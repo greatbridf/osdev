@@ -11,36 +11,34 @@ real_start:
     movw %ax, %ds
     movw %ax, %es
     movw %ax, %ss
+
+# perform a temporary stack
     movw $(stack_base-_start), %ax
     movw %ax, %bp
     movw %ax, %sp
 
-    call print_hello
+    call read_data
 
 die:
     hlt
     jmp die
 
-print_hello:
-    push %bp
-    mov %sp, %bp
-
-    mov $(string_hello-_start), %ax
-    push %bp
-    mov %ax, %bp
-    movw $0x1301, %ax
-    movw $0x000f, %bx
-    movw $12, %cx
-    movw $0, %dx
-    int $0x10
-    pop %bp
-
-    mov %bp, %sp
-    pop %bp
+read_data:
+    movw $(read_data_pack-_start), %si
+    mov $0x42, %ah
+    mov $0x80, %dl
+    int $0x13
     ret
 
 string_hello:
 .string "Hello World!"
+
+read_data_pack:
+    .byte 0x10, 0
+    .word 2      # block count
+    .word 0x0000 # offset address
+    .word 0x0050 # segment address
+    .long  0     # LBA to read
 
 stack_edge:
 .space 128

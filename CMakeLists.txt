@@ -28,10 +28,12 @@ include_directories(${PROJECT_SOURCE_DIR}/include)
 set(KERNEL_MAIN_SOURCES src/kernel_main.c
                         src/kernel/interrupt.c
                         src/kernel/stdio.c
+                        src/kernel/mem.c
                         src/kernel/vga.c
                         include/asm/boot.h
                         include/kernel/interrupt.h
                         include/kernel/stdio.h
+                        include/kernel/mem.h
                         include/kernel/vga.h
                         include/types/stdint.h
                         include/kernel_main.h

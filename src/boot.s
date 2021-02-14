@@ -57,7 +57,36 @@ loader_start:
     movw %cs, %ax
     movw %ax, %ds
 
-# load gdt
+# get memory size info and storage it
+_get_memory_size:
+    xorw %cx, %cx
+    xorw %dx, %dx
+    movw $0xe801, %ax
+
+    int $0x15
+    jc _get_memory_size_error
+
+    cmpb $0x86, %ah # unsupported function
+    je _get_memory_size_error
+    cmpb $0x80, %ah # invalid command
+    je _get_memory_size_error
+
+    jcxz _get_memory_size_use_ax
+    movw %cx, %ax
+    movw %dx, %bx
+
+_get_memory_size_use_ax:
+    movl $(asm_mem_size_info-loader_start), %edx
+    movw %ax, (%edx)
+    addw $2, %dx
+    movw %bx, (%edx)
+    jmp _load_gdt
+
+_get_memory_size_error:
+    xchgw %bx, %bx
+    jmp loader_halt
+
+_load_gdt:
     cli
     lgdt (asm_gdt_descriptor-loader_start)
 
@@ -89,7 +118,7 @@ loader_halt:
     jmp loader_halt
 
 asm_gdt_descriptor:
-    .word (4 * 8) - 1 # size
+    .word (3 * 8) - 1 # size
     .long 0x0600+(asm_gdt_table-loader_start)  # address
 
 .globl asm_gdt_descriptor
@@ -114,3 +143,11 @@ asm_gdt_table:
     .byte 0x92       # access
     .byte 0b11000000 # flag and limit 16:20
     .byte 0x00       # base 24:31
+
+asm_mem_size_info:
+    .word 0x12
+    .word 0x34
+
+.globl asm_mem_size_info
+.type  asm_mem_size_info @object
+.size  asm_mem_size_info, (.-asm_mem_size_info)

@@ -9,6 +9,7 @@ set(EXTRACT_DIR ${PROJECT_BINARY_DIR}/extract)
 file(MAKE_DIRECTORY ${EXTRACT_DIR})
 
 set(BOOTLOADER_SOURCES src/boot.s
+                       src/asm/a20.s
                        )
 
 add_library(bootloader STATIC ${BOOTLOADER_SOURCES})

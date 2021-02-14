@@ -5,6 +5,8 @@ SECTIONS
 {
     .text :
     {
+        *(.text.bootsect)
+        *(.text.loader)
         *(.text*)
         *(.rodata)
     }

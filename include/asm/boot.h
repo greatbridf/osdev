@@ -6,3 +6,5 @@ struct gdt_descriptor {
 };
 
 extern struct gdt_descriptor asm_gdt_descriptor;
+
+extern uint32_t check_a20_on(void);

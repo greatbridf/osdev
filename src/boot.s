@@ -1,4 +1,4 @@
-.text
+.section .text.bootsect
 .code16
 
 # mbr
@@ -51,6 +51,7 @@ stack_base:
 .space 510 - (.-_start)
 .word 0xaa55
 
+.section .text.loader
 
 # loader
 
@@ -75,16 +76,12 @@ loader_start:
 start_32bit:
     movw $16, %ax
     movw %ax, %ds
+    movw %ax, %es
     movw %ax, %ss
 
 # set up stack
     movl $0x003fffff, %ebp
     movl $0x003fffff, %esp
-
-# breakpoint
-#ifdef _DEBUG
-    xchgw %bx, %bx
-#endif
 
     call kernel_main
 

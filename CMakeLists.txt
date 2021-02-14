@@ -1,8 +1,9 @@
 cmake_minimum_required(VERSION 3.15)
 project(my_os_bootloader ASM)
 
-set(CMAKE_CXX_FLAGS "-nostdinc -m32 -nostdlib")
 set(CMAKE_ASM_FLAGS "-m32")
+
+include_directories(${PROJECT_SOURCE_DIR}/include)
 
 set(EXTRACT_DIR ${PROJECT_BINARY_DIR}/extract)
 file(MAKE_DIRECTORY ${EXTRACT_DIR})
@@ -17,8 +18,27 @@ add_custom_command(OUTPUT extracted_bootloader
     COMMAND ar xf ${PROJECT_BINARY_DIR}/libbootloader.a --output=${EXTRACT_DIR}
 )
 
+project(kernel_main)
+
+set(CMAKE_C_FLAGS "-nostdinc -m32 -nostdlib -Wall -O -fverbose-asm -fno-exceptions -fno-pic")
+
+include_directories(${PROJECT_SOURCE_DIR}/include)
+
+set(KERNEL_MAIN_SOURCES src/kernel_main.c
+                        include/asm/boot.h
+                        include/types/stdint.h
+                        include/kernel_main.h
+                        )
+add_library(kernel_main STATIC ${KERNEL_MAIN_SOURCES})
+
+add_custom_command(OUTPUT extracted_kernel_main
+    DEPENDS kernel_main
+    COMMAND ar xf ${PROJECT_BINARY_DIR}/libkernel_main.a --output=${EXTRACT_DIR}
+)
+
 add_custom_target(boot.img
     DEPENDS extracted_bootloader
+    DEPENDS extracted_kernel_main
     COMMAND ld -T ${CMAKE_SOURCE_DIR}/ldscript.ld ${EXTRACT_DIR}/*.o
     -melf_i386 --oformat=binary -o ${CMAKE_BINARY_DIR}/boot.img
 )

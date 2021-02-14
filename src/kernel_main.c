@@ -18,5 +18,6 @@ void kernel_main(void)
     vga_printk((const int8_t*)"No work to do, halting...", 0x0fU);
 
 _loop:
+    asm("hlt");
     goto _loop;
 }

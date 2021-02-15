@@ -1,6 +1,7 @@
 #include <kernel_main.h>
 
 #include <asm/boot.h>
+#include <kernel/interrupt.h>
 #include <kernel/mem.h>
 #include <kernel/stdio.h>
 #include <kernel/vga.h>
@@ -27,6 +28,9 @@ void kernel_main(void)
         mem_size, mem_size / 1024 / 1024, (int32_t)asm_mem_size_info.n_1k_blks,
         (int32_t)asm_mem_size_info.n_64k_blks);
     vga_printk(buf, 0x0fu);
+
+    vga_printk("Initializing interrupt descriptor table...\n", 0x0fu);
+    init_idt();
 
     vga_printk("No work to do, halting...\n", 0x0fU);
 

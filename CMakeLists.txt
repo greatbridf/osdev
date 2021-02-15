@@ -10,6 +10,8 @@ file(MAKE_DIRECTORY ${EXTRACT_DIR})
 
 set(BOOTLOADER_SOURCES src/boot.s
                        src/asm/a20.s
+                       src/asm/interrupt.s
+                       src/asm/port_io.s
                        )
 
 add_library(bootloader STATIC ${BOOTLOADER_SOURCES})
@@ -31,6 +33,7 @@ set(KERNEL_MAIN_SOURCES src/kernel_main.c
                         src/kernel/mem.c
                         src/kernel/vga.c
                         include/asm/boot.h
+                        include/asm/port_io.h
                         include/kernel/interrupt.h
                         include/kernel/stdio.h
                         include/kernel/mem.h

@@ -2,6 +2,8 @@
 
 #include <asm/port_io.h>
 #include <kernel/interrupt.h>
+#include <kernel/stdio.h>
+#include <kernel/vga.h>
 
 static struct IDT_entry IDT[256];
 
@@ -50,9 +52,15 @@ void irq0_handler(void)
 {
     asm_outb(0x20, 0x20);
 }
+// keyboard interrupt
 void irq1_handler(void)
 {
     asm_outb(0x20, 0x20);
+    uint8_t c = 0x00;
+    c = asm_inb(PORT_KEYDATA);
+    static char buf[4] = { 0 };
+    snprintf(buf, 4, "%d", c);
+    vga_printk(buf, 0x0fu);
 }
 void irq2_handler(void)
 {

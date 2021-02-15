@@ -13,3 +13,12 @@ asm_outb:
     popl %edx
     popl %eax
     ret
+
+.globl asm_inb
+.type  asm_inb @function
+asm_inb:
+    pushl %edx
+    movw 8(%esp), %dx
+    inb %dx, %al
+    popl %edx
+    ret

@@ -35,6 +35,8 @@ set(KERNEL_MAIN_SOURCES src/kernel_main.c
                         include/kernel/stdio.h
                         include/kernel/mem.h
                         include/kernel/vga.h
+                        include/types/types.h
+                        include/types/size.h
                         include/types/stdint.h
                         include/kernel_main.h
                         )

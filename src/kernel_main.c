@@ -1,6 +1,7 @@
 #include <kernel_main.h>
 
 #include <asm/boot.h>
+#include <kernel/stdio.h>
 #include <kernel/vga.h>
 
 void kernel_main(void)

@@ -10,6 +10,9 @@ void vga_put_char(struct vga_char* c)
 {
     *p_vga_head = *c;
     ++p_vga_head;
+    if ((p_vga_head - VGA_MEM) == 80 * 25) {
+        p_vga_head = VGA_MEM;
+    }
 }
 
 void vga_new_line()

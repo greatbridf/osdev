@@ -11,12 +11,12 @@ void kernel_main(void)
     result = check_a20_on();
 
     if (result) {
-        vga_printk((const int8_t*)"ON", 0x0fU);
+        vga_printk((const int8_t*)"A20 is ON\n", 0x0fU);
     } else {
-        vga_printk((const int8_t*)"NOT ON", 0x0fU);
+        vga_printk((const int8_t*)"A20 is NOT ON\n", 0x0fU);
     }
 
-    vga_printk((const int8_t*)"No work to do, halting...", 0x0fU);
+    vga_printk((const int8_t*)"No work to do, halting...\n", 0x0fU);
 
 _loop:
     asm("hlt");

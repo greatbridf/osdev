@@ -14,6 +14,6 @@ struct vga_char {
 #define VGA_SCREEN_HEIGHT_IN_CHARS (25U)
 
 void vga_put_char(struct vga_char* c);
-void vga_printk(const int8_t* str, uint8_t color);
+void vga_printk(const char* str, uint8_t color);
 
 #endif // _KERNEL_VGA_H_

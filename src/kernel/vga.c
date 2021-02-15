@@ -19,7 +19,7 @@ void vga_new_line()
     p_vga_head += (VGA_SCREEN_WIDTH_IN_CHARS - offset);
 }
 
-void vga_printk(const int8_t* str, uint8_t color)
+void vga_printk(const char* str, uint8_t color)
 {
     struct vga_char s_c;
     s_c.color = color;

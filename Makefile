@@ -4,4 +4,5 @@ run:
 	-bochs -f bochs.conf
 
 build/boot.vdi: build/boot.img
+	-rm build/boot.vdi
 	VBoxManage convertfromraw $< $@ --format VDI

@@ -9,3 +9,6 @@ typedef __UINT8_TYPE__ uint8_t;
 typedef __UINT16_TYPE__ uint16_t;
 typedef __UINT32_TYPE__ uint32_t;
 typedef __UINT64_TYPE__ uint64_t;
+
+typedef uint32_t size_t;
+typedef int32_t ssize_t;

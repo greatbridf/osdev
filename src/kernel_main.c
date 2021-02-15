@@ -7,7 +7,8 @@
 
 void kernel_main(void)
 {
-    asm volatile("xchgw %bx, %bx"); // magic breakpoint
+    MAKE_BREAK_POINT();
+
     uint32_t result;
     result = check_a20_on();
 

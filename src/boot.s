@@ -57,6 +57,11 @@ loader_start:
     movw %cs, %ax
     movw %ax, %ds
 
+_clear_screen:
+    mov $0x00, %ah
+    mov $0x03, %al
+    int $0x10
+
 # get memory size info and storage it
 _get_memory_size:
     xorw %cx, %cx

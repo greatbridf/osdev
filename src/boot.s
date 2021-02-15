@@ -113,8 +113,11 @@ start_32bit:
     movw %ax, %ss
 
 # set up stack
-    movl $0x003fffff, %ebp
-    movl $0x003fffff, %esp
+# in order to align 16 byte
+# set stack base address at
+# 0x003ffff0
+    movl $0x003ffff0, %ebp
+    movl $0x003ffff0, %esp
 
     call kernel_main
 

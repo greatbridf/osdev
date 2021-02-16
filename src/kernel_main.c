@@ -1,6 +1,7 @@
 #include <kernel_main.h>
 
 #include <asm/boot.h>
+#include <asm/port_io.h>
 #include <kernel/interrupt.h>
 #include <kernel/mem.h>
 #include <kernel/stdio.h>
@@ -36,7 +37,7 @@ void kernel_main(void)
 
     vga_printk("No work to do, halting...\n", 0x0fU);
 
-_loop:
-    asm("hlt");
-    goto _loop;
+    while (1) {
+        asm_hlt();
+    }
 }

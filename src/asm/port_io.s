@@ -22,3 +22,21 @@ asm_inb:
     inb %dx, %al
     popl %edx
     ret
+
+.globl asm_hlt
+.type  asm_hlt @function
+asm_hlt:
+    hlt
+    ret
+
+.globl asm_cli
+.type  asm_cli @function
+asm_cli:
+    cli
+    ret
+
+.globl asm_sti
+.type  asm_sti @function
+asm_sti:
+    sti
+    ret

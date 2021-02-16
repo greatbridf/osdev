@@ -90,9 +90,8 @@ void irq0_handler(void)
 // keyboard interrupt
 void irq1_handler(void)
 {
-    handle_keyboard_interrupt();
-
     asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
+    handle_keyboard_interrupt();
 }
 void irq2_handler(void)
 {

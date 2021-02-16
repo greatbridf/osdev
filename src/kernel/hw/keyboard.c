@@ -34,9 +34,14 @@ void process_keyboard_data(void)
 {
     char buf[128] = { 0 };
     while (keyboard_has_data()) {
-        char c;
+        // as scan codes may be greater than 127
+        // so we use unsigned char here to prevent
+        // the compiler from automatically filling
+        // 1's in front of the scan codes and cause
+        // codes like '9e' show like 'ffffff9e'
+        unsigned char c;
         c = ring_buffer_read(p_scan_code_buf);
-        snprintf(buf, 128, "%d", (int32_t)c);
+        snprintf(buf, 128, "%x", c);
     }
     vga_printk(buf, 0x0fu);
 }

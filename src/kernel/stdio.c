@@ -8,6 +8,31 @@ static inline char d_to_c(int32_t n)
     return '0' + n;
 }
 
+// where n is between 0 and 15
+// base is either 'a' of 'A',
+// depending on you want capitalized
+// or not
+static inline char hex_to_c(int32_t n, char base)
+{
+    if (n < 10) {
+        // n belongs to [0, 9]
+        return d_to_c(n);
+    } else {
+        // n belongs to [10, 15]
+        return base + (n - 10);
+    }
+}
+
+static inline char x_to_c(int32_t n)
+{
+    return hex_to_c(n, 'a');
+}
+
+static inline char X_to_c(int32_t n)
+{
+    return hex_to_c(n, 'A');
+}
+
 // this will check if there is still free space
 // in the buffer. if so, push the char into it,
 // change the value of buf_size and move pointer
@@ -63,6 +88,46 @@ snprint_decimal(
     return n_write;
 }
 
+size_t
+snprint_hex(
+    char* buf,
+    size_t buf_size,
+    uint32_t num,
+    int32_t capitalized)
+{
+    size_t n_write = 0;
+
+    char* orig_buf = buf;
+
+    do {
+        if (capitalized) {
+            do_write_if_free(buf, buf_size, X_to_c(num % 16));
+        } else {
+            do_write_if_free(buf, buf_size, x_to_c(num % 16));
+        }
+        num /= 16;
+        ++n_write;
+    } while (num != 0);
+
+    // prepend trailing '\0'
+    if (buf_size > 0)
+        *buf = 0x00;
+
+    // move buf pointer to the last digit of number
+    --buf;
+
+    // reverse output
+    while (orig_buf < buf) {
+        char c = *buf;
+        *buf = *orig_buf;
+        *orig_buf = c;
+        --buf;
+        ++orig_buf;
+    }
+
+    return n_write;
+}
+
 static inline size_t
 snprint_char(
     char* buf,
@@ -94,6 +159,16 @@ snprintf(
             case 'd':
                 n_tmp_write = snprint_decimal(buf, buf_size, *(int32_t*)arg_ptr);
                 arg_ptr += sizeof(int32_t);
+                break;
+
+            case 'x':
+                n_tmp_write = snprint_hex(buf, buf_size, *(uint32_t*)arg_ptr, 0);
+                arg_ptr += sizeof(uint32_t);
+                break;
+
+            case 'X':
+                n_tmp_write = snprint_hex(buf, buf_size, *(uint32_t*)arg_ptr, 1);
+                arg_ptr += sizeof(uint32_t);
                 break;
 
             // c string

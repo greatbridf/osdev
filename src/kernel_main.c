@@ -32,6 +32,8 @@ void kernel_main(void)
     vga_printk("Initializing interrupt descriptor table...\n", 0x0fu);
     init_idt();
 
+    vga_printk("Interrupt descriptor table initialized!\n", 0x0fu);
+
     vga_printk("No work to do, halting...\n", 0x0fU);
 
 _loop:

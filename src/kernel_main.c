@@ -2,6 +2,7 @@
 
 #include <asm/boot.h>
 #include <asm/port_io.h>
+#include <kernel/hw/keyboard.h>
 #include <kernel/interrupt.h>
 #include <kernel/mem.h>
 #include <kernel/stdio.h>
@@ -38,6 +39,13 @@ void kernel_main(void)
     vga_printk("No work to do, halting...\n", 0x0fU);
 
     while (1) {
+        // disable interrupt
+        asm_cli();
+
+        if (keyboard_has_data()) {
+            process_keyboard_data();
+        }
+        asm_sti();
         asm_hlt();
     }
 }

@@ -1,6 +1,7 @@
 #define _INTERRUPT_C_
 
 #include <asm/port_io.h>
+#include <kernel/hw/keyboard.h>
 #include <kernel/interrupt.h>
 #include <kernel/stdio.h>
 #include <kernel/vga.h>
@@ -10,19 +11,19 @@ static struct IDT_entry IDT[256];
 
 void init_idt()
 {
-    asm_outb(0x20, 0x11); // edge trigger mode
-    asm_outb(0x21, 0x20); // start from int 0x20
-    asm_outb(0x21, 0x04); // PIC1 is connected to IRQ2 (1 << 2)
-    asm_outb(0x21, 0x01); // no buffer mode
+    asm_outb(PORT_PIC1_COMMAND, 0x11); // edge trigger mode
+    asm_outb(PORT_PIC1_DATA, 0x20); // start from int 0x20
+    asm_outb(PORT_PIC1_DATA, 0x04); // PIC1 is connected to IRQ2 (1 << 2)
+    asm_outb(PORT_PIC1_DATA, 0x01); // no buffer mode
 
-    asm_outb(0xa0, 0x11); // edge trigger mode
-    asm_outb(0xa1, 0x28); // start from int 0x28
-    asm_outb(0xa1, 0x02); // connected to IRQ2
-    asm_outb(0xa1, 0x01); // no buffer mode
+    asm_outb(PORT_PIC2_COMMAND, 0x11); // edge trigger mode
+    asm_outb(PORT_PIC2_DATA, 0x28); // start from int 0x28
+    asm_outb(PORT_PIC2_DATA, 0x02); // connected to IRQ2
+    asm_outb(PORT_PIC2_DATA, 0x01); // no buffer mode
 
     // allow all the interrupts
-    asm_outb(0x21, 0x00);
-    asm_outb(0xa1, 0x00);
+    asm_outb(PORT_PIC1_DATA, 0x00);
+    asm_outb(PORT_PIC2_DATA, 0x00);
 
     // handle general protection fault (handle segmentation fault)
     SET_IDT_ENTRY_FN(13, int13, 0x08);
@@ -66,10 +67,10 @@ void int13_handler(
 
     snprintf(
         buf, 512,
-        "eax: %d, ebx: %d, ecx: %d, edx: %d\n"
-        "esp: %d, ebp: %d, esi: %d, edi: %d\n"
-        "eip: %d, cs: %d, error_code: %d   \n"
-        "eflags: %d                        \n",
+        "eax: %x, ebx: %x, ecx: %x, edx: %x\n"
+        "esp: %x, ebp: %x, esi: %x, edi: %x\n"
+        "eip: %x, cs: %x, error_code: %x   \n"
+        "eflags: %x                        \n",
         s_regs.eax, s_regs.ebx, s_regs.ecx,
         s_regs.edx, s_regs.esp, s_regs.ebp,
         s_regs.esi, s_regs.edi, eip,
@@ -84,79 +85,76 @@ void int13_handler(
 
 void irq0_handler(void)
 {
-    asm_outb(0x20, 0x20);
+    asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
 }
 // keyboard interrupt
 void irq1_handler(void)
 {
-    asm_outb(0x20, 0x20);
-    uint8_t c = 0x00;
-    c = asm_inb(PORT_KEYDATA);
-    static char buf[4] = { 0 };
-    snprintf(buf, 4, "%d", c);
-    vga_printk(buf, 0x0fu);
+    handle_keyboard_interrupt();
+
+    asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
 }
 void irq2_handler(void)
 {
-    asm_outb(0x20, 0x20);
+    asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
 }
 void irq3_handler(void)
 {
-    asm_outb(0x20, 0x20);
+    asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
 }
 void irq4_handler(void)
 {
-    asm_outb(0x20, 0x20);
+    asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
 }
 void irq5_handler(void)
 {
-    asm_outb(0x20, 0x20);
+    asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
 }
 void irq6_handler(void)
 {
-    asm_outb(0x20, 0x20);
+    asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
 }
 void irq7_handler(void)
 {
-    asm_outb(0x20, 0x20);
+    asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
 }
 void irq8_handler(void)
 {
-    asm_outb(0xa0, 0x20);
-    asm_outb(0x20, 0x20);
+    asm_outb(PORT_PIC2_COMMAND, PIC_EOI);
+    asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
 }
 void irq9_handler(void)
 {
-    asm_outb(0xa0, 0x20);
-    asm_outb(0x20, 0x20);
+    asm_outb(PORT_PIC2_COMMAND, PIC_EOI);
+    asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
 }
 void irq10_handler(void)
 {
-    asm_outb(0xa0, 0x20);
-    asm_outb(0x20, 0x20);
+    asm_outb(PORT_PIC2_COMMAND, PIC_EOI);
+    asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
 }
 void irq11_handler(void)
 {
-    asm_outb(0xa0, 0x20);
-    asm_outb(0x20, 0x20);
+    asm_outb(PORT_PIC2_COMMAND, PIC_EOI);
+    asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
 }
 void irq12_handler(void)
 {
-    asm_outb(0xa0, 0x20);
-    asm_outb(0x20, 0x20);
+    asm_outb(PORT_PIC2_COMMAND, PIC_EOI);
+    asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
 }
 void irq13_handler(void)
 {
-    asm_outb(0xa0, 0x20);
-    asm_outb(0x20, 0x20);
+    asm_outb(PORT_PIC2_COMMAND, PIC_EOI);
+    asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
 }
 void irq14_handler(void)
 {
-    asm_outb(0xa0, 0x20);
-    asm_outb(0x20, 0x20);
+    asm_outb(PORT_PIC2_COMMAND, PIC_EOI);
+    asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
 }
 void irq15_handler(void)
 {
-    asm_outb(0xa0, 0x20);
-    asm_outb(0x20, 0x20);
+    asm_outb(PORT_PIC2_COMMAND, PIC_EOI);
+    asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
 }

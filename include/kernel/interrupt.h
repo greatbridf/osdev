@@ -4,6 +4,8 @@
 
 #define INTERRUPT_GATE_TYPE (0x8e)
 
+#define PIC_EOI (0x20)
+
 struct regs_32 {
     uint32_t edi;
     uint32_t esi;

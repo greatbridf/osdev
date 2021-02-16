@@ -32,6 +32,7 @@ set(KERNEL_MAIN_SOURCES src/kernel_main.c
                         src/kernel/stdio.c
                         src/kernel/mem.c
                         src/kernel/vga.c
+                        src/kernel/hw/keyboard.c
                         src/types/buffer.c
                         include/asm/boot.h
                         include/asm/port_io.h
@@ -39,6 +40,7 @@ set(KERNEL_MAIN_SOURCES src/kernel_main.c
                         include/kernel/stdio.h
                         include/kernel/mem.h
                         include/kernel/vga.h
+                        include/kernel/hw/keyboard.h
                         include/types/buffer.h
                         include/types/types.h
                         include/types/size.h

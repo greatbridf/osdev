@@ -4,6 +4,7 @@
 #include <kernel/interrupt.h>
 #include <kernel/stdio.h>
 #include <kernel/vga.h>
+#include <kernel_main.h>
 
 static struct IDT_entry IDT[256];
 
@@ -22,6 +23,10 @@ void init_idt()
     // allow all the interrupts
     asm_outb(0x21, 0x00);
     asm_outb(0xa1, 0x00);
+
+    // handle general protection fault (handle segmentation fault)
+    SET_IDT_ENTRY_FN(13, int13, 0x08);
+    // SET_IDT_ENTRY(0x0c, /* addr */ 0, 0x08);
 
     // 0x08 stands for kernel code segment
     SET_UP_IRQ(0, 0x08);
@@ -46,6 +51,35 @@ void init_idt()
     *((uint32_t*)(idt_descriptor + 1)) = (ptr_t)IDT;
 
     asm_load_idt(idt_descriptor);
+}
+
+void int13_handler(
+    struct regs_32 s_regs,
+    uint32_t error_code,
+    ptr_t eip,
+    uint16_t cs,
+    uint32_t eflags)
+{
+    char buf[512] = { 0 };
+
+    vga_printk("---- SEGMENTATION FAULT ----\n", 0x0fu);
+
+    snprintf(
+        buf, 512,
+        "eax: %d, ebx: %d, ecx: %d, edx: %d\n"
+        "esp: %d, ebp: %d, esi: %d, edi: %d\n"
+        "eip: %d, cs: %d, error_code: %d   \n"
+        "eflags: %d                        \n",
+        s_regs.eax, s_regs.ebx, s_regs.ecx,
+        s_regs.edx, s_regs.esp, s_regs.ebp,
+        s_regs.esi, s_regs.edi, eip,
+        cs, error_code, eflags);
+    vga_printk(buf, 0x0fu);
+
+    vga_printk("----   HALTING SYSTEM   ----", 0x0fu);
+
+    asm_cli();
+    asm_hlt();
 }
 
 void irq0_handler(void)

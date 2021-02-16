@@ -2,6 +2,14 @@
 
 .text
 
+.globl int13
+.type  int13 @function
+int13:
+    pushal
+    call int13_handler
+    popal
+    iret
+
 .globl irq0
 .type  irq0 @function
 irq0:

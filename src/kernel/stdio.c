@@ -22,7 +22,6 @@ static inline char d_to_c(int32_t n)
         --(y);                    \
     }
 
-// TODO: print negative numbers
 size_t
 snprint_decimal(
     char* buf,
@@ -30,6 +29,13 @@ snprint_decimal(
     int32_t num)
 {
     size_t n_write = 0;
+
+    if (num < 0) {
+        do_write_if_free(buf, buf_size, '-');
+        ++n_write;
+        num *= (-1);
+    }
+
     char* orig_buf = buf;
 
     do {

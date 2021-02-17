@@ -116,8 +116,8 @@ start_32bit:
 # in order to align 16 byte
 # set stack base address at
 # 0x003ffff0
-    movl $0x003ffff0, %ebp
-    movl $0x003ffff0, %esp
+    movl $0x03fffff0, %ebp
+    movl $0x03fffff0, %esp
 
     call kernel_main
 
@@ -137,7 +137,7 @@ asm_gdt_table:
     .8byte 0         # null descriptor
 
     # code segment
-    .word 0x03ff     # limit 0 :15
+    .word 0x3fff     # limit 0 :15
     .word 0x0000     # base  0 :15
     .byte 0x00       # base  16:23
     .byte 0x9a       # access
@@ -145,7 +145,7 @@ asm_gdt_table:
     .byte 0x00       # base 24:31
 
     # data segment
-    .word 0x03ff     # limit 0 :15
+    .word 0x3fff     # limit 0 :15
     .word 0x0000     # base  0 :15
     .byte 0x00       # base  16:23
     .byte 0x92       # access

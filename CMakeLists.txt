@@ -32,6 +32,7 @@ endif()
 include_directories(${PROJECT_SOURCE_DIR}/include)
 
 set(KERNEL_MAIN_SOURCES src/kernel_main.c
+                        src/kernel/errno.c
                         src/kernel/interrupt.c
                         src/kernel/stdio.c
                         src/kernel/mem.c
@@ -40,6 +41,7 @@ set(KERNEL_MAIN_SOURCES src/kernel_main.c
                         src/types/buffer.c
                         include/asm/boot.h
                         include/asm/port_io.h
+                        include/kernel/errno.h
                         include/kernel/interrupt.h
                         include/kernel/stdio.h
                         include/kernel/mem.h

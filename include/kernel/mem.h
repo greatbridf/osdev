@@ -9,3 +9,26 @@ struct mem_size_info {
 };
 
 extern struct mem_size_info asm_mem_size_info;
+
+// TODO: decide heap start address according
+//   to user's memory size
+#define HEAP_START ((void*)0x01000000)
+
+struct mem_blk_flags {
+    uint8_t is_free;
+    uint8_t has_next;
+    uint8_t _unused2;
+    uint8_t _unused3;
+};
+
+struct mem_blk {
+    size_t size;
+    struct mem_blk_flags flags;
+    // the first byte of the memory space
+    // the minimal allocated space is 4 bytes
+    uint8_t data[4];
+};
+
+void init_heap(void);
+
+void* k_malloc(size_t size);

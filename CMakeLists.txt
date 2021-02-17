@@ -23,7 +23,11 @@ add_custom_command(OUTPUT extracted_bootloader
 
 project(kernel_main)
 
-set(CMAKE_C_FLAGS "-nostdinc -m32 -nostdlib -Wall -O -fverbose-asm -fno-exceptions -fno-pic")
+if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+    set(CMAKE_C_FLAGS "-nostdinc -m32 -nostdlib -Wall -g -O0 -fverbose-asm -fno-exceptions -fno-pic")
+elseif(CMAKE_BUILD_TYPE STREQUAL "Release")
+    set(CMAKE_C_FLAGS "-nostdinc -m32 -nostdlib -Wall -O -fverbose-asm -fno-exceptions -fno-pic")
+endif()
 
 include_directories(${PROJECT_SOURCE_DIR}/include)
 

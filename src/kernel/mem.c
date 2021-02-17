@@ -109,7 +109,7 @@ static void split_block(
         return;
     }
 
-    struct mem_blk* blk_next = blk
+    struct mem_blk* blk_next = ((void*)blk)
         + sizeof(struct mem_blk)
         + this_size
         - 4 * sizeof(uint8_t);
@@ -143,4 +143,12 @@ void* k_malloc(size_t size)
 
     block_allocated->flags.is_free = 0;
     return block_allocated->data;
+}
+
+void k_free(void* ptr)
+{
+    ptr -= (sizeof(struct mem_blk_flags) + sizeof(size_t));
+    struct mem_blk* blk = (struct mem_blk*)ptr;
+    blk->flags.is_free = 1;
+    // TODO: fusion free blocks nearby
 }

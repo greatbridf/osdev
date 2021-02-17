@@ -32,3 +32,5 @@ struct mem_blk {
 void init_heap(void);
 
 void* k_malloc(size_t size);
+
+void k_free(void* ptr);

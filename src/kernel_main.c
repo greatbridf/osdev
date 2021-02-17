@@ -36,6 +36,22 @@ void kernel_main(void)
 
     vga_printk("Interrupt descriptor table initialized!\n", 0x0fu);
 
+    vga_printk("Initializing heap space\n", 0x0fu);
+
+    init_heap();
+
+    vga_printk("Heap space initialized!\n", 0x0fu);
+
+    vga_printk("Testing k_malloc...\n", 0x0fu);
+
+    MAKE_BREAK_POINT();
+    char* p_buf_base = (char*)k_malloc(sizeof(char) * 1024);
+    char* p_buf_head = p_buf_base;
+    for (int i = 0; i < 100; ++i) {
+        p_buf_head += snprintf(p_buf_head, 1024, "%d", i);
+    }
+    vga_printk(p_buf_base, 0x0fu);
+
     vga_printk("No work to do, halting...\n", 0x0fU);
 
     while (1) {

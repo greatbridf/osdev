@@ -100,6 +100,32 @@ allocate_new_block(
     return blk;
 }
 
+static void split_block(
+    struct mem_blk* blk,
+    size_t this_size)
+{
+    // block is too small to get split
+    if (blk->size < sizeof(struct mem_blk) + this_size) {
+        return;
+    }
+
+    struct mem_blk* blk_next = blk
+        + sizeof(struct mem_blk)
+        + this_size
+        - 4 * sizeof(uint8_t);
+
+    blk_next->size = blk->size
+        - this_size
+        - sizeof(struct mem_blk)
+        + 4 * sizeof(uint8_t);
+
+    blk_next->flags.has_next = blk->flags.has_next;
+    blk_next->flags.is_free = 1;
+
+    blk->flags.has_next = 1;
+    blk->size = this_size;
+}
+
 void* k_malloc(size_t size)
 {
     struct mem_blk* block_allocated;
@@ -112,7 +138,7 @@ void* k_malloc(size_t size)
         // no need to check errno and return value
         // preserve these for the caller
     } else {
-        // TODO: split block
+        split_block(block_allocated, size);
     }
 
     block_allocated->flags.is_free = 0;

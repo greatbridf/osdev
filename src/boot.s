@@ -39,7 +39,7 @@ string_hello:
 
 read_data_pack:
     .byte 0x10, 0
-    .word 16     # block count (read 8k)
+    .word 32     # block count (read 16k)
     .word 0x0000 # offset address
     .word 0x0060 # segment address
     .long 1      # LBA to read

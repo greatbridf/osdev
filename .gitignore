@@ -5,3 +5,5 @@ build/
 test/
 
 bx_enh_dbg.ini
+
+.cache/

@@ -10,7 +10,7 @@ ring_buffer_empty(struct ring_buffer* buf)
 int32_t
 ring_buffer_full(struct ring_buffer* buf)
 {
-    return (buf->count == (buf->buf_end_pos - buf->buf_start_pos + 1));
+    return (buf->count == (size_t)(buf->buf_end_pos - buf->buf_start_pos + 1));
 }
 
 static inline void

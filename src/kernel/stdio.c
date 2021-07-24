@@ -47,13 +47,13 @@ static inline char X_to_c(int32_t n)
         --(y);                    \
     }
 
-size_t
+ssize_t
 snprint_decimal(
     char* buf,
     size_t buf_size,
     int32_t num)
 {
-    size_t n_write = 0;
+    ssize_t n_write = 0;
 
     if (num < 0) {
         do_write_if_free(buf, buf_size, '-');
@@ -88,14 +88,14 @@ snprint_decimal(
     return n_write;
 }
 
-size_t
+ssize_t
 snprint_hex(
     char* buf,
     size_t buf_size,
     uint32_t num,
     int32_t capitalized)
 {
-    size_t n_write = 0;
+    ssize_t n_write = 0;
 
     char* orig_buf = buf;
 
@@ -128,7 +128,7 @@ snprint_hex(
     return n_write;
 }
 
-static inline size_t
+static inline ssize_t
 snprint_char(
     char* buf,
     size_t buf_size,
@@ -139,14 +139,14 @@ snprint_char(
     return sizeof(c);
 }
 
-size_t
+ssize_t
 snprintf(
     char* buf,
     size_t buf_size,
     const char* fmt,
     ...)
 {
-    size_t n_write = 0;
+    ssize_t n_write = 0;
     void* arg_ptr = ((void*)&buf) + sizeof(char*) + sizeof(size_t) + sizeof(const char*);
 
     for (char c; (c = *fmt) != 0x00; ++fmt) {

@@ -11,6 +11,8 @@ static struct IDT_entry IDT[256];
 
 void init_idt()
 {
+    asm_cli();
+
     asm_outb(PORT_PIC1_COMMAND, 0x11); // edge trigger mode
     asm_outb(PORT_PIC1_DATA, 0x20); // start from int 0x20
     asm_outb(PORT_PIC1_DATA, 0x04); // PIC1 is connected to IRQ2 (1 << 2)

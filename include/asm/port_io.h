@@ -9,6 +9,9 @@
 #define PORT_PIC2_COMMAND (PORT_PIC2)
 #define PORT_PIC2_DATA ((PORT_PIC2) + 1)
 
+#define PORT_KEYBOARD_COMMAND (0x64)
+#define PORT_KEYBOARD_DATA (0x60)
+
 #define PORT_KEYDATA 0x0060u
 
 extern void asm_outb(uint16_t port_number, uint8_t data);

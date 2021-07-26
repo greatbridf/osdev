@@ -2,6 +2,10 @@
 
 #include <types/stdint.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 ssize_t
 snprint_decimal(
     char* buf,
@@ -14,3 +18,7 @@ snprintf(
     size_t buf_size,
     const char* fmt,
     ...);
+
+#ifdef __cplusplus
+}
+#endif

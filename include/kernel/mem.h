@@ -2,6 +2,10 @@
 
 #include <types/stdint.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 // don't forget to add the initial 1m to the total
 struct mem_size_info {
     uint16_t n_1k_blks; // memory between 1m and 16m in 1k blocks
@@ -34,3 +38,7 @@ void init_heap(void);
 void* k_malloc(size_t size);
 
 void k_free(void* ptr);
+
+#ifdef __cplusplus
+}
+#endif

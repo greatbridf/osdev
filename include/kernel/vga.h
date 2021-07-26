@@ -4,6 +4,10 @@
 
 #include <types/stdint.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 struct vga_char {
     int8_t c;
     uint8_t color;
@@ -15,5 +19,9 @@ struct vga_char {
 
 void vga_put_char(struct vga_char* c);
 void vga_printk(const char* str, uint8_t color);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif // _KERNEL_VGA_H_

@@ -14,9 +14,17 @@
 
 #define PORT_KEYDATA 0x0060u
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 extern void asm_outb(uint16_t port_number, uint8_t data);
 extern uint8_t asm_inb(uint16_t port_number);
 
 extern void asm_hlt(void);
 extern void asm_cli(void);
 extern void asm_sti(void);
+
+#ifdef __cplusplus
+}
+#endif

@@ -20,6 +20,9 @@ void vga_new_line()
     int32_t offset = p_vga_head - VGA_MEM;
     offset %= VGA_SCREEN_WIDTH_IN_CHARS;
     p_vga_head += (VGA_SCREEN_WIDTH_IN_CHARS - offset);
+    if ((p_vga_head - VGA_MEM) >= 80 * 25) {
+        p_vga_head = VGA_MEM;
+    }
 }
 
 void vga_printk(const char* str, uint8_t color)

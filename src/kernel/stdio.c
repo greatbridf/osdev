@@ -1,5 +1,6 @@
 #include <kernel/stdio.h>
 
+#include <types/size.h>
 #include <types/stdint.h>
 
 // where n is in the range of [0, 9]
@@ -97,6 +98,14 @@ snprint_hex(
 {
     ssize_t n_write = 0;
 
+    do_write_if_free(buf, buf_size, '0');
+    if (capitalized) {
+        do_write_if_free(buf, buf_size, 'X');
+    } else {
+        do_write_if_free(buf, buf_size, 'x');
+    }
+    n_write += 2;
+
     char* orig_buf = buf;
 
     do {
@@ -182,6 +191,13 @@ snprintf(
                 n_tmp_write = snprint_char(buf, buf_size, *(char*)arg_ptr);
                 arg_ptr += sizeof(char);
                 break;
+
+            // pointer
+            case 'p':
+                n_tmp_write = snprint_hex(buf, buf_size, *(ptr_t*)arg_ptr, 0);
+                arg_ptr += sizeof(ptr_t);
+                break;
+
             default:
                 n_tmp_write = snprint_char(buf, buf_size, *(fmt - 1));
                 break;

@@ -262,9 +262,15 @@ public:
     {
         return iterator_type(head->next);
     }
+
     iterator_type end() noexcept
     {
         return iterator_type(tail);
+    }
+
+    bool empty(void) const noexcept
+    {
+        return size() == 0;
     }
 
     // TODO

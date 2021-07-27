@@ -2,6 +2,7 @@
 
 #include <asm/boot.h>
 #include <asm/port_io.h>
+#include <kernel/event/event.h>
 #include <kernel/hw/keyboard.h>
 #include <kernel/interrupt.h>
 #include <kernel/mem.h>
@@ -70,9 +71,8 @@ void kernel_main(void)
         // disable interrupt
         asm_cli();
 
-        if (keyboard_has_data()) {
-            process_keyboard_data();
-        }
+        dispatch_event();
+
         asm_sti();
         asm_hlt();
     }

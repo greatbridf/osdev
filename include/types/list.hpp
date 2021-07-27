@@ -216,6 +216,7 @@ public:
         node_base_type* current_node = iter._node();
         current_node->prev->connect(current_node->next);
         allocator_traits<allocator_type>::deallocate(static_cast<node_type*>(current_node));
+        --_size();
     }
 
     // insert the value v in front of the given iterator

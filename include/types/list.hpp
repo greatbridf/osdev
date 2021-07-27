@@ -179,6 +179,11 @@ private:
     node_base_type* head;
     node_base_type* tail;
 
+    const size_t& _size(void) const noexcept
+    {
+        return (static_cast<sentry_node_type*>(head))->value;
+    }
+
     size_t& _size(void) noexcept
     {
         return (static_cast<sentry_node_type*>(head))->value;

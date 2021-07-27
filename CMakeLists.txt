@@ -52,6 +52,7 @@ set(KERNEL_MAIN_SOURCES src/kernel_main.c
                         include/kernel/mem.h
                         include/kernel/vga.h
                         include/kernel/hw/keyboard.h
+                        include/kernel/input/keycodes.h
                         include/types/buffer.h
                         include/types/types.h
                         include/types/size.h

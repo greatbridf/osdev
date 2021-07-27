@@ -8,6 +8,16 @@
 #include <kernel/stdio.h>
 #include <kernel/vga.h>
 
+typedef void (*constructor)(void);
+extern constructor start_ctors;
+extern constructor end_ctors;
+void call_constructors_for_cpp(void)
+{
+    for (constructor* ctor = &start_ctors; ctor != &end_ctors; ++ctor) {
+        (*ctor)();
+    }
+}
+
 void kernel_main(void)
 {
     MAKE_BREAK_POINT();
@@ -41,6 +51,12 @@ void kernel_main(void)
     init_heap();
 
     vga_printk("Heap space initialized!\n", 0x0fu);
+
+    vga_printk("Constructing c++ global objects\n", 0x0fu);
+
+    call_constructors_for_cpp();
+
+    vga_printk("Cpp global objects constructed\n", 0x0fu);
 
     vga_printk("Testing k_malloc...\n", 0x0fu);
     char* k_malloc_buf = (char*)k_malloc(sizeof(char) * 128);

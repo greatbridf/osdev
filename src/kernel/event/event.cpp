@@ -27,7 +27,7 @@ void dispatch_event(void)
     while (!input_event_queue.empty()) {
         for (auto iter = input_event_queue.begin(); iter != input_event_queue.end(); ++iter) {
             const auto& item = *iter;
-            snprintf(buf, 1024, "input event: type%x, data%x, code%x\n", item.type, item.data, item.code);
+            snprintf(buf, 1024, "\rinput event: type%x, data%x, code%x\r", item.type, item.data, item.code);
             vga_printk(buf, 0x0fu);
             input_event_queue.erase(iter);
         }

@@ -15,6 +15,12 @@ void vga_put_char(struct vga_char* c)
     }
 }
 
+void vga_return()
+{
+    const int32_t offset = p_vga_head - VGA_MEM;
+    p_vga_head -= (offset % VGA_SCREEN_WIDTH_IN_CHARS);
+}
+
 void vga_new_line()
 {
     int32_t offset = p_vga_head - VGA_MEM;
@@ -30,10 +36,16 @@ void vga_printk(const char* str, uint8_t color)
     struct vga_char s_c;
     s_c.color = color;
     while ((s_c.c = *(str++)) != 0x00) {
-        if (s_c.c == '\n') {
+        switch (s_c.c) {
+        case CR:
+            vga_return();
+            break;
+        case LF:
             vga_new_line();
-        } else {
+            break;
+        default:
             vga_put_char(&s_c);
+            break;
         }
     }
 }

@@ -2,6 +2,14 @@
 
 #include <types/stdint.h>
 
+#ifndef CR
+#define CR ('\r')
+#endif
+
+#ifndef LF
+#define LF ('\n')
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif

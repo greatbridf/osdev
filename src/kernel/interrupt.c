@@ -2,6 +2,7 @@
 
 #include <asm/port_io.h>
 #include <kernel/hw/keyboard.h>
+#include <kernel/hw/timer.h>
 #include <kernel/interrupt.h>
 #include <kernel/stdio.h>
 #include <kernel/vga.h>
@@ -87,6 +88,7 @@ void int13_handler(
 
 void irq0_handler(void)
 {
+    inc_tick();
     asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
 }
 // keyboard interrupt

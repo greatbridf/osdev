@@ -12,6 +12,9 @@
 #define PORT_KEYBOARD_COMMAND (0x64)
 #define PORT_KEYBOARD_DATA (0x60)
 
+#define PORT_PIT_CONTROL (0x43)
+#define PORT_PIT_COUNT (0x40)
+
 #define PORT_KEYDATA 0x0060u
 
 #ifdef __cplusplus

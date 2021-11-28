@@ -4,6 +4,7 @@
 #include <asm/port_io.h>
 #include <kernel/event/event.h>
 #include <kernel/hw/keyboard.h>
+#include <kernel/hw/timer.h>
 #include <kernel/interrupt.h>
 #include <kernel/mem.h>
 #include <kernel/stdio.h>
@@ -44,6 +45,8 @@ void kernel_main(void)
 
     vga_printk("Initializing interrupt descriptor table...\n", 0x0fu);
     init_idt();
+
+    init_pit();
 
     vga_printk("Interrupt descriptor table initialized!\n", 0x0fu);
 

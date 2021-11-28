@@ -12,3 +12,6 @@ typedef __UINT64_TYPE__ uint64_t;
 
 typedef uint32_t size_t;
 typedef int32_t ssize_t;
+
+typedef uint32_t time_t;
+typedef int32_t time_diff_t;

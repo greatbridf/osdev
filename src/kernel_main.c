@@ -59,7 +59,7 @@ void kernel_main(void)
     if (asm_e820_mem_map_entry_size == 20) {
         for (uint32_t i = 0; i < asm_e820_mem_map_count; ++i) {
             printkf(
-                "[mem] entry %d: %lld ~ %lld, type: %d\n",
+                "[mem] entry %d: %llx ~ %llx, type: %d\n",
                 i,
                 e820_mem_map_20[i].base,
                 e820_mem_map_20[i].base + e820_mem_map_20[i].len,

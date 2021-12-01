@@ -51,6 +51,32 @@ void kernel_main(void)
         (int32_t)asm_mem_size_info.n_1k_blks,
         (int32_t)asm_mem_size_info.n_64k_blks);
 
+    printkf(
+        "mem_map_entry_count: %d , mem_map_entry_size: %d \n",
+        asm_e820_mem_map_count,
+        asm_e820_mem_map_entry_size);
+
+    if (asm_e820_mem_map_entry_size == 20) {
+        for (uint32_t i = 0; i < asm_e820_mem_map_count; ++i) {
+            printkf(
+                "[mem] entry %d: %lld ~ %lld, type: %d\n",
+                i,
+                e820_mem_map_20[i].base,
+                e820_mem_map_20[i].base + e820_mem_map_20[i].len,
+                e820_mem_map_20[i].type);
+        }
+    } else {
+        for (uint32_t i = 0; i < asm_e820_mem_map_count; ++i) {
+            printkf(
+                "[mem] entry %d: %lld ~ %lld, type: %d, acpi_attr: %d\n",
+                i,
+                e820_mem_map_24[i].in.base,
+                e820_mem_map_24[i].in.base + e820_mem_map_24[i].in.len,
+                e820_mem_map_24[i].in.type,
+                e820_mem_map_24[i].acpi_extension_attr);
+        }
+    }
+
     printkf("Initializing interrupt descriptor table...\n");
 
     init_idt();

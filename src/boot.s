@@ -85,11 +85,54 @@ _get_memory_size_use_ax:
     movw %ax, (%edx)
     addw $2, %dx
     movw %bx, (%edx)
-    jmp _load_gdt
+    jmp _e820_mem_map_load
 
 _get_memory_size_error:
     xchgw %bx, %bx
     jmp loader_halt
+
+_e820_mem_map_load:
+    addl $4, %esp
+    movl $0, (%esp)
+
+    # save the destination address to es:di
+    movw %cs, %ax
+    movw %ax, %es
+
+    movl $(asm_e820_mem_map-loader_start), %edi
+
+    # clear ebx
+    xorl %ebx, %ebx
+
+    # set the magic number to edx
+    movl $0x534D4150, %edx
+
+_e820_mem_map_load_loop:
+    # set function number to eax
+    movl $0xe820, %eax
+
+    # set default entry size
+    movl $24, %ecx
+
+    int $0x15
+
+    incl (%esp)
+    addl %ecx, %edi
+
+    jc _e820_mem_map_load_fin
+    cmpl $0, %ebx
+    jz _e820_mem_map_load_fin
+    jmp _e820_mem_map_load_loop
+
+_e820_mem_map_load_fin:
+    movl (%esp), %eax
+    movl $(asm_e820_mem_map_count-loader_start), %edi
+    movl %eax, (%edi)
+
+    movl $(asm_e820_mem_map_entry_size-loader_start), %edi
+    movl %ecx, (%edi)
+
+    jmp _load_gdt
 
 _load_gdt:
     cli
@@ -159,3 +202,19 @@ asm_mem_size_info:
 .globl asm_mem_size_info
 .type  asm_mem_size_info @object
 .size  asm_mem_size_info, (.-asm_mem_size_info)
+
+asm_e820_mem_map:
+    .space 1024
+.globl asm_e820_mem_map
+.type  asm_e820_mem_map @object
+.size  asm_e820_mem_map, (.-asm_e820_mem_map)
+
+asm_e820_mem_map_count:
+    .long 0
+.globl asm_e820_mem_map_count
+.type  asm_e820_mem_map_count @object
+
+asm_e820_mem_map_entry_size:
+    .long 0
+.globl asm_e820_mem_map_entry_size
+.type  asm_e820_mem_map_entry_size @object

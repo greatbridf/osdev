@@ -180,19 +180,19 @@ asm_gdt_table:
     .8byte 0         # null descriptor
 
     # code segment
-    .word 0x3fff     # limit 0 :15
+    .word 0xffff     # limit 0 :15
     .word 0x0000     # base  0 :15
     .byte 0x00       # base  16:23
     .byte 0x9a       # access
-    .byte 0b11000000 # flag and limit 16:20
+    .byte 0b11001111 # flag and limit 16:20
     .byte 0x00       # base 24:31
 
     # data segment
-    .word 0x3fff     # limit 0 :15
+    .word 0xffff     # limit 0 :15
     .word 0x0000     # base  0 :15
     .byte 0x00       # base  16:23
     .byte 0x92       # access
-    .byte 0b11000000 # flag and limit 16:20
+    .byte 0b11001111 # flag and limit 16:20
     .byte 0x00       # base 24:31
 
 asm_mem_size_info:

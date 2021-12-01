@@ -152,3 +152,33 @@ void k_free(void* ptr)
     blk->flags.is_free = 1;
     // TODO: fusion free blocks nearby
 }
+
+static inline void _create_pd(page_directory_entry* pde)
+{
+}
+
+static page_directory_entry* _kernel_pd = KERNEL_PAGE_DIRECTORY_ADDR;
+
+static inline void _create_kernel_pt(int32_t index)
+{
+    page_table_entry* pt = KERNEL_PAGE_TABLE_START_ADDR + index * 0x1000;
+    for (int32_t i = 0; i < 1024; ++i) {
+        pt[i].v = 0b00000011;
+        pt[i].in.addr = ((index * 0x400000) + i * 0x1000) >> 12;
+    }
+}
+
+static inline void _create_kernel_pd(void)
+{
+    for (int32_t i = 0; i < 1024; ++i) {
+        _kernel_pd[i].v = 0b00000011;
+        _kernel_pd[i].in.addr = ((uint32_t)(KERNEL_PAGE_TABLE_START_ADDR + i * 0x1000) >> 12);
+        _create_kernel_pt(i);
+    }
+}
+
+void init_paging(void)
+{
+    _create_kernel_pd();
+    asm("nop");
+}

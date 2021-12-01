@@ -77,6 +77,10 @@ void kernel_main(void)
         }
     }
 
+    init_paging();
+
+    printkf("Paging enabled\n");
+
     printkf("Initializing interrupt descriptor table...\n");
 
     init_idt();

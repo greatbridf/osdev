@@ -165,6 +165,10 @@ static inline void _create_kernel_pt(int32_t index)
     page_table_entry* pt = KERNEL_PAGE_TABLE_START_ADDR + index * 0x1000;
     for (int32_t i = 0; i < 1024; ++i) {
         pt[i].v = 0b00000011;
+        // 0xc0000000 ~ 0xffffffff is mapped as kernel space
+        // from physical address 0 to
+        if (index >= 768)
+            index -= 768;
         pt[i].in.addr = ((index * 0x400000) + i * 0x1000) >> 12;
     }
 }

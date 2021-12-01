@@ -20,6 +20,12 @@ void call_constructors_for_cpp(void)
     }
 }
 
+#define KERNEL_MAIN_BUF_SIZE (128)
+
+#define printkf(x...)                       \
+    snprintf(buf, KERNEL_MAIN_BUF_SIZE, x); \
+    vga_printk(buf, 0x0fu);
+
 void kernel_main(void)
 {
     MAKE_BREAK_POINT();
@@ -37,38 +43,41 @@ void kernel_main(void)
     mem_size += 1024 * asm_mem_size_info.n_1k_blks;
     mem_size += 64 * 1024 * asm_mem_size_info.n_64k_blks;
 
-    char buf[128] = { 0 };
-    snprintf(buf, 128, "Memory size: %d bytes (%d MB), 16k blocks: %d, 64k blocks: %d\n",
-        mem_size, mem_size / 1024 / 1024, (int32_t)asm_mem_size_info.n_1k_blks,
+    char buf[KERNEL_MAIN_BUF_SIZE] = { 0 };
+    printkf(
+        "Memory size: %d bytes (%d MB), 16k blocks: %d, 64k blocks: %d\n",
+        mem_size,
+        mem_size / 1024 / 1024,
+        (int32_t)asm_mem_size_info.n_1k_blks,
         (int32_t)asm_mem_size_info.n_64k_blks);
-    vga_printk(buf, 0x0fu);
 
-    vga_printk("Initializing interrupt descriptor table...\n", 0x0fu);
+    printkf("Initializing interrupt descriptor table...\n");
+
     init_idt();
 
     init_pit();
 
-    vga_printk("Interrupt descriptor table initialized!\n", 0x0fu);
+    printkf("Interrupt descriptor table initialized!\n");
 
-    vga_printk("Initializing heap space\n", 0x0fu);
+    printkf("Initializing heap space\n");
 
     init_heap();
 
-    vga_printk("Heap space initialized!\n", 0x0fu);
+    printkf("Heap space initialized!\n");
 
-    vga_printk("Constructing c++ global objects\n", 0x0fu);
+    printkf("Constructing c++ global objects\n");
 
     call_constructors_for_cpp();
 
-    vga_printk("Cpp global objects constructed\n", 0x0fu);
+    printkf("Cpp global objects constructed\n");
 
-    vga_printk("Testing k_malloc...\n", 0x0fu);
+    printkf("Testing k_malloc...\n");
     char* k_malloc_buf = (char*)k_malloc(sizeof(char) * 128);
     snprintf(k_malloc_buf, 128, "This text is printed on the heap!\n");
     vga_printk(k_malloc_buf, 0x0fu);
     k_free(k_malloc_buf);
 
-    vga_printk("No work to do, halting...\n", 0x0fU);
+    printkf("No work to do, halting...\n");
 
     while (1) {
         // disable interrupt

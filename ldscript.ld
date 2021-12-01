@@ -19,7 +19,7 @@ SECTIONS
         BYTE(0xaa);
     } > WHOLE
 
-    .text 0x600 : AT(0x200)
+    .text 0x7e00 : AT(0x200)
     {
         *(.text.loader)
         *(.text*)

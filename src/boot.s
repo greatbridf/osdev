@@ -21,7 +21,7 @@ real_start:
 
     call read_data
 
-    ljmp $0x0060, $(loader_start-loader_start)
+    ljmp $0x07e0, $(loader_start-loader_start)
 
 die:
     hlt
@@ -41,7 +41,7 @@ read_data_pack:
     .byte 0x10, 0
     .word 32     # block count (read 16k)
     .word 0x0000 # offset address
-    .word 0x0060 # segment address
+    .word 0x07e0 # segment address
     .long 1      # LBA to read
 
 stack_edge:
@@ -143,7 +143,7 @@ _load_gdt:
     orl $1, %eax
     movl %eax, %cr0
 
-    ljmp $0x08, $0x0600 + (start_32bit-loader_start)
+    ljmp $0x08, $0x7e00 + (start_32bit-loader_start)
 
 .code32
 
@@ -170,7 +170,7 @@ loader_halt:
 
 asm_gdt_descriptor:
     .word (3 * 8) - 1 # size
-    .long 0x0600+(asm_gdt_table-loader_start)  # address
+    .long 0x7e00+(asm_gdt_table-loader_start)  # address
 
 .globl asm_gdt_descriptor
 .type asm_gdt_descriptor @object

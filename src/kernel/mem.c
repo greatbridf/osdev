@@ -1,4 +1,5 @@
 #include <asm/port_io.h>
+#include <asm/sys.h>
 #include <kernel/errno.h>
 #include <kernel/mem.h>
 #include <kernel/vga.h>
@@ -180,5 +181,5 @@ static inline void _create_kernel_pd(void)
 void init_paging(void)
 {
     _create_kernel_pd();
-    asm("nop");
+    asm_enable_paging(_kernel_pd);
 }

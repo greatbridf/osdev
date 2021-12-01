@@ -12,6 +12,7 @@ set(BOOTLOADER_SOURCES src/boot.s
                        src/asm/a20.s
                        src/asm/interrupt.s
                        src/asm/port_io.s
+                       src/asm/sys.s
                        )
 
 add_library(bootloader STATIC ${BOOTLOADER_SOURCES})
@@ -48,6 +49,7 @@ set(KERNEL_MAIN_SOURCES src/kernel_main.c
                         src/types/buffer.c
                         include/asm/boot.h
                         include/asm/port_io.h
+                        include/asm/sys.h
                         include/kernel/event/event.h
                         include/kernel/errno.h
                         include/kernel/interrupt.h

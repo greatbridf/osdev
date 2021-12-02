@@ -5,9 +5,27 @@
 .globl int13
 .type  int13 @function
 int13:
+    xchgw %bx, %bx
     pushal
     call int13_handler
     popal
+
+# remove the 32bit error code from stack
+    addl $4, %esp
+    iret
+
+.globl int14
+.type  int14 @function
+int14:
+    xchgw %bx, %bx
+    pushal
+    movl %cr2, %eax
+    pushl %eax
+    call int14_handler
+    popal
+
+# remove the 32bit error code from stack
+    addl $4, %esp
     iret
 
 .globl irq0

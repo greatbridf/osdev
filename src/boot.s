@@ -169,7 +169,7 @@ loader_halt:
     jmp loader_halt
 
 asm_gdt_descriptor:
-    .word (3 * 8) - 1 # size
+    .word (5 * 8) - 1 # size
     .long 0x7e00+(asm_gdt_table-loader_start)  # address
 
 .globl asm_gdt_descriptor
@@ -179,7 +179,7 @@ asm_gdt_descriptor:
 asm_gdt_table:
     .8byte 0         # null descriptor
 
-    # code segment
+    # kernel code segment
     .word 0xffff     # limit 0 :15
     .word 0x0000     # base  0 :15
     .byte 0x00       # base  16:23
@@ -187,11 +187,27 @@ asm_gdt_table:
     .byte 0b11001111 # flag and limit 16:20
     .byte 0x00       # base 24:31
 
-    # data segment
+    # kernel data segment
     .word 0xffff     # limit 0 :15
     .word 0x0000     # base  0 :15
     .byte 0x00       # base  16:23
     .byte 0x92       # access
+    .byte 0b11001111 # flag and limit 16:20
+    .byte 0x00       # base 24:31
+
+    # user code segment
+    .word 0xffff     # limit 0 :15
+    .word 0x0000     # base  0 :15
+    .byte 0x00       # base  16:23
+    .byte 0xfa       # access
+    .byte 0b11001111 # flag and limit 16:20
+    .byte 0x00       # base 24:31
+
+    # kernel data segment
+    .word 0xffff     # limit 0 :15
+    .word 0x0000     # base  0 :15
+    .byte 0x00       # base  16:23
+    .byte 0xf2       # access
     .byte 0b11001111 # flag and limit 16:20
     .byte 0x00       # base 24:31
 

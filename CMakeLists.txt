@@ -19,7 +19,7 @@ add_library(bootloader STATIC ${BOOTLOADER_SOURCES})
 
 add_custom_command(OUTPUT extracted_bootloader
     DEPENDS bootloader
-    COMMAND ar xf ${PROJECT_BINARY_DIR}/libbootloader.a --output=${EXTRACT_DIR}
+    COMMAND ${CMAKE_AR} xf ${PROJECT_BINARY_DIR}/libbootloader.a --output=${EXTRACT_DIR}
 )
 
 project(kernel_main)
@@ -71,19 +71,19 @@ add_library(kernel_main STATIC ${KERNEL_MAIN_SOURCES})
 
 add_custom_command(OUTPUT extracted_kernel_main
     DEPENDS kernel_main
-    COMMAND ar xf ${PROJECT_BINARY_DIR}/libkernel_main.a --output=${EXTRACT_DIR}
+    COMMAND ${CMAKE_AR} xf ${PROJECT_BINARY_DIR}/libkernel_main.a --output=${EXTRACT_DIR}
 )
 
 add_custom_target(kernel.out
     DEPENDS extracted_bootloader
     DEPENDS extracted_kernel_main
-    COMMAND ld -T ${CMAKE_SOURCE_DIR}/ldscript.ld ${EXTRACT_DIR}/*.o
+    COMMAND ${CMAKE_LD} -T ${CMAKE_SOURCE_DIR}/ldscript.ld ${EXTRACT_DIR}/*.o
     -melf_i386 -o ${CMAKE_BINARY_DIR}/kernel.out
 )
 
 add_custom_target(boot.img
     DEPENDS kernel.out
-    COMMAND objcopy --strip-debug -O binary
+    COMMAND ${CMAKE_OBJCOPY} --strip-debug -O binary
     ${CMAKE_BINARY_DIR}/kernel.out boot.img)
 
 add_custom_command(OUTPUT run

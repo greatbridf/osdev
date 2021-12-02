@@ -26,24 +26,12 @@ void call_constructors_for_cpp(void)
     snprintf(buf, KERNEL_MAIN_BUF_SIZE, x); \
     vga_printk(buf, 0x0fu);
 
-void kernel_main(void)
+static inline void show_mem_info(char* buf)
 {
-    MAKE_BREAK_POINT();
-
-    uint32_t result;
-    result = check_a20_on();
-
-    if (result) {
-        vga_printk("A20 is ON\n", 0x0fU);
-    } else {
-        vga_printk("A20 is NOT ON\n", 0x0fU);
-    }
-
     uint32_t mem_size = 0;
     mem_size += 1024 * asm_mem_size_info.n_1k_blks;
     mem_size += 64 * 1024 * asm_mem_size_info.n_64k_blks;
 
-    char buf[KERNEL_MAIN_BUF_SIZE] = { 0 };
     printkf(
         "Memory size: %d bytes (%d MB), 16k blocks: %d, 64k blocks: %d\n",
         mem_size,
@@ -76,30 +64,40 @@ void kernel_main(void)
                 e820_mem_map_24[i].acpi_extension_attr);
         }
     }
+}
+
+static inline void check_a20_status(void)
+{
+    uint32_t result;
+    result = check_a20_on();
+
+    if (result) {
+        vga_printk("A20 is ON\n", 0x0fU);
+    } else {
+        vga_printk("A20 is NOT ON\n", 0x0fU);
+    }
+}
+
+void kernel_main(void)
+{
+    MAKE_BREAK_POINT();
+
+    char buf[KERNEL_MAIN_BUF_SIZE] = { 0 };
+
+    show_mem_info(buf);
 
     init_paging();
-
     printkf("Paging enabled\n");
 
-    printkf("Initializing interrupt descriptor table...\n");
-
     init_idt();
-
     init_pit();
-
-    printkf("Interrupt descriptor table initialized!\n");
-
-    printkf("Initializing heap space\n");
+    printkf("IDT initialized\n");
 
     init_heap();
-
-    printkf("Heap space initialized!\n");
-
-    printkf("Constructing c++ global objects\n");
+    printkf("Heap space initialized\n");
 
     call_constructors_for_cpp();
-
-    printkf("Cpp global objects constructed\n");
+    printkf("C++ global objects constructed\n");
 
     printkf("Testing k_malloc...\n");
     char* k_malloc_buf = (char*)k_malloc(sizeof(char) * 128);

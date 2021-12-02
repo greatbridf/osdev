@@ -1,10 +1,11 @@
 set(CMAKE_SYSTEM_NAME Linux)
 
-#set(CMAKE_ASM_COMPILER /usr/local/bin/x86_64-elf-as)
-set(CMAKE_C_COMPILER /usr/local/bin/x86_64-elf-gcc)
-set(CMAKE_CXX_COMPILER /usr/local/bin/x86_64-elf-g++)
-set(CMAKE_AR /usr/local/bin/x86_64-elf-ar)
-set(CMAKE_LD /usr/local/bin/x86_64-elf-ld)
+set(TOOLCHAIN_PATH_AND_PREFIX "/usr/local/x86_64-elf-gcc/bin/x86_64-elf-")
+
+set(CMAKE_C_COMPILER ${TOOLCHAIN_PATH_AND_PREFIX}gcc)
+set(CMAKE_CXX_COMPILER ${TOOLCHAIN_PATH_AND_PREFIX}g++)
+set(CMAKE_AR ${TOOLCHAIN_PATH_AND_PREFIX}ar)
+set(CMAKE_LINKER ${TOOLCHAIN_PATH_AND_PREFIX}ld)
 set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
 
 SET(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)

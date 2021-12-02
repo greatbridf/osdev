@@ -77,7 +77,7 @@ add_custom_command(OUTPUT extracted_kernel_main
 add_custom_target(kernel.out
     DEPENDS extracted_bootloader
     DEPENDS extracted_kernel_main
-    COMMAND ${CMAKE_LD} -T ${CMAKE_SOURCE_DIR}/ldscript.ld ${EXTRACT_DIR}/*.o
+    COMMAND ${CMAKE_LINKER} -T ${CMAKE_SOURCE_DIR}/ldscript.ld ${EXTRACT_DIR}/*.o
     -melf_i386 -o ${CMAKE_BINARY_DIR}/kernel.out
 )
 

@@ -62,6 +62,14 @@ void int13_handler(
     uint16_t cs,
     uint32_t eflags);
 
+void int14_handler(
+    ptr_t addr,
+    struct regs_32 s_regs,
+    uint32_t error_code,
+    ptr_t eip,
+    uint16_t cs,
+    uint32_t eflags);
+
 void irq0_handler(void);
 void irq1_handler(void);
 void irq2_handler(void);

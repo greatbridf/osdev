@@ -15,3 +15,51 @@ asm_enable_paging:
     movl %eax, %cr0
 
     ret
+
+.global asm_load_gdt
+.type   asm_load_gdt @function
+asm_load_gdt:
+    cli
+    leal 6(%esp), %eax
+    lgdt (%eax)
+    ljmp $0x08, $_asm_load_gdt_fin
+_asm_load_gdt_fin:
+    sti
+    ret
+
+.global asm_load_tr
+.type   asm_load_tr @function
+asm_load_tr:
+    cli
+    movl 4(%esp), %eax
+    orl $0, %eax
+    ltr %ax
+    sti
+    ret
+
+
+# examples for going ring 3
+_test_user_space_program:
+    movl $0x1919810, %eax
+    movl $0xc48c, %ecx
+_reap:
+    cmpl $1000, (%ecx)
+    jl _reap
+_fault:
+    cli
+
+go_user_space_example:
+    movl $((4 * 8) | 3), %eax
+    movw %ax, %ds
+    movw %ax, %es
+    movw %ax, %fs
+    movw %ax, %gs
+
+    movl %esp, %eax
+    pushl $((4 * 8) | 3)
+    pushl %eax
+    pushf
+    pushl $((3 * 8) | 3)
+    pushl $_test_user_space_program
+
+    iret

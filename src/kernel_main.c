@@ -105,6 +105,10 @@ void kernel_main(void)
     vga_printk(k_malloc_buf, 0x0fu);
     k_free(k_malloc_buf);
 
+    void* kernel_stack = k_malloc(KERNEL_STACK_SIZE);
+    init_gdt_with_tss(kernel_stack + KERNEL_STACK_SIZE - 1, KERNEL_STACK_SEGMENT);
+    printkf("new GDT and TSS loaded\n");
+
     printkf("No work to do, halting...\n");
 
     while (1) {

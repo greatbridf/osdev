@@ -108,6 +108,26 @@ typedef union page_table_entry {
 
 void init_paging(void);
 
+#define SD_TYPE_CODE_SYSTEM (0x9a)
+#define SD_TYPE_DATA_SYSTEM (0x92)
+
+#define SD_TYPE_CODE_USER (0xfa)
+#define SD_TYPE_DATA_USER (0xf2)
+
+#define SD_TYPE_TSS (0x89)
+
+typedef struct segment_descriptor_struct {
+    uint64_t limit_low : 16;
+    uint64_t base_low : 16;
+    uint64_t base_mid : 8;
+    uint64_t access : 8;
+    uint64_t limit_high : 4;
+    uint64_t flags : 4;
+    uint64_t base_high : 8;
+} segment_descriptor;
+
+void init_gdt_with_tss(void* kernel_esp, uint16_t kernel_ss);
+
 #ifdef __cplusplus
 }
 #endif

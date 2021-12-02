@@ -1,12 +1,18 @@
+#include <asm/boot.h>
 #include <asm/port_io.h>
 #include <asm/sys.h>
 #include <kernel/errno.h>
 #include <kernel/mem.h>
+#include <kernel/task.h>
 #include <kernel/vga.h>
 #include <kernel_main.h>
 
 static void* p_start;
 static void* p_break;
+static segment_descriptor* gdt;
+
+// temporary
+static struct tss32_t _tss;
 
 static int32_t set_heap_start(void* start_addr)
 {
@@ -163,12 +169,20 @@ static page_directory_entry* _kernel_pd = KERNEL_PAGE_DIRECTORY_ADDR;
 static inline void _create_kernel_pt(int32_t index)
 {
     page_table_entry* pt = KERNEL_PAGE_TABLE_START_ADDR + index * 0x1000;
+
+    // 0xc0000000 ~ 0xffffffff is mapped as kernel space
+    // from physical address 0 to
+    int32_t is_kernel = (index >= 768);
+    if (is_kernel) {
+        index -= 768;
+    }
+
     for (int32_t i = 0; i < 1024; ++i) {
-        pt[i].v = 0b00000011;
-        // 0xc0000000 ~ 0xffffffff is mapped as kernel space
-        // from physical address 0 to
-        if (index >= 768)
-            index -= 768;
+        if (is_kernel) {
+            pt[i].v = 0b00000011;
+        } else {
+            pt[i].v = 0b00000111;
+        }
         pt[i].in.addr = ((index * 0x400000) + i * 0x1000) >> 12;
     }
 }
@@ -176,7 +190,11 @@ static inline void _create_kernel_pt(int32_t index)
 static inline void _create_kernel_pd(void)
 {
     for (int32_t i = 0; i < 1024; ++i) {
-        _kernel_pd[i].v = 0b00000011;
+        if (i >= 768) {
+            _kernel_pd[i].v = 0b00000011;
+        } else {
+            _kernel_pd[i].v = 0b00000111;
+        }
         _kernel_pd[i].in.addr = ((uint32_t)(KERNEL_PAGE_TABLE_START_ADDR + i * 0x1000) >> 12);
         _create_kernel_pt(i);
     }
@@ -186,4 +204,42 @@ void init_paging(void)
 {
     _create_kernel_pd();
     asm_enable_paging(_kernel_pd);
+}
+
+static inline void
+set_segment_descriptor(
+    segment_descriptor* sd,
+    uint32_t base,
+    uint32_t limit,
+    uint8_t access,
+    uint8_t flags)
+{
+    sd->access = access;
+    sd->flags = flags;
+    sd->base_low = base;
+    sd->base_mid = base >> 16;
+    sd->base_high = base >> 24;
+    sd->limit_low = limit;
+    sd->limit_high = limit >> 16;
+}
+
+void init_gdt_with_tss(void* kernel_esp, uint16_t kernel_ss)
+{
+    gdt = k_malloc(sizeof(segment_descriptor) * 6);
+    // since the size in the struct is an OFFSET
+    // it needs to be added one to get its real size
+    uint16_t asm_gdt_size = (asm_gdt_descriptor.size + 1) / 8;
+    segment_descriptor* asm_gdt = (segment_descriptor*)asm_gdt_descriptor.address;
+
+    for (int i = 0; i < asm_gdt_size; ++i) {
+        gdt[i] = asm_gdt[i];
+    }
+
+    set_segment_descriptor(gdt + 5, (uint32_t)&_tss, sizeof(struct tss32_t), SD_TYPE_TSS, 0b0000);
+
+    _tss.esp0 = (uint32_t)kernel_esp;
+    _tss.ss0 = kernel_ss;
+
+    asm_load_gdt((6 * sizeof(segment_descriptor) - 1) << 16, (uint32_t)gdt);
+    asm_load_tr((6 - 1) * 8);
 }

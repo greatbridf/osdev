@@ -2,7 +2,7 @@
 
 #include <types/stdint.h>
 
-struct gdt_descriptor {
+struct __attribute__((__packed__)) gdt_descriptor {
     uint16_t size;
     uint32_t address;
 };

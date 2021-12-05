@@ -24,8 +24,8 @@ add_custom_command(OUTPUT extracted_bootloader
 
 project(kernel_main)
 
-set(CMAKE_C_FLAGS "-nostdinc -m32 -nostdlib -Wall -Wextra -fverbose-asm -fno-exceptions -fno-pic -fno-stack-protector")
-set(CMAKE_CXX_FLAGS "-nostdinc -m32 -nostdlib -Wall -Wextra -fverbose-asm -fno-use-cxa-atexit -fno-exceptions -fno-pic -fno-stack-protector")
+set(CMAKE_C_FLAGS "-nostdinc -m32 -nostdlib -Wall -Wextra -Wno-builtin-declaration-mismatch -Wno-format -fverbose-asm -fno-exceptions -fno-pic -fno-stack-protector")
+set(CMAKE_CXX_FLAGS "-nostdinc -m32 -nostdlib -Wall -Wextra -Wno-builtin-declaration-mismatch -Wno-format -fverbose-asm -fno-use-cxa-atexit -fno-exceptions -fno-pic -fno-stack-protector")
 
 if (CMAKE_BUILD_TYPE STREQUAL "Debug")
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O0 -g")

@@ -82,12 +82,20 @@ void kernel_main(void)
 {
     MAKE_BREAK_POINT();
 
-    char buf[KERNEL_MAIN_BUF_SIZE] = { 0 };
+    char buf[KERNEL_MAIN_BUF_SIZE];
 
     show_mem_info(buf);
 
     init_paging();
     printkf("Paging enabled\n");
+
+    asm_enable_sse();
+    printkf("SSE enabled\n");
+
+    {
+        char test_sse[KERNEL_MAIN_BUF_SIZE] = { 0 };
+    }
+    printkf("SSE tested\n");
 
     init_idt();
     init_pit();

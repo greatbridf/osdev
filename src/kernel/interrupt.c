@@ -29,6 +29,7 @@ void init_idt()
     asm_outb(PORT_PIC2_DATA, 0x00);
 
     // handle general protection fault (handle segmentation fault)
+    SET_IDT_ENTRY_FN(6, int6, 0x08);
     SET_IDT_ENTRY_FN(13, int13, 0x08);
     SET_IDT_ENTRY_FN(14, int14, 0x08);
     // SET_IDT_ENTRY(0x0c, /* addr */ 0, 0x08);
@@ -58,6 +59,33 @@ void init_idt()
     asm_load_idt(idt_descriptor);
 }
 
+void int6_handler(
+    struct regs_32 s_regs,
+    uint32_t error_code,
+    ptr_t eip,
+    uint16_t cs)
+{
+    char buf[512];
+
+    vga_printk("---- INVALID OPCODE ----\n", 0x0fu);
+
+    snprintf(
+        buf, 512,
+        "eax: %x, ebx: %x, ecx: %x, edx: %x\n"
+        "esp: %x, ebp: %x, esi: %x, edi: %x\n"
+        "eip: %x, cs: %x, error_code: %x   \n",
+        s_regs.eax, s_regs.ebx, s_regs.ecx,
+        s_regs.edx, s_regs.esp, s_regs.ebp,
+        s_regs.esi, s_regs.edi, eip,
+        cs, error_code);
+    vga_printk(buf, 0x0fu);
+
+    vga_printk("----   HALTING SYSTEM   ----", 0x0fu);
+
+    asm_cli();
+    asm_hlt();
+}
+
 // general protection
 void int13_handler(
     struct regs_32 s_regs,
@@ -66,7 +94,7 @@ void int13_handler(
     uint16_t cs,
     uint32_t eflags)
 {
-    char buf[512] = { 0 };
+    char buf[512];
 
     vga_printk("---- SEGMENTATION FAULT ----\n", 0x0fu);
 
@@ -97,7 +125,7 @@ void int14_handler(
     uint16_t cs,
     uint32_t eflags)
 {
-    char buf[512] = { 0 };
+    char buf[512];
 
     vga_printk("---- PAGE FAULT ----\n", 0x0fu);
 

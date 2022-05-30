@@ -2,6 +2,16 @@
 
 .text
 
+.globl int6
+.type  int6 @function
+int6:
+    xchgw %bx, %bx
+    pushal
+    call int6_handler
+    popal
+
+    iret
+
 .globl int13
 .type  int13 @function
 int13:
@@ -43,7 +53,7 @@ irq1:
     call irq1_handler
     popal
     iret
-    
+
 .globl irq2
 .type  irq2 @function
 irq2:

@@ -3,6 +3,8 @@ project(my_os_bootloader ASM)
 
 set(CMAKE_ASM_FLAGS "-m32")
 
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 include_directories(${PROJECT_SOURCE_DIR}/include)
 
 set(EXTRACT_DIR ${PROJECT_BINARY_DIR}/extract)

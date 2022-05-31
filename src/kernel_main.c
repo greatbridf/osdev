@@ -4,6 +4,7 @@
 #include <asm/port_io.h>
 #include <kernel/event/event.h>
 #include <kernel/hw/keyboard.h>
+#include <kernel/hw/serial.h>
 #include <kernel/hw/timer.h>
 #include <kernel/interrupt.h>
 #include <kernel/mem.h>
@@ -112,6 +113,14 @@ void kernel_main(void)
     snprintf(k_malloc_buf, 128, "This text is printed on the heap!\n");
     vga_printk(k_malloc_buf, 0x0fu);
     k_free(k_malloc_buf);
+
+    printkf("initializing serial ports... ");
+    int result = init_serial_port(PORT_SERIAL0);
+    if (result == 0) {
+        printkf("ok\n");
+    } else {
+        printkf("failed\n");
+    }
 
     void* kernel_stack = k_malloc(KERNEL_STACK_SIZE);
     init_gdt_with_tss(kernel_stack + KERNEL_STACK_SIZE - 1, KERNEL_STACK_SEGMENT);

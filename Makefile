@@ -1,6 +1,9 @@
 .PHONY: run
 run: build
 	qemu-system-i386 -drive file=build/boot.img,format=raw -display curses -no-reboot -no-shutdown -S -s -enable-kvm
+.PHONY: srun
+srun: build
+	qemu-system-i386 -drive file=build/boot.img,format=raw -display none -no-reboot -no-shutdown -S -s -enable-kvm -serial mon:stdio
 
 .PHONY: build
 build:

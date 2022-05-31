@@ -2,6 +2,8 @@
 
 #include <types/types.h>
 
+typedef uint16_t port_id_t;
+
 #define PORT_PIC1 (0x20)
 #define PORT_PIC2 (0xa0)
 #define PORT_PIC1_COMMAND (PORT_PIC1)
@@ -21,8 +23,8 @@
 extern "C" {
 #endif
 
-extern void asm_outb(uint16_t port_number, uint8_t data);
-extern uint8_t asm_inb(uint16_t port_number);
+extern void asm_outb(port_id_t port_number, uint8_t data);
+extern uint8_t asm_inb(port_id_t port_number);
 
 extern void asm_hlt(void);
 extern void asm_cli(void);

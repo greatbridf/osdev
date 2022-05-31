@@ -7,6 +7,7 @@
 #include <kernel/hw/serial.h>
 #include <kernel/hw/timer.h>
 #include <kernel/interrupt.h>
+#include <kernel/tty.h>
 #include <kernel/mem.h>
 #include <kernel/stdio.h>
 #include <kernel/vga.h>
@@ -23,9 +24,11 @@ void call_constructors_for_cpp(void)
 
 #define KERNEL_MAIN_BUF_SIZE (128)
 
+
+static struct tty* console = NULL;
 #define printkf(x...)                       \
     snprintf(buf, KERNEL_MAIN_BUF_SIZE, x); \
-    vga_printk(buf, 0x0fu);
+    tty_print(console, buf)
 
 static inline void show_mem_info(char* buf)
 {
@@ -73,10 +76,18 @@ static inline void check_a20_status(void)
     result = check_a20_on();
 
     if (result) {
-        vga_printk("A20 is ON\n", 0x0fU);
+        // TODO: change to tty
     } else {
-        vga_printk("A20 is NOT ON\n", 0x0fU);
+        // TODO: change to tty
     }
+}
+
+static inline void halt_on_init_error(void)
+{
+    MAKE_BREAK_POINT();
+    asm_cli();
+    while (1)
+        asm_hlt();
 }
 
 void kernel_main(void)
@@ -84,6 +95,12 @@ void kernel_main(void)
     MAKE_BREAK_POINT();
 
     char buf[KERNEL_MAIN_BUF_SIZE];
+
+    struct tty early_console;
+    if (make_serial_tty(&early_console, PORT_SERIAL0) != GB_OK) {
+        halt_on_init_error();
+    }
+    console = &early_console;
 
     show_mem_info(buf);
 
@@ -102,8 +119,12 @@ void kernel_main(void)
     init_pit();
     printkf("IDT initialized\n");
 
-    init_heap();
-    printkf("Heap space initialized\n");
+    printkf("initializing heap space... ");
+    if (init_heap() != GB_OK) {
+        printkf("failed\n");
+        halt_on_init_error();
+    }
+    printkf("ok\n");
 
     call_constructors_for_cpp();
     printkf("C++ global objects constructed\n");
@@ -111,7 +132,8 @@ void kernel_main(void)
     printkf("Testing k_malloc...\n");
     char* k_malloc_buf = (char*)k_malloc(sizeof(char) * 128);
     snprintf(k_malloc_buf, 128, "This text is printed on the heap!\n");
-    vga_printk(k_malloc_buf, 0x0fu);
+    // TODO: change to tty
+    // vga_printk(k_malloc_buf, 0x0fu);
     k_free(k_malloc_buf);
 
     printkf("initializing serial ports... ");

@@ -38,7 +38,7 @@ static void* sbrk(size_t increment)
     }
 }
 
-void init_heap(void)
+int init_heap(void)
 {
     // start of the available address space
     // TODO: adjust heap start address
@@ -46,15 +46,13 @@ void init_heap(void)
     set_heap_start(HEAP_START);
 
     if (brk(HEAP_START) != 0) {
-        vga_printk("Failed to initialize heap, halting...", 0x0fu);
-        MAKE_BREAK_POINT();
-        asm_cli();
-        asm_hlt();
+        return GB_FAILED;
     }
     struct mem_blk* p_blk = sbrk(0);
     p_blk->size = 4;
     p_blk->flags.has_next = 0;
     p_blk->flags.is_free = 1;
+    return GB_OK;
 }
 
 // @param start_pos position where to start finding

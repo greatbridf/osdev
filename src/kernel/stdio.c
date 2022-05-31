@@ -411,3 +411,24 @@ snprintf(
 
     return n_write;
 }
+
+#define BYTES_PER_MAX_COPY_UNIT (sizeof(uint32_t)/sizeof(uint8_t))
+void* memcpy(void* dst, const void* src, size_t n)
+{
+    void* orig_dst = dst;
+    for (size_t i = 0; i < n / BYTES_PER_MAX_COPY_UNIT; ++i) {
+        *((uint32_t*)dst++) = *((uint32_t*)src++);
+    }
+    for (size_t i = 0; i < (n % BYTES_PER_MAX_COPY_UNIT); ++i) {
+        *((char*)dst++) = *((char*)src++);
+    }
+    return orig_dst;
+}
+
+size_t strlen(const char* str)
+{
+    size_t n = 0;
+    while (*(str++) != '\0')
+        ++n;
+    return n;
+}

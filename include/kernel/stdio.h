@@ -14,6 +14,10 @@
 extern "C" {
 #endif
 
+void* memcpy(void* dst, const void* src, size_t n);
+size_t strlen(const char* str);
+char* strncpy(char* dst, const char* src, size_t max_n);
+
 ssize_t
 snprint_decimal(
     char* buf,

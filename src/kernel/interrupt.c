@@ -67,7 +67,8 @@ void int6_handler(
 {
     char buf[512];
 
-    vga_printk("---- INVALID OPCODE ----\n", 0x0fu);
+    // TODO: change to tty
+    vga_print("---- INVALID OPCODE ----\n", 0x0fu);
 
     snprintf(
         buf, 512,
@@ -78,9 +79,11 @@ void int6_handler(
         s_regs.edx, s_regs.esp, s_regs.ebp,
         s_regs.esi, s_regs.edi, eip,
         cs, error_code);
-    vga_printk(buf, 0x0fu);
+    // TODO: change to tty
+    vga_print(buf, 0x0fu);
 
-    vga_printk("----   HALTING SYSTEM   ----", 0x0fu);
+    // TODO: change to tty
+    vga_print("----   HALTING SYSTEM   ----", 0x0fu);
 
     asm_cli();
     asm_hlt();
@@ -96,7 +99,8 @@ void int13_handler(
 {
     char buf[512];
 
-    vga_printk("---- SEGMENTATION FAULT ----\n", 0x0fu);
+    // TODO: change to tty
+    vga_print("---- SEGMENTATION FAULT ----\n", 0x0fu);
 
     snprintf(
         buf, 512,
@@ -108,9 +112,11 @@ void int13_handler(
         s_regs.edx, s_regs.esp, s_regs.ebp,
         s_regs.esi, s_regs.edi, eip,
         cs, error_code, eflags);
-    vga_printk(buf, 0x0fu);
+    // TODO: change to tty
+    vga_print(buf, 0x0fu);
 
-    vga_printk("----   HALTING SYSTEM   ----", 0x0fu);
+    // TODO: change to tty
+    vga_print("----   HALTING SYSTEM   ----", 0x0fu);
 
     asm_cli();
     asm_hlt();
@@ -127,7 +133,8 @@ void int14_handler(
 {
     char buf[512];
 
-    vga_printk("---- PAGE FAULT ----\n", 0x0fu);
+    // TODO: change to tty
+    vga_print("---- PAGE FAULT ----\n", 0x0fu);
 
     snprintf(
         buf, 512,
@@ -139,9 +146,11 @@ void int14_handler(
         s_regs.edx, s_regs.esp, s_regs.ebp,
         s_regs.esi, s_regs.edi, eip,
         cs, error_code, eflags, addr);
-    vga_printk(buf, 0x0fu);
+    // TODO: change to tty
+    vga_print(buf, 0x0fu);
 
-    vga_printk("----   HALTING SYSTEM   ----", 0x0fu);
+    // TODO: change to tty
+    vga_print("----   HALTING SYSTEM   ----", 0x0fu);
 
     asm_cli();
     asm_hlt();

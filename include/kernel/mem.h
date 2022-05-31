@@ -33,7 +33,7 @@ struct mem_blk {
     uint8_t data[4];
 };
 
-void init_heap(void);
+int init_heap(void);
 
 void* k_malloc(size_t size);
 

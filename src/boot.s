@@ -41,7 +41,7 @@ read_data_pack:
     .byte 0x10, 0
 # TODO!!!
 # read more!
-    .word 64     # block count (read 16k)
+    .word 64     # block count (read 32k)
     .word 0x0000 # offset address
     .word 0x07e0 # segment address
     .long 1      # LBA to read

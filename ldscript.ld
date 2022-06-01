@@ -28,6 +28,9 @@ SECTIONS
 
     .data :
     {
+        kernel_size = .;
+        LONG(ADDR(.kernel_end) - ADDR(.text));
+
         start_ctors = .;
         KEEP(*(.init_array));
         KEEP(*(SORT_BY_INIT_PRIORITY(.init_array*)));
@@ -41,6 +44,10 @@ SECTIONS
     {
         *(.bss)
         *(.bss*)
+    } > WHOLE
+
+    .kernel_end :
+    {
     } > WHOLE
 
 	/* Stabs debugging sections.  */

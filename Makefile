@@ -9,9 +9,19 @@ srun: build
 nativerun: build
 	qemu-system-i386 $(QEMU_ARGS) -display none -serial mon:stdio
 
+.PHONY: configure
+configure:
+	cmake -Bbuild -DCMAKE_BUILD_TYPE=Debug
+	cp build/compile_commands.json .
+
 .PHONY: build
 build:
 	cmake --build build --target boot.img
+
+.PHONY: clean
+clean:
+	-rm -rf build
+	-rm compile_commands.json
 
 .PHONY: debug
 debug:

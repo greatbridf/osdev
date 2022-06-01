@@ -30,6 +30,11 @@ static struct tty* console = NULL;
     snprintf(buf, KERNEL_MAIN_BUF_SIZE, x); \
     tty_print(console, buf)
 
+#define EVE_START(x) printkf(x "... ")
+#define INIT_START(x) EVE_START("initializing " x)
+#define INIT_OK() printkf("ok\n")
+#define INIT_FAILED() printkf("failed\n")
+
 static inline void show_mem_info(char* buf)
 {
     uint32_t mem_size = 0;
@@ -68,6 +73,7 @@ static inline void show_mem_info(char* buf)
                 e820_mem_map_24[i].acpi_extension_attr);
         }
     }
+    printkf("kernel size: %x\n", kernel_size);
 }
 
 static inline void check_a20_status(void)
@@ -104,30 +110,29 @@ void kernel_main(void)
 
     show_mem_info(buf);
 
+    INIT_START("paging");
     init_paging();
-    printkf("Paging enabled\n");
+    INIT_OK();
 
+    INIT_START("SSE");
     asm_enable_sse();
-    printkf("SSE enabled\n");
+    INIT_OK();
 
-    {
-        char test_sse[KERNEL_MAIN_BUF_SIZE] = { 0 };
-    }
-    printkf("SSE tested\n");
-
+    INIT_START("IDT");
     init_idt();
     init_pit();
-    printkf("IDT initialized\n");
+    INIT_OK();
 
-    printkf("initializing heap space... ");
+    INIT_START("heap space");
     if (init_heap() != GB_OK) {
-        printkf("failed\n");
+        INIT_FAILED();
         halt_on_init_error();
     }
-    printkf("ok\n");
+    INIT_OK();
 
+    INIT_START("C++ global objects");
     call_constructors_for_cpp();
-    printkf("C++ global objects constructed\n");
+    INIT_OK();
 
     printkf("Testing k_malloc...\n");
     char* k_malloc_buf = (char*)k_malloc(sizeof(char) * 128);
@@ -136,12 +141,12 @@ void kernel_main(void)
     // vga_printk(k_malloc_buf, 0x0fu);
     k_free(k_malloc_buf);
 
-    printkf("initializing serial ports... ");
+    INIT_START("serial ports");
     int result = init_serial_port(PORT_SERIAL0);
     if (result == 0) {
-        printkf("ok\n");
+        INIT_OK();
     } else {
-        printkf("failed\n");
+        INIT_FAILED();
     }
 
     void* kernel_stack = k_malloc(KERNEL_STACK_SIZE);

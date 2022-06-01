@@ -26,5 +26,7 @@ extern uint8_t asm_e820_mem_map[1024];
 extern uint32_t asm_e820_mem_map_count;
 extern uint32_t asm_e820_mem_map_entry_size;
 
+extern uint32_t kernel_size;
+
 #define e820_mem_map_20 ((struct e820_mem_map_entry_20*)asm_e820_mem_map)
 #define e820_mem_map_24 ((struct e820_mem_map_entry_24*)asm_e820_mem_map)

@@ -1,9 +1,13 @@
+QEMU_ARGS=-drive file=build/boot.img,format=raw -no-reboot -no-shutdown -enable-kvm
 .PHONY: run
 run: build
-	qemu-system-i386 -drive file=build/boot.img,format=raw -display curses -no-reboot -no-shutdown -S -s -enable-kvm
+	qemu-system-i386 $(QEMU_ARGS) -display curses -S -s
 .PHONY: srun
 srun: build
-	qemu-system-i386 -drive file=build/boot.img,format=raw -display none -no-reboot -no-shutdown -S -s -enable-kvm -serial mon:stdio
+	qemu-system-i386 $(QEMU_ARGS) -display none -S -s -serial mon:stdio
+.PHONY: nativerun
+nativerun: build
+	qemu-system-i386 $(QEMU_ARGS) -display none -serial mon:stdio
 
 .PHONY: build
 build:

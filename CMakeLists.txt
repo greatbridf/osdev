@@ -50,6 +50,7 @@ set(KERNEL_MAIN_SOURCES src/kernel_main.c
                         src/kernel/hw/serial.c
                         src/kernel/hw/timer.c
                         src/kernel/event/event.cpp
+                        src/types/bitmap.c
                         src/types/buffer.c
                         include/asm/boot.h
                         include/asm/port_io.h
@@ -66,6 +67,7 @@ set(KERNEL_MAIN_SOURCES src/kernel_main.c
                         include/kernel/hw/timer.h
                         include/kernel/input/keycodes.h
                         include/kernel/input/input_event.h
+                        include/types/bitmap.h
                         include/types/buffer.h
                         include/types/types.h
                         include/types/size.h

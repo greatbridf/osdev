@@ -11,6 +11,7 @@
 #include <kernel/mem.h>
 #include <kernel/stdio.h>
 #include <kernel/vga.h>
+#include <types/bitmap.h>
 
 typedef void (*constructor)(void);
 extern constructor start_ctors;

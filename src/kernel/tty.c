@@ -36,7 +36,7 @@ void tty_print(struct tty* p_tty, const char* str)
 int make_serial_tty(struct tty* p_tty, int id)
 {
     *(port_id_t*)&p_tty->data = id;
-    snprintf(p_tty->name, sizeof(p_tty->name), "ttyS%d", id);
+    snprintf(p_tty->name, sizeof(p_tty->name), "ttyS%x", id);
     p_tty->ops = &serial_tty_ops;
     return GB_OK;
 }

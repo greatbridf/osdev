@@ -6,6 +6,7 @@
 #include <kernel/task.h>
 #include <kernel/vga.h>
 #include <kernel_main.h>
+#include <types/bitmap.h>
 
 static void* p_start;
 static void* p_break;
@@ -13,6 +14,9 @@ static segment_descriptor* gdt;
 
 // temporary
 static struct tss32_t _tss;
+
+static size_t mem_size;
+static char mem_bitmap[1024 * 1024 / 8];
 
 static int32_t set_heap_start(void* start_addr)
 {
@@ -158,22 +162,82 @@ void k_free(void* ptr)
     // TODO: fusion free blocks nearby
 }
 
+static inline size_t addr_to_page(phys_ptr_t p)
+{
+    return p >> 12;
+}
+
+static inline void mark_page(size_t n)
+{
+    bm_set(mem_bitmap, n);
+}
+
+static inline void free_page(size_t n)
+{
+    bm_clear(mem_bitmap, n);
+}
+
+static void mark_addr_len(phys_ptr_t start, size_t n)
+{
+    if (n == 0) return;
+    size_t start_page = addr_to_page(start);
+    size_t end_page   = addr_to_page(start + n + 4095);
+    for (uint32_t i = start_page; i < end_page; ++i)
+        mark_page(i);
+}
+
+static void free_addr_len(phys_ptr_t start, size_t n)
+{
+    if (n == 0) return;
+    size_t start_page = (start >> 12);
+    size_t end_page   = ((start + n + 4095) >> 12);
+    for (uint32_t i = start_page; i < end_page; ++i)
+        free_page(i);
+}
+
+static inline void mark_addr_range(phys_ptr_t start, phys_ptr_t end)
+{
+    mark_addr_len(start, end - start);
+}
+
+static inline void free_addr_range(phys_ptr_t start, phys_ptr_t end)
+{
+    free_addr_len(start, end - start);
+}
+
+static int alloc_page(void)
+{
+    for (size_t i = 0; i < 1024 * 1024; ++i) {
+        if (bm_test(mem_bitmap, i) == 0) {
+            mark_page(i);
+            return i;
+        }
+    }
+    return GB_FAILED;
+}
+
+// allocate ONE whole page
+static phys_ptr_t _k_p_malloc(void)
+{
+    return (phys_ptr_t)(alloc_page() << 12);
+}
+
+static void _k_p_free(phys_ptr_t ptr)
+{
+    free_page(addr_to_page(ptr));
+}
+
 static inline void _create_pd(page_directory_entry* pde)
 {
 }
 
 static page_directory_entry* _kernel_pd = KERNEL_PAGE_DIRECTORY_ADDR;
 
-static inline void _create_kernel_pt(int32_t index)
+static inline void _create_kernel_pt(page_table_entry* pt, int32_t index)
 {
-    page_table_entry* pt = KERNEL_PAGE_TABLE_START_ADDR + index * 0x1000;
-
-    // 0xc0000000 ~ 0xffffffff is mapped as kernel space
+    // 0x00000000 ~ 0x3fffffff is mapped as kernel space
     // from physical address 0 to
-    int32_t is_kernel = (index >= 768);
-    if (is_kernel) {
-        index -= 768;
-    }
+    int32_t is_kernel = (index < 256);
 
     for (int32_t i = 0; i < 1024; ++i) {
         if (is_kernel) {
@@ -188,18 +252,52 @@ static inline void _create_kernel_pt(int32_t index)
 static inline void _create_kernel_pd(void)
 {
     for (int32_t i = 0; i < 1024; ++i) {
-        if (i >= 768) {
+        if (i < 256) {
             _kernel_pd[i].v = 0b00000011;
         } else {
             _kernel_pd[i].v = 0b00000111;
         }
-        _kernel_pd[i].in.addr = ((uint32_t)(KERNEL_PAGE_TABLE_START_ADDR + i * 0x1000) >> 12);
-        _create_kernel_pt(i);
+        page_table_entry* pt = (page_table_entry*)_k_p_malloc();
+        _kernel_pd[i].in.addr = ((size_t)pt >> 12);
+        _create_kernel_pt(pt, i);
+    }
+}
+
+static void init_mem_layout(void)
+{
+    mem_size = 1024 * mem_size_info.n_1k_blks;
+    mem_size += 64 * 1024 * mem_size_info.n_64k_blks;
+
+    // mark kernel page directory
+    mark_addr_range(0x00000000, 0x00001000);
+    // mark EBDA and upper memory as allocated
+    mark_addr_range(0x80000, 0xfffff);
+    // mark kernel
+    mark_addr_len(0x00100000, kernel_size);
+
+    if (e820_mem_map_entry_size == 20) {
+        struct e820_mem_map_entry_20* entry = (struct e820_mem_map_entry_20*)e820_mem_map;
+        for (uint32_t i = 0; i < e820_mem_map_count; ++i, ++entry) {
+            if (entry->type != 1)
+            {
+                mark_addr_len(entry->base, entry->len);
+            }
+        }
+    } else {
+        struct e820_mem_map_entry_24* entry = (struct e820_mem_map_entry_24*)e820_mem_map;
+        for (uint32_t i = 0; i < e820_mem_map_count; ++i, ++entry) {
+            if (entry->in.type != 1)
+            {
+                mark_addr_len(entry->in.base, entry->in.len);
+            }
+        }
     }
 }
 
 void init_paging(void)
 {
+    init_mem_layout();
+
     _create_kernel_pd();
     asm_enable_paging(_kernel_pd);
 }
@@ -223,6 +321,8 @@ set_segment_descriptor(
 
 void init_gdt_with_tss(void* kernel_esp, uint16_t kernel_ss)
 {
+    // TODO: fix this
+    return;
     gdt = k_malloc(sizeof(segment_descriptor) * 6);
     // since the size in the struct is an OFFSET
     // it needs to be added one to get its real size

@@ -12,7 +12,23 @@ struct mem_size_info {
     uint16_t n_64k_blks; // memory above 16m in 64k blocks
 };
 
-extern struct mem_size_info asm_mem_size_info;
+struct e820_mem_map_entry_20 {
+    uint64_t base;
+    uint64_t len;
+    uint32_t type;
+};
+
+struct e820_mem_map_entry_24 {
+    struct e820_mem_map_entry_20 in;
+    uint32_t acpi_extension_attr;
+};
+
+// in kernel_main.c
+extern uint8_t e820_mem_map[1024];
+extern uint32_t e820_mem_map_count;
+extern uint32_t e820_mem_map_entry_size;
+extern uint32_t kernel_size;
+extern struct mem_size_info mem_size_info;
 
 // TODO: decide heap start address according
 //   to user's memory size

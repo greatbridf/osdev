@@ -36,7 +36,7 @@ SECTIONS
 
     .data :
     {
-        kernel_size = .;
+        asm_kernel_size = .;
         LONG(__real_kernel_end - ADDR(.text));
 
         start_ctors = .;

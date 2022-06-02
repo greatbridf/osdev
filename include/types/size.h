@@ -11,3 +11,6 @@ typedef int32_t diff_t;
 typedef uint64_t ptr_t;
 typedef int64_t diff_t;
 #endif
+
+typedef ptr_t phys_ptr_t;
+typedef ptr_t virt_ptr_t;

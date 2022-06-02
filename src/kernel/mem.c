@@ -341,3 +341,19 @@ void init_gdt_with_tss(void* kernel_esp, uint16_t kernel_ss)
     asm_load_gdt((6 * sizeof(segment_descriptor) - 1) << 16, (uint32_t)gdt);
     asm_load_tr((6 - 1) * 8);
 }
+
+void create_segment_descriptor(
+        segment_descriptor* sd,
+        uint32_t base,
+        uint32_t limit,
+        uint32_t flags,
+        uint32_t access)
+{
+    sd->base_low   = base  & 0x0000ffff;
+    sd->base_mid   = ((base  & 0x00ff0000) >> 16);
+    sd->base_high  = ((base  & 0xff000000) >> 24);
+    sd->limit_low  = limit & 0x0000ffff;
+    sd->limit_high = ((limit & 0x000f0000) >> 16);
+    sd->access     = access;
+    sd->flags      = flags;
+}

@@ -143,6 +143,12 @@ typedef struct segment_descriptor_struct {
 } segment_descriptor;
 
 void init_gdt_with_tss(void* kernel_esp, uint16_t kernel_ss);
+void create_segment_descriptor(
+        segment_descriptor* sd,
+        uint32_t base,
+        uint32_t limit,
+        uint32_t flags,
+        uint32_t access);
 
 #ifdef __cplusplus
 }

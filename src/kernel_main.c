@@ -2,6 +2,7 @@
 
 #include <asm/boot.h>
 #include <asm/port_io.h>
+#include <asm/sys.h>
 #include <kernel/event/event.h>
 #include <kernel/hw/keyboard.h>
 #include <kernel/hw/serial.h>
@@ -26,7 +27,7 @@ void call_constructors_for_cpp(void)
 #define KERNEL_MAIN_BUF_SIZE (128)
 
 
-static struct tty* console = NULL;
+struct tty* console = NULL;
 #define printkf(x...)                       \
     snprintf(buf, KERNEL_MAIN_BUF_SIZE, x); \
     tty_print(console, buf)
@@ -120,10 +121,24 @@ static inline void show_mem_info(char* buf)
     printkf("kernel size: %x\n", kernel_size);
 }
 
+static segment_descriptor new_gdt[5];
+
+void load_new_gdt(void)
+{
+    create_segment_descriptor(new_gdt+0, 0,  0, 0, 0);
+    create_segment_descriptor(new_gdt+1, 0, ~0, 0b1100, SD_TYPE_CODE_SYSTEM);
+    create_segment_descriptor(new_gdt+2, 0, ~0, 0b1100, SD_TYPE_DATA_SYSTEM);
+    create_segment_descriptor(new_gdt+3, 0, ~0, 0b1100, SD_TYPE_CODE_USER);
+    create_segment_descriptor(new_gdt+4, 0, ~0, 0b1100, SD_TYPE_DATA_USER);
+    asm_load_gdt((5 * 8 - 1) << 16, (phys_ptr_t)new_gdt);
+}
+
 void kernel_main(void)
 {
     MAKE_BREAK_POINT();
     save_loader_data();
+
+    load_new_gdt();
 
     char buf[KERNEL_MAIN_BUF_SIZE];
 

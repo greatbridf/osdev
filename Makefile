@@ -1,4 +1,5 @@
-QEMU_ARGS=-drive file=build/boot.img,format=raw -no-reboot -no-shutdown -enable-kvm
+# disable kvm to debug triple faults
+QEMU_ARGS=-drive file=build/boot.img,format=raw -no-reboot -no-shutdown -d cpu_reset,int # -enable-kvm
 .PHONY: run
 run: build
 	qemu-system-i386 $(QEMU_ARGS) -display curses -S -s

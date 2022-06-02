@@ -17,6 +17,9 @@ struct tty
     char data[12];
 };
 
+// in kernel_main.c
+extern struct tty* console;
+
 void tty_print(struct tty* p_tty, const char* str);
 
 int make_serial_tty(struct tty* p_tty, int id);

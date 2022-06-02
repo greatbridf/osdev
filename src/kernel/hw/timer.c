@@ -1,4 +1,5 @@
 #include <asm/port_io.h>
+#include <kernel/tty.h>
 #include <kernel/hw/timer.h>
 
 static time_t _current_ticks = 0;
@@ -16,6 +17,7 @@ void init_pit(void)
 
 void inc_tick(void)
 {
+    tty_print(console, "tick");
     ++_current_ticks;
 }
 

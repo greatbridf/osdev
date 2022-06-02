@@ -12,7 +12,8 @@ int32_t init_serial_port(port_id_t port)
    asm_outb(port + 1, 0x00);    //                  (hi byte)
    asm_outb(port + 3, 0x03);    // 8 bits, no parity, one stop bit
    asm_outb(port + 2, 0xC7);    // Enable FIFO, clear them, with 14-byte threshold
-   asm_outb(port + 4, 0x0B);    // IRQs enabled, RTS/DSR set
+   // TODO: IRQ disabled
+   // asm_outb(port + 4, 0x0B);    // IRQs enabled, RTS/DSR set
    asm_outb(port + 4, 0x1E);    // Set in loopback mode, test the serial chip
    asm_outb(port + 0, 0xAE);    // Test serial chip (send byte 0xAE and check if serial returns same byte)
 

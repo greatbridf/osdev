@@ -1,6 +1,7 @@
 #pragma once
 
 #include <kernel/mem.h>
+#include <types/types.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -9,7 +10,8 @@ extern "C" {
 void asm_enable_paging(page_directory_entry* pd_addr);
 
 // the limit should be set on the higher 16bit
-void asm_load_gdt(uint32_t limit, uint32_t addr);
+// e.g. (n * sizeof(segment_descriptor) - 1) << 16
+void asm_load_gdt(uint32_t limit, phys_ptr_t addr);
 
 void asm_load_tr(uint16_t index);
 

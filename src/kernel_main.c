@@ -131,6 +131,7 @@ void load_new_gdt(void)
     create_segment_descriptor(new_gdt+3, 0, ~0, 0b1100, SD_TYPE_CODE_USER);
     create_segment_descriptor(new_gdt+4, 0, ~0, 0b1100, SD_TYPE_DATA_USER);
     asm_load_gdt((5 * 8 - 1) << 16, (phys_ptr_t)new_gdt);
+    asm_cli();
 }
 
 void kernel_main(void)

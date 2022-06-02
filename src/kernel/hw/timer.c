@@ -17,7 +17,6 @@ void init_pit(void)
 
 void inc_tick(void)
 {
-    tty_print(console, "tick");
     ++_current_ticks;
 }
 

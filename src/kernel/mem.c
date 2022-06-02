@@ -338,7 +338,8 @@ void init_gdt_with_tss(void* kernel_esp, uint16_t kernel_ss)
     _tss.esp0 = (uint32_t)kernel_esp;
     _tss.ss0 = kernel_ss;
 
-    asm_load_gdt((6 * sizeof(segment_descriptor) - 1) << 16, (uint32_t)gdt);
+    // +1 for enabling interrupt
+    asm_load_gdt(((6 * sizeof(segment_descriptor) - 1) << 16) + 1, (uint32_t)gdt);
     asm_load_tr((6 - 1) * 8);
 }
 

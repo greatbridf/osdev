@@ -25,7 +25,7 @@ clean:
 
 .PHONY: debug
 debug:
-	gdb --symbols=build/kernel.out --init-eval-command 'target remote:1234' --eval-command 'hbr kernel_main' --eval-command 'c'
+	gdb --symbols=build/kernel.out --init-eval-command 'set pagination off' --init-eval-command 'target remote:1234' --eval-command 'hbr kernel_main' --eval-command 'c'
 
 build/boot.vdi: build/boot.img
 	-rm build/boot.vdi

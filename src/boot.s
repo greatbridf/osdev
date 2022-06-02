@@ -164,6 +164,24 @@ start_32bit:
     movl $0x03fffff0, %ebp
     movl $0x03fffff0, %esp
 
+# TODO: move REAL KERNEL to 0x100000
+    movl $__loader_end, %eax
+    movl $__real_kernel_start, %ebx
+
+    movl $__kernel_size_offset, %ecx
+    movl (%ecx), %ecx
+    addl $__loader_end, %ecx
+    movl (%ecx), %ecx
+
+_move_kernel:
+    movl (%eax), %edx
+    movl %edx, (%ebx)
+    addl $4, %eax
+    addl $4, %ebx
+    subl $4, %ecx
+    cmpl $0, %ecx
+    jge _move_kernel
+
     call kernel_main
 
 loader_halt:
@@ -205,7 +223,7 @@ asm_gdt_table:
     .byte 0b11001111 # flag and limit 16:20
     .byte 0x00       # base 24:31
 
-    # kernel data segment
+    # user data segment
     .word 0xffff     # limit 0 :15
     .word 0x0000     # base  0 :15
     .byte 0x00       # base  16:23

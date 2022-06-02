@@ -19,9 +19,17 @@ SECTIONS
         BYTE(0xaa);
     } > WHOLE
 
-    .text 0x7e00 : AT(0x200)
+    .text.loader 0x7e00 : AT(0x200)
     {
         *(.text.loader)
+        __kernel_size_offset = .;
+        LONG(LOADADDR(.data) - LOADADDR(.text));
+        __loader_end = .;
+    } > WHOLE
+
+    .text 0x100000 : AT(LOADADDR(.text.loader) + SIZEOF(.text.loader))
+    {
+        __real_kernel_start = .;
         *(.text*)
         *(.rodata*)
     } > WHOLE
@@ -29,7 +37,7 @@ SECTIONS
     .data :
     {
         kernel_size = .;
-        LONG(ADDR(.kernel_end) - ADDR(.text));
+        LONG(__real_kernel_end - ADDR(.text));
 
         start_ctors = .;
         KEEP(*(.init_array));
@@ -48,9 +56,10 @@ SECTIONS
 
     .kernel_end :
     {
+        __real_kernel_end = .;
     } > WHOLE
 
-	/* Stabs debugging sections.  */
+    /* Stabs debugging sections.  */
     .stab          0 : { *(.stab) }
     .stabstr       0 : { *(.stabstr) }
     .stab.excl     0 : { *(.stab.excl) }
@@ -89,8 +98,10 @@ SECTIONS
         BYTE(0x00);
     } > WHOLE
 
+/*
     /DISCARD/ :
     {
         *(.comment)
     }
+*/
 }

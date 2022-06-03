@@ -1,4 +1,4 @@
-#include <kernel_main.h>
+#include "kernel_main.h"
 
 #include <asm/boot.h>
 #include <asm/port_io.h>

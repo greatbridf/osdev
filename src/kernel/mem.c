@@ -3,6 +3,7 @@
 #include <asm/sys.h>
 #include <kernel/errno.h>
 #include <kernel/mem.h>
+#include <kernel/stdio.h>
 #include <kernel/task.h>
 #include <kernel/vga.h>
 #include <kernel_main.h>
@@ -162,17 +163,37 @@ void k_free(void* ptr)
     // TODO: fusion free blocks nearby
 }
 
-static inline size_t addr_to_page(phys_ptr_t p)
+static inline page_t phys_addr_to_page(phys_ptr_t ptr)
 {
-    return p >> 12;
+    return ptr >> 12;
 }
 
-static inline void mark_page(size_t n)
+static inline pd_i_t page_to_pd_i(page_t p)
+{
+    return p >> 10;
+}
+
+static inline pt_i_t page_to_pt_i(page_t p)
+{
+    return p & (1024-1);
+}
+
+static inline phys_ptr_t page_to_phys_addr(page_t p)
+{
+    return p << 12;
+}
+
+static inline pd_i_t phys_addr_to_pd_i(phys_ptr_t ptr)
+{
+    return page_to_pd_i(phys_addr_to_page(ptr));
+}
+
+static inline void mark_page(page_t n)
 {
     bm_set(mem_bitmap, n);
 }
 
-static inline void free_page(size_t n)
+static inline void free_page(page_t n)
 {
     bm_clear(mem_bitmap, n);
 }
@@ -180,18 +201,18 @@ static inline void free_page(size_t n)
 static void mark_addr_len(phys_ptr_t start, size_t n)
 {
     if (n == 0) return;
-    size_t start_page = addr_to_page(start);
-    size_t end_page   = addr_to_page(start + n + 4095);
-    for (uint32_t i = start_page; i < end_page; ++i)
+    page_t start_page = phys_addr_to_page(start);
+    page_t end_page   = phys_addr_to_page(start + n + 4095);
+    for (page_t i = start_page; i < end_page; ++i)
         mark_page(i);
 }
 
 static void free_addr_len(phys_ptr_t start, size_t n)
 {
     if (n == 0) return;
-    size_t start_page = (start >> 12);
-    size_t end_page   = ((start + n + 4095) >> 12);
-    for (uint32_t i = start_page; i < end_page; ++i)
+    page_t start_page = phys_addr_to_page(start);
+    page_t end_page   = phys_addr_to_page(start + n + 4095);
+    for (page_t i = start_page; i < end_page; ++i)
         free_page(i);
 }
 
@@ -207,7 +228,7 @@ static inline void free_addr_range(phys_ptr_t start, phys_ptr_t end)
 
 static int alloc_page(void)
 {
-    for (size_t i = 0; i < 1024 * 1024; ++i) {
+    for (page_t i = 0; i < 1024 * 1024; ++i) {
         if (bm_test(mem_bitmap, i) == 0) {
             mark_page(i);
             return i;
@@ -219,48 +240,172 @@ static int alloc_page(void)
 // allocate ONE whole page
 static phys_ptr_t _k_p_malloc(void)
 {
-    return (phys_ptr_t)(alloc_page() << 12);
+    return page_to_phys_addr(alloc_page());
 }
 
 static void _k_p_free(phys_ptr_t ptr)
 {
-    free_page(addr_to_page(ptr));
+    free_page(phys_addr_to_page(ptr));
 }
 
-static inline void _create_pd(page_directory_entry* pde)
+static inline void create_pd(page_directory_entry* pde)
 {
+    for (int i = 0; i < 1024; ++i)
+    {
+        pde->v = 0;
+        ++pde;
+    }
 }
 
 static page_directory_entry* _kernel_pd = KERNEL_PAGE_DIRECTORY_ADDR;
 
-static inline void _create_kernel_pt(page_table_entry* pt, int32_t index)
-{
-    // 0x00000000 ~ 0x3fffffff is mapped as kernel space
-    // from physical address 0 to
-    int32_t is_kernel = (index < 256);
+// map n pages from p_ptr to v_ptr
+// p_ptr and v_ptr needs to be 4kb-aligned
+static int p_map(
+        page_directory_entry* pd,
+        phys_ptr_t p_ptr,
+        virt_ptr_t v_ptr,
+        size_t n,
+        int rw,
+        int priv);
 
-    for (int32_t i = 0; i < 1024; ++i) {
-        if (is_kernel) {
-            pt[i].v = 0b00000011;
-        } else {
-            pt[i].v = 0b00000111;
+// map n pages
+static inline int p_n_map(
+        page_directory_entry* pd,
+        phys_ptr_t p_ptr,
+        virt_ptr_t v_ptr,
+        size_t n,
+        int rw,
+        int priv);
+
+// map n bytes identically
+static inline int _p_ident_n_map(
+        page_directory_entry* pd,
+        phys_ptr_t p_ptr,
+        size_t n,
+        int rw,
+        int priv);
+
+static inline void make_page_table(page_directory_entry* pd, page_t p)
+{
+    phys_ptr_t pp_pt = page_to_phys_addr(p);
+
+    page_table_entry* pt = (page_table_entry*)pp_pt;
+
+    memset(pt, 0x00, sizeof(page_table_entry) * 1024);
+
+    _p_ident_n_map(
+            pd,
+            pp_pt,
+            sizeof(page_table_entry) * 1024, 1, 1
+            );
+}
+
+// map n pages from p_ptr to v_ptr
+// p_ptr and v_ptr needs to be 4kb-aligned
+static int p_map(
+        page_directory_entry* pd,
+        phys_ptr_t p_ptr,
+        virt_ptr_t v_ptr,
+        size_t n,
+        int rw,
+        int priv)
+{
+    // pages to be mapped
+    page_t v_page_start = phys_addr_to_page(v_ptr);
+    page_t v_page_end   = v_page_start + n;
+
+    for (pd_i_t pde_index = page_to_pd_i(v_page_start); pde_index <= page_to_pd_i(v_page_end); ++pde_index)
+    {
+        // page table not present
+        if (pd[pde_index].in.p != 1)
+        {
+            pd[pde_index].in.p = 1;
+            pd[pde_index].in.a = 0;
+            pd[pde_index].in.rw = 1;
+            page_t p_page = alloc_page();
+            pd[pde_index].in.addr = p_page;
+            make_page_table(pd, p_page);
         }
-        pt[i].in.addr = ((index * 0x400000) + i * 0x1000) >> 12;
     }
+
+    for (size_t i = 0; i < n; ++i)
+    {
+        page_t v_page = v_page_start + i;
+        pd_i_t pd_i = page_to_pd_i(v_page);
+        page_table_entry* pt = (page_table_entry*) page_to_phys_addr(pd[pd_i].in.addr);
+        pt += page_to_pt_i(v_page);
+
+        if (pt->in.p == 1)
+        {
+            errno = EEXIST;
+            return GB_FAILED;
+        }
+        pt->in.p = 1;
+        pt->in.rw = (rw == 1);
+        pt->in.us = !(priv == 1);
+        pt->in.a = 0;
+        pt->in.d = 0;
+
+        pt->in.addr = phys_addr_to_page(p_ptr) + i;
+    }
+
+    return GB_OK;
+}
+
+// map n pages
+static inline int p_n_map(
+        page_directory_entry* pd,
+        phys_ptr_t p_ptr,
+        virt_ptr_t v_ptr,
+        size_t n,
+        int rw,
+        int priv)
+{
+    return p_map(
+            pd,
+            p_ptr,
+            v_ptr,
+            (n + 4096 - 1) >> 12,
+            rw,
+            priv
+            );
+}
+
+// map n bytes identically
+static inline int _p_ident_n_map(
+        page_directory_entry* pd,
+        phys_ptr_t p_ptr,
+        size_t n,
+        int rw,
+        int priv)
+{
+    return p_n_map(
+            pd,
+            p_ptr,
+            p_ptr,
+            n,
+            rw,
+            priv
+            );
 }
 
 static inline void _create_kernel_pd(void)
 {
-    for (int32_t i = 0; i < 1024; ++i) {
-        if (i < 256) {
-            _kernel_pd[i].v = 0b00000011;
-        } else {
-            _kernel_pd[i].v = 0b00000111;
-        }
-        page_table_entry* pt = (page_table_entry*)_k_p_malloc();
-        _kernel_pd[i].in.addr = ((size_t)pt >> 12);
-        _create_kernel_pt(pt, i);
-    }
+    create_pd(_kernel_pd);
+
+    _p_ident_n_map(_kernel_pd,
+            (phys_ptr_t)KERNEL_PAGE_DIRECTORY_ADDR,
+            sizeof(page_directory_entry) * 1024, 1, 1);
+    _p_ident_n_map(_kernel_pd,
+            (0x00080000),
+            (0xfffff - 0x80000 + 1), 1, 1);
+    _p_ident_n_map(_kernel_pd,
+            KERNEL_START_ADDR,
+            kernel_size, 1, 1);
+    _p_ident_n_map(_kernel_pd,
+            KERNEL_EARLY_STACK_ADDR - KERNEL_EARLY_STACK_SIZE,
+            KERNEL_EARLY_STACK_SIZE, 1, 1);
 }
 
 static void init_mem_layout(void)

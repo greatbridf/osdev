@@ -24,6 +24,9 @@ void dispatch_event(void)
     char buf[1024];
     auto& input_event_queue = event::input_event_queue();
 
+    char* ptr = (char*)0x8000000;
+    *ptr = 0xff;
+
     while (!input_event_queue.empty()) {
         for (auto iter = input_event_queue.begin(); iter != input_event_queue.end(); ++iter) {
             const auto& item = *iter;

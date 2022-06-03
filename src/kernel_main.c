@@ -93,29 +93,23 @@ static inline void show_mem_info(char* buf)
     if (e820_mem_map_entry_size == 20) {
         struct e820_mem_map_entry_20* entry = (struct e820_mem_map_entry_20*)e820_mem_map;
         for (uint32_t i = 0; i < e820_mem_map_count; ++i, ++entry) {
-            if (entry->type != 1)
-            {
-                printkf(
-                    "[mem] entry %d: %llx ~ %llx, type: %d\n",
-                    i,
-                    entry->base,
-                    entry->base + entry->len,
-                    entry->type);
-            }
+            printkf(
+                "[mem] entry %d: %llx ~ %llx, type: %d\n",
+                i,
+                entry->base,
+                entry->base + entry->len,
+                entry->type);
         }
     } else {
         struct e820_mem_map_entry_24* entry = (struct e820_mem_map_entry_24*)e820_mem_map;
         for (uint32_t i = 0; i < e820_mem_map_count; ++i, ++entry) {
-            if (entry->in.type != 1)
-            {
-                printkf(
-                    "[mem] entry %d: %lld ~ %lld, type: %d, acpi_attr: %d\n",
-                    i,
-                    entry->in.base,
-                    entry->in.base + entry->in.len,
-                    entry->in.type,
-                    entry->acpi_extension_attr);
-            }
+            printkf(
+                "[mem] entry %d: %lld ~ %lld, type: %d, acpi_attr: %d\n",
+                i,
+                entry->in.base,
+                entry->in.base + entry->in.len,
+                entry->in.type,
+                entry->acpi_extension_attr);
         }
     }
     printkf("kernel size: %x\n", kernel_size);

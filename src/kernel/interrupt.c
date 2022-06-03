@@ -5,6 +5,7 @@
 #include <kernel/hw/timer.h>
 #include <kernel/interrupt.h>
 #include <kernel/stdio.h>
+#include <kernel/tty.h>
 #include <kernel/vga.h>
 #include <kernel_main.h>
 
@@ -67,8 +68,7 @@ void int6_handler(
 {
     char buf[512];
 
-    // TODO: change to tty
-    vga_print("---- INVALID OPCODE ----\n", 0x0fu);
+    tty_print(console, "---- INVALID OPCODE ----\n");
 
     snprintf(
         buf, 512,
@@ -79,11 +79,9 @@ void int6_handler(
         s_regs.edx, s_regs.esp, s_regs.ebp,
         s_regs.esi, s_regs.edi, eip,
         cs, error_code);
-    // TODO: change to tty
-    vga_print(buf, 0x0fu);
+    tty_print(console, buf);
 
-    // TODO: change to tty
-    vga_print("----   HALTING SYSTEM   ----", 0x0fu);
+    tty_print(console, "----   HALTING SYSTEM   ----");
 
     asm_cli();
     asm_hlt();
@@ -99,8 +97,7 @@ void int13_handler(
 {
     char buf[512];
 
-    // TODO: change to tty
-    vga_print("---- SEGMENTATION FAULT ----\n", 0x0fu);
+    tty_print(console, "---- SEGMENTATION FAULT ----\n");
 
     snprintf(
         buf, 512,
@@ -112,11 +109,9 @@ void int13_handler(
         s_regs.edx, s_regs.esp, s_regs.ebp,
         s_regs.esi, s_regs.edi, eip,
         cs, error_code, eflags);
-    // TODO: change to tty
-    vga_print(buf, 0x0fu);
+    tty_print(console, buf);
 
-    // TODO: change to tty
-    vga_print("----   HALTING SYSTEM   ----", 0x0fu);
+    tty_print(console, "----   HALTING SYSTEM   ----");
 
     asm_cli();
     asm_hlt();
@@ -133,8 +128,7 @@ void int14_handler(
 {
     char buf[512];
 
-    // TODO: change to tty
-    vga_print("---- PAGE FAULT ----\n", 0x0fu);
+    tty_print(console, "---- PAGE FAULT ----\n");
 
     snprintf(
         buf, 512,
@@ -146,11 +140,9 @@ void int14_handler(
         s_regs.edx, s_regs.esp, s_regs.ebp,
         s_regs.esi, s_regs.edi, eip,
         cs, error_code, eflags, addr);
-    // TODO: change to tty
-    vga_print(buf, 0x0fu);
+    tty_print(console, buf);
 
-    // TODO: change to tty
-    vga_print("----   HALTING SYSTEM   ----", 0x0fu);
+    tty_print(console, "----   HALTING SYSTEM   ----");
 
     asm_cli();
     asm_hlt();

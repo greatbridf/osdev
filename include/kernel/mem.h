@@ -78,7 +78,7 @@ struct page_directory_entry_in {
     uint32_t d : 1;
     uint32_t ps : 1;
     uint32_t ignored : 4;
-    uint32_t addr : 20;
+    page_t addr : 20;
 };
 
 typedef union page_directory_entry {
@@ -111,7 +111,7 @@ struct page_table_entry_in {
     uint32_t pat : 1;
     uint32_t g : 1;
     uint32_t ignored : 3;
-    uint32_t addr : 20;
+    page_t addr : 20;
 };
 
 typedef union page_table_entry {
@@ -120,7 +120,6 @@ typedef union page_table_entry {
 } page_table_entry;
 
 #define KERNEL_PAGE_DIRECTORY_ADDR ((page_directory_entry*)0x00000000)
-#define KERNEL_PAGE_TABLE_START_ADDR ((page_table_entry*)0x00100000)
 
 void init_paging(void);
 

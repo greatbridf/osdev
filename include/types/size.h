@@ -14,3 +14,6 @@ typedef int64_t diff_t;
 
 typedef ptr_t phys_ptr_t;
 typedef ptr_t virt_ptr_t;
+typedef size_t page_t;
+typedef size_t pd_i_t;
+typedef size_t pt_i_t;

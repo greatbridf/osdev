@@ -417,12 +417,28 @@ void* memcpy(void* dst, const void* src, size_t n)
 {
     void* orig_dst = dst;
     for (size_t i = 0; i < n / BYTES_PER_MAX_COPY_UNIT; ++i) {
-        *((uint32_t*)dst++) = *((uint32_t*)src++);
+        *(uint32_t*)dst = *(uint32_t*)src;
+        dst += BYTES_PER_MAX_COPY_UNIT;
+        src += BYTES_PER_MAX_COPY_UNIT;
     }
     for (size_t i = 0; i < (n % BYTES_PER_MAX_COPY_UNIT); ++i) {
         *((char*)dst++) = *((char*)src++);
     }
     return orig_dst;
+}
+
+void* memset(void* dst, int c, size_t n)
+{
+    c &= 0xff;
+    int cc = (c + (c << 8) + (c << 16) + (c << 24));
+    for (size_t i = 0; i < n / BYTES_PER_MAX_COPY_UNIT; ++i) {
+        *(uint32_t*)dst = cc;
+        dst += BYTES_PER_MAX_COPY_UNIT;
+    }
+    for (size_t i = 0; i < (n % BYTES_PER_MAX_COPY_UNIT); ++i) {
+        *((char*)dst++) = c;
+    }
+    return dst;
 }
 
 size_t strlen(const char* str)

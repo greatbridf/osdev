@@ -1,4 +1,4 @@
-#include "kernel/vga.h"
+#include <kernel/tty.h>
 #include <asm/port_io.h>
 #include <kernel/event/event.h>
 #include <kernel/input/input_event.h>
@@ -31,8 +31,7 @@ void dispatch_event(void)
         for (auto iter = input_event_queue.begin(); iter != input_event_queue.end(); ++iter) {
             const auto& item = *iter;
             snprintf(buf, 1024, "\rinput event: type%x, data%x, code%x\r", item.type, item.data, item.code);
-            // TODO: change to tty
-            vga_print(buf, 0x0fu);
+            tty_print(console, buf);
             input_event_queue.erase(iter);
         }
     }

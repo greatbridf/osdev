@@ -164,7 +164,6 @@ start_32bit:
     movl $0x03fffff0, %ebp
     movl $0x03fffff0, %esp
 
-# TODO: move REAL KERNEL to 0x100000
     movl $__loader_end, %eax
     movl $__real_kernel_start, %ebx
 

@@ -43,9 +43,9 @@ static inline void check_a20_status(void)
     result = check_a20_on();
 
     if (result) {
-        // TODO: change to tty
+        tty_print(console, "a20 is on");
     } else {
-        // TODO: change to tty
+        tty_print(console, "a20 is NOT on");
     }
 }
 
@@ -174,8 +174,7 @@ void kernel_main(void)
     printkf("Testing k_malloc...\n");
     char* k_malloc_buf = (char*)k_malloc(sizeof(char) * 128);
     snprintf(k_malloc_buf, 128, "This text is printed on the heap!\n");
-    // TODO: change to tty
-    // vga_printk(k_malloc_buf, 0x0fu);
+    tty_print(console, k_malloc_buf);
     k_free(k_malloc_buf);
 
     void* kernel_stack = k_malloc(KERNEL_STACK_SIZE);

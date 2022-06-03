@@ -390,22 +390,26 @@ static inline int _p_ident_n_map(
             );
 }
 
-static inline void _create_kernel_pd(void)
+static inline int _create_kernel_pd(void)
 {
     create_pd(_kernel_pd);
 
-    _p_ident_n_map(_kernel_pd,
+    int result = 0;
+
+    result |= _p_ident_n_map(_kernel_pd,
             (phys_ptr_t)KERNEL_PAGE_DIRECTORY_ADDR,
             sizeof(page_directory_entry) * 1024, 1, 1);
-    _p_ident_n_map(_kernel_pd,
+    result |= _p_ident_n_map(_kernel_pd,
             (0x00080000),
             (0xfffff - 0x80000 + 1), 1, 1);
-    _p_ident_n_map(_kernel_pd,
+    result |= _p_ident_n_map(_kernel_pd,
             KERNEL_START_ADDR,
             kernel_size, 1, 1);
-    _p_ident_n_map(_kernel_pd,
+    result |= _p_ident_n_map(_kernel_pd,
             KERNEL_EARLY_STACK_ADDR - KERNEL_EARLY_STACK_SIZE,
             KERNEL_EARLY_STACK_SIZE, 1, 1);
+    
+    return result;
 }
 
 static void init_mem_layout(void)
@@ -443,7 +447,10 @@ void init_paging(void)
 {
     init_mem_layout();
 
-    _create_kernel_pd();
+    if (_create_kernel_pd() != GB_OK) {
+        asm_cli();
+        asm_hlt();
+    }
     asm_enable_paging(_kernel_pd);
 }
 

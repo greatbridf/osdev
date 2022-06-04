@@ -9,6 +9,51 @@
 #include <kernel_main.h>
 #include <types/bitmap.h>
 
+// static variables
+
+static page_directory_entry* kernel_pd;
+
+// ---------------------
+
+// constant values
+
+#define EMPTY_PAGE_ADDR ((phys_ptr_t)0x6000)
+#define EMPTY_PAGE_END ((phys_ptr_t)0x7000)
+
+// ---------------------
+
+// forward declarations
+static page_t alloc_page(void);
+
+// map n pages from p_ptr to v_ptr
+// p_ptr and v_ptr needs to be 4kb-aligned
+static int p_map(
+    struct mm* mm_area,
+    phys_ptr_t p_ptr,
+    virt_ptr_t v_ptr,
+    size_t n,
+    int rw,
+    int priv);
+
+// map n bytes identically
+static inline int _ident_map(
+    struct mm* mm_area,
+    phys_ptr_t p_ptr,
+    size_t n,
+    int rw,
+    int priv);
+
+// map page to the end of mm_area in pd
+int k_map(
+    struct mm* mm_area,
+    struct page* page,
+    int read,
+    int write,
+    int priv,
+    int cow);
+
+// ---------------------
+
 static void* p_start;
 static void* p_break;
 static segment_descriptor* gdt;
@@ -27,6 +72,9 @@ static int32_t set_heap_start(void* start_addr)
 
 static int32_t brk(void* addr)
 {
+    if (addr >= KERNEL_HEAP_LIMIT) {
+        return GB_FAILED;
+    }
     p_break = addr;
     return 0;
 }
@@ -45,12 +93,9 @@ static void* sbrk(size_t increment)
 
 int init_heap(void)
 {
-    // start of the available address space
-    // TODO: adjust heap start address
-    //   according to user's memory size
-    set_heap_start(HEAP_START);
+    set_heap_start(KERNEL_HEAP_START);
 
-    if (brk(HEAP_START) != 0) {
+    if (brk(KERNEL_HEAP_START) != 0) {
         return GB_FAILED;
     }
     struct mem_blk* p_blk = sbrk(0);
@@ -175,7 +220,7 @@ static inline pd_i_t page_to_pd_i(page_t p)
 
 static inline pt_i_t page_to_pt_i(page_t p)
 {
-    return p & (1024-1);
+    return p & (1024 - 1);
 }
 
 static inline phys_ptr_t page_to_phys_addr(page_t p)
@@ -200,18 +245,20 @@ static inline void free_page(page_t n)
 
 static void mark_addr_len(phys_ptr_t start, size_t n)
 {
-    if (n == 0) return;
+    if (n == 0)
+        return;
     page_t start_page = phys_addr_to_page(start);
-    page_t end_page   = phys_addr_to_page(start + n + 4095);
+    page_t end_page = phys_addr_to_page(start + n + 4095);
     for (page_t i = start_page; i < end_page; ++i)
         mark_page(i);
 }
 
 static void free_addr_len(phys_ptr_t start, size_t n)
 {
-    if (n == 0) return;
+    if (n == 0)
+        return;
     page_t start_page = phys_addr_to_page(start);
-    page_t end_page   = phys_addr_to_page(start + n + 4095);
+    page_t end_page = phys_addr_to_page(start + n + 4095);
     for (page_t i = start_page; i < end_page; ++i)
         free_page(i);
 }
@@ -226,7 +273,7 @@ static inline void free_addr_range(phys_ptr_t start, phys_ptr_t end)
     free_addr_len(start, end - start);
 }
 
-static int alloc_page(void)
+static page_t alloc_page(void)
 {
     for (page_t i = 0; i < 1024 * 1024; ++i) {
         if (bm_test(mem_bitmap, i) == 0) {
@@ -237,54 +284,13 @@ static int alloc_page(void)
     return GB_FAILED;
 }
 
-// allocate ONE whole page
-static phys_ptr_t _k_p_malloc(void)
-{
-    return page_to_phys_addr(alloc_page());
-}
-
-static void _k_p_free(phys_ptr_t ptr)
-{
-    free_page(phys_addr_to_page(ptr));
-}
-
 static inline void create_pd(page_directory_entry* pde)
 {
-    for (int i = 0; i < 1024; ++i)
-    {
+    for (int i = 0; i < 1024; ++i) {
         pde->v = 0;
         ++pde;
     }
 }
-
-static page_directory_entry* _kernel_pd = KERNEL_PAGE_DIRECTORY_ADDR;
-
-// map n pages from p_ptr to v_ptr
-// p_ptr and v_ptr needs to be 4kb-aligned
-static int p_map(
-        page_directory_entry* pd,
-        phys_ptr_t p_ptr,
-        virt_ptr_t v_ptr,
-        size_t n,
-        int rw,
-        int priv);
-
-// map n pages
-static inline int p_n_map(
-        page_directory_entry* pd,
-        phys_ptr_t p_ptr,
-        virt_ptr_t v_ptr,
-        size_t n,
-        int rw,
-        int priv);
-
-// map n bytes identically
-static inline int _p_ident_n_map(
-        page_directory_entry* pd,
-        phys_ptr_t p_ptr,
-        size_t n,
-        int rw,
-        int priv);
 
 static inline void make_page_table(page_directory_entry* pd, page_t p)
 {
@@ -293,51 +299,57 @@ static inline void make_page_table(page_directory_entry* pd, page_t p)
     page_table_entry* pt = (page_table_entry*)pp_pt;
 
     memset(pt, 0x00, sizeof(page_table_entry) * 1024);
+}
 
-    _p_ident_n_map(
-            pd,
-            pp_pt,
-            sizeof(page_table_entry) * 1024, 1, 1
-            );
+static inline void do_map()
+{
 }
 
 // map n pages from p_ptr to v_ptr
 // p_ptr and v_ptr needs to be 4kb-aligned
 static int p_map(
-        page_directory_entry* pd,
-        phys_ptr_t p_ptr,
-        virt_ptr_t v_ptr,
-        size_t n,
-        int rw,
-        int priv)
+    struct mm* mm_area,
+    phys_ptr_t p_ptr,
+    virt_ptr_t v_ptr,
+    size_t n,
+    int rw,
+    int priv)
 {
+    page_directory_entry* pd = mm_area->pd;
     // pages to be mapped
     page_t v_page_start = phys_addr_to_page(v_ptr);
-    page_t v_page_end   = v_page_start + n;
+    page_t v_page_end = v_page_start + n;
 
-    for (pd_i_t pde_index = page_to_pd_i(v_page_start); pde_index <= page_to_pd_i(v_page_end); ++pde_index)
-    {
+    for (pd_i_t pde_index = page_to_pd_i(v_page_start); pde_index <= page_to_pd_i(v_page_end); ++pde_index) {
         // page table not present
-        if (pd[pde_index].in.p != 1)
-        {
+        if (pd[pde_index].in.p != 1) {
+            page_t p_page = alloc_page();
+
             pd[pde_index].in.p = 1;
             pd[pde_index].in.a = 0;
             pd[pde_index].in.rw = 1;
-            page_t p_page = alloc_page();
             pd[pde_index].in.addr = p_page;
+            // set the page table address first in the pde
+            // before making page table since the function
+            // calls p_map recursively and the p_map call
+            // requires the pde to find it's destination
+
             make_page_table(pd, p_page);
+
+            _ident_map(
+                pd,
+                page_to_phys_addr(p_page),
+                sizeof(page_table_entry) * 1024, 1, 1);
         }
     }
 
-    for (size_t i = 0; i < n; ++i)
-    {
+    for (size_t i = 0; i < n; ++i) {
         page_t v_page = v_page_start + i;
         pd_i_t pd_i = page_to_pd_i(v_page);
-        page_table_entry* pt = (page_table_entry*) page_to_phys_addr(pd[pd_i].in.addr);
+        page_table_entry* pt = (page_table_entry*)page_to_phys_addr(pd[pd_i].in.addr);
         pt += page_to_pt_i(v_page);
 
-        if (pt->in.p == 1)
-        {
+        if (pt->in.p == 1) {
             errno = EEXIST;
             return GB_FAILED;
         }
@@ -353,62 +365,60 @@ static int p_map(
     return GB_OK;
 }
 
-// map n pages
-static inline int p_n_map(
-        page_directory_entry* pd,
-        phys_ptr_t p_ptr,
-        virt_ptr_t v_ptr,
-        size_t n,
-        int rw,
-        int priv)
-{
-    return p_map(
-            pd,
-            p_ptr,
-            v_ptr,
-            (n + 4096 - 1) >> 12,
-            rw,
-            priv
-            );
-}
-
 // map n bytes identically
-static inline int _p_ident_n_map(
-        page_directory_entry* pd,
-        phys_ptr_t p_ptr,
-        size_t n,
-        int rw,
-        int priv)
+static inline int nk_map(
+    struct mm* mm_area,
+    phys_ptr_t p_ptr,
+    size_t n,
+    int rw,
+    int priv)
 {
+    struct mm* p_area = mm_area;
+    while (p_area != NULL) {
+        if (p_ptr >= p_area->start && p_ptr < p_area->start + p_area->len * 4096) {
+            break;
+        }
+    }
+
+    // area does not exist
+    if (p_area == NULL) {
+    }
+
     return p_n_map(
-            pd,
-            p_ptr,
-            p_ptr,
-            n,
-            rw,
-            priv
-            );
+        mm_area,
+        p_ptr,
+        p_ptr,
+        n,
+        rw,
+        priv);
 }
 
 static inline int _create_kernel_pd(void)
 {
-    create_pd(_kernel_pd);
+    create_pd(kernel_pd);
 
     int result = 0;
 
-    result |= _p_ident_n_map(_kernel_pd,
-            (phys_ptr_t)KERNEL_PAGE_DIRECTORY_ADDR,
-            sizeof(page_directory_entry) * 1024, 1, 1);
-    result |= _p_ident_n_map(_kernel_pd,
-            (0x00080000),
-            (0xfffff - 0x80000 + 1), 1, 1);
-    result |= _p_ident_n_map(_kernel_pd,
-            KERNEL_START_ADDR,
-            kernel_size, 1, 1);
-    result |= _p_ident_n_map(_kernel_pd,
-            KERNEL_EARLY_STACK_ADDR - KERNEL_EARLY_STACK_SIZE,
-            KERNEL_EARLY_STACK_SIZE, 1, 1);
-    
+    result |= _p_ident_n_map(kernel_pd,
+        kernel_pd,
+        4096, 1, 1);
+
+    result |= _p_ident_n_map(kernel_pd,
+        EMPTY_PAGE_ADDR,
+        4096, 0, 0);
+
+    result |= _p_ident_n_map(kernel_pd,
+        (0x00080000),
+        (0xfffff - 0x80000 + 1), 1, 1);
+
+    result |= _p_ident_n_map(kernel_pd,
+        KERNEL_START_ADDR,
+        kernel_size, 1, 1);
+
+    result |= _p_ident_n_map(kernel_pd,
+        KERNEL_EARLY_STACK_ADDR - KERNEL_EARLY_STACK_SIZE,
+        KERNEL_EARLY_STACK_SIZE, 1, 1);
+
     return result;
 }
 
@@ -418,7 +428,9 @@ static void init_mem_layout(void)
     mem_size += 64 * 1024 * mem_size_info.n_64k_blks;
 
     // mark kernel page directory
-    mark_addr_range(0x00000000, 0x00001000);
+    mark_addr_range(0x00000000, 0x00006000);
+    // mark empty page
+    mark_addr_len(EMPTY_PAGE_ADDR, EMPTY_PAGE_END);
     // mark EBDA and upper memory as allocated
     mark_addr_range(0x80000, 0xfffff);
     // mark kernel
@@ -427,31 +439,99 @@ static void init_mem_layout(void)
     if (e820_mem_map_entry_size == 20) {
         struct e820_mem_map_entry_20* entry = (struct e820_mem_map_entry_20*)e820_mem_map;
         for (uint32_t i = 0; i < e820_mem_map_count; ++i, ++entry) {
-            if (entry->type != 1)
-            {
+            if (entry->type != 1) {
                 mark_addr_len(entry->base, entry->len);
             }
         }
     } else {
         struct e820_mem_map_entry_24* entry = (struct e820_mem_map_entry_24*)e820_mem_map;
         for (uint32_t i = 0; i < e820_mem_map_count; ++i, ++entry) {
-            if (entry->in.type != 1)
-            {
+            if (entry->in.type != 1) {
                 mark_addr_len(entry->in.base, entry->in.len);
             }
         }
     }
 }
 
+static struct mm* k_mm_head;
+static struct mm first_mm;
+
+// map page to the end of mm_area in pd
+int k_map(
+    struct mm* mm_area,
+    struct page* page,
+    int read,
+    int write,
+    int priv,
+    int cow)
+{
+    struct page* p_page_end = mm_area->pgs;
+    while (p_page_end != NULL)
+        p_page_end = p_page_end->next;
+
+    struct page* new_page = k_malloc(sizeof(struct page));
+    new_page->attr.read = (read == 1);
+    new_page->attr.write = (write == 1);
+    new_page->attr.system = (priv == 1);
+    new_page->phys_page_id = page->phys_page_id;
+
+    new_page->next = NULL;
+    p_page_end->next = new_page;
+
+    if (cow) {
+        new_page->attr.cow = 1;
+        new_page->ref_count = page->ref_count;
+        ++page->ref_count;
+    } else {
+        new_page->attr.cow = 0;
+        *new_page->ref_count = 1;
+        p_map(
+            mm_area, page_to_phys_addr(new_page->phys_page_id),
+            mm_area->start + 4096 * mm_area->len,
+            1,
+            (write && !cow),
+            priv);
+    }
+
+    ++mm_area->len;
+}
+
 void init_paging(void)
 {
     init_mem_layout();
+
+    // create initial struct mms
+    memset(&first_mm, 0x00, sizeof(struct mm));
+
+    first_mm.attr.read = 1;
+    first_mm.attr.write = 1;
+    first_mm.attr.system = 1;
+    first_mm.start = 0x30000000;
+    first_mm.len = 1;
+    first_mm.next = NULL;
+
+    page_t init_mm_page = alloc_page();
+    p_map(KERNEL_EARLY_PAGE_DIRECTORY_ADDR, page_to_phys_addr(init_mm_page), KERNEL_HEAP_START, 1, 1, 1);
+    init_heap();
+
+    first_mm.pgs = (struct page*)k_malloc(sizeof(struct page));
+
+    first_mm.pgs->attr.read = 1;
+    first_mm.pgs->attr.write = 1;
+    first_mm.pgs->attr.system = 1;
+    first_mm.pgs->attr.cow = 0;
+    first_mm.pgs->phys_page_id = init_mm_page;
+    first_mm.pgs->ref_count = (size_t*)k_malloc(sizeof(size_t));
+    first_mm.pgs->next = NULL;
+
+    k_mm_head = &first_mm;
 
     if (_create_kernel_pd() != GB_OK) {
         asm_cli();
         asm_hlt();
     }
-    asm_enable_paging(_kernel_pd);
+
+    asm_enable_paging(kernel_pd);
 }
 
 static inline void
@@ -473,8 +553,6 @@ set_segment_descriptor(
 
 void init_gdt_with_tss(void* kernel_esp, uint16_t kernel_ss)
 {
-    // TODO: fix this
-    return;
     gdt = k_malloc(sizeof(segment_descriptor) * 6);
     // since the size in the struct is an OFFSET
     // it needs to be added one to get its real size
@@ -496,17 +574,17 @@ void init_gdt_with_tss(void* kernel_esp, uint16_t kernel_ss)
 }
 
 void create_segment_descriptor(
-        segment_descriptor* sd,
-        uint32_t base,
-        uint32_t limit,
-        uint32_t flags,
-        uint32_t access)
+    segment_descriptor* sd,
+    uint32_t base,
+    uint32_t limit,
+    uint32_t flags,
+    uint32_t access)
 {
-    sd->base_low   = base  & 0x0000ffff;
-    sd->base_mid   = ((base  & 0x00ff0000) >> 16);
-    sd->base_high  = ((base  & 0xff000000) >> 24);
-    sd->limit_low  = limit & 0x0000ffff;
+    sd->base_low = base & 0x0000ffff;
+    sd->base_mid = ((base & 0x00ff0000) >> 16);
+    sd->base_high = ((base & 0xff000000) >> 24);
+    sd->limit_low = limit & 0x0000ffff;
     sd->limit_high = ((limit & 0x000f0000) >> 16);
-    sd->access     = access;
-    sd->flags      = flags;
+    sd->access = access;
+    sd->flags = flags;
 }

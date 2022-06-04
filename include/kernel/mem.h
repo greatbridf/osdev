@@ -1,5 +1,6 @@
 #pragma once
 
+#include <types/size.h>
 #include <types/stdint.h>
 
 #ifdef __cplusplus
@@ -30,9 +31,8 @@ extern uint32_t e820_mem_map_entry_size;
 extern uint32_t kernel_size;
 extern struct mem_size_info mem_size_info;
 
-// TODO: decide heap start address according
-//   to user's memory size
-#define HEAP_START ((void*)0x01000000)
+#define KERNEL_HEAP_START ((void*)0x30000000)
+#define KERNEL_HEAP_LIMIT ((void*)0x40000000)
 
 struct mem_blk_flags {
     uint8_t is_free;
@@ -47,6 +47,35 @@ struct mem_blk {
     // the first byte of the memory space
     // the minimal allocated space is 4 bytes
     uint8_t data[4];
+};
+
+struct page_attr {
+    uint32_t read : 1;
+    uint32_t write : 1;
+    uint32_t system : 1;
+    uint32_t cow : 1;
+};
+
+struct page {
+    page_t phys_page_id;
+    size_t* ref_count;
+    struct page_attr attr;
+    struct page* next;
+};
+
+struct mm_attr {
+    uint32_t read : 1;
+    uint32_t write : 1;
+    uint32_t system : 1;
+};
+
+struct mm {
+    virt_ptr_t start;
+    size_t len;
+    struct mm_attr attr;
+    struct page* pgs;
+    struct mm* next;
+    page_directory_entry* pd;
 };
 
 int init_heap(void);
@@ -119,7 +148,7 @@ typedef union page_table_entry {
     struct page_table_entry_in in;
 } page_table_entry;
 
-#define KERNEL_PAGE_DIRECTORY_ADDR ((page_directory_entry*)0x00000000)
+#define KERNEL_EARLY_PAGE_DIRECTORY_ADDR ((page_directory_entry*)0x00000000)
 
 void init_paging(void);
 
@@ -143,11 +172,11 @@ typedef struct segment_descriptor_struct {
 
 void init_gdt_with_tss(void* kernel_esp, uint16_t kernel_ss);
 void create_segment_descriptor(
-        segment_descriptor* sd,
-        uint32_t base,
-        uint32_t limit,
-        uint32_t flags,
-        uint32_t access);
+    segment_descriptor* sd,
+    uint32_t base,
+    uint32_t limit,
+    uint32_t flags,
+    uint32_t access);
 
 #ifdef __cplusplus
 }

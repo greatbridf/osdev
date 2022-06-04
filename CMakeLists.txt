@@ -42,6 +42,7 @@ include_directories(${PROJECT_SOURCE_DIR}/include)
 set(KERNEL_MAIN_SOURCES src/kernel_main.c
                         src/kernel/errno.c
                         src/kernel/interrupt.c
+                        src/kernel/process.c
                         src/kernel/tty.c
                         src/kernel/stdio.c
                         src/kernel/mem.c
@@ -59,6 +60,7 @@ set(KERNEL_MAIN_SOURCES src/kernel_main.c
                         include/kernel/errno.h
                         include/kernel/tty.h
                         include/kernel/interrupt.h
+                        include/kernel/process.h
                         include/kernel/stdio.h
                         include/kernel/mem.h
                         include/kernel/vga.h
@@ -86,6 +88,7 @@ add_custom_command(OUTPUT extracted_kernel_main
 add_custom_target(kernel.out
     DEPENDS extracted_bootloader
     DEPENDS extracted_kernel_main
+    DEPENDS ${CMAKE_SOURCE_DIR}/ldscript.ld
     COMMAND ${CMAKE_LINKER} -T ${CMAKE_SOURCE_DIR}/ldscript.ld ${EXTRACT_DIR}/*.o
     -melf_i386 -o ${CMAKE_BINARY_DIR}/kernel.out
 )

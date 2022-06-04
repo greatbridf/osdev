@@ -8,9 +8,9 @@
 #include <kernel/hw/serial.h>
 #include <kernel/hw/timer.h>
 #include <kernel/interrupt.h>
-#include <kernel/tty.h>
 #include <kernel/mem.h>
 #include <kernel/stdio.h>
+#include <kernel/tty.h>
 #include <kernel/vga.h>
 #include <types/bitmap.h>
 
@@ -25,7 +25,6 @@ void call_constructors_for_cpp(void)
 }
 
 #define KERNEL_MAIN_BUF_SIZE (128)
-
 
 struct tty* console = NULL;
 #define printkf(x...)                       \
@@ -119,11 +118,11 @@ static segment_descriptor new_gdt[5];
 
 void load_new_gdt(void)
 {
-    create_segment_descriptor(new_gdt+0, 0,  0, 0, 0);
-    create_segment_descriptor(new_gdt+1, 0, ~0, 0b1100, SD_TYPE_CODE_SYSTEM);
-    create_segment_descriptor(new_gdt+2, 0, ~0, 0b1100, SD_TYPE_DATA_SYSTEM);
-    create_segment_descriptor(new_gdt+3, 0, ~0, 0b1100, SD_TYPE_CODE_USER);
-    create_segment_descriptor(new_gdt+4, 0, ~0, 0b1100, SD_TYPE_DATA_USER);
+    create_segment_descriptor(new_gdt + 0, 0, 0, 0, 0);
+    create_segment_descriptor(new_gdt + 1, 0, ~0, 0b1100, SD_TYPE_CODE_SYSTEM);
+    create_segment_descriptor(new_gdt + 2, 0, ~0, 0b1100, SD_TYPE_DATA_SYSTEM);
+    create_segment_descriptor(new_gdt + 3, 0, ~0, 0b1100, SD_TYPE_CODE_USER);
+    create_segment_descriptor(new_gdt + 4, 0, ~0, 0b1100, SD_TYPE_DATA_USER);
     asm_load_gdt((5 * 8 - 1) << 16, (phys_ptr_t)new_gdt);
     asm_cli();
 }
@@ -147,12 +146,12 @@ void kernel_main(void)
 
     show_mem_info(buf);
 
-    INIT_START("paging");
-    init_paging();
-    INIT_OK();
-
     INIT_START("SSE");
     asm_enable_sse();
+    INIT_OK();
+
+    EVE_START("rebuilding page table");
+    init_paging();
     INIT_OK();
 
     INIT_START("IDT");

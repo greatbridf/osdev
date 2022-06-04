@@ -2,8 +2,8 @@
 
 #include <types/stdint.h>
 
-#define KERNEL_EARLY_STACK_ADDR ((phys_ptr_t)0x03fffff0)
-#define KERNEL_EARLY_STACK_SIZE ((size_t) 0xfffff0)
+#define KERNEL_EARLY_STACK_ADDR ((phys_ptr_t)0x01000000)
+#define KERNEL_EARLY_STACK_SIZE ((size_t)0x100000)
 
 struct __attribute__((__packed__)) gdt_descriptor {
     uint16_t size;

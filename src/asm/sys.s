@@ -16,6 +16,12 @@ asm_enable_paging:
 
     ret
 
+.global current_pd
+.type   current_pd @function
+current_pd:
+    movl %cr3, %eax
+    ret
+
 .global asm_load_gdt
 .type   asm_load_gdt @function
 asm_load_gdt:

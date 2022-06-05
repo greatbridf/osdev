@@ -130,6 +130,8 @@ void load_new_gdt(void)
 void kernel_main(void)
 {
     // MAKE_BREAK_POINT();
+    asm_enable_sse();
+
     save_loader_data();
 
     load_new_gdt();
@@ -145,10 +147,6 @@ void kernel_main(void)
     console = &early_console;
 
     show_mem_info(buf);
-
-    INIT_START("SSE");
-    asm_enable_sse();
-    INIT_OK();
 
     INIT_START("exception handlers");
     init_idt();

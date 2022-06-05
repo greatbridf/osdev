@@ -12,6 +12,12 @@ int6:
 
     iret
 
+.globl int8
+.type  int8 @function
+int8:
+    nop
+    iret
+
 .globl int13
 .type  int13 @function
 int13:
@@ -158,5 +164,9 @@ irq15:
 asm_load_idt:
     movl 4(%esp), %edx
     lidt (%edx)
+    movl 8(%esp), %edx
+    cmpl $0, %edx
+    je asm_load_idt_skip
     sti
+asm_load_idt_skip:
     ret

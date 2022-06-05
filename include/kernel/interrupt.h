@@ -48,12 +48,13 @@ struct IDT_entry {
 extern struct IDT_entry IDT[256];
 #endif
 
-void init_idt();
+void init_idt(void);
+void init_pic(void);
 
 // idt_descriptor: uint16_t[3]
 // [0] bit 0 :15 => limit
 // [1] bit 16:47 => address
-extern void asm_load_idt(uint16_t idt_descriptor[3]);
+extern void asm_load_idt(uint16_t idt_descriptor[3], int sti);
 
 void int13_handler(
     struct regs_32 s_regs,

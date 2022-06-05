@@ -165,9 +165,10 @@ setup_early_kernel_page_table:
 # set up early kernel page table
 
 # the early kernel page directory is located at physical
-# address 0x00000000, size 4k, so we fill the first 5KiB
+# address 0x00000000, size 4k, and the empty page is at
+# 0x5000-0x5fff, so we fill the first 6KiB
     movl $0x00000000, %eax
-    movl $0x5000, %ecx
+    movl $0x6000, %ecx
     call _fill_zero
 
 # map the first 16MiB identically

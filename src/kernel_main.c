@@ -150,24 +150,21 @@ void kernel_main(void)
     asm_enable_sse();
     INIT_OK();
 
-    EVE_START("rebuilding page table");
-    init_paging();
-    INIT_OK();
-
-    INIT_START("IDT");
+    INIT_START("exception handlers");
     init_idt();
-    init_pit();
     INIT_OK();
 
-    INIT_START("heap space");
-    if (init_heap() != GB_OK) {
-        INIT_FAILED();
-        halt_on_init_error();
-    }
+    INIT_START("memory allocation");
+    init_mem();
     INIT_OK();
 
     INIT_START("C++ global objects");
     call_constructors_for_cpp();
+    INIT_OK();
+
+    INIT_START("programmable interrupt controller and timer");
+    init_pic();
+    init_pit();
     INIT_OK();
 
     printkf("Testing k_malloc...\n");
@@ -175,10 +172,6 @@ void kernel_main(void)
     snprintf(k_malloc_buf, 128, "This text is printed on the heap!\n");
     tty_print(console, k_malloc_buf);
     k_free(k_malloc_buf);
-
-    void* kernel_stack = k_malloc(KERNEL_STACK_SIZE);
-    init_gdt_with_tss(kernel_stack + KERNEL_STACK_SIZE - 1, KERNEL_STACK_SEGMENT);
-    printkf("new GDT and TSS loaded\n");
 
     printkf("No work to do, halting...\n");
 

@@ -15,6 +15,28 @@ void init_idt()
 {
     asm_cli();
 
+    memset(IDT, 0x00, sizeof(IDT));
+
+    // invalid opcode
+    SET_IDT_ENTRY_FN(6, int6, 0x08);
+    // double fault
+    SET_IDT_ENTRY_FN(8, int8, 0x08);
+    // general protection
+    SET_IDT_ENTRY_FN(13, int13, 0x08);
+    // page fault
+    SET_IDT_ENTRY_FN(14, int14, 0x08);
+
+    uint16_t idt_descriptor[3];
+    idt_descriptor[0] = sizeof(struct IDT_entry) * 256;
+    *((uint32_t*)(idt_descriptor + 1)) = (ptr_t)IDT;
+
+    asm_load_idt(idt_descriptor, 0);
+}
+
+void init_pic(void)
+{
+    asm_cli();
+
     asm_outb(PORT_PIC1_COMMAND, 0x11); // edge trigger mode
     asm_outb(PORT_PIC1_DATA, 0x20); // start from int 0x20
     asm_outb(PORT_PIC1_DATA, 0x04); // PIC1 is connected to IRQ2 (1 << 2)
@@ -28,12 +50,6 @@ void init_idt()
     // allow all the interrupts
     asm_outb(PORT_PIC1_DATA, 0x00);
     asm_outb(PORT_PIC2_DATA, 0x00);
-
-    // handle general protection fault (handle segmentation fault)
-    SET_IDT_ENTRY_FN(6, int6, 0x08);
-    SET_IDT_ENTRY_FN(13, int13, 0x08);
-    SET_IDT_ENTRY_FN(14, int14, 0x08);
-    // SET_IDT_ENTRY(0x0c, /* addr */ 0, 0x08);
 
     // 0x08 stands for kernel code segment
     SET_UP_IRQ(0, 0x08);
@@ -53,11 +69,7 @@ void init_idt()
     SET_UP_IRQ(14, 0x08);
     SET_UP_IRQ(15, 0x08);
 
-    uint16_t idt_descriptor[3];
-    idt_descriptor[0] = sizeof(struct IDT_entry) * 256;
-    *((uint32_t*)(idt_descriptor + 1)) = (ptr_t)IDT;
-
-    asm_load_idt(idt_descriptor);
+    asm_sti();
 }
 
 void int6_handler(

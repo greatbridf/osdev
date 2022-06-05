@@ -519,9 +519,13 @@ void init_mem(void)
     empty_page.ref_count = (size_t*)k_malloc(sizeof(size_t));
     *empty_page.ref_count = 1;
 
-    k_map(
-        kernel_mm_head, &empty_page,
-        1, 1, 1, 1);
+    // TODO: improve the algorithm SO FREAKING SLOW
+    // while (kernel_mm_head->len < 256 * 1024 * 1024 / PAGE_SIZE) {
+    while (kernel_mm_head->len < 16 * 1024 * 1024 / PAGE_SIZE) {
+        k_map(
+            kernel_mm_head, &empty_page,
+            1, 1, 1, 1);
+    }
 }
 
 void create_segment_descriptor(

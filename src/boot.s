@@ -199,7 +199,8 @@ load_early_kernel_page_table:
     movl %eax, %cr3
 
     movl %cr0, %eax
-    orl $0x80000001, %eax
+    // SET PE, WP, PG
+    orl $0x80010001, %eax
     movl %eax, %cr0
 
     jmp start_move_kernel

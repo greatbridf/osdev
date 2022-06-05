@@ -129,7 +129,7 @@ void load_new_gdt(void)
 
 void kernel_main(void)
 {
-    MAKE_BREAK_POINT();
+    // MAKE_BREAK_POINT();
     save_loader_data();
 
     load_new_gdt();
@@ -168,10 +168,12 @@ void kernel_main(void)
     INIT_OK();
 
     printkf("Testing k_malloc...\n");
-    char* k_malloc_buf = (char*)k_malloc(sizeof(char) * 128);
-    snprintf(k_malloc_buf, 128, "This text is printed on the heap!\n");
+    char* k_malloc_buf = (char*)k_malloc(sizeof(char) * 4097);
+    snprintf(k_malloc_buf, 4097, "This text is printed on the heap!\n");
     tty_print(console, k_malloc_buf);
     k_free(k_malloc_buf);
+
+    k_malloc_buf[4096] = '\x89';
 
     printkf("No work to do, halting...\n");
 

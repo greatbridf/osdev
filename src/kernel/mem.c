@@ -8,10 +8,12 @@
 #include <kernel/vga.h>
 #include <kernel_main.h>
 #include <types/bitmap.h>
+#include <types/list.h>
 
 // static variables
 
-static struct mm kernel_mm;
+struct mm kernel_mm;
+struct mm* kernel_mm_head;
 
 // ---------------------
 
@@ -22,23 +24,8 @@ static struct mm kernel_mm;
 
 // ---------------------
 
-// forward declarations
-static page_t alloc_page(void);
-
-// map page to the end of mm_area in pd
-int k_map(
-    struct mm* mm_area,
-    struct page* page,
-    int read,
-    int write,
-    int priv,
-    int cow);
-
-// ---------------------
-
 static void* p_start;
 static void* p_break;
-static segment_descriptor* gdt;
 
 static size_t mem_size;
 static char mem_bitmap[1024 * 1024 / 8];
@@ -187,36 +174,6 @@ void k_free(void* ptr)
     // TODO: fusion free blocks nearby
 }
 
-static inline page_t phys_addr_to_page(phys_ptr_t ptr)
-{
-    return ptr >> 12;
-}
-
-static inline pd_i_t page_to_pd_i(page_t p)
-{
-    return p >> 10;
-}
-
-static inline pt_i_t page_to_pt_i(page_t p)
-{
-    return p & (1024 - 1);
-}
-
-static inline phys_ptr_t page_to_phys_addr(page_t p)
-{
-    return p << 12;
-}
-
-static inline pd_i_t phys_addr_to_pd_i(phys_ptr_t ptr)
-{
-    return page_to_pd_i(phys_addr_to_page(ptr));
-}
-
-static inline pd_i_t phys_addr_to_pt_i(phys_ptr_t ptr)
-{
-    return page_to_pt_i(phys_addr_to_page(ptr));
-}
-
 void* p_ptr_to_v_ptr(phys_ptr_t p_ptr)
 {
     if (p_ptr <= 0x30000000) {
@@ -224,13 +181,14 @@ void* p_ptr_to_v_ptr(phys_ptr_t p_ptr)
         return (void*)p_ptr;
     } else {
         // TODO: address translation
+        MAKE_BREAK_POINT();
         return (void*)0xffffffff;
     }
 }
 
-phys_ptr_t v_ptr_to_p_ptr(struct mm* mm, void* v_ptr)
+phys_ptr_t l_ptr_to_p_ptr(struct mm* mm, linr_ptr_t v_ptr)
 {
-    if (mm == &kernel_mm && v_ptr < 0x30000000) {
+    if (mm == kernel_mm_head && v_ptr < (linr_ptr_t)KERNEL_IDENTICALLY_MAPPED_AREA_LIMIT) {
         return (phys_ptr_t)v_ptr;
     }
     while (mm != NULL) {
@@ -238,13 +196,19 @@ phys_ptr_t v_ptr_to_p_ptr(struct mm* mm, void* v_ptr)
             goto next;
         }
         size_t offset = (size_t)(v_ptr - mm->start);
-        return page_to_phys_addr(mm->pgs[offset / 4096].phys_page_id) + (offset % 4096);
+        LIST_LIKE_AT(struct page, mm->pgs, offset / PAGE_SIZE, result);
+        return page_to_phys_addr(result->phys_page_id) + (offset % 4096);
     next:
         mm = mm->next;
     }
 
     // TODO: handle error
     return 0xffffffff;
+}
+
+phys_ptr_t v_ptr_to_p_ptr(void* v_ptr)
+{
+    return l_ptr_to_p_ptr(kernel_mm_head, (linr_ptr_t)v_ptr);
 }
 
 static inline void mark_page(page_t n)
@@ -287,7 +251,7 @@ static inline void free_addr_range(phys_ptr_t start, phys_ptr_t end)
     free_addr_len(start, end - start);
 }
 
-static page_t alloc_page(void)
+page_t alloc_raw_page(void)
 {
     for (page_t i = 0; i < 1024 * 1024; ++i) {
         if (bm_test(mem_bitmap, i) == 0) {
@@ -296,6 +260,16 @@ static page_t alloc_page(void)
         }
     }
     return GB_FAILED;
+}
+
+struct page* allocate_page(void)
+{
+    // TODO: allocate memory on identically mapped area
+    struct page* p = (struct page*)k_malloc(sizeof(struct page));
+    memset(p, 0x00, sizeof(struct page));
+    p->phys_page_id = alloc_raw_page();
+    p->ref_count = (size_t*)k_malloc(sizeof(size_t));
+    return p;
 }
 
 static inline void make_page_table(page_table_entry* pt)
@@ -334,34 +308,73 @@ static inline void init_mem_layout(void)
     }
 }
 
+int is_l_ptr_valid(struct mm* mm_area, linr_ptr_t l_ptr)
+{
+    while (mm_area != NULL) {
+        if (l_ptr >= mm_area->start && l_ptr < mm_area->start + mm_area->len * PAGE_SIZE) {
+            return GB_OK;
+        }
+        mm_area = mm_area->next;
+    }
+    return GB_FAILED;
+}
+
+struct page* find_page_by_l_ptr(struct mm* mm, linr_ptr_t l_ptr)
+{
+    if (mm == kernel_mm_head && l_ptr < (linr_ptr_t)KERNEL_IDENTICALLY_MAPPED_AREA_LIMIT) {
+        // TODO: make mm for identically mapped area
+        MAKE_BREAK_POINT();
+        return (struct page*)0xffffffff;
+    }
+    while (mm != NULL) {
+        if (l_ptr >= mm->start && l_ptr < mm->start + mm->len * 4096) {
+            size_t offset = (size_t)(l_ptr - mm->start);
+            LIST_LIKE_AT(struct page, mm->pgs, offset / PAGE_SIZE, result);
+            return result;
+        }
+        mm = mm->next;
+    }
+
+    // TODO: error handling
+    return NULL;
+}
+
+void map_raw_page_to_pte(
+    page_table_entry* pte,
+    page_t page,
+    int rw,
+    int priv)
+{
+    // set P bit
+    pte->v = 0x00000001;
+    pte->in.rw = (rw == 1);
+    pte->in.us = (priv == 1);
+    pte->in.page = page;
+}
+
 static void _map_raw_page_to_addr(
     struct mm* mm_area,
     page_t page,
     int rw,
     int priv)
 {
-    // although it's NOT a physical address, we treat it as one
-    phys_ptr_t addr = (phys_ptr_t)mm_area->start + mm_area->len * 4096;
-    page_directory_entry* pde = mm_area->pd + phys_addr_to_pd_i(addr);
+    linr_ptr_t addr = (linr_ptr_t)mm_area->start + mm_area->len * 4096;
+    page_directory_entry* pde = mm_area->pd + linr_addr_to_pd_i(addr);
     // page table not exist
     if (!pde->in.p) {
         // allocate a page for the page table
         pde->in.p = 1;
         pde->in.rw = 1;
         pde->in.us = 0;
-        pde->in.pt_page = alloc_page();
+        pde->in.pt_page = alloc_raw_page();
 
         make_page_table((page_table_entry*)p_ptr_to_v_ptr(page_to_phys_addr(pde->in.pt_page)));
     }
 
     // map the page in the page table
     page_table_entry* pte = (page_table_entry*)p_ptr_to_v_ptr(page_to_phys_addr(pde->in.pt_page));
-    pte += phys_addr_to_pt_i(addr);
-    // set P bit
-    pte->v = 0x00000001;
-    pte->in.rw = (rw == 1);
-    pte->in.us = !(priv == 1);
-    pte->in.page = page;
+    pte += linr_addr_to_pt_i(addr);
+    map_raw_page_to_pte(pte, page, rw, priv);
 }
 
 // map page to the end of mm_area in pd
@@ -437,7 +450,7 @@ static inline void _init_map_page_identically(page_t page)
         pde->in.p = 1;
         pde->in.rw = 1;
         pde->in.us = 0;
-        pde->in.pt_page = alloc_page();
+        pde->in.pt_page = alloc_raw_page();
         _init_map_page_identically(pde->in.pt_page);
 
         make_page_table((page_table_entry*)p_ptr_to_v_ptr(page_to_phys_addr(pde->in.pt_page)));
@@ -460,7 +473,6 @@ static inline void init_paging_map_low_mem_identically(void)
     }
 }
 
-struct mm* mm_head;
 static struct page empty_page;
 static struct page heap_first_page;
 static size_t heap_first_page_ref_count;
@@ -472,7 +484,7 @@ void init_mem(void)
     // map the 16MiB-768MiB identically
     init_paging_map_low_mem_identically();
 
-    mm_head = &kernel_mm;
+    kernel_mm_head = &kernel_mm;
 
     kernel_mm.attr.read = 1;
     kernel_mm.attr.write = 1;
@@ -481,19 +493,19 @@ void init_mem(void)
     kernel_mm.next = NULL;
     kernel_mm.pd = KERNEL_PAGE_DIRECTORY_ADDR;
     kernel_mm.pgs = NULL;
-    kernel_mm.start = KERNEL_HEAP_START;
+    kernel_mm.start = (linr_ptr_t)KERNEL_HEAP_START;
 
     heap_first_page.attr.cow = 0;
     heap_first_page.attr.read = 1;
     heap_first_page.attr.write = 1;
     heap_first_page.attr.system = 1;
     heap_first_page.next = NULL;
-    heap_first_page.phys_page_id = alloc_page();
+    heap_first_page.phys_page_id = alloc_raw_page();
     heap_first_page.ref_count = &heap_first_page_ref_count;
 
     *heap_first_page.ref_count = 0;
 
-    k_map(mm_head, &heap_first_page, 1, 1, 1, 0);
+    k_map(kernel_mm_head, &heap_first_page, 1, 1, 1, 0);
 
     init_heap();
 
@@ -505,6 +517,11 @@ void init_mem(void)
     empty_page.next = NULL;
     empty_page.phys_page_id = phys_addr_to_page(EMPTY_PAGE_ADDR);
     empty_page.ref_count = (size_t*)k_malloc(sizeof(size_t));
+    *empty_page.ref_count = 1;
+
+    k_map(
+        kernel_mm_head, &empty_page,
+        1, 1, 1, 1);
 }
 
 void create_segment_descriptor(

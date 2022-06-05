@@ -4,6 +4,7 @@
 #include <kernel/hw/keyboard.h>
 #include <kernel/hw/timer.h>
 #include <kernel/interrupt.h>
+#include <kernel/mem.h>
 #include <kernel/stdio.h>
 #include <kernel/tty.h>
 #include <kernel/vga.h>
@@ -129,33 +130,73 @@ void int13_handler(
     asm_hlt();
 }
 
+static size_t page_fault_times;
+
 // page fault
 void int14_handler(
-    ptr_t addr,
+    linr_ptr_t l_addr,
     struct regs_32 s_regs,
-    uint32_t error_code,
-    ptr_t eip,
+    struct page_fault_error_code error_code,
+    void* v_eip,
     uint16_t cs,
     uint32_t eflags)
 {
+    MAKE_BREAK_POINT();
     char buf[512];
 
-    tty_print(console, "---- PAGE FAULT ----\n");
+    ++page_fault_times;
 
+    // not present page, possibly mapped but not loaded
+    // or invalid address or just invalid address
+    // TODO: mmapping and swapping
+    if (error_code.present == 0) {
+        goto kill;
+    }
+
+    // kernel code
+    if (cs == KERNEL_CODE_SEGMENT) {
+        if (is_l_ptr_valid(kernel_mm_head, l_addr) != GB_OK) {
+            goto kill;
+        }
+        struct page* page = find_page_by_l_ptr(kernel_mm_head, l_addr);
+
+        // copy on write
+        if (error_code.write == 1 && page->attr.cow == 1) {
+            page_directory_entry* pde = kernel_mm_head->pd + linr_addr_to_pd_i(l_addr);
+            page_table_entry* pte = p_ptr_to_v_ptr(page_to_phys_addr(pde->in.pt_page));
+            pte += linr_addr_to_pt_i(l_addr);
+
+            // if it is a dying page
+            if (*page->ref_count == 1) {
+                page->attr.cow = 0;
+                pte->in.a = 0;
+                pte->in.rw = 1;
+                return;
+            }
+            // duplicate the page
+            page_t new_page = alloc_raw_page();
+            void* new_page_data = p_ptr_to_v_ptr(page_to_phys_addr(new_page));
+            memcpy(new_page_data, p_ptr_to_v_ptr(page_to_phys_addr(page->phys_page_id)), PAGE_SIZE);
+
+            pte->in.page = new_page;
+            pte->in.rw = 1;
+            pte->in.a = 0;
+
+            --*page->ref_count;
+
+            page->ref_count = (size_t*)k_malloc(sizeof(size_t));
+            *page->ref_count = 1;
+            page->attr.cow = 0;
+            page->phys_page_id = new_page;
+            return;
+        }
+    }
+
+kill:
     snprintf(
         buf, 512,
-        "eax: %x, ebx: %x, ecx: %x, edx: %x\n"
-        "esp: %x, ebp: %x, esi: %x, edi: %x\n"
-        "eip: %x, cs: %x, error_code: %x   \n"
-        "eflags: %x, addr: %x              \n",
-        s_regs.eax, s_regs.ebx, s_regs.ecx,
-        s_regs.edx, s_regs.esp, s_regs.ebp,
-        s_regs.esi, s_regs.edi, eip,
-        cs, error_code, eflags, addr);
+        "killed: segmentation fault (eip: %x, cr2: %x, error_code: %x)", v_eip, l_addr, error_code);
     tty_print(console, buf);
-
-    tty_print(console, "----   HALTING SYSTEM   ----");
-
     asm_cli();
     asm_hlt();
 }

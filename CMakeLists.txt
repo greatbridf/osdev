@@ -75,6 +75,7 @@ set(KERNEL_MAIN_SOURCES src/kernel_main.c
                         include/types/size.h
                         include/types/status.h
                         include/types/stdint.h
+                        include/types/list.h
                         include/types/list.hpp
                         include/kernel_main.h
                         )

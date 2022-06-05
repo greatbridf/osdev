@@ -38,6 +38,7 @@ int14:
     movl %cr2, %eax
     pushl %eax
     call int14_handler
+    popl %eax
     popal
 
 # remove the 32bit error code from stack

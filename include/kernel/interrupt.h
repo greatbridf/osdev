@@ -17,6 +17,24 @@ struct regs_32 {
     uint32_t eax;
 };
 
+// present: When set, the page fault was caused by a page-protection violation.
+//          When not set, it was caused by a non-present page.
+// write:   When set, the page fault was caused by a write access.
+//          When not set, it was caused by a read access.
+// user:    When set, the page fault was caused while CPL = 3.
+//          This does not necessarily mean that the page fault was a privilege violation.
+// from https://wiki.osdev.org/Exceptions#Page_Fault
+struct page_fault_error_code {
+    uint32_t present : 1;
+    uint32_t write : 1;
+    uint32_t user : 1;
+    uint32_t reserved_write : 1;
+    uint32_t instruction_fetch : 1;
+    uint32_t protection_key : 1;
+    uint32_t shadow_stack : 1;
+    uint32_t software_guard_extensions : 1;
+};
+
 // external interrupt handler function
 // stub in assembly MUST be called irqN
 #define SET_UP_IRQ(N, SELECTOR)        \
@@ -64,10 +82,10 @@ void int13_handler(
     uint32_t eflags);
 
 void int14_handler(
-    ptr_t addr,
+    linr_ptr_t l_addr,
     struct regs_32 s_regs,
-    uint32_t error_code,
-    ptr_t eip,
+    struct page_fault_error_code error_code,
+    void* v_eip,
     uint16_t cs,
     uint32_t eflags);
 

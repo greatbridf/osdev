@@ -34,7 +34,7 @@ SECTIONS
         *(.rodata*)
     } > WHOLE
 
-    .data :
+    .data : AT(LOADADDR(.text) + ADDR(.data) - ADDR(.text))
     {
         asm_kernel_size = .;
         LONG(__real_kernel_end - ADDR(.text));
@@ -98,10 +98,9 @@ SECTIONS
         BYTE(0x00);
     } > WHOLE
 
-/*
     /DISCARD/ :
     {
-        *(.comment)
+        *(.fini_array*)
+        *(.eh_frame*)
     }
-*/
 }

@@ -11,9 +11,16 @@ asm_enable_paging:
     movl %eax, %cr3
 
     movl %cr0, %eax
-    orl $0x80000001, %eax
+    // SET PE, WP, PG
+    orl $0x80010001, %eax
     movl %eax, %cr0
 
+    ret
+
+.global current_pd
+.type   current_pd @function
+current_pd:
+    movl %cr3, %eax
     ret
 
 .global asm_load_gdt

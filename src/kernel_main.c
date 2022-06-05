@@ -8,9 +8,9 @@
 #include <kernel/hw/serial.h>
 #include <kernel/hw/timer.h>
 #include <kernel/interrupt.h>
-#include <kernel/tty.h>
 #include <kernel/mem.h>
 #include <kernel/stdio.h>
+#include <kernel/tty.h>
 #include <kernel/vga.h>
 #include <types/bitmap.h>
 
@@ -25,7 +25,6 @@ void call_constructors_for_cpp(void)
 }
 
 #define KERNEL_MAIN_BUF_SIZE (128)
-
 
 struct tty* console = NULL;
 #define printkf(x...)                       \
@@ -119,18 +118,20 @@ static segment_descriptor new_gdt[5];
 
 void load_new_gdt(void)
 {
-    create_segment_descriptor(new_gdt+0, 0,  0, 0, 0);
-    create_segment_descriptor(new_gdt+1, 0, ~0, 0b1100, SD_TYPE_CODE_SYSTEM);
-    create_segment_descriptor(new_gdt+2, 0, ~0, 0b1100, SD_TYPE_DATA_SYSTEM);
-    create_segment_descriptor(new_gdt+3, 0, ~0, 0b1100, SD_TYPE_CODE_USER);
-    create_segment_descriptor(new_gdt+4, 0, ~0, 0b1100, SD_TYPE_DATA_USER);
+    create_segment_descriptor(new_gdt + 0, 0, 0, 0, 0);
+    create_segment_descriptor(new_gdt + 1, 0, ~0, 0b1100, SD_TYPE_CODE_SYSTEM);
+    create_segment_descriptor(new_gdt + 2, 0, ~0, 0b1100, SD_TYPE_DATA_SYSTEM);
+    create_segment_descriptor(new_gdt + 3, 0, ~0, 0b1100, SD_TYPE_CODE_USER);
+    create_segment_descriptor(new_gdt + 4, 0, ~0, 0b1100, SD_TYPE_DATA_USER);
     asm_load_gdt((5 * 8 - 1) << 16, (phys_ptr_t)new_gdt);
     asm_cli();
 }
 
 void kernel_main(void)
 {
-    MAKE_BREAK_POINT();
+    // MAKE_BREAK_POINT();
+    asm_enable_sse();
+
     save_loader_data();
 
     load_new_gdt();
@@ -147,39 +148,30 @@ void kernel_main(void)
 
     show_mem_info(buf);
 
-    INIT_START("paging");
-    init_paging();
-    INIT_OK();
-
-    INIT_START("SSE");
-    asm_enable_sse();
-    INIT_OK();
-
-    INIT_START("IDT");
+    INIT_START("exception handlers");
     init_idt();
-    init_pit();
     INIT_OK();
 
-    INIT_START("heap space");
-    if (init_heap() != GB_OK) {
-        INIT_FAILED();
-        halt_on_init_error();
-    }
+    INIT_START("memory allocation");
+    init_mem();
     INIT_OK();
 
     INIT_START("C++ global objects");
     call_constructors_for_cpp();
     INIT_OK();
 
+    INIT_START("programmable interrupt controller and timer");
+    init_pic();
+    init_pit();
+    INIT_OK();
+
     printkf("Testing k_malloc...\n");
-    char* k_malloc_buf = (char*)k_malloc(sizeof(char) * 128);
-    snprintf(k_malloc_buf, 128, "This text is printed on the heap!\n");
+    char* k_malloc_buf = (char*)k_malloc(sizeof(char) * 4097);
+    snprintf(k_malloc_buf, 4097, "This text is printed on the heap!\n");
     tty_print(console, k_malloc_buf);
     k_free(k_malloc_buf);
 
-    void* kernel_stack = k_malloc(KERNEL_STACK_SIZE);
-    init_gdt_with_tss(kernel_stack + KERNEL_STACK_SIZE - 1, KERNEL_STACK_SEGMENT);
-    printkf("new GDT and TSS loaded\n");
+    k_malloc_buf[4096] = '\x89';
 
     printkf("No work to do, halting...\n");
 

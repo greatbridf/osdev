@@ -157,13 +157,76 @@ start_32bit:
     movw %ax, %gs
     movw %ax, %ss
 
-# set up stack
-# in order to align 16 byte
-# set stack base address at
-# 0x003ffff0
-    movl $0x03fffff0, %ebp
-    movl $0x03fffff0, %esp
+# set up early stack at 0x001000000
+    movl $0x01000000, %ebp
+    movl $0x01000000, %esp
 
+setup_early_kernel_page_table:
+# set up early kernel page table
+
+# the early kernel page directory is located at physical
+# address 0x00000000, size 4k, and the empty page is at
+# 0x5000-0x5fff, so we fill the first 6KiB
+    movl $0x00000000, %eax
+    movl $0x6000, %ecx
+    call _fill_zero
+
+# map the first 16MiB identically
+# 0x0000-0x0fff: early kernel pd
+# 0x1000-0x4fff: pde 0 - 4
+    movl $0x00000000, %eax
+    movl $0x00001003, %ebx
+_fill_pde_loop:
+    movl %ebx, (%eax)
+    addl $4, %eax
+    addl $0x1000, %ebx
+    cmpl $0x5003, %ebx
+    jne _fill_pde_loop
+
+# then, create page tables
+    movl $0x00000003, %eax
+    movl $0x00001000, %ecx
+
+_create_page_table_loop1:
+    movl %eax, (%ecx)
+    addl $4, %ecx
+    addl $0x1000, %eax
+    cmpl $0x4ffc, %ecx
+    jle _create_page_table_loop1
+
+load_early_kernel_page_table:
+    movl $0x00000000, %eax
+    movl %eax, %cr3
+
+    movl %cr0, %eax
+    // SET PE, WP, PG
+    orl $0x80010001, %eax
+    movl %eax, %cr0
+
+    jmp start_move_kernel
+
+# quick call
+# %eax: address to fill
+# %ecx: byte count to fill
+_fill_zero:
+    movl %ecx, -4(%esp)
+    movl %eax, -8(%esp)
+
+_fill_zero_loop:
+    cmpl $0, %ecx
+    jz _fill_zero_end
+    subl $4, %ecx
+    movl $0, (%eax)
+    addl $4, %eax
+    jmp _fill_zero_loop
+
+_fill_zero_end:
+    movl -8(%esp), %eax
+    movl -4(%esp), %ecx
+    ret
+
+start_move_kernel:
+# move the kernel to 0x100000
     movl $__loader_end, %eax
     movl $__real_kernel_start, %ebx
 

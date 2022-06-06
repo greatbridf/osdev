@@ -1,4 +1,5 @@
 #include <asm/port_io.h>
+#include <kernel/tty.h>
 #include <kernel/hw/timer.h>
 
 static time_t _current_ticks = 0;

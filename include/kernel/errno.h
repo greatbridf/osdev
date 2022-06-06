@@ -8,3 +8,4 @@ extern uint32_t* _get_errno(void);
 
 #define ENOMEM 0
 #define ENOTFOUND 1
+#define EEXIST (1 << 1)

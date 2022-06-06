@@ -21,7 +21,7 @@ real_start:
 
     call read_data
 
-    ljmp $0x0060, $(loader_start-loader_start)
+    ljmp $0x07e0, $(loader_start-loader_start)
 
 die:
     hlt
@@ -39,9 +39,11 @@ string_hello:
 
 read_data_pack:
     .byte 0x10, 0
-    .word 32     # block count (read 16k)
+# TODO!!!
+# read more!
+    .word 64     # block count (read 32k)
     .word 0x0000 # offset address
-    .word 0x0060 # segment address
+    .word 0x07e0 # segment address
     .long 1      # LBA to read
 
 stack_edge:
@@ -143,7 +145,7 @@ _load_gdt:
     orl $1, %eax
     movl %eax, %cr0
 
-    ljmp $0x08, $0x0600 + (start_32bit-loader_start)
+    ljmp $0x08, $0x7e00 + (start_32bit-loader_start)
 
 .code32
 
@@ -155,12 +157,92 @@ start_32bit:
     movw %ax, %gs
     movw %ax, %ss
 
-# set up stack
-# in order to align 16 byte
-# set stack base address at
-# 0x003ffff0
-    movl $0x03fffff0, %ebp
-    movl $0x03fffff0, %esp
+# set up early stack at 0x001000000
+    movl $0x01000000, %ebp
+    movl $0x01000000, %esp
+
+setup_early_kernel_page_table:
+# set up early kernel page table
+
+# the early kernel page directory is located at physical
+# address 0x00000000, size 4k, and the empty page is at
+# 0x5000-0x5fff, so we fill the first 6KiB
+    movl $0x00000000, %eax
+    movl $0x6000, %ecx
+    call _fill_zero
+
+# map the first 16MiB identically
+# 0x0000-0x0fff: early kernel pd
+# 0x1000-0x4fff: pde 0 - 4
+    movl $0x00000000, %eax
+    movl $0x00001003, %ebx
+_fill_pde_loop:
+    movl %ebx, (%eax)
+    addl $4, %eax
+    addl $0x1000, %ebx
+    cmpl $0x5003, %ebx
+    jne _fill_pde_loop
+
+# then, create page tables
+    movl $0x00000003, %eax
+    movl $0x00001000, %ecx
+
+_create_page_table_loop1:
+    movl %eax, (%ecx)
+    addl $4, %ecx
+    addl $0x1000, %eax
+    cmpl $0x4ffc, %ecx
+    jle _create_page_table_loop1
+
+load_early_kernel_page_table:
+    movl $0x00000000, %eax
+    movl %eax, %cr3
+
+    movl %cr0, %eax
+    // SET PE, WP, PG
+    orl $0x80010001, %eax
+    movl %eax, %cr0
+
+    jmp start_move_kernel
+
+# quick call
+# %eax: address to fill
+# %ecx: byte count to fill
+_fill_zero:
+    movl %ecx, -4(%esp)
+    movl %eax, -8(%esp)
+
+_fill_zero_loop:
+    cmpl $0, %ecx
+    jz _fill_zero_end
+    subl $4, %ecx
+    movl $0, (%eax)
+    addl $4, %eax
+    jmp _fill_zero_loop
+
+_fill_zero_end:
+    movl -8(%esp), %eax
+    movl -4(%esp), %ecx
+    ret
+
+start_move_kernel:
+# move the kernel to 0x100000
+    movl $__loader_end, %eax
+    movl $__real_kernel_start, %ebx
+
+    movl $__kernel_size_offset, %ecx
+    movl (%ecx), %ecx
+    addl $__loader_end, %ecx
+    movl (%ecx), %ecx
+
+_move_kernel:
+    movl (%eax), %edx
+    movl %edx, (%ebx)
+    addl $4, %eax
+    addl $4, %ebx
+    subl $4, %ecx
+    cmpl $0, %ecx
+    jge _move_kernel
 
     call kernel_main
 
@@ -169,8 +251,8 @@ loader_halt:
     jmp loader_halt
 
 asm_gdt_descriptor:
-    .word (3 * 8) - 1 # size
-    .long 0x0600+(asm_gdt_table-loader_start)  # address
+    .word (5 * 8) - 1 # size
+    .long 0x7e00+(asm_gdt_table-loader_start)  # address
 
 .globl asm_gdt_descriptor
 .type asm_gdt_descriptor @object
@@ -179,20 +261,36 @@ asm_gdt_descriptor:
 asm_gdt_table:
     .8byte 0         # null descriptor
 
-    # code segment
-    .word 0x3fff     # limit 0 :15
+    # kernel code segment
+    .word 0xffff     # limit 0 :15
     .word 0x0000     # base  0 :15
     .byte 0x00       # base  16:23
     .byte 0x9a       # access
-    .byte 0b11000000 # flag and limit 16:20
+    .byte 0b11001111 # flag and limit 16:20
     .byte 0x00       # base 24:31
 
-    # data segment
-    .word 0x3fff     # limit 0 :15
+    # kernel data segment
+    .word 0xffff     # limit 0 :15
     .word 0x0000     # base  0 :15
     .byte 0x00       # base  16:23
     .byte 0x92       # access
-    .byte 0b11000000 # flag and limit 16:20
+    .byte 0b11001111 # flag and limit 16:20
+    .byte 0x00       # base 24:31
+
+    # user code segment
+    .word 0xffff     # limit 0 :15
+    .word 0x0000     # base  0 :15
+    .byte 0x00       # base  16:23
+    .byte 0xfa       # access
+    .byte 0b11001111 # flag and limit 16:20
+    .byte 0x00       # base 24:31
+
+    # user data segment
+    .word 0xffff     # limit 0 :15
+    .word 0x0000     # base  0 :15
+    .byte 0x00       # base  16:23
+    .byte 0xf2       # access
+    .byte 0b11001111 # flag and limit 16:20
     .byte 0x00       # base 24:31
 
 asm_mem_size_info:

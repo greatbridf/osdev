@@ -2,12 +2,47 @@
 
 .text
 
+.globl int6
+.type  int6 @function
+int6:
+    xchgw %bx, %bx
+    pushal
+    call int6_handler
+    popal
+
+    iret
+
+.globl int8
+.type  int8 @function
+int8:
+    nop
+    iret
+
 .globl int13
 .type  int13 @function
 int13:
+    xchgw %bx, %bx
     pushal
     call int13_handler
     popal
+
+# remove the 32bit error code from stack
+    addl $4, %esp
+    iret
+
+.globl int14
+.type  int14 @function
+int14:
+    xchgw %bx, %bx
+    pushal
+    movl %cr2, %eax
+    pushl %eax
+    call int14_handler
+    popl %eax
+    popal
+
+# remove the 32bit error code from stack
+    addl $4, %esp
     iret
 
 .globl irq0
@@ -25,7 +60,7 @@ irq1:
     call irq1_handler
     popal
     iret
-    
+
 .globl irq2
 .type  irq2 @function
 irq2:
@@ -130,5 +165,9 @@ irq15:
 asm_load_idt:
     movl 4(%esp), %edx
     lidt (%edx)
+    movl 8(%esp), %edx
+    cmpl $0, %edx
+    je asm_load_idt_skip
     sti
+asm_load_idt_skip:
     ret

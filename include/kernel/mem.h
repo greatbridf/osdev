@@ -127,7 +127,7 @@ struct mm {
 extern uint8_t e820_mem_map[1024];
 extern uint32_t e820_mem_map_count;
 extern uint32_t e820_mem_map_entry_size;
-extern uint32_t kernel_size;
+extern size_t kernel_size;
 extern struct mem_size_info mem_size_info;
 
 #define KERNEL_HEAP_START ((void*)0x30000000)

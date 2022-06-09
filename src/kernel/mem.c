@@ -188,9 +188,6 @@ void* p_ptr_to_v_ptr(phys_ptr_t p_ptr)
 
 phys_ptr_t l_ptr_to_p_ptr(struct mm* mm, linr_ptr_t v_ptr)
 {
-    if (mm == kernel_mm_head && v_ptr < (linr_ptr_t)KERNEL_IDENTICALLY_MAPPED_AREA_LIMIT) {
-        return (phys_ptr_t)v_ptr;
-    }
     while (mm != NULL) {
         if (v_ptr < mm->start || v_ptr >= mm->start + mm->len * 4096) {
             goto next;
@@ -208,6 +205,9 @@ phys_ptr_t l_ptr_to_p_ptr(struct mm* mm, linr_ptr_t v_ptr)
 
 phys_ptr_t v_ptr_to_p_ptr(void* v_ptr)
 {
+    if (v_ptr < KERNEL_IDENTICALLY_MAPPED_AREA_LIMIT) {
+        return (phys_ptr_t)v_ptr;
+    }
     return l_ptr_to_p_ptr(kernel_mm_head, (linr_ptr_t)v_ptr);
 }
 
@@ -259,7 +259,8 @@ page_t alloc_raw_page(void)
             return i;
         }
     }
-    return GB_FAILED;
+    MAKE_BREAK_POINT();
+    return 0xffffffff;
 }
 
 struct page* allocate_page(void)
@@ -339,7 +340,7 @@ struct page* find_page_by_l_ptr(struct mm* mm, linr_ptr_t l_ptr)
     return NULL;
 }
 
-void map_raw_page_to_pte(
+static inline void map_raw_page_to_pte(
     page_table_entry* pte,
     page_t page,
     int rw,

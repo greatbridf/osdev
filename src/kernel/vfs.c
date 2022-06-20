@@ -154,7 +154,7 @@ static inline size_t _tmpfs_allocinode(struct tmpfs_data* data)
 static inline int _tmpfs_mklink(struct tmpfs_inode* dir, size_t ino, const char* filename)
 {
     struct tmpfs_file_entry ent = {
-        .filename = 0,
+        .filename = { 0 },
         .ino = ino,
     };
     snprintf(ent.filename, sizeof(ent.filename), filename);

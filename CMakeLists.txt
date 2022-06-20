@@ -78,7 +78,9 @@ set(KERNEL_MAIN_SOURCES src/kernel_main.c
                         include/types/status.h
                         include/types/stdint.h
                         include/types/list.h
+                        include/types/allocator.hpp
                         include/types/list.hpp
+                        include/types/vector.hpp
                         include/kernel_main.h
                         )
 add_library(kernel_main STATIC ${KERNEL_MAIN_SOURCES})

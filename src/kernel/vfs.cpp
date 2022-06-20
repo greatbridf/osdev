@@ -59,6 +59,7 @@ public:
     size_t read(struct inode* file, char* buf, size_t buf_size, size_t offset, size_t n);
     size_t write(struct inode* file, const char* buf, size_t offset, size_t n);
     int readdir(struct inode* dir, struct dirent* entry, size_t i);
+    struct inode* findinode(struct inode* dir, const char* filename);
 
     struct inode* root_inode(void)
     {
@@ -81,11 +82,11 @@ int tmpfs_readdir(struct inode* dir, struct dirent* entry, size_t i)
     auto* fs = static_cast<tmpfs*>(dir->fs->impl);
     return fs->readdir(dir, entry, i);
 }
-// int tmpfs_finddir(struct inode* dir, struct dirent* entry, const char* filename)
-// {
-//     auto* fs = static_cast<tmpfs*>(dir->fs->impl);
-//     return fs->finddir(dir, entry, filename);
-// }
+struct inode* tmpfs_findinode(struct inode* dir, const char* filename)
+{
+    auto* fs = static_cast<tmpfs*>(dir->fs->impl);
+    return fs->findinode(dir, filename);
+}
 int tmpfs_mkfile(struct inode* dir, const char* filename)
 {
     auto* fs = static_cast<tmpfs*>(dir->fs->impl);
@@ -101,7 +102,7 @@ int tmpfs_mkfile(struct inode* dir, const char* filename)
 int tmpfs_mkdir(struct inode* dir, const char* dirname)
 {
     auto* fs = static_cast<tmpfs*>(dir->fs->impl);
-    fs->mkfile(dir, dirname);
+    fs->mkdir(dir, dirname);
     return GB_OK;
 }
 
@@ -109,7 +110,7 @@ static const struct inode_ops tmpfs_inode_ops = {
     .read = tmpfs_read,
     .write = tmpfs_write,
     .readdir = tmpfs_readdir,
-    .finddir = 0,
+    .findinode = tmpfs_findinode,
     .mkfile = tmpfs_mkfile,
     .rmfile = 0,
     .mkdir = tmpfs_mkdir,
@@ -183,7 +184,9 @@ size_t tmpfs::write(struct inode* file, const char* buf, size_t offset, size_t n
 
     auto* data = static_cast<vector<char>*>(file->impl);
 
-    data->at(offset + n - 1) = 0x00;
+    for (size_t i = data->size(); i < offset + n; ++i) {
+        data->push_back(0);
+    }
     memcpy(data->data() + offset, buf, n);
 
     return n;
@@ -205,8 +208,22 @@ int tmpfs::readdir(struct inode* dir, struct dirent* entry, size_t i)
     return GB_OK;
 }
 
-// typedef int (*inode_finddir)(struct inode* dir, struct dirent* entry, const char* filename);
-// typedef int (*inode_rmfile)(struct inode* dir, const char* filename);
+struct inode* tmpfs::findinode(struct inode* dir, const char* filename)
+{
+    struct dirent ent { };
+    size_t i = 0;
+    while (readdir(dir, &ent, i) == GB_OK) {
+        if (strcmp(ent.name, filename) == 0) {
+            // optimize: use hash table to build an index
+            auto& inodes = static_cast<tmpfs*>(dir->fs->impl)->m_inodes;
+            for (auto iter = inodes.begin(); iter != inodes.end(); ++iter)
+                if (iter->ino == ent.ino)
+                    return iter.ptr();
+        }
+        ++i;
+    }
+    return nullptr;
+}
 
 size_t vfs_read(struct inode* file, char* buf, size_t buf_size, size_t offset, size_t n)
 {
@@ -232,12 +249,12 @@ int vfs_readdir(struct inode* dir, struct dirent* entry, size_t i)
         return 0;
     }
 }
-int vfs_finddir(struct inode* dir, struct dirent* entry, const char* filename)
+struct inode* vfs_findinode(struct inode* dir, const char* filename)
 {
-    if (dir->fs->ops->finddir) {
-        return dir->fs->ops->finddir(dir, entry, filename);
+    if (dir->fs->ops->findinode) {
+        return dir->fs->ops->findinode(dir, filename);
     } else {
-        return 0;
+        return nullptr;
     }
 }
 int vfs_mkfile(struct inode* dir, const char* filename)
@@ -276,10 +293,23 @@ void init_vfs(void)
     vfs_mkdir(fs_root, "root");
     vfs_mkfile(fs_root, "init");
 
+    tty_print(console, "/:\n");
     struct dirent ent { };
     int i = 0;
     char buf[256];
     while (vfs_readdir(fs_root, &ent, i) == GB_OK) {
+        snprintf(buf, 256, "%s: inode(%d)\n", ent.name, ent.ino);
+        tty_print(console, buf);
+        ++i;
+    }
+
+    auto* dev = vfs_findinode(fs_root, "dev");
+    vfs_mkfile(dev, "console");
+    auto* file_console = vfs_findinode(dev, "console");
+
+    tty_print(console, "/dev:\n");
+    i = 0;
+    while (vfs_readdir(dev, &ent, i) == GB_OK) {
         snprintf(buf, 256, "%s: inode(%d)\n", ent.name, ent.ino);
         tty_print(console, buf);
         ++i;

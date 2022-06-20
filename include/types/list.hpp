@@ -118,7 +118,12 @@ public:
 
         pointer_type operator->() const noexcept
         {
-            return (static_cast<node_type*>(n))->value;
+            return &(static_cast<node_type*>(n))->value;
+        }
+
+        pointer_type ptr(void) const noexcept
+        {
+            return &(static_cast<node_type*>(n))->value;
         }
 
         node_base_type* _node(void) const noexcept

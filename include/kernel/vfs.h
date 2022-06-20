@@ -35,12 +35,17 @@ struct inode_ops {
     inode_mkdir mkdir;
 };
 
+struct fs_info {
+    const struct inode_ops* ops;
+    void* impl;
+};
+
 struct inode {
     struct inode_flags flags;
     uint32_t perm;
-    uint32_t impl;
+    void* impl;
     uint32_t ino;
-    const struct inode_ops* ops;
+    struct fs_info* fs;
 };
 
 struct dirent {
@@ -48,7 +53,7 @@ struct dirent {
     uint32_t ino;
 };
 
-extern struct inode fs_root;
+extern struct inode* fs_root;
 
 void init_vfs(void);
 

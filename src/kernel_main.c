@@ -130,7 +130,7 @@ void load_new_gdt(void)
 
 void init_bss_section(void)
 {
-    void* bss_addr = bss_section_start_addr;
+    void* bss_addr = (void*)bss_section_start_addr;
     size_t bss_size = bss_section_end_addr - bss_section_start_addr;
     memset(bss_addr, 0x00, bss_size);
 }

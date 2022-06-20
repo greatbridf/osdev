@@ -22,7 +22,7 @@ SECTIONS
     .text.loader 0x7e00 : AT(0x200)
     {
         *(.text.loader)
-        __kernel_size_offset = .;
+        __kernel_text_and_data_size_offset = .;
         LONG(LOADADDR(.data) - LOADADDR(.text));
         __loader_end = .;
     } > WHOLE
@@ -36,8 +36,14 @@ SECTIONS
 
     .data : AT(LOADADDR(.text) + ADDR(.data) - ADDR(.text))
     {
+        kernel_text_and_data_size = .;
+        LONG(__kernel_text_and_data_end - ADDR(.text));
         asm_kernel_size = .;
         LONG(__real_kernel_end - ADDR(.text));
+        bss_section_start_addr = .;
+        LONG(ABSOLUTE(__bss_start));
+        bss_section_end_addr = .;
+        LONG(ABSOLUTE(__bss_end));
 
         start_ctors = .;
         KEEP(*(.init_array));
@@ -46,12 +52,15 @@ SECTIONS
 
         *(.data)
         *(.data*)
+        __kernel_text_and_data_end = .;
     } > WHOLE
 
-    .bss :
+    .bss ALIGN(0x1000) :
     {
+        __bss_start = .;
         *(.bss)
         *(.bss*)
+        __bss_end = ALIGN(0x1000);
     } > WHOLE
 
     .kernel_end :

@@ -230,7 +230,7 @@ start_move_kernel:
     movl $__loader_end, %eax
     movl $__real_kernel_start, %ebx
 
-    movl $__kernel_size_offset, %ecx
+    movl $__kernel_text_and_data_size_offset, %ecx
     movl (%ecx), %ecx
     addl $__loader_end, %ecx
     movl (%ecx), %ecx

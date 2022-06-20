@@ -127,10 +127,19 @@ void load_new_gdt(void)
     asm_cli();
 }
 
+void init_bss_section(void)
+{
+    void* bss_addr = bss_section_start_addr;
+    size_t bss_size = bss_section_end_addr - bss_section_start_addr;
+    memset(bss_addr, 0x00, bss_size);
+}
+
 void kernel_main(void)
 {
     // MAKE_BREAK_POINT();
     asm_enable_sse();
+
+    init_bss_section();
 
     save_loader_data();
 

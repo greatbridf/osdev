@@ -11,6 +11,7 @@
 #include <kernel/mem.h>
 #include <kernel/stdio.h>
 #include <kernel/tty.h>
+#include <kernel/vfs.h>
 #include <kernel/vga.h>
 #include <types/bitmap.h>
 
@@ -181,6 +182,8 @@ void kernel_main(void)
     k_free(k_malloc_buf);
 
     k_malloc_buf[4096] = '\x89';
+
+    init_vfs();
 
     printkf("No work to do, halting...\n");
 

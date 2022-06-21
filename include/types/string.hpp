@@ -65,6 +65,15 @@ public:
     {
         return string(this->m_arr + pos, n);
     }
+    const char* c_str(void) const noexcept
+    {
+        return this->data();
+    }
+    void clear(void)
+    {
+        inner_vector_type::clear();
+        this->push_back(0x00);
+    }
 };
 } // namespace types
 

@@ -273,6 +273,13 @@ public:
         return size() == 0;
     }
 
+    void clear(void)
+    {
+        for (size_t i = 0; i < size(); ++i)
+            allocator_traits<allocator_type>::deconstruct(m_arr + i);
+        m_size = 0;
+    }
+
     // TODO
 
     // iterator_type r_start() noexcept;

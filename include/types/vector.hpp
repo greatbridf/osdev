@@ -2,6 +2,7 @@
 
 #include <kernel/mem.h>
 #include <types/allocator.hpp>
+#include <types/cplusplus.hpp>
 #include <types/types.h>
 
 namespace types {
@@ -9,19 +10,26 @@ namespace types {
 template <typename T, template <typename _value_type> class Allocator = kernel_allocator>
 class vector {
 public:
+    template <typename Pointer>
     class iterator;
 
     using value_type = T;
     using pointer_type = value_type*;
     using reference_type = value_type&;
-    using iterator_type = iterator;
+    using iterator_type = iterator<value_type*>;
+    using const_iterator_type = iterator<const value_type*>;
     using size_type = size_t;
     using difference_type = ssize_t;
     using index_type = size_type;
     using allocator_type = Allocator<value_type>;
 
 public:
+    template <typename Pointer>
     class iterator {
+    public:
+        using Value = typename types::traits::remove_pointer<Pointer>::type;
+        using Reference = typename types::traits::add_reference<Value>::type;
+
     public:
         explicit iterator(const iterator& iter) noexcept
             : p(iter.p)
@@ -33,7 +41,7 @@ public:
         {
         }
 
-        explicit iterator(pointer_type p) noexcept
+        explicit iterator(Pointer p) noexcept
             : p(p)
         {
         }
@@ -74,25 +82,33 @@ public:
             return iter;
         }
 
-        reference_type operator*() const noexcept
+        Reference operator*() const noexcept
         {
             return *p;
         }
 
-        pointer_type operator->() const noexcept
+        Pointer operator->() const noexcept
         {
             return p;
         }
 
     protected:
-        pointer_type p;
+        Pointer p;
     };
 
 public:
-    vector() noexcept
+    explicit vector(size_type capacity = 1) noexcept
         : m_size(0)
     {
-        resize(1);
+        resize(capacity);
+    }
+
+    vector(const vector<T, Allocator>& arr) noexcept
+        : m_size(0)
+    {
+        resize(arr.capacity());
+        for (const auto& item : arr)
+            push_back(item);
     }
 
     ~vector() noexcept
@@ -122,11 +138,11 @@ public:
     // TODO: find
 
     // erase the node which iter points to
-    void erase(const iterator_type& iter) noexcept
-    {
-        allocator_traits<allocator_type>::deconstruct(iter.p);
-        --m_size;
-    }
+    // void erase(const iterator_type& iter) noexcept
+    // {
+    //     allocator_traits<allocator_type>::deconstruct(iter.p);
+    //     --m_size;
+    // }
 
     // insert the value v in front of the given iterator
     // void insert(const iterator_type& iter, const value_type& v) noexcept
@@ -196,9 +212,30 @@ public:
         ++m_size;
     }
 
-    size_t size(void) const noexcept
+    void pop_back(void) noexcept
+    {
+        allocator_traits<allocator_type>::deconstruct(&*back());
+        --m_size;
+    }
+
+    size_type size(void) const noexcept
     {
         return m_size;
+    }
+
+    size_type capacity(void) const noexcept
+    {
+        return m_capacity;
+    }
+
+    const_iterator_type cbegin() const noexcept
+    {
+        return const_iterator_type(m_arr);
+    }
+
+    const_iterator_type cend() const noexcept
+    {
+        return const_iterator_type(m_arr + m_size);
     }
 
     iterator_type begin() noexcept
@@ -206,9 +243,29 @@ public:
         return iterator_type(m_arr);
     }
 
+    const_iterator_type begin() const noexcept
+    {
+        return cbegin();
+    }
+
     iterator_type end() noexcept
     {
         return iterator_type(m_arr + m_size);
+    }
+
+    const_iterator_type end() const noexcept
+    {
+        return cend();
+    }
+
+    iterator_type back() noexcept
+    {
+        return iterator_type(m_arr + m_size - 1);
+    }
+
+    const iterator_type back() const noexcept
+    {
+        return const_iterator_type(m_arr + m_size - 1);
     }
 
     bool empty(void) const noexcept
@@ -217,8 +274,6 @@ public:
     }
 
     // TODO
-    // iterator_type cstart() noexcept;
-    // iterator_type cend() noexcept;
 
     // iterator_type r_start() noexcept;
     // iterator_type r_end() noexcept;
@@ -226,13 +281,17 @@ public:
     // iterator_type cr_start() noexcept;
     // iterator_type cr_end() noexcept;
 
-private:
+protected:
+    inline const value_type& _at(index_type i) const
+    {
+        return m_arr[i];
+    }
     inline value_type& _at(index_type i)
     {
         return m_arr[i];
     }
 
-private:
+protected:
     value_type* m_arr;
     size_type m_capacity;
     size_type m_size;

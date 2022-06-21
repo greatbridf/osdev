@@ -79,7 +79,9 @@ set(KERNEL_MAIN_SOURCES src/kernel_main.c
                         include/types/stdint.h
                         include/types/list.h
                         include/types/allocator.hpp
+                        include/types/cplusplus.hpp
                         include/types/list.hpp
+                        include/types/string.hpp
                         include/types/vector.hpp
                         include/kernel_main.h
                         )

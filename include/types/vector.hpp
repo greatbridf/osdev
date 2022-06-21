@@ -208,7 +208,7 @@ public:
 
     iterator_type end() noexcept
     {
-        return iterator_type(m_arr + m_size - 1);
+        return iterator_type(m_arr + m_size);
     }
 
     bool empty(void) const noexcept

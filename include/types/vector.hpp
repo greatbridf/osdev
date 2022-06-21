@@ -31,12 +31,12 @@ public:
         using Reference = typename types::traits::add_reference<Value>::type;
 
     public:
-        explicit iterator(const iterator& iter) noexcept
+        iterator(const iterator& iter) noexcept
             : p(iter.p)
         {
         }
 
-        explicit iterator(iterator&& iter) noexcept
+        iterator(iterator&& iter) noexcept
             : p(iter.p)
         {
         }
@@ -79,6 +79,18 @@ public:
         {
             iterator iter(*this);
             --p;
+            return iter;
+        }
+
+        iterator operator+(size_type n) noexcept
+        {
+            iterator iter(p + n);
+            return iter;
+        }
+
+        iterator operator-(size_type n) noexcept
+        {
+            iterator iter(p - n);
             return iter;
         }
 
@@ -132,7 +144,7 @@ public:
             allocator_traits<allocator_type>::deconstruct(m_arr + i);
 
         if (m_arr)
-        allocator_traits<allocator_type>::deallocate(m_arr);
+            allocator_traits<allocator_type>::deallocate(m_arr);
         m_arr = new_ptr;
     }
 

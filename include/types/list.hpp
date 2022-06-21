@@ -60,12 +60,12 @@ private:
 public:
     class iterator {
     public:
-        explicit iterator(const iterator& iter) noexcept
+        iterator(const iterator& iter) noexcept
             : n(iter.n)
         {
         }
 
-        explicit iterator(iterator&& iter) noexcept
+        iterator(iterator&& iter) noexcept
             : n(iter.n)
         {
         }

@@ -74,6 +74,26 @@ public:
         inner_vector_type::clear();
         this->push_back(0x00);
     }
+    char pop(void)
+    {
+        this->pop_back();
+        auto iter = inner_vector_type::back();
+        char c = *iter;
+        *iter = 0x00;
+        return c;
+    }
+    typename inner_vector_type::iterator_type back(void)
+    {
+        return --inner_vector_type::back();
+    }
+    typename inner_vector_type::const_iterator_type back(void) const
+    {
+        return --inner_vector_type::back();
+    }
+    typename inner_vector_type::const_iterator_type cback(void) const
+    {
+        return --inner_vector_type::cback();
+    }
 };
 } // namespace types
 

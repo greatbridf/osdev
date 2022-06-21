@@ -65,6 +65,9 @@ int vfs_mkfile(struct inode* dir, const char* filename);
 int vfs_rmfile(struct inode* dir, const char* filename);
 int vfs_mkdir(struct inode* dir, const char* dirname);
 
+// @return pointer to the inode if found, nullptr if not
+struct inode* vfs_open(const char* path);
+
 #ifdef __cplusplus
 }
 #endif

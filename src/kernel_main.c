@@ -185,6 +185,9 @@ void kernel_main(void)
 
     init_vfs();
 
+    struct inode* init = vfs_open("/init");
+    vfs_read(init, buf, 128, 1, 10);
+
     printkf("No work to do, halting...\n");
 
     while (1) {

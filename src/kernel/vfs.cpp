@@ -281,6 +281,49 @@ int vfs_mkdir(struct inode* dir, const char* dirname)
         return 0;
     }
 }
+
+struct inode* vfs_open(const char* path)
+{
+    struct inode* cur = fs_root;
+    size_t n = 0;
+    char buf[128] {};
+    switch (*(path++)) {
+    // absolute path
+    case '/':
+        while (true) {
+            if (path[n] == 0x00) {
+                strncpy(buf, path, n);
+                buf[n] = 0x00;
+                cur = vfs_findinode(cur, buf);
+                return cur;
+            }
+            if (path[n] == '/') {
+                strncpy(buf, path, n);
+                buf[n] = 0x00;
+                cur = vfs_findinode(cur, buf);
+                if (path[n + 1] == 0x00) {
+                    return cur;
+                } else {
+                    path += (n + 1);
+                    n = 0;
+                    continue;
+                }
+            }
+            ++n;
+        }
+        break;
+    // empty string
+    case 0x00:
+        return nullptr;
+        break;
+    // relative path
+    default:
+        return nullptr;
+        break;
+    }
+    return nullptr;
+}
+
 struct inode* fs_root;
 static tmpfs* rootfs;
 
@@ -293,25 +336,7 @@ void init_vfs(void)
     vfs_mkdir(fs_root, "root");
     vfs_mkfile(fs_root, "init");
 
-    tty_print(console, "/:\n");
-    struct dirent ent { };
-    int i = 0;
-    char buf[256];
-    while (vfs_readdir(fs_root, &ent, i) == GB_OK) {
-        snprintf(buf, 256, "%s: inode(%d)\n", ent.name, ent.ino);
-        tty_print(console, buf);
-        ++i;
-    }
-
-    auto* dev = vfs_findinode(fs_root, "dev");
-    vfs_mkfile(dev, "console");
-    auto* file_console = vfs_findinode(dev, "console");
-
-    tty_print(console, "/dev:\n");
-    i = 0;
-    while (vfs_readdir(dev, &ent, i) == GB_OK) {
-        snprintf(buf, 256, "%s: inode(%d)\n", ent.name, ent.ino);
-        tty_print(console, buf);
-        ++i;
-    }
+    auto* init = vfs_open("/init");
+    const char* str = "#/bin/sh\nexec /bin/sh\n";
+    vfs_write(init, str, 0, strlen(str));
 }

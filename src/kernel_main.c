@@ -11,6 +11,7 @@
 #include <kernel/mem.h>
 #include <kernel/stdio.h>
 #include <kernel/tty.h>
+#include <kernel/vfs.h>
 #include <kernel/vga.h>
 #include <types/bitmap.h>
 
@@ -129,7 +130,7 @@ void load_new_gdt(void)
 
 void init_bss_section(void)
 {
-    void* bss_addr = bss_section_start_addr;
+    void* bss_addr = (void*)bss_section_start_addr;
     size_t bss_size = bss_section_end_addr - bss_section_start_addr;
     memset(bss_addr, 0x00, bss_size);
 }
@@ -181,6 +182,11 @@ void kernel_main(void)
     k_free(k_malloc_buf);
 
     k_malloc_buf[4096] = '\x89';
+
+    init_vfs();
+
+    struct inode* init = vfs_open("/init");
+    vfs_read(init, buf, 128, 1, 10);
 
     printkf("No work to do, halting...\n");
 

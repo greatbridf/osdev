@@ -46,6 +46,7 @@ set(KERNEL_MAIN_SOURCES src/kernel_main.c
                         src/kernel/tty.c
                         src/kernel/stdio.c
                         src/kernel/mem.c
+                        src/kernel/vfs.cpp
                         src/kernel/vga.c
                         src/kernel/hw/keyboard.cpp
                         src/kernel/hw/serial.c
@@ -63,6 +64,7 @@ set(KERNEL_MAIN_SOURCES src/kernel_main.c
                         include/kernel/process.h
                         include/kernel/stdio.h
                         include/kernel/mem.h
+                        include/kernel/vfs.h
                         include/kernel/vga.h
                         include/kernel/hw/keyboard.h
                         include/kernel/hw/serial.h
@@ -76,7 +78,11 @@ set(KERNEL_MAIN_SOURCES src/kernel_main.c
                         include/types/status.h
                         include/types/stdint.h
                         include/types/list.h
+                        include/types/allocator.hpp
+                        include/types/cplusplus.hpp
                         include/types/list.hpp
+                        include/types/string.hpp
+                        include/types/vector.hpp
                         include/kernel_main.h
                         )
 add_library(kernel_main STATIC ${KERNEL_MAIN_SOURCES})

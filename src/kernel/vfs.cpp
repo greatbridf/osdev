@@ -251,9 +251,15 @@ int tmpfs::stat(struct inode* dir, struct stat* stat, const char* filename)
         return GB_FAILED;
     }
 
-    stat->st_blksize = 1;
-    stat->st_blocks = static_cast<vector<char>*>(file_inode->impl)->size();
     stat->st_ino = file_inode->ino;
+    if (file_inode->flags.file) {
+        stat->st_blksize = 1;
+        stat->st_blocks = static_cast<vector<char>*>(file_inode->impl)->size();
+    }
+    if (file_inode->flags.directory) {
+        stat->st_blksize = sizeof(struct tmpfs_file_entry);
+        stat->st_blocks = static_cast<vector<struct tmpfs_file_entry>*>(file_inode->impl)->size();
+    }
 
     return GB_OK;
 }
@@ -360,6 +366,15 @@ struct inode* vfs_open(const char* path)
 
 int vfs_stat(struct stat* stat, const char* _path)
 {
+    if (_path[0] == '/' && _path[1] == 0x00) {
+        if (fs_root->fs->ops->stat) {
+            return fs_root->fs->ops->stat(fs_root, stat, ".");
+        } else {
+            errno = EINVAL;
+            return GB_FAILED;
+        }
+    }
+
     string path(_path);
     auto iter = path.back();
     while (*(iter - 1) != '/')
@@ -399,5 +414,8 @@ void init_vfs(void)
     vfs_write(init, str, 0, strlen(str));
 
     struct stat _stat { };
+
     vfs_stat(&_stat, "/init");
+    vfs_stat(&_stat, "/");
+    vfs_stat(&_stat, "/dev");
 }

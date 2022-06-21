@@ -263,7 +263,7 @@ public:
         return iterator_type(m_arr + m_size - 1);
     }
 
-    const iterator_type back() const noexcept
+    const_iterator_type back() const noexcept
     {
         return const_iterator_type(m_arr + m_size - 1);
     }

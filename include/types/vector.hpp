@@ -98,15 +98,15 @@ public:
 
 public:
     explicit vector(size_type capacity = 1) noexcept
-        : m_size(0)
+        : m_arr(nullptr)
+        , m_size(0)
     {
         resize(capacity);
     }
 
     vector(const vector<T, Allocator>& arr) noexcept
-        : m_size(0)
+        : vector(arr.capacity())
     {
-        resize(arr.capacity());
         for (const auto& item : arr)
             push_back(item);
     }
@@ -131,6 +131,7 @@ public:
         for (size_t i = 0; i < orig_size; ++i)
             allocator_traits<allocator_type>::deconstruct(m_arr + i);
 
+        if (m_arr)
         allocator_traits<allocator_type>::deallocate(m_arr);
         m_arr = new_ptr;
     }

@@ -1,14 +1,17 @@
+#include <kernel/errno.h>
 #include <kernel/mem.h>
 #include <kernel/stdio.h>
 #include <kernel/tty.h>
 #include <kernel/vfs.h>
 #include <types/allocator.hpp>
 #include <types/list.hpp>
+#include <types/string.hpp>
 #include <types/vector.hpp>
 
 using types::allocator_traits;
 using types::kernel_allocator;
 using types::list;
+using types::string;
 using types::vector;
 
 struct tmpfs_file_entry {
@@ -60,6 +63,7 @@ public:
     size_t write(struct inode* file, const char* buf, size_t offset, size_t n);
     int readdir(struct inode* dir, struct dirent* entry, size_t i);
     struct inode* findinode(struct inode* dir, const char* filename);
+    int stat(struct inode* dir, struct stat* stat, const char* filename);
 
     struct inode* root_inode(void)
     {
@@ -105,6 +109,11 @@ int tmpfs_mkdir(struct inode* dir, const char* dirname)
     fs->mkdir(dir, dirname);
     return GB_OK;
 }
+int tmpfs_stat(struct inode* dir, struct stat* stat, const char* filename)
+{
+    auto* fs = static_cast<tmpfs*>(dir->fs->impl);
+    return fs->stat(dir, stat, filename);
+}
 
 static const struct inode_ops tmpfs_inode_ops = {
     .read = tmpfs_read,
@@ -114,6 +123,7 @@ static const struct inode_ops tmpfs_inode_ops = {
     .mkfile = tmpfs_mkfile,
     .rmfile = 0,
     .mkdir = tmpfs_mkdir,
+    .stat = tmpfs_stat,
 };
 
 tmpfs::tmpfs(size_t limit)
@@ -194,13 +204,17 @@ size_t tmpfs::write(struct inode* file, const char* buf, size_t offset, size_t n
 
 int tmpfs::readdir(struct inode* dir, struct dirent* entry, size_t i)
 {
-    if (dir->flags.directory != 1)
+    if (dir->flags.directory != 1) {
+        errno = ENOTDIR;
         return GB_FAILED;
+    }
 
     auto* fes = static_cast<vector<struct tmpfs_file_entry>*>(dir->impl);
 
-    if (i >= fes->size())
+    if (i >= fes->size()) {
+        errno = ENOENT;
         return GB_FAILED;
+    }
 
     entry->ino = fes->at(i).ino;
     snprintf(entry->name, sizeof(entry->name), fes->at(i).filename);
@@ -223,6 +237,25 @@ struct inode* tmpfs::findinode(struct inode* dir, const char* filename)
         ++i;
     }
     return nullptr;
+}
+
+int tmpfs::stat(struct inode* dir, struct stat* stat, const char* filename)
+{
+    // for later use
+    // auto* fes = static_cast<vector<struct tmpfs_file_entry>*>(dir->impl);
+
+    auto* file_inode = vfs_findinode(dir, filename);
+
+    if (!file_inode) {
+        errno = ENOENT;
+        return GB_FAILED;
+    }
+
+    stat->st_blksize = 1;
+    stat->st_blocks = static_cast<vector<char>*>(file_inode->impl)->size();
+    stat->st_ino = file_inode->ino;
+
+    return GB_OK;
 }
 
 size_t vfs_read(struct inode* file, char* buf, size_t buf_size, size_t offset, size_t n)
@@ -284,23 +317,24 @@ int vfs_mkdir(struct inode* dir, const char* dirname)
 
 struct inode* vfs_open(const char* path)
 {
+    if (path[0] == '/' && path[1] == 0x00) {
+        return fs_root;
+    }
+
     struct inode* cur = fs_root;
     size_t n = 0;
-    char buf[128] {};
     switch (*(path++)) {
     // absolute path
     case '/':
         while (true) {
             if (path[n] == 0x00) {
-                strncpy(buf, path, n);
-                buf[n] = 0x00;
-                cur = vfs_findinode(cur, buf);
+                string fname(path, n);
+                cur = vfs_findinode(cur, fname.c_str());
                 return cur;
             }
             if (path[n] == '/') {
-                strncpy(buf, path, n);
-                buf[n] = 0x00;
-                cur = vfs_findinode(cur, buf);
+                string fname(path, n);
+                cur = vfs_findinode(cur, fname.c_str());
                 if (path[n + 1] == 0x00) {
                     return cur;
                 } else {
@@ -324,6 +358,30 @@ struct inode* vfs_open(const char* path)
     return nullptr;
 }
 
+int vfs_stat(struct stat* stat, const char* _path)
+{
+    string path(_path);
+    auto iter = path.back();
+    while (*(iter - 1) != '/')
+        --iter;
+    string filename(&*iter);
+    string parent_path = path.substr(0, &*iter - path.data());
+
+    auto* dir_inode = vfs_open(parent_path.c_str());
+
+    if (!dir_inode) {
+        errno = ENOENT;
+        return GB_FAILED;
+    }
+
+    if (dir_inode->fs->ops->stat) {
+        return dir_inode->fs->ops->stat(dir_inode, stat, filename.c_str());
+    } else {
+        errno = EINVAL;
+        return GB_FAILED;
+    }
+}
+
 struct inode* fs_root;
 static tmpfs* rootfs;
 
@@ -339,4 +397,7 @@ void init_vfs(void)
     auto* init = vfs_open("/init");
     const char* str = "#/bin/sh\nexec /bin/sh\n";
     vfs_write(init, str, 0, strlen(str));
+
+    struct stat _stat { };
+    vfs_stat(&_stat, "/init");
 }

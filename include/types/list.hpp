@@ -168,7 +168,12 @@ public:
         allocator_traits<sentry_allocator_type>::deconstruct_and_deallocate(static_cast<sentry_node_type*>(tail));
     }
 
-    // TODO: find
+    iterator_type find(const value_type& v) noexcept
+    {
+        for (iterator_type iter = begin(); iter != end(); ++iter)
+            if (*iter == v)
+                return iter;
+    }
 
     // erase the node which iter points to
     void erase(const iterator_type& iter) noexcept

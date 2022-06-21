@@ -449,6 +449,20 @@ size_t strlen(const char* str)
     return n;
 }
 
+char* strncpy(char* dst, const char* src, size_t n)
+{
+    size_t len = strlen(src);
+
+    if (len < n) {
+        memset(dst + len, 0x00, n - len);
+        memcpy(dst, src, len);
+    } else {
+        memcpy(dst, src, n);
+    }
+
+    return dst;
+}
+
 int strcmp(const char* s1, const char* s2)
 {
     int c;

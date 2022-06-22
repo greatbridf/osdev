@@ -1,5 +1,5 @@
 #pragma once
-#include <kernel/mem.h>
+#include <kernel/mem.hpp>
 #include <types/types.h>
 
 inline void* operator new(size_t, void* ptr)

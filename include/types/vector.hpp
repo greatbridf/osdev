@@ -1,6 +1,6 @@
 #pragma once
 
-#include <kernel/mem.h>
+#include <kernel/mem.hpp>
 #include <types/allocator.hpp>
 #include <types/cplusplus.hpp>
 #include <types/types.h>

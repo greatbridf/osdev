@@ -2,7 +2,7 @@
 #include <asm/port_io.h>
 #include <asm/sys.h>
 #include <kernel/errno.h>
-#include <kernel/mem.h>
+#include <kernel/mem.hpp>
 #include <kernel/stdio.h>
 #include <kernel/task.h>
 #include <kernel/vga.h>
@@ -48,7 +48,7 @@ static int32_t brk(void* addr)
 // sets errno when failed to increase heap pointer
 static void* sbrk(size_t increment)
 {
-    if (brk(p_break + increment) != 0) {
+    if (brk((char*)p_break + increment) != 0) {
         errno = ENOMEM;
         return 0;
     } else {
@@ -64,11 +64,20 @@ int init_heap(void)
     if (brk(KERNEL_HEAP_START) != 0) {
         return GB_FAILED;
     }
-    struct mem_blk* p_blk = sbrk(0);
+    struct mem_blk* p_blk = (struct mem_blk*)sbrk(0);
     p_blk->size = 4;
     p_blk->flags.has_next = 0;
     p_blk->flags.is_free = 1;
     return GB_OK;
+}
+
+static inline struct mem_blk* _find_next_mem_blk(struct mem_blk* blk, size_t blk_size)
+{
+    char* p = (char*)blk;
+    p += sizeof(struct mem_blk);
+    p += blk_size;
+    p -= (4 * sizeof(uint8_t));
+    return (struct mem_blk*)p;
 }
 
 // @param start_pos position where to start finding
@@ -88,10 +97,7 @@ find_blk(
                 errno = ENOTFOUND;
                 return start_pos;
             }
-            start_pos = ((void*)start_pos)
-                + sizeof(struct mem_blk)
-                + start_pos->size
-                - 4 * sizeof(uint8_t);
+            start_pos = _find_next_mem_blk(start_pos, start_pos->size);
         }
     }
 }
@@ -106,10 +112,7 @@ allocate_new_block(
         return 0;
     }
 
-    struct mem_blk* blk = ((void*)blk_before)
-        + sizeof(struct mem_blk)
-        + blk_before->size
-        - 4 * sizeof(uint8_t);
+    struct mem_blk* blk = _find_next_mem_blk(blk_before, blk_before->size);
 
     blk_before->flags.has_next = 1;
 
@@ -130,10 +133,7 @@ static void split_block(
         return;
     }
 
-    struct mem_blk* blk_next = ((void*)blk)
-        + sizeof(struct mem_blk)
-        + this_size
-        - 4 * sizeof(uint8_t);
+    struct mem_blk* blk_next = _find_next_mem_blk(blk, this_size);
 
     blk_next->size = blk->size
         - this_size
@@ -151,7 +151,7 @@ void* k_malloc(size_t size)
 {
     struct mem_blk* block_allocated;
 
-    block_allocated = find_blk(p_start, size);
+    block_allocated = find_blk((struct mem_blk*)p_start, size);
     if (errno == ENOTFOUND) {
         // 'block_allocated' in the argument list is the pointer
         // pointing to the last block
@@ -168,7 +168,7 @@ void* k_malloc(size_t size)
 
 void k_free(void* ptr)
 {
-    ptr -= (sizeof(struct mem_blk_flags) + sizeof(size_t));
+    ptr = (void*)((char*)ptr - (sizeof(struct mem_blk_flags) + sizeof(size_t)));
     struct mem_blk* blk = (struct mem_blk*)ptr;
     blk->flags.is_free = 1;
     // TODO: fusion free blocks nearby
@@ -190,13 +190,12 @@ phys_ptr_t l_ptr_to_p_ptr(struct mm* mm, linr_ptr_t v_ptr)
 {
     while (mm != NULL) {
         if (v_ptr < mm->start || v_ptr >= mm->start + mm->len * 4096) {
-            goto next;
+            mm = mm->next;
+            continue;
         }
         size_t offset = (size_t)(v_ptr - mm->start);
         LIST_LIKE_AT(struct page, mm->pgs, offset / PAGE_SIZE, result);
         return page_to_phys_addr(result->phys_page_id) + (offset % 4096);
-    next:
-        mm = mm->next;
     }
 
     // TODO: handle error
@@ -397,7 +396,7 @@ int k_map(
             page = page->next;
 
         // create a new page node
-        struct page* new_page = k_malloc(sizeof(struct page));
+        struct page* new_page = (struct page*)k_malloc(sizeof(struct page));
 
         new_page->attr.read = (read == 1);
         new_page->attr.write = (write == 1);

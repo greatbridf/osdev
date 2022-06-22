@@ -8,7 +8,7 @@
 #include <kernel/hw/serial.h>
 #include <kernel/hw/timer.h>
 #include <kernel/interrupt.h>
-#include <kernel/mem.h>
+#include <kernel/mem.hpp>
 #include <kernel/stdio.h>
 #include <kernel/tty.h>
 #include <kernel/vfs.h>

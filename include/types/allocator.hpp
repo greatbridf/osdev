@@ -19,7 +19,7 @@ public:
 
     static value_type* allocate_memory(size_t count)
     {
-        return static_cast<value_type*>(::k_malloc(sizeof(value_type) * count));
+        return static_cast<value_type*>(::k_malloc(count));
     }
 
     static void deallocate_memory(value_type* ptr)

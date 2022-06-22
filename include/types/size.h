@@ -2,6 +2,12 @@
 
 #include "stdint.h"
 
+#ifdef __GNUC__
+#define PACKED __attribute__((__packed__))
+#else
+#error "no definition for ((PACKED))"
+#endif
+
 #define __32bit_system
 
 #ifdef __32bit_system

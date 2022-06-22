@@ -2,26 +2,27 @@
 
 .text
 
+# TODO: stack alignment
 .globl int6
 .type  int6 @function
 int6:
-    xchgw %bx, %bx
     pushal
     call int6_handler
     popal
 
     iret
 
+# TODO: stack alignment
 .globl int8
 .type  int8 @function
 int8:
     nop
     iret
 
+# TODO: stack alignment
 .globl int13
 .type  int13 @function
 int13:
-    xchgw %bx, %bx
     pushal
     call int13_handler
     popal
@@ -33,11 +34,21 @@ int13:
 .globl int14
 .type  int14 @function
 int14:
-    xchgw %bx, %bx
     pushal
     movl %cr2, %eax
     pushl %eax
+
+    # stack alignment and push *data
+    movl %esp, %eax
+    subl $0x4, %esp
+    andl $0xfffffff0, %esp
+    movl %eax, (%esp)
+
     call int14_handler
+
+    # restore stack
+    popl %esp
+
     popl %eax
     popal
 
@@ -49,7 +60,18 @@ int14:
 .type  irq0 @function
 irq0:
     pushal
+
+    # stack alignment and push *data
+    movl %esp, %eax
+    subl $0x4, %esp
+    andl $0xfffffff0, %esp
+    movl %eax, (%esp)
+
     call irq0_handler
+
+    # restore stack
+    popl %esp
+
     popal
     iret
 

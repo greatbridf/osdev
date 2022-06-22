@@ -1,5 +1,5 @@
 #include <kernel/errno.h>
-#include <kernel/mem.hpp>
+#include <kernel/mem.h>
 #include <kernel/stdio.h>
 #include <kernel/tty.h>
 #include <kernel/vfs.h>

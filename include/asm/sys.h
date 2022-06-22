@@ -1,6 +1,6 @@
 #pragma once
 
-#include <kernel/mem.hpp>
+#include <kernel/mem.h>
 #include <types/types.h>
 
 #ifdef __cplusplus

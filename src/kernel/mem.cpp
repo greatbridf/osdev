@@ -2,18 +2,17 @@
 #include <asm/port_io.h>
 #include <asm/sys.h>
 #include <kernel/errno.h>
-#include <kernel/mem.hpp>
+#include <kernel/mem.h>
+#include <kernel/mm.hpp>
 #include <kernel/stdio.h>
 #include <kernel/task.h>
 #include <kernel/vga.h>
 #include <kernel_main.h>
 #include <types/bitmap.h>
-#include <types/list.h>
 
-// static variables
+// global objects
 
-struct mm kernel_mm;
-struct mm* kernel_mm_head;
+mm_list* kernel_mms;
 
 // ---------------------
 
@@ -22,156 +21,203 @@ struct mm* kernel_mm_head;
 #define EMPTY_PAGE_ADDR ((phys_ptr_t)0x5000)
 #define EMPTY_PAGE_END ((phys_ptr_t)0x6000)
 
-// ---------------------
+#define IDENTICALLY_MAPPED_HEAP_SIZE ((size_t)0x400000)
 
-static void* p_start;
-static void* p_break;
+// ---------------------
 
 static size_t mem_size;
 static char mem_bitmap[1024 * 1024 / 8];
 
-static int32_t set_heap_start(void* start_addr)
-{
-    p_start = start_addr;
-    return 0;
-}
+class brk_memory_allocator {
+public:
+    using byte = uint8_t;
+    using size_type = size_t;
 
-static int32_t brk(void* addr)
-{
-    if (addr >= KERNEL_HEAP_LIMIT) {
-        return GB_FAILED;
+    struct mem_blk_flags {
+        uint8_t is_free;
+        uint8_t has_next;
+        uint8_t _unused2;
+        uint8_t _unused3;
+    };
+
+    struct mem_blk {
+        size_t size;
+        struct mem_blk_flags flags;
+        // the first byte of the memory space
+        // the minimal allocated space is 4 bytes
+        uint8_t data[4];
+    };
+
+private:
+    byte* p_start;
+    byte* p_break;
+    byte* p_limit;
+
+    brk_memory_allocator(void) = delete;
+    brk_memory_allocator(const brk_memory_allocator&) = delete;
+    brk_memory_allocator(brk_memory_allocator&&) = delete;
+
+    inline int brk(byte* addr)
+    {
+        if (addr >= p_limit)
+            return GB_FAILED;
+        p_break = addr;
+        return GB_OK;
     }
-    p_break = addr;
-    return 0;
-}
 
-// sets errno when failed to increase heap pointer
-static void* sbrk(size_t increment)
-{
-    if (brk((char*)p_break + increment) != 0) {
-        errno = ENOMEM;
-        return 0;
-    } else {
-        errno = 0;
-        return p_break;
-    }
-}
-
-int init_heap(void)
-{
-    set_heap_start(KERNEL_HEAP_START);
-
-    if (brk(KERNEL_HEAP_START) != 0) {
-        return GB_FAILED;
-    }
-    struct mem_blk* p_blk = (struct mem_blk*)sbrk(0);
-    p_blk->size = 4;
-    p_blk->flags.has_next = 0;
-    p_blk->flags.is_free = 1;
-    return GB_OK;
-}
-
-static inline struct mem_blk* _find_next_mem_blk(struct mem_blk* blk, size_t blk_size)
-{
-    char* p = (char*)blk;
-    p += sizeof(struct mem_blk);
-    p += blk_size;
-    p -= (4 * sizeof(uint8_t));
-    return (struct mem_blk*)p;
-}
-
-// @param start_pos position where to start finding
-// @param size the size of the block we're looking for
-// @return found block if suitable block exists, if not, the last block
-static struct mem_blk*
-find_blk(
-    struct mem_blk* start_pos,
-    size_t size)
-{
-    while (1) {
-        if (start_pos->flags.is_free && start_pos->size >= size) {
-            errno = 0;
-            return start_pos;
+    // sets errno
+    inline byte* sbrk(size_type increment)
+    {
+        if (brk(p_break + increment) != GB_OK) {
+            errno = ENOMEM;
+            return nullptr;
         } else {
-            if (!start_pos->flags.has_next) {
-                errno = ENOTFOUND;
-                return start_pos;
-            }
-            start_pos = _find_next_mem_blk(start_pos, start_pos->size);
+            errno = 0;
+            return p_break;
         }
     }
-}
 
-static struct mem_blk*
-allocate_new_block(
-    struct mem_blk* blk_before,
-    size_t size)
-{
-    sbrk(sizeof(struct mem_blk) + size - 4 * sizeof(uint8_t));
-    if (errno) {
-        return 0;
+    inline mem_blk* _find_next_mem_blk(mem_blk* blk, size_type blk_size)
+    {
+        byte* p = (byte*)blk;
+        p += sizeof(mem_blk);
+        p += blk_size;
+        p -= (4 * sizeof(byte));
+        return (mem_blk*)p;
     }
 
-    struct mem_blk* blk = _find_next_mem_blk(blk_before, blk_before->size);
-
-    blk_before->flags.has_next = 1;
-
-    blk->flags.has_next = 0;
-    blk->flags.is_free = 1;
-    blk->size = size;
-
-    errno = 0;
-    return blk;
-}
-
-static void split_block(
-    struct mem_blk* blk,
-    size_t this_size)
-{
-    // block is too small to get split
-    if (blk->size < sizeof(struct mem_blk) + this_size) {
-        return;
+    // sets errno
+    // @param start_pos position where to start finding
+    // @param size the size of the block we're looking for
+    // @return found block if suitable block exists, if not, the last block
+    mem_blk* find_blk(mem_blk* start_pos, size_type size)
+    {
+        while (1) {
+            if (start_pos->flags.is_free && start_pos->size >= size) {
+                errno = 0;
+                return start_pos;
+            } else {
+                if (!start_pos->flags.has_next) {
+                    errno = ENOTFOUND;
+                    return start_pos;
+                }
+                start_pos = _find_next_mem_blk(start_pos, start_pos->size);
+            }
+        }
     }
 
-    struct mem_blk* blk_next = _find_next_mem_blk(blk, this_size);
+    // sets errno
+    mem_blk* allocate_new_block(mem_blk* blk_before, size_type size)
+    {
+        sbrk(sizeof(mem_blk) + size - 4 * sizeof(byte));
+        // preserves errno
+        if (errno) {
+            return nullptr;
+        }
 
-    blk_next->size = blk->size
-        - this_size
-        - sizeof(struct mem_blk)
-        + 4 * sizeof(uint8_t);
+        mem_blk* blk = _find_next_mem_blk(blk_before, blk_before->size);
 
-    blk_next->flags.has_next = blk->flags.has_next;
-    blk_next->flags.is_free = 1;
+        blk_before->flags.has_next = 1;
 
-    blk->flags.has_next = 1;
-    blk->size = this_size;
-}
+        blk->flags.has_next = 0;
+        blk->flags.is_free = 1;
+        blk->size = size;
+
+        errno = 0;
+        return blk;
+    }
+
+    void split_block(mem_blk* blk, size_type this_size)
+    {
+        // block is too small to get split
+        if (blk->size < sizeof(mem_blk) + this_size) {
+            return;
+        }
+
+        mem_blk* blk_next = _find_next_mem_blk(blk, this_size);
+
+        blk_next->size = blk->size
+            - this_size
+            - sizeof(mem_blk)
+            + 4 * sizeof(byte);
+
+        blk_next->flags.has_next = blk->flags.has_next;
+        blk_next->flags.is_free = 1;
+
+        blk->flags.has_next = 1;
+        blk->size = this_size;
+    }
+
+public:
+    brk_memory_allocator(void* start, size_type limit)
+        : p_start((byte*)start)
+        , p_limit(p_start + limit)
+    {
+        brk(p_start);
+        mem_blk* p_blk = (mem_blk*)sbrk(0);
+        p_blk->size = 4;
+        p_blk->flags.has_next = 0;
+        p_blk->flags.is_free = 1;
+    }
+
+    // sets errno
+    void* alloc(size_type size)
+    {
+        struct mem_blk* block_allocated;
+
+        block_allocated = find_blk((mem_blk*)p_start, size);
+        if (errno == ENOTFOUND) {
+            // 'block_allocated' in the argument list is the pointer
+            // pointing to the last block
+            block_allocated = allocate_new_block(block_allocated, size);
+            if (errno) {
+                // preserves errno
+                return nullptr;
+            }
+        } else {
+            split_block(block_allocated, size);
+        }
+
+        errno = 0;
+        block_allocated->flags.is_free = 0;
+        return block_allocated->data;
+    }
+
+    void free(void* ptr)
+    {
+        mem_blk* blk = (mem_blk*)((byte*)ptr - (sizeof(mem_blk_flags) + sizeof(size_t)));
+        blk->flags.is_free = 1;
+        // TODO: fusion free blocks nearby
+    }
+};
+
+static brk_memory_allocator* kernel_heap_allocator;
+static brk_memory_allocator
+    kernel_ident_mapped_allocator((void*)bss_section_end_addr,
+        IDENTICALLY_MAPPED_HEAP_SIZE);
 
 void* k_malloc(size_t size)
 {
-    struct mem_blk* block_allocated;
-
-    block_allocated = find_blk((struct mem_blk*)p_start, size);
-    if (errno == ENOTFOUND) {
-        // 'block_allocated' in the argument list is the pointer
-        // pointing to the last block
-        block_allocated = allocate_new_block(block_allocated, size);
-        // no need to check errno and return value
-        // preserve these for the caller
-    } else {
-        split_block(block_allocated, size);
-    }
-
-    block_allocated->flags.is_free = 0;
-    return block_allocated->data;
+    return kernel_heap_allocator->alloc(size);
 }
 
 void k_free(void* ptr)
 {
-    ptr = (void*)((char*)ptr - (sizeof(struct mem_blk_flags) + sizeof(size_t)));
-    struct mem_blk* blk = (struct mem_blk*)ptr;
-    blk->flags.is_free = 1;
-    // TODO: fusion free blocks nearby
+    kernel_heap_allocator->free(ptr);
+}
+
+void* ki_malloc(size_t size)
+{
+    void* ptr = kernel_ident_mapped_allocator.alloc(size);
+    if (!ptr) {
+        MAKE_BREAK_POINT();
+    }
+    return ptr;
+}
+
+void ki_free(void* ptr)
+{
+    kernel_ident_mapped_allocator.free(ptr);
 }
 
 void* p_ptr_to_v_ptr(phys_ptr_t p_ptr)
@@ -186,28 +232,26 @@ void* p_ptr_to_v_ptr(phys_ptr_t p_ptr)
     }
 }
 
-phys_ptr_t l_ptr_to_p_ptr(struct mm* mm, linr_ptr_t v_ptr)
+phys_ptr_t l_ptr_to_p_ptr(const mm_list* mms, linr_ptr_t v_ptr)
 {
-    while (mm != NULL) {
-        if (v_ptr < mm->start || v_ptr >= mm->start + mm->len * 4096) {
-            mm = mm->next;
+    for (const mm& item : *mms) {
+        if (v_ptr < item.start || v_ptr >= item.start + item.pgs->size() * PAGE_SIZE)
             continue;
-        }
-        size_t offset = (size_t)(v_ptr - mm->start);
-        LIST_LIKE_AT(struct page, mm->pgs, offset / PAGE_SIZE, result);
-        return page_to_phys_addr(result->phys_page_id) + (offset % 4096);
+        size_t offset = (size_t)(v_ptr - item.start);
+        const page& p = item.pgs->at(offset / PAGE_SIZE);
+        return page_to_phys_addr(p.phys_page_id) + (offset % PAGE_SIZE);
     }
 
     // TODO: handle error
     return 0xffffffff;
 }
 
-phys_ptr_t v_ptr_to_p_ptr(void* v_ptr)
+phys_ptr_t v_ptr_to_p_ptr(const void* v_ptr)
 {
     if (v_ptr < KERNEL_IDENTICALLY_MAPPED_AREA_LIMIT) {
         return (phys_ptr_t)v_ptr;
     }
-    return l_ptr_to_p_ptr(kernel_mm_head, (linr_ptr_t)v_ptr);
+    return l_ptr_to_p_ptr(kernel_mms, (linr_ptr_t)v_ptr);
 }
 
 static inline void mark_page(page_t n)
@@ -262,13 +306,11 @@ page_t alloc_raw_page(void)
     return 0xffffffff;
 }
 
-struct page* allocate_page(void)
+struct page allocate_page(void)
 {
-    // TODO: allocate memory on identically mapped area
-    struct page* p = (struct page*)k_malloc(sizeof(struct page));
-    memset(p, 0x00, sizeof(struct page));
-    p->phys_page_id = alloc_raw_page();
-    p->ref_count = (size_t*)k_malloc(sizeof(size_t));
+    struct page p { };
+    p.phys_page_id = alloc_raw_page();
+    p.ref_count = types::kernel_ident_allocator_new<size_t>(0);
     return p;
 }
 
@@ -290,6 +332,8 @@ static inline void init_mem_layout(void)
     mark_addr_range(0x80000, 0xfffff);
     // mark kernel
     mark_addr_len(0x00100000, kernel_size);
+    // mark identically mapped heap
+    mark_addr_len(bss_section_end_addr, IDENTICALLY_MAPPED_HEAP_SIZE);
 
     if (e820_mem_map_entry_size == 20) {
         struct e820_mem_map_entry_20* entry = (struct e820_mem_map_entry_20*)e820_mem_map;
@@ -308,35 +352,25 @@ static inline void init_mem_layout(void)
     }
 }
 
-int is_l_ptr_valid(struct mm* mm_area, linr_ptr_t l_ptr)
+int is_l_ptr_valid(const mm_list* mms, linr_ptr_t l_ptr)
 {
-    while (mm_area != NULL) {
-        if (l_ptr >= mm_area->start && l_ptr < mm_area->start + mm_area->len * PAGE_SIZE) {
+    for (const auto& item : *mms)
+        if (l_ptr >= item.start && l_ptr < item.start + item.pgs->size() * PAGE_SIZE)
             return GB_OK;
-        }
-        mm_area = mm_area->next;
-    }
     return GB_FAILED;
 }
 
-struct page* find_page_by_l_ptr(struct mm* mm, linr_ptr_t l_ptr)
+struct page* find_page_by_l_ptr(const mm_list* mms, linr_ptr_t l_ptr)
 {
-    if (mm == kernel_mm_head && l_ptr < (linr_ptr_t)KERNEL_IDENTICALLY_MAPPED_AREA_LIMIT) {
-        // TODO: make mm for identically mapped area
-        MAKE_BREAK_POINT();
-        return (struct page*)0xffffffff;
-    }
-    while (mm != NULL) {
-        if (l_ptr >= mm->start && l_ptr < mm->start + mm->len * 4096) {
-            size_t offset = (size_t)(l_ptr - mm->start);
-            LIST_LIKE_AT(struct page, mm->pgs, offset / PAGE_SIZE, result);
-            return result;
+    for (const mm& item : *mms) {
+        if (l_ptr >= item.start && l_ptr < item.start + item.pgs->size() * PAGE_SIZE) {
+            size_t offset = (size_t)(l_ptr - item.start);
+            return &item.pgs->at(offset / PAGE_SIZE);
         }
-        mm = mm->next;
     }
 
     // TODO: error handling
-    return NULL;
+    return nullptr;
 }
 
 static inline void map_raw_page_to_pte(
@@ -352,13 +386,16 @@ static inline void map_raw_page_to_pte(
     pte->in.page = page;
 }
 
-static void _map_raw_page_to_addr(
+// map page to the end of mm_area in pd
+int k_map(
     struct mm* mm_area,
-    page_t page,
-    int rw,
-    int priv)
+    const struct page* page,
+    int read,
+    int write,
+    int priv,
+    int cow)
 {
-    linr_ptr_t addr = (linr_ptr_t)mm_area->start + mm_area->len * 4096;
+    linr_ptr_t addr = (linr_ptr_t)mm_area->start + mm_area->pgs->size() * PAGE_SIZE;
     page_directory_entry* pde = mm_area->pd + linr_addr_to_pd_i(addr);
     // page table not exist
     if (!pde->in.p) {
@@ -374,64 +411,10 @@ static void _map_raw_page_to_addr(
     // map the page in the page table
     page_table_entry* pte = (page_table_entry*)p_ptr_to_v_ptr(page_to_phys_addr(pde->in.pt_page));
     pte += linr_addr_to_pt_i(addr);
-    map_raw_page_to_pte(pte, page, rw, priv);
-}
+    map_raw_page_to_pte(pte, page->phys_page_id, (write && !cow), priv);
 
-// map page to the end of mm_area in pd
-int k_map(
-    struct mm* mm_area,
-    struct page* page,
-    int read,
-    int write,
-    int priv,
-    int cow)
-{
-    struct page* p_page_end = mm_area->pgs;
-    while (p_page_end != NULL && p_page_end->next != NULL)
-        p_page_end = p_page_end->next;
-
-    if (cow) {
-        // find its ancestor
-        while (page->attr.cow)
-            page = page->next;
-
-        // create a new page node
-        struct page* new_page = (struct page*)k_malloc(sizeof(struct page));
-
-        new_page->attr.read = (read == 1);
-        new_page->attr.write = (write == 1);
-        new_page->attr.system = (priv == 1);
-        new_page->attr.cow = 1;
-        // TODO: move *next out of struct page
-        new_page->next = NULL;
-
-        new_page->phys_page_id = page->phys_page_id;
-        new_page->ref_count = page->ref_count;
-
-        if (p_page_end != NULL)
-            p_page_end->next = new_page;
-        else
-            mm_area->pgs = new_page;
-    } else {
-        page->attr.read = (read == 1);
-        page->attr.write = (write == 1);
-        page->attr.system = (priv == 1);
-        page->attr.cow = 0;
-        // TODO: move *next out of struct page
-        page->next = NULL;
-
-        if (p_page_end != NULL)
-            p_page_end->next = page;
-        else
-            mm_area->pgs = page;
-    }
-    _map_raw_page_to_addr(
-        mm_area,
-        page->phys_page_id,
-        (write && !cow),
-        priv);
-
-    ++mm_area->len;
+    mm_area->pgs->push_back(*page);
+    mm_area->pgs->back()->attr.cow = cow;
     ++*page->ref_count;
     return GB_OK;
 }
@@ -473,9 +456,7 @@ static inline void init_paging_map_low_mem_identically(void)
     }
 }
 
-static struct page empty_page;
-static struct page heap_first_page;
-static size_t heap_first_page_ref_count;
+static page empty_page;
 
 void init_mem(void)
 {
@@ -484,46 +465,43 @@ void init_mem(void)
     // map the 16MiB-768MiB identically
     init_paging_map_low_mem_identically();
 
-    kernel_mm_head = &kernel_mm;
+    kernel_mms = types::kernel_ident_allocator_new<mm_list>();
+    kernel_mms->push_back(mm {
+        .start = (linr_ptr_t)KERNEL_HEAP_START,
+        .attr = {
+            .read = 1,
+            .write = 1,
+            .system = 1,
+        },
+        .pgs = types::kernel_ident_allocator_new<page_arr>(),
+        .pd = KERNEL_PAGE_DIRECTORY_ADDR,
+    });
 
-    kernel_mm.attr.read = 1;
-    kernel_mm.attr.write = 1;
-    kernel_mm.attr.system = 1;
-    kernel_mm.len = 0;
-    kernel_mm.next = NULL;
-    kernel_mm.pd = KERNEL_PAGE_DIRECTORY_ADDR;
-    kernel_mm.pgs = NULL;
-    kernel_mm.start = (linr_ptr_t)KERNEL_HEAP_START;
+    page heap_first_page {
+        .phys_page_id = alloc_raw_page(),
+        .ref_count = types::kernel_ident_allocator_new<size_t>(0),
+        .attr = {
+            .cow = 0,
+        },
+    };
 
-    heap_first_page.attr.cow = 0;
-    heap_first_page.attr.read = 1;
-    heap_first_page.attr.write = 1;
-    heap_first_page.attr.system = 1;
-    heap_first_page.next = NULL;
-    heap_first_page.phys_page_id = alloc_raw_page();
-    heap_first_page.ref_count = &heap_first_page_ref_count;
+    mm* heap_mm = kernel_mms->begin().ptr();
 
-    *heap_first_page.ref_count = 0;
-
-    k_map(kernel_mm_head, &heap_first_page, 1, 1, 1, 0);
-
-    init_heap();
+    k_map(heap_mm, &heap_first_page, 1, 1, 1, 0);
+    memset(KERNEL_HEAP_START, 0x00, PAGE_SIZE);
+    kernel_heap_allocator = types::kernel_ident_allocator_new<brk_memory_allocator>(KERNEL_HEAP_START,
+        (uint32_t)KERNEL_HEAP_LIMIT - (uint32_t)KERNEL_HEAP_START);
 
     // create empty_page struct
     empty_page.attr.cow = 0;
-    empty_page.attr.read = 1;
-    empty_page.attr.write = 0;
-    empty_page.attr.system = 0;
-    empty_page.next = NULL;
     empty_page.phys_page_id = phys_addr_to_page(EMPTY_PAGE_ADDR);
-    empty_page.ref_count = (size_t*)k_malloc(sizeof(size_t));
-    *empty_page.ref_count = 1;
+    empty_page.ref_count = types::kernel_ident_allocator_new<size_t>(1);
 
     // TODO: improve the algorithm SO FREAKING SLOW
     // while (kernel_mm_head->len < 256 * 1024 * 1024 / PAGE_SIZE) {
-    while (kernel_mm_head->len < 16 * 1024 * 1024 / PAGE_SIZE) {
+    while (heap_mm->pgs->size() < 256 * 1024 * 1024 / PAGE_SIZE) {
         k_map(
-            kernel_mm_head, &empty_page,
+            heap_mm, &empty_page,
             1, 1, 1, 1);
     }
 }

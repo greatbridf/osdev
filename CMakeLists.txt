@@ -41,7 +41,7 @@ include_directories(${PROJECT_SOURCE_DIR}/include)
 
 set(KERNEL_MAIN_SOURCES src/kernel_main.c
                         src/kernel/errno.c
-                        src/kernel/interrupt.c
+                        src/kernel/interrupt.cpp
                         src/kernel/process.c
                         src/kernel/tty.c
                         src/kernel/stdio.c
@@ -63,7 +63,8 @@ set(KERNEL_MAIN_SOURCES src/kernel_main.c
                         include/kernel/interrupt.h
                         include/kernel/process.h
                         include/kernel/stdio.h
-                        include/kernel/mem.hpp
+                        include/kernel/mem.h
+                        include/kernel/mm.hpp
                         include/kernel/vfs.h
                         include/kernel/vga.h
                         include/kernel/hw/keyboard.h
@@ -77,7 +78,6 @@ set(KERNEL_MAIN_SOURCES src/kernel_main.c
                         include/types/size.h
                         include/types/status.h
                         include/types/stdint.h
-                        include/types/list.h
                         include/types/allocator.hpp
                         include/types/cplusplus.hpp
                         include/types/list.hpp

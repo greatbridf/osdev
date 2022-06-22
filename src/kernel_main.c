@@ -8,7 +8,7 @@
 #include <kernel/hw/serial.h>
 #include <kernel/hw/timer.h>
 #include <kernel/interrupt.h>
-#include <kernel/mem.hpp>
+#include <kernel/mem.h>
 #include <kernel/stdio.h>
 #include <kernel/tty.h>
 #include <kernel/vfs.h>
@@ -52,13 +52,9 @@ extern constructor start_ctors;
 extern constructor end_ctors;
 void call_constructors_for_cpp(void)
 {
-    if (start_ctors != end_ctors) {
-        tty_print(console, "error: c++ global objects are now allowed");
-        halt_on_init_error();
+    for (constructor* ctor = &start_ctors; ctor != &end_ctors; ++ctor) {
+        (*ctor)();
     }
-    // for (constructor* ctor = &start_ctors; ctor != &end_ctors; ++ctor) {
-    //     (*ctor)();
-    // }
 }
 
 uint8_t e820_mem_map[1024];
@@ -166,12 +162,15 @@ void kernel_main(void)
     init_idt();
     INIT_OK();
 
-    INIT_START("memory allocation");
-    init_mem();
-    INIT_OK();
-
+    // NOTE:
+    // the initializer of c++ global objects MUST NOT contain
+    // all kinds of memory allocations
     INIT_START("C++ global objects");
     call_constructors_for_cpp();
+    INIT_OK();
+
+    INIT_START("memory allocation");
+    init_mem();
     INIT_OK();
 
     INIT_START("programmable interrupt controller and timer");

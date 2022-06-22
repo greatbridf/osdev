@@ -1,6 +1,6 @@
 #include <asm/port_io.h>
 #include <kernel/hw/serial.h>
-#include <kernel/mem.hpp>
+#include <kernel/mem.h>
 #include <kernel/stdio.h>
 #include <kernel/tty.h>
 #include <kernel/vga.h>

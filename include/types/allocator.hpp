@@ -1,4 +1,5 @@
 #pragma once
+#include <kernel/mem.h>
 #include <types/types.h>
 
 inline void* operator new(size_t, void* ptr)
@@ -7,6 +8,10 @@ inline void* operator new(size_t, void* ptr)
 }
 
 namespace types {
+
+template <typename Allocator>
+class allocator_traits;
+
 template <typename T>
 class kernel_allocator {
 public:
@@ -22,6 +27,12 @@ public:
         ::k_free(ptr);
     }
 };
+
+template <typename T, typename... Args>
+T* kernel_allocator_new(Args... args)
+{
+    return allocator_traits<kernel_allocator<T>>::allocate_and_construct(args...);
+}
 
 template <typename Allocator>
 class allocator_traits {

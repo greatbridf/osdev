@@ -15,16 +15,6 @@
 #include <kernel/vga.h>
 #include <types/bitmap.h>
 
-typedef void (*constructor)(void);
-extern constructor start_ctors;
-extern constructor end_ctors;
-void call_constructors_for_cpp(void)
-{
-    for (constructor* ctor = &start_ctors; ctor != &end_ctors; ++ctor) {
-        (*ctor)();
-    }
-}
-
 #define KERNEL_MAIN_BUF_SIZE (128)
 
 struct tty* console = NULL;
@@ -55,6 +45,20 @@ static inline void halt_on_init_error(void)
     asm_cli();
     while (1)
         asm_hlt();
+}
+
+typedef void (*constructor)(void);
+extern constructor start_ctors;
+extern constructor end_ctors;
+void call_constructors_for_cpp(void)
+{
+    if (start_ctors != end_ctors) {
+        tty_print(console, "error: c++ global objects are now allowed");
+        halt_on_init_error();
+    }
+    // for (constructor* ctor = &start_ctors; ctor != &end_ctors; ++ctor) {
+    //     (*ctor)();
+    // }
 }
 
 uint8_t e820_mem_map[1024];

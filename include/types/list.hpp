@@ -172,14 +172,14 @@ public:
         tail->connect(head);
     }
 
-    list(const list<T, Allocator>& v)
+    list(const list& v)
         : list()
     {
         for (const auto& item : v)
             push_back(item);
     }
 
-    list<T, Allocator>& operator=(const list<T, Allocator>& v)
+    list& operator=(const list& v)
     {
         clear();
         for (const auto& item : v)

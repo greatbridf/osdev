@@ -115,7 +115,7 @@ public:
         resize(capacity);
     }
 
-    vector(const vector<T, Allocator>& arr) noexcept
+    vector(const vector& arr) noexcept
         : vector(arr.capacity())
     {
         for (const auto& item : arr)

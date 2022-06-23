@@ -233,7 +233,7 @@ public:
     template <typename... Args>
     iterator_type emplace_back(Args&&... args)
     {
-        push_back(value_type(args...));
+        push_back(value_type(forward<Args>(args)...));
         return back();
     }
 

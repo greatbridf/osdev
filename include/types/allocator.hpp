@@ -1,5 +1,6 @@
 #pragma once
 #include <kernel/mem.h>
+#include <types/cplusplus.hpp>
 #include <types/types.h>
 
 inline void* operator new(size_t, void* ptr)
@@ -47,13 +48,13 @@ public:
 template <typename T, typename... Args>
 T* kernel_allocator_new(Args&&... args)
 {
-    return allocator_traits<kernel_allocator<T>>::allocate_and_construct(args...);
+    return allocator_traits<kernel_allocator<T>>::allocate_and_construct(forward<Args>(args)...);
 }
 
 template <typename T, typename... Args>
 T* kernel_ident_allocator_new(Args&&... args)
 {
-    return allocator_traits<kernel_ident_allocator<T>>::allocate_and_construct(args...);
+    return allocator_traits<kernel_ident_allocator<T>>::allocate_and_construct(forward<Args>(args)...);
 }
 
 template <typename Allocator>
@@ -71,7 +72,7 @@ public:
     template <typename... Args>
     static value_type* construct(value_type* ptr, Args&&... args)
     {
-        new (ptr) value_type(args...);
+        new (ptr) value_type(forward<Args>(args)...);
         return ptr;
     }
 
@@ -79,7 +80,7 @@ public:
     static value_type* allocate_and_construct(Args&&... args)
     {
         auto* ptr = allocate(1);
-        construct(ptr, args...);
+        construct(ptr, forward<Args>(args)...);
         return ptr;
     }
 

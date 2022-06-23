@@ -35,6 +35,7 @@ using mm_list = types::list<mm, types::kernel_ident_allocator>;
 
 // in mem.cpp
 extern mm_list* kernel_mms;
+extern page empty_page;
 
 // translate physical address to virtual(mapped) address
 void* p_ptr_to_v_ptr(phys_ptr_t p_ptr);
@@ -137,3 +138,6 @@ page_t alloc_raw_page(void);
 
 // allocate a struct page together with the raw page
 struct page allocate_page(void);
+
+page_directory_entry* alloc_pd(void);
+page_table_entry* alloc_pt(void);

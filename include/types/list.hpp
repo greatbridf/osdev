@@ -166,6 +166,13 @@ public:
         tail->connect(head);
     }
 
+    list(const list<T, Allocator>& v)
+        : list()
+    {
+        for (const auto& item : v)
+            push_back(item);
+    }
+
     ~list() noexcept
     {
         for (auto iter = begin(); iter != end(); ++iter) {

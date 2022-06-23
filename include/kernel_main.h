@@ -1,4 +1,5 @@
 #pragma once
+#include <types/types.h>
 
 static inline void __break_point(void)
 {
@@ -12,4 +13,4 @@ static inline void __break_point(void)
 
 #define KERNEL_START_ADDR (0x00100000)
 
-void kernel_main(void);
+void NORETURN kernel_main(void);

@@ -6,6 +6,7 @@
 #include <kernel/interrupt.h>
 #include <kernel/mem.h>
 #include <kernel/mm.hpp>
+#include <kernel/process.hpp>
 #include <kernel/stdio.h>
 #include <kernel/tty.h>
 #include <kernel/vga.h>
@@ -147,6 +148,11 @@ struct PACKED int14_data {
 extern "C" void int14_handler(struct int14_data* d)
 {
     char buf[512];
+    mm_list* mms = nullptr;
+    if (current_process)
+        mms = current_process->mms;
+    else
+        mms = kernel_mms;
 
     // TODO: remove debug variable
     ++page_fault_times;
@@ -160,14 +166,14 @@ extern "C" void int14_handler(struct int14_data* d)
 
     // kernel code
     if (d->cs == KERNEL_CODE_SEGMENT) {
-        if (is_l_ptr_valid(kernel_mms, d->l_addr) != GB_OK) {
+        if (is_l_ptr_valid(mms, d->l_addr) != GB_OK) {
             goto kill;
         }
-        struct page* page = find_page_by_l_ptr(kernel_mms, d->l_addr);
+        struct page* page = find_page_by_l_ptr(mms, d->l_addr);
 
         // copy on write
         if (d->error_code.write == 1 && page->attr.cow == 1) {
-            page_directory_entry* pde = mms_get_pd(kernel_mms) + linr_addr_to_pd_i(d->l_addr);
+            page_directory_entry* pde = mms_get_pd(mms) + linr_addr_to_pd_i(d->l_addr);
             page_table_entry* pte = (page_table_entry*)p_ptr_to_v_ptr(page_to_phys_addr(pde->in.pt_page));
             pte += linr_addr_to_pt_i(d->l_addr);
 

@@ -9,7 +9,9 @@
 #include <kernel/hw/timer.h>
 #include <kernel/interrupt.h>
 #include <kernel/mem.h>
+#include <kernel/process.hpp>
 #include <kernel/stdio.h>
+#include <kernel/task.h>
 #include <kernel/tty.h>
 #include <kernel/vfs.h>
 #include <kernel/vga.h>
@@ -115,7 +117,8 @@ static inline void show_mem_info(char* buf)
     printkf("kernel size: %x\n", kernel_size);
 }
 
-static segment_descriptor new_gdt[5];
+static segment_descriptor new_gdt[6];
+static struct tss32_t _tss;
 
 void load_new_gdt(void)
 {
@@ -124,7 +127,11 @@ void load_new_gdt(void)
     create_segment_descriptor(new_gdt + 2, 0, ~0, 0b1100, SD_TYPE_DATA_SYSTEM);
     create_segment_descriptor(new_gdt + 3, 0, ~0, 0b1100, SD_TYPE_CODE_USER);
     create_segment_descriptor(new_gdt + 4, 0, ~0, 0b1100, SD_TYPE_DATA_USER);
-    asm_load_gdt((5 * 8 - 1) << 16, (phys_ptr_t)new_gdt);
+    create_segment_descriptor(new_gdt + 5, (uint32_t)&_tss, sizeof(_tss), 0b0000, SD_TYPE_TSS);
+
+    asm_load_gdt((6 * 8 - 1) << 16, (phys_ptr_t)new_gdt);
+    asm_load_tr((6 - 1) * 8);
+
     asm_cli();
 }
 
@@ -135,7 +142,9 @@ void init_bss_section(void)
     memset(bss_addr, 0x00, bss_size);
 }
 
-void kernel_main(void)
+static struct tty early_console;
+
+void NORETURN kernel_main(void)
 {
     // MAKE_BREAK_POINT();
     asm_enable_sse();
@@ -150,7 +159,6 @@ void kernel_main(void)
 
     init_serial_port(PORT_SERIAL0);
 
-    struct tty early_console;
     if (make_serial_tty(&early_console, PORT_SERIAL0) != GB_OK) {
         halt_on_init_error();
     }
@@ -191,15 +199,6 @@ void kernel_main(void)
     struct inode* init = vfs_open("/init");
     vfs_read(init, buf, 128, 1, 10);
 
-    printkf("No work to do, halting...\n");
-
-    while (1) {
-        // disable interrupt
-        asm_cli();
-
-        dispatch_event();
-
-        asm_sti();
-        asm_hlt();
-    }
+    printkf("switching execution to the scheduler...");
+    init_scheduler(&_tss);
 }

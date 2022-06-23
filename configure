@@ -59,7 +59,8 @@ else
 fi
 
 cp Makefile.src Makefile
-sed -i '' "s/##PLACEHOLDER_1##/$QEMU/" Makefile
-sed -i '' "s/##PLACEHOLDER_2##/$GDB/" Makefile
-sed -i '' "s/##PLACEHOLDER_3##/$QEMU_ACCEL/" Makefile
-sed -i '' "s/##PLACEHOLDER_4##/$CROSS_COMPILE_FLAG/" Makefile
+sed -i '' -e "s/##PLACEHOLDER_1##/$QEMU/" Makefile > /dev/null 2>&1
+sed -i '' -e "s/##PLACEHOLDER_2##/$GDB/" Makefile > /dev/null 2>&1
+sed -i '' -e "s/##PLACEHOLDER_3##/$QEMU_ACCEL/" Makefile > /dev/null 2>&1
+sed -i '' -e "s/##PLACEHOLDER_4##/$CROSS_COMPILE_FLAG/" Makefile > /dev/null 2>&1
+exit 0

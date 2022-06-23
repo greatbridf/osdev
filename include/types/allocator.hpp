@@ -45,13 +45,13 @@ public:
 };
 
 template <typename T, typename... Args>
-T* kernel_allocator_new(Args... args)
+T* kernel_allocator_new(Args&&... args)
 {
     return allocator_traits<kernel_allocator<T>>::allocate_and_construct(args...);
 }
 
 template <typename T, typename... Args>
-T* kernel_ident_allocator_new(Args... args)
+T* kernel_ident_allocator_new(Args&&... args)
 {
     return allocator_traits<kernel_ident_allocator<T>>::allocate_and_construct(args...);
 }
@@ -69,14 +69,14 @@ public:
     }
 
     template <typename... Args>
-    static value_type* construct(value_type* ptr, Args... args)
+    static value_type* construct(value_type* ptr, Args&&... args)
     {
         new (ptr) value_type(args...);
         return ptr;
     }
 
     template <typename... Args>
-    static value_type* allocate_and_construct(Args... args)
+    static value_type* allocate_and_construct(Args&&... args)
     {
         auto* ptr = allocate(1);
         construct(ptr, args...);

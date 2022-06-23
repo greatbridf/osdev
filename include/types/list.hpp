@@ -237,7 +237,7 @@ public:
     {
         node_base_type* new_node = allocator_traits<allocator_type>::allocate_and_construct(v);
         iterator_type ret(new_node);
-        iter._node().prev->connect(new_node);
+        iter._node()->prev->connect(new_node);
         new_node->connect(iter._node());
 
         ++_size();
@@ -255,7 +255,7 @@ public:
     }
 
     template <typename... Args>
-    reference_type emplace_back(Args... args)
+    iterator_type emplace_back(Args&&... args)
     {
         return insert(end(), value_type(args...));
     }
@@ -271,7 +271,7 @@ public:
     }
 
     template <typename... Args>
-    reference_type emplace_front(Args... args)
+    iterator_type emplace_front(Args&&... args)
     {
         return insert(begin(), value_type(args...));
     }

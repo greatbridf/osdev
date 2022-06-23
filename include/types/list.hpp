@@ -165,6 +165,8 @@ private:
 
     void destroy(void)
     {
+        if (!head || !tail)
+            return;
         clear();
         allocator_traits<sentry_allocator_type>::deconstruct_and_deallocate(static_cast<sentry_node_type*>(head));
         allocator_traits<sentry_allocator_type>::deconstruct_and_deallocate(static_cast<sentry_node_type*>(tail));

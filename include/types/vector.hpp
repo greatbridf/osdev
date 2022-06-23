@@ -40,6 +40,12 @@ public:
         {
         }
 
+        iterator& operator=(const iterator& iter)
+        {
+            p = iter.p;
+            return *this;
+        }
+
         explicit iterator(Pointer p) noexcept
             : p(p)
         {

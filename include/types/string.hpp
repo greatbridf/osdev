@@ -31,6 +31,10 @@ public:
         : inner_vector_type((const inner_vector_type&)str)
     {
     }
+    string(string&& str)
+        : inner_vector_type((inner_vector_type &&) move(str))
+    {
+    }
     string& append(const char* str, size_type n = npos)
     {
         this->pop_back();
@@ -47,6 +51,10 @@ public:
     {
         return this->append(str.data());
     }
+    string& append(string&& str)
+    {
+        return this->append(str.data());
+    }
     string& operator+=(const char c)
     {
         *this->back() = c;
@@ -60,6 +68,10 @@ public:
     string& operator+=(const string& str)
     {
         return this->append(str);
+    }
+    string& operator+=(string&& str)
+    {
+        return this->append(move(str));
     }
     string substr(size_type pos, size_type n = npos)
     {

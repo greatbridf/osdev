@@ -52,7 +52,7 @@ private:
         }
 
         explicit node(NodeValue&& v) noexcept
-            : value(v)
+            : value(move(v))
         {
         }
 
@@ -75,6 +75,7 @@ public:
         iterator(iterator&& iter) noexcept
             : n(iter.n)
         {
+            iter.n = nullptr;
         }
 
         iterator& operator=(const iterator& iter)
@@ -162,6 +163,13 @@ private:
         return (static_cast<sentry_node_type*>(head))->value;
     }
 
+    void destroy(void)
+    {
+        clear();
+        allocator_traits<sentry_allocator_type>::deconstruct_and_deallocate(static_cast<sentry_node_type*>(head));
+        allocator_traits<sentry_allocator_type>::deconstruct_and_deallocate(static_cast<sentry_node_type*>(tail));
+    }
+
 public:
     list() noexcept
         // size is stored in the 'head' node
@@ -179,6 +187,14 @@ public:
             push_back(item);
     }
 
+    list(list&& v)
+        : head(v.head)
+        , tail(v.tail)
+    {
+        v.head = nullptr;
+        v.tail = nullptr;
+    }
+
     list& operator=(const list& v)
     {
         clear();
@@ -187,13 +203,21 @@ public:
         return *this;
     }
 
+    list& operator=(list&& v)
+    {
+        destroy();
+
+        head = v.head;
+        tail = v.tail;
+        v.head = nullptr;
+        v.tail = nullptr;
+
+        return *this;
+    }
+
     ~list() noexcept
     {
-        for (auto iter = begin(); iter != end(); ++iter) {
-            erase(iter);
-        }
-        allocator_traits<sentry_allocator_type>::deconstruct_and_deallocate(static_cast<sentry_node_type*>(head));
-        allocator_traits<sentry_allocator_type>::deconstruct_and_deallocate(static_cast<sentry_node_type*>(tail));
+        destroy();
     }
 
     iterator_type find(const value_type& v) noexcept
@@ -235,7 +259,7 @@ public:
     // insert the value v in front of the given iterator
     iterator_type insert(const iterator_type& iter, value_type&& v) noexcept
     {
-        node_base_type* new_node = allocator_traits<allocator_type>::allocate_and_construct(types::move(v));
+        node_base_type* new_node = allocator_traits<allocator_type>::allocate_and_construct(move(v));
         iterator_type ret(new_node);
         iter._node()->prev->connect(new_node);
         new_node->connect(iter._node());
@@ -251,7 +275,7 @@ public:
 
     void push_back(value_type&& v) noexcept
     {
-        insert(end(), v);
+        insert(end(), move(v));
     }
 
     template <typename... Args>
@@ -267,7 +291,7 @@ public:
 
     void push_front(value_type&& v) noexcept
     {
-        insert(begin(), v);
+        insert(begin(), move(v));
     }
 
     template <typename... Args>

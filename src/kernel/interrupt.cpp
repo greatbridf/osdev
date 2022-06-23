@@ -2,6 +2,7 @@
 
 #include <asm/port_io.h>
 #include <kernel/hw/keyboard.h>
+#include <kernel/hw/serial.h>
 #include <kernel/hw/timer.h>
 #include <kernel/interrupt.h>
 #include <kernel/mem.h>
@@ -236,6 +237,7 @@ extern "C" void irq3_handler(void)
 }
 extern "C" void irq4_handler(void)
 {
+    serial_receive_data_interrupt();
     asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
 }
 extern "C" void irq5_handler(void)

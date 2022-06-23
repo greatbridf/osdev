@@ -6,6 +6,7 @@
 #include <kernel/interrupt.h>
 #include <kernel/mem.h>
 #include <kernel/mm.hpp>
+#include <kernel/process.hpp>
 #include <kernel/stdio.h>
 #include <kernel/tty.h>
 #include <kernel/vga.h>
@@ -102,7 +103,7 @@ extern "C" void int6_handler(
 }
 
 // general protection
-void int13_handler(
+extern "C" void int13_handler(
     struct regs_32 s_regs,
     uint32_t error_code,
     ptr_t eip,
@@ -131,40 +132,50 @@ void int13_handler(
     asm_hlt();
 }
 
+// TODO: remove debug variable
 static size_t page_fault_times;
 
+struct PACKED int14_data {
+    linr_ptr_t l_addr;
+    struct regs_32 s_regs;
+    struct page_fault_error_code error_code;
+    void* v_eip;
+    uint32_t cs;
+    uint32_t eflags;
+};
+
 // page fault
-void int14_handler(
-    linr_ptr_t l_addr,
-    struct regs_32 s_regs,
-    struct page_fault_error_code error_code,
-    void* v_eip,
-    uint16_t cs,
-    uint32_t eflags)
+extern "C" void int14_handler(struct int14_data* d)
 {
     char buf[512];
+    mm_list* mms = nullptr;
+    if (current_process)
+        mms = &current_process->mms;
+    else
+        mms = kernel_mms;
 
+    // TODO: remove debug variable
     ++page_fault_times;
 
     // not present page, possibly mapped but not loaded
     // or invalid address or just invalid address
     // TODO: mmapping and swapping
-    if (error_code.present == 0) {
+    if (d->error_code.present == 0) {
         goto kill;
     }
 
     // kernel code
-    if (cs == KERNEL_CODE_SEGMENT) {
-        if (is_l_ptr_valid(kernel_mms, l_addr) != GB_OK) {
+    if (d->cs == KERNEL_CODE_SEGMENT) {
+        if (is_l_ptr_valid(mms, d->l_addr) != GB_OK) {
             goto kill;
         }
-        struct page* page = find_page_by_l_ptr(kernel_mms, l_addr);
+        struct page* page = find_page_by_l_ptr(mms, d->l_addr);
 
         // copy on write
-        if (error_code.write == 1 && page->attr.cow == 1) {
-            page_directory_entry* pde = mms_get_pd(kernel_mms) + linr_addr_to_pd_i(l_addr);
+        if (d->error_code.write == 1 && page->attr.cow == 1) {
+            page_directory_entry* pde = mms_get_pd(mms) + linr_addr_to_pd_i(d->l_addr);
             page_table_entry* pte = (page_table_entry*)p_ptr_to_v_ptr(page_to_phys_addr(pde->in.pt_page));
-            pte += linr_addr_to_pt_i(l_addr);
+            pte += linr_addr_to_pt_i(d->l_addr);
 
             // if it is a dying page
             if (*page->ref_count == 1) {
@@ -195,7 +206,7 @@ void int14_handler(
 kill:
     snprintf(
         buf, 512,
-        "killed: segmentation fault (eip: %x, cr2: %x, error_code: %x)", v_eip, l_addr, error_code);
+        "killed: segmentation fault (eip: %x, cr2: %x, error_code: %x)", d->v_eip, d->l_addr, d->error_code);
     tty_print(console, buf);
 
     MAKE_BREAK_POINT();
@@ -203,77 +214,78 @@ kill:
     asm_hlt();
 }
 
-void irq0_handler(void)
+extern "C" void irq0_handler(struct irq0_data* d)
 {
     inc_tick();
+    context_switch(d);
     asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
 }
 // keyboard interrupt
-void irq1_handler(void)
+extern "C" void irq1_handler(void)
 {
     asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
     handle_keyboard_interrupt();
 }
-void irq2_handler(void)
+extern "C" void irq2_handler(void)
 {
     asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
 }
-void irq3_handler(void)
+extern "C" void irq3_handler(void)
 {
     asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
 }
-void irq4_handler(void)
+extern "C" void irq4_handler(void)
 {
     asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
 }
-void irq5_handler(void)
+extern "C" void irq5_handler(void)
 {
     asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
 }
-void irq6_handler(void)
+extern "C" void irq6_handler(void)
 {
     asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
 }
-void irq7_handler(void)
+extern "C" void irq7_handler(void)
 {
     asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
 }
-void irq8_handler(void)
-{
-    asm_outb(PORT_PIC2_COMMAND, PIC_EOI);
-    asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
-}
-void irq9_handler(void)
+extern "C" void irq8_handler(void)
 {
     asm_outb(PORT_PIC2_COMMAND, PIC_EOI);
     asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
 }
-void irq10_handler(void)
+extern "C" void irq9_handler(void)
 {
     asm_outb(PORT_PIC2_COMMAND, PIC_EOI);
     asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
 }
-void irq11_handler(void)
+extern "C" void irq10_handler(void)
 {
     asm_outb(PORT_PIC2_COMMAND, PIC_EOI);
     asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
 }
-void irq12_handler(void)
+extern "C" void irq11_handler(void)
 {
     asm_outb(PORT_PIC2_COMMAND, PIC_EOI);
     asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
 }
-void irq13_handler(void)
+extern "C" void irq12_handler(void)
 {
     asm_outb(PORT_PIC2_COMMAND, PIC_EOI);
     asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
 }
-void irq14_handler(void)
+extern "C" void irq13_handler(void)
 {
     asm_outb(PORT_PIC2_COMMAND, PIC_EOI);
     asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
 }
-void irq15_handler(void)
+extern "C" void irq14_handler(void)
+{
+    asm_outb(PORT_PIC2_COMMAND, PIC_EOI);
+    asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
+}
+extern "C" void irq15_handler(void)
 {
     asm_outb(PORT_PIC2_COMMAND, PIC_EOI);
     asm_outb(PORT_PIC1_COMMAND, PIC_EOI);

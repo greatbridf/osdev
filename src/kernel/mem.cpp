@@ -319,6 +319,24 @@ static inline void make_page_table(page_table_entry* pt)
     memset(pt, 0x00, sizeof(page_table_entry) * 1024);
 }
 
+page_directory_entry* alloc_pd(void)
+{
+    // TODO: alloc page in low mem and gen struct page for it
+    page_t pd_page = alloc_raw_page();
+    page_directory_entry* pd = (page_directory_entry*)p_ptr_to_v_ptr(page_to_phys_addr(pd_page));
+    memset(pd, 0x00, PAGE_SIZE);
+    return pd;
+}
+
+page_table_entry* alloc_pt(void)
+{
+    // TODO: alloc page in low mem and gen struct page for it
+    page_t pt_page = alloc_raw_page();
+    page_table_entry* pt = (page_table_entry*)p_ptr_to_v_ptr(page_to_phys_addr(pt_page));
+    make_page_table(pt);
+    return pt;
+}
+
 static inline void init_mem_layout(void)
 {
     mem_size = 1024 * mem_size_info.n_1k_blks;
@@ -382,7 +400,7 @@ static inline void map_raw_page_to_pte(
     // set P bit
     pte->v = 0x00000001;
     pte->in.rw = (rw == 1);
-    pte->in.us = (priv == 1);
+    pte->in.us = (priv == 0);
     pte->in.page = page;
 }
 
@@ -402,7 +420,7 @@ int k_map(
         // allocate a page for the page table
         pde->in.p = 1;
         pde->in.rw = 1;
-        pde->in.us = 0;
+        pde->in.us = (priv == 0);
         pde->in.pt_page = alloc_raw_page();
 
         make_page_table((page_table_entry*)p_ptr_to_v_ptr(page_to_phys_addr(pde->in.pt_page)));
@@ -456,7 +474,7 @@ static inline void init_paging_map_low_mem_identically(void)
     }
 }
 
-static page empty_page;
+page empty_page;
 
 void init_mem(void)
 {
@@ -466,16 +484,7 @@ void init_mem(void)
     init_paging_map_low_mem_identically();
 
     kernel_mms = types::kernel_ident_allocator_new<mm_list>();
-    kernel_mms->push_back(mm {
-        .start = (linr_ptr_t)KERNEL_HEAP_START,
-        .attr = {
-            .read = 1,
-            .write = 1,
-            .system = 1,
-        },
-        .pgs = types::kernel_ident_allocator_new<page_arr>(),
-        .pd = KERNEL_PAGE_DIRECTORY_ADDR,
-    });
+    auto heap_mm = kernel_mms->emplace_back((linr_ptr_t)KERNEL_HEAP_START, KERNEL_PAGE_DIRECTORY_ADDR, 1, 1);
 
     page heap_first_page {
         .phys_page_id = alloc_raw_page(),
@@ -485,9 +494,7 @@ void init_mem(void)
         },
     };
 
-    mm* heap_mm = kernel_mms->begin().ptr();
-
-    k_map(heap_mm, &heap_first_page, 1, 1, 1, 0);
+    k_map(heap_mm.ptr(), &heap_first_page, 1, 1, 1, 0);
     memset(KERNEL_HEAP_START, 0x00, PAGE_SIZE);
     kernel_heap_allocator = types::kernel_ident_allocator_new<brk_memory_allocator>(KERNEL_HEAP_START,
         (uint32_t)KERNEL_HEAP_LIMIT - (uint32_t)KERNEL_HEAP_START);
@@ -501,7 +508,7 @@ void init_mem(void)
     // while (kernel_mm_head->len < 256 * 1024 * 1024 / PAGE_SIZE) {
     while (heap_mm->pgs->size() < 256 * 1024 * 1024 / PAGE_SIZE) {
         k_map(
-            heap_mm, &empty_page,
+            heap_mm.ptr(), &empty_page,
             1, 1, 1, 1);
     }
 }
@@ -520,4 +527,28 @@ void create_segment_descriptor(
     sd->limit_high = ((limit & 0x000f0000) >> 16);
     sd->access = access;
     sd->flags = flags;
+}
+
+mm::mm(linr_ptr_t start, page_directory_entry* pd, bool write, bool system)
+    : start(start)
+    , attr({
+          .read { 1 },
+          .write { write },
+          .system { system },
+      })
+    , pd(pd)
+    , pgs(types::kernel_ident_allocator_new<page_arr>())
+{
+}
+
+mm::mm(const mm& val)
+    : start(val.start)
+    , attr({
+          .read { val.attr.read },
+          .write { val.attr.write },
+          .system { val.attr.system },
+      })
+    , pd(val.pd)
+    , pgs(val.pgs)
+{
 }

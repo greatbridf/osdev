@@ -38,6 +38,13 @@ public:
         iterator(iterator&& iter) noexcept
             : p(iter.p)
         {
+            iter.p = nullptr;
+        }
+
+        iterator& operator=(const iterator& iter)
+        {
+            p = iter.p;
+            return *this;
         }
 
         explicit iterator(Pointer p) noexcept
@@ -115,11 +122,22 @@ public:
         resize(capacity);
     }
 
-    vector(const vector<T, Allocator>& arr) noexcept
+    vector(const vector& arr) noexcept
         : vector(arr.capacity())
     {
         for (const auto& item : arr)
             push_back(item);
+    }
+
+    vector(vector&& arr) noexcept
+    {
+        m_arr = arr.m_arr;
+        m_capacity = arr.m_capacity;
+        m_size = arr.m_size;
+
+        arr.m_arr = nullptr;
+        arr.m_capacity = 0;
+        arr.m_size = 0;
     }
 
     ~vector() noexcept
@@ -220,8 +238,15 @@ public:
     {
         if (m_size == m_capacity)
             resize(m_capacity * 2);
-        allocator_traits<allocator_type>::construct(m_arr + m_size, v);
+        allocator_traits<allocator_type>::construct(m_arr + m_size, move(v));
         ++m_size;
+    }
+
+    template <typename... Args>
+    iterator_type emplace_back(Args&&... args)
+    {
+        push_back(value_type(forward<Args>(args)...));
+        return back();
     }
 
     void pop_back(void) noexcept

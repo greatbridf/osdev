@@ -42,7 +42,7 @@ include_directories(${PROJECT_SOURCE_DIR}/include)
 set(KERNEL_MAIN_SOURCES src/kernel_main.c
                         src/kernel/errno.c
                         src/kernel/interrupt.cpp
-                        src/kernel/process.c
+                        src/kernel/process.cpp
                         src/kernel/tty.c
                         src/kernel/stdio.c
                         src/kernel/mem.cpp
@@ -61,7 +61,7 @@ set(KERNEL_MAIN_SOURCES src/kernel_main.c
                         include/kernel/errno.h
                         include/kernel/tty.h
                         include/kernel/interrupt.h
-                        include/kernel/process.h
+                        include/kernel/process.hpp
                         include/kernel/stdio.h
                         include/kernel/mem.h
                         include/kernel/mm.hpp

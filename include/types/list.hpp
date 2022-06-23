@@ -52,7 +52,7 @@ private:
         }
 
         explicit node(NodeValue&& v) noexcept
-            : value(v)
+            : value(move(v))
         {
         }
 
@@ -75,6 +75,13 @@ public:
         iterator(iterator&& iter) noexcept
             : n(iter.n)
         {
+            iter.n = nullptr;
+        }
+
+        iterator& operator=(const iterator& iter)
+        {
+            n = iter.n;
+            return *this;
         }
 
         explicit iterator(node_base* _n) noexcept
@@ -156,6 +163,15 @@ private:
         return (static_cast<sentry_node_type*>(head))->value;
     }
 
+    void destroy(void)
+    {
+        if (!head || !tail)
+            return;
+        clear();
+        allocator_traits<sentry_allocator_type>::deconstruct_and_deallocate(static_cast<sentry_node_type*>(head));
+        allocator_traits<sentry_allocator_type>::deconstruct_and_deallocate(static_cast<sentry_node_type*>(tail));
+    }
+
 public:
     list() noexcept
         // size is stored in the 'head' node
@@ -166,13 +182,44 @@ public:
         tail->connect(head);
     }
 
+    list(const list& v)
+        : list()
+    {
+        for (const auto& item : v)
+            push_back(item);
+    }
+
+    list(list&& v)
+        : head(v.head)
+        , tail(v.tail)
+    {
+        v.head = nullptr;
+        v.tail = nullptr;
+    }
+
+    list& operator=(const list& v)
+    {
+        clear();
+        for (const auto& item : v)
+            push_back(item);
+        return *this;
+    }
+
+    list& operator=(list&& v)
+    {
+        destroy();
+
+        head = v.head;
+        tail = v.tail;
+        v.head = nullptr;
+        v.tail = nullptr;
+
+        return *this;
+    }
+
     ~list() noexcept
     {
-        for (auto iter = begin(); iter != end(); ++iter) {
-            erase(iter);
-        }
-        allocator_traits<sentry_allocator_type>::deconstruct_and_deallocate(static_cast<sentry_node_type*>(head));
-        allocator_traits<sentry_allocator_type>::deconstruct_and_deallocate(static_cast<sentry_node_type*>(tail));
+        destroy();
     }
 
     iterator_type find(const value_type& v) noexcept
@@ -183,32 +230,44 @@ public:
     }
 
     // erase the node which iter points to
-    void erase(const iterator_type& iter) noexcept
+    iterator_type erase(const iterator_type& iter) noexcept
     {
         node_base_type* current_node = iter._node();
+        iterator_type ret(current_node->next);
         current_node->prev->connect(current_node->next);
         allocator_traits<allocator_type>::deconstruct_and_deallocate(static_cast<node_type*>(current_node));
         --_size();
+        return ret;
+    }
+
+    void clear(void)
+    {
+        for (auto iter = begin(); iter != end();)
+            iter = erase(iter);
     }
 
     // insert the value v in front of the given iterator
-    void insert(const iterator_type& iter, const value_type& v) noexcept
+    iterator_type insert(const iterator_type& iter, const value_type& v) noexcept
     {
         node_base_type* new_node = allocator_traits<allocator_type>::allocate_and_construct(v);
+        iterator_type ret(new_node);
         iter._node()->prev->connect(new_node);
         new_node->connect(iter._node());
 
         ++_size();
+        return ret;
     }
 
     // insert the value v in front of the given iterator
-    void insert(const iterator_type& iter, value_type&& v) noexcept
+    iterator_type insert(const iterator_type& iter, value_type&& v) noexcept
     {
-        node_base_type* new_node = allocator_traits<allocator_type>::allocate_and_construct(v);
-        iter._node().prev->connect(new_node);
+        node_base_type* new_node = allocator_traits<allocator_type>::allocate_and_construct(move(v));
+        iterator_type ret(new_node);
+        iter._node()->prev->connect(new_node);
         new_node->connect(iter._node());
 
         ++_size();
+        return ret;
     }
 
     void push_back(const value_type& v) noexcept
@@ -218,7 +277,13 @@ public:
 
     void push_back(value_type&& v) noexcept
     {
-        insert(end(), v);
+        insert(end(), move(v));
+    }
+
+    template <typename... Args>
+    iterator_type emplace_back(Args&&... args)
+    {
+        return insert(end(), value_type(forward<Args>(args)...));
     }
 
     void push_front(const value_type& v) noexcept
@@ -228,7 +293,13 @@ public:
 
     void push_front(value_type&& v) noexcept
     {
-        insert(begin(), v);
+        insert(begin(), move(v));
+    }
+
+    template <typename... Args>
+    iterator_type emplace_front(Args&&... args)
+    {
+        return insert(begin(), value_type(forward<Args>(args)...));
     }
 
     size_t size(void) const noexcept
@@ -272,9 +343,6 @@ public:
     }
 
     // TODO
-    // iterator_type cstart() noexcept;
-    // iterator_type cend() noexcept;
-
     // iterator_type r_start() noexcept;
     // iterator_type r_end() noexcept;
 

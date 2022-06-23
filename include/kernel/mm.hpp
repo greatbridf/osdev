@@ -6,6 +6,8 @@
 #include <types/types.h>
 #include <types/vector.hpp>
 
+constexpr size_t THREAD_KERNEL_STACK_SIZE = 2 * PAGE_SIZE;
+
 struct page_attr {
     uint32_t cow : 1;
 };
@@ -24,17 +26,23 @@ struct mm_attr {
     uint32_t system : 1;
 };
 
-struct mm {
+class mm {
+public:
     linr_ptr_t start;
     struct mm_attr attr;
-    page_arr* pgs;
     page_directory_entry* pd;
+    page_arr* pgs;
+
+public:
+    mm(const mm& val);
+    mm(linr_ptr_t start, page_directory_entry* pd, bool write, bool system);
 };
 
 using mm_list = types::list<mm, types::kernel_ident_allocator>;
 
 // in mem.cpp
 extern mm_list* kernel_mms;
+extern page empty_page;
 
 // translate physical address to virtual(mapped) address
 void* p_ptr_to_v_ptr(phys_ptr_t p_ptr);
@@ -137,3 +145,6 @@ page_t alloc_raw_page(void);
 
 // allocate a struct page together with the raw page
 struct page allocate_page(void);
+
+page_directory_entry* alloc_pd(void);
+page_table_entry* alloc_pt(void);

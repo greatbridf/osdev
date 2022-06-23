@@ -9,3 +9,5 @@ bx_enh_dbg.ini
 .cache/
 
 compile_commands.json
+
+Makefile

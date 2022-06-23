@@ -1,0 +1,66 @@
+#!/bin/sh
+QEMU_EXECUTABLES="qemu-system-i386 qemu-system-x86_64"
+GDB_EXECUTABLES="gdb x86_64-elf-gdb"
+
+event() {
+    printf "$1... "
+}
+
+event "finding qemu"
+for item in $QEMU_EXECUTABLES; do
+    if $item --version > /dev/null 2>&1; then
+        QEMU="$item"
+        break
+    fi
+done
+if [ "$QEMU" = "" ]; then
+    echo "failed"
+    exit 1
+fi
+echo "$QEMU"
+
+event "finding gdb"
+for item in $GDB_EXECUTABLES; do
+    if $item --version > /dev/null 2>&1; then
+        GDB="$item"
+        break
+    fi
+done
+if [ "$GDB" = "" ]; then
+    echo "failed"
+    exit 1
+fi
+echo "$GDB"
+
+event "checking os type"
+OS=`uname`
+case "$OS" in
+    "Linux")
+        echo "Linux"
+        QEMU_ACCEL='-enable-kvm'
+        ;;
+    "Darwin")
+        echo "macOS"
+        QEMU_ACCEL='-accel hvf'
+        ;;
+    *)
+        echo "unknown"
+        exit 1
+        ;;
+esac
+
+event "checking cross compiling"
+if [ "$CROSS_COMPILE" != "" ]; then
+    echo "yes"
+    CROSS_COMPILE_FLAG='--toolchain cross-compile.cmake'
+else
+    echo "no"
+    CROSS_COMPILE_FLAG=
+fi
+
+cp Makefile.src Makefile
+sed -i '' -e "s/##PLACEHOLDER_1##/$QEMU/" Makefile > /dev/null 2>&1
+sed -i '' -e "s/##PLACEHOLDER_2##/$GDB/" Makefile > /dev/null 2>&1
+sed -i '' -e "s/##PLACEHOLDER_3##/$QEMU_ACCEL/" Makefile > /dev/null 2>&1
+sed -i '' -e "s/##PLACEHOLDER_4##/$CROSS_COMPILE_FLAG/" Makefile > /dev/null 2>&1
+exit 0

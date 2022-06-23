@@ -77,6 +77,12 @@ public:
         {
         }
 
+        iterator& operator=(const iterator& iter)
+        {
+            n = iter.n;
+            return *this;
+        }
+
         explicit iterator(node_base* _n) noexcept
             : n(_n)
         {
@@ -173,6 +179,14 @@ public:
             push_back(item);
     }
 
+    list<T, Allocator>& operator=(const list<T, Allocator>& v)
+    {
+        clear();
+        for (const auto& item : v)
+            push_back(item);
+        return *this;
+    }
+
     ~list() noexcept
     {
         for (auto iter = begin(); iter != end(); ++iter) {
@@ -190,12 +204,20 @@ public:
     }
 
     // erase the node which iter points to
-    void erase(const iterator_type& iter) noexcept
+    iterator_type erase(const iterator_type& iter) noexcept
     {
         node_base_type* current_node = iter._node();
+        iterator_type ret(current_node->next);
         current_node->prev->connect(current_node->next);
         allocator_traits<allocator_type>::deconstruct_and_deallocate(static_cast<node_type*>(current_node));
         --_size();
+        return ret;
+    }
+
+    void clear(void)
+    {
+        for (auto iter = begin(); iter != end();)
+            iter = erase(iter);
     }
 
     // insert the value v in front of the given iterator
@@ -279,9 +301,6 @@ public:
     }
 
     // TODO
-    // iterator_type cstart() noexcept;
-    // iterator_type cend() noexcept;
-
     // iterator_type r_start() noexcept;
     // iterator_type r_end() noexcept;
 

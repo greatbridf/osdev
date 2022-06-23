@@ -13,142 +13,119 @@ static inline void* align_down_to_16byte(void* addr)
     return (void*)((uint32_t)addr & 0xfffffff0);
 }
 
-thread* current_thread;
-process* current_process;
-
+static bool is_scheduler_ready;
 static types::list<process>* processes;
 static types::list<thread*>* ready_thds;
 
-static inline void create_init_process(void)
+thread* current_thread;
+process* current_process;
+
+process::process(process&& val)
+    : mms(types::move(val.mms))
+    , thds(types::move(val.thds))
 {
-    auto init = processes->emplace_back();
+    if (current_process == &val)
+        current_process = this;
 
-    init->kernel_esp = align_down_to_16byte((char*)k_malloc(THREAD_KERNEL_STACK_SIZE) + THREAD_KERNEL_STACK_SIZE);
-    memset((char*)init->kernel_esp - THREAD_KERNEL_STACK_SIZE, 0x00, THREAD_KERNEL_STACK_SIZE);
-    init->attr.system = 0;
-    init->mms = *kernel_mms;
+    attr.system = val.attr.system;
+    k_esp = val.k_esp;
 
-    tss.esp0 = (uint32_t)init->kernel_esp;
-
-    page_directory_entry* pd = alloc_pd();
-    memcpy(pd, mms_get_pd(kernel_mms), PAGE_SIZE);
-
-    for (auto& item : init->mms) {
-        item.pd = pd;
+    for (auto& item : thds) {
+        item.owner = this;
     }
 
-    auto user_mm = init->mms.emplace_back(mm {
-        .start = 0x40000000,
-        .attr = {
-            .read = 1,
-            .write = 1,
-            .system = 0,
-        },
-        .pgs = types::kernel_allocator_new<page_arr>(),
-        .pd = pd,
-    });
-
-    auto thd = init->thds.emplace_back(thread {
-        .eip = (void*)0x40000000U,
-        .owner = init.ptr(),
-        .regs {},
-        .eflags {},
-        .esp = 0x40100000U,
-    });
-    ready_thds->push_back(thd.ptr());
-
-    for (int i = 0; i < 1 * 1024 * 1024 / PAGE_SIZE; ++i) {
-        k_map(user_mm.ptr(), &empty_page, 1, 1, 0, 1);
-    }
-
-    current_process = init.ptr();
-    current_thread = thd.ptr();
-    asm_switch_pd(pd);
-
-    // movl $0x01919810, %eax
-    // movl $0x00114514, %ebx
-    // jmp $.
-    unsigned char instruction[] = {
-        0xb8, 0x10, 0x98, 0x91, 0x01, 0xbb, 0x14, 0x45, 0x11, 0x00, 0xeb, 0xfe
-    };
-
-    void* user_mem = (void*)0x40000000U;
-    memcpy(user_mem, instruction, sizeof(instruction));
+    val.k_esp = nullptr;
+    val.attr.system = 0;
 }
 
-static inline void create_test_process(void)
+process::process(void* start_eip, uint8_t* image, size_t image_size, bool system)
+    : mms(*kernel_mms)
+    , thds {}
+    , attr { .system = system }
 {
-    auto proc = processes->emplace_back();
-    proc->attr.system = 0;
-    proc->kernel_esp = align_down_to_16byte((char*)k_malloc(THREAD_KERNEL_STACK_SIZE) + THREAD_KERNEL_STACK_SIZE);
-    memset((char*)proc->kernel_esp - THREAD_KERNEL_STACK_SIZE, 0x00, THREAD_KERNEL_STACK_SIZE);
-
-    proc->mms = *kernel_mms;
+    k_esp = align_down_to_16byte((char*)k_malloc(THREAD_KERNEL_STACK_SIZE) + THREAD_KERNEL_STACK_SIZE);
+    memset((char*)k_esp - THREAD_KERNEL_STACK_SIZE, 0x00, THREAD_KERNEL_STACK_SIZE);
 
     page_directory_entry* pd = alloc_pd();
     memcpy(pd, mms_get_pd(kernel_mms), PAGE_SIZE);
-    for (auto& item : proc->mms)
+    for (auto& item : mms)
         item.pd = pd;
 
-    auto user_mm = proc->mms.emplace_back(mm {
-        .start = 0x40000000,
+    auto user_mm = mms.emplace_back(mm {
+        // TODO: change this
+        .start = 0x40000000U,
         .attr = {
             .read = 1,
             .write = 1,
-            .system = 0,
+            .system = system,
         },
         .pgs = types::kernel_allocator_new<page_arr>(),
         .pd = pd,
     });
 
-    auto thd = proc->thds.emplace_back(thread {
-        .eip = (void*)0x40000000U,
-        .owner = proc.ptr(),
+    auto thd = thds.emplace_back(thread {
+        .eip = start_eip,
+        .owner = this,
         .regs {},
         .eflags {},
+        // TODO: change this
         .esp = 0x40100000U,
     });
     ready_thds->push_back(thd.ptr());
 
+    // TODO: change this
     for (int i = 0; i < 1 * 1024 * 1024 / PAGE_SIZE; ++i)
         k_map(user_mm.ptr(), &empty_page, 1, 1, 0, 1);
 
-    page_directory_entry* init_pd = (page_directory_entry*)p_ptr_to_v_ptr(current_pd());
+    auto* old_pd = reinterpret_cast<page_directory_entry*>(p_ptr_to_v_ptr(current_pd()));
+    auto* old_proc = current_process;
+    auto* old_thd = current_thread;
 
-    auto old_proc = current_process;
-    auto old_thd = current_thread;
-
-    current_process = proc.ptr();
+    current_process = this;
     current_thread = thd.ptr();
     asm_switch_pd(pd);
 
-    unsigned char instruction[] = {
-        0xb8, 0x00, 0x81, 0x19, 0x19, 0xbb, 0x00, 0x14, 0x45, 0x11, 0xeb, 0xfe
-    };
-
-    void* user_mem = (void*)0x40000000U;
-    memcpy(user_mem, instruction, sizeof(instruction));
+    // TODO: change this
+    memcpy((void*)0x40000000U, image, image_size);
 
     current_process = old_proc;
     current_thread = old_thd;
-    asm_switch_pd(init_pd);
+    asm_switch_pd(old_pd);
 }
-
-static bool is_scheduler_ready;
 
 void NORETURN init_scheduler()
 {
     processes = types::kernel_allocator_new<types::list<process>>();
     ready_thds = types::kernel_allocator_new<types::list<thread*>>();
 
-    tss.ss0 = KERNEL_DATA_SEGMENT;
+    // movl $0x01919810, %eax
+    // movl $0x00114514, %ebx
+    // jmp $.
+    unsigned char instruction1[] = {
+        0xb8, 0x10, 0x98, 0x91, 0x01, 0xbb, 0x14, 0x45, 0x11, 0x00, 0xeb, 0xfe
+    };
 
-    create_init_process();
-    create_test_process();
+    uint8_t instruction2[] = {
+        0xb8, 0x00, 0x81, 0x19, 0x19, 0xbb, 0x00, 0x14, 0x45, 0x11, 0xeb, 0xfe
+    };
 
+    void* user_space_start = reinterpret_cast<void*>(0x40000000U);
+
+    processes->emplace_back(user_space_start, instruction1, sizeof(instruction1), false);
+    processes->emplace_back(user_space_start, instruction2, sizeof(instruction2), false);
+
+    // we need interrupts enabled for cow mapping
     asm_cli();
+
+    auto init_process = processes->begin();
+    current_process = init_process.ptr();
+    current_thread = init_process->thds.begin().ptr();
+    tss.ss0 = KERNEL_DATA_SEGMENT;
+    tss.esp0 = (uint32_t)init_process->k_esp;
+    asm_switch_pd(mms_get_pd(&current_process->mms));
+
     is_scheduler_ready = true;
-    go_user_space((void*)0x40000000U);
+    go_user_space(user_space_start);
 }
 
 void context_switch(irq0_data* intrpt_data)
@@ -167,7 +144,7 @@ void context_switch(irq0_data* intrpt_data)
     process* pro = thd->owner;
     if (current_process != pro) {
         if (!pro->attr.system) {
-            tss.esp0 = (uint32_t)pro->kernel_esp;
+            tss.esp0 = (uint32_t)pro->k_esp;
         }
 
         current_process = pro;

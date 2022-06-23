@@ -23,11 +23,17 @@ struct thread {
     uint32_t esp;
 };
 
-struct process {
+class process {
+public:
     mm_list mms;
     types::list<thread> thds;
-    void* kernel_esp;
+    void* k_esp;
     process_attr attr;
+
+public:
+    process(process&& val);
+    process(const process&) = delete;
+    process(void* start_eip, uint8_t* image, size_t image_size, bool system);
 };
 
 // in process.cpp

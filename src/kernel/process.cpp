@@ -30,7 +30,7 @@ static inline void create_init_process(void)
         item.pd = pd;
     }
 
-    _init->mms.push_back(mm {
+    auto user_mm = _init->mms.emplace_back(mm {
         .start = 0x40000000,
         .attr = {
             .read = 1,
@@ -45,8 +45,6 @@ static inline void create_init_process(void)
         .eip = (void*)0x40000000U,
         .owner = _init,
     });
-
-    auto user_mm = ++_init->mms.begin();
 
     for (int i = 0; i < 1 * 1024 * 1024 / PAGE_SIZE; ++i) {
         k_map(user_mm.ptr(), &empty_page, 1, 1, 0, 1);

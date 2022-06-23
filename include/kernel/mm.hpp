@@ -26,11 +26,16 @@ struct mm_attr {
     uint32_t system : 1;
 };
 
-struct mm {
+class mm {
+public:
     linr_ptr_t start;
     struct mm_attr attr;
-    page_arr* pgs;
     page_directory_entry* pd;
+    page_arr* pgs;
+
+public:
+    mm(const mm& val);
+    mm(linr_ptr_t start, page_directory_entry* pd, bool write, bool system);
 };
 
 using mm_list = types::list<mm, types::kernel_ident_allocator>;

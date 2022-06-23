@@ -484,16 +484,7 @@ void init_mem(void)
     init_paging_map_low_mem_identically();
 
     kernel_mms = types::kernel_ident_allocator_new<mm_list>();
-    kernel_mms->push_back(mm {
-        .start = (linr_ptr_t)KERNEL_HEAP_START,
-        .attr = {
-            .read = 1,
-            .write = 1,
-            .system = 1,
-        },
-        .pgs = types::kernel_ident_allocator_new<page_arr>(),
-        .pd = KERNEL_PAGE_DIRECTORY_ADDR,
-    });
+    auto heap_mm = kernel_mms->emplace_back((linr_ptr_t)KERNEL_HEAP_START, KERNEL_PAGE_DIRECTORY_ADDR, 1, 1);
 
     page heap_first_page {
         .phys_page_id = alloc_raw_page(),
@@ -503,9 +494,7 @@ void init_mem(void)
         },
     };
 
-    mm* heap_mm = kernel_mms->begin().ptr();
-
-    k_map(heap_mm, &heap_first_page, 1, 1, 1, 0);
+    k_map(heap_mm.ptr(), &heap_first_page, 1, 1, 1, 0);
     memset(KERNEL_HEAP_START, 0x00, PAGE_SIZE);
     kernel_heap_allocator = types::kernel_ident_allocator_new<brk_memory_allocator>(KERNEL_HEAP_START,
         (uint32_t)KERNEL_HEAP_LIMIT - (uint32_t)KERNEL_HEAP_START);
@@ -519,7 +508,7 @@ void init_mem(void)
     // while (kernel_mm_head->len < 256 * 1024 * 1024 / PAGE_SIZE) {
     while (heap_mm->pgs->size() < 256 * 1024 * 1024 / PAGE_SIZE) {
         k_map(
-            heap_mm, &empty_page,
+            heap_mm.ptr(), &empty_page,
             1, 1, 1, 1);
     }
 }
@@ -538,4 +527,28 @@ void create_segment_descriptor(
     sd->limit_high = ((limit & 0x000f0000) >> 16);
     sd->access = access;
     sd->flags = flags;
+}
+
+mm::mm(linr_ptr_t start, page_directory_entry* pd, bool write, bool system)
+    : start(start)
+    , attr({
+          .read { 1 },
+          .write { write },
+          .system { system },
+      })
+    , pd(pd)
+    , pgs(types::kernel_ident_allocator_new<page_arr>())
+{
+}
+
+mm::mm(const mm& val)
+    : start(val.start)
+    , attr({
+          .read { val.attr.read },
+          .write { val.attr.write },
+          .system { val.attr.system },
+      })
+    , pd(val.pd)
+    , pgs(val.pgs)
+{
 }

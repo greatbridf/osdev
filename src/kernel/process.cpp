@@ -51,17 +51,7 @@ process::process(void* start_eip, uint8_t* image, size_t image_size, bool system
     for (auto& item : mms)
         item.pd = pd;
 
-    auto user_mm = mms.emplace_back(mm {
-        // TODO: change this
-        .start = 0x40000000U,
-        .attr = {
-            .read = 1,
-            .write = 1,
-            .system = system,
-        },
-        .pgs = types::kernel_allocator_new<page_arr>(),
-        .pd = pd,
-    });
+    auto user_mm = mms.emplace_back(0x40000000U, pd, 1, system);
 
     auto thd = thds.emplace_back(thread {
         .eip = start_eip,

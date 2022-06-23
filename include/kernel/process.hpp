@@ -20,8 +20,6 @@ struct thread {
     process* owner;
     regs_32 regs;
     uint32_t eflags;
-    uint16_t cs;
-    uint16_t ss;
     uint32_t esp;
 };
 
@@ -29,7 +27,6 @@ struct process {
     mm_list mms;
     types::list<thread> thds;
     void* kernel_esp;
-    uint16_t kernel_ss;
     process_attr attr;
 };
 

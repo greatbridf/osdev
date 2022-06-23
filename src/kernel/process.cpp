@@ -25,12 +25,10 @@ static inline void create_init_process(void)
 
     init->kernel_esp = align_down_to_16byte((char*)k_malloc(THREAD_KERNEL_STACK_SIZE) + THREAD_KERNEL_STACK_SIZE);
     memset((char*)init->kernel_esp - THREAD_KERNEL_STACK_SIZE, 0x00, THREAD_KERNEL_STACK_SIZE);
-    init->kernel_ss = 0x10;
     init->attr.system = 0;
     init->mms = *kernel_mms;
 
     tss.esp0 = (uint32_t)init->kernel_esp;
-    tss.ss0 = init->kernel_ss;
 
     page_directory_entry* pd = alloc_pd();
     memcpy(pd, mms_get_pd(kernel_mms), PAGE_SIZE);
@@ -55,8 +53,6 @@ static inline void create_init_process(void)
         .owner = init.ptr(),
         .regs {},
         .eflags {},
-        .cs = USER_CODE_SELECTOR,
-        .ss = USER_DATA_SELECTOR,
         .esp = 0x40100000U,
     });
     ready_thds->push_back(thd.ptr());
@@ -86,7 +82,6 @@ static inline void create_test_process(void)
     proc->attr.system = 0;
     proc->kernel_esp = align_down_to_16byte((char*)k_malloc(THREAD_KERNEL_STACK_SIZE) + THREAD_KERNEL_STACK_SIZE);
     memset((char*)proc->kernel_esp - THREAD_KERNEL_STACK_SIZE, 0x00, THREAD_KERNEL_STACK_SIZE);
-    proc->kernel_ss = KERNEL_DATA_SEGMENT;
 
     proc->mms = *kernel_mms;
 
@@ -111,8 +106,6 @@ static inline void create_test_process(void)
         .owner = proc.ptr(),
         .regs {},
         .eflags {},
-        .cs = USER_CODE_SELECTOR,
-        .ss = USER_DATA_SELECTOR,
         .esp = 0x40100000U,
     });
     ready_thds->push_back(thd.ptr());
@@ -148,6 +141,8 @@ void NORETURN init_scheduler()
     processes = types::kernel_allocator_new<types::list<process>>();
     ready_thds = types::kernel_allocator_new<types::list<thread*>>();
 
+    tss.ss0 = KERNEL_DATA_SEGMENT;
+
     create_init_process();
     create_test_process();
 
@@ -172,11 +167,7 @@ void context_switch(irq0_data* intrpt_data)
     process* pro = thd->owner;
     if (current_process != pro) {
         if (!pro->attr.system) {
-            current_process->kernel_esp = (void*)tss.esp0;
-            current_process->kernel_ss = tss.ss0;
-
             tss.esp0 = (uint32_t)pro->kernel_esp;
-            tss.ss0 = pro->kernel_ss;
         }
 
         current_process = pro;
@@ -184,13 +175,11 @@ void context_switch(irq0_data* intrpt_data)
     }
 
     // save current thread info
-    current_thread->cs = intrpt_data->cs;
     current_thread->eflags = intrpt_data->eflags;
     current_thread->eip = intrpt_data->v_eip;
     memcpy(&current_thread->regs, &intrpt_data->s_regs, sizeof(regs_32));
 
     // load ready thread info
-    intrpt_data->cs = thd->cs;
     intrpt_data->eflags = thd->eflags;
     intrpt_data->eflags |= 0x200; // sti
     intrpt_data->v_eip = thd->eip;
@@ -199,10 +188,13 @@ void context_switch(irq0_data* intrpt_data)
     if (!pro->attr.system) {
         // user mode
         current_thread->esp = intrpt_data->esp;
-        current_thread->ss = intrpt_data->ss;
 
-        intrpt_data->ss = thd->ss;
+        intrpt_data->cs = USER_CODE_SELECTOR;
+        intrpt_data->ss = USER_DATA_SELECTOR;
         intrpt_data->esp = thd->esp;
+    } else {
+        // supervisor mode
+        intrpt_data->cs = KERNEL_CODE_SEGMENT;
     }
 
     ready_thds->erase(ready_thds->begin());

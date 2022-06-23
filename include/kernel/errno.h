@@ -14,10 +14,10 @@ extern uint32_t* _get_errno(void);
 }
 #endif
 
-#define ENOMEM 0
-#define ENOTFOUND 1
+#define ENOMEM (1 << 0)
 #define EEXIST (1 << 1)
 #define ENOENT (1 << 2)
 #define EINVAL (1 << 3)
 #define EISDIR (1 << 4)
 #define ENOTDIR (1 << 5)
+#define ENOTFOUND (1 << 6)

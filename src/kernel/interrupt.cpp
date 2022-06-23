@@ -5,6 +5,7 @@
 #include <kernel/hw/timer.h>
 #include <kernel/interrupt.h>
 #include <kernel/mem.h>
+#include <kernel/mm.hpp>
 #include <kernel/stdio.h>
 #include <kernel/tty.h>
 #include <kernel/vga.h>
@@ -73,7 +74,7 @@ void init_pic(void)
     asm_sti();
 }
 
-void int6_handler(
+extern "C" void int6_handler(
     struct regs_32 s_regs,
     uint32_t error_code,
     ptr_t eip,
@@ -141,7 +142,6 @@ void int14_handler(
     uint16_t cs,
     uint32_t eflags)
 {
-    MAKE_BREAK_POINT();
     char buf[512];
 
     ++page_fault_times;
@@ -155,15 +155,15 @@ void int14_handler(
 
     // kernel code
     if (cs == KERNEL_CODE_SEGMENT) {
-        if (is_l_ptr_valid(kernel_mm_head, l_addr) != GB_OK) {
+        if (is_l_ptr_valid(kernel_mms, l_addr) != GB_OK) {
             goto kill;
         }
-        struct page* page = find_page_by_l_ptr(kernel_mm_head, l_addr);
+        struct page* page = find_page_by_l_ptr(kernel_mms, l_addr);
 
         // copy on write
         if (error_code.write == 1 && page->attr.cow == 1) {
-            page_directory_entry* pde = kernel_mm_head->pd + linr_addr_to_pd_i(l_addr);
-            page_table_entry* pte = p_ptr_to_v_ptr(page_to_phys_addr(pde->in.pt_page));
+            page_directory_entry* pde = mms_get_pd(kernel_mms) + linr_addr_to_pd_i(l_addr);
+            page_table_entry* pte = (page_table_entry*)p_ptr_to_v_ptr(page_to_phys_addr(pde->in.pt_page));
             pte += linr_addr_to_pt_i(l_addr);
 
             // if it is a dying page
@@ -197,6 +197,8 @@ kill:
         buf, 512,
         "killed: segmentation fault (eip: %x, cr2: %x, error_code: %x)", v_eip, l_addr, error_code);
     tty_print(console, buf);
+
+    MAKE_BREAK_POINT();
     asm_cli();
     asm_hlt();
 }

@@ -1,7 +1,7 @@
 #pragma once
 
-#include <kernel/mem.h>
 #include <types/allocator.hpp>
+#include <types/cplusplus.hpp>
 #include <types/types.h>
 
 namespace types {
@@ -14,12 +14,14 @@ private:
     class node;
 
 public:
+    template <typename Pointer>
     class iterator;
 
     using value_type = T;
     using pointer_type = value_type*;
     using reference_type = value_type&;
-    using iterator_type = iterator;
+    using iterator_type = iterator<value_type*>;
+    using const_iterator_type = iterator<const value_type*>;
     using size_type = size_t;
     using difference_type = ssize_t;
     using node_base_type = node_base;
@@ -58,7 +60,12 @@ private:
     };
 
 public:
+    template <typename Pointer>
     class iterator {
+    public:
+        using Value = typename types::traits::remove_pointer<Pointer>::type;
+        using Reference = typename types::traits::add_reference<Value>::type;
+
     public:
         iterator(const iterator& iter) noexcept
             : n(iter.n)
@@ -111,17 +118,17 @@ public:
             return iter;
         }
 
-        reference_type operator*() const noexcept
+        Reference operator*() const noexcept
         {
             return (static_cast<node_type*>(n))->value;
         }
 
-        pointer_type operator->() const noexcept
+        Pointer operator->() const noexcept
         {
             return &(static_cast<node_type*>(n))->value;
         }
 
-        pointer_type ptr(void) const noexcept
+        Pointer ptr(void) const noexcept
         {
             return &(static_cast<node_type*>(n))->value;
         }
@@ -237,6 +244,26 @@ public:
     iterator_type end() noexcept
     {
         return iterator_type(tail);
+    }
+
+    const_iterator_type begin() const noexcept
+    {
+        return const_iterator_type(head->next);
+    }
+
+    const_iterator_type end() const noexcept
+    {
+        return const_iterator_type(tail);
+    }
+
+    const_iterator_type cbegin() const noexcept
+    {
+        return const_iterator_type(head->next);
+    }
+
+    const_iterator_type cend() const noexcept
+    {
+        return const_iterator_type(tail);
     }
 
     bool empty(void) const noexcept

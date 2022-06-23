@@ -1,16 +1,20 @@
-#include <kernel/tty.h>
 #include <asm/port_io.h>
 #include <kernel/event/event.h>
 #include <kernel/input/input_event.h>
 #include <kernel/stdio.h>
+#include <kernel/tty.h>
+#include <types/allocator.hpp>
 #include <types/list.hpp>
 
-static ::types::list<::input_event> _input_event_queue {};
+static ::types::list<::input_event>* _input_event_queue;
 
 namespace event {
 ::types::list<::input_event>& input_event_queue(void)
 {
-    return _input_event_queue;
+    if (!_input_event_queue) {
+        _input_event_queue = types::kernel_allocator_new<types::list<input_event>>();
+    }
+    return *_input_event_queue;
 }
 } // namespace event
 

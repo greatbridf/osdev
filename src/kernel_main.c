@@ -15,16 +15,6 @@
 #include <kernel/vga.h>
 #include <types/bitmap.h>
 
-typedef void (*constructor)(void);
-extern constructor start_ctors;
-extern constructor end_ctors;
-void call_constructors_for_cpp(void)
-{
-    for (constructor* ctor = &start_ctors; ctor != &end_ctors; ++ctor) {
-        (*ctor)();
-    }
-}
-
 #define KERNEL_MAIN_BUF_SIZE (128)
 
 struct tty* console = NULL;
@@ -55,6 +45,16 @@ static inline void halt_on_init_error(void)
     asm_cli();
     while (1)
         asm_hlt();
+}
+
+typedef void (*constructor)(void);
+extern constructor start_ctors;
+extern constructor end_ctors;
+void call_constructors_for_cpp(void)
+{
+    for (constructor* ctor = &start_ctors; ctor != &end_ctors; ++ctor) {
+        (*ctor)();
+    }
 }
 
 uint8_t e820_mem_map[1024];
@@ -162,12 +162,15 @@ void kernel_main(void)
     init_idt();
     INIT_OK();
 
-    INIT_START("memory allocation");
-    init_mem();
-    INIT_OK();
-
+    // NOTE:
+    // the initializer of c++ global objects MUST NOT contain
+    // all kinds of memory allocations
     INIT_START("C++ global objects");
     call_constructors_for_cpp();
+    INIT_OK();
+
+    INIT_START("memory allocation");
+    init_mem();
     INIT_OK();
 
     INIT_START("programmable interrupt controller and timer");

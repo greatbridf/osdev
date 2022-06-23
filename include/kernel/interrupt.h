@@ -2,6 +2,10 @@
 
 #include <types/types.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #define INTERRUPT_GATE_TYPE (0x8e)
 
 #define PIC_EOI (0x20)
@@ -38,7 +42,6 @@ struct page_fault_error_code {
 // external interrupt handler function
 // stub in assembly MUST be called irqN
 #define SET_UP_IRQ(N, SELECTOR)        \
-    extern void irq##N();              \
     ptr_t addr_irq##N = (ptr_t)irq##N; \
     SET_IDT_ENTRY(0x20 + (N), (addr_irq##N), (SELECTOR));
 
@@ -105,3 +108,40 @@ void irq12_handler(void);
 void irq13_handler(void);
 void irq14_handler(void);
 void irq15_handler(void);
+
+void int0(void);
+void int1(void);
+void int2(void);
+void int3(void);
+void int4(void);
+void int5(void);
+void int6(void);
+void int7(void);
+void int8(void);
+void int9(void);
+void int10(void);
+void int11(void);
+void int12(void);
+void int13(void);
+void int14(void);
+
+void irq0(void);
+void irq1(void);
+void irq2(void);
+void irq3(void);
+void irq4(void);
+void irq5(void);
+void irq6(void);
+void irq7(void);
+void irq8(void);
+void irq9(void);
+void irq10(void);
+void irq11(void);
+void irq12(void);
+void irq13(void);
+void irq14(void);
+void irq15(void);
+
+#ifdef __cplusplus
+}
+#endif

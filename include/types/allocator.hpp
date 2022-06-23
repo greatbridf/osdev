@@ -1,4 +1,5 @@
 #pragma once
+#include <kernel/mem.h>
 #include <types/types.h>
 
 inline void* operator new(size_t, void* ptr)
@@ -7,6 +8,10 @@ inline void* operator new(size_t, void* ptr)
 }
 
 namespace types {
+
+template <typename Allocator>
+class allocator_traits;
+
 template <typename T>
 class kernel_allocator {
 public:
@@ -14,7 +19,7 @@ public:
 
     static value_type* allocate_memory(size_t count)
     {
-        return static_cast<value_type*>(::k_malloc(sizeof(value_type) * count));
+        return static_cast<value_type*>(::k_malloc(count));
     }
 
     static void deallocate_memory(value_type* ptr)
@@ -22,6 +27,34 @@ public:
         ::k_free(ptr);
     }
 };
+
+template <typename T>
+class kernel_ident_allocator {
+public:
+    using value_type = T;
+
+    static value_type* allocate_memory(size_t count)
+    {
+        return static_cast<value_type*>(::ki_malloc(count));
+    }
+
+    static void deallocate_memory(value_type* ptr)
+    {
+        ::ki_free(ptr);
+    }
+};
+
+template <typename T, typename... Args>
+T* kernel_allocator_new(Args... args)
+{
+    return allocator_traits<kernel_allocator<T>>::allocate_and_construct(args...);
+}
+
+template <typename T, typename... Args>
+T* kernel_ident_allocator_new(Args... args)
+{
+    return allocator_traits<kernel_ident_allocator<T>>::allocate_and_construct(args...);
+}
 
 template <typename Allocator>
 class allocator_traits {

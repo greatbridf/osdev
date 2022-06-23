@@ -1,5 +1,6 @@
 #pragma once
 
+#include <kernel/interrupt.h>
 #include <kernel/task.h>
 #include <types/types.h>
 
@@ -17,6 +18,11 @@ struct process_attr {
 struct thread {
     void* eip;
     process* owner;
+    regs_32 regs;
+    uint32_t eflags;
+    uint16_t cs;
+    uint16_t ss;
+    uint32_t esp;
 };
 
 struct process {
@@ -30,10 +36,11 @@ struct process {
 // in process.cpp
 extern process* current_process;
 
-extern "C" void NORETURN init_scheduler(tss32_t* tss);
+extern "C" void NORETURN init_scheduler();
+void context_switch(irq0_data* intrpt_data);
 
 #else
 
-void NORETURN init_scheduler(struct tss32_t* tss);
+void NORETURN init_scheduler();
 
 #endif

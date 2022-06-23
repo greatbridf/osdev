@@ -62,11 +62,14 @@ go_user_space:
     movw %ax, %fs
     movw %ax, %gs
 
-    movl %esp, %eax
     movl 4(%esp), %ebx
     pushl $((4 * 8) | 3)
-    pushl %eax
+    pushl $0x40100000
     pushf
+    # allow interrupts in user mode
+    movl (%esp), %eax
+    orl $0x200, %eax
+    movl %eax, (%esp)
     pushl $((3 * 8) | 3)
     pushl %ebx
 

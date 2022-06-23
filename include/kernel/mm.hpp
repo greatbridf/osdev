@@ -6,6 +6,8 @@
 #include <types/types.h>
 #include <types/vector.hpp>
 
+constexpr size_t THREAD_KERNEL_STACK_SIZE = 2 * PAGE_SIZE;
+
 struct page_attr {
     uint32_t cow : 1;
 };

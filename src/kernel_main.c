@@ -118,7 +118,7 @@ static inline void show_mem_info(char* buf)
 }
 
 static segment_descriptor new_gdt[6];
-static struct tss32_t _tss;
+struct tss32_t tss;
 
 void load_new_gdt(void)
 {
@@ -127,7 +127,7 @@ void load_new_gdt(void)
     create_segment_descriptor(new_gdt + 2, 0, ~0, 0b1100, SD_TYPE_DATA_SYSTEM);
     create_segment_descriptor(new_gdt + 3, 0, ~0, 0b1100, SD_TYPE_CODE_USER);
     create_segment_descriptor(new_gdt + 4, 0, ~0, 0b1100, SD_TYPE_DATA_USER);
-    create_segment_descriptor(new_gdt + 5, (uint32_t)&_tss, sizeof(_tss), 0b0000, SD_TYPE_TSS);
+    create_segment_descriptor(new_gdt + 5, (uint32_t)&tss, sizeof(tss), 0b0000, SD_TYPE_TSS);
 
     asm_load_gdt((6 * 8 - 1) << 16, (phys_ptr_t)new_gdt);
     asm_load_tr((6 - 1) * 8);
@@ -200,5 +200,5 @@ void NORETURN kernel_main(void)
     vfs_read(init, buf, 128, 1, 10);
 
     printkf("switching execution to the scheduler...");
-    init_scheduler(&_tss);
+    init_scheduler(&tss);
 }

@@ -140,7 +140,7 @@ struct PACKED int14_data {
     struct regs_32 s_regs;
     struct page_fault_error_code error_code;
     void* v_eip;
-    uint16_t cs;
+    uint32_t cs;
     uint32_t eflags;
 };
 
@@ -214,18 +214,10 @@ kill:
     asm_hlt();
 }
 
-struct PACKED irq0_data {
-    struct regs_32 s_regs;
-    void* v_eip;
-    uint16_t cs;
-    uint32_t eflags;
-    uint32_t esp;
-    uint16_t ss;
-};
-
 extern "C" void irq0_handler(struct irq0_data* d)
 {
     inc_tick();
+    context_switch(d);
     asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
 }
 // keyboard interrupt

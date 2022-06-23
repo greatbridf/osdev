@@ -22,7 +22,7 @@ configure:
 
 .PHONY: build
 build:
-	cmake --build build --target boot.img
+	cmake --build build -j 6 --target boot.img
 
 .PHONY: clean
 clean:

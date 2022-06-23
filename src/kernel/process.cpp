@@ -11,23 +11,26 @@ static inline void* align_down_to_16byte(void* addr)
     return (void*)((uint32_t)addr & 0xfffffff0);
 }
 
-static struct process _init;
+static process* _init;
 process* current_process;
 
 static inline void create_init_process(void)
 {
-    _init.kernel_esp = align_down_to_16byte(k_malloc(4096 * 1024));
-    _init.kernel_ss = 0x10;
-    _init.mms = types::kernel_allocator_new<mm_list>(*kernel_mms);
+    _init = types::kernel_allocator_new<process>();
+
+    _init->kernel_esp = align_down_to_16byte(k_malloc(4096 * 1024));
+    _init->kernel_ss = 0x10;
+    _init->attr.system = 0;
+    _init->mms = *kernel_mms;
 
     page_directory_entry* pd = alloc_pd();
     memcpy(pd, mms_get_pd(kernel_mms), PAGE_SIZE);
 
-    for (auto& item : *_init.mms) {
+    for (auto& item : _init->mms) {
         item.pd = pd;
     }
 
-    _init.mms->push_back(mm {
+    _init->mms.push_back(mm {
         .start = 0x40000000,
         .attr = {
             .read = 1,
@@ -38,13 +41,18 @@ static inline void create_init_process(void)
         .pd = pd,
     });
 
-    auto user_mm = ++_init.mms->begin();
+    _init->thds.push_back(thread {
+        .eip = (void*)0x40000000U,
+        .owner = _init,
+    });
+
+    auto user_mm = ++_init->mms.begin();
 
     for (int i = 0; i < 1 * 1024 * 1024 / PAGE_SIZE; ++i) {
         k_map(user_mm.ptr(), &empty_page, 1, 1, 0, 1);
     }
 
-    current_process = &_init;
+    current_process = _init;
     asm_switch_pd(pd);
 
     // movl $0x01919810, %eax
@@ -62,8 +70,9 @@ void NORETURN init_scheduler(struct tss32_t* tss)
 {
     create_init_process();
 
-    tss->esp0 = (uint32_t)_init.kernel_esp;
-    tss->ss0 = _init.kernel_ss;
+    // TODO: fix it
+    tss->esp0 = (uint32_t)_init->kernel_esp;
+    tss->ss0 = _init->kernel_ss;
 
     go_user_space((void*)0x40000000U);
 }

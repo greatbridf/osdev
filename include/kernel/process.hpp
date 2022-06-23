@@ -5,13 +5,26 @@
 
 #ifdef __cplusplus
 #include <kernel/mm.hpp>
+#include <types/list.hpp>
+
+struct process;
+struct thread;
+
+struct process_attr {
+    uint16_t system : 1;
+};
+
+struct thread {
+    void* eip;
+    process* owner;
+};
 
 struct process {
-    mm_list* mms;
+    mm_list mms;
+    types::list<thread> thds;
     void* kernel_esp;
-    void* eip;
     uint16_t kernel_ss;
-    uint16_t cs;
+    process_attr attr;
 };
 
 // in process.cpp

@@ -150,7 +150,7 @@ extern "C" void int14_handler(struct int14_data* d)
     char buf[512];
     mm_list* mms = nullptr;
     if (current_process)
-        mms = current_process->mms;
+        mms = &current_process->mms;
     else
         mms = kernel_mms;
 

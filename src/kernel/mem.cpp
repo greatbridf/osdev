@@ -406,7 +406,7 @@ static inline void map_raw_page_to_pte(
 
 // map page to the end of mm_area in pd
 int k_map(
-    struct mm* mm_area,
+    mm* mm_area,
     const struct page* page,
     int read,
     int write,

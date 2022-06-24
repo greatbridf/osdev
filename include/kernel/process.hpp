@@ -8,7 +8,7 @@
 #include <kernel/mm.hpp>
 #include <types/list.hpp>
 
-struct process;
+class process;
 struct thread;
 
 struct process_attr {

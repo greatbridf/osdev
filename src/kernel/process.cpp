@@ -30,9 +30,8 @@ process::process(process&& val)
     attr.system = val.attr.system;
     k_esp = val.k_esp;
 
-    for (auto& item : thds) {
+    for (auto& item : thds)
         item.owner = this;
-    }
 
     val.k_esp = nullptr;
     val.attr.system = 0;

@@ -193,3 +193,28 @@ asm_load_idt:
     sti
 asm_load_idt_skip:
     ret
+
+.globl syscall_stub
+.type  syscall_stub @function
+syscall_stub:
+    cmpl $8, %eax
+    jge syscall_stub_end
+    pushal
+
+    # syscall function no. is in %eax
+    # store it in %ebx
+    movl %eax, %ebx
+    # stack alignment and push *data
+    movl %esp, %eax
+    subl $0x4, %esp
+    andl $0xfffffff0, %esp
+    movl %eax, (%esp)
+
+    call *syscall_handlers(%ebx)
+
+    # restore stack
+    popl %esp
+
+    popal
+syscall_stub_end:
+    iret

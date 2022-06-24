@@ -37,7 +37,7 @@ elseif(CMAKE_BUILD_TYPE STREQUAL "Release")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O")
 endif()
 
-include_directories(${PROJECT_SOURCE_DIR}/include)
+include_directories(${PROJECT_SOURCE_DIR}/include ${PROJECT_SOURCE_DIR}/user-space-program/build)
 
 set(KERNEL_MAIN_SOURCES src/kernel_main.c
                         src/kernel/errno.c
@@ -94,11 +94,19 @@ add_custom_command(OUTPUT extracted_kernel_main
     COMMAND ${CMAKE_AR} xf ${PROJECT_BINARY_DIR}/libkernel_main.a --output=${EXTRACT_DIR}
 )
 
+add_custom_command(OUTPUT user_space_programs
+    COMMAND make -C ${CMAKE_SOURCE_DIR}/user-space-program all
+    COMMAND mkdir -p ${CMAKE_SOURCE_DIR}/user-space-program/build
+    COMMAND rm -f ${CMAKE_SOURCE_DIR}/user-space-program/build/*
+    COMMAND cp ${CMAKE_SOURCE_DIR}/user-space-program/*.res ${CMAKE_SOURCE_DIR}/user-space-program/build
+)
+
 add_custom_target(kernel.out
     DEPENDS extracted_bootloader
     DEPENDS extracted_kernel_main
+    DEPENDS user_space_programs
     DEPENDS ${CMAKE_SOURCE_DIR}/ldscript.ld
-    COMMAND ${CMAKE_LINKER} -T ${CMAKE_SOURCE_DIR}/ldscript.ld ${EXTRACT_DIR}/*.o
+    COMMAND ${CMAKE_LINKER} -T ${CMAKE_SOURCE_DIR}/ldscript.ld ${EXTRACT_DIR}/*.o ${CMAKE_SOURCE_DIR}/user-space-program/user.sym
     -melf_i386 -o ${CMAKE_BINARY_DIR}/kernel.out
 )
 

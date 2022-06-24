@@ -210,7 +210,7 @@ syscall_stub:
     andl $0xfffffff0, %esp
     movl %eax, (%esp)
 
-    call *syscall_handlers(%ebx)
+    call *syscall_handlers(,%ebx,4)
 
     # restore stack
     popl %esp

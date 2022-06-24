@@ -199,6 +199,6 @@ void NORETURN kernel_main(void)
     struct inode* init = vfs_open("/init");
     vfs_read(init, buf, 128, 1, 10);
 
-    printkf("switching execution to the scheduler...");
+    printkf("switching execution to the scheduler...\n");
     init_scheduler(&tss);
 }

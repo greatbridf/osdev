@@ -5,6 +5,8 @@
 #include <kernel/stdio.h>
 #include <kernel_main.h>
 #include <types/types.h>
+#include <hello-world.res>
+#include <interrupt-test.res>
 
 extern "C" void NORETURN go_user_space(void* eip);
 
@@ -87,25 +89,10 @@ void NORETURN init_scheduler()
     processes = types::kernel_allocator_new<types::list<process>>();
     ready_thds = types::kernel_allocator_new<types::list<thread*>>();
 
-    // movl $0x01919810, %eax
-    // movl $0x00114514, %ebx
-    // movl $0x00000001, %eax
-    // int $0x80
-    unsigned char instruction1[] = {
-        0xb8, 0x10, 0x98, 0x91, 0x01, 0xbb, 0x14, 0x45, 0x11, 0x00, 0xb8, 0x00, 0x00, 0x00, 0x00, 0xcd, 0x80
-    };
-
-    // movl $0x19198100, %eax
-    // movl $0x11451400, %ebx
-    // jmp $.
-    uint8_t instruction2[] = {
-        0xb8, 0x00, 0x81, 0x19, 0x19, 0xbb, 0x00, 0x14, 0x45, 0x11, 0xeb, 0xfe
-    };
-
     void* user_space_start = reinterpret_cast<void*>(0x40000000U);
 
-    processes->emplace_back(user_space_start, instruction1, sizeof(instruction1), false);
-    processes->emplace_back(user_space_start, instruction2, sizeof(instruction2), false);
+    processes->emplace_back(user_space_start, hello_world_bin, hello_world_bin_len, false);
+    processes->emplace_back(user_space_start, interrupt_test_bin, interrupt_test_bin_len, false);
 
     // we need interrupts enabled for cow mapping
     asm_cli();

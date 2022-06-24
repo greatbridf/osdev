@@ -9,6 +9,7 @@
 #include <kernel/mm.hpp>
 #include <kernel/process.hpp>
 #include <kernel/stdio.h>
+#include <kernel/syscall.hpp>
 #include <kernel/tty.h>
 #include <kernel/vga.h>
 #include <kernel_main.h>
@@ -22,13 +23,16 @@ void init_idt()
     memset(IDT, 0x00, sizeof(IDT));
 
     // invalid opcode
-    SET_IDT_ENTRY_FN(6, int6, 0x08);
+    SET_IDT_ENTRY_FN(6, int6, 0x08, KERNEL_INTERRUPT_GATE_TYPE);
     // double fault
-    SET_IDT_ENTRY_FN(8, int8, 0x08);
+    SET_IDT_ENTRY_FN(8, int8, 0x08, KERNEL_INTERRUPT_GATE_TYPE);
     // general protection
-    SET_IDT_ENTRY_FN(13, int13, 0x08);
+    SET_IDT_ENTRY_FN(13, int13, 0x08, KERNEL_INTERRUPT_GATE_TYPE);
     // page fault
-    SET_IDT_ENTRY_FN(14, int14, 0x08);
+    SET_IDT_ENTRY_FN(14, int14, 0x08, KERNEL_INTERRUPT_GATE_TYPE);
+    // system call
+    SET_IDT_ENTRY_FN(0x80, syscall_stub, 0x08, USER_INTERRUPT_GATE_TYPE);
+    init_syscall();
 
     uint16_t idt_descriptor[3];
     idt_descriptor[0] = sizeof(struct IDT_entry) * 256;
@@ -84,7 +88,7 @@ extern "C" void int6_handler(
 {
     char buf[512];
 
-    tty_print(console, "---- INVALID OPCODE ----\n");
+    tty_print(console, "\n---- INVALID OPCODE ----\n");
 
     snprintf(
         buf, 512,
@@ -97,7 +101,7 @@ extern "C" void int6_handler(
         cs, error_code);
     tty_print(console, buf);
 
-    tty_print(console, "----   HALTING SYSTEM   ----");
+    tty_print(console, "----   HALTING SYSTEM   ----\n");
 
     asm_cli();
     asm_hlt();
@@ -113,7 +117,7 @@ extern "C" void int13_handler(
 {
     char buf[512];
 
-    tty_print(console, "---- SEGMENTATION FAULT ----\n");
+    tty_print(console, "\n---- SEGMENTATION FAULT ----\n");
 
     snprintf(
         buf, 512,
@@ -127,7 +131,7 @@ extern "C" void int13_handler(
         cs, error_code, eflags);
     tty_print(console, buf);
 
-    tty_print(console, "----   HALTING SYSTEM   ----");
+    tty_print(console, "----   HALTING SYSTEM   ----\n");
 
     asm_cli();
     asm_hlt();
@@ -207,7 +211,7 @@ extern "C" void int14_handler(struct int14_data* d)
 kill:
     snprintf(
         buf, 512,
-        "killed: segmentation fault (eip: %x, cr2: %x, error_code: %x)", d->v_eip, d->l_addr, d->error_code);
+        "\nkilled: segmentation fault (eip: %x, cr2: %x, error_code: %x)\n", d->v_eip, d->l_addr, d->error_code);
     tty_print(console, buf);
 
     MAKE_BREAK_POINT();

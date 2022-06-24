@@ -15,10 +15,14 @@ srun: build
 nativerun: build
 	$(QEMU_BIN) $(QEMU_ARGS) -display none -serial mon:stdio
 
-.PHONY: configure
-configure:
+.PHONY: prepare
+prepare:
 	cmake -Bbuild -DCMAKE_BUILD_TYPE=Debug $(CROSS_COMPILE)
 	cp build/compile_commands.json .
+
+.PHONY: reprepare
+reprepare: clean prepare
+	true
 
 .PHONY: build
 build:
@@ -28,6 +32,10 @@ build:
 clean:
 	-rm -rf build
 	-rm compile_commands.json
+
+.PHONY: clean-all
+clean-all: clean
+	-rm Makefile
 
 .PHONY: debug
 debug:

@@ -6,7 +6,8 @@
 extern "C" {
 #endif
 
-#define INTERRUPT_GATE_TYPE (0x8e)
+#define KERNEL_INTERRUPT_GATE_TYPE (0x8e)
+#define USER_INTERRUPT_GATE_TYPE (0xee)
 
 #define PIC_EOI (0x20)
 
@@ -52,18 +53,18 @@ struct page_fault_error_code {
 // stub in assembly MUST be called irqN
 #define SET_UP_IRQ(N, SELECTOR)        \
     ptr_t addr_irq##N = (ptr_t)irq##N; \
-    SET_IDT_ENTRY(0x20 + (N), (addr_irq##N), (SELECTOR));
+    SET_IDT_ENTRY(0x20 + (N), (addr_irq##N), (SELECTOR), KERNEL_INTERRUPT_GATE_TYPE);
 
-#define SET_IDT_ENTRY_FN(N, FUNC_NAME, SELECTOR) \
+#define SET_IDT_ENTRY_FN(N, FUNC_NAME, SELECTOR, TYPE) \
     extern void FUNC_NAME();                     \
     ptr_t addr_##FUNC_NAME = (ptr_t)FUNC_NAME;   \
-    SET_IDT_ENTRY((N), (addr_##FUNC_NAME), (SELECTOR));
+    SET_IDT_ENTRY((N), (addr_##FUNC_NAME), (SELECTOR), (TYPE));
 
-#define SET_IDT_ENTRY(N, ADDR, SELECTOR)      \
+#define SET_IDT_ENTRY(N, ADDR, SELECTOR, TYPE)      \
     IDT[(N)].offset_low = (ADDR)&0x0000ffff;  \
     IDT[(N)].selector = (SELECTOR);           \
     IDT[(N)].zero = 0;                        \
-    IDT[(N)].type_attr = INTERRUPT_GATE_TYPE; \
+    IDT[(N)].type_attr = (TYPE); \
     IDT[(N)].offset_high = ((ADDR)&0xffff0000) >> 16
 
 struct IDT_entry {
@@ -125,6 +126,8 @@ void irq12(void);
 void irq13(void);
 void irq14(void);
 void irq15(void);
+
+void syscall_stub(void);
 
 #ifdef __cplusplus
 }

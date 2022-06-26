@@ -37,15 +37,30 @@ OS=`uname`
 case "$OS" in
     "Linux")
         echo "Linux"
-        QEMU_ACCEL='-enable-kvm'
         ;;
     "Darwin")
         echo "macOS"
-        QEMU_ACCEL='-accel hvf'
         ;;
     *)
         echo "unknown"
         exit 1
+        ;;
+esac
+
+event "setting hardware acceleration type"
+case "$OS" in
+    "Linux")
+        echo "kvm"
+        QEMU_ACCEL='-enable-kvm'
+        ;;
+    "Darwin")
+        if [ "$QEMU" = "qemu-system-x86_64" ]; then
+            echo "hvf"
+            QEMU_ACCEL='-accel hvf'
+        else
+            echo "tcg"
+            QEMU_ACCEL='-accel tcg'
+        fi
         ;;
 esac
 

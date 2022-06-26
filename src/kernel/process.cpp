@@ -19,6 +19,7 @@ static inline void* align_down_to_16byte(void* addr)
 static bool is_scheduler_ready;
 static types::list<process>* processes;
 static types::list<thread*>* ready_thds;
+static pid_t max_pid = 1;
 
 thread* current_thread;
 process* current_process;
@@ -26,6 +27,7 @@ process* current_process;
 process::process(process&& val)
     : mms(types::move(val.mms))
     , thds(types::move(val.thds))
+    , pid(val.pid)
 {
     if (current_process == &val)
         current_process = this;
@@ -40,10 +42,39 @@ process::process(process&& val)
     val.attr.system = 0;
 }
 
+process::process(const process& val, const thread& main_thd)
+    : mms(*kernel_mms)
+    , attr { .system = val.attr.system }
+    , pid { max_pid++ }
+{
+    k_esp = align_down_to_16byte((char*)k_malloc(THREAD_KERNEL_STACK_SIZE) + THREAD_KERNEL_STACK_SIZE);
+    memset((char*)k_esp - THREAD_KERNEL_STACK_SIZE, 0x00, THREAD_KERNEL_STACK_SIZE);
+    auto iter_thd = thds.emplace_back(main_thd);
+    iter_thd->owner = this;
+
+    page_directory_entry* pd = alloc_pd();
+    memcpy(pd, mms_get_pd(kernel_mms), PAGE_SIZE);
+
+    mms.begin()->pd = pd;
+    // skip kernel heap
+    for (auto iter_src = ++val.mms.cbegin(); iter_src != val.mms.cend(); ++iter_src) {
+        auto iter_dst = mms.emplace_back(iter_src->start, pd, iter_src->attr.write, iter_src->attr.system);
+        iter_dst->pd = pd;
+        for (auto pg = iter_src->pgs->begin(); pg != iter_src->pgs->end(); ++pg)
+            k_map(iter_dst.ptr(),
+                    &*pg,
+                    iter_src->attr.read,
+                    iter_src->attr.write,
+                    iter_src->attr.system,
+                    1);
+    }
+}
+
 process::process(void* start_eip, uint8_t* image, size_t image_size, bool system)
     : mms(*kernel_mms)
     , thds {}
     , attr { .system = system }
+    , pid { max_pid++ }
 {
     k_esp = align_down_to_16byte((char*)k_malloc(THREAD_KERNEL_STACK_SIZE) + THREAD_KERNEL_STACK_SIZE);
     memset((char*)k_esp - THREAD_KERNEL_STACK_SIZE, 0x00, THREAD_KERNEL_STACK_SIZE);
@@ -148,6 +179,16 @@ void process_context_load(interrupt_stack*, process* proc)
         tss.esp0 = (uint32_t)proc->k_esp;
     asm_switch_pd(mms_get_pd(&proc->mms));
     current_process = proc;
+}
+
+void add_to_process_list(process&& proc)
+{
+    processes->push_back(types::move(proc));
+}
+
+void add_to_ready_list(thread* thd)
+{
+    ready_thds->push_back(thd);
 }
 
 void do_scheduling(interrupt_stack* intrpt_data)

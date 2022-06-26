@@ -8,6 +8,8 @@
 #include <kernel/mm.hpp>
 #include <types/list.hpp>
 
+typedef size_t pid_t;
+
 class process;
 struct thread;
 
@@ -36,10 +38,12 @@ public:
     types::list<thread> thds;
     void* k_esp;
     process_attr attr;
+    pid_t pid;
 
 public:
     process(process&& val);
     process(const process&) = delete;
+    process(const process& proc, const thread& main_thread);
     process(void* start_eip, uint8_t* image, size_t image_size, bool system);
 };
 
@@ -54,6 +58,9 @@ void thread_context_save(interrupt_stack* int_stack, thread* thd, bool kernel);
 void thread_context_load(interrupt_stack* int_stack, thread* thd, bool kernel);
 void process_context_save(interrupt_stack*, process*);
 void process_context_load(interrupt_stack*, process* proc);
+
+void add_to_process_list(process&& proc);
+void add_to_ready_list(thread* thd);
 
 #else
 

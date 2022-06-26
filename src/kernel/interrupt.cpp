@@ -219,10 +219,10 @@ kill:
     asm_hlt();
 }
 
-extern "C" void irq0_handler(struct irq0_data* d)
+extern "C" void irq0_handler(struct interrupt_stack* d)
 {
     inc_tick();
-    context_switch(d);
+    do_scheduling(d);
     asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
 }
 // keyboard interrupt

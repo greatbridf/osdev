@@ -40,7 +40,7 @@ public:
 extern process* current_process;
 
 extern "C" void NORETURN init_scheduler();
-void context_switch(irq0_data* intrpt_data);
+void do_scheduling(interrupt_stack* intrpt_data);
 
 #else
 

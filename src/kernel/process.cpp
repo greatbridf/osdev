@@ -108,7 +108,43 @@ void NORETURN init_scheduler()
     go_user_space(user_space_start);
 }
 
-void context_switch(irq0_data* intrpt_data)
+void thread_context_save(interrupt_stack* int_stack, thread* thd, bool kernel)
+{
+    thd->eflags = int_stack->eflags;
+    thd->eip = int_stack->v_eip;
+    memcpy(&thd->regs, &int_stack->s_regs, sizeof(regs_32));
+    if (!kernel)
+        thd->esp = int_stack->esp;
+}
+
+void thread_context_load(interrupt_stack* int_stack, thread* thd, bool kernel)
+{
+    int_stack->eflags = (thd->eflags | 0x200); // OR $STI
+    int_stack->v_eip = thd->eip;
+    memcpy(&int_stack->s_regs, &thd->regs, sizeof(regs_32));
+    if (!kernel) {
+        int_stack->cs = USER_CODE_SELECTOR;
+        int_stack->ss = USER_DATA_SELECTOR;
+        int_stack->esp = thd->esp;
+    } else {
+        int_stack->cs = KERNEL_CODE_SEGMENT;
+    }
+    current_thread = thd;
+}
+
+void process_context_save(interrupt_stack*, process*)
+{
+}
+
+void process_context_load(interrupt_stack*, process* proc)
+{
+    if (!proc->attr.system)
+        tss.esp0 = (uint32_t)proc->k_esp;
+    asm_switch_pd(mms_get_pd(&proc->mms));
+    current_process = proc;
+}
+
+void do_scheduling(interrupt_stack* intrpt_data)
 {
     if (!is_scheduler_ready)
         return;
@@ -121,38 +157,15 @@ void context_switch(irq0_data* intrpt_data)
         return;
     }
 
-    process* pro = thd->owner;
-    if (current_process != pro) {
-        if (!pro->attr.system) {
-            tss.esp0 = (uint32_t)pro->k_esp;
-        }
-
-        current_process = pro;
-        asm_switch_pd(pro->mms.begin()->pd);
+    process* proc = thd->owner;
+    bool kernel = proc->attr.system;
+    if (current_process != proc) {
+        process_context_save(intrpt_data, current_process);
+        process_context_load(intrpt_data, proc);
     }
 
-    // save current thread info
-    current_thread->eflags = intrpt_data->eflags;
-    current_thread->eip = intrpt_data->v_eip;
-    memcpy(&current_thread->regs, &intrpt_data->s_regs, sizeof(regs_32));
-
-    // load ready thread info
-    intrpt_data->eflags = thd->eflags;
-    intrpt_data->eflags |= 0x200; // sti
-    intrpt_data->v_eip = thd->eip;
-    memcpy(&intrpt_data->s_regs, &thd->regs, sizeof(regs_32));
-
-    if (!pro->attr.system) {
-        // user mode
-        current_thread->esp = intrpt_data->esp;
-
-        intrpt_data->cs = USER_CODE_SELECTOR;
-        intrpt_data->ss = USER_DATA_SELECTOR;
-        intrpt_data->esp = thd->esp;
-    } else {
-        // supervisor mode
-        intrpt_data->cs = KERNEL_CODE_SEGMENT;
-    }
+    thread_context_save(intrpt_data, current_thread, kernel);
+    thread_context_load(intrpt_data, thd, kernel);
 
     ready_thds->erase(ready_thds->begin());
     // check if the thread is ready

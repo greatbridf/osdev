@@ -22,7 +22,7 @@ struct regs_32 {
     uint32_t eax;
 };
 
-struct PACKED irq0_data {
+struct PACKED interrupt_stack {
     struct regs_32 s_regs;
     void* v_eip;
     uint32_t cs;

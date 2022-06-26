@@ -3,6 +3,7 @@
 #include <kernel/mm.hpp>
 #include <kernel/process.hpp>
 #include <kernel/stdio.h>
+#include <kernel/tty.h>
 #include <kernel_main.h>
 #include <types/types.h>
 #include <hello-world.res>
@@ -61,6 +62,11 @@ process::process(void* start_eip, uint8_t* image, size_t image_size, bool system
         .eflags {},
         // TODO: change this
         .esp = 0x40100000U,
+        .attr {
+            .system = system,
+            .ready = 1,
+            .wait = 0,
+        },
     });
     ready_thds->push_back(thd.ptr());
 
@@ -149,16 +155,19 @@ void do_scheduling(interrupt_stack* intrpt_data)
     if (!is_scheduler_ready)
         return;
 
-    thread* thd = *ready_thds->begin();
-    if (current_thread == thd) {
-        ready_thds->erase(ready_thds->begin());
-        // check if the thread is ready
-        ready_thds->push_back(thd);
-        return;
-    }
+    auto iter_thd = ready_thds->begin();
+    while (!((*iter_thd)->attr.ready))
+        iter_thd = ready_thds->erase(iter_thd);
+    auto thd = *iter_thd;
 
-    process* proc = thd->owner;
-    bool kernel = proc->attr.system;
+    process* proc = nullptr;
+    bool kernel = false;
+
+    if (current_thread == thd)
+        goto next_task;
+
+    proc = thd->owner;
+    kernel = proc->attr.system;
     if (current_process != proc) {
         process_context_save(intrpt_data, current_process);
         process_context_load(intrpt_data, proc);
@@ -167,9 +176,8 @@ void do_scheduling(interrupt_stack* intrpt_data)
     thread_context_save(intrpt_data, current_thread, kernel);
     thread_context_load(intrpt_data, thd, kernel);
 
-    ready_thds->erase(ready_thds->begin());
-    // check if the thread is ready
-    ready_thds->push_back(thd);
-
-    current_thread = thd;
+next_task:
+    ready_thds->erase(iter_thd);
+    if (thd->attr.ready)
+        ready_thds->push_back(thd);
 }

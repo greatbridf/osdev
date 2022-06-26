@@ -1,5 +1,6 @@
 #include <asm/port_io.h>
 #include <kernel/syscall.hpp>
+#include <kernel/process.hpp>
 #include <kernel/tty.h>
 
 syscall_handler syscall_handlers[8];
@@ -25,7 +26,9 @@ void _syscall_write(interrupt_stack* data)
 
 void _syscall_sleep(interrupt_stack* data)
 {
-    ++data->s_regs.ecx;
+    current_thread->attr.ready = 0;
+    current_thread->attr.wait = 1;
+    do_scheduling(data);
 }
 
 void init_syscall(void)

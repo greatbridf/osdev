@@ -27,8 +27,8 @@ struct PACKED interrupt_stack {
     void* v_eip;
     uint32_t cs;
     uint32_t eflags;
-    uint32_t esp;
-    uint32_t ss;
+    const uint32_t esp;
+    const uint32_t ss;
 };
 
 // present: When set, the page fault was caused by a page-protection violation.

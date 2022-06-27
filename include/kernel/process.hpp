@@ -28,7 +28,6 @@ struct thread {
     process* owner;
     regs_32 regs;
     uint32_t eflags;
-    uint32_t esp;
     thread_attr attr;
 };
 
@@ -36,6 +35,7 @@ class process {
 public:
     mm_list mms;
     types::list<thread> thds;
+    // TODO: allocate a kernel stack for EVERY THREAD
     void* k_esp;
     process_attr attr;
     pid_t pid;
@@ -54,8 +54,8 @@ extern thread* current_thread;
 extern "C" void NORETURN init_scheduler();
 void do_scheduling(interrupt_stack* intrpt_data);
 
-void thread_context_save(interrupt_stack* int_stack, thread* thd, bool kernel);
-void thread_context_load(interrupt_stack* int_stack, thread* thd, bool kernel);
+void thread_context_save(interrupt_stack* int_stack, thread* thd);
+void thread_context_load(interrupt_stack* int_stack, thread* thd);
 void process_context_save(interrupt_stack*, process*);
 void process_context_load(interrupt_stack*, process* proc);
 

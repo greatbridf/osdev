@@ -10,6 +10,8 @@
 #include <interrupt-test.res>
 
 extern "C" void NORETURN go_user_space(void* eip);
+extern "C" void NORETURN to_kernel(interrupt_stack* ret_stack);
+extern "C" void NORETURN to_user(interrupt_stack* ret_stack);
 
 static inline void* align_down_to_16byte(void* addr)
 {
@@ -47,26 +49,29 @@ process::process(const process& val, const thread& main_thd)
     , attr { .system = val.attr.system }
     , pid { max_pid++ }
 {
-    k_esp = align_down_to_16byte((char*)k_malloc(THREAD_KERNEL_STACK_SIZE) + THREAD_KERNEL_STACK_SIZE);
-    memset((char*)k_esp - THREAD_KERNEL_STACK_SIZE, 0x00, THREAD_KERNEL_STACK_SIZE);
+    k_esp = (char*)k_malloc(THREAD_KERNEL_STACK_SIZE);
+    memset((char*)k_esp, 0x00, THREAD_KERNEL_STACK_SIZE);
+    k_esp = align_down_to_16byte((char*)k_esp + THREAD_KERNEL_STACK_SIZE);
     auto iter_thd = thds.emplace_back(main_thd);
     iter_thd->owner = this;
 
-    page_directory_entry* pd = alloc_pd();
-    memcpy(pd, mms_get_pd(kernel_mms), PAGE_SIZE);
+    if (!val.attr.system) {
+        page_directory_entry* pd = alloc_pd();
+        memcpy(pd, mms_get_pd(kernel_mms), PAGE_SIZE);
 
-    mms.begin()->pd = pd;
-    // skip kernel heap
-    for (auto iter_src = ++val.mms.cbegin(); iter_src != val.mms.cend(); ++iter_src) {
-        auto iter_dst = mms.emplace_back(iter_src->start, pd, iter_src->attr.write, iter_src->attr.system);
-        iter_dst->pd = pd;
-        for (auto pg = iter_src->pgs->begin(); pg != iter_src->pgs->end(); ++pg)
-            k_map(iter_dst.ptr(),
-                    &*pg,
-                    iter_src->attr.read,
-                    iter_src->attr.write,
-                    iter_src->attr.system,
-                    1);
+        mms.begin()->pd = pd;
+        // skip kernel heap
+        for (auto iter_src = ++val.mms.cbegin(); iter_src != val.mms.cend(); ++iter_src) {
+            auto iter_dst = mms.emplace_back(iter_src->start, pd, iter_src->attr.write, iter_src->attr.system);
+            iter_dst->pd = pd;
+            for (auto pg = iter_src->pgs->begin(); pg != iter_src->pgs->end(); ++pg)
+                k_map(iter_dst.ptr(),
+                        &*pg,
+                        iter_src->attr.read,
+                        iter_src->attr.write,
+                        iter_src->attr.system,
+                        1);
+        }
     }
 }
 
@@ -76,23 +81,25 @@ process::process(void* start_eip, uint8_t* image, size_t image_size, bool system
     , attr { .system = system }
     , pid { max_pid++ }
 {
-    k_esp = align_down_to_16byte((char*)k_malloc(THREAD_KERNEL_STACK_SIZE) + THREAD_KERNEL_STACK_SIZE);
-    memset((char*)k_esp - THREAD_KERNEL_STACK_SIZE, 0x00, THREAD_KERNEL_STACK_SIZE);
-
-    page_directory_entry* pd = alloc_pd();
-    memcpy(pd, mms_get_pd(kernel_mms), PAGE_SIZE);
-    for (auto& item : mms)
-        item.pd = pd;
-
-    auto user_mm = mms.emplace_back(0x40000000U, pd, 1, system);
+    k_esp = (char*)k_malloc(THREAD_KERNEL_STACK_SIZE);
+    memset((char*)k_esp, 0x00, THREAD_KERNEL_STACK_SIZE);
+    k_esp = align_down_to_16byte((char*)k_esp + THREAD_KERNEL_STACK_SIZE);
 
     auto thd = thds.emplace_back(thread {
         .eip = start_eip,
         .owner = this,
-        .regs {},
-        .eflags {},
         // TODO: change this
-        .esp = 0x40100000U,
+        .regs {
+            .edi {},
+            .esi {},
+            .ebp = system ? (uint32_t)k_esp : 0x40100000U,
+            .esp = system ? (uint32_t)k_esp : 0x40100000U,
+            .ebx {},
+            .edx {},
+            .ecx {},
+            .eax {},
+        },
+        .eflags {},
         .attr {
             .system = system,
             .ready = 1,
@@ -101,24 +108,40 @@ process::process(void* start_eip, uint8_t* image, size_t image_size, bool system
     });
     ready_thds->push_back(thd.ptr());
 
-    // TODO: change this
-    for (int i = 0; i < 1 * 1024 * 1024 / PAGE_SIZE; ++i)
-        k_map(user_mm.ptr(), &empty_page, 1, 1, 0, 1);
+    if (!system) {
+        page_directory_entry* pd = alloc_pd();
+        memcpy(pd, mms_get_pd(kernel_mms), PAGE_SIZE);
+        for (auto& item : mms)
+            item.pd = pd;
 
-    auto* old_pd = reinterpret_cast<page_directory_entry*>(p_ptr_to_v_ptr(current_pd()));
-    auto* old_proc = current_process;
-    auto* old_thd = current_thread;
+        auto user_mm = mms.emplace_back(0x40000000U, pd, 1, system);
 
-    current_process = this;
-    current_thread = thd.ptr();
-    asm_switch_pd(pd);
+        // TODO: change this
+        for (int i = 0; i < 1 * 1024 * 1024 / PAGE_SIZE; ++i)
+            k_map(user_mm.ptr(), &empty_page, 1, 1, 0, 1);
 
-    // TODO: change this
-    memcpy((void*)0x40000000U, image, image_size);
+        auto* old_pd = reinterpret_cast<page_directory_entry*>(p_ptr_to_v_ptr(current_pd()));
+        auto* old_proc = current_process;
+        auto* old_thd = current_thread;
 
-    current_process = old_proc;
-    current_thread = old_thd;
-    asm_switch_pd(old_pd);
+        current_process = this;
+        current_thread = thd.ptr();
+        asm_switch_pd(pd);
+
+        // TODO: change this
+        memcpy((void*)0x40000000U, image, image_size);
+
+        current_process = old_proc;
+        current_thread = old_thd;
+        asm_switch_pd(old_pd);
+    }
+}
+
+void kernel_threadd_main(void)
+{
+    tty_print(console, "kernel thread daemon started\n");
+    for (;;)
+        asm_hlt();
 }
 
 void NORETURN init_scheduler()
@@ -130,6 +153,7 @@ void NORETURN init_scheduler()
 
     processes->emplace_back(user_space_start, hello_world_bin, hello_world_bin_len, false);
     processes->emplace_back(user_space_start, interrupt_test_bin, interrupt_test_bin_len, false);
+    processes->emplace_back((void*)kernel_threadd_main, nullptr, 0, true);
 
     // we need interrupts enabled for cow mapping
     asm_cli();
@@ -145,27 +169,22 @@ void NORETURN init_scheduler()
     go_user_space(user_space_start);
 }
 
-void thread_context_save(interrupt_stack* int_stack, thread* thd, bool kernel)
+void thread_context_save(interrupt_stack* int_stack, thread* thd)
 {
     thd->eflags = int_stack->eflags;
     thd->eip = int_stack->v_eip;
     memcpy(&thd->regs, &int_stack->s_regs, sizeof(regs_32));
-    if (!kernel)
-        thd->esp = int_stack->esp;
+    if (thd->attr.system)
+        thd->regs.esp = int_stack->s_regs.esp + 0x0c;
+    else
+        thd->regs.esp = int_stack->esp;
 }
 
-void thread_context_load(interrupt_stack* int_stack, thread* thd, bool kernel)
+void thread_context_load(interrupt_stack* int_stack, thread* thd)
 {
     int_stack->eflags = (thd->eflags | 0x200); // OR $STI
     int_stack->v_eip = thd->eip;
     memcpy(&int_stack->s_regs, &thd->regs, sizeof(regs_32));
-    if (!kernel) {
-        int_stack->cs = USER_CODE_SELECTOR;
-        int_stack->ss = USER_DATA_SELECTOR;
-        int_stack->esp = thd->esp;
-    } else {
-        int_stack->cs = KERNEL_CODE_SEGMENT;
-    }
     current_thread = thd;
 }
 
@@ -191,6 +210,13 @@ void add_to_ready_list(thread* thd)
     ready_thds->push_back(thd);
 }
 
+static inline void next_task(const types::list<thread*>::iterator_type& iter_to_remove, thread* cur_thd)
+{
+        ready_thds->erase(iter_to_remove);
+        if (cur_thd->attr.ready)
+            ready_thds->push_back(cur_thd);
+}
+
 void do_scheduling(interrupt_stack* intrpt_data)
 {
     if (!is_scheduler_ready)
@@ -201,24 +227,24 @@ void do_scheduling(interrupt_stack* intrpt_data)
         iter_thd = ready_thds->erase(iter_thd);
     auto thd = *iter_thd;
 
-    process* proc = nullptr;
-    bool kernel = false;
+    if (current_thread == thd) {
+        next_task(iter_thd, thd);
+        return;
+    }
 
-    if (current_thread == thd)
-        goto next_task;
-
-    proc = thd->owner;
-    kernel = proc->attr.system;
+    process* proc = thd->owner;
     if (current_process != proc) {
         process_context_save(intrpt_data, current_process);
         process_context_load(intrpt_data, proc);
     }
 
-    thread_context_save(intrpt_data, current_thread, kernel);
-    thread_context_load(intrpt_data, thd, kernel);
+    thread_context_save(intrpt_data, current_thread);
+    thread_context_load(intrpt_data, thd);
 
-next_task:
-    ready_thds->erase(iter_thd);
-    if (thd->attr.ready)
-        ready_thds->push_back(thd);
+    next_task(iter_thd, thd);
+
+    if (thd->attr.system)
+        to_kernel(intrpt_data);
+    else
+        to_user(intrpt_data);
 }

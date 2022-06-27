@@ -13,7 +13,7 @@ void _syscall_not_impl(interrupt_stack* data)
 
 void _syscall_fork(interrupt_stack* data)
 {
-    thread_context_save(data, current_thread, current_process->attr.system);
+    thread_context_save(data, current_thread);
     process_context_save(data, current_process);
 
     process new_proc(*current_process, *current_thread);

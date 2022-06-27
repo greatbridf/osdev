@@ -222,8 +222,8 @@ kill:
 extern "C" void irq0_handler(struct interrupt_stack* d)
 {
     inc_tick();
-    do_scheduling(d);
     asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
+    do_scheduling(d);
 }
 // keyboard interrupt
 extern "C" void irq1_handler(void)

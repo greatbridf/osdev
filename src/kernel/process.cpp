@@ -6,6 +6,7 @@
 #include <kernel/tty.h>
 #include <kernel_main.h>
 #include <types/types.h>
+#include <types/lock.h>
 #include <hello-world.res>
 #include <interrupt-test.res>
 
@@ -13,15 +14,13 @@ extern "C" void NORETURN go_user_space(void* eip);
 extern "C" void NORETURN to_kernel(interrupt_stack* ret_stack);
 extern "C" void NORETURN to_user(interrupt_stack* ret_stack);
 
-static inline void* align_down_to_16byte(void* addr)
-{
-    return (void*)((uint32_t)addr & 0xfffffff0);
-}
-
 static bool is_scheduler_ready;
 static types::list<process>* processes;
 static types::list<thread*>* ready_thds;
 static pid_t max_pid = 1;
+void (* volatile kthreadd_new_thd_func)(void*);
+void  * volatile kthreadd_new_thd_data;
+uint32_t kthreadd_lock = 0;
 
 thread* current_thread;
 process* current_process;
@@ -49,13 +48,15 @@ process::process(const process& val, const thread& main_thd)
     , attr { .system = val.attr.system }
     , pid { max_pid++ }
 {
-    k_esp = (char*)k_malloc(THREAD_KERNEL_STACK_SIZE);
-    memset((char*)k_esp, 0x00, THREAD_KERNEL_STACK_SIZE);
-    k_esp = align_down_to_16byte((char*)k_esp + THREAD_KERNEL_STACK_SIZE);
     auto iter_thd = thds.emplace_back(main_thd);
     iter_thd->owner = this;
 
     if (!val.attr.system) {
+        // TODO: allocate low mem
+        k_esp = (void*)page_to_phys_addr(alloc_n_raw_pages(2));
+        memset((char*)k_esp, 0x00, THREAD_KERNEL_STACK_SIZE);
+        k_esp = (char*)k_esp + THREAD_KERNEL_STACK_SIZE;
+
         page_directory_entry* pd = alloc_pd();
         memcpy(pd, mms_get_pd(kernel_mms), PAGE_SIZE);
 
@@ -72,6 +73,19 @@ process::process(const process& val, const thread& main_thd)
                         iter_src->attr.system,
                         1);
         }
+    } else {
+        // TODO: allocate low mem
+        k_esp = (void*)page_to_phys_addr(alloc_n_raw_pages(2));
+        memcpy(k_esp, main_thd.owner->k_esp, THREAD_KERNEL_STACK_SIZE);
+        k_esp = (char*)k_esp + THREAD_KERNEL_STACK_SIZE;
+
+        auto orig_k_esp = (uint32_t)main_thd.owner->k_esp;
+
+        iter_thd->regs.ebp -= orig_k_esp;
+        iter_thd->regs.ebp += (uint32_t)k_esp;
+
+        iter_thd->regs.esp -= orig_k_esp;
+        iter_thd->regs.esp += (uint32_t)k_esp;
     }
 }
 
@@ -81,9 +95,10 @@ process::process(void* start_eip, uint8_t* image, size_t image_size, bool system
     , attr { .system = system }
     , pid { max_pid++ }
 {
-    k_esp = (char*)k_malloc(THREAD_KERNEL_STACK_SIZE);
+    // TODO: allocate low mem
+    k_esp = (void*)page_to_phys_addr(alloc_n_raw_pages(2));
     memset((char*)k_esp, 0x00, THREAD_KERNEL_STACK_SIZE);
-    k_esp = align_down_to_16byte((char*)k_esp + THREAD_KERNEL_STACK_SIZE);
+    k_esp = (char*)k_esp + THREAD_KERNEL_STACK_SIZE;
 
     auto thd = thds.emplace_back(thread {
         .eip = start_eip,
@@ -137,11 +152,46 @@ process::process(void* start_eip, uint8_t* image, size_t image_size, bool system
     }
 }
 
+void _example_io_thread(void* _d)
+{
+    const char* data = reinterpret_cast<const char*>(_d);
+    tty_print(console, data);
+    // syscall_sleep
+    asm volatile("movl $0x02, %%eax\nint $0x80":::"eax");
+}
+
 void kernel_threadd_main(void)
 {
     tty_print(console, "kernel thread daemon started\n");
-    for (;;)
+    kthreadd_new_thd_func = _example_io_thread;
+    kthreadd_new_thd_data = (void*)"data in io thread\n";
+    for (;;) {
+        spin_lock(&kthreadd_lock);
+
+        if (kthreadd_new_thd_func) {
+            int return_value = 0;
+
+            void (*func)(void*) = kthreadd_new_thd_func;
+            void* data = kthreadd_new_thd_data;
+            kthreadd_new_thd_func = nullptr;
+            kthreadd_new_thd_data = nullptr;
+
+            spin_unlock(&kthreadd_lock);
+
+            // syscall_fork
+            asm volatile("movl $0x00, %%eax\nint $0x80\nmovl %%eax, %0": "=a" (return_value): :);
+
+            if (return_value != 0) {
+                // child
+                func(data);
+                for (;;) asm_hlt();
+                // TODO: syscall_exit()
+            }
+        } else {
+            spin_unlock(&kthreadd_lock);
+        }
         asm_hlt();
+    }
 }
 
 void NORETURN init_scheduler()
@@ -212,9 +262,9 @@ void add_to_ready_list(thread* thd)
 
 static inline void next_task(const types::list<thread*>::iterator_type& iter_to_remove, thread* cur_thd)
 {
-        ready_thds->erase(iter_to_remove);
-        if (cur_thd->attr.ready)
-            ready_thds->push_back(cur_thd);
+    ready_thds->erase(iter_to_remove);
+    if (cur_thd->attr.ready)
+        ready_thds->push_back(cur_thd);
 }
 
 void do_scheduling(interrupt_stack* intrpt_data)

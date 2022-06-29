@@ -6,6 +6,27 @@ event() {
     printf "$1... "
 }
 
+# $1: OS NAME
+# $2: CROSS COMPILE FLAG
+generate_cross_compile_script() {
+cat > cross-compile.cmake <<EOF
+set(CMAKE_SYSTEM_NAME $1)
+
+set(TOOLCHAIN_PATH_AND_PREFIX "$2")
+
+set(CMAKE_C_COMPILER \${TOOLCHAIN_PATH_AND_PREFIX}gcc)
+set(CMAKE_CXX_COMPILER \${TOOLCHAIN_PATH_AND_PREFIX}c++)
+set(CMAKE_AR \${TOOLCHAIN_PATH_AND_PREFIX}ar)
+set(CMAKE_LINKER \${TOOLCHAIN_PATH_AND_PREFIX}ld)
+set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
+
+SET(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
+# for libraries and headers in the target directories
+SET(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
+SET(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
+EOF
+}
+
 event "finding qemu"
 for item in $QEMU_EXECUTABLES; do
     if $item --version > /dev/null 2>&1; then
@@ -37,11 +58,9 @@ OS=`uname`
 case "$OS" in
     "Linux")
         echo "Linux"
-        QEMU_ACCEL='-enable-kvm'
         ;;
     "Darwin")
         echo "macOS"
-        QEMU_ACCEL='-accel hvf'
         ;;
     *)
         echo "unknown"
@@ -49,10 +68,28 @@ case "$OS" in
         ;;
 esac
 
+event "setting hardware acceleration type"
+case "$OS" in
+    "Linux")
+        echo "kvm"
+        QEMU_ACCEL='-enable-kvm'
+        ;;
+    "Darwin")
+        if [ "$QEMU" = "qemu-system-x86_64" ]; then
+            echo "hvf"
+            QEMU_ACCEL='-accel hvf'
+        else
+            echo "tcg"
+            QEMU_ACCEL='-accel tcg'
+        fi
+        ;;
+esac
+
 event "checking cross compiling"
 if [ "$CROSS_COMPILE" != "" ]; then
     echo "yes"
     CROSS_COMPILE_FLAG='--toolchain cross-compile.cmake'
+    generate_cross_compile_script "$OS" "$CROSS_COMPILE"
 else
     echo "no"
     CROSS_COMPILE_FLAG=

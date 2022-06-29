@@ -82,9 +82,9 @@ void init_pic(void)
 
 extern "C" void int6_handler(
     struct regs_32 s_regs,
-    uint32_t error_code,
     ptr_t eip,
-    uint16_t cs)
+    uint16_t cs,
+    uint32_t eflags)
 {
     char buf[512];
 
@@ -94,11 +94,11 @@ extern "C" void int6_handler(
         buf, 512,
         "eax: %x, ebx: %x, ecx: %x, edx: %x\n"
         "esp: %x, ebp: %x, esi: %x, edi: %x\n"
-        "eip: %x, cs: %x, error_code: %x   \n",
+        "eip: %x, cs: %x, eflags: %x       \n",
         s_regs.eax, s_regs.ebx, s_regs.ecx,
         s_regs.edx, s_regs.esp, s_regs.ebp,
         s_regs.esi, s_regs.edi, eip,
-        cs, error_code);
+        cs, eflags);
     tty_print(console, buf);
 
     tty_print(console, "----   HALTING SYSTEM   ----\n");
@@ -219,11 +219,11 @@ kill:
     asm_hlt();
 }
 
-extern "C" void irq0_handler(struct irq0_data* d)
+extern "C" void irq0_handler(struct interrupt_stack* d)
 {
     inc_tick();
-    context_switch(d);
     asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
+    do_scheduling(d);
 }
 // keyboard interrupt
 extern "C" void irq1_handler(void)

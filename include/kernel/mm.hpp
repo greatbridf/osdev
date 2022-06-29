@@ -143,6 +143,10 @@ int k_map(
 // allocate a raw page
 page_t alloc_raw_page(void);
 
+// allocate n raw page(s)
+// @return the id of the first page allocated
+page_t alloc_n_raw_pages(size_t n);
+
 // allocate a struct page together with the raw page
 struct page allocate_page(void);
 

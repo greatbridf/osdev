@@ -296,10 +296,30 @@ static inline void free_addr_range(phys_ptr_t start, phys_ptr_t end)
 
 page_t alloc_raw_page(void)
 {
-    for (page_t i = 0; i < 1024 * 1024; ++i) {
-        if (bm_test(mem_bitmap, i) == 0) {
-            mark_page(i);
-            return i;
+    return alloc_n_raw_pages(1);
+}
+
+// @return the max count (but less than n) of the pages continuously available
+static inline size_t _test_n_raw_pages(page_t start, size_t n)
+{
+    // *start is already allocated
+    if (bm_test(mem_bitmap, start))
+        return 0;
+
+    return 1 + ((n > 1) ? _test_n_raw_pages(start + 1, n - 1) : 0);
+}
+
+page_t alloc_n_raw_pages(size_t n)
+{
+    page_t first = 0;
+    while (first <= 1024 * 1024 - n) {
+        size_t max = _test_n_raw_pages(first, n);
+        if (max != n) {
+            first += (max + 1);
+        } else {
+            for (page_t i = first; i < first + n; ++i)
+                bm_set(mem_bitmap, i);
+            return first;
         }
     }
     MAKE_BREAK_POINT();

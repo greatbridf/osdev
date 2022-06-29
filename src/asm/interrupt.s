@@ -218,3 +218,68 @@ syscall_stub:
     popal
 syscall_stub_end:
     iret
+
+# parameters:
+# interrupt_stack* ret_stack
+.globl to_kernel
+.type  to_kernel @function
+to_kernel:
+    movw $0x10, %ax
+    movw %ax, %ss
+    movw %ax, %ds
+    movw %ax, %es
+    movw %ax, %fs
+    movw %ax, %gs
+
+    movl 4(%esp), %eax
+
+    movl (%eax), %edi
+    movl 4(%eax), %esi
+    movl 8(%eax), %ebp
+    movl 12(%eax), %esp # %esp is the dst stack
+    movl 16(%eax), %ebx
+    movl 20(%eax), %edx
+    movl 24(%eax), %ecx
+#   TODO: optimize for caching
+#   movl 28(%eax), %eax # we deal with %eax later
+
+    pushl 40(%eax) # %eflags
+    pushl $0x08    # %cs
+    pushl 32(%eax) # %eip
+
+    movl 28(%eax), %eax
+
+    iret
+
+# parameters:
+# interrupt_stack* ret_stack
+.globl to_user
+.type  to_user @function
+to_user:
+    movw $0x23, %ax
+    movw %ax, %ds
+    movw %ax, %es
+    movw %ax, %fs
+    movw %ax, %gs
+
+    movl 4(%esp), %edi
+
+    movl 40(%edi), %ebp # save eflags
+    movl 32(%edi), %esi # save eip
+
+    movl 28(%edi), %eax
+    movl 24(%edi), %ecx
+    movl 20(%edi), %edx
+    movl 16(%edi), %ebx
+
+    pushl $0x23    # %ss
+    pushl 12(%edi) # %esp
+    pushl %ebp     # %eflags
+    pushl $0x1b    # %cs
+    pushl %esi     # %eip
+
+    movl 8(%edi), %ebp
+    movl 4(%edi), %esi
+    movl (%edi), %edi
+
+    iret

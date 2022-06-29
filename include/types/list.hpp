@@ -33,13 +33,13 @@ public:
 private:
     class node_base {
     public:
-        node_base* prev = 0;
-        node_base* next = 0;
+        node_type* prev = 0;
+        node_type* next = 0;
 
-        void connect(node_base* _next) noexcept
+        void connect(node_type* _next) noexcept
         {
             this->next = _next;
-            _next->prev = this;
+            _next->prev = static_cast<node_type*>(this);
         }
     };
 
@@ -84,7 +84,7 @@ public:
             return *this;
         }
 
-        explicit iterator(node_base* _n) noexcept
+        explicit iterator(node_type* _n) noexcept
             : n(_n)
         {
         }
@@ -127,17 +127,17 @@ public:
 
         Reference operator*() const noexcept
         {
-            return (static_cast<node_type*>(n))->value;
+            return n->value;
         }
 
         Pointer operator->() const noexcept
         {
-            return &(static_cast<node_type*>(n))->value;
+            return &n->value;
         }
 
         Pointer ptr(void) const noexcept
         {
-            return &(static_cast<node_type*>(n))->value;
+            return &n->value;
         }
 
         node_base_type* _node(void) const noexcept
@@ -146,7 +146,7 @@ public:
         }
 
     protected:
-        node_base_type* n;
+        node_type* n;
     };
 
 private:
@@ -178,8 +178,8 @@ public:
         : head(allocator_traits<sentry_allocator_type>::allocate_and_construct(0))
         , tail(allocator_traits<sentry_allocator_type>::allocate_and_construct(0))
     {
-        head->connect(tail);
-        tail->connect(head);
+        head->connect(static_cast<node_type*>(tail));
+        tail->connect(static_cast<node_type*>(head));
     }
 
     list(const list& v)
@@ -249,10 +249,10 @@ public:
     // insert the value v in front of the given iterator
     iterator_type insert(const iterator_type& iter, const value_type& v) noexcept
     {
-        node_base_type* new_node = allocator_traits<allocator_type>::allocate_and_construct(v);
+        node_type* new_node = allocator_traits<allocator_type>::allocate_and_construct(v);
         iterator_type ret(new_node);
         iter._node()->prev->connect(new_node);
-        new_node->connect(iter._node());
+        new_node->connect(static_cast<node_type*>(iter._node()));
 
         ++_size();
         return ret;
@@ -261,10 +261,10 @@ public:
     // insert the value v in front of the given iterator
     iterator_type insert(const iterator_type& iter, value_type&& v) noexcept
     {
-        node_base_type* new_node = allocator_traits<allocator_type>::allocate_and_construct(move(v));
+        node_type* new_node = allocator_traits<allocator_type>::allocate_and_construct(move(v));
         iterator_type ret(new_node);
         iter._node()->prev->connect(new_node);
-        new_node->connect(iter._node());
+        new_node->connect(static_cast<node_type*>(iter._node()));
 
         ++_size();
         return ret;
@@ -314,7 +314,7 @@ public:
 
     iterator_type end() noexcept
     {
-        return iterator_type(tail);
+        return iterator_type(static_cast<node_type*>(tail));
     }
 
     const_iterator_type begin() const noexcept
@@ -324,17 +324,17 @@ public:
 
     const_iterator_type end() const noexcept
     {
-        return const_iterator_type(tail);
+        return const_iterator_type(static_cast<node_type*>(tail));
     }
 
     const_iterator_type cbegin() const noexcept
     {
-        return const_iterator_type(head->next);
+        return begin();
     }
 
     const_iterator_type cend() const noexcept
     {
-        return const_iterator_type(tail);
+        return end();
     }
 
     bool empty(void) const noexcept

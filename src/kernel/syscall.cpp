@@ -49,12 +49,19 @@ void _syscall_sleep(interrupt_stack* data)
     do_scheduling(data);
 }
 
+void _syscall_crash(interrupt_stack*)
+{
+    tty_print(console, "\nan error occurred while executing command\n");
+    asm_cli();
+    asm_hlt();
+}
+
 void init_syscall(void)
 {
     syscall_handlers[0] = _syscall_fork;
     syscall_handlers[1] = _syscall_write;
     syscall_handlers[2] = _syscall_sleep;
-    syscall_handlers[3] = _syscall_not_impl;
+    syscall_handlers[3] = _syscall_crash;
     syscall_handlers[4] = _syscall_not_impl;
     syscall_handlers[5] = _syscall_not_impl;
     syscall_handlers[6] = _syscall_not_impl;

@@ -166,9 +166,8 @@ void kernel_threadd_main(void)
     kthreadd_new_thd_func = _example_io_thread;
     kthreadd_new_thd_data = (void*)"data in io thread\n";
     for (;;) {
-        spin_lock(&kthreadd_lock);
-
         if (kthreadd_new_thd_func) {
+            spin_lock(&kthreadd_lock);
             int return_value = 0;
 
             void (*func)(void*) = kthreadd_new_thd_func;
@@ -187,7 +186,6 @@ void kernel_threadd_main(void)
                 for (;;) asm_hlt();
                 // TODO: syscall_exit()
             }
-        } else {
             spin_unlock(&kthreadd_lock);
         }
         asm_hlt();

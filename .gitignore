@@ -7,6 +7,7 @@ test/
 bx_enh_dbg.ini
 
 .cache/
+*.swp
 
 compile_commands.json
 

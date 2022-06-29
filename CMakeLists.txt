@@ -28,6 +28,7 @@ project(kernel_main)
 
 set(CMAKE_C_FLAGS "-nostdinc -m32 -nostdlib -W -Wall -Wextra -Wno-builtin-declaration-mismatch -Wno-format -Werror=implicit-int -Werror=implicit-function-declaration -Werror=strict-aliasing -fverbose-asm -fno-exceptions -fno-pic -fno-stack-protector")
 set(CMAKE_CXX_FLAGS "-nostdinc -m32 -nostdlib -W -Wall -Wextra -Wno-builtin-declaration-mismatch -Wno-format -fverbose-asm -fno-use-cxa-atexit -fno-exceptions -fno-pic -fno-stack-protector")
+set(CMAKE_CXX_STANDARD 17)
 
 if (CMAKE_BUILD_TYPE STREQUAL "Debug")
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O0 -g")
@@ -70,6 +71,7 @@ set(KERNEL_MAIN_SOURCES src/kernel_main.c
                         include/kernel/vfs.h
                         include/kernel/vga.h
                         include/kernel/hw/keyboard.h
+                        include/kernel/hw/port.hpp
                         include/kernel/hw/serial.h
                         include/kernel/hw/timer.h
                         include/kernel/input/keycodes.h

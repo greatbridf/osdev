@@ -62,6 +62,21 @@ T&& forward(typename traits::remove_reference<T>::type& val)
     return static_cast<T&&>(val);
 }
 
+template <typename T, T _value>
+struct constant_value {
+    static constexpr T value = _value;
+};
+using true_type = constant_value<bool, true>;
+using false_type = constant_value<bool, false>;
+
+template <typename, typename>
+struct is_same : false_type
+{};
+
+template <typename T>
+struct is_same<T, T>: true_type
+{};
+
 } // namespace types
 
 #endif

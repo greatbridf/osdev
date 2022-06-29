@@ -62,6 +62,8 @@ void process_context_load(interrupt_stack*, process* proc);
 void add_to_process_list(process&& proc);
 void add_to_ready_list(thread* thd);
 
+void k_new_thread(void(*func)(void*), void* data);
+
 #else
 
 void NORETURN init_scheduler();

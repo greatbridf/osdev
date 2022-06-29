@@ -18,9 +18,9 @@ static bool is_scheduler_ready;
 static types::list<process>* processes;
 static types::list<thread*>* ready_thds;
 static pid_t max_pid = 1;
-void (* volatile kthreadd_new_thd_func)(void*);
-void  * volatile kthreadd_new_thd_data;
-uint32_t kthreadd_lock = 0;
+static void (* volatile kthreadd_new_thd_func)(void*);
+static void  * volatile kthreadd_new_thd_data;
+static uint32_t volatile kthreadd_lock = 0;
 
 thread* current_thread;
 process* current_process;
@@ -163,8 +163,7 @@ void _example_io_thread(void* _d)
 void kernel_threadd_main(void)
 {
     tty_print(console, "kernel thread daemon started\n");
-    kthreadd_new_thd_func = _example_io_thread;
-    kthreadd_new_thd_data = (void*)"data in io thread\n";
+    k_new_thread(_example_io_thread, (void*)"data in io thread\n");
     for (;;) {
         if (kthreadd_new_thd_func) {
             spin_lock(&kthreadd_lock);
@@ -190,6 +189,14 @@ void kernel_threadd_main(void)
         }
         asm_hlt();
     }
+}
+
+void k_new_thread(void(*func)(void*), void* data)
+{
+    spin_lock(&kthreadd_lock);
+    kthreadd_new_thd_func = func;
+    kthreadd_new_thd_data = data;
+    spin_unlock(&kthreadd_lock);
 }
 
 void NORETURN init_scheduler()

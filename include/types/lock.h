@@ -6,7 +6,7 @@
 extern "C" {
 #endif
 
-static inline void spin_lock(uint32_t* lock_addr)
+static inline void spin_lock(uint32_t volatile* lock_addr)
 {
     asm volatile(
             "_spin:\n\t\
@@ -21,7 +21,7 @@ static inline void spin_lock(uint32_t* lock_addr)
             );
 }
 
-static inline void spin_unlock(uint32_t* lock_addr)
+static inline void spin_unlock(uint32_t volatile* lock_addr)
 {
     asm volatile("movl $0, %%eax\nxchgl %%eax, (%0)"
                  :

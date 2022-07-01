@@ -4,6 +4,7 @@
 #include <kernel/process.hpp>
 #include <kernel/stdio.h>
 #include <kernel/tty.h>
+#include <kernel/hw/ata.hpp>
 #include <kernel_main.h>
 #include <types/types.h>
 #include <types/lock.h>
@@ -152,18 +153,10 @@ process::process(void* start_eip, uint8_t* image, size_t image_size, bool system
     }
 }
 
-void _example_io_thread(void* _d)
-{
-    const char* data = reinterpret_cast<const char*>(_d);
-    tty_print(console, data);
-    // syscall_sleep
-    asm volatile("movl $0x02, %%eax\nint $0x80":::"eax");
-}
-
 void kernel_threadd_main(void)
 {
     tty_print(console, "kernel thread daemon started\n");
-    k_new_thread(_example_io_thread, (void*)"data in io thread\n");
+    k_new_thread(hw::init_ata, nullptr);
     for (;;) {
         if (kthreadd_new_thd_func) {
             spin_lock(&kthreadd_lock);

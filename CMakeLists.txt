@@ -50,6 +50,7 @@ set(KERNEL_MAIN_SOURCES src/kernel_main.c
                         src/kernel/mem.cpp
                         src/kernel/vfs.cpp
                         src/kernel/vga.c
+                        src/kernel/hw/ata.cpp
                         src/kernel/hw/keyboard.cpp
                         src/kernel/hw/serial.c
                         src/kernel/hw/timer.c
@@ -70,6 +71,7 @@ set(KERNEL_MAIN_SOURCES src/kernel_main.c
                         include/kernel/mm.hpp
                         include/kernel/vfs.h
                         include/kernel/vga.h
+                        include/kernel/hw/ata.hpp
                         include/kernel/hw/keyboard.h
                         include/kernel/hw/port.hpp
                         include/kernel/hw/serial.h

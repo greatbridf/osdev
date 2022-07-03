@@ -41,12 +41,10 @@ protected:
         return allocator_traits<kernel_allocator<vector<char>>>::allocate_and_construct();
     }
 
-    inline struct inode mk_inode(unsigned int dir, unsigned int file, unsigned int mnt, void* data)
+    inline struct inode mk_inode(union inode_flags flags, void* data)
     {
         struct inode i { };
-        i.flags.directory = dir;
-        i.flags.file = file;
-        i.flags.mount_point = mnt;
+        i.flags.v = flags.v;
         i.fs = &m_fs;
         i.impl = data;
         i.ino = m_last_inode_no++;
@@ -58,6 +56,7 @@ public:
     explicit tmpfs(size_t limit);
     void mklink(struct inode* dir, struct inode* inode, const char* filename);
     void mkfile(struct inode* dir, const char* filename);
+    void mknode(struct inode* dir, const char* filename, union special_node sn);
     void mkdir(struct inode* dir, const char* dirname);
     size_t read(struct inode* file, char* buf, size_t buf_size, size_t offset, size_t n);
     size_t write(struct inode* file, const char* buf, size_t offset, size_t n);
@@ -97,6 +96,12 @@ int tmpfs_mkfile(struct inode* dir, const char* filename)
     fs->mkfile(dir, filename);
     return GB_OK;
 }
+int tmpfs_mknode(struct inode* dir, const char* filename, union special_node sn)
+{
+    auto* fs = static_cast<tmpfs*>(dir->fs->impl);
+    fs->mknode(dir, filename, sn);
+    return GB_OK;
+}
 // int tmpfs_rmfile(struct inode* dir, const char* filename)
 // {
 //     auto* fs = static_cast<tmpfs*>(dir->fs->impl);
@@ -121,6 +126,7 @@ static const struct inode_ops tmpfs_inode_ops = {
     .readdir = tmpfs_readdir,
     .findinode = tmpfs_findinode,
     .mkfile = tmpfs_mkfile,
+    .mknode = tmpfs_mknode,
     .rmfile = 0,
     .mkdir = tmpfs_mkdir,
     .stat = tmpfs_stat,
@@ -131,7 +137,7 @@ tmpfs::tmpfs(size_t limit)
     , m_fs { .ops = &tmpfs_inode_ops, .impl = this }
     , m_last_inode_no(0)
 {
-    struct inode in = mk_inode(1, 0, 1, mk_fe_vector());
+    struct inode in = mk_inode({ .v = INODE_DIR | INODE_MNT }, mk_fe_vector());
 
     mklink(&in, &in, ".");
     mklink(&in, &in, "..");
@@ -152,14 +158,21 @@ void tmpfs::mklink(struct inode* dir, struct inode* inode, const char* filename)
 
 void tmpfs::mkfile(struct inode* dir, const char* filename)
 {
-    struct inode file = mk_inode(0, 1, 0, mk_data_vector());
+    struct inode file = mk_inode({ .v = INODE_FILE }, mk_data_vector());
     m_inodes.push_back(file);
     mklink(dir, &file, filename);
 }
 
+void tmpfs::mknode(struct inode* dir, const char* filename, union special_node sn)
+{
+    struct inode node = mk_inode({ .v = INODE_NODE }, (void*)sn.v);
+    m_inodes.push_back(node);
+    mklink(dir, &node, filename);
+}
+
 void tmpfs::mkdir(struct inode* dir, const char* dirname)
 {
-    struct inode new_dir = mk_inode(1, 0, 0, mk_fe_vector());
+    struct inode new_dir = mk_inode({ .v = INODE_DIR }, mk_fe_vector());
     m_inodes.push_back(new_dir);
     mklink(&new_dir, &new_dir, ".");
 
@@ -169,7 +182,7 @@ void tmpfs::mkdir(struct inode* dir, const char* dirname)
 
 size_t tmpfs::read(struct inode* file, char* buf, size_t buf_size, size_t offset, size_t n)
 {
-    if (file->flags.file != 1)
+    if (file->flags.in.file != 1)
         return 0;
 
     auto* data = static_cast<vector<char>*>(file->impl);
@@ -189,7 +202,7 @@ size_t tmpfs::read(struct inode* file, char* buf, size_t buf_size, size_t offset
 
 size_t tmpfs::write(struct inode* file, const char* buf, size_t offset, size_t n)
 {
-    if (file->flags.file != 1)
+    if (file->flags.in.file != 1)
         return 0;
 
     auto* data = static_cast<vector<char>*>(file->impl);
@@ -204,7 +217,7 @@ size_t tmpfs::write(struct inode* file, const char* buf, size_t offset, size_t n
 
 int tmpfs::readdir(struct inode* dir, struct dirent* entry, size_t i)
 {
-    if (dir->flags.directory != 1) {
+    if (dir->flags.in.directory != 1) {
         errno = ENOTDIR;
         return GB_FAILED;
     }
@@ -252,33 +265,57 @@ int tmpfs::stat(struct inode* dir, struct stat* stat, const char* filename)
     }
 
     stat->st_ino = file_inode->ino;
-    if (file_inode->flags.file) {
+    if (file_inode->flags.in.file) {
+        stat->st_rdev.v = 0;
         stat->st_blksize = 1;
         stat->st_blocks = static_cast<vector<char>*>(file_inode->impl)->size();
     }
-    if (file_inode->flags.directory) {
+    if (file_inode->flags.in.directory) {
+        stat->st_rdev.v = 0;
         stat->st_blksize = sizeof(struct tmpfs_file_entry);
         stat->st_blocks = static_cast<vector<struct tmpfs_file_entry>*>(file_inode->impl)->size();
+    }
+    if (file_inode->flags.in.special_node) {
+        stat->st_rdev.v = (uint32_t)file_inode->impl;
+        stat->st_blksize = 0;
+        stat->st_blocks = 0;
     }
 
     return GB_OK;
 }
 
+// 8 * 8 for now
+static struct special_node_ops sn_ops[8][8];
+
 size_t vfs_read(struct inode* file, char* buf, size_t buf_size, size_t offset, size_t n)
 {
-    if (file->fs->ops->read) {
-        return file->fs->ops->read(file, buf, buf_size, offset, n);
+    if (file->flags.in.special_node) {
+        union special_node sn {
+            .v = (uint32_t)file->impl
+        };
+        auto* ops = &sn_ops[sn.in.major][sn.in.minor];
+        if (ops)
+            return ops->read(buf, buf_size, offset, n);
     } else {
-        return 0;
+        if (file->fs->ops->read)
+            return file->fs->ops->read(file, buf, buf_size, offset, n);
     }
+    return 0;
 }
 size_t vfs_write(struct inode* file, const char* buf, size_t offset, size_t n)
 {
-    if (file->fs->ops->write) {
-        return file->fs->ops->write(file, buf, offset, n);
+    if (file->flags.in.special_node) {
+        union special_node sn {
+            .v = (uint32_t)file->impl
+        };
+        auto* ops = &sn_ops[sn.in.major][sn.in.minor];
+        if (ops)
+            return ops->write(buf, offset, n);
     } else {
-        return 0;
+        if (file->fs->ops->read)
+            return file->fs->ops->write(file, buf, offset, n);
     }
+    return 0;
 }
 int vfs_readdir(struct inode* dir, struct dirent* entry, size_t i)
 {
@@ -300,6 +337,14 @@ int vfs_mkfile(struct inode* dir, const char* filename)
 {
     if (dir->fs->ops->mkfile) {
         return dir->fs->ops->mkfile(dir, filename);
+    } else {
+        return 0;
+    }
+}
+int vfs_mknode(struct inode* dir, const char* filename, union special_node sn)
+{
+    if (dir->fs->ops->mknode) {
+        return dir->fs->ops->mknode(dir, filename, sn);
     } else {
         return 0;
     }
@@ -400,8 +445,29 @@ int vfs_stat(struct stat* stat, const char* _path)
 struct inode* fs_root;
 static tmpfs* rootfs;
 
+void register_special_block(uint16_t major, uint16_t minor, special_node_read read, special_node_write write)
+{
+    sn_ops[major][minor].read = read;
+    sn_ops[major][minor].write = write;
+}
+
+size_t b_null_read(char* buf, size_t buf_size, size_t, size_t n)
+{
+    if (n >= buf_size)
+        n = buf_size;
+    memset(buf, 0x00, n);
+    return n;
+}
+size_t b_null_write(const char*, size_t, size_t n)
+{
+    return n;
+}
+
 void init_vfs(void)
 {
+    // null
+    register_special_block(0, 0, b_null_read, b_null_write);
+
     rootfs = allocator_traits<kernel_allocator<tmpfs>>::allocate_and_construct(4096 * 1024);
     fs_root = rootfs->root_inode();
 
@@ -413,9 +479,17 @@ void init_vfs(void)
     const char* str = "#/bin/sh\nexec /bin/sh\n";
     vfs_write(init, str, 0, strlen(str));
 
+    auto* dev = vfs_open("/dev");
+    vfs_mknode(dev, "null", { .in { .major = 0, .minor = 0 } });
+    vfs_mknode(dev, "console", { .in { .major = 1, .minor = 0 } });
+    vfs_mknode(dev, "hda", { .in { .major = 2, .minor = 0 } });
+
     struct stat _stat { };
 
     vfs_stat(&_stat, "/init");
     vfs_stat(&_stat, "/");
     vfs_stat(&_stat, "/dev");
+    vfs_stat(&_stat, "/dev/null");
+    vfs_stat(&_stat, "/dev/console");
+    vfs_stat(&_stat, "/dev/hda");
 }

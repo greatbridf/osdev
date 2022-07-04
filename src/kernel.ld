@@ -3,39 +3,25 @@ OUTPUT_ARCH(i386:i386)
 
 MEMORY
 {
-    WHOLE : org = 0x00000000, l = 4M
+    MEM : org = 0x00000000, l = 4096M
 }
 
 SECTIONS
 {
-    .text.bootsect : AT(0x00)
-    {
-        *(.text.bootsect)
-    } > WHOLE
-
-    .magicnumber : AT(0x1fe)
-    {
-        BYTE(0x55);
-        BYTE(0xaa);
-    } > WHOLE
-
-    .text.loader 0x7e00 : AT(0x200)
+    .text.loader 0x7e00 : AT(0x00000000)
     {
         *(.text.loader)
-        __kernel_text_and_data_size_offset = .;
-        LONG(LOADADDR(.data) - LOADADDR(.text));
+        __p_kernel_text_and_data_size_addr = .;
+        LONG(__loader_end + kernel_text_and_data_size - __real_kernel_start);
         __loader_end = .;
-    } > WHOLE
+    } > MEM
 
     .text 0x100000 : AT(LOADADDR(.text.loader) + SIZEOF(.text.loader))
     {
         __real_kernel_start = .;
         *(.text*)
         *(.rodata*)
-    } > WHOLE
 
-    .data : AT(LOADADDR(.text) + ADDR(.data) - ADDR(.text))
-    {
         kernel_text_and_data_size = .;
         LONG(__kernel_text_and_data_end - ADDR(.text));
         asm_kernel_size = .;
@@ -55,7 +41,7 @@ SECTIONS
         *(.data)
         *(.data*)
         __kernel_text_and_data_end = .;
-    } > WHOLE
+    } > MEM
 
     .bss ALIGN(0x1000) :
     {
@@ -63,12 +49,12 @@ SECTIONS
         *(.bss)
         *(.bss*)
         __bss_end = ALIGN(0x1000);
-    } > WHOLE
+    } > MEM
 
     .kernel_end :
     {
         __real_kernel_end = .;
-    } > WHOLE
+    } > MEM
 
     /* Stabs debugging sections.  */
     .stab          0 : { *(.stab) }
@@ -104,14 +90,11 @@ SECTIONS
     .debug_typenames 0 : { *(.debug_typenames) }
     .debug_varnames  0 : { *(.debug_varnames) }
 
-    .end : AT(0x0ffffff)
-    {
-        BYTE(0x00);
-    } > WHOLE
-
     /DISCARD/ :
     {
         *(.fini_array*)
         *(.eh_frame*)
+        *(.text.bootsect)
+        *(.note*)
     }
 }

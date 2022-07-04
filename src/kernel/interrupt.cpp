@@ -11,8 +11,11 @@
 #include <kernel/stdio.h>
 #include <kernel/syscall.hpp>
 #include <kernel/tty.h>
+#include <kernel/vfs.h>
 #include <kernel/vga.h>
 #include <kernel_main.h>
+#include <types/size.h>
+#include <types/stdint.h>
 
 static struct IDT_entry IDT[256];
 
@@ -137,9 +140,6 @@ extern "C" void int13_handler(
     asm_hlt();
 }
 
-// TODO: remove debug variable
-static size_t page_fault_times;
-
 struct PACKED int14_data {
     linr_ptr_t l_addr;
     struct regs_32 s_regs;
@@ -149,74 +149,75 @@ struct PACKED int14_data {
     uint32_t eflags;
 };
 
-// page fault
-extern "C" void int14_handler(struct int14_data* d)
+static inline void _int14_panic(void* eip, linr_ptr_t cr2, struct page_fault_error_code error_code)
 {
-    char buf[512];
+    char buf[256] {};
+    snprintf(
+        buf, 256,
+        "\nkilled: segmentation fault (eip: %x, cr2: %x, error_code: %x)\n", eip, cr2, error_code);
+    tty_print(console, buf);
+    MAKE_BREAK_POINT();
+    asm_cli();
+    asm_hlt();
+}
+
+// page fault
+extern "C" void int14_handler(int14_data* d)
+{
     mm_list* mms = nullptr;
     if (current_process)
         mms = &current_process->mms;
     else
         mms = kernel_mms;
 
-    // TODO: remove debug variable
-    ++page_fault_times;
+    mm* mm_area = find_mm_area(mms, d->l_addr);
+    if (!mm_area)
+        _int14_panic(d->v_eip, d->l_addr, d->error_code);
 
-    // not present page, possibly mapped but not loaded
-    // or invalid address or just invalid address
-    // TODO: mmapping and swapping
-    if (d->error_code.present == 0) {
-        goto kill;
-    }
+    page_directory_entry* pde = mms_get_pd(mms) + linr_addr_to_pd_i(d->l_addr);
+    page_table_entry* pte = (page_table_entry*)p_ptr_to_v_ptr(page_to_phys_addr(pde->in.pt_page));
+    pte += linr_addr_to_pt_i(d->l_addr);
+    struct page* page = find_page_by_l_ptr(mms, d->l_addr);
 
-    // kernel code
-    if (d->cs == KERNEL_CODE_SEGMENT) {
-        if (is_l_ptr_valid(mms, d->l_addr) != GB_OK) {
-            goto kill;
-        }
-        struct page* page = find_page_by_l_ptr(mms, d->l_addr);
+    if (d->error_code.present == 0 && !mm_area->mapped_file)
+        _int14_panic(d->v_eip, d->l_addr, d->error_code);
 
-        // copy on write
-        if (d->error_code.write == 1 && page->attr.cow == 1) {
-            page_directory_entry* pde = mms_get_pd(mms) + linr_addr_to_pd_i(d->l_addr);
-            page_table_entry* pte = (page_table_entry*)p_ptr_to_v_ptr(page_to_phys_addr(pde->in.pt_page));
-            pte += linr_addr_to_pt_i(d->l_addr);
-
-            // if it is a dying page
-            if (*page->ref_count == 1) {
-                page->attr.cow = 0;
-                pte->in.a = 0;
-                pte->in.rw = 1;
-                return;
-            }
-            // duplicate the page
-            page_t new_page = alloc_raw_page();
-            void* new_page_data = p_ptr_to_v_ptr(page_to_phys_addr(new_page));
-            memcpy(new_page_data, p_ptr_to_v_ptr(page_to_phys_addr(page->phys_page_id)), PAGE_SIZE);
-
-            pte->in.page = new_page;
-            pte->in.rw = 1;
-            pte->in.a = 0;
-
-            --*page->ref_count;
-
-            page->ref_count = (size_t*)k_malloc(sizeof(size_t));
-            *page->ref_count = 1;
+    // copy on write
+    if (page->attr.cow == 1) {
+        // if it is a dying page
+        if (*page->ref_count == 1) {
             page->attr.cow = 0;
-            page->phys_page_id = new_page;
+            pte->in.a = 0;
+            pte->in.rw = mm_area->attr.write;
             return;
         }
+        // duplicate the page
+        page_t new_page = alloc_raw_page();
+
+        // memory mapped
+        if (d->error_code.present == 0)
+            pte->in.p = 1;
+
+        char* new_page_data = (char*)p_ptr_to_v_ptr(page_to_phys_addr(new_page));
+        memcpy(new_page_data, p_ptr_to_v_ptr(page_to_phys_addr(page->phys_page_id)), PAGE_SIZE);
+
+        pte->in.page = new_page;
+        pte->in.rw = mm_area->attr.write;
+        pte->in.a = 0;
+
+        --*page->ref_count;
+
+        page->ref_count = (size_t*)k_malloc(sizeof(size_t));
+        *page->ref_count = 1;
+        page->attr.cow = 0;
+        page->phys_page_id = new_page;
+
+        // memory mapped
+        if (d->error_code.present == 0) {
+            size_t offset = d->l_addr - mm_area->start;
+            vfs_read(mm_area->mapped_file, new_page_data, 4096, mm_area->file_offset + offset, PAGE_SIZE);
+        }
     }
-
-kill:
-    snprintf(
-        buf, 512,
-        "\nkilled: segmentation fault (eip: %x, cr2: %x, error_code: %x)\n", d->v_eip, d->l_addr, d->error_code);
-    tty_print(console, buf);
-
-    MAKE_BREAK_POINT();
-    asm_cli();
-    asm_hlt();
 }
 
 extern "C" void irq0_handler(struct interrupt_stack* d)

@@ -131,8 +131,8 @@ add_custom_target(boot.img
     DEPENDS mbr.bin
     DEPENDS mbr_hole.bin
     COMMAND dd if=mbr.bin of=boot.img
-    COMMAND dd if=mbr_hole.bin of=boot.img oflag=append conv=notrunc
-    COMMAND dd if=/dev/zero of=boot.img bs=32M count=0 seek=1
+    COMMAND cat mbr_hole.bin >> boot.img
+    COMMAND dd if=/dev/zero of=boot.img bs=`expr 32 \\* 1024 \\* 1024` count=0 seek=1
 )
 
 add_custom_command(OUTPUT run

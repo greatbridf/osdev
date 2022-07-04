@@ -19,6 +19,12 @@ set(BOOTLOADER_SOURCES src/boot.s
 
 add_library(bootloader STATIC ${BOOTLOADER_SOURCES})
 
+add_custom_command(OUTPUT mbr.bin
+    DEPENDS ${PROJECT_SOURCE_DIR}/src/mbr.S ${PROJECT_SOURCE_DIR}/src/mbr.ld
+    COMMAND ${CMAKE_ASM_COMPILER} -m32 -c ${PROJECT_SOURCE_DIR}/src/mbr.S -o mbr.o
+    COMMAND ${CMAKE_LINKER} -T ${PROJECT_SOURCE_DIR}/src/mbr.ld mbr.o -o mbr.bin
+)
+
 add_custom_command(OUTPUT extracted_bootloader
     DEPENDS bootloader
     COMMAND ${CMAKE_AR} xf ${PROJECT_BINARY_DIR}/libbootloader.a --output=${EXTRACT_DIR}
@@ -99,8 +105,9 @@ add_custom_command(OUTPUT extracted_kernel_main
     COMMAND ${CMAKE_AR} xf ${PROJECT_BINARY_DIR}/libkernel_main.a --output=${EXTRACT_DIR}
 )
 
-add_custom_command(OUTPUT user_space_programs
-    COMMAND make -C ${CMAKE_SOURCE_DIR}/user-space-program all
+add_custom_target(user_space_programs
+    COMMAND cp ${CMAKE_SOURCE_DIR}/user-space-program/Makefile.src ${CMAKE_SOURCE_DIR}/user-space-program/Makefile
+    COMMAND make -C ${CMAKE_SOURCE_DIR}/user-space-program CROSS_COMPILE=${TOOLCHAIN_PATH_AND_PREFIX} all
     COMMAND mkdir -p ${CMAKE_SOURCE_DIR}/user-space-program/build
     COMMAND rm -f ${CMAKE_SOURCE_DIR}/user-space-program/build/*
     COMMAND cp ${CMAKE_SOURCE_DIR}/user-space-program/*.res ${CMAKE_SOURCE_DIR}/user-space-program/build
@@ -110,15 +117,23 @@ add_custom_target(kernel.out
     DEPENDS extracted_bootloader
     DEPENDS extracted_kernel_main
     DEPENDS user_space_programs
-    DEPENDS ${CMAKE_SOURCE_DIR}/ldscript.ld
-    COMMAND ${CMAKE_LINKER} -T ${CMAKE_SOURCE_DIR}/ldscript.ld ${EXTRACT_DIR}/*.o ${CMAKE_SOURCE_DIR}/user-space-program/user.sym
+    DEPENDS ${CMAKE_SOURCE_DIR}/src/kernel.ld
+    COMMAND ${CMAKE_LINKER} -T ${CMAKE_SOURCE_DIR}/src/kernel.ld ${EXTRACT_DIR}/*.o ${CMAKE_SOURCE_DIR}/user-space-program/user.sym
     -melf_i386 -o ${CMAKE_BINARY_DIR}/kernel.out
 )
 
-add_custom_target(boot.img
+add_custom_target(mbr_hole.bin
     DEPENDS kernel.out
-    COMMAND ${CMAKE_OBJCOPY} --strip-debug -O binary
-    ${CMAKE_BINARY_DIR}/kernel.out boot.img)
+    COMMAND ${CMAKE_OBJCOPY} --strip-debug -O binary ${CMAKE_BINARY_DIR}/kernel.out mbr_hole.bin
+)
+
+add_custom_target(boot.img
+    DEPENDS mbr.bin
+    DEPENDS mbr_hole.bin
+    COMMAND dd if=mbr.bin of=boot.img
+    COMMAND dd if=mbr_hole.bin of=boot.img oflag=append conv=notrunc
+    COMMAND dd if=/dev/zero of=boot.img bs=32M count=0 seek=1
+)
 
 add_custom_command(OUTPUT run
     POST_BUILD

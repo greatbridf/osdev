@@ -1,59 +1,5 @@
-.section .text.bootsect
-.code16
-
-# mbr
-
-.globl _start
-
-_start:
-    jmp $0x07c0, $(real_start-_start)
-
-real_start:
-    movw %cs, %ax
-    movw %ax, %ds
-    movw %ax, %es
-    movw %ax, %ss
-
-# perform a temporary stack
-    movw $(stack_base-_start), %ax
-    movw %ax, %bp
-    movw %ax, %sp
-
-    call read_data
-
-    ljmp $0x07e0, $(loader_start-loader_start)
-
-die:
-    hlt
-    jmp die
-
-read_data:
-    movw $(read_data_pack-_start), %si
-    mov $0x42, %ah
-    mov $0x80, %dl
-    int $0x13
-    ret
-
-string_hello:
-.string "Hello World!"
-
-read_data_pack:
-    .byte 0x10, 0
-# TODO!!!
-# read more!
-    .word 128    # block count (read 64k)
-    .word 0x0000 # offset address
-    .word 0x07e0 # segment address
-    .long 1      # LBA to read
-
-stack_edge:
-.space 128
-stack_base:
-
 .section .text.loader
-
-# loader
-
+.code16
 loader_start:
 # set segment registers
     movw %cs, %ax
@@ -83,7 +29,7 @@ _get_memory_size:
     movw %dx, %bx
 
 _get_memory_size_use_ax:
-    movl $(asm_mem_size_info-loader_start), %edx
+    movl $asm_mem_size_info, %edx
     movw %ax, (%edx)
     addw $2, %dx
     movw %bx, (%edx)
@@ -101,7 +47,7 @@ _e820_mem_map_load:
     movw %cs, %ax
     movw %ax, %es
 
-    movl $(asm_e820_mem_map-loader_start), %edi
+    movl $asm_e820_mem_map, %edi
 
     # clear ebx
     xorl %ebx, %ebx
@@ -128,24 +74,24 @@ _e820_mem_map_load_loop:
 
 _e820_mem_map_load_fin:
     movl (%esp), %eax
-    movl $(asm_e820_mem_map_count-loader_start), %edi
+    movl $asm_e820_mem_map_count, %edi
     movl %eax, (%edi)
 
-    movl $(asm_e820_mem_map_entry_size-loader_start), %edi
+    movl $asm_e820_mem_map_entry_size, %edi
     movl %ecx, (%edi)
 
     jmp _load_gdt
 
 _load_gdt:
     cli
-    lgdt (asm_gdt_descriptor-loader_start)
+    lgdt asm_gdt_descriptor
 
 # enable protection enable (PE) bit
     movl %cr0, %eax
     orl $1, %eax
     movl %eax, %cr0
 
-    ljmp $0x08, $0x7e00 + (start_32bit-loader_start)
+    ljmp $0x08, $start_32bit
 
 .code32
 
@@ -230,9 +176,8 @@ start_move_kernel:
     movl $__loader_end, %eax
     movl $__real_kernel_start, %ebx
 
-    movl $__kernel_text_and_data_size_offset, %ecx
+    movl $__p_kernel_text_and_data_size_addr, %ecx
     movl (%ecx), %ecx
-    addl $__loader_end, %ecx
     movl (%ecx), %ecx
 
 _move_kernel:
@@ -252,7 +197,7 @@ loader_halt:
 
 asm_gdt_descriptor:
     .word (5 * 8) - 1 # size
-    .long 0x7e00+(asm_gdt_table-loader_start)  # address
+    .long asm_gdt_table  # address
 
 .globl asm_gdt_descriptor
 .type asm_gdt_descriptor @object

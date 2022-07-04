@@ -133,6 +133,8 @@ add_custom_target(boot.img
     COMMAND dd if=mbr.bin of=boot.img
     COMMAND cat mbr_hole.bin >> boot.img
     COMMAND dd if=/dev/zero of=boot.img bs=`expr 32 \\* 1024 \\* 1024` count=0 seek=1
+    COMMAND echo -n 'n\\n\\n\\n\\n\\na\\nw\\n' | fdisk boot.img
+    COMMAND mkfs.fat --offset=2048 -v -n SYSTEM boot.img
 )
 
 add_custom_command(OUTPUT run

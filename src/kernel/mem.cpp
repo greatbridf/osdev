@@ -481,7 +481,7 @@ static inline int _mmap(
     int write,
     int priv)
 {
-    if (!file->flags.file) {
+    if (!file->flags.in.file && !file->flags.in.special_node) {
         errno = EINVAL;
         return GB_FAILED;
     }

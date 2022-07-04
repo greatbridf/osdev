@@ -1,6 +1,5 @@
 #pragma once
 
-#include "types/stdint.h"
 #include <types/types.h>
 
 #define INODE_FILE (1 << 0)

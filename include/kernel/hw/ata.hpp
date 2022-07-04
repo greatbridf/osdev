@@ -1,8 +1,8 @@
 #pragma once
 
 #include <asm/port_io.h>
-#include <kernel/syscall.hpp>
 #include <kernel/hw/port.hpp>
+#include <kernel/syscall.hpp>
 #include <types/cplusplus.hpp>
 
 constexpr port_id_t ATA_PRIMARY_BUS_BASE = 0x1f0;
@@ -40,16 +40,21 @@ private:
     p8r stats;
     p8w comms;
 
+    uint8_t slave_flag;
+
 public:
     ata(port_id_t port_base);
 
     stat_t status(void) const;
 
     void identify(void) const;
+    int select(bool master);
 
     size_t read_data(char* buf, size_t n) const;
+    size_t write_data(const char* buf, size_t n) const;
 
     int read_sector(char* buf, uint32_t lba_low, uint16_t lba_high) const;
+    int write_sector(const char* buf, uint32_t lba_low, uint16_t lba_high) const;
 };
 
 void init_ata(void* data);

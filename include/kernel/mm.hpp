@@ -1,6 +1,7 @@
 #pragma once
 
 #include <kernel/mem.h>
+#include <kernel/vfs.h>
 #include <types/allocator.hpp>
 #include <types/list.hpp>
 #include <types/types.h>
@@ -32,6 +33,8 @@ public:
     struct mm_attr attr;
     page_directory_entry* pd;
     page_arr* pgs;
+    struct inode* mapped_file;
+    size_t file_offset;
 
 public:
     mm(const mm& val);
@@ -53,10 +56,9 @@ phys_ptr_t l_ptr_to_p_ptr(const mm_list* mms, linr_ptr_t v_ptr);
 // translate virtual(mapped) address to physical address
 phys_ptr_t v_ptr_to_p_ptr(void* v_ptr);
 
-// check if the l_ptr is contained in the area
-// @return GB_OK if l_ptr is in the area
-//         GB_FAILED if not
-int is_l_ptr_valid(const mm_list* mms, linr_ptr_t l_ptr);
+// @return the pointer to the mm_area containing l_ptr
+//         nullptr if not
+mm* find_mm_area(mm_list* mms, linr_ptr_t l_ptr);
 
 // find the corresponding page the l_ptr pointing to
 // @return the pointer to the struct if found, NULL if not found
@@ -97,40 +99,6 @@ static inline page_directory_entry* mms_get_pd(const mm_list* mms)
     return mms->begin()->pd;
 }
 
-static inline page_directory_entry* lptr_to_pde(const mm_list* mms, linr_ptr_t l_ptr)
-{
-    return mms_get_pd(mms) + linr_addr_to_pd_i((phys_ptr_t)l_ptr);
-}
-
-static inline page_table_entry* lptr_to_pte(const mm_list* mms, linr_ptr_t l_ptr)
-{
-    page_directory_entry* pde = lptr_to_pde(mms, l_ptr);
-    page_table_entry* pte = (page_table_entry*)p_ptr_to_v_ptr(page_to_phys_addr(pde->in.pt_page));
-    return pte + linr_addr_to_pt_i((phys_ptr_t)l_ptr);
-}
-
-static inline page_directory_entry* lp_to_pde(const mm_list* mms, linr_ptr_t l_ptr)
-{
-    phys_ptr_t p_ptr = l_ptr_to_p_ptr(mms, l_ptr);
-    page_directory_entry* pde = mms_get_pd(mms) + linr_addr_to_pd_i(p_ptr);
-    return pde;
-}
-
-// get the corresponding pte for the linear address
-// for example: l_ptr = 0x30001000 will return the pte including the page it is mapped to
-static inline page_table_entry* lp_to_pte(const mm_list* mms, linr_ptr_t l_ptr)
-{
-    phys_ptr_t p_ptr = l_ptr_to_p_ptr(mms, l_ptr);
-
-    page_directory_entry* pde = lp_to_pde(mms, l_ptr);
-    phys_ptr_t p_pt = page_to_phys_addr(pde->in.pt_page);
-
-    page_table_entry* pte = (page_table_entry*)p_ptr_to_v_ptr(p_pt);
-    pte += linr_addr_to_pt_i(p_ptr);
-
-    return pte;
-}
-
 // map the page to the end of the mm_area in pd
 int k_map(
     mm* mm_area,
@@ -139,6 +107,16 @@ int k_map(
     int write,
     int priv,
     int cow);
+
+// @param len is aligned to 4kb boundary automatically, exceeding part will
+// be filled with '0's and not written back to the file
+int mmap(
+    void* hint,
+    size_t len,
+    struct inode* file,
+    size_t offset,
+    int write,
+    int priv);
 
 // allocate a raw page
 page_t alloc_raw_page(void);

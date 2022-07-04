@@ -4,11 +4,13 @@
 #include <kernel/errno.h>
 #include <kernel/mem.h>
 #include <kernel/mm.hpp>
+#include <kernel/process.hpp>
 #include <kernel/stdio.h>
 #include <kernel/task.h>
 #include <kernel/vga.h>
 #include <kernel_main.h>
 #include <types/bitmap.h>
+#include <types/status.h>
 
 // global objects
 
@@ -390,12 +392,12 @@ static inline void init_mem_layout(void)
     }
 }
 
-int is_l_ptr_valid(const mm_list* mms, linr_ptr_t l_ptr)
+mm* find_mm_area(mm_list* mms, linr_ptr_t l_ptr)
 {
-    for (const auto& item : *mms)
-        if (l_ptr >= item.start && l_ptr < item.start + item.pgs->size() * PAGE_SIZE)
-            return GB_OK;
-    return GB_FAILED;
+    for (auto iter = mms->begin(); iter != mms->end(); ++iter)
+        if (l_ptr >= iter->start && l_ptr < iter->start + iter->pgs->size() * PAGE_SIZE)
+            return iter.ptr();
+    return nullptr;
 }
 
 struct page* find_page_by_l_ptr(const mm_list* mms, linr_ptr_t l_ptr)
@@ -414,11 +416,13 @@ struct page* find_page_by_l_ptr(const mm_list* mms, linr_ptr_t l_ptr)
 static inline void map_raw_page_to_pte(
     page_table_entry* pte,
     page_t page,
+    int present,
     int rw,
     int priv)
 {
     // set P bit
-    pte->v = 0x00000001;
+    pte->v = 0;
+    pte->in.p = present;
     pte->in.rw = (rw == 1);
     pte->in.us = (priv == 0);
     pte->in.page = page;
@@ -449,12 +453,67 @@ int k_map(
     // map the page in the page table
     page_table_entry* pte = (page_table_entry*)p_ptr_to_v_ptr(page_to_phys_addr(pde->in.pt_page));
     pte += linr_addr_to_pt_i(addr);
-    map_raw_page_to_pte(pte, page->phys_page_id, (write && !cow), priv);
+    map_raw_page_to_pte(pte, page->phys_page_id, read, (write && !cow), priv);
 
     mm_area->pgs->push_back(*page);
     mm_area->pgs->back()->attr.cow = cow;
     ++*page->ref_count;
     return GB_OK;
+}
+
+bool check_addr_range_avail(const mm* mm_area, void* start, void* end)
+{
+    void* m_start = (void*)mm_area->start;
+    void* m_end = (void*)(mm_area->start + PAGE_SIZE * mm_area->pgs->size());
+
+    if (start >= m_end || end <= m_start)
+        return true;
+    else
+        return false;
+}
+
+static inline int _mmap(
+    mm_list* mms,
+    void* hint,
+    size_t len,
+    struct inode* file,
+    size_t offset,
+    int write,
+    int priv)
+{
+    if (!file->flags.file) {
+        errno = EINVAL;
+        return GB_FAILED;
+    }
+
+    len = (len + PAGE_SIZE - 1) & 0xfffff000;
+    size_t n_pgs = len >> 12;
+
+    for (const auto& mm_area : *mms)
+        if (!check_addr_range_avail(&mm_area, hint, (char*)hint + len)) {
+            errno = EEXIST;
+            return GB_FAILED;
+        }
+
+    auto iter_mm = mms->emplace_back((linr_ptr_t)hint, mms_get_pd(&current_process->mms), write, priv);
+    iter_mm->mapped_file = file;
+    iter_mm->file_offset = offset;
+
+    for (size_t i = 0; i < n_pgs; ++i)
+        k_map(iter_mm.ptr(), &empty_page, 0, write, priv, 1);
+
+    return GB_OK;
+}
+
+int mmap(
+    void* hint,
+    size_t len,
+    struct inode* file,
+    size_t offset,
+    int write,
+    int priv)
+{
+    return _mmap(&current_process->mms, hint, len, file, offset, write, priv);
 }
 
 // map a page identically
@@ -558,6 +617,8 @@ mm::mm(linr_ptr_t start, page_directory_entry* pd, bool write, bool system)
       })
     , pd(pd)
     , pgs(types::kernel_ident_allocator_new<page_arr>())
+    , mapped_file(nullptr)
+    , file_offset(0)
 {
 }
 
@@ -570,5 +631,7 @@ mm::mm(const mm& val)
       })
     , pd(val.pd)
     , pgs(val.pgs)
+    , mapped_file(nullptr)
+    , file_offset(0)
 {
 }

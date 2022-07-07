@@ -95,6 +95,14 @@ else
     CROSS_COMPILE_FLAG=
 fi
 
+event "checking mkfs tool"
+if ! which mkfs.fat > /dev/null 2>&1; then
+    echo "no"
+    exit 1
+else
+    echo `which mkfs.fat`
+fi
+
 cp Makefile.src Makefile
 sed -i '' -e "s/##PLACEHOLDER_1##/$QEMU/" Makefile > /dev/null 2>&1
 sed -i '' -e "s/##PLACEHOLDER_2##/$GDB/" Makefile > /dev/null 2>&1

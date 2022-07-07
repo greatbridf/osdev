@@ -47,7 +47,7 @@ public:
 
     stat_t status(void) const;
 
-    void identify(void) const;
+    bool identify(void) const;
     int select(bool master);
 
     size_t read_data(char* buf, size_t n) const;

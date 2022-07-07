@@ -28,7 +28,7 @@ hw::ata::stat_t hw::ata::status(void) const
     return hw::ata::stat_t { *stats };
 }
 
-void hw::ata::identify(void) const
+bool hw::ata::identify(void) const
 {
     char buf[512] {};
 
@@ -44,12 +44,14 @@ void hw::ata::identify(void) const
         ;
 
     if (stat.in.err)
-        syscall(0x03);
+        return false;
 
     read_data(buf, 512);
 
     if (!status().in.rdy)
-        syscall(0x03);
+        return false;
+
+    return true;
 }
 
 int hw::ata::select(bool master)

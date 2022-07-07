@@ -16,7 +16,7 @@ union inode_flags;
 struct inode_ops;
 struct stat;
 struct dirent;
-union special_node;
+union node_t;
 struct special_node_ops;
 
 typedef size_t (*inode_read)(struct inode* file, char* buf, size_t buf_size, size_t offset, size_t n);
@@ -24,7 +24,7 @@ typedef size_t (*inode_write)(struct inode* file, const char* buf, size_t offset
 typedef int (*inode_readdir)(struct inode* dir, struct dirent* entry, size_t i);
 typedef struct inode* (*inode_findinode)(struct inode* dir, const char* filename);
 typedef int (*inode_mkfile)(struct inode* dir, const char* filename);
-typedef int (*inode_mknode)(struct inode* dir, const char* filename, union special_node sn);
+typedef int (*inode_mknode)(struct inode* dir, const char* filename, union node_t sn);
 typedef int (*inode_rmfile)(struct inode* dir, const char* filename);
 typedef int (*inode_mkdir)(struct inode* dir, const char* dirname);
 typedef int (*inode_stat)(struct inode* dir, struct stat* stat, const char* dirname);
@@ -76,7 +76,7 @@ struct dirent {
     uint32_t ino;
 };
 
-union special_node {
+union node_t {
     uint32_t v;
     struct {
         uint32_t major : 16;
@@ -91,7 +91,7 @@ struct special_node_ops {
 
 struct stat {
     ino_t st_ino;
-    union special_node st_rdev;
+    union node_t st_rdev;
     blksize_t st_blksize;
     blkcnt_t st_blocks;
 };
@@ -107,7 +107,7 @@ size_t vfs_write(struct inode* file, const char* buf, size_t offset, size_t n);
 int vfs_readdir(struct inode* dir, struct dirent* entry, size_t i);
 struct inode* vfs_findinode(struct inode* dir, const char* filename);
 int vfs_mkfile(struct inode* dir, const char* filename);
-int vfs_mknode(struct inode* dir, const char* filename, union special_node sn);
+int vfs_mknode(struct inode* dir, const char* filename, union node_t sn);
 int vfs_rmfile(struct inode* dir, const char* filename);
 int vfs_mkdir(struct inode* dir, const char* dirname);
 

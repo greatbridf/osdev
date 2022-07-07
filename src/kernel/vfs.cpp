@@ -56,7 +56,7 @@ public:
     explicit tmpfs(size_t limit);
     void mklink(struct inode* dir, struct inode* inode, const char* filename);
     void mkfile(struct inode* dir, const char* filename);
-    void mknode(struct inode* dir, const char* filename, union special_node sn);
+    void mknode(struct inode* dir, const char* filename, union node_t sn);
     void mkdir(struct inode* dir, const char* dirname);
     size_t read(struct inode* file, char* buf, size_t buf_size, size_t offset, size_t n);
     size_t write(struct inode* file, const char* buf, size_t offset, size_t n);
@@ -96,7 +96,7 @@ int tmpfs_mkfile(struct inode* dir, const char* filename)
     fs->mkfile(dir, filename);
     return GB_OK;
 }
-int tmpfs_mknode(struct inode* dir, const char* filename, union special_node sn)
+int tmpfs_mknode(struct inode* dir, const char* filename, union node_t sn)
 {
     auto* fs = static_cast<tmpfs*>(dir->fs->impl);
     fs->mknode(dir, filename, sn);
@@ -163,7 +163,7 @@ void tmpfs::mkfile(struct inode* dir, const char* filename)
     mklink(dir, &file, filename);
 }
 
-void tmpfs::mknode(struct inode* dir, const char* filename, union special_node sn)
+void tmpfs::mknode(struct inode* dir, const char* filename, union node_t sn)
 {
     struct inode node = mk_inode({ .v = INODE_NODE }, (void*)sn.v);
     m_inodes.push_back(node);
@@ -290,7 +290,7 @@ static struct special_node_ops sn_ops[8][8];
 size_t vfs_read(struct inode* file, char* buf, size_t buf_size, size_t offset, size_t n)
 {
     if (file->flags.in.special_node) {
-        union special_node sn {
+        union node_t sn {
             .v = (uint32_t)file->impl
         };
         auto* ops = &sn_ops[sn.in.major][sn.in.minor];
@@ -305,7 +305,7 @@ size_t vfs_read(struct inode* file, char* buf, size_t buf_size, size_t offset, s
 size_t vfs_write(struct inode* file, const char* buf, size_t offset, size_t n)
 {
     if (file->flags.in.special_node) {
-        union special_node sn {
+        union node_t sn {
             .v = (uint32_t)file->impl
         };
         auto* ops = &sn_ops[sn.in.major][sn.in.minor];
@@ -341,7 +341,7 @@ int vfs_mkfile(struct inode* dir, const char* filename)
         return 0;
     }
 }
-int vfs_mknode(struct inode* dir, const char* filename, union special_node sn)
+int vfs_mknode(struct inode* dir, const char* filename, union node_t sn)
 {
     if (dir->fs->ops->mknode) {
         return dir->fs->ops->mknode(dir, filename, sn);

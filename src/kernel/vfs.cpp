@@ -5,6 +5,7 @@
 #include <kernel/vfs.h>
 #include <types/allocator.hpp>
 #include <types/list.hpp>
+#include <types/stdint.h>
 #include <types/string.hpp>
 #include <types/vector.hpp>
 
@@ -285,7 +286,7 @@ int tmpfs::stat(struct inode* dir, struct stat* stat, const char* filename)
 }
 
 // 8 * 8 for now
-static struct special_node_ops sn_ops[8][8];
+static struct special_node sns[8][8];
 
 size_t vfs_read(struct inode* file, char* buf, size_t buf_size, size_t offset, size_t n)
 {
@@ -293,9 +294,10 @@ size_t vfs_read(struct inode* file, char* buf, size_t buf_size, size_t offset, s
         union node_t sn {
             .v = (uint32_t)file->impl
         };
-        auto* ops = &sn_ops[sn.in.major][sn.in.minor];
+        auto* ptr = &sns[sn.in.major][sn.in.minor];
+        auto* ops = &ptr->ops;
         if (ops && ops->read)
-            return ops->read(buf, buf_size, offset, n);
+            return ops->read(ptr, buf, buf_size, offset, n);
     } else {
         if (file->fs->ops->read)
             return file->fs->ops->read(file, buf, buf_size, offset, n);
@@ -308,9 +310,10 @@ size_t vfs_write(struct inode* file, const char* buf, size_t offset, size_t n)
         union node_t sn {
             .v = (uint32_t)file->impl
         };
-        auto* ops = &sn_ops[sn.in.major][sn.in.minor];
+        auto* ptr = &sns[sn.in.major][sn.in.minor];
+        auto* ops = &ptr->ops;
         if (ops && ops->write)
-            return ops->write(buf, offset, n);
+            return ops->write(ptr, buf, offset, n);
     } else {
         if (file->fs->ops->read)
             return file->fs->ops->write(file, buf, offset, n);
@@ -445,20 +448,29 @@ int vfs_stat(struct stat* stat, const char* _path)
 struct inode* fs_root;
 static tmpfs* rootfs;
 
-void register_special_block(uint16_t major, uint16_t minor, special_node_read read, special_node_write write)
+void register_special_block(
+    uint16_t major,
+    uint16_t minor,
+    special_node_read read,
+    special_node_write write,
+    uint32_t data1,
+    uint32_t data2)
 {
-    sn_ops[major][minor].read = read;
-    sn_ops[major][minor].write = write;
+    struct special_node& sn = sns[major][minor];
+    sn.ops.read = read;
+    sn.ops.write = write;
+    sn.data1 = data1;
+    sn.data2 = data2;
 }
 
-size_t b_null_read(char* buf, size_t buf_size, size_t, size_t n)
+size_t b_null_read(struct special_node*, char* buf, size_t buf_size, size_t, size_t n)
 {
     if (n >= buf_size)
         n = buf_size;
     memset(buf, 0x00, n);
     return n;
 }
-size_t b_null_write(const char*, size_t, size_t n)
+size_t b_null_write(struct special_node*, const char*, size_t, size_t n)
 {
     return n;
 }
@@ -466,7 +478,7 @@ size_t b_null_write(const char*, size_t, size_t n)
 void init_vfs(void)
 {
     // null
-    register_special_block(0, 0, b_null_read, b_null_write);
+    register_special_block(0, 0, b_null_read, b_null_write, 0, 0);
 
     rootfs = allocator_traits<kernel_allocator<tmpfs>>::allocate_and_construct(4096 * 1024);
     fs_root = rootfs->root_inode();

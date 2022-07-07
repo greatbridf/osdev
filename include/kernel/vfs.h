@@ -1,5 +1,6 @@
 #pragma once
 
+#include <types/stdint.h>
 #include <types/types.h>
 
 #define INODE_FILE (1 << 0)
@@ -29,8 +30,8 @@ typedef int (*inode_rmfile)(struct inode* dir, const char* filename);
 typedef int (*inode_mkdir)(struct inode* dir, const char* dirname);
 typedef int (*inode_stat)(struct inode* dir, struct stat* stat, const char* dirname);
 
-typedef size_t (*special_node_read)(char* buf, size_t buf_size, size_t offset, size_t n);
-typedef size_t (*special_node_write)(const char* buf, size_t offset, size_t n);
+typedef size_t (*special_node_read)(struct special_node* sn, char* buf, size_t buf_size, size_t offset, size_t n);
+typedef size_t (*special_node_write)(struct special_node* sn, const char* buf, size_t offset, size_t n);
 
 typedef uint32_t ino_t;
 typedef uint32_t blksize_t;
@@ -89,6 +90,12 @@ struct special_node_ops {
     special_node_write write;
 };
 
+struct special_node {
+    struct special_node_ops ops;
+    uint32_t data1;
+    uint32_t data2;
+};
+
 struct stat {
     ino_t st_ino;
     union node_t st_rdev;
@@ -100,7 +107,12 @@ extern struct inode* fs_root;
 
 void init_vfs(void);
 
-void register_special_block(uint16_t major, uint16_t minor, special_node_read read, special_node_write write);
+void register_special_block(uint16_t major,
+    uint16_t minor,
+    special_node_read read,
+    special_node_write write,
+    uint32_t data1,
+    uint32_t data2);
 
 size_t vfs_read(struct inode* file, char* buf, size_t buf_size, size_t offset, size_t n);
 size_t vfs_write(struct inode* file, const char* buf, size_t offset, size_t n);

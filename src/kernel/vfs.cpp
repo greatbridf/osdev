@@ -294,7 +294,7 @@ size_t vfs_read(struct inode* file, char* buf, size_t buf_size, size_t offset, s
             .v = (uint32_t)file->impl
         };
         auto* ops = &sn_ops[sn.in.major][sn.in.minor];
-        if (ops)
+        if (ops && ops->read)
             return ops->read(buf, buf_size, offset, n);
     } else {
         if (file->fs->ops->read)
@@ -309,7 +309,7 @@ size_t vfs_write(struct inode* file, const char* buf, size_t offset, size_t n)
             .v = (uint32_t)file->impl
         };
         auto* ops = &sn_ops[sn.in.major][sn.in.minor];
-        if (ops)
+        if (ops && ops->write)
             return ops->write(buf, offset, n);
     } else {
         if (file->fs->ops->read)

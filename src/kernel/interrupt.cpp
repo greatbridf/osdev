@@ -11,7 +11,7 @@
 #include <kernel/stdio.h>
 #include <kernel/syscall.hpp>
 #include <kernel/tty.h>
-#include <kernel/vfs.h>
+#include <kernel/vfs.hpp>
 #include <kernel/vga.h>
 #include <kernel_main.h>
 #include <types/size.h>

@@ -3,7 +3,7 @@
 #include <kernel/stdio.h>
 #include <kernel/syscall.hpp>
 #include <kernel/tty.h>
-#include <kernel/vfs.h>
+#include <kernel/vfs.hpp>
 #include <types/allocator.hpp>
 #include <types/status.h>
 #include <types/stdint.h>
@@ -136,9 +136,9 @@ void hw::init_ata(void* data)
     ata_pri->identify();
     ata_pri->select(true);
 
-    register_special_block(
+    fs::register_special_block(
         2, 0,
-        [](char* buf, size_t buf_size, size_t offset, size_t n) -> size_t {
+        [](fs::special_node*, char* buf, size_t buf_size, size_t offset, size_t n) -> size_t {
             // TODO: check buf_size
             char b[512] {};
             char* orig_buf = buf;
@@ -158,12 +158,12 @@ void hw::init_ata(void* data)
             }
             return buf - orig_buf;
         },
-        [](const char* buf, size_t offset, size_t n) -> size_t {
+        [](fs::special_node*, const char* buf, size_t offset, size_t n) -> size_t {
             syscall(0x03);
             return n;
-        });
-    auto* hda = vfs_open("/dev/hda");
+        }, 0, 0);
+    auto* hda = fs::vfs_open("/dev/hda");
     char buf[512] {};
-    vfs_read(hda, buf, 512, 1, 512);
-    vfs_write(hda, buf, 1, 512);
+    fs::vfs_read(hda, buf, 512, 1, 512);
+    fs::vfs_write(hda, buf, 1, 512);
 }

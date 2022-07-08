@@ -33,7 +33,7 @@ add_custom_command(OUTPUT extracted_bootloader
 project(kernel_main)
 
 set(CMAKE_C_FLAGS "-nostdinc -m32 -nostdlib -W -Wall -Wextra -Wno-builtin-declaration-mismatch -Wno-format -Werror=implicit-int -Werror=implicit-function-declaration -Werror=strict-aliasing -fverbose-asm -fno-exceptions -fno-pic -fno-stack-protector")
-set(CMAKE_CXX_FLAGS "-nostdinc -m32 -nostdlib -W -Wall -Wextra -Wno-builtin-declaration-mismatch -Wno-format -fverbose-asm -fno-use-cxa-atexit -fno-exceptions -fno-pic -fno-stack-protector")
+set(CMAKE_CXX_FLAGS "-nostdinc -m32 -nostdlib -W -Wall -Wextra -Wno-builtin-declaration-mismatch -Wno-format -fverbose-asm -fno-use-cxa-atexit -fno-exceptions -fno-pic -fno-stack-protector -fno-rtti")
 set(CMAKE_CXX_STANDARD 17)
 
 if (CMAKE_BUILD_TYPE STREQUAL "Debug")
@@ -75,7 +75,7 @@ set(KERNEL_MAIN_SOURCES src/kernel_main.c
                         include/kernel/syscall.hpp
                         include/kernel/mem.h
                         include/kernel/mm.hpp
-                        include/kernel/vfs.h
+                        include/kernel/vfs.hpp
                         include/kernel/vga.h
                         include/kernel/hw/ata.hpp
                         include/kernel/hw/keyboard.h

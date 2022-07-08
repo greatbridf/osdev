@@ -13,7 +13,6 @@
 #include <kernel/stdio.h>
 #include <kernel/task.h>
 #include <kernel/tty.h>
-#include <kernel/vfs.h>
 #include <kernel/vga.h>
 #include <types/bitmap.h>
 
@@ -143,6 +142,8 @@ void init_bss_section(void)
 }
 
 static struct tty early_console;
+
+extern void init_vfs();
 
 void NORETURN kernel_main(void)
 {

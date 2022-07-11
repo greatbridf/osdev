@@ -86,6 +86,7 @@ set(KERNEL_MAIN_SOURCES src/kernel_main.c
                         include/kernel/input/input_event.h
                         include/types/bitmap.h
                         include/types/buffer.h
+                        include/types/hash_map.hpp
                         include/types/types.h
                         include/types/size.h
                         include/types/status.h

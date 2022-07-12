@@ -13,6 +13,12 @@ mbr_start:
     movw %ax, %bp
     movw %ax, %sp
 
+# read the first 64k
+    call read_data
+
+# read the rest
+    addw $(0x100 * 16), read_data_segment
+    addl $(8 * 16), read_data_lba
     call read_data
 
 # loader start

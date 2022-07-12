@@ -1,9 +1,11 @@
 #pragma once
 
+#include <types/allocator.hpp>
 #include <types/hash_map.hpp>
 #include <types/list.hpp>
 #include <types/stdint.h>
 #include <types/types.h>
+#include <types/vector.hpp>
 
 #define INODE_FILE (1 << 0)
 #define INODE_DIR (1 << 1)
@@ -33,11 +35,7 @@ struct inode {
     void* impl;
     ino_t ino;
     vfs* fs;
-};
-
-struct dirent {
-    char name[128];
-    uint32_t ino;
+    size_t size;
 };
 
 union node_t {
@@ -67,11 +65,52 @@ struct special_node {
 struct stat {
     ino_t st_ino;
     node_t st_rdev;
+    size_t st_size;
     blksize_t st_blksize;
     blkcnt_t st_blocks;
 };
 
 class vfs {
+public:
+    struct dentry {
+    public:
+        using name_type = types::string<>;
+
+    private:
+        types::list<dentry> children;
+        types::hash_map<name_type, dentry*, types::string_hasher<const name_type&>> idx_children;
+
+    public:
+        dentry* parent;
+        inode* ind;
+        // if the entry is not a file, this flag is ignored
+        union {
+            uint32_t v;
+            struct {
+                uint32_t present : 1;
+                uint32_t dirty : 1;
+            } in;
+        } flags;
+        name_type name;
+
+        explicit dentry(dentry* parent, inode* ind, const name_type& name);
+        explicit dentry(dentry* parent, inode* ind, name_type&& name);
+        dentry(const dentry& val) = delete;
+        dentry(dentry&& val);
+
+        dentry& operator=(const dentry& val) = delete;
+        dentry& operator=(dentry&& val) = delete;
+
+        dentry* append(inode* ind, const name_type& name);
+        dentry* append(inode* ind, name_type&& name);
+
+        dentry* find(const name_type& name);
+
+        dentry* replace(dentry* val);
+
+        void invalidate(void);
+    };
+
 private:
     // TODO: use allocator designed for small objects
     using inode_list = types::list<inode>;
@@ -79,17 +118,22 @@ private:
 
 private:
     inode_list _inodes;
-    inode* _root_inode;
-    ino_t _last_inode_no;
     inode_index_cache_list _idx_inodes;
+    types::hash_map<dentry*, dentry*, types::linux_hasher<dentry*>> _mount_recover_list;
+    ino_t _last_inode_no;
 
 private:
     ino_t _assign_inode_id(void);
 
 protected:
-    inode* cache_inode(inode_flags flags, uint32_t perm, void* impl_data);
+    dentry _root;
+
+protected:
+    inode* cache_inode(inode_flags flags, uint32_t perm, size_t size, void* impl_data);
     inode* get_inode(ino_t ino);
     void register_root_node(inode* root);
+
+    virtual int load_dentry(dentry* ent);
 
 public:
     explicit vfs(void);
@@ -98,21 +142,23 @@ public:
     vfs(vfs&&) = delete;
     vfs& operator=(vfs&&) = delete;
 
-    inode* root(void) const;
+    constexpr dentry* root(void)
+    {
+        return &_root;
+    }
+
+    int mount(dentry* mnt, vfs* new_fs);
 
     virtual size_t inode_read(inode* file, char* buf, size_t buf_size, size_t offset, size_t n);
     virtual size_t inode_write(inode* file, const char* buf, size_t offset, size_t n);
-    virtual int inode_readdir(inode* dir, dirent* entry, size_t i);
-    virtual int inode_mkfile(inode* dir, const char* filename);
-    virtual int inode_mknode(inode* dir, const char* filename, union node_t sn);
-    virtual int inode_rmfile(inode* dir, const char* filename);
-    virtual int inode_mkdir(inode* dir, const char* dirname);
-    virtual int inode_stat(inode* dir, stat* stat, const char* dirname);
-    // requires inode_readdir to work
-    virtual inode* inode_findinode(inode* dir, const char* filename);
+    virtual int inode_mkfile(dentry* dir, const char* filename);
+    virtual int inode_mknode(dentry* dir, const char* filename, union node_t sn);
+    virtual int inode_rmfile(dentry* dir, const char* filename);
+    virtual int inode_mkdir(dentry* dir, const char* dirname);
+    virtual int inode_stat(dentry* dir, stat* stat);
 };
 
-extern struct inode* fs_root;
+extern fs::vfs::dentry* fs_root;
 
 void register_special_block(uint16_t major,
     uint16_t minor,
@@ -121,21 +167,19 @@ void register_special_block(uint16_t major,
     uint32_t data1,
     uint32_t data2);
 
+vfs* register_fs(vfs* fs);
+
 size_t vfs_read(inode* file, char* buf, size_t buf_size, size_t offset, size_t n);
 size_t vfs_write(inode* file, const char* buf, size_t offset, size_t n);
-int vfs_readdir(inode* dir, dirent* entry, size_t i);
-inode* vfs_findinode(inode* dir, const char* filename);
-int vfs_mkfile(inode* dir, const char* filename);
-int vfs_mknode(inode* dir, const char* filename, node_t sn);
-int vfs_rmfile(inode* dir, const char* filename);
-int vfs_mkdir(inode* dir, const char* dirname);
+int vfs_mkfile(fs::vfs::dentry* dir, const char* filename);
+int vfs_mknode(fs::vfs::dentry* dir, const char* filename, node_t sn);
+int vfs_rmfile(fs::vfs::dentry* dir, const char* filename);
+int vfs_mkdir(fs::vfs::dentry* dir, const char* dirname);
+int vfs_stat(const char* filename, stat* stat);
+int vfs_stat(fs::vfs::dentry* ent, stat* stat);
 
-// requires inode_findinode to work
-// @return pointer to the inode if found, nullptr if not
-inode* vfs_open(const char* path);
-
-// @return GB_OK if succeed, GB_FAILED if failed and set errno
-int vfs_stat(struct stat* stat, const char* path);
+// @return pointer to the dentry if found, nullptr if not
+fs::vfs::dentry* vfs_open(const char* path);
 
 } // namespace fs
 

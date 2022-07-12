@@ -46,7 +46,8 @@ endif()
 
 include_directories(${PROJECT_SOURCE_DIR}/include ${PROJECT_SOURCE_DIR}/user-space-program/build)
 
-set(KERNEL_MAIN_SOURCES src/kernel_main.c
+set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
+                        src/kernel_main.c
                         src/kernel/errno.c
                         src/kernel/interrupt.cpp
                         src/kernel/process.cpp
@@ -66,6 +67,7 @@ set(KERNEL_MAIN_SOURCES src/kernel_main.c
                         include/asm/boot.h
                         include/asm/port_io.h
                         include/asm/sys.h
+                        include/fs/fat.hpp
                         include/kernel/event/event.h
                         include/kernel/errno.h
                         include/kernel/tty.h

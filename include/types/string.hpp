@@ -27,14 +27,6 @@ public:
     {
         this->append(str, n);
     }
-    string(const string& str)
-        : inner_vector_type((const inner_vector_type&)str)
-    {
-    }
-    string(string&& str)
-        : inner_vector_type((inner_vector_type &&) move(str))
-    {
-    }
     string& append(const char* str, size_type n = npos)
     {
         this->pop_back();

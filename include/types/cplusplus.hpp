@@ -48,6 +48,32 @@ struct add_reference {
     using type = T&;
 };
 
+template <typename T>
+struct remove_cv {
+    using type = T;
+};
+template <typename T>
+struct remove_cv<const T> {
+    using type = T;
+};
+template <typename T>
+struct remove_cv<volatile T> {
+    using type = T;
+};
+template <typename T>
+struct remove_cv<const volatile T> {
+    using type = T;
+};
+
+template <typename T>
+struct decay {
+private:
+    using U = remove_reference<T>;
+
+public:
+    using type = typename remove_cv<U>::type;
+};
+
 } // namespace types::traits
 
 namespace types {

@@ -109,32 +109,19 @@ public:
 
 public:
     struct pair {
-        pair(const key_type& _key, const value_type& _val)
+        const key_type key;
+        value_type value;
+
+        pair(void) = delete;
+        pair(const key_type _key, value_type _val)
             : key(_key)
             , value(_val)
-        {
-        }
-        pair(key_type&& _key, const value_type& _val)
-            : key(move(_key))
-            , value(_val)
-        {
-        }
-        pair(const key_type& _key, value_type&& _val)
-            : key(_key)
-            , value(move(_val))
-        {
-        }
-        pair(key_type&& _key, value_type&& _val)
-            : key(move(_key))
-            , value(move(_val))
         {
         }
         bool operator==(const pair& p)
         {
             return key == p.key;
         }
-        key_type key;
-        value_type value;
     };
 
     template <typename Pointer>
@@ -176,6 +163,11 @@ public:
             return !(*this == iter);
         }
 
+        bool operator!()
+        {
+            return !p;
+        }
+
         Reference operator*() const noexcept
         {
             return *p;
@@ -187,9 +179,6 @@ public:
 
     protected:
         Pointer p;
-
-    public:
-        static inline iterator npos = iterator((Pointer)-1);
     };
 
 private:
@@ -227,13 +216,13 @@ public:
     }
 
     hash_map(hash_map&& v)
-        : buckets(move(v))
+        : buckets(move(v.buckets))
     {
     }
 
     ~hash_map()
     {
-        clear();
+        buckets.clear();
     }
 
     void insert(const pair& p)
@@ -271,7 +260,7 @@ public:
             if (key == item.key)
                 return iterator_type(&item);
         }
-        return iterator_type::npos;
+        return iterator_type(nullptr);
     }
 
     const_iterator_type find(const key_type& key) const
@@ -282,12 +271,13 @@ public:
             if (key == item.key)
                 return const_iterator_type(&(*item));
         }
-        return const_iterator_type::npos;
+        return const_iterator_type(nullptr);
     }
 
     void clear(void)
     {
-        buckets.clear();
+        for (size_t i = 0; i < buckets.size(); ++i)
+            buckets.at(i).clear();
     }
 };
 

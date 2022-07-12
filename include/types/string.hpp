@@ -73,6 +73,10 @@ public:
     {
         return this->append(move(str));
     }
+    bool operator==(const string& rhs) const
+    {
+        return strcmp(c_str(), rhs.c_str()) == 0;
+    }
     string substr(size_type pos, size_type n = npos)
     {
         return string(this->m_arr + pos, n);

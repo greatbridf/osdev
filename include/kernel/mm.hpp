@@ -1,7 +1,7 @@
 #pragma once
 
 #include <kernel/mem.h>
-#include <kernel/vfs.h>
+#include <kernel/vfs.hpp>
 #include <types/allocator.hpp>
 #include <types/list.hpp>
 #include <types/types.h>
@@ -33,7 +33,7 @@ public:
     struct mm_attr attr;
     page_directory_entry* pd;
     page_arr* pgs;
-    struct inode* mapped_file;
+    fs::inode* mapped_file;
     size_t file_offset;
 
 public:
@@ -113,7 +113,7 @@ int k_map(
 int mmap(
     void* hint,
     size_t len,
-    struct inode* file,
+    fs::inode* file,
     size_t offset,
     int write,
     int priv);

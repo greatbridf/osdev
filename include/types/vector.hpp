@@ -140,6 +140,25 @@ public:
         arr.m_size = 0;
     }
 
+    vector& operator=(vector&& arr)
+    {
+        resize(0);
+        m_arr = arr.m_arr;
+        m_capacity = arr.m_capacity;
+        m_size = arr.m_size;
+
+        arr.m_arr = nullptr;
+        arr.m_capacity = 0;
+        arr.m_size = 0;
+
+        return *this;
+    }
+
+    vector& operator=(const vector& arr)
+    {
+        return operator=(vector(arr));
+    }
+
     ~vector() noexcept
     {
         resize(0);

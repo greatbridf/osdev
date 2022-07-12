@@ -476,12 +476,12 @@ static inline int _mmap(
     mm_list* mms,
     void* hint,
     size_t len,
-    struct inode* file,
+    fs::inode* file,
     size_t offset,
     int write,
     int priv)
 {
-    if (!file->flags.file) {
+    if (!file->flags.in.file && !file->flags.in.special_node) {
         errno = EINVAL;
         return GB_FAILED;
     }
@@ -508,7 +508,7 @@ static inline int _mmap(
 int mmap(
     void* hint,
     size_t len,
-    struct inode* file,
+    fs::inode* file,
     size_t offset,
     int write,
     int priv)

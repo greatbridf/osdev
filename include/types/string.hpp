@@ -27,14 +27,6 @@ public:
     {
         this->append(str, n);
     }
-    string(const string& str)
-        : inner_vector_type((const inner_vector_type&)str)
-    {
-    }
-    string(string&& str)
-        : inner_vector_type((inner_vector_type &&) move(str))
-    {
-    }
     string& append(const char* str, size_type n = npos)
     {
         this->pop_back();
@@ -57,7 +49,8 @@ public:
     }
     string& operator+=(const char c)
     {
-        *this->back() = c;
+        this->pop_back();
+        this->push_back(c);
         this->push_back(0x00);
         return *this;
     }
@@ -72,6 +65,10 @@ public:
     string& operator+=(string&& str)
     {
         return this->append(move(str));
+    }
+    bool operator==(const string& rhs) const
+    {
+        return strcmp(c_str(), rhs.c_str()) == 0;
     }
     string substr(size_type pos, size_type n = npos)
     {
@@ -96,14 +93,23 @@ public:
     }
     typename inner_vector_type::iterator_type back(void)
     {
+        // TODO: assert
+        if (this->empty())
+            return typename inner_vector_type::iterator_type((void*)0xffffffff);
         return --inner_vector_type::back();
     }
     typename inner_vector_type::const_iterator_type back(void) const
     {
+        // TODO: assert
+        if (this->empty())
+            return typename inner_vector_type::iterator_type((void*)0xffffffff);
         return --inner_vector_type::back();
     }
     typename inner_vector_type::const_iterator_type cback(void) const
     {
+        // TODO: assert
+        if (this->empty())
+            return typename inner_vector_type::iterator_type((void*)0xffffffff);
         return --inner_vector_type::cback();
     }
 };

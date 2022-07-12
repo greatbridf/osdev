@@ -13,7 +13,6 @@
 #include <kernel/stdio.h>
 #include <kernel/task.h>
 #include <kernel/tty.h>
-#include <kernel/vfs.h>
 #include <kernel/vga.h>
 #include <types/bitmap.h>
 
@@ -144,6 +143,8 @@ void init_bss_section(void)
 
 static struct tty early_console;
 
+extern void init_vfs();
+
 void NORETURN kernel_main(void)
 {
     // MAKE_BREAK_POINT();
@@ -195,9 +196,6 @@ void NORETURN kernel_main(void)
     k_malloc_buf[4096] = '\x89';
 
     init_vfs();
-
-    struct inode* init = vfs_open("/init");
-    vfs_read(init, buf, 128, 1, 10);
 
     printkf("switching execution to the scheduler...\n");
     init_scheduler(&tss);

@@ -11,7 +11,7 @@
 #include <kernel/stdio.h>
 #include <kernel/syscall.hpp>
 #include <kernel/tty.h>
-#include <kernel/vfs.h>
+#include <kernel/vfs.hpp>
 #include <kernel/vga.h>
 #include <kernel_main.h>
 #include <types/size.h>
@@ -214,8 +214,8 @@ extern "C" void int14_handler(int14_data* d)
 
         // memory mapped
         if (d->error_code.present == 0) {
-            size_t offset = d->l_addr - mm_area->start;
-            vfs_read(mm_area->mapped_file, new_page_data, 4096, mm_area->file_offset + offset, PAGE_SIZE);
+            size_t offset = (d->l_addr - mm_area->start) & 0xfffff000;
+            vfs_read(mm_area->mapped_file, new_page_data, PAGE_SIZE, mm_area->file_offset + offset, PAGE_SIZE);
         }
     }
 }

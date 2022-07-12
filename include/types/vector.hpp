@@ -154,6 +154,11 @@ public:
         return *this;
     }
 
+    vector& operator=(const vector& arr)
+    {
+        return operator=(vector(arr));
+    }
+
     ~vector() noexcept
     {
         resize(0);

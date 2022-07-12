@@ -1,0 +1,30 @@
+CROSS_COMPILE=
+CC=$(CROSS_COMPILE)gcc
+LD=$(CROSS_COMPILE)ld
+XXD=xxd
+
+RES=hello-world.res interrupt-test.res
+OBJS=hello-world.o interrupt-test.o
+
+all: user.sym $(RES)
+	mkdir -p build
+	cp $(RES) build
+
+user.sym: $(OBJS) output_symbols.ld
+	$(LD) -r -T output_symbols.ld $(OBJS) -o user.sym
+
+%.o: %.s
+	$(CC) -c -g -m32 -o $@ $<
+
+%.bin: %.o output_code.ld
+	$(LD) -T output_code.ld $< -o $@
+
+%.res: %.bin
+	$(XXD) -i $< $@
+
+.PHONY: clean
+clean:
+	-rm -rf build
+	-rm $(OBJS)
+	-rm $(RES)
+	-rm user.sym

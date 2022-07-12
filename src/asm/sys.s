@@ -2,6 +2,13 @@
 
 .text
 
+.global asm_switch_pd
+.type   asm_switch_pd @function
+asm_switch_pd:
+    movl 4(%esp), %eax
+    movl %eax, %cr3
+    ret
+
 .global asm_enable_paging
 .type   asm_enable_paging @function
 asm_enable_paging:
@@ -34,7 +41,6 @@ _asm_load_gdt_fin:
 	movw 4(%esp), %ax
 	cmpw $0, %ax
 	je _asm_load_gdt_fin_ret
-    sti
 _asm_load_gdt_fin_ret:
     ret
 
@@ -45,32 +51,26 @@ asm_load_tr:
     movl 4(%esp), %eax
     orl $0, %eax
     ltr %ax
-    sti
     ret
 
-
-# examples for going ring 3
-_test_user_space_program:
-    movl $0x1919810, %eax
-    movl $0xc48c, %ecx
-_reap:
-    cmpl $1000, (%ecx)
-    jl _reap
-_fault:
-    cli
-
-go_user_space_example:
+.globl go_user_space
+.type  go_user_space @function
+go_user_space:
     movl $((4 * 8) | 3), %eax
     movw %ax, %ds
     movw %ax, %es
     movw %ax, %fs
     movw %ax, %gs
 
-    movl %esp, %eax
+    movl 4(%esp), %ebx
     pushl $((4 * 8) | 3)
-    pushl %eax
+    pushl $0x40100000
     pushf
+    # allow interrupts in user mode
+    movl (%esp), %eax
+    orl $0x200, %eax
+    movl %eax, (%esp)
     pushl $((3 * 8) | 3)
-    pushl $_test_user_space_program
+    pushl %ebx
 
     iret

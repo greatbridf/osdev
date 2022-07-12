@@ -1,0 +1,12 @@
+0x00000000 - 0x00001000 kernel pd
+0x00001000 - 0x00005000 kernel pt
+0x00005000 - 0x00006000 empty page
+
+....
+
+0x00100000 - 0x???????? kernel code, data, bss
+0x???????? - 0x01000000 kernel early stack
+
+....
+
+0x30000000 - 0x40000000 kernel heap

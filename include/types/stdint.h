@@ -1,6 +1,10 @@
 #pragma once
 
+#ifdef __cplusplus
+#define NULL (nullptr)
+#else
 #define NULL ((void*)0)
+#endif
 
 typedef __INT8_TYPE__ int8_t;
 typedef __INT16_TYPE__ int16_t;

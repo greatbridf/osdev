@@ -9,20 +9,12 @@
 #include <kernel/hw/timer.h>
 #include <kernel/interrupt.h>
 #include <kernel/mem.h>
+#include <kernel/process.hpp>
 #include <kernel/stdio.h>
+#include <kernel/task.h>
 #include <kernel/tty.h>
 #include <kernel/vga.h>
 #include <types/bitmap.h>
-
-typedef void (*constructor)(void);
-extern constructor start_ctors;
-extern constructor end_ctors;
-void call_constructors_for_cpp(void)
-{
-    for (constructor* ctor = &start_ctors; ctor != &end_ctors; ++ctor) {
-        (*ctor)();
-    }
-}
 
 #define KERNEL_MAIN_BUF_SIZE (128)
 
@@ -54,6 +46,16 @@ static inline void halt_on_init_error(void)
     asm_cli();
     while (1)
         asm_hlt();
+}
+
+typedef void (*constructor)(void);
+extern constructor start_ctors;
+extern constructor end_ctors;
+void call_constructors_for_cpp(void)
+{
+    for (constructor* ctor = &start_ctors; ctor != &end_ctors; ++ctor) {
+        (*ctor)();
+    }
 }
 
 uint8_t e820_mem_map[1024];
@@ -114,7 +116,8 @@ static inline void show_mem_info(char* buf)
     printkf("kernel size: %x\n", kernel_size);
 }
 
-static segment_descriptor new_gdt[5];
+static segment_descriptor new_gdt[6];
+struct tss32_t tss;
 
 void load_new_gdt(void)
 {
@@ -123,14 +126,31 @@ void load_new_gdt(void)
     create_segment_descriptor(new_gdt + 2, 0, ~0, 0b1100, SD_TYPE_DATA_SYSTEM);
     create_segment_descriptor(new_gdt + 3, 0, ~0, 0b1100, SD_TYPE_CODE_USER);
     create_segment_descriptor(new_gdt + 4, 0, ~0, 0b1100, SD_TYPE_DATA_USER);
-    asm_load_gdt((5 * 8 - 1) << 16, (phys_ptr_t)new_gdt);
+    create_segment_descriptor(new_gdt + 5, (uint32_t)&tss, sizeof(tss), 0b0000, SD_TYPE_TSS);
+
+    asm_load_gdt((6 * 8 - 1) << 16, (phys_ptr_t)new_gdt);
+    asm_load_tr((6 - 1) * 8);
+
     asm_cli();
 }
 
-void kernel_main(void)
+void init_bss_section(void)
+{
+    void* bss_addr = (void*)bss_section_start_addr;
+    size_t bss_size = bss_section_end_addr - bss_section_start_addr;
+    memset(bss_addr, 0x00, bss_size);
+}
+
+static struct tty early_console;
+
+extern void init_vfs();
+
+void NORETURN kernel_main(void)
 {
     // MAKE_BREAK_POINT();
     asm_enable_sse();
+
+    init_bss_section();
 
     save_loader_data();
 
@@ -140,7 +160,6 @@ void kernel_main(void)
 
     init_serial_port(PORT_SERIAL0);
 
-    struct tty early_console;
     if (make_serial_tty(&early_console, PORT_SERIAL0) != GB_OK) {
         halt_on_init_error();
     }
@@ -152,12 +171,15 @@ void kernel_main(void)
     init_idt();
     INIT_OK();
 
-    INIT_START("memory allocation");
-    init_mem();
-    INIT_OK();
-
+    // NOTE:
+    // the initializer of c++ global objects MUST NOT contain
+    // all kinds of memory allocations
     INIT_START("C++ global objects");
     call_constructors_for_cpp();
+    INIT_OK();
+
+    INIT_START("memory allocation");
+    init_mem();
     INIT_OK();
 
     INIT_START("programmable interrupt controller and timer");
@@ -173,15 +195,8 @@ void kernel_main(void)
 
     k_malloc_buf[4096] = '\x89';
 
-    printkf("No work to do, halting...\n");
+    init_vfs();
 
-    while (1) {
-        // disable interrupt
-        asm_cli();
-
-        dispatch_event();
-
-        asm_sti();
-        asm_hlt();
-    }
+    printkf("switching execution to the scheduler...\n");
+    init_scheduler(&tss);
 }

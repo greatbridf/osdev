@@ -1,63 +1,15 @@
 OUTPUT_FORMAT(elf32-i386)
 OUTPUT_ARCH(i386:i386)
 
-MEMORY
-{
-    WHOLE : org = 0x00000000, l = 4M
-}
-
 SECTIONS
 {
-    .text.bootsect : AT(0x00)
+    /DISCARD/ :
     {
-        *(.text.bootsect)
-    } > WHOLE
-
-    .magicnumber : AT(0x1fe)
-    {
-        BYTE(0x55);
-        BYTE(0xaa);
-    } > WHOLE
-
-    .text.loader 0x7e00 : AT(0x200)
-    {
-        *(.text.loader)
-        __kernel_size_offset = .;
-        LONG(LOADADDR(.data) - LOADADDR(.text));
-        __loader_end = .;
-    } > WHOLE
-
-    .text 0x100000 : AT(LOADADDR(.text.loader) + SIZEOF(.text.loader))
-    {
-        __real_kernel_start = .;
         *(.text*)
-        *(.rodata*)
-    } > WHOLE
-
-    .data : AT(LOADADDR(.text) + ADDR(.data) - ADDR(.text))
-    {
-        asm_kernel_size = .;
-        LONG(__real_kernel_end - ADDR(.text));
-
-        start_ctors = .;
-        KEEP(*(.init_array));
-        KEEP(*(SORT_BY_INIT_PRIORITY(.init_array*)));
-        end_ctors = .;
-
         *(.data)
         *(.data*)
-    } > WHOLE
-
-    .bss :
-    {
-        *(.bss)
-        *(.bss*)
-    } > WHOLE
-
-    .kernel_end :
-    {
-        __real_kernel_end = .;
-    } > WHOLE
+        *(.note.gnu.property)
+    }
 
     /* Stabs debugging sections.  */
     .stab          0 : { *(.stab) }
@@ -92,15 +44,4 @@ SECTIONS
     .debug_funcnames 0 : { *(.debug_funcnames) }
     .debug_typenames 0 : { *(.debug_typenames) }
     .debug_varnames  0 : { *(.debug_varnames) }
-
-    .end : AT(0x0ffffff)
-    {
-        BYTE(0x00);
-    } > WHOLE
-
-    /DISCARD/ :
-    {
-        *(.fini_array*)
-        *(.eh_frame*)
-    }
 }

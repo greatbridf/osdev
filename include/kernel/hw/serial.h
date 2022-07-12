@@ -1,6 +1,10 @@
 #pragma once
 #include <asm/port_io.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #define PORT_SERIAL0 (0x3f8)
 #define PORT_SERIAL1 (0x2f8)
 
@@ -11,3 +15,9 @@ uint8_t serial_read_data(port_id_t port);
 
 int32_t is_serial_ready_for_transmition(port_id_t port);
 void serial_send_data(port_id_t port, uint8_t data);
+
+void serial_receive_data_interrupt(void);
+
+#ifdef __cplusplus
+}
+#endif

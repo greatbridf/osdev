@@ -69,13 +69,20 @@ struct constant_value {
 using true_type = constant_value<bool, true>;
 using false_type = constant_value<bool, false>;
 
+template <typename>
+struct template_true_type : public true_type {
+};
+template <typename>
+struct template_false_type : public false_type {
+};
+
 template <typename, typename>
-struct is_same : false_type
-{};
+struct is_same : false_type {
+};
 
 template <typename T>
-struct is_same<T, T>: true_type
-{};
+struct is_same<T, T> : true_type {
+};
 
 } // namespace types
 

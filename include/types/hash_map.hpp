@@ -4,6 +4,7 @@
 #include <types/cplusplus.hpp>
 #include <types/list.hpp>
 #include <types/stdint.h>
+#include <types/string.hpp>
 #include <types/types.h>
 #include <types/vector.hpp>
 
@@ -24,10 +25,55 @@ static constexpr uint32_t hash32(uint32_t val, uint32_t bits)
     return _hash32(val) >> (32 - bits);
 }
 
-struct decimal_hash {
-    static constexpr uint32_t hash(uint32_t val, uint32_t bits)
+template <typename T>
+struct linux_hasher {
+    static constexpr uint32_t hash(const T& val, uint32_t bits)
     {
         return hash32(val, bits);
+    }
+};
+
+template <typename T>
+struct linux_hasher<T*> {
+    static constexpr uint32_t hash(T* val, uint32_t bits)
+    {
+        return hash32(reinterpret_cast<uint32_t>(val), bits);
+    }
+};
+
+template <typename T>
+struct string_hasher {
+    static constexpr uint32_t hash(T, uint32_t)
+    {
+        static_assert(types::template_false_type<T>::value, "string hasher does not support this type");
+        return (uint32_t)0;
+    }
+};
+template <>
+struct string_hasher<const char*> {
+    static constexpr uint32_t hash(const char* str, uint32_t bits)
+    {
+        constexpr uint32_t seed = 131;
+        uint32_t hash = 0;
+
+        while (*str)
+            hash = hash * seed + (*str++);
+
+        return hash32(hash, bits);
+    }
+};
+template <template <typename> class Allocator>
+struct string_hasher<const types::string<Allocator>&> {
+    static inline constexpr uint32_t hash(const types::string<Allocator>& str, uint32_t bits)
+    {
+        return string_hasher<const char*>::hash(str.c_str(), bits);
+    }
+};
+template <template <typename> class Allocator>
+struct string_hasher<types::string<Allocator>&&> {
+    static inline constexpr uint32_t hash(types::string<Allocator>&& str, uint32_t bits)
+    {
+        return string_hasher<const char*>::hash(str.c_str(), bits);
     }
 };
 
@@ -171,7 +217,7 @@ public:
     explicit hash_map(void)
         : buckets(INITIAL_BUCKETS_ALLOCATED)
     {
-        for (int i = 0; i < INITIAL_BUCKETS_ALLOCATED; ++i)
+        for (size_type i = 0; i < INITIAL_BUCKETS_ALLOCATED; ++i)
             buckets.emplace_back();
     }
 

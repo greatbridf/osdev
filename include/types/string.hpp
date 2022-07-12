@@ -57,7 +57,8 @@ public:
     }
     string& operator+=(const char c)
     {
-        *this->back() = c;
+        this->pop_back();
+        this->push_back(c);
         this->push_back(0x00);
         return *this;
     }
@@ -100,14 +101,23 @@ public:
     }
     typename inner_vector_type::iterator_type back(void)
     {
+        // TODO: assert
+        if (this->empty())
+            return typename inner_vector_type::iterator_type((void*)0xffffffff);
         return --inner_vector_type::back();
     }
     typename inner_vector_type::const_iterator_type back(void) const
     {
+        // TODO: assert
+        if (this->empty())
+            return typename inner_vector_type::iterator_type((void*)0xffffffff);
         return --inner_vector_type::back();
     }
     typename inner_vector_type::const_iterator_type cback(void) const
     {
+        // TODO: assert
+        if (this->empty())
+            return typename inner_vector_type::iterator_type((void*)0xffffffff);
         return --inner_vector_type::cback();
     }
 };

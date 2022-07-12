@@ -113,7 +113,7 @@ int k_map(
 int mmap(
     void* hint,
     size_t len,
-    struct inode* file,
+    fs::inode* file,
     size_t offset,
     int write,
     int priv);

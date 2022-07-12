@@ -150,6 +150,8 @@ public:
         arr.m_arr = nullptr;
         arr.m_capacity = 0;
         arr.m_size = 0;
+
+        return *this;
     }
 
     ~vector() noexcept

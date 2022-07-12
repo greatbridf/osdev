@@ -13,7 +13,6 @@
 
 using types::allocator_traits;
 using types::kernel_allocator;
-using types::list;
 using types::string;
 using types::vector;
 
@@ -22,6 +21,37 @@ struct tmpfs_file_entry {
     char filename[128];
 };
 
+fs::vfs::vfs(void)
+    : _root_inode(nullptr)
+    , _last_inode_no(0)
+{
+}
+fs::ino_t fs::vfs::_assign_inode_id(void)
+{
+    return ++_last_inode_no;
+}
+fs::inode* fs::vfs::cache_inode(inode_flags flags, uint32_t perm, void* impl_data)
+{
+    auto iter = _inodes.emplace_back(inode { flags, perm, impl_data, _assign_inode_id(), this });
+    _idx_inodes.insert(iter->ino, iter.ptr());
+    return iter.ptr();
+}
+fs::inode* fs::vfs::get_inode(ino_t ino)
+{
+    auto iter = _idx_inodes.find(ino);
+    if (iter != iter.npos)
+        return iter->value;
+    else
+        return nullptr;
+}
+void fs::vfs::register_root_node(inode* root)
+{
+    _root_inode = root;
+}
+fs::inode* fs::vfs::root(void) const
+{
+    return _root_inode;
+}
 size_t fs::vfs::inode_read(inode*, char*, size_t, size_t, size_t)
 {
     syscall(0x03);
@@ -37,9 +67,17 @@ int fs::vfs::inode_readdir(inode*, dirent*, size_t)
     syscall(0x03);
     return GB_FAILED;
 }
-fs::inode* fs::vfs::inode_findinode(inode*, const char*)
+fs::inode* fs::vfs::inode_findinode(inode* dir, const char* filename)
 {
-    syscall(0x03);
+    fs::dirent ent {};
+    size_t i = 0;
+    // TODO: if the inode is a mount point, the ino MIGHT BE THE SAME
+    while (inode_readdir(dir, &ent, i) == GB_OK) {
+        if (strcmp(ent.name, filename) == 0) {
+            return get_inode(ent.ino);
+        }
+        ++i;
+    }
     return nullptr;
 }
 int fs::vfs::inode_mkfile(inode*, const char*)
@@ -69,15 +107,6 @@ int fs::vfs::inode_stat(inode*, stat*, const char*)
 }
 
 class tmpfs : public virtual fs::vfs {
-private:
-    using inode_list_type = list<fs::inode, kernel_allocator>;
-
-private:
-    size_t m_limit;
-    // TODO: hashtable etc.
-    inode_list_type m_inodes;
-    fs::ino_t m_last_inode_no;
-
 protected:
     inline vector<tmpfs_file_entry>* mk_fe_vector(void)
     {
@@ -87,17 +116,6 @@ protected:
     inline vector<char>* mk_data_vector(void)
     {
         return allocator_traits<kernel_allocator<vector<char>>>::allocate_and_construct();
-    }
-
-    inline fs::inode mk_inode(fs::inode_flags flags, void* data)
-    {
-        fs::inode i {};
-        i.flags.v = flags.v;
-        i.impl = data;
-        i.ino = m_last_inode_no++;
-        i.perm = 0777;
-        i.fs = this;
-        return i;
     }
 
     void mklink(fs::inode* dir, fs::inode* inode, const char* filename)
@@ -112,38 +130,33 @@ protected:
     }
 
 public:
-    explicit tmpfs(size_t limit)
-        : m_limit(limit)
-        , m_last_inode_no(0)
+    explicit tmpfs(void)
     {
-        auto in = mk_inode({ .v = INODE_DIR | INODE_MNT }, mk_fe_vector());
+        auto& in = *cache_inode({ INODE_DIR | INODE_MNT }, 0777, mk_fe_vector());
 
         mklink(&in, &in, ".");
         mklink(&in, &in, "..");
 
-        m_inodes.push_back(in);
+        register_root_node(&in);
     }
 
     virtual int inode_mkfile(fs::inode* dir, const char* filename) override
     {
-        auto file = mk_inode({ .v = INODE_FILE }, mk_data_vector());
-        m_inodes.push_back(file);
+        auto& file = *cache_inode({ .v = INODE_FILE }, 0777, mk_data_vector());
         mklink(dir, &file, filename);
         return GB_OK;
     }
 
     virtual int inode_mknode(fs::inode* dir, const char* filename, fs::node_t sn) override
     {
-        auto node = mk_inode({ .v = INODE_NODE }, (void*)sn.v);
-        m_inodes.push_back(node);
+        auto& node = *cache_inode({ .v = INODE_NODE }, 0777, (void*)sn.v);
         mklink(dir, &node, filename);
         return GB_OK;
     }
 
     virtual int inode_mkdir(fs::inode* dir, const char* dirname) override
     {
-        auto new_dir = mk_inode({ .v = INODE_DIR }, mk_fe_vector());
-        m_inodes.push_back(new_dir);
+        auto& new_dir = *cache_inode({ .v = INODE_DIR }, 0777, mk_fe_vector());
         mklink(&new_dir, &new_dir, ".");
 
         mklink(dir, &new_dir, dirname);
@@ -206,23 +219,6 @@ public:
         return GB_OK;
     }
 
-    virtual fs::inode* inode_findinode(fs::inode* dir, const char* filename) override
-    {
-        fs::dirent ent {};
-        size_t i = 0;
-        while (inode_readdir(dir, &ent, i) == GB_OK) {
-            if (strcmp(ent.name, filename) == 0) {
-                // TODO: if the inode is a mount point, the ino MIGHT BE THE SAME
-                // optimize: use hash table to build an index
-                for (auto iter = m_inodes.begin(); iter != m_inodes.end(); ++iter)
-                    if (iter->ino == ent.ino)
-                        return iter.ptr();
-            }
-            ++i;
-        }
-        return nullptr;
-    }
-
     virtual int inode_stat(fs::inode* dir, fs::stat* stat, const char* filename) override
     {
         // for later use
@@ -253,11 +249,6 @@ public:
         }
 
         return GB_OK;
-    }
-
-    fs::inode* root_inode(void)
-    {
-        return m_inodes.begin().ptr();
     }
 };
 
@@ -425,8 +416,8 @@ void init_vfs(void)
     // null
     fs::register_special_block(0, 0, b_null_read, b_null_write, 0, 0);
 
-    rootfs = allocator_traits<kernel_allocator<tmpfs>>::allocate_and_construct(4096 * 1024);
-    fs::fs_root = rootfs->root_inode();
+    rootfs = allocator_traits<kernel_allocator<tmpfs>>::allocate_and_construct();
+    fs::fs_root = rootfs->root();
 
     fs::vfs_mkdir(fs::fs_root, "dev");
     fs::vfs_mkdir(fs::fs_root, "root");

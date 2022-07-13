@@ -52,12 +52,12 @@ public:
         {
         }
 
-        bool operator==(const iterator& iter) noexcept
+        bool operator==(const iterator& iter) const noexcept
         {
             return this->p == iter.p;
         }
 
-        bool operator!=(const iterator& iter) noexcept
+        bool operator!=(const iterator& iter) const noexcept
         {
             return !(*this == iter);
         }

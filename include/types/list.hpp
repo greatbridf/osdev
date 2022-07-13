@@ -89,12 +89,12 @@ public:
         {
         }
 
-        bool operator==(const iterator& iter) noexcept
+        bool operator==(const iterator& iter) const noexcept
         {
             return this->_node() == iter._node();
         }
 
-        bool operator!=(const iterator& iter) noexcept
+        bool operator!=(const iterator& iter) const noexcept
         {
             return !(*this == iter);
         }

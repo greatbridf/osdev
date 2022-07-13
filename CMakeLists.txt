@@ -44,7 +44,7 @@ elseif(CMAKE_BUILD_TYPE STREQUAL "Release")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O")
 endif()
 
-if (FDISK_BIN STREQUAL "")
+if (NOT DEFINED FDISK_BIN)
     set(FDISK_BIN fdisk)
 endif()
 

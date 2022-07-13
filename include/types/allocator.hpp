@@ -1,6 +1,7 @@
 #pragma once
 #include <kernel/mem.h>
 #include <types/cplusplus.hpp>
+#include <types/stdint.h>
 #include <types/types.h>
 
 inline void* operator new(size_t, void* ptr)
@@ -10,7 +11,19 @@ inline void* operator new(size_t, void* ptr)
 
 namespace types {
 
-template <typename Allocator>
+template <typename T>
+concept Allocator = requires(size_t size, typename T::value_type* ptr)
+{
+    typename T::value_type;
+    {
+        T::allocate_memory(size)
+        } -> same_as<typename T::value_type*>;
+    {
+        T::deallocate_memory(ptr)
+        } -> same_as<void>;
+};
+
+template <Allocator T>
 class allocator_traits;
 
 template <typename T>
@@ -57,16 +70,16 @@ T* kernel_ident_allocator_new(Args&&... args)
     return allocator_traits<kernel_ident_allocator<T>>::allocate_and_construct(forward<Args>(args)...);
 }
 
-template <typename Allocator>
+template <Allocator _allocator>
 class allocator_traits {
 public:
-    using value_type = typename Allocator::value_type;
+    using value_type = typename _allocator::value_type;
 
     static value_type* allocate(size_t count)
     {
         if (count == 0)
             return nullptr;
-        return Allocator::allocate_memory(sizeof(value_type) * count);
+        return _allocator::allocate_memory(sizeof(value_type) * count);
     }
 
     template <typename... Args>
@@ -95,7 +108,7 @@ public:
     {
         if (!ptr)
             return;
-        Allocator::deallocate_memory(ptr);
+        _allocator::deallocate_memory(ptr);
     }
 
     static void deconstruct_and_deallocate(value_type* ptr)

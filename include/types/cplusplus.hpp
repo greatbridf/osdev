@@ -1,6 +1,19 @@
 #pragma once
 
+#include <types/stdint.h>
+
 #ifdef __cplusplus
+
+namespace types {
+
+template <typename T, T _value>
+struct constant_value {
+    static constexpr T value = _value;
+};
+using true_type = constant_value<bool, true>;
+using false_type = constant_value<bool, false>;
+
+};
 
 namespace types::traits::inner {
 
@@ -66,6 +79,14 @@ struct remove_cv<const volatile T> {
 };
 
 template <typename T>
+struct is_pointer : false_type {
+};
+
+template <typename T>
+struct is_pointer<T*> : true_type {
+};
+
+template <typename T>
 struct decay {
 private:
     using U = remove_reference<T>;
@@ -88,13 +109,6 @@ T&& forward(typename traits::remove_reference<T>::type& val)
     return static_cast<T&&>(val);
 }
 
-template <typename T, T _value>
-struct constant_value {
-    static constexpr T value = _value;
-};
-using true_type = constant_value<bool, true>;
-using false_type = constant_value<bool, false>;
-
 template <typename>
 struct template_true_type : public true_type {
 };
@@ -109,6 +123,26 @@ struct is_same : false_type {
 template <typename T>
 struct is_same<T, T> : true_type {
 };
+
+template <typename T>
+struct add_rvalue_reference {
+    using type = T&&;
+};
+template <>
+struct add_rvalue_reference<void> {
+    using type = void;
+};
+
+template <typename Src, typename Dst>
+concept convertible_to = (traits::is_pointer<Src>::value && is_same<Dst, uint32_t>::value)
+    || (traits::is_pointer<Dst>::value && is_same<Src, uint32_t>::value)
+    || requires(Src _src)
+{
+    { static_cast<Dst>(_src) };
+};
+
+template <typename A, typename B>
+concept same_as = is_same<A, B>::value;
 
 } // namespace types
 

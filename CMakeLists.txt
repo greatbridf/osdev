@@ -44,6 +44,10 @@ elseif(CMAKE_BUILD_TYPE STREQUAL "Release")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O")
 endif()
 
+if (FDISK_BIN STREQUAL "")
+    set(FDISK_BIN fdisk)
+endif()
+
 set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
                         src/kernel_main.c
                         src/kernel/errno.c
@@ -134,7 +138,7 @@ add_custom_target(boot.img
     COMMAND dd if=mbr.bin of=boot.img
     COMMAND cat mbr_hole.bin >> boot.img
     COMMAND dd if=/dev/zero of=boot.img bs=`expr 512 \\* 1024 \\* 1024` count=0 seek=1
-    COMMAND sh -c \"echo n\; echo\; echo\; echo\; echo\; echo a\; echo w\" | fdisk boot.img
+    COMMAND sh -c \"echo n\; echo\; echo\; echo\; echo\; echo a\; echo w\" | ${FDISK_BIN} boot.img
     COMMAND mkfs.fat --offset=2048 -v -n SYSTEM boot.img
     COMMAND mcopy -i boot.img@@1M ${CMAKE_SOURCE_DIR}/user-space-program/build/hello-world.out ::hello.out
     COMMAND mcopy -i boot.img@@1M ${CMAKE_SOURCE_DIR}/user-space-program/build/interrupt-test.out ::int.out

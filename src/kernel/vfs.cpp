@@ -466,6 +466,7 @@ void init_vfs(void)
 
     vfs_mkdir(fs_root, "dev");
     vfs_mkdir(fs_root, "root");
+    vfs_mkdir(fs_root, "mnt");
     vfs_mkfile(fs_root, "init");
 
     auto* init = vfs_open("/init");

@@ -1,7 +1,9 @@
 #include <asm/port_io.h>
-#include <kernel/syscall.hpp>
+#include <kernel/interrupt.h>
 #include <kernel/process.hpp>
+#include <kernel/syscall.hpp>
 #include <kernel/tty.h>
+#include <types/elf.hpp>
 
 syscall_handler syscall_handlers[8];
 
@@ -56,14 +58,33 @@ void _syscall_crash(interrupt_stack*)
     asm_hlt();
 }
 
+// syscall_exec(const char* exec, const char** argv)
+// @param exec: the path of program to execute
+// @param argv: arguments end with nullptr
+void _syscall_exec(interrupt_stack* data)
+{
+    const char* exec = reinterpret_cast<const char*>(data->s_regs.edi);
+
+    // TODO: load argv
+    const char** argv = reinterpret_cast<const char**>(data->s_regs.esi);
+    (void)argv;
+
+    types::elf::elf32_load(exec, data, current_process->attr.system);
+}
+
+void _syscall_exit(interrupt_stack* data)
+{
+    _syscall_crash(data);
+}
+
 void init_syscall(void)
 {
     syscall_handlers[0] = _syscall_fork;
     syscall_handlers[1] = _syscall_write;
     syscall_handlers[2] = _syscall_sleep;
     syscall_handlers[3] = _syscall_crash;
-    syscall_handlers[4] = _syscall_not_impl;
-    syscall_handlers[5] = _syscall_not_impl;
+    syscall_handlers[4] = _syscall_exec;
+    syscall_handlers[5] = _syscall_exit;
     syscall_handlers[6] = _syscall_not_impl;
     syscall_handlers[7] = _syscall_not_impl;
 }

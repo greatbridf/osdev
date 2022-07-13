@@ -1,17 +1,22 @@
 #include <asm/port_io.h>
 #include <asm/sys.h>
+#include <fs/fat.hpp>
+#include <kernel/hw/ata.hpp>
+#include <kernel/interrupt.h>
+#include <kernel/mem.h>
 #include <kernel/mm.hpp>
 #include <kernel/process.hpp>
 #include <kernel/stdio.h>
+#include <kernel/syscall.hpp>
 #include <kernel/tty.h>
-#include <kernel/hw/ata.hpp>
+#include <kernel/vfs.hpp>
 #include <kernel_main.h>
-#include <types/types.h>
+#include <types/allocator.hpp>
+#include <types/elf.hpp>
 #include <types/lock.h>
-#include <hello-world.res>
-#include <interrupt-test.res>
+#include <types/status.h>
+#include <types/types.h>
 
-extern "C" void NORETURN go_user_space(void* eip);
 extern "C" void NORETURN to_kernel(interrupt_stack* ret_stack);
 extern "C" void NORETURN to_user(interrupt_stack* ret_stack);
 
@@ -19,8 +24,8 @@ static bool is_scheduler_ready;
 static types::list<process>* processes;
 static types::list<thread*>* ready_thds;
 static pid_t max_pid = 1;
-static void (* volatile kthreadd_new_thd_func)(void*);
-static void  * volatile kthreadd_new_thd_data;
+static void (*volatile kthreadd_new_thd_func)(void*);
+static void* volatile kthreadd_new_thd_data;
 static uint32_t volatile kthreadd_lock = 0;
 
 thread* current_thread;
@@ -68,11 +73,11 @@ process::process(const process& val, const thread& main_thd)
             iter_dst->pd = pd;
             for (auto pg = iter_src->pgs->begin(); pg != iter_src->pgs->end(); ++pg)
                 k_map(iter_dst.ptr(),
-                        &*pg,
-                        iter_src->attr.read,
-                        iter_src->attr.write,
-                        iter_src->attr.system,
-                        1);
+                    &*pg,
+                    iter_src->attr.read,
+                    iter_src->attr.write,
+                    iter_src->attr.system,
+                    1);
         }
     } else {
         // TODO: allocate low mem
@@ -90,10 +95,10 @@ process::process(const process& val, const thread& main_thd)
     }
 }
 
-process::process(void* start_eip, uint8_t* image, size_t image_size, bool system)
+process::process(void* start_eip)
     : mms(*kernel_mms)
     , thds {}
-    , attr { .system = system }
+    , attr { .system = 1 }
     , pid { max_pid++ }
 {
     // TODO: allocate low mem
@@ -104,12 +109,11 @@ process::process(void* start_eip, uint8_t* image, size_t image_size, bool system
     auto thd = thds.emplace_back(thread {
         .eip = start_eip,
         .owner = this,
-        // TODO: change this
         .regs {
             .edi {},
             .esi {},
-            .ebp = system ? (uint32_t)k_esp : 0x40100000U,
-            .esp = system ? (uint32_t)k_esp : 0x40100000U,
+            .ebp = reinterpret_cast<uint32_t>(k_esp),
+            .esp = reinterpret_cast<uint32_t>(k_esp),
             .ebx {},
             .edx {},
             .ecx {},
@@ -117,46 +121,49 @@ process::process(void* start_eip, uint8_t* image, size_t image_size, bool system
         },
         .eflags {},
         .attr {
-            .system = system,
+            .system = 1,
             .ready = 1,
             .wait = 0,
         },
     });
     ready_thds->push_back(thd.ptr());
+}
 
-    if (!system) {
-        page_directory_entry* pd = alloc_pd();
-        memcpy(pd, mms_get_pd(kernel_mms), PAGE_SIZE);
-        for (auto& item : mms)
-            item.pd = pd;
+void NORETURN _kernel_init(void)
+{
+    // TODO: parse kernel parameters
+    auto* _new_fs = fs::register_fs(types::kernel_allocator_new<fs::fat::fat32>(fs::vfs_open("/dev/hda1")->ind));
+    int ret = fs::fs_root->ind->fs->mount(fs::vfs_open("/mnt"), _new_fs);
+    if (ret != GB_OK)
+        syscall(0x03);
 
-        auto user_mm = mms.emplace_back(0x40000000U, pd, 1, system);
+    page_directory_entry* new_pd = alloc_pd();
+    memcpy(new_pd, mms_get_pd(kernel_mms), PAGE_SIZE);
 
-        // TODO: change this
-        for (int i = 0; i < 1 * 1024 * 1024 / PAGE_SIZE; ++i)
-            k_map(user_mm.ptr(), &empty_page, 1, 1, 0, 1);
+    asm_cli();
 
-        auto* old_pd = reinterpret_cast<page_directory_entry*>(p_ptr_to_v_ptr(current_pd()));
-        auto* old_proc = current_process;
-        auto* old_thd = current_thread;
+    current_process->mms.begin()->pd = new_pd;
 
-        current_process = this;
-        current_thread = thd.ptr();
-        asm_switch_pd(pd);
+    asm_sti();
 
-        // TODO: change this
-        memcpy((void*)0x40000000U, image, image_size);
+    interrupt_stack intrpt_stack {};
+    intrpt_stack.eflags = 0x200; // STI
+    types::elf::elf32_load("/mnt/INIT.ELF", &intrpt_stack, 0);
+    // map stack area
+    ret = mmap((void*)types::elf::ELF_STACK_TOP, types::elf::ELF_STACK_SIZE, fs::vfs_open("/dev/null")->ind, 0, 1, 0);
+    if (ret != GB_OK)
+        syscall(0x03);
 
-        current_process = old_proc;
-        current_thread = old_thd;
-        asm_switch_pd(old_pd);
-    }
+    asm_cli();
+    current_process->attr.system = 0;
+    current_thread->attr.system = 0;
+    to_user(&intrpt_stack);
 }
 
 void kernel_threadd_main(void)
 {
     tty_print(console, "kernel thread daemon started\n");
-    k_new_thread(hw::init_ata, nullptr);
+    k_new_thread(hw::init_ata, (void*)_kernel_init);
     for (;;) {
         if (kthreadd_new_thd_func) {
             spin_lock(&kthreadd_lock);
@@ -170,12 +177,16 @@ void kernel_threadd_main(void)
             spin_unlock(&kthreadd_lock);
 
             // syscall_fork
-            asm volatile("movl $0x00, %%eax\nint $0x80\nmovl %%eax, %0": "=a" (return_value): :);
+            asm volatile("movl $0x00, %%eax\nint $0x80\nmovl %%eax, %0"
+                         : "=a"(return_value)
+                         :
+                         :);
 
             if (return_value != 0) {
                 // child
                 func(data);
-                for (;;) asm_hlt();
+                for (;;)
+                    syscall(0x03);
                 // TODO: syscall_exit()
             }
             spin_unlock(&kthreadd_lock);
@@ -184,7 +195,7 @@ void kernel_threadd_main(void)
     }
 }
 
-void k_new_thread(void(*func)(void*), void* data)
+void k_new_thread(void (*func)(void*), void* data)
 {
     spin_lock(&kthreadd_lock);
     kthreadd_new_thd_func = func;
@@ -197,24 +208,26 @@ void NORETURN init_scheduler()
     processes = types::kernel_allocator_new<types::list<process>>();
     ready_thds = types::kernel_allocator_new<types::list<thread*>>();
 
-    void* user_space_start = reinterpret_cast<void*>(0x40000000U);
+    auto iter = processes->emplace_back((void*)kernel_threadd_main);
 
-    processes->emplace_back(user_space_start, hello_world_bin, hello_world_bin_len, false);
-    processes->emplace_back(user_space_start, interrupt_test_bin, interrupt_test_bin_len, false);
-    processes->emplace_back((void*)kernel_threadd_main, nullptr, 0, true);
-
-    // we need interrupts enabled for cow mapping
+    // we need interrupts enabled for cow mapping so now we disable it
+    // in case timer interrupt mess things up
     asm_cli();
 
-    auto init_process = processes->begin();
-    current_process = init_process.ptr();
-    current_thread = init_process->thds.begin().ptr();
+    current_process = iter.ptr();
+    current_thread = iter->thds.begin().ptr();
+
     tss.ss0 = KERNEL_DATA_SEGMENT;
-    tss.esp0 = (uint32_t)init_process->k_esp;
+    tss.esp0 = (uint32_t)iter->k_esp;
+
     asm_switch_pd(mms_get_pd(&current_process->mms));
 
     is_scheduler_ready = true;
-    go_user_space(user_space_start);
+
+    interrupt_stack intrpt_stack {};
+    process_context_load(&intrpt_stack, current_process);
+    thread_context_load(&intrpt_stack, current_thread);
+    to_kernel(&intrpt_stack);
 }
 
 void thread_context_save(interrupt_stack* int_stack, thread* thd)

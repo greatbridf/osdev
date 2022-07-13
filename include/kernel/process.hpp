@@ -44,7 +44,9 @@ public:
     process(process&& val);
     process(const process&) = delete;
     process(const process& proc, const thread& main_thread);
-    process(void* start_eip, uint8_t* image, size_t image_size, bool system);
+
+    // only used for system initialization
+    process(void* start_eip);
 };
 
 // in process.cpp
@@ -62,7 +64,7 @@ void process_context_load(interrupt_stack*, process* proc);
 void add_to_process_list(process&& proc);
 void add_to_ready_list(thread* thd);
 
-void k_new_thread(void(*func)(void*), void* data);
+void k_new_thread(void (*func)(void*), void* data);
 
 #else
 

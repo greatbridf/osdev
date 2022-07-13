@@ -196,9 +196,10 @@ static inline void mbr_part_probe(fs::inode* drive, uint16_t major, uint16_t min
     }
 }
 
-void hw::init_ata(void* data)
+// data: void (*func_to_call_next)(void)
+void NORETURN hw::init_ata(void* data)
 {
-    if (data != nullptr)
+    if (!data)
         syscall(0x03);
 
     ata_pri = types::kernel_allocator_new<ata>(ATA_PRIMARY_BUS_BASE);
@@ -229,4 +230,9 @@ void hw::init_ata(void* data)
 
     auto* hda = fs::vfs_open("/dev/hda");
     mbr_part_probe(hda->ind, 2, 1);
+
+    // noreturn
+    ((void (*)(void))data)();
+    for (;;)
+        syscall(0x03);
 }

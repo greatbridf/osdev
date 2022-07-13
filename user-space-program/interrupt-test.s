@@ -1,8 +1,9 @@
 .code32
-.section .text.user-space
 
-.globl user_interrupt_test
-user_interrupt_test:
+.text
+
+.globl main
+main:
 # fork 1 -> 2
 	xorl %eax, %eax
 	int $0x80
@@ -22,5 +23,7 @@ user_interrupt_test:
 # noreturn
 	jmp .
 
+.data
+
 __user_interrupt_test_string:
-	.ascii "syscall 0x01 write: hello from user space\n\0"
+	.asciz "syscall 0x01 write: hello from user space\n"

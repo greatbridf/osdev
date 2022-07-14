@@ -1,5 +1,6 @@
 #pragma once
 
+#include "types/size.h"
 #include <kernel/mem.h>
 #include <kernel/vfs.hpp>
 #include <types/allocator.hpp>
@@ -9,37 +10,39 @@
 
 constexpr size_t THREAD_KERNEL_STACK_SIZE = 2 * PAGE_SIZE;
 
-struct page_attr {
-    uint32_t cow : 1;
-};
-
 struct page {
     page_t phys_page_id;
-    page_table_entry* pte;
+    pte_t* pte;
     size_t* ref_count;
-    struct page_attr attr;
+    union {
+        uint32_t v;
+        struct {
+            uint32_t cow : 1;
+        } in;
+    } attr;
 };
 
 using page_arr = types::vector<page, types::kernel_ident_allocator>;
 
-struct mm_attr {
-    uint32_t read : 1;
-    uint32_t write : 1;
-    uint32_t system : 1;
-};
-
 class mm {
 public:
-    linr_ptr_t start;
-    struct mm_attr attr;
-    page_directory_entry* pd;
+    void* start;
+    union {
+        uint32_t v;
+        struct {
+            uint32_t read : 1;
+            uint32_t write : 1;
+            uint32_t system : 1;
+        } in;
+    } attr;
+    pd_t pd;
     page_arr* pgs;
     fs::inode* mapped_file;
     size_t file_offset;
 
 public:
     mm(const mm& val);
-    mm(linr_ptr_t start, page_directory_entry* pd, bool write, bool system);
+    mm(void* start, pd_t pd, bool write, bool system);
 };
 
 using mm_list = types::list<mm, types::kernel_ident_allocator>;
@@ -52,52 +55,112 @@ extern page empty_page;
 void* p_ptr_to_v_ptr(phys_ptr_t p_ptr);
 
 // translate linear address to physical address
-phys_ptr_t l_ptr_to_p_ptr(const mm_list* mms, linr_ptr_t v_ptr);
+phys_ptr_t l_ptr_to_p_ptr(const mm_list* mms, void* v_ptr);
 
 // translate virtual(mapped) address to physical address
 phys_ptr_t v_ptr_to_p_ptr(void* v_ptr);
 
 // @return the pointer to the mm_area containing l_ptr
 //         nullptr if not
-mm* find_mm_area(mm_list* mms, linr_ptr_t l_ptr);
+mm* find_mm_area(mm_list* mms, void* l_ptr);
 
 // find the corresponding page the l_ptr pointing to
 // @return the pointer to the struct if found, NULL if not found
-struct page* find_page_by_l_ptr(const mm_list* mms, linr_ptr_t l_ptr);
+struct page* find_page_by_l_ptr(const mm_list* mms, void* l_ptr);
 
-static inline page_t phys_addr_to_page(phys_ptr_t ptr)
+inline size_t vptrdiff(void* p1, void* p2)
+{
+    return (uint8_t*)p1 - (uint8_t*)p2;
+}
+
+inline page_t phys_addr_to_page(phys_ptr_t ptr)
 {
     return ptr >> 12;
 }
 
-static inline pd_i_t page_to_pd_i(page_t p)
+inline pd_i_t page_to_pd_i(page_t p)
 {
     return p >> 10;
 }
 
-static inline pt_i_t page_to_pt_i(page_t p)
+inline constexpr pt_i_t page_to_pt_i(page_t p)
 {
     return p & (1024 - 1);
 }
 
-static inline phys_ptr_t page_to_phys_addr(page_t p)
+inline phys_ptr_t page_to_phys_addr(page_t p)
 {
     return p << 12;
 }
 
-static inline pd_i_t linr_addr_to_pd_i(linr_ptr_t ptr)
+inline pd_i_t linr_addr_to_pd_i(void* ptr)
 {
-    return page_to_pd_i(phys_addr_to_page(ptr));
+    return page_to_pd_i(phys_addr_to_page((phys_ptr_t)ptr));
 }
 
-static inline pd_i_t linr_addr_to_pt_i(linr_ptr_t ptr)
+inline pd_i_t linr_addr_to_pt_i(void* ptr)
 {
-    return page_to_pt_i(phys_addr_to_page(ptr));
+    return page_to_pt_i(phys_addr_to_page((phys_ptr_t)ptr));
 }
 
-static inline page_directory_entry* mms_get_pd(const mm_list* mms)
+inline pd_t mms_get_pd(const mm_list* mms)
 {
     return mms->begin()->pd;
+}
+
+inline void* to_vp(page_t pg)
+{
+    return p_ptr_to_v_ptr(page_to_phys_addr(pg));
+}
+
+inline pd_t to_pd(page_t pg)
+{
+    return reinterpret_cast<pd_t>(to_vp(pg));
+}
+
+inline pt_t to_pt(page_t pg)
+{
+    return reinterpret_cast<pt_t>(to_vp(pg));
+}
+
+inline pt_t to_pt(pde_t* pde)
+{
+    return to_pt(pde->in.pt_page);
+}
+
+inline pde_t* to_pde(pd_t pd, void* addr)
+{
+    return *pd + linr_addr_to_pd_i(addr);
+}
+
+inline pte_t* to_pte(pt_t pt, void* addr)
+{
+    return *pt + linr_addr_to_pt_i(addr);
+}
+
+inline pte_t* to_pte(pt_t pt, page_t pg)
+{
+    return *pt + page_to_pt_i(pg);
+}
+
+inline pte_t* to_pte(pde_t* pde, page_t pg)
+{
+    return to_pte(to_pt(pde), pg);
+}
+
+inline pte_t* to_pte(pde_t* pde, void* addr)
+{
+    return to_pte(to_pt(pde), addr);
+}
+
+inline pte_t* to_pte(pd_t pd, void* addr)
+{
+    return to_pte(to_pde(pd, addr), addr);
+}
+
+inline void* mmend(const mm* mm_area)
+{
+    return (char*)mm_area->start + mm_area->pgs->size() * PAGE_SIZE;
 }
 
 // map the page to the end of the mm_area in pd
@@ -129,5 +192,5 @@ page_t alloc_n_raw_pages(size_t n);
 // allocate a struct page together with the raw page
 struct page allocate_page(void);
 
-page_directory_entry* alloc_pd(void);
-page_table_entry* alloc_pt(void);
+pd_t alloc_pd(void);
+pt_t alloc_pt(void);

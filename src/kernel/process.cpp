@@ -63,20 +63,20 @@ process::process(const process& val, const thread& main_thd)
         memset((char*)k_esp, 0x00, THREAD_KERNEL_STACK_SIZE);
         k_esp = (char*)k_esp + THREAD_KERNEL_STACK_SIZE;
 
-        page_directory_entry* pd = alloc_pd();
+        pd_t pd = alloc_pd();
         memcpy(pd, mms_get_pd(kernel_mms), PAGE_SIZE);
 
         mms.begin()->pd = pd;
         // skip kernel heap
         for (auto iter_src = ++val.mms.cbegin(); iter_src != val.mms.cend(); ++iter_src) {
-            auto iter_dst = mms.emplace_back(iter_src->start, pd, iter_src->attr.write, iter_src->attr.system);
+            auto iter_dst = mms.emplace_back(iter_src->start, pd, iter_src->attr.in.write, iter_src->attr.in.system);
             iter_dst->pd = pd;
             for (auto pg = iter_src->pgs->begin(); pg != iter_src->pgs->end(); ++pg)
                 k_map(iter_dst.ptr(),
                     &*pg,
-                    iter_src->attr.read,
-                    iter_src->attr.write,
-                    iter_src->attr.system,
+                    iter_src->attr.in.read,
+                    iter_src->attr.in.write,
+                    iter_src->attr.in.system,
                     1);
         }
     } else {
@@ -137,7 +137,7 @@ void NORETURN _kernel_init(void)
     if (ret != GB_OK)
         syscall(0x03);
 
-    page_directory_entry* new_pd = alloc_pd();
+    pd_t new_pd = alloc_pd();
     memcpy(new_pd, mms_get_pd(kernel_mms), PAGE_SIZE);
 
     asm_cli();

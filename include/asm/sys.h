@@ -7,8 +7,8 @@
 extern "C" {
 #endif
 
-void asm_switch_pd(page_directory_entry* pd_addr);
-void asm_enable_paging(page_directory_entry* pd_addr);
+void asm_switch_pd(pd_t pd_addr);
+void asm_enable_paging(pd_t pd_addr);
 
 phys_ptr_t current_pd(void);
 

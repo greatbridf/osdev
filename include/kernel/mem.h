@@ -40,23 +40,22 @@ struct e820_mem_map_entry_24 {
  * ps  : use 4MiB pages (ignored)
  * addr: page table address
  */
-struct page_directory_entry_in {
-    uint32_t p : 1;
-    uint32_t rw : 1;
-    uint32_t us : 1;
-    uint32_t pwt : 1;
-    uint32_t pcd : 1;
-    uint32_t a : 1;
-    uint32_t d : 1;
-    uint32_t ps : 1;
-    uint32_t ignored : 4;
-    page_t pt_page : 20;
-};
-
-typedef union page_directory_entry {
+typedef union pde_t {
     uint32_t v;
-    struct page_directory_entry_in in;
-} page_directory_entry;
+    struct {
+        uint32_t p : 1;
+        uint32_t rw : 1;
+        uint32_t us : 1;
+        uint32_t pwt : 1;
+        uint32_t pcd : 1;
+        uint32_t a : 1;
+        uint32_t d : 1;
+        uint32_t ps : 1;
+        uint32_t ignored : 4;
+        page_t pt_page : 20;
+    } in;
+} pde_t;
+typedef pde_t (*pd_t)[1024];
 
 /*
  * page table entry
@@ -72,24 +71,23 @@ typedef union page_directory_entry {
  * g   : used in cr4 mode (ignored)
  * addr: physical memory address
  */
-struct page_table_entry_in {
-    uint32_t p : 1;
-    uint32_t rw : 1;
-    uint32_t us : 1;
-    uint32_t pwt : 1;
-    uint32_t pcd : 1;
-    uint32_t a : 1;
-    uint32_t d : 1;
-    uint32_t pat : 1;
-    uint32_t g : 1;
-    uint32_t ignored : 3;
-    page_t page : 20;
-};
-
-typedef union page_table_entry {
+typedef union pte_t {
     uint32_t v;
-    struct page_table_entry_in in;
-} page_table_entry;
+    struct {
+        uint32_t p : 1;
+        uint32_t rw : 1;
+        uint32_t us : 1;
+        uint32_t pwt : 1;
+        uint32_t pcd : 1;
+        uint32_t a : 1;
+        uint32_t d : 1;
+        uint32_t pat : 1;
+        uint32_t g : 1;
+        uint32_t ignored : 3;
+        page_t page : 20;
+    } in;
+} pte_t;
+typedef pte_t (*pt_t)[1024];
 
 // in kernel_main.c
 extern uint8_t e820_mem_map[1024];
@@ -109,7 +107,7 @@ void* ki_malloc(size_t size);
 
 void ki_free(void* ptr);
 
-#define KERNEL_PAGE_DIRECTORY_ADDR ((page_directory_entry*)0x00000000)
+#define KERNEL_PAGE_DIRECTORY_ADDR ((pd_t)0x00000000)
 
 void init_mem(void);
 

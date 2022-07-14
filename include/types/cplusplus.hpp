@@ -141,6 +141,9 @@ concept convertible_to = (traits::is_pointer<Src>::value && is_same<Dst, uint32_
     { static_cast<Dst>(_src) };
 };
 
+template <typename T>
+concept PointerType = traits::is_pointer<T>::value;
+
 template <typename A, typename B>
 concept same_as = is_same<A, B>::value;
 

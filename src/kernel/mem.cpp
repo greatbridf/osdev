@@ -419,6 +419,7 @@ int k_map(
     if (cow && !page->attr.in.cow) {
         page->attr.in.cow = 1;
         page->pte->in.rw = 0;
+        invalidate_tlb(addr);
     }
     ++*page->ref_count;
 

@@ -15,6 +15,7 @@ struct page_attr {
 
 struct page {
     page_t phys_page_id;
+    page_table_entry* pte;
     size_t* ref_count;
     struct page_attr attr;
 };
@@ -102,7 +103,7 @@ static inline page_directory_entry* mms_get_pd(const mm_list* mms)
 // map the page to the end of the mm_area in pd
 int k_map(
     mm* mm_area,
-    const struct page* page,
+    page* page,
     int read,
     int write,
     int priv,

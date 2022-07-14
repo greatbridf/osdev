@@ -330,10 +330,12 @@ page_t alloc_n_raw_pages(size_t n)
 
 struct page allocate_page(void)
 {
-    struct page p { };
-    p.phys_page_id = alloc_raw_page();
-    p.ref_count = types::kernel_ident_allocator_new<size_t>(0);
-    return p;
+    return page {
+        .phys_page_id = alloc_raw_page(),
+        .pte = nullptr,
+        .ref_count = types::kernel_ident_allocator_new<size_t>(0),
+        .attr {},
+    };
 }
 
 static inline void make_page_table(page_table_entry* pt)
@@ -431,7 +433,7 @@ static inline void map_raw_page_to_pte(
 // map page to the end of mm_area in pd
 int k_map(
     mm* mm_area,
-    const struct page* page,
+    page* page,
     int read,
     int write,
     int priv,
@@ -455,9 +457,14 @@ int k_map(
     pte += linr_addr_to_pt_i(addr);
     map_raw_page_to_pte(pte, page->phys_page_id, read, (write && !cow), priv);
 
-    mm_area->pgs->push_back(*page);
-    mm_area->pgs->back()->attr.cow = cow;
+    if (cow && !page->attr.cow) {
+        page->attr.cow = 1;
+        page->pte->in.rw = 0;
+    }
     ++*page->ref_count;
+
+    auto iter = mm_area->pgs->emplace_back(*page);
+    iter->pte = pte;
     return GB_OK;
 }
 
@@ -567,6 +574,7 @@ void init_mem(void)
 
     page heap_first_page {
         .phys_page_id = alloc_raw_page(),
+        .pte = nullptr,
         .ref_count = types::kernel_ident_allocator_new<size_t>(0),
         .attr = {
             .cow = 0,
@@ -582,6 +590,9 @@ void init_mem(void)
     empty_page.attr.cow = 0;
     empty_page.phys_page_id = phys_addr_to_page(EMPTY_PAGE_ADDR);
     empty_page.ref_count = types::kernel_ident_allocator_new<size_t>(1);
+    empty_page.pte = ((page_table_entry*)p_ptr_to_v_ptr(
+                         page_to_phys_addr(KERNEL_PAGE_DIRECTORY_ADDR->in.pt_page)))
+        + page_to_pt_i(empty_page.phys_page_id);
 
     // TODO: improve the algorithm SO FREAKING SLOW
     // while (kernel_mm_head->len < 256 * 1024 * 1024 / PAGE_SIZE) {

@@ -223,13 +223,13 @@ public:
         return m_arr;
     }
 
-    value_type& at(index_type i) noexcept
+    constexpr value_type& at(index_type i) noexcept
     {
         // TODO: boundary check
         return _at(i);
     }
 
-    const value_type& at(index_type i) const noexcept
+    constexpr const value_type& at(index_type i) const noexcept
     {
         // TODO: boundary check
         return _at(i);
@@ -274,12 +274,12 @@ public:
         --m_size;
     }
 
-    size_type size(void) const noexcept
+    constexpr size_type size(void) const noexcept
     {
         return m_size;
     }
 
-    size_type capacity(void) const noexcept
+    constexpr size_type capacity(void) const noexcept
     {
         return m_capacity;
     }

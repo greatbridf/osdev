@@ -59,7 +59,7 @@ process::process(const process& val, const thread& main_thd)
 
     if (!val.attr.system) {
         // TODO: allocate low mem
-        k_esp = (void*)page_to_phys_addr(alloc_n_raw_pages(2));
+        k_esp = (void*)to_pp(alloc_n_raw_pages(2));
         memset((char*)k_esp, 0x00, THREAD_KERNEL_STACK_SIZE);
         k_esp = (char*)k_esp + THREAD_KERNEL_STACK_SIZE;
 
@@ -81,7 +81,7 @@ process::process(const process& val, const thread& main_thd)
         }
     } else {
         // TODO: allocate low mem
-        k_esp = (void*)page_to_phys_addr(alloc_n_raw_pages(2));
+        k_esp = (void*)to_pp(alloc_n_raw_pages(2));
         memcpy(k_esp, main_thd.owner->k_esp, THREAD_KERNEL_STACK_SIZE);
         k_esp = (char*)k_esp + THREAD_KERNEL_STACK_SIZE;
 
@@ -102,7 +102,7 @@ process::process(void* start_eip)
     , pid { max_pid++ }
 {
     // TODO: allocate low mem
-    k_esp = (void*)page_to_phys_addr(alloc_n_raw_pages(2));
+    k_esp = (void*)to_pp(alloc_n_raw_pages(2));
     memset((char*)k_esp, 0x00, THREAD_KERNEL_STACK_SIZE);
     k_esp = (char*)k_esp + THREAD_KERNEL_STACK_SIZE;
 

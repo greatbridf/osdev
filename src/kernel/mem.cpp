@@ -20,8 +20,8 @@ mm_list* kernel_mms;
 
 // constant values
 
-#define EMPTY_PAGE_ADDR ((phys_ptr_t)0x5000)
-#define EMPTY_PAGE_END ((phys_ptr_t)0x6000)
+#define EMPTY_PAGE_ADDR ((pptr_t)0x5000)
+#define EMPTY_PAGE_END ((pptr_t)0x6000)
 
 #define IDENTICALLY_MAPPED_HEAP_SIZE ((size_t)0x400000)
 
@@ -222,7 +222,7 @@ void ki_free(void* ptr)
     kernel_ident_mapped_allocator.free(ptr);
 }
 
-void* p_ptr_to_v_ptr(phys_ptr_t p_ptr)
+void* ptovp(pptr_t p_ptr)
 {
     if (p_ptr <= 0x30000000) {
         // memory below 768MiB is identically mapped
@@ -232,28 +232,6 @@ void* p_ptr_to_v_ptr(phys_ptr_t p_ptr)
         MAKE_BREAK_POINT();
         return (void*)0xffffffff;
     }
-}
-
-phys_ptr_t l_ptr_to_p_ptr(const mm_list* mms, void* v_ptr)
-{
-    for (const mm& item : *mms) {
-        if (v_ptr < item.start || v_ptr >= mmend(&item))
-            continue;
-        size_t offset = vptrdiff(v_ptr, item.start);
-        const page& p = item.pgs->at(offset / PAGE_SIZE);
-        return page_to_phys_addr(p.phys_page_id) + (offset % PAGE_SIZE);
-    }
-
-    // TODO: handle error
-    return 0xffffffff;
-}
-
-phys_ptr_t v_ptr_to_p_ptr(void* v_ptr)
-{
-    if (v_ptr < KERNEL_IDENTICALLY_MAPPED_AREA_LIMIT) {
-        return (phys_ptr_t)v_ptr;
-    }
-    return l_ptr_to_p_ptr(kernel_mms, v_ptr);
 }
 
 static inline void mark_page(page_t n)
@@ -266,32 +244,32 @@ static inline void free_page(page_t n)
     bm_clear(mem_bitmap, n);
 }
 
-static void mark_addr_len(phys_ptr_t start, size_t n)
+static void mark_addr_len(pptr_t start, size_t n)
 {
     if (n == 0)
         return;
-    page_t start_page = phys_addr_to_page(start);
-    page_t end_page = phys_addr_to_page(start + n + 4095);
+    page_t start_page = to_page(start);
+    page_t end_page = to_page(start + n + 4095);
     for (page_t i = start_page; i < end_page; ++i)
         mark_page(i);
 }
 
-static void free_addr_len(phys_ptr_t start, size_t n)
+static void free_addr_len(pptr_t start, size_t n)
 {
     if (n == 0)
         return;
-    page_t start_page = phys_addr_to_page(start);
-    page_t end_page = phys_addr_to_page(start + n + 4095);
+    page_t start_page = to_page(start);
+    page_t end_page = to_page(start + n + 4095);
     for (page_t i = start_page; i < end_page; ++i)
         free_page(i);
 }
 
-static inline void mark_addr_range(phys_ptr_t start, phys_ptr_t end)
+static inline void mark_addr_range(pptr_t start, pptr_t end)
 {
     mark_addr_len(start, end - start);
 }
 
-static inline void free_addr_range(phys_ptr_t start, phys_ptr_t end)
+static inline void free_addr_range(pptr_t start, pptr_t end)
 {
     free_addr_len(start, end - start);
 }
@@ -394,19 +372,6 @@ mm* find_mm_area(mm_list* mms, void* l_ptr)
     for (auto iter = mms->begin(); iter != mms->end(); ++iter)
         if (l_ptr >= iter->start && l_ptr < mmend(iter.ptr()))
             return iter.ptr();
-    return nullptr;
-}
-
-page* find_page_by_l_ptr(const mm_list* mms, void* l_ptr)
-{
-    for (const mm& item : *mms) {
-        if (l_ptr >= item.start && l_ptr < mmend(&item)) {
-            size_t offset = vptrdiff(l_ptr, item.start);
-            return &item.pgs->at(offset / PAGE_SIZE);
-        }
-    }
-
-    // TODO: error handling
     return nullptr;
 }
 
@@ -523,7 +488,7 @@ int mmap(
 // to avoid dead loops
 static inline void _init_map_page_identically(page_t page)
 {
-    pde_t* pde = *KERNEL_PAGE_DIRECTORY_ADDR + page_to_pd_i(page);
+    pde_t* pde = *KERNEL_PAGE_DIRECTORY_ADDR + to_pdi(page);
     // page table not exist
     if (!pde->in.p) {
         // allocate a page for the page table
@@ -544,11 +509,11 @@ static inline void _init_map_page_identically(page_t page)
 
 static inline void init_paging_map_low_mem_identically(void)
 {
-    for (phys_ptr_t addr = 0x01000000; addr < 0x30000000; addr += 0x1000) {
+    for (pptr_t addr = 0x01000000; addr < 0x30000000; addr += 0x1000) {
         // check if the address is valid and not mapped
-        if (bm_test(mem_bitmap, phys_addr_to_page(addr)))
+        if (bm_test(mem_bitmap, to_page(addr)))
             continue;
-        _init_map_page_identically(phys_addr_to_page(addr));
+        _init_map_page_identically(to_page(addr));
     }
 }
 
@@ -578,7 +543,7 @@ void init_mem(void)
 
     // create empty_page struct
     empty_page.attr.in.cow = 0;
-    empty_page.phys_page_id = phys_addr_to_page(EMPTY_PAGE_ADDR);
+    empty_page.phys_page_id = to_page(EMPTY_PAGE_ADDR);
     empty_page.ref_count = types::kernel_ident_allocator_new<size_t>(1);
     empty_page.pte = to_pte(*KERNEL_PAGE_DIRECTORY_ADDR, empty_page.phys_page_id);
 

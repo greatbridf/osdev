@@ -10,6 +10,7 @@
 #include <kernel/vga.h>
 #include <kernel_main.h>
 #include <types/bitmap.h>
+#include <types/size.h>
 #include <types/status.h>
 
 // global objects
@@ -334,6 +335,26 @@ pt_t alloc_pt(void)
     return pt;
 }
 
+void dealloc_pd(pd_t pd)
+{
+    for (pde_t* ent = (*pd) + 256; ent < (*pd) + 1024; ++ent) {
+        if (!ent->in.p)
+            continue;
+        dealloc_pt(to_pt(ent));
+    }
+    memset(pd, 0x00, sizeof(*pd));
+
+    page_t pg = to_page((pptr_t)pd);
+    free_page(pg);
+}
+void dealloc_pt(pt_t pt)
+{
+    memset(pt, 0x00, sizeof(*pt));
+
+    page_t pg = to_page((pptr_t)pt);
+    free_page(pg);
+}
+
 static inline void init_mem_layout(void)
 {
     mem_size = 1024 * mem_size_info.n_1k_blks;
@@ -425,6 +446,25 @@ int k_map(
 
     auto iter = mm_area->pgs->emplace_back(*page);
     iter->pte = pte;
+    return GB_OK;
+}
+
+int k_unmap(mm* mm_area)
+{
+    for (auto iter = mm_area->pgs->begin(); iter != mm_area->pgs->end(); ++iter) {
+        if (*iter->ref_count == 1) {
+            ki_free(iter->ref_count);
+            free_page(iter->phys_page_id);
+        } else {
+            --*iter->ref_count;
+        }
+
+        iter->phys_page_id = 0;
+        iter->attr.v = 0;
+        iter->pte->v = 0;
+    }
+    mm_area->attr.v = 0;
+    mm_area->start = 0;
     return GB_OK;
 }
 

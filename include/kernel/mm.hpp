@@ -40,6 +40,9 @@ int k_map(
     int priv,
     int cow);
 
+// unmap a whole mem area, making sure that we will never use it again
+int k_unmap(mm* mm_area);
+
 // private memory mapping
 // changes won't be neither written back to file nor shared between processes
 // TODO: shared mapping
@@ -202,3 +205,6 @@ struct page allocate_page(void);
 
 pd_t alloc_pd(void);
 pt_t alloc_pt(void);
+
+void dealloc_pd(pd_t pd);
+void dealloc_pt(pt_t pt);

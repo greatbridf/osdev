@@ -59,13 +59,13 @@ public:
 };
 
 template <typename T, typename... Args>
-T* kernel_allocator_new(Args&&... args)
+constexpr T* kernel_allocator_new(Args&&... args)
 {
     return allocator_traits<kernel_allocator<T>>::allocate_and_construct(forward<Args>(args)...);
 }
 
 template <typename T, typename... Args>
-T* kernel_ident_allocator_new(Args&&... args)
+constexpr T* kernel_ident_allocator_new(Args&&... args)
 {
     return allocator_traits<kernel_ident_allocator<T>>::allocate_and_construct(forward<Args>(args)...);
 }

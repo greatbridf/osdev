@@ -67,18 +67,11 @@ process::process(const process& val, const thread& main_thd)
         memcpy(pd, mms_get_pd(kernel_mms), PAGE_SIZE);
 
         mms.begin()->pd = pd;
-        // skip kernel heap
-        for (auto iter_src = ++val.mms.cbegin(); iter_src != val.mms.cend(); ++iter_src) {
-            auto iter_dst = mms.emplace_back(iter_src->start, pd, iter_src->attr.in.write, iter_src->attr.in.system);
-            iter_dst->pd = pd;
-            for (auto pg = iter_src->pgs->begin(); pg != iter_src->pgs->end(); ++pg)
-                k_map(iter_dst.ptr(),
-                    &*pg,
-                    iter_src->attr.in.read,
-                    iter_src->attr.in.write,
-                    iter_src->attr.in.system,
-                    1);
-        }
+
+        // skip kernel heap since it's already copied above
+        for (auto iter_src = ++val.mms.cbegin(); iter_src != val.mms.cend(); ++iter_src)
+            mm::mirror_mm_area(&mms, iter_src.ptr(), pd);
+
     } else {
         // TODO: allocate low mem
         k_esp = (void*)to_pp(alloc_n_raw_pages(2));

@@ -461,7 +461,15 @@ static inline int _mmap(
             return GB_FAILED;
         }
 
-    auto iter_mm = mms->emplace_back(hint, mms_get_pd(&current_process->mms), write, priv);
+    auto iter_mm = mms->emplace_back(mm {
+        .start = hint,
+        .attr { .in {
+            .read = 1,
+            .write = static_cast<uint32_t>(write),
+            .system = static_cast<uint32_t>(priv),
+        } },
+        .pd = mms_get_pd(&current_process->mms),
+    });
     iter_mm->mapped_file = file;
     iter_mm->file_offset = offset;
 
@@ -527,7 +535,15 @@ void init_mem(void)
     init_paging_map_low_mem_identically();
 
     kernel_mms = types::kernel_ident_allocator_new<mm_list>();
-    auto heap_mm = kernel_mms->emplace_back(KERNEL_HEAP_START, KERNEL_PAGE_DIRECTORY_ADDR, 1, 1);
+    auto heap_mm = kernel_mms->emplace_back(mm {
+        .start = KERNEL_HEAP_START,
+        .attr { .in {
+            .read = 1,
+            .write = 1,
+            .system = 1,
+        } },
+        .pd = KERNEL_PAGE_DIRECTORY_ADDR,
+    });
 
     page heap_first_page {
         .phys_page_id = alloc_raw_page(),
@@ -570,28 +586,4 @@ void create_segment_descriptor(
     sd->limit_high = ((limit & 0x000f0000) >> 16);
     sd->access = access;
     sd->flags = flags;
-}
-
-mm::mm(void* start, pd_t pd, bool write, bool system)
-    : start(start)
-    , attr { .in {
-          .read = 1,
-          .write = write,
-          .system = system,
-      } }
-    , pd(pd)
-    , pgs(types::kernel_ident_allocator_new<page_arr>())
-    , mapped_file(nullptr)
-    , file_offset(0)
-{
-}
-
-mm::mm(const mm& val)
-    : start(val.start)
-    , attr { .v = val.attr.v }
-    , pd(val.pd)
-    , pgs(val.pgs)
-    , mapped_file(nullptr)
-    , file_offset(0)
-{
 }

@@ -1,10 +1,12 @@
 #pragma once
 
-#include "types/size.h"
 #include <kernel/mem.h>
 #include <kernel/vfs.hpp>
 #include <types/allocator.hpp>
+#include <types/cplusplus.hpp>
 #include <types/list.hpp>
+#include <types/size.h>
+#include <types/status.h>
 #include <types/types.h>
 #include <types/vector.hpp>
 
@@ -22,9 +24,35 @@ struct page {
     } attr;
 };
 
+struct mm;
+
+// map the page to the end of the mm_area in pd
+int k_map(
+    mm* mm_area,
+    page* page,
+    int read,
+    int write,
+    int priv,
+    int cow);
+
+// private memory mapping
+// changes won't be neither written back to file nor shared between processes
+// TODO: shared mapping
+// @param len is aligned to 4kb boundary automatically, exceeding part will
+// be filled with '0's and not written back to the file
+int mmap(
+    void* hint,
+    size_t len,
+    fs::inode* file,
+    size_t offset,
+    int write,
+    int priv);
+
 using page_arr = types::vector<page, types::kernel_ident_allocator>;
 
-class mm {
+using mm_list = types::list<mm, types::kernel_ident_allocator>;
+
+struct mm {
 public:
     void* start;
     union {
@@ -36,16 +64,33 @@ public:
         } in;
     } attr;
     pd_t pd;
-    page_arr* pgs;
-    fs::inode* mapped_file;
-    size_t file_offset;
+    page_arr* pgs = types::kernel_ident_allocator_new<page_arr>();
+    fs::inode* mapped_file = nullptr;
+    size_t file_offset = 0;
 
 public:
-    mm(const mm& val);
-    mm(void* start, pd_t pd, bool write, bool system);
-};
+    static constexpr int mirror_mm_area(mm_list* dst, const mm* src, pd_t pd)
+    {
+        mm new_nn {
+            .start = src->start,
+            .attr { src->attr.v },
+            .pd = pd,
+            .mapped_file = src->mapped_file,
+            .file_offset = src->file_offset,
+        };
 
-using mm_list = types::list<mm, types::kernel_ident_allocator>;
+        for (auto iter = src->pgs->begin(); iter != src->pgs->end(); ++iter) {
+            if (k_map(&new_nn, &*iter,
+                    src->attr.in.read, src->attr.in.write, src->attr.in.system, 1)
+                != GB_OK) {
+                return GB_FAILED;
+            }
+        }
+
+        dst->emplace_back(types::move(new_nn));
+        return GB_OK;
+    }
+};
 
 // in mem.cpp
 extern mm_list* kernel_mms;
@@ -139,25 +184,6 @@ inline constexpr void* mmend(const mm* mm_area)
 {
     return (char*)mm_area->start + mm_area->pgs->size() * PAGE_SIZE;
 }
-
-// map the page to the end of the mm_area in pd
-int k_map(
-    mm* mm_area,
-    page* page,
-    int read,
-    int write,
-    int priv,
-    int cow);
-
-// @param len is aligned to 4kb boundary automatically, exceeding part will
-// be filled with '0's and not written back to the file
-int mmap(
-    void* hint,
-    size_t len,
-    fs::inode* file,
-    size_t offset,
-    int write,
-    int priv);
 
 // allocate a raw page
 page_t alloc_raw_page(void);

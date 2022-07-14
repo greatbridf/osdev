@@ -227,6 +227,7 @@ public:
         for (iterator_type iter = begin(); iter != end(); ++iter)
             if (*iter == v)
                 return iter;
+        return end();
     }
 
     // erase the node which iter points to

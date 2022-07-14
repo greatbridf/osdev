@@ -205,7 +205,7 @@ extern "C" void int14_handler(int14_data* d)
 
         --*page->ref_count;
 
-        page->ref_count = (size_t*)k_malloc(sizeof(size_t));
+        page->ref_count = (size_t*)ki_malloc(sizeof(size_t));
         *page->ref_count = 1;
         page->attr.in.cow = 0;
         page->phys_page_id = new_page;

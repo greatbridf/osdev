@@ -88,6 +88,7 @@ public:
         };
 
         for (auto iter = src->pgs->begin(); iter != src->pgs->end(); ++iter) {
+            // TODO: preserve dirty flag, clear accessed flag
             if (k_map(&new_nn, &*iter,
                     src->attr.in.read, src->attr.in.write, src->attr.in.system, 1)
                 != GB_OK) {

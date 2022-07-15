@@ -170,10 +170,7 @@ void kernel_threadd_main(void)
             spin_unlock(&kthreadd_lock);
 
             // syscall_fork
-            asm volatile("movl $0x00, %%eax\nint $0x80\nmovl %%eax, %0"
-                         : "=a"(return_value)
-                         :
-                         :);
+            return_value = syscall(0x00);
 
             if (return_value != 0) {
                 // child

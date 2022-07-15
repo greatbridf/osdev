@@ -111,37 +111,37 @@ setup_early_kernel_page_table:
 # set up early kernel page table
 
 # the early kernel page directory is located at physical
-# address 0x00000000, size 4k, and the empty page is at
-# 0x5000-0x5fff, so we fill the first 6KiB
+# address 0x00001000, size 4k, and the empty page is at
+# 0x0000-0x0fff, so we fill the first 6KiB
     movl $0x00000000, %eax
     movl $0x6000, %ecx
     call _fill_zero
 
 # map the first 16MiB identically
-# 0x0000-0x0fff: early kernel pd
-# 0x1000-0x4fff: pde 0 - 4
-    movl $0x00000000, %eax
-    movl $0x00001003, %ebx
+# 0x1000-0x1fff: early kernel pd
+# 0x2000-0x5fff: pde 0 - 4
+    movl $0x00001000, %eax
+    movl $0x00002003, %ebx
 _fill_pde_loop:
     movl %ebx, (%eax)
     addl $4, %eax
     addl $0x1000, %ebx
-    cmpl $0x5003, %ebx
+    cmpl $0x6003, %ebx
     jne _fill_pde_loop
 
 # then, create page tables
     movl $0x00000003, %eax
-    movl $0x00001000, %ecx
+    movl $0x00002000, %ecx
 
 _create_page_table_loop1:
     movl %eax, (%ecx)
     addl $4, %ecx
     addl $0x1000, %eax
-    cmpl $0x4ffc, %ecx
+    cmpl $0x5ffc, %ecx
     jle _create_page_table_loop1
 
 load_early_kernel_page_table:
-    movl $0x00000000, %eax
+    movl $0x00001000, %eax
     movl %eax, %cr3
 
     movl %cr0, %eax

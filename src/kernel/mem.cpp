@@ -21,8 +21,8 @@ mm_list* kernel_mms;
 
 // constant values
 
-#define EMPTY_PAGE_ADDR ((pptr_t)0x5000)
-#define EMPTY_PAGE_END ((pptr_t)0x6000)
+#define EMPTY_PAGE_ADDR ((pptr_t)0x0000)
+#define EMPTY_PAGE_END ((pptr_t)0x1000)
 
 #define IDENTICALLY_MAPPED_HEAP_SIZE ((size_t)0x400000)
 
@@ -361,7 +361,7 @@ static inline void init_mem_layout(void)
     mem_size += 64 * 1024 * mem_size_info.n_64k_blks;
 
     // mark kernel page directory
-    mark_addr_range(0x00000000, 0x00005000);
+    mark_addr_range(0x00001000, 0x00006000);
     // mark empty page
     mark_addr_range(EMPTY_PAGE_ADDR, EMPTY_PAGE_END);
     // mark EBDA and upper memory as allocated
@@ -603,6 +603,8 @@ void init_mem(void)
     empty_page.phys_page_id = to_page(EMPTY_PAGE_ADDR);
     empty_page.ref_count = types::kernel_ident_allocator_new<size_t>(1);
     empty_page.pte = to_pte(*KERNEL_PAGE_DIRECTORY_ADDR, empty_page.phys_page_id);
+    empty_page.pte->in.rw = 0;
+    invalidate_tlb(0x00000000);
 
     // TODO: improve the algorithm SO FREAKING SLOW
     // while (kernel_mm_head->len < 256 * 1024 * 1024 / PAGE_SIZE) {

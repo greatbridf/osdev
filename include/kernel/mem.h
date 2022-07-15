@@ -107,7 +107,7 @@ void* ki_malloc(size_t size);
 
 void ki_free(void* ptr);
 
-#define KERNEL_PAGE_DIRECTORY_ADDR ((pd_t)0x00000000)
+#define KERNEL_PAGE_DIRECTORY_ADDR ((pd_t)0x00001000)
 
 void init_mem(void);
 

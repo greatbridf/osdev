@@ -145,7 +145,7 @@ size_t _ata_read(fs::special_node* sn, char* buf, size_t buf_size, size_t offset
         end = sn->data1 + sn->data2;
     offset %= 512;
     for (size_t i = start; i < end; ++i) {
-        (*ata_bus)->read_sector(b, i, 0);
+        (void)(*ata_bus)->read_sector(b, i, 0);
         size_t to_copy = 0;
         if (offset)
             to_copy = 512 - offset;

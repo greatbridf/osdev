@@ -100,7 +100,7 @@ set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
                         include/types/allocator.hpp
                         include/types/cplusplus.hpp
                         include/types/list.hpp
-                        include/types/lock.h
+                        include/types/lock.hpp
                         include/types/string.hpp
                         include/types/vector.hpp
                         include/kernel_main.h

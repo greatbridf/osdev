@@ -127,7 +127,7 @@ void NORETURN _kernel_init(void)
     // TODO: parse kernel parameters
     auto* _new_fs = fs::register_fs(types::kernel_allocator_new<fs::fat::fat32>(fs::vfs_open("/dev/hda1")->ind));
     int ret = fs::fs_root->ind->fs->mount(fs::vfs_open("/mnt"), _new_fs);
-    if (ret != GB_OK)
+    if (unlikely(ret != GB_OK))
         syscall(0x03);
 
     pd_t new_pd = alloc_pd();
@@ -144,7 +144,7 @@ void NORETURN _kernel_init(void)
     types::elf::elf32_load("/mnt/INIT.ELF", &intrpt_stack, 0);
     // map stack area
     ret = mmap((void*)types::elf::ELF_STACK_TOP, types::elf::ELF_STACK_SIZE, fs::vfs_open("/dev/null")->ind, 0, 1, 0);
-    if (ret != GB_OK)
+    if (unlikely(ret != GB_OK))
         syscall(0x03);
 
     asm_cli();
@@ -270,7 +270,7 @@ static inline void next_task(const types::list<thread*>::iterator_type& iter_to_
 
 void do_scheduling(interrupt_stack* intrpt_data)
 {
-    if (!is_scheduler_ready)
+    if (unlikely(!is_scheduler_ready))
         return;
 
     auto iter_thd = ready_thds->begin();

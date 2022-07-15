@@ -194,12 +194,15 @@ inline constexpr void* mmend(const mm* mm_area)
     return (char*)mm_area->start + mm_area->pgs->size() * PAGE_SIZE;
 }
 
-// allocate a raw page
-page_t alloc_raw_page(void);
-
 // allocate n raw page(s)
 // @return the id of the first page allocated
 page_t alloc_n_raw_pages(size_t n);
+
+// allocate a raw page
+inline page_t alloc_raw_page(void)
+{
+    return alloc_n_raw_pages(1);
+}
 
 // allocate a struct page together with the raw page
 struct page allocate_page(void);

@@ -60,9 +60,9 @@ private:
     brk_memory_allocator(const brk_memory_allocator&) = delete;
     brk_memory_allocator(brk_memory_allocator&&) = delete;
 
-    inline int brk(byte* addr)
+    inline constexpr int brk(byte* addr)
     {
-        if (addr >= p_limit)
+        if (unlikely(addr >= p_limit))
             return GB_FAILED;
         p_break = addr;
         return GB_OK;
@@ -71,7 +71,7 @@ private:
     // sets errno
     inline byte* sbrk(size_type increment)
     {
-        if (brk(p_break + increment) != GB_OK) {
+        if (unlikely(brk(p_break + increment) != GB_OK)) {
             errno = ENOMEM;
             return nullptr;
         } else {
@@ -100,7 +100,7 @@ private:
                 errno = 0;
                 return start_pos;
             } else {
-                if (!start_pos->flags.has_next) {
+                if (unlikely(!start_pos->flags.has_next)) {
                     errno = ENOTFOUND;
                     return start_pos;
                 }
@@ -114,7 +114,7 @@ private:
     {
         sbrk(sizeof(mem_blk) + size - 4 * sizeof(byte));
         // preserves errno
-        if (errno) {
+        if (unlikely(errno)) {
             return nullptr;
         }
 
@@ -201,7 +201,10 @@ static brk_memory_allocator
 
 void* k_malloc(size_t size)
 {
-    return kernel_heap_allocator->alloc(size);
+    void* ptr = kernel_heap_allocator->alloc(size);
+    if unlikely (!ptr)
+        MAKE_BREAK_POINT();
+    return ptr;
 }
 
 void k_free(void* ptr)
@@ -212,9 +215,8 @@ void k_free(void* ptr)
 void* ki_malloc(size_t size)
 {
     void* ptr = kernel_ident_mapped_allocator.alloc(size);
-    if (!ptr) {
+    if (unlikely(!ptr))
         MAKE_BREAK_POINT();
-    }
     return ptr;
 }
 
@@ -235,19 +237,19 @@ void* ptovp(pptr_t p_ptr)
     }
 }
 
-static inline void mark_page(page_t n)
+inline void mark_page(page_t n)
 {
     bm_set(mem_bitmap, n);
 }
 
-static inline void free_page(page_t n)
+inline void free_page(page_t n)
 {
     bm_clear(mem_bitmap, n);
 }
 
-static void mark_addr_len(pptr_t start, size_t n)
+constexpr void mark_addr_len(pptr_t start, size_t n)
 {
-    if (n == 0)
+    if (unlikely(n == 0))
         return;
     page_t start_page = to_page(start);
     page_t end_page = to_page(start + n + 4095);
@@ -255,9 +257,9 @@ static void mark_addr_len(pptr_t start, size_t n)
         mark_page(i);
 }
 
-static void free_addr_len(pptr_t start, size_t n)
+constexpr void free_addr_len(pptr_t start, size_t n)
 {
-    if (n == 0)
+    if (unlikely(n == 0))
         return;
     page_t start_page = to_page(start);
     page_t end_page = to_page(start + n + 4095);
@@ -265,19 +267,14 @@ static void free_addr_len(pptr_t start, size_t n)
         free_page(i);
 }
 
-static inline void mark_addr_range(pptr_t start, pptr_t end)
+inline constexpr void mark_addr_range(pptr_t start, pptr_t end)
 {
     mark_addr_len(start, end - start);
 }
 
-static inline void free_addr_range(pptr_t start, pptr_t end)
+inline constexpr void free_addr_range(pptr_t start, pptr_t end)
 {
     free_addr_len(start, end - start);
-}
-
-page_t alloc_raw_page(void)
-{
-    return alloc_n_raw_pages(1);
 }
 
 // @return the max count (but less than n) of the pages continuously available
@@ -423,7 +420,7 @@ int k_map(
     void* addr = mmend(mm_area);
     pde_t* pde = to_pde(mm_area->pd, addr);
     // page table not exist
-    if (!pde->in.p) {
+    if (unlikely(!pde->in.p)) {
         // allocate a page for the page table
         pde->in.p = 1;
         pde->in.rw = 1;
@@ -437,7 +434,7 @@ int k_map(
     pte_t* pte = to_pte(pde, addr);
     map_raw_page_to_pte(pte, page->phys_page_id, read, (write && !cow), priv);
 
-    if (cow && !page->attr.in.cow) {
+    if (unlikely(cow && !page->attr.in.cow)) {
         page->attr.in.cow = 1;
         page->pte->in.rw = 0;
         invalidate_tlb(addr);
@@ -488,7 +485,7 @@ static inline int _mmap(
     int write,
     int priv)
 {
-    if (!file->flags.in.file && !file->flags.in.special_node) {
+    if (unlikely(!file->flags.in.file && !file->flags.in.special_node)) {
         errno = EINVAL;
         return GB_FAILED;
     }
@@ -539,7 +536,7 @@ static inline void _init_map_page_identically(page_t page)
 {
     pde_t* pde = *KERNEL_PAGE_DIRECTORY_ADDR + to_pdi(page);
     // page table not exist
-    if (!pde->in.p) {
+    if (unlikely(!pde->in.p)) {
         // allocate a page for the page table
         // set the P bit of the pde in advance
         pde->in.p = 1;

@@ -16,6 +16,7 @@
 #include <kernel_main.h>
 #include <types/size.h>
 #include <types/stdint.h>
+#include <types/types.h>
 
 static struct IDT_entry IDT[256];
 
@@ -171,13 +172,13 @@ extern "C" void int14_handler(int14_data* d)
         mms = kernel_mms;
 
     mm* mm_area = find_mm_area(mms, d->l_addr);
-    if (!mm_area)
+    if (unlikely(!mm_area))
         _int14_panic(d->v_eip, d->l_addr, d->error_code);
 
     pte_t* pte = to_pte(mms_get_pd(mms), d->l_addr);
     page* page = lto_page(mm_area, d->l_addr);
 
-    if (d->error_code.present == 0 && !mm_area->mapped_file)
+    if (unlikely(d->error_code.present == 0 && !mm_area->mapped_file))
         _int14_panic(d->v_eip, d->l_addr, d->error_code);
 
     // copy on write

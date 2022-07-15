@@ -57,12 +57,20 @@ process::process(const process& val, const thread& main_thd)
     auto iter_thd = thds.emplace_back(main_thd);
     iter_thd->owner = this;
 
-    if (!val.attr.system) {
-        // TODO: allocate low mem
-        k_esp = (void*)to_pp(alloc_n_raw_pages(2));
-        memset((char*)k_esp, 0x00, THREAD_KERNEL_STACK_SIZE);
-        k_esp = (char*)k_esp + THREAD_KERNEL_STACK_SIZE;
+    // TODO: allocate low mem
+    k_esp = (void*)to_pp(alloc_n_raw_pages(2));
+    memcpy(k_esp, (char*)main_thd.owner->k_esp - THREAD_KERNEL_STACK_SIZE, THREAD_KERNEL_STACK_SIZE);
+    k_esp = (char*)k_esp + THREAD_KERNEL_STACK_SIZE;
 
+    if (val.attr.system) {
+        auto orig_k_esp = (uint32_t)main_thd.owner->k_esp;
+
+        iter_thd->regs.ebp -= orig_k_esp;
+        iter_thd->regs.ebp += (uint32_t)k_esp;
+
+        iter_thd->regs.esp -= orig_k_esp;
+        iter_thd->regs.esp += (uint32_t)k_esp;
+    } else {
         pd_t pd = alloc_pd();
         memcpy(pd, mms_get_pd(kernel_mms), PAGE_SIZE);
 
@@ -71,20 +79,6 @@ process::process(const process& val, const thread& main_thd)
         // skip kernel heap since it's already copied above
         for (auto iter_src = ++val.mms.cbegin(); iter_src != val.mms.cend(); ++iter_src)
             mm::mirror_mm_area(&mms, iter_src.ptr(), pd);
-
-    } else {
-        // TODO: allocate low mem
-        k_esp = (void*)to_pp(alloc_n_raw_pages(2));
-        memcpy(k_esp, main_thd.owner->k_esp, THREAD_KERNEL_STACK_SIZE);
-        k_esp = (char*)k_esp + THREAD_KERNEL_STACK_SIZE;
-
-        auto orig_k_esp = (uint32_t)main_thd.owner->k_esp;
-
-        iter_thd->regs.ebp -= orig_k_esp;
-        iter_thd->regs.ebp += (uint32_t)k_esp;
-
-        iter_thd->regs.esp -= orig_k_esp;
-        iter_thd->regs.esp += (uint32_t)k_esp;
     }
 }
 

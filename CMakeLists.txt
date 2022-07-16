@@ -40,8 +40,8 @@ if (CMAKE_BUILD_TYPE STREQUAL "Debug")
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O0 -g")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O0 -g")
 elseif(CMAKE_BUILD_TYPE STREQUAL "Release")
-    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O")
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O2")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O2")
 endif()
 
 if (NOT DEFINED FDISK_BIN)
@@ -100,7 +100,7 @@ set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
                         include/types/allocator.hpp
                         include/types/cplusplus.hpp
                         include/types/list.hpp
-                        include/types/lock.h
+                        include/types/lock.hpp
                         include/types/string.hpp
                         include/types/vector.hpp
                         include/kernel_main.h

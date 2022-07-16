@@ -111,13 +111,13 @@ public:
         const key_type key;
         value_type value;
 
-        pair(void) = delete;
-        pair(const key_type _key, value_type _val)
+        constexpr pair(void) = delete;
+        constexpr pair(const key_type _key, value_type _val)
             : key(_key)
             , value(_val)
         {
         }
-        bool operator==(const pair& p)
+        constexpr bool operator==(const pair& p)
         {
             return key == p.key;
         }
@@ -129,49 +129,51 @@ public:
         using _Value = typename traits::remove_pointer<Pointer>::type;
         using Reference = typename traits::add_reference<_Value>::type;
 
+        friend class hash_map;
+
     public:
-        iterator(const iterator& iter) noexcept
+        constexpr iterator(const iterator& iter) noexcept
             : p(iter.p)
         {
         }
 
-        iterator(iterator&& iter) noexcept
+        constexpr iterator(iterator&& iter) noexcept
             : p(iter.p)
         {
             iter.p = nullptr;
         }
 
-        iterator& operator=(const iterator& iter)
+        constexpr iterator& operator=(const iterator& iter)
         {
             p = iter.p;
             return *this;
         }
 
-        explicit iterator(Pointer p) noexcept
+        explicit constexpr iterator(Pointer p) noexcept
             : p(p)
         {
         }
 
-        bool operator==(const iterator& iter) const noexcept
+        constexpr bool operator==(const iterator& iter) const noexcept
         {
             return this->p == iter.p;
         }
 
-        bool operator!=(const iterator& iter) const noexcept
+        constexpr bool operator!=(const iterator& iter) const noexcept
         {
             return !(*this == iter);
         }
 
-        bool operator!()
+        constexpr operator bool()
         {
-            return !p;
+            return p != nullptr;
         }
 
-        Reference operator*() const noexcept
+        constexpr Reference operator*() const noexcept
         {
             return *p;
         }
-        Pointer operator->() const noexcept
+        constexpr Pointer operator->() const noexcept
         {
             return p;
         }
@@ -202,19 +204,19 @@ protected:
     }
 
 public:
-    explicit hash_map(void)
+    explicit constexpr hash_map(void)
         : buckets(INITIAL_BUCKETS_ALLOCATED)
     {
         for (size_type i = 0; i < INITIAL_BUCKETS_ALLOCATED; ++i)
             buckets.emplace_back();
     }
 
-    hash_map(const hash_map& v)
+    constexpr hash_map(const hash_map& v)
         : buckets(v.buckets)
     {
     }
 
-    hash_map(hash_map&& v)
+    constexpr hash_map(hash_map&& v)
         : buckets(move(v.buckets))
     {
     }
@@ -224,22 +226,22 @@ public:
         buckets.clear();
     }
 
-    void insert(const pair& p)
+    constexpr void insert(const pair& p)
     {
         auto hash_value = _Hasher::hash(p.key, hash_length());
         buckets.at(hash_value).push_back(p);
     }
-    void insert(pair&& p)
+    constexpr void insert(pair&& p)
     {
         auto hash_value = _Hasher::hash(p.key, hash_length());
         buckets.at(hash_value).push_back(move(p));
     }
-    void insert(const key_type& key, const value_type& val)
+    constexpr void insert(const key_type& key, const value_type& val)
     {
         insert(pair { key, val });
     }
 
-    void remove(const key_type& key)
+    constexpr void remove(const key_type& key)
     {
         auto hash_value = _Hasher::hash(key, hash_length());
         auto& bucket = buckets.at(hash_value);
@@ -251,7 +253,18 @@ public:
         }
     }
 
-    iterator_type find(const key_type& key)
+    constexpr void remove(iterator_type iter)
+    {
+        remove(iter->key);
+        iter.p = nullptr;
+    }
+    constexpr void remove(const_iterator_type iter)
+    {
+        remove(iter->key);
+        iter.p = nullptr;
+    }
+
+    constexpr iterator_type find(const key_type& key)
     {
         auto hash_value = _Hasher::hash(key, hash_length());
         auto& bucket = buckets.at(hash_value);
@@ -262,7 +275,7 @@ public:
         return iterator_type(nullptr);
     }
 
-    const_iterator_type find(const key_type& key) const
+    constexpr const_iterator_type find(const key_type& key) const
     {
         auto hash_value = _Hasher::hash(key, hash_length());
         const auto& bucket = buckets.at(hash_value);
@@ -273,7 +286,7 @@ public:
         return const_iterator_type(nullptr);
     }
 
-    void clear(void)
+    constexpr void clear(void)
     {
         for (size_t i = 0; i < buckets.size(); ++i)
             buckets.at(i).clear();

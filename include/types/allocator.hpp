@@ -59,15 +59,43 @@ public:
 };
 
 template <typename T, typename... Args>
-T* kernel_allocator_new(Args&&... args)
+constexpr T* kernel_allocator_new(Args&&... args)
 {
     return allocator_traits<kernel_allocator<T>>::allocate_and_construct(forward<Args>(args)...);
 }
 
+template <PointerType T, typename... Args>
+constexpr auto kernel_allocator_pnew(T, Args&&... args)
+{
+    using value_type = typename traits::remove_pointer<T>::type;
+    return kernel_allocator_new<value_type>(forward<Args>(args)...);
+}
+
 template <typename T, typename... Args>
-T* kernel_ident_allocator_new(Args&&... args)
+constexpr T* kernel_ident_allocator_new(Args&&... args)
 {
     return allocator_traits<kernel_ident_allocator<T>>::allocate_and_construct(forward<Args>(args)...);
+}
+
+template <PointerType T, typename... Args>
+constexpr auto kernel_ident_allocator_pnew(T, Args&&... args)
+{
+    using value_type = typename traits::remove_pointer<T>::type;
+    return kernel_ident_allocator_new<value_type>(forward<Args>(args)...);
+}
+
+template <PointerType T>
+constexpr void kernel_allocator_delete(T ptr)
+{
+    using value_type = typename traits::remove_pointer<T>::type;
+    return allocator_traits<kernel_allocator<value_type>>::deconstruct_and_deallocate(ptr);
+}
+
+template <PointerType T>
+constexpr void kernel_ident_allocator_delete(T ptr)
+{
+    using value_type = typename traits::remove_pointer<T>::type;
+    return allocator_traits<kernel_ident_allocator<value_type>>::deconstruct_and_deallocate(ptr);
 }
 
 template <Allocator _allocator>

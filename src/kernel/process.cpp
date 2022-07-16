@@ -57,34 +57,12 @@ process::process(const process& val, const thread& main_thd)
     auto iter_thd = thds.emplace_back(main_thd);
     iter_thd->owner = this;
 
-    if (!val.attr.system) {
-        // TODO: allocate low mem
-        k_esp = (void*)page_to_phys_addr(alloc_n_raw_pages(2));
-        memset((char*)k_esp, 0x00, THREAD_KERNEL_STACK_SIZE);
-        k_esp = (char*)k_esp + THREAD_KERNEL_STACK_SIZE;
+    // TODO: allocate low mem
+    k_esp = (void*)to_pp(alloc_n_raw_pages(2));
+    memcpy(k_esp, (char*)main_thd.owner->k_esp - THREAD_KERNEL_STACK_SIZE, THREAD_KERNEL_STACK_SIZE);
+    k_esp = (char*)k_esp + THREAD_KERNEL_STACK_SIZE;
 
-        page_directory_entry* pd = alloc_pd();
-        memcpy(pd, mms_get_pd(kernel_mms), PAGE_SIZE);
-
-        mms.begin()->pd = pd;
-        // skip kernel heap
-        for (auto iter_src = ++val.mms.cbegin(); iter_src != val.mms.cend(); ++iter_src) {
-            auto iter_dst = mms.emplace_back(iter_src->start, pd, iter_src->attr.write, iter_src->attr.system);
-            iter_dst->pd = pd;
-            for (auto pg = iter_src->pgs->begin(); pg != iter_src->pgs->end(); ++pg)
-                k_map(iter_dst.ptr(),
-                    &*pg,
-                    iter_src->attr.read,
-                    iter_src->attr.write,
-                    iter_src->attr.system,
-                    1);
-        }
-    } else {
-        // TODO: allocate low mem
-        k_esp = (void*)page_to_phys_addr(alloc_n_raw_pages(2));
-        memcpy(k_esp, main_thd.owner->k_esp, THREAD_KERNEL_STACK_SIZE);
-        k_esp = (char*)k_esp + THREAD_KERNEL_STACK_SIZE;
-
+    if (val.attr.system) {
         auto orig_k_esp = (uint32_t)main_thd.owner->k_esp;
 
         iter_thd->regs.ebp -= orig_k_esp;
@@ -92,6 +70,15 @@ process::process(const process& val, const thread& main_thd)
 
         iter_thd->regs.esp -= orig_k_esp;
         iter_thd->regs.esp += (uint32_t)k_esp;
+    } else {
+        pd_t pd = alloc_pd();
+        memcpy(pd, mms_get_pd(kernel_mms), PAGE_SIZE);
+
+        mms.begin()->pd = pd;
+
+        // skip kernel heap since it's already copied above
+        for (auto iter_src = ++val.mms.cbegin(); iter_src != val.mms.cend(); ++iter_src)
+            mm::mirror_mm_area(&mms, iter_src.ptr(), pd);
     }
 }
 
@@ -102,7 +89,7 @@ process::process(void* start_eip)
     , pid { max_pid++ }
 {
     // TODO: allocate low mem
-    k_esp = (void*)page_to_phys_addr(alloc_n_raw_pages(2));
+    k_esp = (void*)to_pp(alloc_n_raw_pages(2));
     memset((char*)k_esp, 0x00, THREAD_KERNEL_STACK_SIZE);
     k_esp = (char*)k_esp + THREAD_KERNEL_STACK_SIZE;
 
@@ -134,10 +121,10 @@ void NORETURN _kernel_init(void)
     // TODO: parse kernel parameters
     auto* _new_fs = fs::register_fs(types::kernel_allocator_new<fs::fat::fat32>(fs::vfs_open("/dev/hda1")->ind));
     int ret = fs::fs_root->ind->fs->mount(fs::vfs_open("/mnt"), _new_fs);
-    if (ret != GB_OK)
+    if (unlikely(ret != GB_OK))
         syscall(0x03);
 
-    page_directory_entry* new_pd = alloc_pd();
+    pd_t new_pd = alloc_pd();
     memcpy(new_pd, mms_get_pd(kernel_mms), PAGE_SIZE);
 
     asm_cli();
@@ -151,7 +138,7 @@ void NORETURN _kernel_init(void)
     types::elf::elf32_load("/mnt/INIT.ELF", &intrpt_stack, 0);
     // map stack area
     ret = mmap((void*)types::elf::ELF_STACK_TOP, types::elf::ELF_STACK_SIZE, fs::vfs_open("/dev/null")->ind, 0, 1, 0);
-    if (ret != GB_OK)
+    if (unlikely(ret != GB_OK))
         syscall(0x03);
 
     asm_cli();
@@ -177,10 +164,7 @@ void kernel_threadd_main(void)
             spin_unlock(&kthreadd_lock);
 
             // syscall_fork
-            asm volatile("movl $0x00, %%eax\nint $0x80\nmovl %%eax, %0"
-                         : "=a"(return_value)
-                         :
-                         :);
+            return_value = syscall(0x00);
 
             if (return_value != 0) {
                 // child
@@ -280,7 +264,7 @@ static inline void next_task(const types::list<thread*>::iterator_type& iter_to_
 
 void do_scheduling(interrupt_stack* intrpt_data)
 {
-    if (!is_scheduler_ready)
+    if (unlikely(!is_scheduler_ready))
         return;
 
     auto iter_thd = ready_thds->begin();

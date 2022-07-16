@@ -22,11 +22,13 @@ public:
             "this type is not implemented yet.");
         port_size_t ret;
         if constexpr (types::is_same<port_size_t, uint8_t>::value)
-            asm("inb %1, %0"
+            asm volatile(
+                "inb %1, %0"
                 : "=a"(ret)
                 : "d"(mp));
         if constexpr (types::is_same<port_size_t, uint16_t>::value)
-            asm("inw %1, %0"
+            asm volatile(
+                "inw %1, %0"
                 : "=a"(ret)
                 : "d"(mp));
         return ret;
@@ -38,11 +40,13 @@ public:
             types::is_same<port_size_t, uint8_t>::value || types::is_same<port_size_t, uint16_t>::value,
             "this type is not implemented yet.");
         if constexpr (types::is_same<port_size_t, uint8_t>::value)
-            asm("outb %1, %0"
+            asm volatile(
+                "outb %1, %0"
                 :
                 : "d"(mp), "a"(n));
         if constexpr (types::is_same<port_size_t, uint16_t>::value)
-            asm("outw %1, %0"
+            asm volatile(
+                "outw %1, %0"
                 :
                 : "d"(mp), "a"(n));
         return n;

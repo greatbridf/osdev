@@ -30,82 +30,82 @@ public:
         using Reference = typename types::traits::add_reference<Value>::type;
 
     public:
-        iterator(const iterator& iter) noexcept
+        constexpr iterator(const iterator& iter) noexcept
             : p(iter.p)
         {
         }
 
-        iterator(iterator&& iter) noexcept
+        constexpr iterator(iterator&& iter) noexcept
             : p(iter.p)
         {
             iter.p = nullptr;
         }
 
-        iterator& operator=(const iterator& iter)
+        constexpr iterator& operator=(const iterator& iter)
         {
             p = iter.p;
             return *this;
         }
 
-        explicit iterator(Pointer p) noexcept
+        explicit constexpr iterator(Pointer p) noexcept
             : p(p)
         {
         }
 
-        bool operator==(const iterator& iter) const noexcept
+        constexpr bool operator==(const iterator& iter) const noexcept
         {
             return this->p == iter.p;
         }
 
-        bool operator!=(const iterator& iter) const noexcept
+        constexpr bool operator!=(const iterator& iter) const noexcept
         {
             return !(*this == iter);
         }
 
-        iterator& operator++() noexcept
+        constexpr iterator& operator++() noexcept
         {
             ++p;
             return *this;
         }
 
-        iterator operator++(int) noexcept
+        constexpr iterator operator++(int) noexcept
         {
             iterator iter(*this);
             ++p;
             return iter;
         }
 
-        iterator& operator--() noexcept
+        constexpr iterator& operator--() noexcept
         {
             --p;
             return *this;
         }
 
-        iterator operator--(int) noexcept
+        constexpr iterator operator--(int) noexcept
         {
             iterator iter(*this);
             --p;
             return iter;
         }
 
-        iterator operator+(size_type n) noexcept
+        constexpr iterator operator+(size_type n) noexcept
         {
             iterator iter(p + n);
             return iter;
         }
 
-        iterator operator-(size_type n) noexcept
+        constexpr iterator operator-(size_type n) noexcept
         {
             iterator iter(p - n);
             return iter;
         }
 
-        Reference operator*() const noexcept
+        constexpr Reference operator*() const noexcept
         {
             return *p;
         }
 
-        Pointer operator->() const noexcept
+        constexpr Pointer operator->() const noexcept
         {
             return p;
         }
@@ -115,21 +115,21 @@ public:
     };
 
 public:
-    explicit vector(size_type capacity = 1) noexcept
+    explicit constexpr vector(size_type capacity = 1) noexcept
         : m_arr(nullptr)
         , m_size(0)
     {
         resize(capacity);
     }
 
-    vector(const vector& arr) noexcept
+    constexpr vector(const vector& arr) noexcept
         : vector(arr.capacity())
     {
         for (const auto& item : arr)
             push_back(item);
     }
 
-    vector(vector&& arr) noexcept
+    constexpr vector(vector&& arr) noexcept
     {
         m_arr = arr.m_arr;
         m_capacity = arr.m_capacity;
@@ -140,7 +140,7 @@ public:
         arr.m_size = 0;
     }
 
-    vector& operator=(vector&& arr)
+    constexpr vector& operator=(vector&& arr)
     {
         resize(0);
         m_arr = arr.m_arr;
@@ -154,7 +154,7 @@ public:
         return *this;
     }
 
-    vector& operator=(const vector& arr)
+    constexpr vector& operator=(const vector& arr)
     {
         return operator=(vector(arr));
     }
@@ -164,7 +164,7 @@ public:
         resize(0);
     }
 
-    void resize(size_type n)
+    constexpr void resize(size_type n)
     {
         value_type* new_ptr = allocator_traits<allocator_type>::allocate(n);
 
@@ -213,39 +213,39 @@ public:
     //     ++_size();
     // }
 
-    value_type* data(void) noexcept
+    constexpr value_type* data(void) noexcept
     {
         return m_arr;
     }
 
-    const value_type* data(void) const noexcept
+    constexpr const value_type* data(void) const noexcept
     {
         return m_arr;
     }
 
-    value_type& at(index_type i) noexcept
+    constexpr value_type& at(index_type i) noexcept
     {
         // TODO: boundary check
         return _at(i);
     }
 
-    const value_type& at(index_type i) const noexcept
+    constexpr const value_type& at(index_type i) const noexcept
     {
         // TODO: boundary check
         return _at(i);
     }
 
-    value_type& operator[](index_type i) noexcept
+    constexpr value_type& operator[](index_type i) noexcept
     {
         return at(i);
     }
 
-    const value_type& operator[](index_type i) const noexcept
+    constexpr const value_type& operator[](index_type i) const noexcept
     {
         return at(i);
     }
 
-    void push_back(const value_type& v) noexcept
+    constexpr void push_back(const value_type& v) noexcept
     {
         if (m_size == m_capacity)
             resize(m_capacity * 2);
@@ -253,7 +253,7 @@ public:
         ++m_size;
     }
 
-    void push_back(value_type&& v) noexcept
+    constexpr void push_back(value_type&& v) noexcept
     {
         if (m_size == m_capacity)
             resize(m_capacity * 2);
@@ -262,74 +262,74 @@ public:
     }
 
     template <typename... Args>
-    iterator_type emplace_back(Args&&... args)
+    constexpr iterator_type emplace_back(Args&&... args)
     {
         push_back(value_type(forward<Args>(args)...));
         return back();
     }
 
-    void pop_back(void) noexcept
+    constexpr void pop_back(void) noexcept
     {
         allocator_traits<allocator_type>::deconstruct(&*back());
         --m_size;
     }
 
-    size_type size(void) const noexcept
+    constexpr size_type size(void) const noexcept
     {
         return m_size;
     }
 
-    size_type capacity(void) const noexcept
+    constexpr size_type capacity(void) const noexcept
     {
         return m_capacity;
     }
 
-    const_iterator_type cbegin() const noexcept
+    constexpr const_iterator_type cbegin() const noexcept
     {
         return const_iterator_type(m_arr);
     }
 
-    const_iterator_type cend() const noexcept
+    constexpr const_iterator_type cend() const noexcept
     {
         return const_iterator_type(m_arr + m_size);
     }
 
-    iterator_type begin() noexcept
+    constexpr iterator_type begin() noexcept
     {
         return iterator_type(m_arr);
     }
 
-    const_iterator_type begin() const noexcept
+    constexpr const_iterator_type begin() const noexcept
     {
         return cbegin();
     }
 
-    iterator_type end() noexcept
+    constexpr iterator_type end() noexcept
     {
         return iterator_type(m_arr + m_size);
     }
 
-    const_iterator_type end() const noexcept
+    constexpr const_iterator_type end() const noexcept
     {
         return cend();
     }
 
-    iterator_type back() noexcept
+    constexpr iterator_type back() noexcept
     {
         return iterator_type(m_arr + m_size - 1);
     }
 
-    const_iterator_type back() const noexcept
+    constexpr const_iterator_type back() const noexcept
     {
         return const_iterator_type(m_arr + m_size - 1);
     }
 
-    bool empty(void) const noexcept
+    constexpr bool empty(void) const noexcept
     {
         return size() == 0;
     }
 
-    void clear(void)
+    constexpr void clear(void)
     {
         for (size_t i = 0; i < size(); ++i)
             allocator_traits<allocator_type>::deconstruct(m_arr + i);
@@ -345,11 +345,11 @@ public:
     // iterator_type cr_end() noexcept;
 
 protected:
-    inline const value_type& _at(index_type i) const
+    inline constexpr const value_type& _at(index_type i) const
     {
         return m_arr[i];
     }
-    inline value_type& _at(index_type i)
+    inline constexpr value_type& _at(index_type i)
     {
         return m_arr[i];
     }

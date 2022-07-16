@@ -10,6 +10,7 @@
 #include <kernel/vga.h>
 #include <kernel_main.h>
 #include <types/bitmap.h>
+#include <types/size.h>
 #include <types/status.h>
 
 // global objects
@@ -20,8 +21,8 @@ mm_list* kernel_mms;
 
 // constant values
 
-#define EMPTY_PAGE_ADDR ((phys_ptr_t)0x5000)
-#define EMPTY_PAGE_END ((phys_ptr_t)0x6000)
+#define EMPTY_PAGE_ADDR ((pptr_t)0x0000)
+#define EMPTY_PAGE_END ((pptr_t)0x1000)
 
 #define IDENTICALLY_MAPPED_HEAP_SIZE ((size_t)0x400000)
 
@@ -59,9 +60,9 @@ private:
     brk_memory_allocator(const brk_memory_allocator&) = delete;
     brk_memory_allocator(brk_memory_allocator&&) = delete;
 
-    inline int brk(byte* addr)
+    inline constexpr int brk(byte* addr)
     {
-        if (addr >= p_limit)
+        if (unlikely(addr >= p_limit))
             return GB_FAILED;
         p_break = addr;
         return GB_OK;
@@ -70,7 +71,7 @@ private:
     // sets errno
     inline byte* sbrk(size_type increment)
     {
-        if (brk(p_break + increment) != GB_OK) {
+        if (unlikely(brk(p_break + increment) != GB_OK)) {
             errno = ENOMEM;
             return nullptr;
         } else {
@@ -99,7 +100,7 @@ private:
                 errno = 0;
                 return start_pos;
             } else {
-                if (!start_pos->flags.has_next) {
+                if (unlikely(!start_pos->flags.has_next)) {
                     errno = ENOTFOUND;
                     return start_pos;
                 }
@@ -113,7 +114,7 @@ private:
     {
         sbrk(sizeof(mem_blk) + size - 4 * sizeof(byte));
         // preserves errno
-        if (errno) {
+        if (unlikely(errno)) {
             return nullptr;
         }
 
@@ -200,7 +201,10 @@ static brk_memory_allocator
 
 void* k_malloc(size_t size)
 {
-    return kernel_heap_allocator->alloc(size);
+    void* ptr = kernel_heap_allocator->alloc(size);
+    if unlikely (!ptr)
+        MAKE_BREAK_POINT();
+    return ptr;
 }
 
 void k_free(void* ptr)
@@ -211,9 +215,8 @@ void k_free(void* ptr)
 void* ki_malloc(size_t size)
 {
     void* ptr = kernel_ident_mapped_allocator.alloc(size);
-    if (!ptr) {
+    if (unlikely(!ptr))
         MAKE_BREAK_POINT();
-    }
     return ptr;
 }
 
@@ -222,7 +225,7 @@ void ki_free(void* ptr)
     kernel_ident_mapped_allocator.free(ptr);
 }
 
-void* p_ptr_to_v_ptr(phys_ptr_t p_ptr)
+void* ptovp(pptr_t p_ptr)
 {
     if (p_ptr <= 0x30000000) {
         // memory below 768MiB is identically mapped
@@ -234,71 +237,44 @@ void* p_ptr_to_v_ptr(phys_ptr_t p_ptr)
     }
 }
 
-phys_ptr_t l_ptr_to_p_ptr(const mm_list* mms, linr_ptr_t v_ptr)
-{
-    for (const mm& item : *mms) {
-        if (v_ptr < item.start || v_ptr >= item.start + item.pgs->size() * PAGE_SIZE)
-            continue;
-        size_t offset = (size_t)(v_ptr - item.start);
-        const page& p = item.pgs->at(offset / PAGE_SIZE);
-        return page_to_phys_addr(p.phys_page_id) + (offset % PAGE_SIZE);
-    }
-
-    // TODO: handle error
-    return 0xffffffff;
-}
-
-phys_ptr_t v_ptr_to_p_ptr(const void* v_ptr)
-{
-    if (v_ptr < KERNEL_IDENTICALLY_MAPPED_AREA_LIMIT) {
-        return (phys_ptr_t)v_ptr;
-    }
-    return l_ptr_to_p_ptr(kernel_mms, (linr_ptr_t)v_ptr);
-}
-
-static inline void mark_page(page_t n)
+inline void mark_page(page_t n)
 {
     bm_set(mem_bitmap, n);
 }
 
-static inline void free_page(page_t n)
+inline void free_page(page_t n)
 {
     bm_clear(mem_bitmap, n);
 }
 
-static void mark_addr_len(phys_ptr_t start, size_t n)
+constexpr void mark_addr_len(pptr_t start, size_t n)
 {
-    if (n == 0)
+    if (unlikely(n == 0))
         return;
-    page_t start_page = phys_addr_to_page(start);
-    page_t end_page = phys_addr_to_page(start + n + 4095);
+    page_t start_page = to_page(start);
+    page_t end_page = to_page(start + n + 4095);
     for (page_t i = start_page; i < end_page; ++i)
         mark_page(i);
 }
 
-static void free_addr_len(phys_ptr_t start, size_t n)
+constexpr void free_addr_len(pptr_t start, size_t n)
 {
-    if (n == 0)
+    if (unlikely(n == 0))
         return;
-    page_t start_page = phys_addr_to_page(start);
-    page_t end_page = phys_addr_to_page(start + n + 4095);
+    page_t start_page = to_page(start);
+    page_t end_page = to_page(start + n + 4095);
     for (page_t i = start_page; i < end_page; ++i)
         free_page(i);
 }
 
-static inline void mark_addr_range(phys_ptr_t start, phys_ptr_t end)
+inline constexpr void mark_addr_range(pptr_t start, pptr_t end)
 {
     mark_addr_len(start, end - start);
 }
 
-static inline void free_addr_range(phys_ptr_t start, phys_ptr_t end)
+inline constexpr void free_addr_range(pptr_t start, pptr_t end)
 {
     free_addr_len(start, end - start);
-}
-
-page_t alloc_raw_page(void)
-{
-    return alloc_n_raw_pages(1);
 }
 
 // @return the max count (but less than n) of the pages continuously available
@@ -334,31 +310,46 @@ struct page allocate_page(void)
         .phys_page_id = alloc_raw_page(),
         .pte = nullptr,
         .ref_count = types::kernel_ident_allocator_new<size_t>(0),
-        .attr {},
+        .attr { 0 },
     };
 }
 
-static inline void make_page_table(page_table_entry* pt)
-{
-    memset(pt, 0x00, sizeof(page_table_entry) * 1024);
-}
-
-page_directory_entry* alloc_pd(void)
+pd_t alloc_pd(void)
 {
     // TODO: alloc page in low mem and gen struct page for it
     page_t pd_page = alloc_raw_page();
-    page_directory_entry* pd = (page_directory_entry*)p_ptr_to_v_ptr(page_to_phys_addr(pd_page));
+    pd_t pd = to_pd(pd_page);
     memset(pd, 0x00, PAGE_SIZE);
     return pd;
 }
 
-page_table_entry* alloc_pt(void)
+pt_t alloc_pt(void)
 {
     // TODO: alloc page in low mem and gen struct page for it
     page_t pt_page = alloc_raw_page();
-    page_table_entry* pt = (page_table_entry*)p_ptr_to_v_ptr(page_to_phys_addr(pt_page));
-    make_page_table(pt);
+    pt_t pt = to_pt(pt_page);
+    memset(pt, 0x00, PAGE_SIZE);
     return pt;
+}
+
+void dealloc_pd(pd_t pd)
+{
+    for (pde_t* ent = (*pd) + 256; ent < (*pd) + 1024; ++ent) {
+        if (!ent->in.p)
+            continue;
+        dealloc_pt(to_pt(ent));
+    }
+    memset(pd, 0x00, sizeof(*pd));
+
+    page_t pg = to_page((pptr_t)pd);
+    free_page(pg);
+}
+void dealloc_pt(pt_t pt)
+{
+    memset(pt, 0x00, sizeof(*pt));
+
+    page_t pg = to_page((pptr_t)pt);
+    free_page(pg);
 }
 
 static inline void init_mem_layout(void)
@@ -367,7 +358,7 @@ static inline void init_mem_layout(void)
     mem_size += 64 * 1024 * mem_size_info.n_64k_blks;
 
     // mark kernel page directory
-    mark_addr_range(0x00000000, 0x00005000);
+    mark_addr_range(0x00001000, 0x00006000);
     // mark empty page
     mark_addr_range(EMPTY_PAGE_ADDR, EMPTY_PAGE_END);
     // mark EBDA and upper memory as allocated
@@ -394,29 +385,16 @@ static inline void init_mem_layout(void)
     }
 }
 
-mm* find_mm_area(mm_list* mms, linr_ptr_t l_ptr)
+mm* find_mm_area(mm_list* mms, void* l_ptr)
 {
     for (auto iter = mms->begin(); iter != mms->end(); ++iter)
-        if (l_ptr >= iter->start && l_ptr < iter->start + iter->pgs->size() * PAGE_SIZE)
+        if (l_ptr >= iter->start && l_ptr < mmend(iter.ptr()))
             return iter.ptr();
     return nullptr;
 }
 
-struct page* find_page_by_l_ptr(const mm_list* mms, linr_ptr_t l_ptr)
-{
-    for (const mm& item : *mms) {
-        if (l_ptr >= item.start && l_ptr < item.start + item.pgs->size() * PAGE_SIZE) {
-            size_t offset = (size_t)(l_ptr - item.start);
-            return &item.pgs->at(offset / PAGE_SIZE);
-        }
-    }
-
-    // TODO: error handling
-    return nullptr;
-}
-
 static inline void map_raw_page_to_pte(
-    page_table_entry* pte,
+    pte_t* pte,
     page_t page,
     int present,
     int rw,
@@ -439,27 +417,27 @@ int k_map(
     int priv,
     int cow)
 {
-    linr_ptr_t addr = (linr_ptr_t)mm_area->start + mm_area->pgs->size() * PAGE_SIZE;
-    page_directory_entry* pde = mm_area->pd + linr_addr_to_pd_i(addr);
+    void* addr = mmend(mm_area);
+    pde_t* pde = to_pde(mm_area->pd, addr);
     // page table not exist
-    if (!pde->in.p) {
+    if (unlikely(!pde->in.p)) {
         // allocate a page for the page table
         pde->in.p = 1;
         pde->in.rw = 1;
         pde->in.us = (priv == 0);
         pde->in.pt_page = alloc_raw_page();
 
-        make_page_table((page_table_entry*)p_ptr_to_v_ptr(page_to_phys_addr(pde->in.pt_page)));
+        memset(to_pt(pde), 0x00, PAGE_SIZE);
     }
 
     // map the page in the page table
-    page_table_entry* pte = (page_table_entry*)p_ptr_to_v_ptr(page_to_phys_addr(pde->in.pt_page));
-    pte += linr_addr_to_pt_i(addr);
+    pte_t* pte = to_pte(pde, addr);
     map_raw_page_to_pte(pte, page->phys_page_id, read, (write && !cow), priv);
 
-    if (cow && !page->attr.cow) {
-        page->attr.cow = 1;
+    if (unlikely(cow && !page->attr.in.cow)) {
+        page->attr.in.cow = 1;
         page->pte->in.rw = 0;
+        invalidate_tlb(addr);
     }
     ++*page->ref_count;
 
@@ -468,10 +446,29 @@ int k_map(
     return GB_OK;
 }
 
+int k_unmap(mm* mm_area)
+{
+    for (auto iter = mm_area->pgs->begin(); iter != mm_area->pgs->end(); ++iter) {
+        if (*iter->ref_count == 1) {
+            ki_free(iter->ref_count);
+            free_page(iter->phys_page_id);
+        } else {
+            --*iter->ref_count;
+        }
+
+        iter->phys_page_id = 0;
+        iter->attr.v = 0;
+        iter->pte->v = 0;
+    }
+    mm_area->attr.v = 0;
+    mm_area->start = 0;
+    return GB_OK;
+}
+
 bool check_addr_range_avail(const mm* mm_area, void* start, void* end)
 {
-    void* m_start = (void*)mm_area->start;
-    void* m_end = (void*)(mm_area->start + PAGE_SIZE * mm_area->pgs->size());
+    void* m_start = mm_area->start;
+    void* m_end = mmend(mm_area);
 
     if (start >= m_end || end <= m_start)
         return true;
@@ -488,7 +485,7 @@ static inline int _mmap(
     int write,
     int priv)
 {
-    if (!file->flags.in.file && !file->flags.in.special_node) {
+    if (unlikely(!file->flags.in.file && !file->flags.in.special_node)) {
         errno = EINVAL;
         return GB_FAILED;
     }
@@ -502,7 +499,15 @@ static inline int _mmap(
             return GB_FAILED;
         }
 
-    auto iter_mm = mms->emplace_back((linr_ptr_t)hint, mms_get_pd(&current_process->mms), write, priv);
+    auto iter_mm = mms->emplace_back(mm {
+        .start = hint,
+        .attr { .in {
+            .read = 1,
+            .write = static_cast<uint32_t>(write),
+            .system = static_cast<uint32_t>(priv),
+        } },
+        .pd = mms_get_pd(&current_process->mms),
+    });
     iter_mm->mapped_file = file;
     iter_mm->file_offset = offset;
 
@@ -529,9 +534,9 @@ int mmap(
 // to avoid dead loops
 static inline void _init_map_page_identically(page_t page)
 {
-    page_directory_entry* pde = KERNEL_PAGE_DIRECTORY_ADDR + page_to_pd_i(page);
+    pde_t* pde = *KERNEL_PAGE_DIRECTORY_ADDR + to_pdi(page);
     // page table not exist
-    if (!pde->in.p) {
+    if (unlikely(!pde->in.p)) {
         // allocate a page for the page table
         // set the P bit of the pde in advance
         pde->in.p = 1;
@@ -539,24 +544,22 @@ static inline void _init_map_page_identically(page_t page)
         pde->in.us = 0;
         pde->in.pt_page = alloc_raw_page();
         _init_map_page_identically(pde->in.pt_page);
-
-        make_page_table((page_table_entry*)p_ptr_to_v_ptr(page_to_phys_addr(pde->in.pt_page)));
+        memset(to_pt(pde), 0x00, PAGE_SIZE);
     }
 
     // map the page in the page table
-    page_table_entry* pt = (page_table_entry*)p_ptr_to_v_ptr(page_to_phys_addr(pde->in.pt_page));
-    pt += page_to_pt_i(page);
+    pte_t* pt = to_pte(pde, page);
     pt->v = 0x00000003;
     pt->in.page = page;
 }
 
 static inline void init_paging_map_low_mem_identically(void)
 {
-    for (phys_ptr_t addr = 0x01000000; addr < 0x30000000; addr += 0x1000) {
+    for (pptr_t addr = 0x01000000; addr < 0x30000000; addr += 0x1000) {
         // check if the address is valid and not mapped
-        if (bm_test(mem_bitmap, phys_addr_to_page(addr)))
+        if (bm_test(mem_bitmap, to_page(addr)))
             continue;
-        _init_map_page_identically(phys_addr_to_page(addr));
+        _init_map_page_identically(to_page(addr));
     }
 }
 
@@ -570,29 +573,35 @@ void init_mem(void)
     init_paging_map_low_mem_identically();
 
     kernel_mms = types::kernel_ident_allocator_new<mm_list>();
-    auto heap_mm = kernel_mms->emplace_back((linr_ptr_t)KERNEL_HEAP_START, KERNEL_PAGE_DIRECTORY_ADDR, 1, 1);
+    auto heap_mm = kernel_mms->emplace_back(mm {
+        .start = KERNEL_HEAP_START,
+        .attr { .in {
+            .read = 1,
+            .write = 1,
+            .system = 1,
+        } },
+        .pd = KERNEL_PAGE_DIRECTORY_ADDR,
+    });
 
     page heap_first_page {
         .phys_page_id = alloc_raw_page(),
         .pte = nullptr,
         .ref_count = types::kernel_ident_allocator_new<size_t>(0),
-        .attr = {
-            .cow = 0,
-        },
+        .attr = { 0 },
     };
 
     k_map(heap_mm.ptr(), &heap_first_page, 1, 1, 1, 0);
     memset(KERNEL_HEAP_START, 0x00, PAGE_SIZE);
     kernel_heap_allocator = types::kernel_ident_allocator_new<brk_memory_allocator>(KERNEL_HEAP_START,
-        (uint32_t)KERNEL_HEAP_LIMIT - (uint32_t)KERNEL_HEAP_START);
+        vptrdiff(KERNEL_HEAP_LIMIT, KERNEL_HEAP_START));
 
     // create empty_page struct
-    empty_page.attr.cow = 0;
-    empty_page.phys_page_id = phys_addr_to_page(EMPTY_PAGE_ADDR);
+    empty_page.attr.in.cow = 0;
+    empty_page.phys_page_id = to_page(EMPTY_PAGE_ADDR);
     empty_page.ref_count = types::kernel_ident_allocator_new<size_t>(1);
-    empty_page.pte = ((page_table_entry*)p_ptr_to_v_ptr(
-                         page_to_phys_addr(KERNEL_PAGE_DIRECTORY_ADDR->in.pt_page)))
-        + page_to_pt_i(empty_page.phys_page_id);
+    empty_page.pte = to_pte(*KERNEL_PAGE_DIRECTORY_ADDR, empty_page.phys_page_id);
+    empty_page.pte->in.rw = 0;
+    invalidate_tlb(0x00000000);
 
     // TODO: improve the algorithm SO FREAKING SLOW
     // while (kernel_mm_head->len < 256 * 1024 * 1024 / PAGE_SIZE) {
@@ -617,32 +626,4 @@ void create_segment_descriptor(
     sd->limit_high = ((limit & 0x000f0000) >> 16);
     sd->access = access;
     sd->flags = flags;
-}
-
-mm::mm(linr_ptr_t start, page_directory_entry* pd, bool write, bool system)
-    : start(start)
-    , attr({
-          .read { 1 },
-          .write { write },
-          .system { system },
-      })
-    , pd(pd)
-    , pgs(types::kernel_ident_allocator_new<page_arr>())
-    , mapped_file(nullptr)
-    , file_offset(0)
-{
-}
-
-mm::mm(const mm& val)
-    : start(val.start)
-    , attr({
-          .read { val.attr.read },
-          .write { val.attr.write },
-          .system { val.attr.system },
-      })
-    , pd(val.pd)
-    , pgs(val.pgs)
-    , mapped_file(nullptr)
-    , file_offset(0)
-{
 }

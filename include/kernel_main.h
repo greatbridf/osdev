@@ -1,10 +1,13 @@
 #pragma once
 #include <types/types.h>
 
-static inline void __break_point(void)
-{
-    asm volatile("xchgw %bx, %bx");
-}
+#define __crash() asm volatile("ud2")
+
+#ifdef __BOCHS_SYSTEM__
+#define __break_point() asm volatile("xchgw %bx, %bx")
+#else
+#define __break_point() __crash()
+#endif
 
 #define MAKE_BREAK_POINT() __break_point()
 

@@ -1,8 +1,11 @@
 #include <asm/port_io.h>
 #include <kernel/interrupt.h>
+#include <kernel/mem.h>
+#include <kernel/mm.hpp>
 #include <kernel/process.hpp>
 #include <kernel/syscall.hpp>
 #include <kernel/tty.h>
+#include <types/allocator.hpp>
 #include <types/elf.hpp>
 
 syscall_handler syscall_handlers[8];
@@ -78,9 +81,59 @@ void _syscall_exec(interrupt_stack* data)
     types::elf::elf32_load(exec, data, current_process->attr.system);
 }
 
+// @param exit_code
 void _syscall_exit(interrupt_stack* data)
 {
-    _syscall_crash(data);
+    uint32_t exit_code = data->s_regs.edi;
+
+    // TODO: terminating a thread only
+    if (current_thread->owner->thds.size() != 1) {
+        _syscall_crash(data);
+    }
+
+    // terminating a whole process:
+
+    // clear threads
+    remove_from_ready_list(current_thread);
+    current_process->thds.clear();
+
+    // TODO: write back mmap'ped files and close them
+
+    // unmap all memory areas
+    auto& mms = current_process->mms;
+    // skip kernel heap area
+    for (auto iter = ++mms.begin(); iter != mms.end();) {
+        k_unmap(iter.ptr());
+        types::kernel_ident_allocator_delete(iter->pgs);
+
+        iter = mms.erase(iter);
+    }
+    pd_t old_pd = mms.begin()->pd;
+    current_process->mms.clear();
+
+    // make child processes orphans (children of init)
+    auto children = idx_child_processes->find(current_process->pid);
+    if (children) {
+        for (auto iter = children->value.begin(); iter != children->value.end(); ++iter)
+            findproc(*iter)->ppid = 1;
+        idx_child_processes->remove(children);
+    }
+
+    // TODO: notify parent process and init
+
+    // switch to new process and continue
+    auto iter_next_thd = query_next_thread();
+    auto* next_thd = *iter_next_thd;
+
+    process_context_load(data, next_thd->owner);
+    thread_context_load(data, next_thd);
+
+    next_task(iter_next_thd);
+
+    // destroy page directory
+    dealloc_pd(old_pd);
+
+    context_jump(next_thd->attr.system, data);
 }
 
 void init_syscall(void)

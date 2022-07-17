@@ -355,7 +355,7 @@ protected:
     }
 
 protected:
-    value_type* m_arr;
+    T* m_arr;
     size_type m_capacity;
     size_type m_size;
 };

@@ -79,14 +79,6 @@ inline void next_task(types::list<thread*>::iterator_type target)
 extern "C" void NORETURN to_kernel(interrupt_stack* ret_stack);
 extern "C" void NORETURN to_user(interrupt_stack* ret_stack);
 
-inline void NORETURN context_jump(bool system, interrupt_stack* intrpt_stack)
-{
-    if (system)
-        to_kernel(intrpt_stack);
-    else
-        to_user(intrpt_stack);
-}
-
 process* findproc(pid_t pid);
 
 void k_new_thread(void (*func)(void*), void* data);

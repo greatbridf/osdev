@@ -92,16 +92,12 @@ void _syscall_exit(interrupt_stack* data)
     // clear threads
     remove_from_ready_list(current_thread);
     current_process->thds.clear();
+    current_thread = nullptr;
 
     // TODO: write back mmap'ped files and close them
 
-    // unmap all memory areas
-    auto& mms = current_process->mms;
-
-    unmap_user_space_memory(mms);
-
-    pd_t old_pd = mms.begin()->pd;
-    current_process->mms.clear();
+    // unmap all memory areas except kernel heap
+    unmap_user_space_memory(current_process->mms);
 
     // make child processes orphans (children of init)
     auto children = idx_child_processes->find(current_process->pid);
@@ -111,21 +107,12 @@ void _syscall_exit(interrupt_stack* data)
         idx_child_processes->remove(children);
     }
 
+    current_process = nullptr;
+
     // TODO: notify parent process and init
 
     // switch to new process and continue
-    auto iter_next_thd = query_next_thread();
-    auto* next_thd = *iter_next_thd;
-
-    process_context_load(data, next_thd->owner);
-    thread_context_load(data, next_thd);
-
-    next_task(iter_next_thd);
-
-    // destroy page directory
-    dealloc_pd(old_pd);
-
-    context_jump(next_thd->attr.system, data);
+    do_scheduling(data);
 }
 
 void init_syscall(void)

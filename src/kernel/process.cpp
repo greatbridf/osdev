@@ -21,7 +21,7 @@
 
 static bool is_scheduler_ready;
 static types::list<process>* processes;
-static types::hash_map<pid_t, process*, types::linux_hasher<pid_t>>* idx_processes;
+static types::hash_map<pid_t, types::list<process>::iterator_type, types::linux_hasher<pid_t>>* idx_processes;
 static types::list<thread*>* ready_thds;
 static pid_t max_pid;
 static void (*volatile kthreadd_new_thd_func)(void*);
@@ -247,7 +247,7 @@ void process_context_load(interrupt_stack*, process* proc)
 void add_to_process_list(process&& proc)
 {
     auto iter = processes->emplace_back(types::move(proc));
-    idx_processes->insert(iter->pid, iter.ptr());
+    idx_processes->insert(iter->pid, iter);
 
     auto children = idx_child_processes->find(iter->ppid);
     if (!children) {
@@ -282,7 +282,7 @@ types::list<thread*>::iterator_type query_next_thread(void)
 
 process* findproc(pid_t pid)
 {
-    return idx_processes->find(pid)->value;
+    return idx_processes->find(pid)->value.ptr();
 }
 
 void do_scheduling(interrupt_stack* intrpt_data)
@@ -300,13 +300,19 @@ void do_scheduling(interrupt_stack* intrpt_data)
 
     process* proc = thd->owner;
     if (current_process != proc) {
-        process_context_save(intrpt_data, current_process);
+        if (current_process)
+            process_context_save(intrpt_data, current_process);
         process_context_load(intrpt_data, proc);
     }
 
-    thread_context_save(intrpt_data, current_thread);
+    if (current_thread)
+        thread_context_save(intrpt_data, current_thread);
     thread_context_load(intrpt_data, thd);
 
     next_task(iter_thd);
-    context_jump(thd->attr.system, intrpt_data);
+
+    if (thd->attr.system)
+        to_kernel(intrpt_data);
+    else
+        to_user(intrpt_data);
 }

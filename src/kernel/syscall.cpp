@@ -72,11 +72,7 @@ void _syscall_exec(interrupt_stack* data)
     const char** argv = reinterpret_cast<const char**>(data->s_regs.esi);
     (void)argv;
 
-    // skip kernel heap
-    for (auto iter = ++current_process->mms.begin(); iter != current_process->mms.end();) {
-        k_unmap(iter.ptr());
-        iter = current_process->mms.erase(iter);
-    }
+    unmap_user_space_memory(current_process->mms);
 
     types::elf::elf32_load(exec, data, current_process->attr.system);
 }
@@ -101,13 +97,9 @@ void _syscall_exit(interrupt_stack* data)
 
     // unmap all memory areas
     auto& mms = current_process->mms;
-    // skip kernel heap area
-    for (auto iter = ++mms.begin(); iter != mms.end();) {
-        k_unmap(iter.ptr());
-        types::kernel_ident_allocator_delete(iter->pgs);
 
-        iter = mms.erase(iter);
-    }
+    unmap_user_space_memory(mms);
+
     pd_t old_pd = mms.begin()->pd;
     current_process->mms.clear();
 

@@ -101,6 +101,16 @@ public:
     }
 };
 
+inline constexpr void unmap_user_space_memory(mm_list& mms)
+{
+    // skip kernel heap
+    for (auto iter = ++mms.begin(); iter != mms.end();) {
+        k_unmap(iter.ptr());
+        types::kernel_ident_allocator_delete(iter->pgs);
+        iter = mms.erase(iter);
+    }
+}
+
 // in mem.cpp
 extern mm_list* kernel_mms;
 extern page empty_page;

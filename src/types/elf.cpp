@@ -1,3 +1,4 @@
+#include <kernel/syscall.hpp>
 #include <types/elf.hpp>
 
 int types::elf::elf32_load(const char* exec, interrupt_stack* intrpt_stack, bool system)
@@ -51,6 +52,11 @@ int types::elf::elf32_load(const char* exec, interrupt_stack* intrpt_stack, bool
 
         ++phents;
     }
+
+    // map stack area
+    auto ret = mmap((void*)types::elf::ELF_STACK_TOP, types::elf::ELF_STACK_SIZE, fs::vfs_open("/dev/null")->ind, 0, 1, 0);
+    if (ret != GB_OK)
+        syscall(0x03);
 
     intrpt_stack->v_eip = (void*)hdr.entry;
     memset((void*)&intrpt_stack->s_regs, 0x00, sizeof(regs_32));

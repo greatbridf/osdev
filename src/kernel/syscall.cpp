@@ -69,6 +69,12 @@ void _syscall_exec(interrupt_stack* data)
     const char** argv = reinterpret_cast<const char**>(data->s_regs.esi);
     (void)argv;
 
+    // skip kernel heap
+    for (auto iter = ++current_process->mms.begin(); iter != current_process->mms.end();) {
+        k_unmap(iter.ptr());
+        iter = current_process->mms.erase(iter);
+    }
+
     types::elf::elf32_load(exec, data, current_process->attr.system);
 }
 

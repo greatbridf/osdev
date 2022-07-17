@@ -136,10 +136,6 @@ void NORETURN _kernel_init(void)
     interrupt_stack intrpt_stack {};
     intrpt_stack.eflags = 0x200; // STI
     types::elf::elf32_load("/mnt/INIT.ELF", &intrpt_stack, 0);
-    // map stack area
-    ret = mmap((void*)types::elf::ELF_STACK_TOP, types::elf::ELF_STACK_SIZE, fs::vfs_open("/dev/null")->ind, 0, 1, 0);
-    if (unlikely(ret != GB_OK))
-        syscall(0x03);
 
     asm_cli();
     current_process->attr.system = 0;

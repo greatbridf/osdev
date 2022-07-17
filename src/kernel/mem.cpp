@@ -437,6 +437,7 @@ int k_map(
     if (unlikely(cow && !page->attr.in.cow)) {
         page->attr.in.cow = 1;
         page->pte->in.rw = 0;
+        page->pte->in.a = 0;
         invalidate_tlb(addr);
     }
     ++*page->ref_count;

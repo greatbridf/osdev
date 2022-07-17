@@ -1,5 +1,6 @@
 #include "kernel_main.h"
 
+#include <types/types.h>
 #include <asm/boot.h>
 #include <asm/port_io.h>
 #include <asm/sys.h>
@@ -9,7 +10,6 @@
 #include <kernel/hw/timer.h>
 #include <kernel/interrupt.h>
 #include <kernel/mem.h>
-#include <kernel/process.hpp>
 #include <kernel/stdio.h>
 #include <kernel/task.h>
 #include <kernel/tty.h>
@@ -144,6 +144,7 @@ void init_bss_section(void)
 static struct tty early_console;
 
 extern void init_vfs();
+extern void NORETURN init_scheduler();
 
 void NORETURN kernel_main(void)
 {

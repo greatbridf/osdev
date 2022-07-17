@@ -1,12 +1,11 @@
 #pragma once
 
 #include <kernel/interrupt.h>
-#include <kernel/task.h>
-#include <types/types.h>
-
-#ifdef __cplusplus
 #include <kernel/mm.hpp>
+#include <kernel/task.h>
+#include <types/hash_map.hpp>
 #include <types/list.hpp>
+#include <types/types.h>
 
 typedef size_t pid_t;
 
@@ -65,9 +64,3 @@ void add_to_process_list(process&& proc);
 void add_to_ready_list(thread* thd);
 
 void k_new_thread(void (*func)(void*), void* data);
-
-#else
-
-void NORETURN init_scheduler();
-
-#endif

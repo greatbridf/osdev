@@ -26,7 +26,7 @@ static types::list<thread*>* ready_thds;
 static pid_t max_pid;
 static void (*volatile kthreadd_new_thd_func)(void*);
 static void* volatile kthreadd_new_thd_data;
-static uint32_t volatile kthreadd_lock = 0;
+static types::mutex kthreadd_mtx;
 
 process::process(process&& val)
     : mms(types::move(val.mms))
@@ -161,26 +161,24 @@ void kernel_threadd_main(void)
 
     for (;;) {
         if (kthreadd_new_thd_func) {
-            spin_lock(&kthreadd_lock);
-            int return_value = 0;
+            void (*func)(void*) = nullptr;
+            void* data = nullptr;
 
-            void (*func)(void*) = kthreadd_new_thd_func;
-            void* data = kthreadd_new_thd_data;
-            kthreadd_new_thd_func = nullptr;
-            kthreadd_new_thd_data = nullptr;
-
-            spin_unlock(&kthreadd_lock);
+            {
+                types::lock_guard lck(kthreadd_mtx);
+                func = kthreadd_new_thd_func;
+                data = kthreadd_new_thd_data;
+            }
 
             // syscall_fork
-            return_value = syscall(0x00);
+            int ret = syscall(0x00);
 
-            if (return_value == 0) {
+            if (ret == 0) {
                 // child process
                 func(data);
                 // the function shouldn't return here
                 syscall(0x03);
             }
-            spin_unlock(&kthreadd_lock);
         }
         // TODO: sleep here to wait for new_kernel_thread event
         asm_hlt();
@@ -189,10 +187,9 @@ void kernel_threadd_main(void)
 
 void k_new_thread(void (*func)(void*), void* data)
 {
-    spin_lock(&kthreadd_lock);
+    types::lock_guard lck(kthreadd_mtx);
     kthreadd_new_thd_func = func;
     kthreadd_new_thd_data = data;
-    spin_unlock(&kthreadd_lock);
 }
 
 void NORETURN init_scheduler()

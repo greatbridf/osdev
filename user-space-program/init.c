@@ -1,21 +1,24 @@
 #include "basic-lib.h"
 
-int main(void)
+int main(int argc, char** argv)
 {
+    for (int i = 0; i < argc; ++i)
+        write(argv[i]);
+
     const char* data = "Hello World from user space init\n";
-    syscall(0x01, (uint32_t)data, 0);
-    int ret = syscall(0x00, 0, 0);
+    write(data);
+    int ret = fork();
     if (ret == 0) {
-        const char* child = "child\n";
-        // write
-        syscall(0x01, (uint32_t)child, 0);
-        // exit
-        syscall(0x05, 255, 0);
+        write("child\n");
+        exit(255);
     } else {
-        const char* parent = "parent\n";
-        // write
-        syscall(0x01, (uint32_t)parent, 0);
-        for (;;) ;
+        write("parent\n");
+    }
+
+    for (;;) {
+        int code = wait();
+        (void)code;
+        code += 1000;
     }
     return 0;
 }

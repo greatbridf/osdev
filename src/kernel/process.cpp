@@ -135,7 +135,8 @@ void NORETURN _kernel_init(void)
 
     interrupt_stack intrpt_stack {};
     intrpt_stack.eflags = 0x200; // STI
-    types::elf::elf32_load("/mnt/INIT.ELF", &intrpt_stack, 0);
+    const char* argv[] = { "/mnt/INIT.ELF", nullptr };
+    types::elf::elf32_load("/mnt/INIT.ELF", argv, &intrpt_stack, 0);
 
     asm_cli();
     current_process->attr.system = 0;

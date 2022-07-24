@@ -1,7 +1,16 @@
+#include <kernel/stdio.h>
 #include <kernel/syscall.hpp>
 #include <types/elf.hpp>
+#include <types/stdint.h>
 
-int types::elf::elf32_load(const char* exec, interrupt_stack* intrpt_stack, bool system)
+template <typename T>
+constexpr void _user_push(uint32_t& sp, T d)
+{
+    sp -= sizeof(T);
+    *(T*)sp = d;
+}
+
+int types::elf::elf32_load(const char* exec, const char** argv, interrupt_stack* intrpt_stack, bool system)
 {
     auto* ent_exec = fs::vfs_open(exec);
     if (!ent_exec) {
@@ -60,7 +69,27 @@ int types::elf::elf32_load(const char* exec, interrupt_stack* intrpt_stack, bool
 
     intrpt_stack->v_eip = (void*)hdr.entry;
     memset((void*)&intrpt_stack->s_regs, 0x00, sizeof(regs_32));
-    intrpt_stack->s_regs.esp = types::elf::ELF_STACK_BOTTOM;
-    intrpt_stack->s_regs.ebp = types::elf::ELF_STACK_BOTTOM;
+
+    auto* sp = &intrpt_stack->s_regs.esp;
+    *sp = types::elf::ELF_STACK_BOTTOM;
+
+    types::vector<const char*> arr;
+    for (const char** ptr = argv; *ptr != nullptr; ++ptr) {
+        auto len = strlen(*ptr);
+        *sp -= (len + 1);
+        *sp = ((*sp >> 4) << 4);
+        memcpy((char*)*sp, *ptr, len + 1);
+        arr.push_back((const char*)*sp);
+    }
+
+    *sp -= sizeof(const char*) * arr.size();
+    *sp = ((*sp >> 4) << 4);
+    memcpy((char*)*sp, arr.data(), sizeof(const char*) * arr.size());
+
+    _user_push(*sp, 0);
+    _user_push(*sp, 0);
+    _user_push(*sp, *sp + 8);
+    _user_push(*sp, arr.size());
+
     return GB_OK;
 }

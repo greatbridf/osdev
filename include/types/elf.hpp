@@ -109,6 +109,7 @@ struct PACKED elf32_program_header_entry {
     uint32_t align;
 };
 
-int elf32_load(const char* exec, interrupt_stack* intrpt_stack, bool system);
+// TODO: environment variables
+int elf32_load(const char* exec, const char** argv, interrupt_stack* intrpt_stack, bool system);
 
 } // namespace types::elf

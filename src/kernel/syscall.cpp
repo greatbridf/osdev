@@ -67,14 +67,11 @@ void _syscall_crash(interrupt_stack*)
 void _syscall_exec(interrupt_stack* data)
 {
     const char* exec = reinterpret_cast<const char*>(data->s_regs.edi);
-
-    // TODO: load argv
     const char** argv = reinterpret_cast<const char**>(data->s_regs.esi);
-    (void)argv;
 
     unmap_user_space_memory(current_process->mms);
 
-    types::elf::elf32_load(exec, data, current_process->attr.system);
+    types::elf::elf32_load(exec, argv, data, current_process->attr.system);
 }
 
 // @param exit_code

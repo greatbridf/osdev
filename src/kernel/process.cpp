@@ -21,7 +21,7 @@
 
 static bool is_scheduler_ready;
 static types::list<process>* processes;
-static types::hash_map<pid_t, types::list<process>::iterator_type, types::linux_hasher<pid_t>>* idx_processes;
+static typename types::hash_map<pid_t, types::list<process>::iterator_type, types::linux_hasher<pid_t>>* idx_processes;
 static types::list<thread*>* ready_thds;
 static pid_t max_pid;
 static void (*volatile kthreadd_new_thd_func)(void*);
@@ -147,7 +147,18 @@ void NORETURN _kernel_init(void)
 void kernel_threadd_main(void)
 {
     tty_print(console, "kernel thread daemon started\n");
-    k_new_thread(hw::init_ata, (void*)_kernel_init);
+
+    // fork
+    int ret = syscall(0x00);
+
+    // pid 1
+    if (ret) {
+        hw::init_ata();
+        _kernel_init();
+        // noreturn
+        syscall(0x03);
+    }
+
     for (;;) {
         if (kthreadd_new_thd_func) {
             spin_lock(&kthreadd_lock);
@@ -163,7 +174,7 @@ void kernel_threadd_main(void)
             // syscall_fork
             return_value = syscall(0x00);
 
-            if (return_value != 0) {
+            if (return_value == 0) {
                 // child process
                 func(data);
                 // the function shouldn't return here

@@ -296,12 +296,18 @@ page_t alloc_n_raw_pages(size_t n)
             first += (max + 1);
         } else {
             for (page_t i = first; i < first + n; ++i)
-                bm_set(mem_bitmap, i);
+                mark_page(i);
             return first;
         }
     }
     MAKE_BREAK_POINT();
     return 0xffffffff;
+}
+
+void free_n_raw_pages(page_t start_pg, size_t n)
+{
+    while (n--)
+        free_page(start_pg++);
 }
 
 struct page allocate_page(void)

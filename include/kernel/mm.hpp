@@ -207,6 +207,7 @@ inline constexpr void* mmend(const mm* mm_area)
 // allocate n raw page(s)
 // @return the id of the first page allocated
 page_t alloc_n_raw_pages(size_t n);
+void free_n_raw_pages(page_t start_pg, size_t n);
 
 // allocate a raw page
 inline page_t alloc_raw_page(void)

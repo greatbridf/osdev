@@ -159,7 +159,7 @@ public:
         return operator=(vector(arr));
     }
 
-    ~vector() noexcept
+    constexpr ~vector() noexcept
     {
         resize(0);
     }

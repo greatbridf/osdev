@@ -99,12 +99,12 @@ public:
 
 namespace types {
 template <typename T>
-T&& move(T& val)
+constexpr T&& move(T& val)
 {
     return static_cast<T&&>(val);
 }
 template <typename T>
-T&& forward(typename traits::remove_reference<T>::type& val)
+constexpr T&& forward(typename traits::remove_reference<T>::type& val)
 {
     return static_cast<T&&>(val);
 }

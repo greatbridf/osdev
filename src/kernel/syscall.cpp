@@ -69,7 +69,7 @@ void _syscall_exec(interrupt_stack* data)
     const char* exec = reinterpret_cast<const char*>(data->s_regs.edi);
     const char** argv = reinterpret_cast<const char**>(data->s_regs.esi);
 
-    unmap_user_space_memory(current_process->mms);
+    current_process->mms.clear_user();
 
     types::elf::elf32_load(exec, argv, data, current_process->attr.system);
 }
@@ -93,8 +93,8 @@ void _syscall_exit(interrupt_stack* data)
 
     // TODO: write back mmap'ped files and close them
 
-    // unmap all memory areas except kernel heap
-    unmap_user_space_memory(current_process->mms);
+    // unmap all user memory areas
+    current_process->mms.clear_user();
 
     // make child processes orphans (children of init)
     auto children = idx_child_processes->find(current_process->pid);

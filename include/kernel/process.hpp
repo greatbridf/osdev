@@ -32,7 +32,7 @@ struct thread {
 
 class process {
 public:
-    mm_list mms;
+    kernel::mm_list mms;
     types::list<thread> thds;
     // TODO: allocate a kernel stack for EVERY THREAD
     void* k_esp;
@@ -43,7 +43,7 @@ public:
 public:
     process(process&& val);
     process(const process&) = delete;
-    process(const process& proc, const thread& main_thread);
+    process(process& proc, const thread& main_thread);
 
     // only used for system initialization
     process(void* start_eip);

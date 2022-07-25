@@ -47,7 +47,7 @@ process::process(process&& val)
     val.attr.system = 0;
 }
 
-process::process(const process& val, const thread& main_thd)
+process::process(process& val, const thread& main_thd)
     : mms(*kernel_mms)
     , attr { .system = val.attr.system }
     , pid { ++max_pid }
@@ -70,14 +70,12 @@ process::process(const process& val, const thread& main_thd)
         iter_thd->regs.esp -= orig_k_esp;
         iter_thd->regs.esp += (uint32_t)k_esp;
     } else {
-        pd_t pd = alloc_pd();
-        memcpy(pd, mms_get_pd(kernel_mms), PAGE_SIZE);
+        for (auto& area : val.mms) {
+            if (area.is_ident())
+                continue;
 
-        mms.begin()->pd = pd;
-
-        // skip kernel heap since it's already copied above
-        for (auto iter_src = ++val.mms.cbegin(); iter_src != val.mms.cend(); ++iter_src)
-            mm::mirror_mm_area(&mms, iter_src.ptr(), pd);
+            mms.mirror_area(area);
+        }
     }
 }
 
@@ -123,15 +121,6 @@ void NORETURN _kernel_init(void)
     int ret = fs::fs_root->ind->fs->mount(fs::vfs_open("/mnt"), _new_fs);
     if (unlikely(ret != GB_OK))
         syscall(0x03);
-
-    pd_t new_pd = alloc_pd();
-    memcpy(new_pd, mms_get_pd(kernel_mms), PAGE_SIZE);
-
-    asm_cli();
-
-    current_process->mms.begin()->pd = new_pd;
-
-    asm_sti();
 
     interrupt_stack intrpt_stack {};
     intrpt_stack.eflags = 0x200; // STI
@@ -212,7 +201,7 @@ void NORETURN init_scheduler()
     tss.ss0 = KERNEL_DATA_SEGMENT;
     tss.esp0 = (uint32_t)init->k_esp;
 
-    asm_switch_pd(mms_get_pd(&current_process->mms));
+    asm_switch_pd(current_process->mms.m_pd);
 
     is_scheduler_ready = true;
 
@@ -249,7 +238,7 @@ void process_context_load(interrupt_stack*, process* proc)
 {
     if (!proc->attr.system)
         tss.esp0 = (uint32_t)proc->k_esp;
-    asm_switch_pd(mms_get_pd(&proc->mms));
+    asm_switch_pd(proc->mms.m_pd);
     current_process = proc;
 }
 

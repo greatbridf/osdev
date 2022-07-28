@@ -387,26 +387,12 @@ static inline void init_mem_layout(void)
 }
 
 using kernel::mm_list;
-mm_list::mm_list(pd_t pd)
-    : m_pd(pd)
-{
-}
-
 mm_list::mm_list(const mm_list& v)
     : m_areas(v.m_areas)
 {
     pd_t pd = alloc_pd();
     memcpy(pd, v.m_pd, PAGE_SIZE);
     m_pd = pd;
-}
-
-mm_list::~mm_list()
-{
-    if (!m_pd)
-        return;
-
-    this->clear_user();
-    dealloc_pd(m_pd);
 }
 
 inline void map_raw_page_to_pte(

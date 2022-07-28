@@ -49,6 +49,12 @@ using page_arr = types::vector<page, types::kernel_ident_allocator>;
 page_t alloc_n_raw_pages(size_t n);
 void free_n_raw_pages(page_t start_pg, size_t n);
 
+pd_t alloc_pd(void);
+pt_t alloc_pt(void);
+
+void dealloc_pd(pd_t pd);
+void dealloc_pt(pt_t pt);
+
 // forward declaration
 namespace kernel {
 class mm_list;
@@ -107,7 +113,10 @@ public:
     pd_t m_pd;
 
 public:
-    explicit mm_list(pd_t pd);
+    explicit constexpr mm_list(pd_t pd)
+        : m_pd(pd)
+    {
+    }
     mm_list(const mm_list& v);
     constexpr mm_list(mm_list&& v)
         : m_areas(::types::move(v.m_areas))
@@ -115,7 +124,14 @@ public:
     {
         v.m_pd = nullptr;
     }
-    ~mm_list();
+    constexpr ~mm_list()
+    {
+        if (!m_pd)
+            return;
+
+        this->clear_user();
+        dealloc_pd(m_pd);
+    }
 
     constexpr iterator_type begin(void)
     {
@@ -313,9 +329,3 @@ inline page_t alloc_raw_page(void)
 
 // allocate a struct page together with the raw page
 struct page allocate_page(void);
-
-pd_t alloc_pd(void);
-pt_t alloc_pt(void);
-
-void dealloc_pd(pd_t pd);
-void dealloc_pt(pt_t pt);

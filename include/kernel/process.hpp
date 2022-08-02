@@ -1,5 +1,6 @@
 #pragma once
 
+#include <kernel/event/evtqueue.hpp>
 #include <kernel/interrupt.h>
 #include <kernel/mm.hpp>
 #include <kernel/task.h>
@@ -15,6 +16,7 @@ struct thread;
 
 struct process_attr {
     uint16_t system : 1;
+    uint16_t zombie : 1 = 0;
 };
 
 struct thread_attr {
@@ -73,7 +75,6 @@ public:
     {
         if (kstack)
             free_n_raw_pages(to_page(kstack), 2);
-        memset(this, 0x00, sizeof(thread));
     }
 };
 
@@ -81,6 +82,7 @@ class process {
 public:
     mutable kernel::mm_list mms;
     types::list<thread> thds;
+    kernel::evtqueue wait_lst;
     process_attr attr;
     pid_t pid;
     pid_t ppid;
@@ -93,6 +95,8 @@ public:
     // only used for system initialization
     explicit process(void);
     explicit process(void (*func_in_kernel_space)(void), pid_t ppid);
+
+    ~process();
 
 private:
     static inline pid_t max_pid;
@@ -118,6 +122,7 @@ extern "C" void NORETURN init_scheduler();
 void schedule(void);
 
 pid_t add_to_process_list(process&& proc);
+void remove_from_process_list(pid_t pid);
 
 void add_to_ready_list(thread* thd);
 void remove_from_ready_list(thread* thd);

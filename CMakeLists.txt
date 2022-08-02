@@ -72,6 +72,7 @@ set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
                         include/asm/sys.h
                         include/fs/fat.hpp
                         include/kernel/event/event.h
+                        include/kernel/event/evtqueue.hpp
                         include/kernel/errno.h
                         include/kernel/tty.h
                         include/kernel/interrupt.h

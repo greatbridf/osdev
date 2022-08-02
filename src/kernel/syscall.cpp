@@ -1,5 +1,6 @@
 #include <asm/port_io.h>
 #include <asm/sys.h>
+#include <kernel/errno.h>
 #include <kernel/interrupt.h>
 #include <kernel/mem.h>
 #include <kernel/mm.hpp>
@@ -122,6 +123,8 @@ void _syscall_exec(interrupt_stack* data)
 void _syscall_exit(interrupt_stack* data)
 {
     uint32_t exit_code = data->s_regs.edi;
+    pid_t pid = current_process->pid;
+    pid_t ppid = current_process->ppid;
 
     // TODO: terminating a thread only
     if (current_thread->owner->thds.size() != 1) {
@@ -140,20 +143,72 @@ void _syscall_exit(interrupt_stack* data)
     current_process->mms.clear_user();
 
     // make child processes orphans (children of init)
-    auto children = idx_child_processes->find(current_process->pid);
+    auto children = idx_child_processes->find(pid);
     if (children) {
-        for (auto iter = children->value.begin(); iter != children->value.end(); ++iter)
+        auto init_children = idx_child_processes->find(1);
+        for (auto iter = children->value.begin(); iter != children->value.end(); ++iter) {
+            init_children->value.push_back(*iter);
             findproc(*iter)->ppid = 1;
+        }
         idx_child_processes->remove(children);
     }
 
-    // TODO: notify parent process and init
+    current_process->attr.zombie = 1;
+
+    // notify parent process and init
+    auto* proc = findproc(pid);
+    auto* parent = findproc(ppid);
+    auto* init = findproc(1);
+    while (!proc->wait_lst.empty()) {
+        init->wait_lst.push(proc->wait_lst.front());
+    }
+    parent->wait_lst.push({ current_thread, (void*)pid, (void*)exit_code, nullptr });
 
     // switch to new process and continue
     schedule();
 
     // we should not return to here
-    MAKE_BREAK_POINT();
+    assert(false);
+}
+
+// @param address of exit code: int*
+// @return pid of the exited process
+void _syscall_wait(interrupt_stack* data)
+{
+    auto* arg1 = reinterpret_cast<int*>(data->s_regs.edi);
+
+    if (arg1 < (int*)0x40000000) {
+        SYSCALL_SET_RETURN_VAL(-1, EINVAL);
+        return;
+    }
+
+    auto& waitlst = current_process->wait_lst;
+    if (waitlst.empty() && !idx_child_processes->find(current_process->pid)) {
+        SYSCALL_SET_RETURN_VAL(-1, ECHILD);
+        return;
+    }
+
+    while (waitlst.empty()) {
+        current_thread->attr.ready = 0;
+        current_thread->attr.wait = 1;
+        waitlst.subscribe(current_thread);
+
+        schedule();
+
+        if (!waitlst.empty()) {
+            waitlst.unsubscribe(current_thread);
+            break;
+        }
+    }
+
+    auto evt = waitlst.front();
+
+    pid_t pid = (pid_t)evt.data1;
+    // TODO: copy_to_user check privilege
+    *arg1 = (int)evt.data2;
+
+    remove_from_process_list(pid);
+    SYSCALL_SET_RETURN_VAL(pid, 0);
 }
 
 void init_syscall(void)
@@ -164,6 +219,6 @@ void init_syscall(void)
     syscall_handlers[3] = _syscall_crash;
     syscall_handlers[4] = _syscall_exec;
     syscall_handlers[5] = _syscall_exit;
-    syscall_handlers[6] = _syscall_not_impl;
+    syscall_handlers[6] = _syscall_wait;
     syscall_handlers[7] = _syscall_not_impl;
 }

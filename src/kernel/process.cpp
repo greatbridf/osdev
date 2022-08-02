@@ -16,6 +16,7 @@
 #include <types/hash_map.hpp>
 #include <types/list.hpp>
 #include <types/lock.hpp>
+#include <types/size.h>
 #include <types/status.h>
 #include <types/stdint.h>
 #include <types/types.h>
@@ -50,6 +51,7 @@ struct no_irq_guard {
 process::process(process&& val)
     : mms(types::move(val.mms))
     , thds(types::move(val.thds))
+    , wait_lst(types::move(val.wait_lst))
     , pid(val.pid)
     , ppid(val.ppid)
 {
@@ -83,7 +85,6 @@ process::process(const process& val, const thread& main_thd)
 
 process::process(void)
     : mms(*kernel_mms)
-    , thds {}
     , attr { .system = 1 }
     , pid { process::alloc_pid() }
     , ppid { 1 }
@@ -95,7 +96,6 @@ process::process(void)
 
 process::process(void (*func)(void), pid_t _ppid)
     : mms(*kernel_mms)
-    , thds {}
     , attr { .system = 1 }
     , pid { process::alloc_pid() }
     , ppid { _ppid }
@@ -118,6 +118,12 @@ process::process(void (*func)(void), pid_t _ppid)
     push_stack(esp, 0);
     // eflags
     push_stack(esp, 0x200);
+}
+
+process::~process()
+{
+    for (auto iter = thds.begin(); iter != thds.end(); ++iter)
+        remove_from_ready_list(iter.ptr());
 }
 
 inline void NORETURN _noreturn_crash(void)
@@ -243,6 +249,20 @@ pid_t add_to_process_list(process&& proc)
     children->value.push_back(iter->pid);
 
     return iter->pid;
+}
+
+void remove_from_process_list(pid_t pid)
+{
+    auto proc_iter = idx_processes->find(pid);
+    auto ppid = proc_iter->value->ppid;
+
+    auto& parent_children = idx_child_processes->find(ppid)->value;
+
+    auto i = parent_children.find(pid);
+    parent_children.erase(i);
+
+    processes->erase(proc_iter->value);
+    idx_processes->remove(proc_iter);
 }
 
 void add_to_ready_list(thread* thd)

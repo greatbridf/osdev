@@ -177,11 +177,12 @@ public:
     constexpr void clear_user()
     {
         for (auto iter = this->begin(); iter != this->end();) {
-            if (iter->is_ident())
+            if (iter->is_ident()) {
                 ++iter;
+                continue;
+            }
 
-            // TODO:
-            // k_unmap(iter.ptr());
+            this->unmap(iter);
             iter = m_areas.erase(iter);
         }
     }

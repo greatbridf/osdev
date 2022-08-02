@@ -201,3 +201,12 @@ void NORETURN kernel_main(void)
     printkf("switching execution to the scheduler...\n");
     init_scheduler(&tss);
 }
+
+void NORETURN __stack_chk_fail(void)
+{
+    tty_print(console, "***** stack smashing detected! *****\nhalting\n");
+    for (;;) {
+        asm_cli();
+        asm_hlt();
+    }
+}

@@ -13,6 +13,9 @@ SECTIONS
     {
         *(.text)
         *(.text*)
+
+        __stack_chk_guard = .;
+        LONG(0x11451419);
     } > MEM
 
     /DISCARD/ :

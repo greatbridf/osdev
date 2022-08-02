@@ -4,7 +4,7 @@ LD=$(CROSS_COMPILE)ld
 OBJCOPY=$(CROSS_COMPILE)objcopy
 XXD=xxd
 
-CFLAGS=-nostdinc -nostdlib -static -g -m32 -W -Wall -Wextra -Werror
+CFLAGS=-nostdinc -nostdlib -static -g -m32 -W -Wall -Wextra -Werror -mstack-protector-guard=global
 
 OBJS=hello-world.out interrupt-test.out stack-test.out init.out
 SYMS=init.sym

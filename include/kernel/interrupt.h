@@ -27,8 +27,8 @@ struct PACKED interrupt_stack {
     void* v_eip;
     uint32_t cs;
     uint32_t eflags;
-    const uint32_t esp;
-    const uint32_t ss;
+    uint32_t esp;
+    uint32_t ss;
 };
 
 // present: When set, the page fault was caused by a page-protection violation.
@@ -56,15 +56,15 @@ struct page_fault_error_code {
     SET_IDT_ENTRY(0x20 + (N), (addr_irq##N), (SELECTOR), KERNEL_INTERRUPT_GATE_TYPE);
 
 #define SET_IDT_ENTRY_FN(N, FUNC_NAME, SELECTOR, TYPE) \
-    extern void FUNC_NAME();                     \
-    ptr_t addr_##FUNC_NAME = (ptr_t)FUNC_NAME;   \
+    extern void FUNC_NAME();                           \
+    ptr_t addr_##FUNC_NAME = (ptr_t)FUNC_NAME;         \
     SET_IDT_ENTRY((N), (addr_##FUNC_NAME), (SELECTOR), (TYPE));
 
-#define SET_IDT_ENTRY(N, ADDR, SELECTOR, TYPE)      \
-    IDT[(N)].offset_low = (ADDR)&0x0000ffff;  \
-    IDT[(N)].selector = (SELECTOR);           \
-    IDT[(N)].zero = 0;                        \
-    IDT[(N)].type_attr = (TYPE); \
+#define SET_IDT_ENTRY(N, ADDR, SELECTOR, TYPE) \
+    IDT[(N)].offset_low = (ADDR)&0x0000ffff;   \
+    IDT[(N)].selector = (SELECTOR);            \
+    IDT[(N)].zero = 0;                         \
+    IDT[(N)].type_attr = (TYPE);               \
     IDT[(N)].offset_high = ((ADDR)&0xffff0000) >> 16
 
 struct IDT_entry {

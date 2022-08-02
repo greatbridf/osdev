@@ -7,26 +7,45 @@
 #include <kernel/mm.hpp>
 #include <kernel/process.hpp>
 #include <kernel/stdio.h>
-#include <kernel/syscall.hpp>
 #include <kernel/tty.h>
 #include <kernel/vfs.hpp>
 #include <kernel_main.h>
 #include <types/allocator.hpp>
+#include <types/assert.h>
 #include <types/elf.hpp>
 #include <types/hash_map.hpp>
 #include <types/list.hpp>
 #include <types/lock.hpp>
 #include <types/status.h>
+#include <types/stdint.h>
 #include <types/types.h>
 
 static bool is_scheduler_ready;
 static types::list<process>* processes;
 static typename types::hash_map<pid_t, types::list<process>::iterator_type, types::linux_hasher<pid_t>>* idx_processes;
 static types::list<thread*>* ready_thds;
-static pid_t max_pid;
 static void (*volatile kthreadd_new_thd_func)(void*);
 static void* volatile kthreadd_new_thd_data;
 static types::mutex kthreadd_mtx;
+
+namespace kernel {
+
+struct no_irq_guard {
+    explicit no_irq_guard()
+    {
+        asm_cli();
+    }
+
+    no_irq_guard(const no_irq_guard&) = delete;
+    no_irq_guard& operator=(const no_irq_guard&) = delete;
+
+    ~no_irq_guard()
+    {
+        asm_sti();
+    }
+};
+
+} // namespace kernel
 
 process::process(process&& val)
     : mms(types::move(val.mms))
@@ -38,115 +57,81 @@ process::process(process&& val)
         current_process = this;
 
     attr.system = val.attr.system;
-    k_esp = val.k_esp;
 
     for (auto& item : thds)
         item.owner = this;
 
-    val.k_esp = nullptr;
     val.attr.system = 0;
 }
 
-process::process(process& val, const thread& main_thd)
+process::process(const process& val, const thread& main_thd)
     : mms(*kernel_mms)
     , attr { .system = val.attr.system }
-    , pid { ++max_pid }
+    , pid { process::alloc_pid() }
     , ppid { val.pid }
 {
     auto iter_thd = thds.emplace_back(main_thd);
     iter_thd->owner = this;
 
-    // TODO: allocate low mem
-    k_esp = (void*)to_pp(alloc_n_raw_pages(2));
-    memcpy(k_esp, (char*)main_thd.owner->k_esp - THREAD_KERNEL_STACK_SIZE, THREAD_KERNEL_STACK_SIZE);
-    k_esp = (char*)k_esp + THREAD_KERNEL_STACK_SIZE;
+    for (auto& area : val.mms) {
+        if (area.is_ident())
+            continue;
 
-    if (val.attr.system) {
-        auto orig_k_esp = (uint32_t)main_thd.owner->k_esp;
-
-        iter_thd->regs.ebp -= orig_k_esp;
-        iter_thd->regs.ebp += (uint32_t)k_esp;
-
-        iter_thd->regs.esp -= orig_k_esp;
-        iter_thd->regs.esp += (uint32_t)k_esp;
-    } else {
-        for (auto& area : val.mms) {
-            if (area.is_ident())
-                continue;
-
-            mms.mirror_area(area);
-        }
+        mms.mirror_area(area);
     }
 }
 
-process::process(void* start_eip)
+process::process(void)
     : mms(*kernel_mms)
     , thds {}
     , attr { .system = 1 }
-    , pid { ++max_pid }
+    , pid { process::alloc_pid() }
     , ppid { 1 }
 {
-    // TODO: allocate low mem
-    k_esp = (void*)to_pp(alloc_n_raw_pages(2));
-    memset((char*)k_esp, 0x00, THREAD_KERNEL_STACK_SIZE);
-    k_esp = (char*)k_esp + THREAD_KERNEL_STACK_SIZE;
+    auto thd = thds.emplace_back(this, true);
 
-    auto thd = thds.emplace_back(thread {
-        .eip = start_eip,
-        .owner = this,
-        .regs {
-            .edi {},
-            .esi {},
-            .ebp = reinterpret_cast<uint32_t>(k_esp),
-            .esp = reinterpret_cast<uint32_t>(k_esp),
-            .ebx {},
-            .edx {},
-            .ecx {},
-            .eax {},
-        },
-        .eflags {},
-        .attr {
-            .system = 1,
-            .ready = 1,
-            .wait = 0,
-        },
-    });
-    ready_thds->push_back(thd.ptr());
+    add_to_ready_list(thd.ptr());
 }
 
-void NORETURN _kernel_init(void)
+process::process(void (*func)(void), pid_t _ppid)
+    : mms(*kernel_mms)
+    , thds {}
+    , attr { .system = 1 }
+    , pid { process::alloc_pid() }
+    , ppid { _ppid }
 {
-    // TODO: parse kernel parameters
-    auto* _new_fs = fs::register_fs(types::kernel_allocator_new<fs::fat::fat32>(fs::vfs_open("/dev/hda1")->ind));
-    int ret = fs::fs_root->ind->fs->mount(fs::vfs_open("/mnt"), _new_fs);
-    if (unlikely(ret != GB_OK))
-        syscall(0x03);
+    auto thd = thds.emplace_back(this, true);
 
-    interrupt_stack intrpt_stack {};
-    intrpt_stack.eflags = 0x200; // STI
-    const char* argv[] = { "/mnt/INIT.ELF", nullptr };
-    types::elf::elf32_load("/mnt/INIT.ELF", argv, &intrpt_stack, 0);
+    add_to_ready_list(thd.ptr());
 
-    asm_cli();
-    current_process->attr.system = 0;
-    current_thread->attr.system = 0;
-    to_user(&intrpt_stack);
+    auto* esp = &thd->esp;
+
+    // return(start) address
+    push_stack(esp, (uint32_t)func);
+    // ebx
+    push_stack(esp, 0);
+    // edi
+    push_stack(esp, 0);
+    // esi
+    push_stack(esp, 0);
+    // ebp
+    push_stack(esp, 0);
+    // eflags
+    push_stack(esp, 0x200);
 }
+
+inline void NORETURN _noreturn_crash(void)
+{
+    for (;;)
+        assert(false);
+}
+
+extern "C" void NORETURN go_kernel(uint32_t* kstack, void (*k_main)(void));
+extern "C" void NORETURN go_user(void* eip, uint32_t* esp);
 
 void kernel_threadd_main(void)
 {
     tty_print(console, "kernel thread daemon started\n");
-
-    // fork
-    int ret = syscall(0x00);
-
-    // pid 1
-    if (ret) {
-        hw::init_ata();
-        _kernel_init();
-        // noreturn
-        syscall(0x03);
-    }
 
     for (;;) {
         if (kthreadd_new_thd_func) {
@@ -157,21 +142,59 @@ void kernel_threadd_main(void)
                 types::lock_guard lck(kthreadd_mtx);
                 func = kthreadd_new_thd_func;
                 data = kthreadd_new_thd_data;
+
+                kthreadd_new_thd_func = nullptr;
+                kthreadd_new_thd_data = nullptr;
             }
+
+            // TODO
+            (void)func, (void)data;
+            assert(false);
 
             // syscall_fork
-            int ret = syscall(0x00);
+            // int ret = syscall(0x00);
 
-            if (ret == 0) {
-                // child process
-                func(data);
-                // the function shouldn't return here
-                syscall(0x03);
-            }
+            // if (ret == 0) {
+            //     // child process
+            //     func(data);
+            //     // the function shouldn't return here
+            //     assert(false);
+            // }
         }
         // TODO: sleep here to wait for new_kernel_thread event
         asm_hlt();
     }
+}
+
+void NORETURN _kernel_init(void)
+{
+    {
+        kernel::no_irq_guard grd;
+
+        add_to_process_list(process { kernel_threadd_main, 1 });
+    }
+    hw::init_ata();
+
+    // TODO: parse kernel parameters
+    auto* _new_fs = fs::register_fs(types::kernel_allocator_new<fs::fat::fat32>(fs::vfs_open("/dev/hda1")->ind));
+    int ret = fs::fs_root->ind->fs->mount(fs::vfs_open("/mnt"), _new_fs);
+    assert_likely(ret == GB_OK);
+
+    current_process->attr.system = 0;
+    current_thread->attr.system = 0;
+
+    const char* argv[] = { "/mnt/INIT.ELF", nullptr };
+
+    types::elf::elf32_load_data d;
+    d.exec = "/mnt/INIT.ELF";
+    d.argv = argv;
+    d.system = false;
+
+    assert(types::elf::elf32_load(&d) == GB_OK);
+
+    is_scheduler_ready = true;
+
+    go_user(d.eip, d.sp);
 }
 
 void k_new_thread(void (*func)(void*), void* data)
@@ -188,8 +211,8 @@ void NORETURN init_scheduler()
     idx_processes = types::kernel_allocator_pnew(idx_processes);
     idx_child_processes = types::kernel_allocator_pnew(idx_child_processes);
 
-    add_to_process_list(process((void*)kernel_threadd_main));
-    auto init = findproc(1);
+    auto pid = add_to_process_list(process {});
+    auto init = findproc(pid);
 
     // we need interrupts enabled for cow mapping so now we disable it
     // in case timer interrupt mess things up
@@ -199,50 +222,14 @@ void NORETURN init_scheduler()
     current_thread = init->thds.begin().ptr();
 
     tss.ss0 = KERNEL_DATA_SEGMENT;
-    tss.esp0 = (uint32_t)init->k_esp;
+    tss.esp0 = current_thread->kstack;
 
     asm_switch_pd(current_process->mms.m_pd);
 
-    is_scheduler_ready = true;
-
-    interrupt_stack intrpt_stack {};
-    process_context_load(&intrpt_stack, current_process);
-    thread_context_load(&intrpt_stack, current_thread);
-    to_kernel(&intrpt_stack);
+    go_kernel(current_thread->esp, _kernel_init);
 }
 
-void thread_context_save(interrupt_stack* int_stack, thread* thd)
-{
-    thd->eflags = int_stack->eflags;
-    thd->eip = int_stack->v_eip;
-    memcpy(&thd->regs, &int_stack->s_regs, sizeof(regs_32));
-    if (thd->attr.system)
-        thd->regs.esp = int_stack->s_regs.esp + 0x0c;
-    else
-        thd->regs.esp = int_stack->esp;
-}
-
-void thread_context_load(interrupt_stack* int_stack, thread* thd)
-{
-    int_stack->eflags = (thd->eflags | 0x200); // OR $STI
-    int_stack->v_eip = thd->eip;
-    memcpy(&int_stack->s_regs, &thd->regs, sizeof(regs_32));
-    current_thread = thd;
-}
-
-void process_context_save(interrupt_stack*, process*)
-{
-}
-
-void process_context_load(interrupt_stack*, process* proc)
-{
-    if (!proc->attr.system)
-        tss.esp0 = (uint32_t)proc->k_esp;
-    asm_switch_pd(proc->mms.m_pd);
-    current_process = proc;
-}
-
-void add_to_process_list(process&& proc)
+pid_t add_to_process_list(process&& proc)
 {
     auto iter = processes->emplace_back(types::move(proc));
     idx_processes->insert(iter->pid, iter);
@@ -254,6 +241,8 @@ void add_to_process_list(process&& proc)
     }
 
     children->value.push_back(iter->pid);
+
+    return iter->pid;
 }
 
 void add_to_ready_list(thread* thd)
@@ -283,7 +272,8 @@ process* findproc(pid_t pid)
     return idx_processes->find(pid)->value.ptr();
 }
 
-void do_scheduling(interrupt_stack* intrpt_data)
+extern "C" void asm_ctx_switch(uint32_t** curr_esp, uint32_t* next_esp);
+void schedule()
 {
     if (unlikely(!is_scheduler_ready))
         return;
@@ -298,19 +288,15 @@ void do_scheduling(interrupt_stack* intrpt_data)
 
     process* proc = thd->owner;
     if (current_process != proc) {
-        if (current_process)
-            process_context_save(intrpt_data, current_process);
-        process_context_load(intrpt_data, proc);
+        asm_switch_pd(proc->mms.m_pd);
+        current_process = proc;
     }
 
-    if (current_thread)
-        thread_context_save(intrpt_data, current_thread);
-    thread_context_load(intrpt_data, thd);
+    auto* curr_thd = current_thread;
 
+    current_thread = thd;
+    tss.esp0 = current_thread->kstack;
     next_task(iter_thd);
 
-    if (thd->attr.system)
-        to_kernel(intrpt_data);
-    else
-        to_user(intrpt_data);
+    asm_ctx_switch(&curr_thd->esp, thd->esp);
 }

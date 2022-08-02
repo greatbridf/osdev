@@ -5,6 +5,7 @@
 #include <kernel/task.h>
 #include <types/hash_map.hpp>
 #include <types/list.hpp>
+#include <types/stdint.h>
 #include <types/types.h>
 
 typedef size_t pid_t;
@@ -23,19 +24,63 @@ struct thread_attr {
 };
 
 struct thread {
-    void* eip;
+private:
+    inline void alloc_kstack(void)
+    {
+        // TODO: alloc low mem
+        kstack = to_pp(alloc_n_raw_pages(2));
+        kstack += THREAD_KERNEL_STACK_SIZE;
+        esp = reinterpret_cast<uint32_t*>(kstack);
+    }
+
+public:
+    uint32_t* esp;
+    pptr_t kstack;
     process* owner;
-    regs_32 regs;
-    uint32_t eflags;
     thread_attr attr;
+
+    explicit inline thread(process* _owner, bool system)
+        : owner { _owner }
+        , attr {
+            .system = system,
+            .ready = 1,
+            .wait = 0,
+        }
+    {
+        alloc_kstack();
+    }
+
+    constexpr thread(thread&& val)
+        : esp { val.esp }
+        , kstack { val.kstack }
+        , owner { val.owner }
+        , attr { val.attr }
+    {
+        val.attr = {};
+        val.esp = 0;
+        val.kstack = 0;
+        val.owner = nullptr;
+    }
+
+    inline thread(const thread& val)
+        : owner { val.owner }
+        , attr { val.attr }
+    {
+        alloc_kstack();
+    }
+
+    constexpr ~thread()
+    {
+        if (kstack)
+            free_n_raw_pages(to_page(kstack), 2);
+        memset(this, 0x00, sizeof(thread));
+    }
 };
 
 class process {
 public:
-    kernel::mm_list mms;
+    mutable kernel::mm_list mms;
     types::list<thread> thds;
-    // TODO: allocate a kernel stack for EVERY THREAD
-    void* k_esp;
     process_attr attr;
     pid_t pid;
     pid_t ppid;
@@ -43,25 +88,36 @@ public:
 public:
     process(process&& val);
     process(const process&) = delete;
-    process(process& proc, const thread& main_thread);
+    process(const process& proc, const thread& main_thread);
 
     // only used for system initialization
-    process(void* start_eip);
+    explicit process(void);
+    explicit process(void (*func_in_kernel_space)(void), pid_t ppid);
+
+private:
+    static inline pid_t max_pid;
+
+    static inline pid_t alloc_pid(void)
+    {
+        return ++max_pid;
+    }
 };
+
+constexpr uint32_t push_stack(uint32_t** stack, uint32_t val)
+{
+    --*stack;
+    **stack = val;
+    return val;
+}
 
 inline process* volatile current_process;
 inline thread* volatile current_thread;
 inline typename types::hash_map<pid_t, types::list<pid_t>, types::linux_hasher<pid_t>>* idx_child_processes;
 
 extern "C" void NORETURN init_scheduler();
-void do_scheduling(interrupt_stack* intrpt_data);
+void schedule(void);
 
-void thread_context_save(interrupt_stack* int_stack, thread* thd);
-void thread_context_load(interrupt_stack* int_stack, thread* thd);
-void process_context_save(interrupt_stack*, process*);
-void process_context_load(interrupt_stack*, process* proc);
-
-void add_to_process_list(process&& proc);
+pid_t add_to_process_list(process&& proc);
 
 void add_to_ready_list(thread* thd);
 void remove_from_ready_list(thread* thd);
@@ -75,9 +131,6 @@ inline void next_task(types::list<thread*>::iterator_type target)
     if (ptr->attr.ready)
         add_to_ready_list(ptr);
 }
-
-extern "C" void NORETURN to_kernel(interrupt_stack* ret_stack);
-extern "C" void NORETURN to_user(interrupt_stack* ret_stack);
 
 process* findproc(pid_t pid);
 

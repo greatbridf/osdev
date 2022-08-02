@@ -219,11 +219,11 @@ extern "C" void int14_handler(int14_data* d)
     }
 }
 
-extern "C" void irq0_handler(struct interrupt_stack* d)
+extern "C" void irq0_handler(interrupt_stack*)
 {
     inc_tick();
     asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
-    do_scheduling(d);
+    schedule();
 }
 // keyboard interrupt
 extern "C" void irq1_handler(void)

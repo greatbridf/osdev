@@ -1,8 +1,9 @@
 .code32
-.section .text.user-space
 
-.globl user_hello_world
-user_hello_world:
+.text
+
+.globl main
+main:
 	movl $0xcbcbcbcb, %eax
 	movl $0xacacacac, %ebx
 	jmp .

@@ -3,111 +3,35 @@
 #include <kernel/mem.h>
 #include <kernel/vfs.hpp>
 #include <types/allocator.hpp>
+#include <types/cplusplus.hpp>
 #include <types/list.hpp>
+#include <types/size.h>
+#include <types/status.h>
 #include <types/types.h>
 #include <types/vector.hpp>
 
-constexpr size_t THREAD_KERNEL_STACK_SIZE = 2 * PAGE_SIZE;
+#define invalidate_tlb(addr) asm("invlpg (%0)" \
+                                 :             \
+                                 : "r"(addr)   \
+                                 : "memory")
 
-struct page_attr {
-    uint32_t cow : 1;
-};
+constexpr size_t THREAD_KERNEL_STACK_SIZE = 2 * PAGE_SIZE;
 
 struct page {
     page_t phys_page_id;
+    pte_t* pte;
     size_t* ref_count;
-    struct page_attr attr;
+    union {
+        uint32_t v;
+        struct {
+            uint32_t cow : 1;
+        } in;
+    } attr;
 };
 
-using page_arr = types::vector<page, types::kernel_ident_allocator>;
-
-struct mm_attr {
-    uint32_t read : 1;
-    uint32_t write : 1;
-    uint32_t system : 1;
-};
-
-class mm {
-public:
-    linr_ptr_t start;
-    struct mm_attr attr;
-    page_directory_entry* pd;
-    page_arr* pgs;
-    fs::inode* mapped_file;
-    size_t file_offset;
-
-public:
-    mm(const mm& val);
-    mm(linr_ptr_t start, page_directory_entry* pd, bool write, bool system);
-};
-
-using mm_list = types::list<mm, types::kernel_ident_allocator>;
-
-// in mem.cpp
-extern mm_list* kernel_mms;
-extern page empty_page;
-
-// translate physical address to virtual(mapped) address
-void* p_ptr_to_v_ptr(phys_ptr_t p_ptr);
-
-// translate linear address to physical address
-phys_ptr_t l_ptr_to_p_ptr(const mm_list* mms, linr_ptr_t v_ptr);
-
-// translate virtual(mapped) address to physical address
-phys_ptr_t v_ptr_to_p_ptr(void* v_ptr);
-
-// @return the pointer to the mm_area containing l_ptr
-//         nullptr if not
-mm* find_mm_area(mm_list* mms, linr_ptr_t l_ptr);
-
-// find the corresponding page the l_ptr pointing to
-// @return the pointer to the struct if found, NULL if not found
-struct page* find_page_by_l_ptr(const mm_list* mms, linr_ptr_t l_ptr);
-
-static inline page_t phys_addr_to_page(phys_ptr_t ptr)
-{
-    return ptr >> 12;
-}
-
-static inline pd_i_t page_to_pd_i(page_t p)
-{
-    return p >> 10;
-}
-
-static inline pt_i_t page_to_pt_i(page_t p)
-{
-    return p & (1024 - 1);
-}
-
-static inline phys_ptr_t page_to_phys_addr(page_t p)
-{
-    return p << 12;
-}
-
-static inline pd_i_t linr_addr_to_pd_i(linr_ptr_t ptr)
-{
-    return page_to_pd_i(phys_addr_to_page(ptr));
-}
-
-static inline pd_i_t linr_addr_to_pt_i(linr_ptr_t ptr)
-{
-    return page_to_pt_i(phys_addr_to_page(ptr));
-}
-
-static inline page_directory_entry* mms_get_pd(const mm_list* mms)
-{
-    return mms->begin()->pd;
-}
-
-// map the page to the end of the mm_area in pd
-int k_map(
-    mm* mm_area,
-    const struct page* page,
-    int read,
-    int write,
-    int priv,
-    int cow);
-
+// private memory mapping
+// changes won't be neither written back to file nor shared between processes
+// TODO: shared mapping
 // @param len is aligned to 4kb boundary automatically, exceeding part will
 // be filled with '0's and not written back to the file
 int mmap(
@@ -118,15 +42,291 @@ int mmap(
     int write,
     int priv);
 
-// allocate a raw page
-page_t alloc_raw_page(void);
+using page_arr = types::vector<page, types::kernel_ident_allocator>;
 
 // allocate n raw page(s)
 // @return the id of the first page allocated
 page_t alloc_n_raw_pages(size_t n);
+void free_n_raw_pages(page_t start_pg, size_t n);
+
+pd_t alloc_pd(void);
+pt_t alloc_pt(void);
+
+void dealloc_pd(pd_t pd);
+void dealloc_pt(pt_t pt);
+
+// forward declaration
+namespace kernel {
+class mm_list;
+} // namespace kernel
+
+struct mm {
+public:
+    void* start;
+    union {
+        uint32_t v;
+        struct {
+            uint32_t read : 1;
+            uint32_t write : 1;
+            uint32_t system : 1;
+        } in;
+    } attr;
+    kernel::mm_list* owner;
+    page_arr* pgs = nullptr;
+    fs::inode* mapped_file = nullptr;
+    size_t file_offset = 0;
+
+public:
+    constexpr void* end(void) const
+    {
+        return (char*)this->start + this->pgs->size() * PAGE_SIZE;
+    }
+
+    inline bool is_ident(void) const
+    {
+        return this->end() <= (void*)0x40000000U;
+    }
+
+    constexpr bool is_avail(void* start, void* end) const
+    {
+        void* m_start = this->start;
+        void* m_end = this->end();
+
+        return (start >= m_end || end <= m_start);
+    }
+
+    int append_page(page* pg, bool present, bool write, bool priv, bool cow);
+};
+
+namespace kernel {
+
+class mm_list {
+public:
+    using list_type = ::types::list<mm, types::kernel_ident_allocator>;
+    using iterator_type = list_type::iterator_type;
+    using const_iterator_type = list_type::const_iterator_type;
+
+private:
+    list_type m_areas;
+
+public:
+    pd_t m_pd;
+
+public:
+    explicit constexpr mm_list(pd_t pd)
+        : m_pd(pd)
+    {
+    }
+    mm_list(const mm_list& v);
+    constexpr mm_list(mm_list&& v)
+        : m_areas(::types::move(v.m_areas))
+        , m_pd(v.m_pd)
+    {
+        v.m_pd = nullptr;
+    }
+    constexpr ~mm_list()
+    {
+        if (!m_pd)
+            return;
+
+        this->clear_user();
+        dealloc_pd(m_pd);
+    }
+
+    constexpr iterator_type begin(void)
+    {
+        return m_areas.begin();
+    }
+    constexpr iterator_type end(void)
+    {
+        return m_areas.end();
+    }
+    constexpr const_iterator_type begin(void) const
+    {
+        return m_areas.begin();
+    }
+    constexpr const_iterator_type end(void) const
+    {
+        return m_areas.end();
+    }
+    constexpr const_iterator_type cbegin(void) const
+    {
+        return m_areas.cbegin();
+    }
+    constexpr const_iterator_type cend(void) const
+    {
+        return m_areas.cend();
+    }
+
+    constexpr iterator_type addarea(void* start, bool w, bool system)
+    {
+        return m_areas.emplace_back(mm {
+            .start = start,
+            .attr {
+                .in {
+                    .read = 1,
+                    .write = w,
+                    .system = system,
+                },
+            },
+            .owner = this,
+            .pgs = ::types::kernel_ident_allocator_new<page_arr>(),
+        });
+    }
+
+    constexpr void clear_user()
+    {
+        for (auto iter = this->begin(); iter != this->end();) {
+            if (iter->is_ident()) {
+                ++iter;
+                continue;
+            }
+
+            this->unmap(iter);
+            iter = m_areas.erase(iter);
+        }
+    }
+
+    constexpr int mirror_area(mm& src)
+    {
+        auto area = this->addarea(
+            src.start, src.attr.in.write, src.attr.in.system);
+        if (src.mapped_file) {
+            area->mapped_file = src.mapped_file;
+            area->file_offset = src.file_offset;
+        }
+
+        for (auto& pg : *src.pgs) {
+            if (area->append_page(&pg,
+                    true,
+                    src.attr.in.write,
+                    src.attr.in.system,
+                    true)
+                != GB_OK) {
+                return GB_FAILED;
+            }
+        }
+
+        return GB_OK;
+    }
+
+    constexpr void unmap(iterator_type area)
+    {
+        for (auto& pg : *area->pgs) {
+            if (*pg.ref_count == 1) {
+                ki_free(pg.ref_count);
+                free_n_raw_pages(pg.phys_page_id, 1);
+            } else {
+                --*pg.ref_count;
+            }
+
+            pg.phys_page_id = 0;
+            pg.attr.v = 0;
+            pg.pte->v = 0;
+        }
+        area->attr.v = 0;
+        area->start = 0;
+    }
+
+    constexpr iterator_type find(void* lp)
+    {
+        for (auto iter = this->begin(); iter != this->end(); ++iter)
+            if (lp >= iter->start && lp < iter->end())
+                return iter;
+
+        return this->end();
+    }
+};
+
+} // namespace kernel
+
+// global variables
+inline kernel::mm_list* kernel_mms;
+inline page empty_page;
+// --------------------------------
+
+// translate physical address to virtual(mapped) address
+void* ptovp(pptr_t p_ptr);
+
+inline constexpr size_t vptrdiff(void* p1, void* p2)
+{
+    return (uint8_t*)p1 - (uint8_t*)p2;
+}
+inline constexpr page* lto_page(mm* mm_area, void* l_ptr)
+{
+    size_t offset = vptrdiff(l_ptr, mm_area->start);
+    return &mm_area->pgs->at(offset / PAGE_SIZE);
+}
+inline constexpr page_t to_page(pptr_t ptr)
+{
+    return ptr >> 12;
+}
+inline constexpr size_t to_pdi(page_t pg)
+{
+    return pg >> 10;
+}
+inline constexpr size_t to_pti(page_t pg)
+{
+    return pg & (1024 - 1);
+}
+inline constexpr pptr_t to_pp(page_t p)
+{
+    return p << 12;
+}
+inline constexpr size_t lto_pdi(pptr_t ptr)
+{
+    return to_pdi(to_page(ptr));
+}
+inline constexpr size_t lto_pti(pptr_t ptr)
+{
+    return to_pti(to_page(ptr));
+}
+inline constexpr pte_t* to_pte(pt_t pt, page_t pg)
+{
+    return *pt + to_pti(pg);
+}
+inline void* to_vp(page_t pg)
+{
+    return ptovp(to_pp(pg));
+}
+inline pd_t to_pd(page_t pg)
+{
+    return reinterpret_cast<pd_t>(to_vp(pg));
+}
+inline pt_t to_pt(page_t pg)
+{
+    return reinterpret_cast<pt_t>(to_vp(pg));
+}
+inline pt_t to_pt(pde_t* pde)
+{
+    return to_pt(pde->in.pt_page);
+}
+inline pde_t* to_pde(pd_t pd, void* addr)
+{
+    return *pd + lto_pdi((pptr_t)addr);
+}
+inline pte_t* to_pte(pt_t pt, void* addr)
+{
+    return *pt + lto_pti((pptr_t)addr);
+}
+inline pte_t* to_pte(pde_t* pde, void* addr)
+{
+    return to_pte(to_pt(pde), addr);
+}
+inline pte_t* to_pte(pd_t pd, void* addr)
+{
+    return to_pte(to_pde(pd, addr), addr);
+}
+inline pte_t* to_pte(pde_t* pde, page_t pg)
+{
+    return to_pte(to_pt(pde), pg);
+}
+
+// allocate a raw page
+inline page_t alloc_raw_page(void)
+{
+    return alloc_n_raw_pages(1);
+}
 
 // allocate a struct page together with the raw page
 struct page allocate_page(void);
-
-page_directory_entry* alloc_pd(void);
-page_table_entry* alloc_pt(void);

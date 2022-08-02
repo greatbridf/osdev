@@ -14,28 +14,29 @@ namespace types {
 constexpr uint32_t GOLDEN_RATIO_32 = 0x61C88647;
 // constexpr uint64_t GOLDEN_RATIO_64 = 0x61C8864680B583EBull;
 
-static constexpr uint32_t _hash32(uint32_t val)
+using hash_t = size_t;
+
+static inline constexpr hash_t _hash32(uint32_t val)
 {
     return val * GOLDEN_RATIO_32;
 }
 
-static constexpr uint32_t hash32(uint32_t val, uint32_t bits)
+static inline constexpr hash_t hash32(uint32_t val, uint32_t bits)
 {
     // higher bits are more random
     return _hash32(val) >> (32 - bits);
 }
 
-template <typename T>
+template <convertible_to<uint32_t> T>
 struct linux_hasher {
-    static constexpr uint32_t hash(const T& val, uint32_t bits)
+    static inline constexpr hash_t hash(T val, uint32_t bits)
     {
-        return hash32(val, bits);
+        return hash32(static_cast<uint32_t>(val), bits);
     }
 };
-
 template <typename T>
 struct linux_hasher<T*> {
-    static constexpr uint32_t hash(T* val, uint32_t bits)
+    static inline constexpr hash_t hash(T* val, uint32_t bits)
     {
         return hash32(reinterpret_cast<uint32_t>(val), bits);
     }
@@ -43,15 +44,15 @@ struct linux_hasher<T*> {
 
 template <typename T>
 struct string_hasher {
-    static constexpr uint32_t hash(T, uint32_t)
+    static inline constexpr hash_t hash(T, uint32_t)
     {
         static_assert(types::template_false_type<T>::value, "string hasher does not support this type");
-        return (uint32_t)0;
+        return (hash_t)0;
     }
 };
 template <>
 struct string_hasher<const char*> {
-    static constexpr uint32_t hash(const char* str, uint32_t bits)
+    static inline constexpr hash_t hash(const char* str, uint32_t bits)
     {
         constexpr uint32_t seed = 131;
         uint32_t hash = 0;
@@ -64,7 +65,7 @@ struct string_hasher<const char*> {
 };
 template <template <typename> class Allocator>
 struct string_hasher<const types::string<Allocator>&> {
-    static inline constexpr uint32_t hash(const types::string<Allocator>& str, uint32_t bits)
+    static inline constexpr hash_t hash(const types::string<Allocator>& str, uint32_t bits)
     {
         return string_hasher<const char*>::hash(str.c_str(), bits);
     }
@@ -77,17 +78,15 @@ struct string_hasher<types::string<Allocator>&&> {
     }
 };
 
-template <class Hasher, typename Value>
-struct hasher_traits {
-    using hash_t = size_t;
-    using length_t = size_t;
-    static constexpr hash_t hash(Value val, length_t bits)
+template <typename _Hasher, typename Value>
+concept Hasher = requires(Value&& val, uint32_t bits)
+{
     {
-        return Hasher::hash(val, bits);
-    }
+        _Hasher::hash(val, bits)
+        } -> convertible_to<size_t>;
 };
 
-template <typename Key, typename Value, typename Hasher, template <typename _T> class Allocator = types::kernel_allocator>
+template <typename Key, typename Value, Hasher<Key> _Hasher, template <typename _T> class Allocator = types::kernel_allocator>
 class hash_map {
 public:
     struct pair;
@@ -112,13 +111,13 @@ public:
         const key_type key;
         value_type value;
 
-        pair(void) = delete;
-        pair(const key_type _key, value_type _val)
+        constexpr pair(void) = delete;
+        constexpr pair(const key_type _key, value_type _val)
             : key(_key)
             , value(_val)
         {
         }
-        bool operator==(const pair& p)
+        constexpr bool operator==(const pair& p)
         {
             return key == p.key;
         }
@@ -130,49 +129,51 @@ public:
         using _Value = typename traits::remove_pointer<Pointer>::type;
         using Reference = typename traits::add_reference<_Value>::type;
 
+        friend class hash_map;
+
     public:
-        iterator(const iterator& iter) noexcept
+        constexpr iterator(const iterator& iter) noexcept
             : p(iter.p)
         {
         }
 
-        iterator(iterator&& iter) noexcept
+        constexpr iterator(iterator&& iter) noexcept
             : p(iter.p)
         {
             iter.p = nullptr;
         }
 
-        iterator& operator=(const iterator& iter)
+        constexpr iterator& operator=(const iterator& iter)
         {
             p = iter.p;
             return *this;
         }
 
-        explicit iterator(Pointer p) noexcept
+        explicit constexpr iterator(Pointer p) noexcept
             : p(p)
         {
         }
 
-        bool operator==(const iterator& iter) noexcept
+        constexpr bool operator==(const iterator& iter) const noexcept
         {
             return this->p == iter.p;
         }
 
-        bool operator!=(const iterator& iter) noexcept
+        constexpr bool operator!=(const iterator& iter) const noexcept
         {
             return !(*this == iter);
         }
 
-        bool operator!()
+        constexpr operator bool()
         {
-            return !p;
+            return p != nullptr;
         }
 
-        Reference operator*() const noexcept
+        constexpr Reference operator*() const noexcept
         {
             return *p;
         }
-        Pointer operator->() const noexcept
+        constexpr Pointer operator->() const noexcept
         {
             return p;
         }
@@ -203,46 +204,46 @@ protected:
     }
 
 public:
-    explicit hash_map(void)
+    explicit constexpr hash_map(void)
         : buckets(INITIAL_BUCKETS_ALLOCATED)
     {
         for (size_type i = 0; i < INITIAL_BUCKETS_ALLOCATED; ++i)
             buckets.emplace_back();
     }
 
-    hash_map(const hash_map& v)
+    constexpr hash_map(const hash_map& v)
         : buckets(v.buckets)
     {
     }
 
-    hash_map(hash_map&& v)
+    constexpr hash_map(hash_map&& v)
         : buckets(move(v.buckets))
     {
     }
 
-    ~hash_map()
+    constexpr ~hash_map()
     {
         buckets.clear();
     }
 
-    void insert(const pair& p)
+    constexpr void insert(const pair& p)
     {
-        auto hash_value = hasher_traits<Hasher, key_type>::hash(p.key, hash_length());
+        auto hash_value = _Hasher::hash(p.key, hash_length());
         buckets.at(hash_value).push_back(p);
     }
-    void insert(pair&& p)
+    constexpr void insert(pair&& p)
     {
-        auto hash_value = hasher_traits<Hasher, key_type>::hash(p.key, hash_length());
+        auto hash_value = _Hasher::hash(p.key, hash_length());
         buckets.at(hash_value).push_back(move(p));
     }
-    void insert(const key_type& key, const value_type& val)
+    constexpr void insert(const key_type& key, const value_type& val)
     {
         insert(pair { key, val });
     }
 
-    void remove(const key_type& key)
+    constexpr void remove(const key_type& key)
     {
-        auto hash_value = hasher_traits<Hasher, key_type>::hash(key, hash_length());
+        auto hash_value = _Hasher::hash(key, hash_length());
         auto& bucket = buckets.at(hash_value);
         for (auto iter = bucket.begin(); iter != bucket.end(); ++iter) {
             if (iter->key == key) {
@@ -252,9 +253,20 @@ public:
         }
     }
 
-    iterator_type find(const key_type& key)
+    constexpr void remove(iterator_type iter)
     {
-        auto hash_value = hasher_traits<Hasher, key_type>::hash(key, hash_length());
+        remove(iter->key);
+        iter.p = nullptr;
+    }
+    constexpr void remove(const_iterator_type iter)
+    {
+        remove(iter->key);
+        iter.p = nullptr;
+    }
+
+    constexpr iterator_type find(const key_type& key)
+    {
+        auto hash_value = _Hasher::hash(key, hash_length());
         auto& bucket = buckets.at(hash_value);
         for (auto& item : bucket) {
             if (key == item.key)
@@ -263,9 +275,9 @@ public:
         return iterator_type(nullptr);
     }
 
-    const_iterator_type find(const key_type& key) const
+    constexpr const_iterator_type find(const key_type& key) const
     {
-        auto hash_value = hasher_traits<Hasher, key_type>::hash(key, hash_length());
+        auto hash_value = _Hasher::hash(key, hash_length());
         const auto& bucket = buckets.at(hash_value);
         for (const auto& item : bucket) {
             if (key == item.key)
@@ -274,7 +286,7 @@ public:
         return const_iterator_type(nullptr);
     }
 
-    void clear(void)
+    constexpr void clear(void)
     {
         for (size_t i = 0; i < buckets.size(); ++i)
             buckets.at(i).clear();

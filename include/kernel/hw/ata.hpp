@@ -57,5 +57,5 @@ public:
     int write_sector(const char* buf, uint32_t lba_low, uint16_t lba_high) const;
 };
 
-void init_ata(void* data);
+void init_ata(void);
 } // namespace hw

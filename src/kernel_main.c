@@ -9,12 +9,14 @@
 #include <kernel/hw/timer.h>
 #include <kernel/interrupt.h>
 #include <kernel/mem.h>
-#include <kernel/process.hpp>
 #include <kernel/stdio.h>
 #include <kernel/task.h>
 #include <kernel/tty.h>
 #include <kernel/vga.h>
+#include <types/assert.h>
 #include <types/bitmap.h>
+#include <types/status.h>
+#include <types/types.h>
 
 #define KERNEL_MAIN_BUF_SIZE (128)
 
@@ -27,26 +29,6 @@ struct tty* console = NULL;
 #define INIT_START(x) EVE_START("initializing " x)
 #define INIT_OK() printkf("ok\n")
 #define INIT_FAILED() printkf("failed\n")
-
-static inline void check_a20_status(void)
-{
-    uint32_t result;
-    result = check_a20_on();
-
-    if (result) {
-        tty_print(console, "a20 is on");
-    } else {
-        tty_print(console, "a20 is NOT on");
-    }
-}
-
-static inline void halt_on_init_error(void)
-{
-    MAKE_BREAK_POINT();
-    asm_cli();
-    while (1)
-        asm_hlt();
-}
 
 typedef void (*constructor)(void);
 extern constructor start_ctors;
@@ -128,7 +110,7 @@ void load_new_gdt(void)
     create_segment_descriptor(new_gdt + 4, 0, ~0, 0b1100, SD_TYPE_DATA_USER);
     create_segment_descriptor(new_gdt + 5, (uint32_t)&tss, sizeof(tss), 0b0000, SD_TYPE_TSS);
 
-    asm_load_gdt((6 * 8 - 1) << 16, (phys_ptr_t)new_gdt);
+    asm_load_gdt((6 * 8 - 1) << 16, (pptr_t)new_gdt);
     asm_load_tr((6 - 1) * 8);
 
     asm_cli();
@@ -144,10 +126,12 @@ void init_bss_section(void)
 static struct tty early_console;
 
 extern void init_vfs();
+extern void NORETURN init_scheduler();
 
 void NORETURN kernel_main(void)
 {
-    // MAKE_BREAK_POINT();
+    assert(check_a20_on());
+
     asm_enable_sse();
 
     init_bss_section();
@@ -156,13 +140,10 @@ void NORETURN kernel_main(void)
 
     load_new_gdt();
 
-    char buf[KERNEL_MAIN_BUF_SIZE];
+    char buf[KERNEL_MAIN_BUF_SIZE] = { 0 };
 
-    init_serial_port(PORT_SERIAL0);
-
-    if (make_serial_tty(&early_console, PORT_SERIAL0) != GB_OK) {
-        halt_on_init_error();
-    }
+    assert(init_serial_port(PORT_SERIAL0) == GB_OK);
+    assert(make_serial_tty(&early_console, PORT_SERIAL0) == GB_OK);
     console = &early_console;
 
     show_mem_info(buf);
@@ -193,10 +174,29 @@ void NORETURN kernel_main(void)
     tty_print(console, k_malloc_buf);
     k_free(k_malloc_buf);
 
-    k_malloc_buf[4096] = '\x89';
-
     init_vfs();
 
     printkf("switching execution to the scheduler...\n");
     init_scheduler(&tss);
+}
+
+void NORETURN __stack_chk_fail(void)
+{
+    tty_print(console, "***** stack smashing detected! *****\n");
+    for (;;)
+        assert(0);
+}
+
+void crash(void)
+{
+    asm volatile("ud2");
+}
+
+void _debugger_breakpoint(void)
+{
+#ifdef __BOCHS_SYSTEM__
+    asm volatile("xchgw %%bx, %%bx");
+#else
+    asm volatile("nop");
+#endif
 }

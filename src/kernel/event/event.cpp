@@ -1,10 +1,15 @@
 #include <asm/port_io.h>
 #include <kernel/event/event.h>
+#include <kernel/event/evtqueue.hpp>
 #include <kernel/input/input_event.h>
+#include <kernel/process.hpp>
 #include <kernel/stdio.h>
 #include <kernel/tty.h>
 #include <types/allocator.hpp>
+#include <types/assert.h>
+#include <types/cplusplus.hpp>
 #include <types/list.hpp>
+#include <types/lock.hpp>
 
 static ::types::list<::input_event>* _input_event_queue;
 
@@ -39,4 +44,57 @@ void dispatch_event(void)
             input_event_queue.erase(iter);
         }
     }
+}
+
+kernel::evtqueue::evtqueue(evtqueue&& q)
+    : m_evts { types::move(q.m_evts) }
+    , m_subscribers { types::move(q.m_subscribers) }
+{
+}
+
+void kernel::evtqueue::push(kernel::evt&& event)
+{
+    types::lock_guard lck(m_mtx);
+    m_evts.push_back(types::move(event));
+    this->notify();
+}
+
+kernel::evt&& kernel::evtqueue::front()
+{
+    assert(!this->empty());
+    types::lock_guard lck(m_mtx);
+
+    auto iter = m_evts.begin();
+    evt e = types::move(*iter);
+    m_evts.erase(iter);
+    return types::move(e);
+}
+
+const kernel::evt* kernel::evtqueue::peek(void) const
+{
+    return m_evts.begin().ptr();
+}
+
+bool kernel::evtqueue::empty(void) const
+{
+    return m_evts.empty();
+}
+
+void kernel::evtqueue::notify(void)
+{
+    for (auto* sub : m_subscribers) {
+        sub->attr.ready = 1;
+        sub->attr.wait = 0;
+        add_to_ready_list(sub);
+    }
+}
+
+void kernel::evtqueue::subscribe(thread* thd)
+{
+    m_subscribers.push_back(thd);
+}
+
+void kernel::evtqueue::unsubscribe(thread* thd)
+{
+    m_subscribers.erase(m_subscribers.find(thd));
 }

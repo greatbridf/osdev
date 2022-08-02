@@ -52,25 +52,3 @@ asm_load_tr:
     orl $0, %eax
     ltr %ax
     ret
-
-.globl go_user_space
-.type  go_user_space @function
-go_user_space:
-    movl $((4 * 8) | 3), %eax
-    movw %ax, %ds
-    movw %ax, %es
-    movw %ax, %fs
-    movw %ax, %gs
-
-    movl 4(%esp), %ebx
-    pushl $((4 * 8) | 3)
-    pushl $0x40100000
-    pushf
-    # allow interrupts in user mode
-    movl (%esp), %eax
-    orl $0x200, %eax
-    movl %eax, (%esp)
-    pushl $((3 * 8) | 3)
-    pushl %ebx
-
-    iret

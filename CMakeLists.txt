@@ -32,19 +32,21 @@ add_custom_command(OUTPUT extracted_bootloader
 
 project(kernel_main)
 
-set(CMAKE_C_FLAGS "-nostdinc -m32 -nostdlib -W -Wall -Wextra -Wno-builtin-declaration-mismatch -Wno-format -Werror=implicit-int -Werror=implicit-function-declaration -Werror=strict-aliasing -fverbose-asm -fno-exceptions -fno-pic -fno-stack-protector")
-set(CMAKE_CXX_FLAGS "-nostdinc -m32 -nostdlib -W -Wall -Wextra -Wno-builtin-declaration-mismatch -Wno-format -fverbose-asm -fno-use-cxa-atexit -fno-exceptions -fno-pic -fno-stack-protector -fno-rtti")
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_C_FLAGS "-nostdinc -m32 -nostdlib -W -Wall -Wextra -Wno-builtin-declaration-mismatch -Wno-format -Werror=implicit-int -Werror=implicit-function-declaration -Werror=strict-aliasing -fverbose-asm -fno-exceptions -fno-pic -ffreestanding -mstack-protector-guard=global")
+set(CMAKE_CXX_FLAGS "-nostdinc -m32 -nostdlib -W -Wall -Wextra -Wno-builtin-declaration-mismatch -Wno-format -fverbose-asm -fno-use-cxa-atexit -fno-exceptions -fno-pic -ffreestanding -fno-rtti -mstack-protector-guard=global")
+set(CMAKE_CXX_STANDARD 20)
 
 if (CMAKE_BUILD_TYPE STREQUAL "Debug")
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O0 -g")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O0 -g")
 elseif(CMAKE_BUILD_TYPE STREQUAL "Release")
-    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O")
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O2")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O2")
 endif()
 
-include_directories(${PROJECT_SOURCE_DIR}/include ${PROJECT_SOURCE_DIR}/user-space-program/build)
+if (NOT DEFINED FDISK_BIN)
+    set(FDISK_BIN fdisk)
+endif()
 
 set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
                         src/kernel_main.c
@@ -64,11 +66,13 @@ set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
                         src/kernel/event/event.cpp
                         src/types/bitmap.c
                         src/types/buffer.c
+                        src/types/elf.cpp
                         include/asm/boot.h
                         include/asm/port_io.h
                         include/asm/sys.h
                         include/fs/fat.hpp
                         include/kernel/event/event.h
+                        include/kernel/event/evtqueue.hpp
                         include/kernel/errno.h
                         include/kernel/tty.h
                         include/kernel/interrupt.h
@@ -86,8 +90,10 @@ set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
                         include/kernel/hw/timer.h
                         include/kernel/input/keycodes.h
                         include/kernel/input/input_event.h
+                        include/types/assert.h
                         include/types/bitmap.h
                         include/types/buffer.h
+                        include/types/elf.hpp
                         include/types/hash_map.hpp
                         include/types/types.h
                         include/types/size.h
@@ -96,7 +102,7 @@ set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
                         include/types/allocator.hpp
                         include/types/cplusplus.hpp
                         include/types/list.hpp
-                        include/types/lock.h
+                        include/types/lock.hpp
                         include/types/string.hpp
                         include/types/vector.hpp
                         include/kernel_main.h
@@ -111,9 +117,6 @@ add_custom_command(OUTPUT extracted_kernel_main
 add_custom_target(user_space_programs
     COMMAND cp ${CMAKE_SOURCE_DIR}/user-space-program/Makefile.src ${CMAKE_SOURCE_DIR}/user-space-program/Makefile
     COMMAND make -C ${CMAKE_SOURCE_DIR}/user-space-program CROSS_COMPILE=${TOOLCHAIN_PATH_AND_PREFIX} all
-    COMMAND mkdir -p ${CMAKE_SOURCE_DIR}/user-space-program/build
-    COMMAND rm -f ${CMAKE_SOURCE_DIR}/user-space-program/build/*
-    COMMAND cp ${CMAKE_SOURCE_DIR}/user-space-program/*.res ${CMAKE_SOURCE_DIR}/user-space-program/build
 )
 
 add_custom_target(kernel.out
@@ -121,7 +124,7 @@ add_custom_target(kernel.out
     DEPENDS extracted_kernel_main
     DEPENDS user_space_programs
     DEPENDS ${CMAKE_SOURCE_DIR}/src/kernel.ld
-    COMMAND ${CMAKE_LINKER} -T ${CMAKE_SOURCE_DIR}/src/kernel.ld ${EXTRACT_DIR}/*.o ${CMAKE_SOURCE_DIR}/user-space-program/user.sym
+    COMMAND ${CMAKE_LINKER} -T ${CMAKE_SOURCE_DIR}/src/kernel.ld ${EXTRACT_DIR}/*.o
     -melf_i386 -o ${CMAKE_BINARY_DIR}/kernel.out
 )
 
@@ -133,12 +136,16 @@ add_custom_target(mbr_hole.bin
 add_custom_target(boot.img
     DEPENDS mbr.bin
     DEPENDS mbr_hole.bin
+    DEPENDS user_space_programs
     COMMAND dd if=mbr.bin of=boot.img
     COMMAND cat mbr_hole.bin >> boot.img
     COMMAND dd if=/dev/zero of=boot.img bs=`expr 512 \\* 1024 \\* 1024` count=0 seek=1
-    COMMAND sh -c \"echo n\; echo\; echo\; echo\; echo\; echo a\; echo w\" | fdisk boot.img
+    COMMAND sh -c \"echo n\; echo\; echo\; echo\; echo\; echo a\; echo w\" | ${FDISK_BIN} boot.img
     COMMAND mkfs.fat --offset=2048 -v -n SYSTEM boot.img
-    COMMAND mcopy -i boot.img@@1M ${CMAKE_SOURCE_DIR}/user-space-program/user.sym ::user.sym
+    COMMAND mcopy -i boot.img@@1M ${CMAKE_SOURCE_DIR}/user-space-program/build/hello-world.out ::hello.out
+    COMMAND mcopy -i boot.img@@1M ${CMAKE_SOURCE_DIR}/user-space-program/build/interrupt-test.out ::int.out
+    COMMAND mcopy -i boot.img@@1M ${CMAKE_SOURCE_DIR}/user-space-program/build/stack-test.out ::stack.out
+    COMMAND mcopy -i boot.img@@1M ${CMAKE_SOURCE_DIR}/user-space-program/build/init.out ::init.elf
 )
 
 add_custom_command(OUTPUT run

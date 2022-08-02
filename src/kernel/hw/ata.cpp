@@ -145,7 +145,7 @@ size_t _ata_read(fs::special_node* sn, char* buf, size_t buf_size, size_t offset
         end = sn->data1 + sn->data2;
     offset %= 512;
     for (size_t i = start; i < end; ++i) {
-        (*ata_bus)->read_sector(b, i, 0);
+        (void)(*ata_bus)->read_sector(b, i, 0);
         size_t to_copy = 0;
         if (offset)
             to_copy = 512 - offset;
@@ -196,11 +196,9 @@ static inline void mbr_part_probe(fs::inode* drive, uint16_t major, uint16_t min
     }
 }
 
-void hw::init_ata(void* data)
+// data: void (*func_to_call_next)(void)
+void hw::init_ata(void)
 {
-    if (data != nullptr)
-        syscall(0x03);
-
     ata_pri = types::kernel_allocator_new<ata>(ATA_PRIMARY_BUS_BASE);
     if (ata_pri->identify())
         ata_pri->select(true);

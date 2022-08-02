@@ -1,10 +1,10 @@
 #include <kernel/errno.h>
 #include <kernel/mem.h>
 #include <kernel/stdio.h>
-#include <kernel/syscall.hpp>
 #include <kernel/tty.h>
 #include <kernel/vfs.hpp>
 #include <types/allocator.hpp>
+#include <types/assert.h>
 #include <types/list.hpp>
 #include <types/status.h>
 #include <types/stdint.h>
@@ -116,7 +116,7 @@ void fs::vfs::register_root_node(inode* root)
 }
 int fs::vfs::load_dentry(dentry*)
 {
-    syscall(0x03);
+    assert(false);
     return GB_FAILED;
 }
 int fs::vfs::mount(dentry* mnt, vfs* new_fs)
@@ -137,37 +137,37 @@ int fs::vfs::mount(dentry* mnt, vfs* new_fs)
 }
 size_t fs::vfs::inode_read(inode*, char*, size_t, size_t, size_t)
 {
-    syscall(0x03);
+    assert(false);
     return 0xffffffff;
 }
 size_t fs::vfs::inode_write(inode*, const char*, size_t, size_t)
 {
-    syscall(0x03);
+    assert(false);
     return 0xffffffff;
 }
 int fs::vfs::inode_mkfile(dentry*, const char*)
 {
-    syscall(0x03);
+    assert(false);
     return GB_FAILED;
 }
 int fs::vfs::inode_mknode(dentry*, const char*, node_t)
 {
-    syscall(0x03);
+    assert(false);
     return GB_FAILED;
 }
 int fs::vfs::inode_rmfile(dentry*, const char*)
 {
-    syscall(0x03);
+    assert(false);
     return GB_FAILED;
 }
 int fs::vfs::inode_mkdir(dentry*, const char*)
 {
-    syscall(0x03);
+    assert(false);
     return GB_FAILED;
 }
 int fs::vfs::inode_stat(dentry*, stat*)
 {
-    syscall(0x03);
+    assert(false);
     return GB_FAILED;
 }
 
@@ -384,6 +384,10 @@ fs::vfs::dentry* fs::vfs_open(const char* path)
             }
             if (path[n] == '/') {
                 cur = cur->find(string(path, n));
+
+                if (!cur)
+                    return cur;
+
                 if (path[n + 1] == 0x00) {
                     return cur;
                 } else {
@@ -466,6 +470,7 @@ void init_vfs(void)
 
     vfs_mkdir(fs_root, "dev");
     vfs_mkdir(fs_root, "root");
+    vfs_mkdir(fs_root, "mnt");
     vfs_mkfile(fs_root, "init");
 
     auto* init = vfs_open("/init");

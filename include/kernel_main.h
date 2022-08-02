@@ -1,13 +1,6 @@
 #pragma once
 #include <types/types.h>
 
-static inline void __break_point(void)
-{
-    asm volatile("xchgw %bx, %bx");
-}
-
-#define MAKE_BREAK_POINT() __break_point()
-
 #define KERNEL_STACK_SIZE (16 * 1024)
 #define KERNEL_STACK_SEGMENT (0x10)
 

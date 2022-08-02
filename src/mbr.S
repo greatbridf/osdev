@@ -16,7 +16,11 @@ mbr_start:
 # read the first 64k
     call read_data
 
-# read the rest
+# read the following 128k
+    addw $(0x100 * 16), read_data_segment
+    addl $(8 * 16), read_data_lba
+    call read_data
+
     addw $(0x100 * 16), read_data_segment
     addl $(8 * 16), read_data_lba
     call read_data

@@ -8,6 +8,7 @@ event() {
 
 # $1: OS NAME
 # $2: CROSS COMPILE FLAG
+# $3: FDISK_BIN
 generate_cross_compile_script() {
 cat > cross-compile.cmake <<EOF
 set(CMAKE_SYSTEM_NAME $1)
@@ -24,6 +25,7 @@ SET(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
 # for libraries and headers in the target directories
 SET(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
 SET(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
+SET(FDISK_BIN $3)
 EOF
 }
 
@@ -85,11 +87,27 @@ case "$OS" in
         ;;
 esac
 
+event "checking util-linux fdisk"
+if [ "$CROSS_COMPILE" = "" -o "$FDISK_BIN" = "" ]; then
+    if ! which fdisk > /dev/null 2>&1; then
+        echo "no"
+        exit 1
+    fi
+    FDISK_BIN=`which fdisk`
+fi
+
+if ! $FDISK_BIN -v 2>&1 | grep util-linux > /dev/null 2>&1 ; then
+    echo "no"
+    exit 1
+else
+    echo "$FDISK_BIN"
+fi
+
 event "checking cross compiling"
 if [ "$CROSS_COMPILE" != "" ]; then
     echo "yes"
     CROSS_COMPILE_FLAG='--toolchain cross-compile.cmake'
-    generate_cross_compile_script "$OS" "$CROSS_COMPILE"
+    generate_cross_compile_script "$OS" "$CROSS_COMPILE" "$FDISK_BIN"
 else
     echo "no"
     CROSS_COMPILE_FLAG=

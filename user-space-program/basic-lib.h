@@ -56,7 +56,7 @@ static inline void NORETURN exit(int exit_code)
 {
     syscall_noreturn(0x05, exit_code, 0);
 }
-static inline uint32_t wait(void)
+static inline uint32_t wait(int* return_value)
 {
-    return syscall(0x06, 0, 0);
+    return syscall(0x06, (uint32_t)return_value, 0);
 }

@@ -16,9 +16,10 @@ int main(int argc, char** argv)
     }
 
     for (;;) {
-        int code = wait();
-        (void)code;
-        code += 1000;
+        int ret;
+        pid_t pid = wait(&ret);
+        (void)pid;
+        pid += 1000;
     }
     return 0;
 }

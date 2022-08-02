@@ -38,6 +38,9 @@ SECTIONS
         KEEP(*(SORT_BY_INIT_PRIORITY(.ctors*)));
         end_ctors = .;
 
+        __stack_chk_guard = .;
+        LONG(0x19198101);
+
         *(.data)
         *(.data*)
         __kernel_text_and_data_end = .;

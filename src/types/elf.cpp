@@ -1,11 +1,21 @@
+#include <kernel/errno.h>
+#include <kernel/stdio.h>
+#include <types/assert.h>
 #include <types/elf.hpp>
+#include <types/stdint.h>
 
-int types::elf::elf32_load(const char* exec, interrupt_stack* intrpt_stack, bool system)
+template <typename T>
+constexpr void _user_push(uint32_t** sp, T d)
 {
-    auto* ent_exec = fs::vfs_open(exec);
+    *sp -= sizeof(T);
+    *(T*)*sp = d;
+}
+
+int types::elf::elf32_load(types::elf::elf32_load_data* d)
+{
+    auto* ent_exec = fs::vfs_open(d->exec);
     if (!ent_exec) {
-        intrpt_stack->s_regs.eax = ENOENT;
-        intrpt_stack->s_regs.edx = 0;
+        d->errcode = ENOENT;
         return GB_FAILED;
     }
 
@@ -18,8 +28,7 @@ int types::elf::elf32_load(const char* exec, interrupt_stack* intrpt_stack, bool
         0, sizeof(types::elf::elf32_header));
 
     if (n_read != sizeof(types::elf::elf32_header)) {
-        intrpt_stack->s_regs.eax = EINVAL;
-        intrpt_stack->s_regs.edx = 0;
+        d->errcode = EINVAL;
         return GB_FAILED;
     }
 
@@ -33,8 +42,7 @@ int types::elf::elf32_load(const char* exec, interrupt_stack* intrpt_stack, bool
 
     // broken file or I/O error
     if (n_read != phents_size) {
-        intrpt_stack->s_regs.eax = EINVAL;
-        intrpt_stack->s_regs.edx = 0;
+        d->errcode = EINVAL;
         return GB_FAILED;
     }
 
@@ -42,19 +50,41 @@ int types::elf::elf32_load(const char* exec, interrupt_stack* intrpt_stack, bool
         if (phents->type != types::elf::elf32_program_header_entry::PT_LOAD)
             continue;
 
-        auto ret = mmap((void*)phents->vaddr, phents->memsz, ent_exec->ind, phents->offset, 1, system);
+        auto ret = mmap((void*)phents->vaddr, phents->memsz, ent_exec->ind, phents->offset, 1, d->system);
         if (ret != GB_OK) {
-            intrpt_stack->s_regs.eax = ret;
-            intrpt_stack->s_regs.edx = 0;
+            d->errcode = ret;
             return GB_FAILED;
         }
 
         ++phents;
     }
 
-    intrpt_stack->v_eip = (void*)hdr.entry;
-    memset((void*)&intrpt_stack->s_regs, 0x00, sizeof(regs_32));
-    intrpt_stack->s_regs.esp = types::elf::ELF_STACK_BOTTOM;
-    intrpt_stack->s_regs.ebp = types::elf::ELF_STACK_BOTTOM;
+    // map stack area
+    auto ret = mmap((void*)types::elf::ELF_STACK_TOP, types::elf::ELF_STACK_SIZE, fs::vfs_open("/dev/null")->ind, 0, 1, 0);
+    assert_likely(ret == GB_OK);
+
+    d->eip = (void*)hdr.entry;
+    d->sp = reinterpret_cast<uint32_t*>(types::elf::ELF_STACK_BOTTOM);
+
+    auto* sp = &d->sp;
+
+    types::vector<const char*> arr;
+    for (const char** ptr = d->argv; *ptr != nullptr; ++ptr) {
+        auto len = strlen(*ptr);
+        *sp -= (len + 1);
+        *sp = (uint32_t*)((uint32_t)*sp & 0xfffffff0);
+        memcpy((char*)*sp, *ptr, len + 1);
+        arr.push_back((const char*)*sp);
+    }
+
+    *sp -= sizeof(const char*) * arr.size();
+    *sp = (uint32_t*)((uint32_t)*sp & 0xfffffff0);
+    memcpy((char*)*sp, arr.data(), sizeof(const char*) * arr.size());
+
+    _user_push(sp, 0);
+    _user_push(sp, 0);
+    _user_push(sp, *sp + 8);
+    _user_push(sp, arr.size());
+
     return GB_OK;
 }

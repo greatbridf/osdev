@@ -221,7 +221,7 @@ public:
     {
     }
 
-    ~hash_map()
+    constexpr ~hash_map()
     {
         buckets.clear();
     }

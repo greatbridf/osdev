@@ -215,15 +215,54 @@ syscall_stub:
     # restore stack
     popl %esp
 
+.globl _syscall_stub_fork_return
+.type  _syscall_stub_fork_return @function
+_syscall_stub_fork_return:
     popal
 syscall_stub_end:
     iret
 
-# parameters:
-# interrupt_stack* ret_stack
-.globl to_kernel
-.type  to_kernel @function
-to_kernel:
+# parameters
+# #1: uint32_t* curr_esp
+# #2: uint32_t next_esp
+.globl asm_ctx_switch
+.type  asm_ctx_switch @function
+asm_ctx_switch:
+    movl 4(%esp), %ecx
+    movl 8(%esp), %eax
+
+    push $_ctx_switch_return
+    push %ebx
+    push %edi
+    push %esi
+    push %ebp
+    pushfl
+
+    movl %esp, (%ecx)
+    movl %eax, %esp
+
+    popfl
+    pop %ebp
+    pop %esi
+    pop %edi
+    pop %ebx
+
+    ret
+
+_ctx_switch_return:
+    ret
+
+# param:
+# #1: uint32_t esp
+# #2: void (*k_init)()
+.globl go_kernel
+.type  go_kernel @function
+go_kernel:
+    movl 4(%esp), %eax
+    movl 8(%esp), %ecx
+    movl %eax, %esp
+    pushl %ecx
+
     movw $0x10, %ax
     movw %ax, %ss
     movw %ax, %ds
@@ -231,55 +270,39 @@ to_kernel:
     movw %ax, %fs
     movw %ax, %gs
 
-    movl 4(%esp), %eax
+    xorl %eax, %eax
+    xorl %ebx, %ebx
+    xorl %ecx, %ecx
+    xorl %edx, %edx
+    xorl %esi, %esi
+    xorl %edi, %edi
+    xorl %ebp, %ebp
 
-    movl (%eax), %edi
-    movl 4(%eax), %esi
-    movl 8(%eax), %ebp
-    movl 12(%eax), %esp # %esp is the dst stack
-    movl 16(%eax), %ebx
-    movl 20(%eax), %edx
-    movl 24(%eax), %ecx
-#   TODO: optimize for caching
-#   movl 28(%eax), %eax # we deal with %eax later
+# eflags: IN
+    pushl $0x200
+    popfl
 
-    pushl 40(%eax) # %eflags
-    pushl $0x08    # %cs
-    pushl 32(%eax) # %eip
+    ret
 
-    movl 28(%eax), %eax
-
-    iret
-
-# parameters:
-# interrupt_stack* ret_stack
-.globl to_user
-.type  to_user @function
-to_user:
+# parameters
+# #1: eip
+# #2: esp
+.globl go_user
+.type  go_user @function
+go_user:
     movw $0x23, %ax
     movw %ax, %ds
     movw %ax, %es
     movw %ax, %fs
     movw %ax, %gs
 
-    movl 4(%esp), %edi
+    movl 4(%esp), %eax
+    movl 8(%esp), %ecx
 
-    movl 40(%edi), %ebp # save eflags
-    movl 32(%edi), %esi # save eip
-
-    movl 28(%edi), %eax
-    movl 24(%edi), %ecx
-    movl 20(%edi), %edx
-    movl 16(%edi), %ebx
-
-    pushl $0x23    # %ss
-    pushl 12(%edi) # %esp
-    pushl %ebp     # %eflags
-    pushl $0x1b    # %cs
-    pushl %esi     # %eip
-
-    movl 8(%edi), %ebp
-    movl 4(%edi), %esi
-    movl (%edi), %edi
+    pushl $0x23
+    pushl %ecx
+    pushl $0x200
+    pushl $0x1b
+    pushl %eax
 
     iret

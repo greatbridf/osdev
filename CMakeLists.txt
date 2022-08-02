@@ -32,8 +32,8 @@ add_custom_command(OUTPUT extracted_bootloader
 
 project(kernel_main)
 
-set(CMAKE_C_FLAGS "-nostdinc -m32 -nostdlib -W -Wall -Wextra -Wno-builtin-declaration-mismatch -Wno-format -Werror=implicit-int -Werror=implicit-function-declaration -Werror=strict-aliasing -fverbose-asm -fno-exceptions -fno-pic -fno-stack-protector")
-set(CMAKE_CXX_FLAGS "-nostdinc -m32 -nostdlib -W -Wall -Wextra -Wno-builtin-declaration-mismatch -Wno-format -fverbose-asm -fno-use-cxa-atexit -fno-exceptions -fno-pic -fno-stack-protector -fno-rtti")
+set(CMAKE_C_FLAGS "-nostdinc -m32 -nostdlib -W -Wall -Wextra -Wno-builtin-declaration-mismatch -Wno-format -Werror=implicit-int -Werror=implicit-function-declaration -Werror=strict-aliasing -fverbose-asm -fno-exceptions -fno-pic -ffreestanding -mstack-protector-guard=global")
+set(CMAKE_CXX_FLAGS "-nostdinc -m32 -nostdlib -W -Wall -Wextra -Wno-builtin-declaration-mismatch -Wno-format -fverbose-asm -fno-use-cxa-atexit -fno-exceptions -fno-pic -ffreestanding -fno-rtti -mstack-protector-guard=global")
 set(CMAKE_CXX_STANDARD 20)
 
 if (CMAKE_BUILD_TYPE STREQUAL "Debug")
@@ -72,6 +72,7 @@ set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
                         include/asm/sys.h
                         include/fs/fat.hpp
                         include/kernel/event/event.h
+                        include/kernel/event/evtqueue.hpp
                         include/kernel/errno.h
                         include/kernel/tty.h
                         include/kernel/interrupt.h
@@ -89,6 +90,7 @@ set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
                         include/kernel/hw/timer.h
                         include/kernel/input/keycodes.h
                         include/kernel/input/input_event.h
+                        include/types/assert.h
                         include/types/bitmap.h
                         include/types/buffer.h
                         include/types/elf.hpp

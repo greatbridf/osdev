@@ -1,43 +1,84 @@
 #include <asm/port_io.h>
+#include <asm/sys.h>
+#include <kernel/errno.h>
 #include <kernel/interrupt.h>
+#include <kernel/mem.h>
+#include <kernel/mm.hpp>
 #include <kernel/process.hpp>
 #include <kernel/syscall.hpp>
 #include <kernel/tty.h>
+#include <kernel_main.h>
+#include <types/allocator.hpp>
+#include <types/assert.h>
 #include <types/elf.hpp>
+#include <types/status.h>
+#include <types/stdint.h>
+
+#define SYSCALL_SET_RETURN_VAL_EAX(_eax) \
+    data->s_regs.eax = ((decltype(data->s_regs.eax))(_eax))
+
+#define SYSCALL_SET_RETURN_VAL_EDX(_edx) \
+    data->s_regs.edx = ((decltype(data->s_regs.edx))(_edx))
+
+#define SYSCALL_SET_RETURN_VAL(_eax, _edx) \
+    SYSCALL_SET_RETURN_VAL_EAX(_eax);      \
+    SYSCALL_SET_RETURN_VAL_EDX(_edx)
 
 syscall_handler syscall_handlers[8];
 
 void _syscall_not_impl(interrupt_stack* data)
 {
-    data->s_regs.eax = 0xffffffff;
-    data->s_regs.edx = 0xffffffff;
+    SYSCALL_SET_RETURN_VAL(0xffffffff, 0xffffffff);
 }
 
+extern "C" void _syscall_stub_fork_return(void);
 void _syscall_fork(interrupt_stack* data)
 {
-    thread_context_save(data, current_thread);
-    process_context_save(data, current_process);
+    auto newpid = add_to_process_list(process { *current_process, *current_thread });
+    auto* newproc = findproc(newpid);
+    thread* newthd = newproc->thds.begin().ptr();
+    add_to_ready_list(newthd);
 
-    process new_proc(*current_process, *current_thread);
-    thread* new_thd = new_proc.thds.begin().ptr();
+    // create fake interrupt stack
+    push_stack(&newthd->esp, data->ss);
+    push_stack(&newthd->esp, data->esp);
+    push_stack(&newthd->esp, data->eflags);
+    push_stack(&newthd->esp, data->cs);
+    push_stack(&newthd->esp, (uint32_t)data->v_eip);
 
-    // return value
-    new_thd->regs.eax = 0;
-    data->s_regs.eax = new_proc.pid;
+    // eax
+    push_stack(&newthd->esp, 0);
+    push_stack(&newthd->esp, data->s_regs.ecx);
+    // edx
+    push_stack(&newthd->esp, 0);
+    push_stack(&newthd->esp, data->s_regs.ebx);
+    push_stack(&newthd->esp, data->s_regs.esp);
+    push_stack(&newthd->esp, data->s_regs.ebp);
+    push_stack(&newthd->esp, data->s_regs.esi);
+    push_stack(&newthd->esp, data->s_regs.edi);
 
-    new_thd->regs.edx = 0;
-    data->s_regs.edx = 0;
+    // ctx_switch stack
+    // return address
+    push_stack(&newthd->esp, (uint32_t)_syscall_stub_fork_return);
+    // ebx
+    push_stack(&newthd->esp, 0);
+    // edi
+    push_stack(&newthd->esp, 0);
+    // esi
+    push_stack(&newthd->esp, 0);
+    // ebp
+    push_stack(&newthd->esp, 0);
+    // eflags
+    push_stack(&newthd->esp, 0);
 
-    add_to_process_list(types::move(new_proc));
-    add_to_ready_list(new_thd);
+    SYSCALL_SET_RETURN_VAL(newpid, 0);
 }
 
 void _syscall_write(interrupt_stack* data)
 {
     tty_print(console, reinterpret_cast<const char*>(data->s_regs.edi));
 
-    data->s_regs.eax = 0;
-    data->s_regs.edx = 0;
+    SYSCALL_SET_RETURN_VAL(0, 0);
 }
 
 void _syscall_sleep(interrupt_stack* data)
@@ -45,10 +86,9 @@ void _syscall_sleep(interrupt_stack* data)
     current_thread->attr.ready = 0;
     current_thread->attr.wait = 1;
 
-    data->s_regs.eax = 0;
-    data->s_regs.edx = 0;
+    SYSCALL_SET_RETURN_VAL(0, 0);
 
-    do_scheduling(data);
+    schedule();
 }
 
 void _syscall_crash(interrupt_stack*)
@@ -64,17 +104,111 @@ void _syscall_crash(interrupt_stack*)
 void _syscall_exec(interrupt_stack* data)
 {
     const char* exec = reinterpret_cast<const char*>(data->s_regs.edi);
-
-    // TODO: load argv
     const char** argv = reinterpret_cast<const char**>(data->s_regs.esi);
-    (void)argv;
 
-    types::elf::elf32_load(exec, data, current_process->attr.system);
+    current_process->mms.clear_user();
+
+    types::elf::elf32_load_data d;
+    d.argv = argv;
+    d.exec = exec;
+    d.system = false;
+
+    assert(types::elf::elf32_load(&d) == GB_OK);
+
+    data->v_eip = d.eip;
+    data->esp = (uint32_t)d.sp;
 }
 
+// @param exit_code
 void _syscall_exit(interrupt_stack* data)
 {
-    _syscall_crash(data);
+    uint32_t exit_code = data->s_regs.edi;
+    pid_t pid = current_process->pid;
+    pid_t ppid = current_process->ppid;
+
+    // TODO: terminating a thread only
+    if (current_thread->owner->thds.size() != 1) {
+        _syscall_crash(data);
+    }
+
+    // terminating a whole process:
+
+    // remove this thread from ready list
+    current_thread->attr.ready = 0;
+    remove_from_ready_list(current_thread);
+
+    // TODO: write back mmap'ped files and close them
+
+    // unmap all user memory areas
+    current_process->mms.clear_user();
+
+    // make child processes orphans (children of init)
+    auto children = idx_child_processes->find(pid);
+    if (children) {
+        auto init_children = idx_child_processes->find(1);
+        for (auto iter = children->value.begin(); iter != children->value.end(); ++iter) {
+            init_children->value.push_back(*iter);
+            findproc(*iter)->ppid = 1;
+        }
+        idx_child_processes->remove(children);
+    }
+
+    current_process->attr.zombie = 1;
+
+    // notify parent process and init
+    auto* proc = findproc(pid);
+    auto* parent = findproc(ppid);
+    auto* init = findproc(1);
+    while (!proc->wait_lst.empty()) {
+        init->wait_lst.push(proc->wait_lst.front());
+    }
+    parent->wait_lst.push({ current_thread, (void*)pid, (void*)exit_code, nullptr });
+
+    // switch to new process and continue
+    schedule();
+
+    // we should not return to here
+    assert(false);
+}
+
+// @param address of exit code: int*
+// @return pid of the exited process
+void _syscall_wait(interrupt_stack* data)
+{
+    auto* arg1 = reinterpret_cast<int*>(data->s_regs.edi);
+
+    if (arg1 < (int*)0x40000000) {
+        SYSCALL_SET_RETURN_VAL(-1, EINVAL);
+        return;
+    }
+
+    auto& waitlst = current_process->wait_lst;
+    if (waitlst.empty() && !idx_child_processes->find(current_process->pid)) {
+        SYSCALL_SET_RETURN_VAL(-1, ECHILD);
+        return;
+    }
+
+    while (waitlst.empty()) {
+        current_thread->attr.ready = 0;
+        current_thread->attr.wait = 1;
+        waitlst.subscribe(current_thread);
+
+        schedule();
+
+        if (!waitlst.empty()) {
+            waitlst.unsubscribe(current_thread);
+            break;
+        }
+    }
+
+    auto evt = waitlst.front();
+
+    pid_t pid = (pid_t)evt.data1;
+    // TODO: copy_to_user check privilege
+    *arg1 = (int)evt.data2;
+
+    remove_from_process_list(pid);
+    SYSCALL_SET_RETURN_VAL(pid, 0);
 }
 
 void init_syscall(void)
@@ -85,6 +219,6 @@ void init_syscall(void)
     syscall_handlers[3] = _syscall_crash;
     syscall_handlers[4] = _syscall_exec;
     syscall_handlers[5] = _syscall_exit;
-    syscall_handlers[6] = _syscall_not_impl;
+    syscall_handlers[6] = _syscall_wait;
     syscall_handlers[7] = _syscall_not_impl;
 }

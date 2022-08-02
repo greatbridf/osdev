@@ -217,7 +217,7 @@ public:
         return *this;
     }
 
-    ~list() noexcept
+    constexpr ~list() noexcept
     {
         destroy();
     }

@@ -165,18 +165,18 @@ static inline void _int14_panic(void* eip, void* cr2, struct page_fault_error_co
 // page fault
 extern "C" void int14_handler(int14_data* d)
 {
-    mm_list* mms = nullptr;
+    kernel::mm_list* mms = nullptr;
     if (current_process)
         mms = &current_process->mms;
     else
         mms = kernel_mms;
 
-    mm* mm_area = find_mm_area(mms, d->l_addr);
-    if (unlikely(!mm_area))
+    auto mm_area = mms->find(d->l_addr);
+    if (unlikely(mm_area == mms->end()))
         _int14_panic(d->v_eip, d->l_addr, d->error_code);
 
-    pte_t* pte = to_pte(mms_get_pd(mms), d->l_addr);
-    page* page = lto_page(mm_area, d->l_addr);
+    pte_t* pte = to_pte(mms->m_pd, d->l_addr);
+    page* page = lto_page(mm_area.ptr(), d->l_addr);
 
     if (unlikely(d->error_code.present == 0 && !mm_area->mapped_file))
         _int14_panic(d->v_eip, d->l_addr, d->error_code);
@@ -219,11 +219,11 @@ extern "C" void int14_handler(int14_data* d)
     }
 }
 
-extern "C" void irq0_handler(struct interrupt_stack* d)
+extern "C" void irq0_handler(interrupt_stack*)
 {
     inc_tick();
     asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
-    do_scheduling(d);
+    schedule();
 }
 // keyboard interrupt
 extern "C" void irq1_handler(void)

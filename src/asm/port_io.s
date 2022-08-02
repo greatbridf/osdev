@@ -45,9 +45,11 @@ asm_sti:
 .type  asm_enable_sse @function
 asm_enable_sse:
 	movl %cr0, %eax
-	orl $0b10, %eax
+    andl $0xfffffff3, %eax
+	orl $0b100010, %eax
 	movl %eax, %cr0
 	movl %cr4, %eax
 	orl $0b11000000000, %eax
 	movl %eax, %cr4
+    fninit
 	ret

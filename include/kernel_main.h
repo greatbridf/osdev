@@ -1,16 +1,6 @@
 #pragma once
 #include <types/types.h>
 
-#define __crash() asm volatile("ud2")
-
-#ifdef __BOCHS_SYSTEM__
-#define __break_point() asm volatile("xchgw %bx, %bx")
-#else
-#define __break_point() __crash()
-#endif
-
-#define MAKE_BREAK_POINT() __break_point()
-
 #define KERNEL_STACK_SIZE (16 * 1024)
 #define KERNEL_STACK_SEGMENT (0x10)
 

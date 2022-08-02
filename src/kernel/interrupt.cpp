@@ -14,6 +14,7 @@
 #include <kernel/vfs.hpp>
 #include <kernel/vga.h>
 #include <kernel_main.h>
+#include <types/assert.h>
 #include <types/size.h>
 #include <types/stdint.h>
 #include <types/types.h>
@@ -157,9 +158,7 @@ static inline void _int14_panic(void* eip, void* cr2, struct page_fault_error_co
         buf, 256,
         "\nkilled: segmentation fault (eip: %x, cr2: %x, error_code: %x)\n", eip, cr2, error_code);
     tty_print(console, buf);
-    MAKE_BREAK_POINT();
-    asm_cli();
-    asm_hlt();
+    assert(false);
 }
 
 // page fault

@@ -221,14 +221,10 @@ void ki_free(void* ptr)
 
 void* ptovp(pptr_t p_ptr)
 {
-    if (p_ptr <= 0x30000000) {
-        // memory below 768MiB is identically mapped
-        return (void*)p_ptr;
-    } else {
-        // TODO: address translation
-        MAKE_BREAK_POINT();
-        return (void*)0xffffffff;
-    }
+    // memory below 768MiB is identically mapped
+    // TODO: address translation for high mem
+    assert(p_ptr <= 0x30000000);
+    return (void*)p_ptr;
 }
 
 inline void mark_page(page_t n)

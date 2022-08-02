@@ -1,3 +1,4 @@
+#include <types/status.h>
 #include <asm/port_io.h>
 #include <kernel/hw/serial.h>
 #include <kernel/stdio.h>
@@ -21,7 +22,7 @@ int32_t init_serial_port(port_id_t port)
 
     // Check if serial is faulty (i.e: not same byte as sent)
     if (asm_inb(port + 0) != 0xAE) {
-        return 1;
+        return GB_FAILED;
     }
 
     // If serial is not faulty set it in normal operation mode
@@ -29,7 +30,7 @@ int32_t init_serial_port(port_id_t port)
     asm_outb(port + 4, 0x0F);
 
     asm_outb(port + 1, 0x01); // Enable interrupts #0: Received Data Available
-    return 0;
+    return GB_OK;
 }
 
 int32_t is_serial_has_data(port_id_t port)

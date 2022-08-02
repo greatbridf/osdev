@@ -10,6 +10,7 @@
 #include <kernel/vga.h>
 #include <kernel_main.h>
 #include <types/allocator.hpp>
+#include <types/assert.h>
 #include <types/bitmap.h>
 #include <types/size.h>
 #include <types/status.h>
@@ -197,8 +198,7 @@ static brk_memory_allocator
 void* k_malloc(size_t size)
 {
     void* ptr = kernel_heap_allocator->alloc(size);
-    if unlikely (!ptr)
-        MAKE_BREAK_POINT();
+    assert_likely(ptr);
     return ptr;
 }
 
@@ -210,8 +210,7 @@ void k_free(void* ptr)
 void* ki_malloc(size_t size)
 {
     void* ptr = kernel_ident_mapped_allocator.alloc(size);
-    if (unlikely(!ptr))
-        MAKE_BREAK_POINT();
+    assert_likely(ptr);
     return ptr;
 }
 
@@ -295,7 +294,7 @@ page_t alloc_n_raw_pages(size_t n)
             return first;
         }
     }
-    MAKE_BREAK_POINT();
+    assert(false);
     return 0xffffffff;
 }
 

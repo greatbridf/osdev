@@ -1,9 +1,9 @@
 #include <fs/fat.hpp>
 #include <kernel/mem.h>
 #include <kernel/mm.hpp>
-#include <kernel/syscall.hpp>
 #include <kernel/vfs.hpp>
 #include <types/allocator.hpp>
+#include <types/assert.h>
 #include <types/hash_map.hpp>
 #include <types/status.h>
 #include <types/stdint.h>
@@ -12,15 +12,13 @@ namespace fs::fat {
 // buf MUST be larger than 512 bytes
 inline void fat32::read_sector(void* buf, uint32_t sector_no)
 {
-    if (vfs_read(
-            device,
-            (char*)buf,
-            SECTOR_SIZE,
-            sector_no * SECTOR_SIZE,
-            SECTOR_SIZE)
-        != SECTOR_SIZE) {
-        syscall(0x03);
-    }
+    assert(vfs_read(
+               device,
+               (char*)buf,
+               SECTOR_SIZE,
+               sector_no * SECTOR_SIZE,
+               SECTOR_SIZE)
+        == SECTOR_SIZE);
 }
 
 // buf MUST be larger than 4096 bytes

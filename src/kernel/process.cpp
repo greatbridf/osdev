@@ -22,8 +22,6 @@
 #include <types/types.h>
 
 static bool is_scheduler_ready;
-static types::list<process>* processes;
-static typename types::hash_map<pid_t, types::list<process>::iterator_type, types::linux_hasher<pid_t>>* idx_processes;
 static types::list<thread*>* ready_thds;
 static void (*volatile kthreadd_new_thd_func)(void*);
 static void* volatile kthreadd_new_thd_data;
@@ -174,7 +172,7 @@ void NORETURN _kernel_init(void)
     {
         kernel::no_irq_guard grd;
 
-        add_to_process_list(process { kernel_threadd_main, 1 });
+        procs->emplace(kernel_threadd_main, 1);
     }
     hw::init_ata();
 
@@ -229,13 +227,10 @@ void k_new_thread(void (*func)(void*), void* data)
 
 void NORETURN init_scheduler()
 {
-    processes = types::kernel_allocator_pnew(processes);
+    procs = types::kernel_allocator_pnew(procs);
     ready_thds = types::kernel_allocator_pnew(ready_thds);
-    idx_processes = types::kernel_allocator_pnew(idx_processes);
-    idx_child_processes = types::kernel_allocator_pnew(idx_child_processes);
 
-    auto pid = add_to_process_list(process {});
-    auto init = findproc(pid);
+    auto* init = procs->emplace().ptr();
 
     // we need interrupts enabled for cow mapping so now we disable it
     // in case timer interrupt mess things up
@@ -280,36 +275,6 @@ void NORETURN init_scheduler()
         assert(false);
 }
 
-pid_t add_to_process_list(process&& proc)
-{
-    auto iter = processes->emplace_back(types::move(proc));
-    idx_processes->insert(iter->pid, iter);
-
-    auto children = idx_child_processes->find(iter->ppid);
-    if (!children) {
-        idx_child_processes->insert(iter->ppid, {});
-        children = idx_child_processes->find(iter->ppid);
-    }
-
-    children->value.push_back(iter->pid);
-
-    return iter->pid;
-}
-
-void remove_from_process_list(pid_t pid)
-{
-    auto proc_iter = idx_processes->find(pid);
-    auto ppid = proc_iter->value->ppid;
-
-    auto& parent_children = idx_child_processes->find(ppid)->value;
-
-    auto i = parent_children.find(pid);
-    parent_children.erase(i);
-
-    processes->erase(proc_iter->value);
-    idx_processes->remove(proc_iter);
-}
-
 void add_to_ready_list(thread* thd)
 {
     ready_thds->push_back(thd);
@@ -330,11 +295,6 @@ types::list<thread*>::iterator_type query_next_thread(void)
     while (!((*iter_thd)->attr.ready))
         iter_thd = ready_thds->erase(iter_thd);
     return iter_thd;
-}
-
-process* findproc(pid_t pid)
-{
-    return idx_processes->find(pid)->value.ptr();
 }
 
 extern "C" void asm_ctx_switch(uint32_t** curr_esp, uint32_t* next_esp);

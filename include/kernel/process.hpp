@@ -4,6 +4,7 @@
 #include <kernel/interrupt.h>
 #include <kernel/mm.hpp>
 #include <kernel/task.h>
+#include <types/cplusplus.hpp>
 #include <types/hash_map.hpp>
 #include <types/list.hpp>
 #include <types/stdint.h>
@@ -107,22 +108,84 @@ private:
     }
 };
 
-constexpr uint32_t push_stack(uint32_t** stack, uint32_t val)
-{
-    --*stack;
-    **stack = val;
-    return val;
-}
+class proclist {
+public:
+    using list_type = types::list<process>;
+    using index_type = types::hash_map<pid_t, types::list<process>::iterator_type, types::linux_hasher<pid_t>>;
+    using child_index_type = types::hash_map<pid_t, types::list<pid_t>, types::linux_hasher<pid_t>>;
+    using iterator_type = list_type::iterator_type;
+    using const_iterator_type = list_type::const_iterator_type;
+
+private:
+    list_type m_procs;
+    index_type m_idx;
+    child_index_type m_child_idx;
+
+public:
+    template <typename... Args>
+    constexpr iterator_type emplace(Args&&... args)
+    {
+        auto iter = m_procs.emplace_back(types::forward<Args>(args)...);
+        m_idx.insert(iter->pid, iter);
+
+        auto children = m_child_idx.find(iter->ppid);
+        if (!children) {
+            m_child_idx.insert(iter->ppid, {});
+            children = m_child_idx.find(iter->ppid);
+        }
+
+        children->value.push_back(iter->pid);
+
+        return iter;
+    }
+
+    constexpr void remove(pid_t pid)
+    {
+        make_children_orphans(pid);
+
+        auto proc_iter = m_idx.find(pid);
+        auto ppid = proc_iter->value->ppid;
+
+        auto& parent_children = m_child_idx.find(ppid)->value;
+
+        auto i = parent_children.find(pid);
+        parent_children.erase(i);
+
+        m_procs.erase(proc_iter->value);
+        m_idx.remove(proc_iter);
+    }
+
+    constexpr process* find(pid_t pid)
+    {
+        return m_idx.find(pid)->value.ptr();
+    }
+
+    constexpr bool has_child(pid_t pid)
+    {
+        auto children = m_child_idx.find(pid);
+        return children && !children->value.empty();
+    }
+
+    constexpr void make_children_orphans(pid_t pid)
+    {
+        auto children = m_child_idx.find(pid);
+        if (children) {
+            auto init_children = m_child_idx.find(1);
+            for (auto iter = children->value.begin(); iter != children->value.end(); ++iter) {
+                init_children->value.push_back(*iter);
+                this->find(*iter)->ppid = 1;
+            }
+            m_child_idx.remove(children);
+        }
+    }
+};
 
 inline process* volatile current_process;
 inline thread* volatile current_thread;
-inline typename types::hash_map<pid_t, types::list<pid_t>, types::linux_hasher<pid_t>>* idx_child_processes;
+inline proclist* procs;
 
 extern "C" void NORETURN init_scheduler();
 void schedule(void);
-
-pid_t add_to_process_list(process&& proc);
-void remove_from_process_list(pid_t pid);
 
 void add_to_ready_list(thread* thd);
 void remove_from_ready_list(thread* thd);
@@ -137,6 +200,11 @@ inline void next_task(types::list<thread*>::iterator_type target)
         add_to_ready_list(ptr);
 }
 
-process* findproc(pid_t pid);
+constexpr uint32_t push_stack(uint32_t** stack, uint32_t val)
+{
+    --*stack;
+    **stack = val;
+    return val;
+}
 
 void k_new_thread(void (*func)(void*), void* data);

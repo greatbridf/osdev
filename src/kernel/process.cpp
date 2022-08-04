@@ -209,8 +209,7 @@ void NORETURN _kernel_init(void)
         : "c"(d.sp), "d"(d.eip)
         : "eax", "memory");
 
-    for (;;)
-        assert(false);
+    _noreturn_crash();
 }
 
 void k_new_thread(void (*func)(void*), void* data)
@@ -265,8 +264,7 @@ void NORETURN init_scheduler()
         : "a"(current_thread->esp), "c"(_kernel_init)
         : "memory");
 
-    for (;;)
-        assert(false);
+    _noreturn_crash();
 }
 
 void add_to_ready_list(thread* thd)

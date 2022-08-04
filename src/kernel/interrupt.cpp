@@ -81,8 +81,6 @@ void init_pic(void)
     SET_UP_IRQ(13, 0x08);
     SET_UP_IRQ(14, 0x08);
     SET_UP_IRQ(15, 0x08);
-
-    asm_sti();
 }
 
 extern "C" void int6_handler(

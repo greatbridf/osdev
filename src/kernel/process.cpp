@@ -21,7 +21,6 @@
 #include <types/stdint.h>
 #include <types/types.h>
 
-static bool is_scheduler_ready;
 static types::list<thread*>* ready_thds;
 static void (*volatile kthreadd_new_thd_func)(void*);
 static void* volatile kthreadd_new_thd_data;
@@ -169,11 +168,10 @@ void kernel_threadd_main(void)
 
 void NORETURN _kernel_init(void)
 {
-    {
-        kernel::no_irq_guard grd;
+    procs->emplace(kernel_threadd_main, 1);
 
-        procs->emplace(kernel_threadd_main, 1);
-    }
+    asm_sti();
+
     hw::init_ata();
 
     // TODO: parse kernel parameters
@@ -193,9 +191,7 @@ void NORETURN _kernel_init(void)
 
     assert(types::elf::elf32_load(&d) == GB_OK);
 
-    is_scheduler_ready = true;
-
-    asm volatile (
+    asm volatile(
         "movw $0x23, %%ax\n"
         "movw %%ax, %%ds\n"
         "movw %%ax, %%es\n"
@@ -211,8 +207,7 @@ void NORETURN _kernel_init(void)
         "iret\n"
         :
         : "c"(d.sp), "d"(d.eip)
-        : "eax", "memory"
-    );
+        : "eax", "memory");
 
     for (;;)
         assert(false);
@@ -259,7 +254,7 @@ void NORETURN init_scheduler()
         "xorl %%ebp, %%ebp\n"
         "xorl %%edx, %%edx\n"
 
-        "pushl $0x200\n"
+        "pushl $0x0\n"
         "popfl\n"
 
         "ret\n"
@@ -268,8 +263,7 @@ void NORETURN init_scheduler()
         "ud2"
         :
         : "a"(current_thread->esp), "c"(_kernel_init)
-        : "memory"
-    );
+        : "memory");
 
     for (;;)
         assert(false);
@@ -300,9 +294,6 @@ types::list<thread*>::iterator_type query_next_thread(void)
 extern "C" void asm_ctx_switch(uint32_t** curr_esp, uint32_t* next_esp);
 void schedule()
 {
-    if (unlikely(!is_scheduler_ready))
-        return;
-
     auto iter_thd = query_next_thread();
     auto thd = *iter_thd;
 

@@ -38,10 +38,6 @@ asm_load_gdt:
     lgdt (%eax)
     ljmp $0x08, $_asm_load_gdt_fin
 _asm_load_gdt_fin:
-	movw 4(%esp), %ax
-	cmpw $0, %ax
-	je _asm_load_gdt_fin_ret
-_asm_load_gdt_fin_ret:
     ret
 
 .global asm_load_tr

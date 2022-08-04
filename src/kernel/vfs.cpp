@@ -462,9 +462,9 @@ void init_vfs(void)
     // null
     register_special_block(0, 0, b_null_read, b_null_write, 0, 0);
 
-    fs_es = types::kernel_allocator_new<types::list<vfs*>>();
+    fs_es = types::pnew<types::kernel_ident_allocator>(fs_es);
 
-    auto* rootfs = types::kernel_allocator_new<tmpfs>();
+    auto* rootfs = types::_new<types::kernel_allocator, tmpfs>();
     fs_es->push_back(rootfs);
     fs_root = rootfs->root();
 

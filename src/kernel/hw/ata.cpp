@@ -201,11 +201,11 @@ static inline void mbr_part_probe(fs::inode* drive, uint16_t major, uint16_t min
 // data: void (*func_to_call_next)(void)
 void hw::init_ata(void)
 {
-    ata_pri = types::kernel_allocator_new<ata>(ATA_PRIMARY_BUS_BASE);
+    ata_pri = types::pnew<types::kernel_allocator>(ata_pri, ATA_PRIMARY_BUS_BASE);
     if (ata_pri->identify())
         ata_pri->select(true);
 
-    ata_sec = types::kernel_allocator_new<ata>(ATA_SECONDARY_BUS_BASE);
+    ata_sec = types::pnew<types::kernel_allocator>(ata_pri, ATA_SECONDARY_BUS_BASE);
     if (ata_pri->identify())
         ata_pri->select(true);
 

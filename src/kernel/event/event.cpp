@@ -17,7 +17,7 @@ namespace event {
 ::types::list<::input_event>& input_event_queue(void)
 {
     if (!_input_event_queue) {
-        _input_event_queue = types::kernel_allocator_new<types::list<input_event>>();
+        _input_event_queue = types::pnew<types::kernel_allocator>(_input_event_queue);
     }
     return *_input_event_queue;
 }

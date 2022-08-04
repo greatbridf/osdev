@@ -6,6 +6,7 @@
 #include <kernel/tty.h>
 #include <kernel/vfs.hpp>
 #include <types/allocator.hpp>
+#include <types/assert.h>
 #include <types/status.h>
 #include <types/stdint.h>
 
@@ -136,7 +137,8 @@ constexpr hw::ata** p_ata_sec = &ata_sec;
 template <hw::ata** ata_bus>
 size_t _ata_read(fs::special_node* sn, char* buf, size_t buf_size, size_t offset, size_t n)
 {
-    // TODO: check buf_size
+    assert_likely(buf_size >= n);
+
     char b[512] {};
     char* orig_buf = buf;
     size_t start = sn->data1 + offset / 512;

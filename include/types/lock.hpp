@@ -5,11 +5,11 @@
 inline void spin_lock(uint32_t volatile* lock_addr)
 {
     asm volatile(
-        "0:\n\t\
+        "%=:\n\t\
          movl $1, %%eax\n\t\
          xchgl %%eax, (%0)\n\t\
          test $0, %%eax\n\t\
-         jne 0\n\t\
+         jne %=b\n\t\
         "
         :
         : "r"(lock_addr)

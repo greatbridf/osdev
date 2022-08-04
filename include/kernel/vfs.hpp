@@ -75,10 +75,12 @@ public:
     struct dentry {
     public:
         using name_type = types::string<>;
+        template <typename T>
+        using allocator_type = types::kernel_allocator<T>;
 
     private:
-        types::list<dentry> children;
-        types::hash_map<name_type, dentry*, types::string_hasher<const name_type&>> idx_children;
+        types::list<dentry, allocator_type>* children = nullptr;
+        types::hash_map<name_type, dentry*, types::string_hasher<const name_type&>, allocator_type>* idx_children = nullptr;
 
     public:
         dentry* parent;
@@ -100,6 +102,8 @@ public:
 
         dentry& operator=(const dentry& val) = delete;
         dentry& operator=(dentry&& val) = delete;
+
+        ~dentry();
 
         dentry* append(inode* ind, const name_type& name);
         dentry* append(inode* ind, name_type&& name);

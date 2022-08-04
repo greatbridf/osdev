@@ -21,7 +21,6 @@
 #include <types/stdint.h>
 #include <types/types.h>
 
-static types::list<thread*>* ready_thds;
 static void (*volatile kthreadd_new_thd_func)(void*);
 static void* volatile kthreadd_new_thd_data;
 static types::mutex kthreadd_mtx;
@@ -69,8 +68,8 @@ process::process(const process& val, const thread& main_thd)
     , pid { process::alloc_pid() }
     , ppid { val.pid }
 {
-    auto iter_thd = thds.emplace_back(main_thd);
-    iter_thd->owner = this;
+    auto* thd = thds.emplace_back(main_thd).ptr();
+    thd->owner = this;
 
     for (auto& area : val.mms) {
         if (area.is_ident())
@@ -78,30 +77,24 @@ process::process(const process& val, const thread& main_thd)
 
         mms.mirror_area(area);
     }
+
+    readythds->push(thd);
 }
 
-process::process(void)
-    : mms(*kernel_mms)
-    , attr { .system = 1 }
-    , pid { process::alloc_pid() }
-    , ppid { 1 }
-{
-    auto thd = thds.emplace_back(this, true);
-
-    add_to_ready_list(thd.ptr());
-}
-
-process::process(void (*func)(void), pid_t _ppid)
+process::process(pid_t _ppid)
     : mms(*kernel_mms)
     , attr { .system = 1 }
     , pid { process::alloc_pid() }
     , ppid { _ppid }
 {
     auto thd = thds.emplace_back(this, true);
+    readythds->push(thd.ptr());
+}
 
-    add_to_ready_list(thd.ptr());
-
-    auto* esp = &thd->esp;
+process::process(void (*func)(void), pid_t _ppid)
+    : process { _ppid }
+{
+    auto* esp = &thds.begin().ptr()->esp;
 
     // return(start) address
     push_stack(esp, (uint32_t)func);
@@ -120,7 +113,7 @@ process::process(void (*func)(void), pid_t _ppid)
 process::~process()
 {
     for (auto iter = thds.begin(); iter != thds.end(); ++iter)
-        remove_from_ready_list(iter.ptr());
+        readythds->remove_all(iter.ptr());
 }
 
 inline void NORETURN _noreturn_crash(void)
@@ -222,9 +215,9 @@ void k_new_thread(void (*func)(void*), void* data)
 void NORETURN init_scheduler()
 {
     procs = types::kernel_allocator_pnew(procs);
-    ready_thds = types::kernel_allocator_pnew(ready_thds);
+    readythds = types::kernel_ident_allocator_pnew(readythds);
 
-    auto* init = procs->emplace().ptr();
+    auto* init = procs->emplace(1).ptr();
 
     // we need interrupts enabled for cow mapping so now we disable it
     // in case timer interrupt mess things up
@@ -267,38 +260,13 @@ void NORETURN init_scheduler()
     _noreturn_crash();
 }
 
-void add_to_ready_list(thread* thd)
-{
-    ready_thds->push_back(thd);
-}
-
-void remove_from_ready_list(thread* thd)
-{
-    auto iter = ready_thds->find(thd);
-    while (iter != ready_thds->end()) {
-        ready_thds->erase(iter);
-        iter = ready_thds->find(thd);
-    }
-}
-
-types::list<thread*>::iterator_type query_next_thread(void)
-{
-    auto iter_thd = ready_thds->begin();
-    while (!((*iter_thd)->attr.ready))
-        iter_thd = ready_thds->erase(iter_thd);
-    return iter_thd;
-}
-
 extern "C" void asm_ctx_switch(uint32_t** curr_esp, uint32_t* next_esp);
 void schedule()
 {
-    auto iter_thd = query_next_thread();
-    auto thd = *iter_thd;
+    auto thd = readythds->query();
 
-    if (current_thread == thd) {
-        next_task(iter_thd);
+    if (current_thread == thd)
         return;
-    }
 
     process* proc = thd->owner;
     if (current_process != proc) {
@@ -310,7 +278,6 @@ void schedule()
 
     current_thread = thd;
     tss.esp0 = current_thread->kstack;
-    next_task(iter_thd);
 
     asm_ctx_switch(&curr_thd->esp, thd->esp);
 }

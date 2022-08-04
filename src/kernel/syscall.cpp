@@ -36,7 +36,6 @@ void _syscall_fork(interrupt_stack* data)
 {
     auto* newproc = procs->emplace(*current_process, *current_thread).ptr();
     thread* newthd = newproc->thds.begin().ptr();
-    add_to_ready_list(newthd);
 
     // create fake interrupt stack
     push_stack(&newthd->esp, data->ss);
@@ -134,7 +133,7 @@ void _syscall_exit(interrupt_stack* data)
 
     // remove this thread from ready list
     current_thread->attr.ready = 0;
-    remove_from_ready_list(current_thread);
+    readythds->remove_all(current_thread);
 
     // TODO: write back mmap'ped files and close them
 

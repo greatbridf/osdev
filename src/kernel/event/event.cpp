@@ -85,7 +85,7 @@ void kernel::evtqueue::notify(void)
     for (auto* sub : m_subscribers) {
         sub->attr.ready = 1;
         sub->attr.wait = 0;
-        add_to_ready_list(sub);
+        readythds->push(sub);
     }
 }
 

@@ -164,16 +164,16 @@ public:
             return !(*this == iter);
         }
 
-        constexpr operator bool()
+        constexpr operator bool(void)
         {
             return p != nullptr;
         }
 
-        constexpr Reference operator*() const noexcept
+        constexpr Reference operator*(void) const noexcept
         {
             return *p;
         }
-        constexpr Pointer operator->() const noexcept
+        constexpr Pointer operator->(void) const noexcept
         {
             return p;
         }

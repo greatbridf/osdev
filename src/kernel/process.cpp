@@ -21,10 +21,6 @@
 #include <types/stdint.h>
 #include <types/types.h>
 
-static bool is_scheduler_ready;
-static types::list<process>* processes;
-static typename types::hash_map<pid_t, types::list<process>::iterator_type, types::linux_hasher<pid_t>>* idx_processes;
-static types::list<thread*>* ready_thds;
 static void (*volatile kthreadd_new_thd_func)(void*);
 static void* volatile kthreadd_new_thd_data;
 static types::mutex kthreadd_mtx;
@@ -72,8 +68,8 @@ process::process(const process& val, const thread& main_thd)
     , pid { process::alloc_pid() }
     , ppid { val.pid }
 {
-    auto iter_thd = thds.emplace_back(main_thd);
-    iter_thd->owner = this;
+    auto* thd = &thds.emplace_back(main_thd);
+    thd->owner = this;
 
     for (auto& area : val.mms) {
         if (area.is_ident())
@@ -81,30 +77,24 @@ process::process(const process& val, const thread& main_thd)
 
         mms.mirror_area(area);
     }
+
+    readythds->push(thd);
 }
 
-process::process(void)
-    : mms(*kernel_mms)
-    , attr { .system = 1 }
-    , pid { process::alloc_pid() }
-    , ppid { 1 }
-{
-    auto thd = thds.emplace_back(this, true);
-
-    add_to_ready_list(thd.ptr());
-}
-
-process::process(void (*func)(void), pid_t _ppid)
+process::process(pid_t _ppid)
     : mms(*kernel_mms)
     , attr { .system = 1 }
     , pid { process::alloc_pid() }
     , ppid { _ppid }
 {
     auto thd = thds.emplace_back(this, true);
+    readythds->push(&thd);
+}
 
-    add_to_ready_list(thd.ptr());
-
-    auto* esp = &thd->esp;
+process::process(void (*func)(void), pid_t _ppid)
+    : process { _ppid }
+{
+    auto* esp = &thds.begin()->esp;
 
     // return(start) address
     push_stack(esp, (uint32_t)func);
@@ -123,7 +113,7 @@ process::process(void (*func)(void), pid_t _ppid)
 process::~process()
 {
     for (auto iter = thds.begin(); iter != thds.end(); ++iter)
-        remove_from_ready_list(iter.ptr());
+        readythds->remove_all(&iter);
 }
 
 inline void NORETURN _noreturn_crash(void)
@@ -171,11 +161,10 @@ void kernel_threadd_main(void)
 
 void NORETURN _kernel_init(void)
 {
-    {
-        kernel::no_irq_guard grd;
+    procs->emplace(kernel_threadd_main, 1);
 
-        add_to_process_list(process { kernel_threadd_main, 1 });
-    }
+    asm_sti();
+
     hw::init_ata();
 
     // TODO: parse kernel parameters
@@ -195,9 +184,7 @@ void NORETURN _kernel_init(void)
 
     assert(types::elf::elf32_load(&d) == GB_OK);
 
-    is_scheduler_ready = true;
-
-    asm volatile (
+    asm volatile(
         "movw $0x23, %%ax\n"
         "movw %%ax, %%ds\n"
         "movw %%ax, %%es\n"
@@ -213,11 +200,9 @@ void NORETURN _kernel_init(void)
         "iret\n"
         :
         : "c"(d.sp), "d"(d.eip)
-        : "eax", "memory"
-    );
+        : "eax", "memory");
 
-    for (;;)
-        assert(false);
+    _noreturn_crash();
 }
 
 void k_new_thread(void (*func)(void*), void* data)
@@ -229,20 +214,17 @@ void k_new_thread(void (*func)(void*), void* data)
 
 void NORETURN init_scheduler()
 {
-    processes = types::kernel_allocator_pnew(processes);
-    ready_thds = types::kernel_allocator_pnew(ready_thds);
-    idx_processes = types::kernel_allocator_pnew(idx_processes);
-    idx_child_processes = types::kernel_allocator_pnew(idx_child_processes);
+    procs = types::kernel_allocator_pnew(procs);
+    readythds = types::kernel_ident_allocator_pnew(readythds);
 
-    auto pid = add_to_process_list(process {});
-    auto init = findproc(pid);
+    auto* init = &procs->emplace(1);
 
     // we need interrupts enabled for cow mapping so now we disable it
     // in case timer interrupt mess things up
     asm_cli();
 
     current_process = init;
-    current_thread = init->thds.begin().ptr();
+    current_thread = &init->thds.begin();
 
     tss.ss0 = KERNEL_DATA_SEGMENT;
     tss.esp0 = current_thread->kstack;
@@ -264,7 +246,7 @@ void NORETURN init_scheduler()
         "xorl %%ebp, %%ebp\n"
         "xorl %%edx, %%edx\n"
 
-        "pushl $0x200\n"
+        "pushl $0x0\n"
         "popfl\n"
 
         "ret\n"
@@ -273,83 +255,18 @@ void NORETURN init_scheduler()
         "ud2"
         :
         : "a"(current_thread->esp), "c"(_kernel_init)
-        : "memory"
-    );
+        : "memory");
 
-    for (;;)
-        assert(false);
-}
-
-pid_t add_to_process_list(process&& proc)
-{
-    auto iter = processes->emplace_back(types::move(proc));
-    idx_processes->insert(iter->pid, iter);
-
-    auto children = idx_child_processes->find(iter->ppid);
-    if (!children) {
-        idx_child_processes->insert(iter->ppid, {});
-        children = idx_child_processes->find(iter->ppid);
-    }
-
-    children->value.push_back(iter->pid);
-
-    return iter->pid;
-}
-
-void remove_from_process_list(pid_t pid)
-{
-    auto proc_iter = idx_processes->find(pid);
-    auto ppid = proc_iter->value->ppid;
-
-    auto& parent_children = idx_child_processes->find(ppid)->value;
-
-    auto i = parent_children.find(pid);
-    parent_children.erase(i);
-
-    processes->erase(proc_iter->value);
-    idx_processes->remove(proc_iter);
-}
-
-void add_to_ready_list(thread* thd)
-{
-    ready_thds->push_back(thd);
-}
-
-void remove_from_ready_list(thread* thd)
-{
-    auto iter = ready_thds->find(thd);
-    while (iter != ready_thds->end()) {
-        ready_thds->erase(iter);
-        iter = ready_thds->find(thd);
-    }
-}
-
-types::list<thread*>::iterator_type query_next_thread(void)
-{
-    auto iter_thd = ready_thds->begin();
-    while (!((*iter_thd)->attr.ready))
-        iter_thd = ready_thds->erase(iter_thd);
-    return iter_thd;
-}
-
-process* findproc(pid_t pid)
-{
-    return idx_processes->find(pid)->value.ptr();
+    _noreturn_crash();
 }
 
 extern "C" void asm_ctx_switch(uint32_t** curr_esp, uint32_t* next_esp);
 void schedule()
 {
-    if (unlikely(!is_scheduler_ready))
-        return;
+    auto thd = readythds->query();
 
-    auto iter_thd = query_next_thread();
-    auto thd = *iter_thd;
-
-    if (current_thread == thd) {
-        next_task(iter_thd);
+    if (current_thread == thd)
         return;
-    }
 
     process* proc = thd->owner;
     if (current_process != proc) {
@@ -361,7 +278,6 @@ void schedule()
 
     current_thread = thd;
     tss.esp0 = current_thread->kstack;
-    next_task(iter_thd);
 
     asm_ctx_switch(&curr_thd->esp, thd->esp);
 }

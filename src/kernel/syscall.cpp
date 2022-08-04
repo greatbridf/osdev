@@ -34,10 +34,8 @@ void _syscall_not_impl(interrupt_stack* data)
 extern "C" void _syscall_stub_fork_return(void);
 void _syscall_fork(interrupt_stack* data)
 {
-    auto newpid = add_to_process_list(process { *current_process, *current_thread });
-    auto* newproc = findproc(newpid);
-    thread* newthd = newproc->thds.begin().ptr();
-    add_to_ready_list(newthd);
+    auto* newproc = &procs->emplace(*current_process, *current_thread);
+    thread* newthd = &newproc->thds.begin();
 
     // create fake interrupt stack
     push_stack(&newthd->esp, data->ss);
@@ -71,7 +69,7 @@ void _syscall_fork(interrupt_stack* data)
     // eflags
     push_stack(&newthd->esp, 0);
 
-    SYSCALL_SET_RETURN_VAL(newpid, 0);
+    SYSCALL_SET_RETURN_VAL(newproc->pid, 0);
 }
 
 void _syscall_write(interrupt_stack* data)
@@ -135,7 +133,7 @@ void _syscall_exit(interrupt_stack* data)
 
     // remove this thread from ready list
     current_thread->attr.ready = 0;
-    remove_from_ready_list(current_thread);
+    readythds->remove_all(current_thread);
 
     // TODO: write back mmap'ped files and close them
 
@@ -143,22 +141,14 @@ void _syscall_exit(interrupt_stack* data)
     current_process->mms.clear_user();
 
     // make child processes orphans (children of init)
-    auto children = idx_child_processes->find(pid);
-    if (children) {
-        auto init_children = idx_child_processes->find(1);
-        for (auto iter = children->value.begin(); iter != children->value.end(); ++iter) {
-            init_children->value.push_back(*iter);
-            findproc(*iter)->ppid = 1;
-        }
-        idx_child_processes->remove(children);
-    }
+    procs->make_children_orphans(pid);
 
     current_process->attr.zombie = 1;
 
     // notify parent process and init
-    auto* proc = findproc(pid);
-    auto* parent = findproc(ppid);
-    auto* init = findproc(1);
+    auto* proc = procs->find(pid);
+    auto* parent = procs->find(ppid);
+    auto* init = procs->find(1);
     while (!proc->wait_lst.empty()) {
         init->wait_lst.push(proc->wait_lst.front());
     }
@@ -183,7 +173,7 @@ void _syscall_wait(interrupt_stack* data)
     }
 
     auto& waitlst = current_process->wait_lst;
-    if (waitlst.empty() && !idx_child_processes->find(current_process->pid)) {
+    if (waitlst.empty() && !procs->has_child(current_process->pid)) {
         SYSCALL_SET_RETURN_VAL(-1, ECHILD);
         return;
     }
@@ -207,7 +197,7 @@ void _syscall_wait(interrupt_stack* data)
     // TODO: copy_to_user check privilege
     *arg1 = (int)evt.data2;
 
-    remove_from_process_list(pid);
+    procs->remove(pid);
     SYSCALL_SET_RETURN_VAL(pid, 0);
 }
 

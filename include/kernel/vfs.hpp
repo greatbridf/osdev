@@ -162,7 +162,7 @@ public:
     virtual int inode_stat(dentry* dir, stat* stat);
 };
 
-extern fs::vfs::dentry* fs_root;
+inline fs::vfs::dentry* fs_root;
 
 void register_special_block(uint16_t major,
     uint16_t minor,

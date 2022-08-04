@@ -439,7 +439,6 @@ int fs::vfs_stat(fs::vfs::dentry* ent, stat* stat)
     return ent->ind->fs->inode_stat(ent, stat);
 }
 
-fs::vfs::dentry* fs::fs_root;
 static types::list<fs::vfs*>* fs_es;
 
 void fs::register_special_block(

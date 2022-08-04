@@ -173,7 +173,7 @@ extern "C" void int14_handler(int14_data* d)
         _int14_panic(d->v_eip, d->l_addr, d->error_code);
 
     pte_t* pte = to_pte(mms->m_pd, d->l_addr);
-    page* page = lto_page(mm_area.ptr(), d->l_addr);
+    page* page = lto_page(&mm_area, d->l_addr);
 
     if (unlikely(d->error_code.present == 0 && !mm_area->mapped_file))
         _int14_panic(d->v_eip, d->l_addr, d->error_code);

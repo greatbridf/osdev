@@ -34,8 +34,8 @@ void _syscall_not_impl(interrupt_stack* data)
 extern "C" void _syscall_stub_fork_return(void);
 void _syscall_fork(interrupt_stack* data)
 {
-    auto* newproc = procs->emplace(*current_process, *current_thread).ptr();
-    thread* newthd = newproc->thds.begin().ptr();
+    auto* newproc = &procs->emplace(*current_process, *current_thread);
+    thread* newthd = &newproc->thds.begin();
 
     // create fake interrupt stack
     push_stack(&newthd->esp, data->ss);

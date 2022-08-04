@@ -157,7 +157,7 @@ public:
 
     constexpr process* find(pid_t pid)
     {
-        return m_idx.find(pid)->value.ptr();
+        return &m_idx.find(pid)->value;
     }
 
     constexpr bool has_child(pid_t pid)

@@ -66,6 +66,8 @@ public:
         using Value = typename types::traits::remove_pointer<Pointer>::type;
         using Reference = typename types::traits::add_reference<Value>::type;
 
+        friend class list;
+
     public:
         constexpr iterator(const iterator& iter) noexcept
             : n(iter.n)
@@ -99,7 +101,7 @@ public:
             return !(*this == iter);
         }
 
-        constexpr iterator& operator++() noexcept
+        constexpr iterator& operator++(void) noexcept
         {
             n = n->next;
             return *this;
@@ -112,7 +114,7 @@ public:
             return iter;
         }
 
-        constexpr iterator& operator--() noexcept
+        constexpr iterator& operator--(void) noexcept
         {
             n = n->prev;
             return *this;
@@ -125,21 +127,22 @@ public:
             return iter;
         }
 
-        constexpr Reference operator*() const noexcept
+        constexpr Reference operator*(void) const noexcept
         {
             return n->value;
         }
 
-        constexpr Pointer operator->() const noexcept
+        constexpr Pointer operator&(void) const noexcept
         {
             return &n->value;
         }
 
-        constexpr Pointer ptr(void) const noexcept
+        constexpr Pointer operator->(void) const noexcept
         {
             return &n->value;
         }
 
+    protected:
         constexpr node_base_type* _node(void) const noexcept
         {
             return n;

@@ -72,7 +72,7 @@ kernel::evt kernel::evtqueue::front()
 
 const kernel::evt* kernel::evtqueue::peek(void) const
 {
-    return m_evts.begin().ptr();
+    return &m_evts.begin();
 }
 
 bool kernel::evtqueue::empty(void) const

@@ -62,7 +62,7 @@ public:
             return !(*this == iter);
         }
 
-        constexpr iterator& operator++() noexcept
+        constexpr iterator& operator++(void) noexcept
         {
             ++p;
             return *this;
@@ -75,7 +75,7 @@ public:
             return iter;
         }
 
-        constexpr iterator& operator--() noexcept
+        constexpr iterator& operator--(void) noexcept
         {
             --p;
             return *this;
@@ -100,12 +100,17 @@ public:
             return iter;
         }
 
-        constexpr Reference operator*() const noexcept
+        constexpr Reference operator*(void) const noexcept
         {
             return *p;
         }
 
-        constexpr Pointer operator->() const noexcept
+        constexpr Pointer operator&(void) const noexcept
+        {
+            return p;
+        }
+
+        constexpr Pointer operator->(void) const noexcept
         {
             return p;
         }

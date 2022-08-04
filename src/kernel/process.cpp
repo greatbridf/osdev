@@ -68,7 +68,7 @@ process::process(const process& val, const thread& main_thd)
     , pid { process::alloc_pid() }
     , ppid { val.pid }
 {
-    auto* thd = thds.emplace_back(main_thd).ptr();
+    auto* thd = &thds.emplace_back(main_thd);
     thd->owner = this;
 
     for (auto& area : val.mms) {
@@ -88,13 +88,13 @@ process::process(pid_t _ppid)
     , ppid { _ppid }
 {
     auto thd = thds.emplace_back(this, true);
-    readythds->push(thd.ptr());
+    readythds->push(&thd);
 }
 
 process::process(void (*func)(void), pid_t _ppid)
     : process { _ppid }
 {
-    auto* esp = &thds.begin().ptr()->esp;
+    auto* esp = &thds.begin()->esp;
 
     // return(start) address
     push_stack(esp, (uint32_t)func);
@@ -113,7 +113,7 @@ process::process(void (*func)(void), pid_t _ppid)
 process::~process()
 {
     for (auto iter = thds.begin(); iter != thds.end(); ++iter)
-        readythds->remove_all(iter.ptr());
+        readythds->remove_all(&iter);
 }
 
 inline void NORETURN _noreturn_crash(void)
@@ -217,14 +217,14 @@ void NORETURN init_scheduler()
     procs = types::kernel_allocator_pnew(procs);
     readythds = types::kernel_ident_allocator_pnew(readythds);
 
-    auto* init = procs->emplace(1).ptr();
+    auto* init = &procs->emplace(1);
 
     // we need interrupts enabled for cow mapping so now we disable it
     // in case timer interrupt mess things up
     asm_cli();
 
     current_process = init;
-    current_thread = init->thds.begin().ptr();
+    current_thread = &init->thds.begin();
 
     tss.ss0 = KERNEL_DATA_SEGMENT;
     tss.esp0 = current_thread->kstack;

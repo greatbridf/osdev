@@ -59,7 +59,7 @@ void kernel::evtqueue::push(kernel::evt&& event)
     this->notify();
 }
 
-kernel::evt&& kernel::evtqueue::front()
+kernel::evt kernel::evtqueue::front()
 {
     assert(!this->empty());
     types::lock_guard lck(m_mtx);
@@ -67,7 +67,7 @@ kernel::evt&& kernel::evtqueue::front()
     auto iter = m_evts.begin();
     evt e = types::move(*iter);
     m_evts.erase(iter);
-    return types::move(e);
+    return e;
 }
 
 const kernel::evt* kernel::evtqueue::peek(void) const

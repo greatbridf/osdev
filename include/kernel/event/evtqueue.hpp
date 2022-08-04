@@ -32,7 +32,7 @@ public:
     evtqueue(evtqueue&&);
 
     void push(evt&& event);
-    evt&& front();
+    evt front();
     const evt* peek(void) const;
 
     bool empty(void) const;

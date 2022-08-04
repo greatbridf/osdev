@@ -168,7 +168,7 @@ void NORETURN _kernel_init(void)
     hw::init_ata();
 
     // TODO: parse kernel parameters
-    auto* _new_fs = fs::register_fs(types::kernel_allocator_new<fs::fat::fat32>(fs::vfs_open("/dev/hda1")->ind));
+    auto* _new_fs = fs::register_fs(types::_new<types::kernel_allocator, fs::fat::fat32>(fs::vfs_open("/dev/hda1")->ind));
     int ret = fs::fs_root->ind->fs->mount(fs::vfs_open("/mnt"), _new_fs);
     assert_likely(ret == GB_OK);
 
@@ -214,8 +214,8 @@ void k_new_thread(void (*func)(void*), void* data)
 
 void NORETURN init_scheduler()
 {
-    procs = types::kernel_allocator_pnew(procs);
-    readythds = types::kernel_ident_allocator_pnew(readythds);
+    procs = types::pnew<types::kernel_allocator>(procs);
+    readythds = types::pnew<types::kernel_allocator>(readythds);
 
     auto* init = &procs->emplace(1);
 

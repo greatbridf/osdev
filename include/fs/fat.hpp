@@ -100,6 +100,7 @@ struct PACKED directory_entry {
     uint32_t size;
 };
 
+// TODO: deallocate inodes when dentry is destroyed
 class fat32 : public virtual fs::vfs {
 private:
     constexpr static uint32_t SECTOR_SIZE = 512;
@@ -113,6 +114,7 @@ private:
     uint32_t next_free_cluster_hint;
     cluster_t root_dir;
     cluster_t data_region_offset;
+    // TODO: use block device special node id
     inode* device;
     uint16_t reserved_sectors;
     uint8_t fat_copies;

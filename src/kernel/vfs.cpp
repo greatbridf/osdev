@@ -27,6 +27,10 @@ fs::vfs::dentry::dentry(dentry* _parent, inode* _ind, const name_type& _name)
     , flags { 0 }
     , name(_name)
 {
+    if (!_ind || _ind->flags.in.directory) {
+        children = types::pnew<allocator_type>(children);
+        idx_children = types::pnew<allocator_type>(idx_children);
+    }
 }
 fs::vfs::dentry::dentry(dentry* _parent, inode* _ind, name_type&& _name)
     : parent(_parent)
@@ -34,28 +38,40 @@ fs::vfs::dentry::dentry(dentry* _parent, inode* _ind, name_type&& _name)
     , flags { 0 }
     , name(types::move(_name))
 {
+    if (!_ind || _ind->flags.in.directory) {
+        children = types::pnew<allocator_type>(children);
+        idx_children = types::pnew<allocator_type>(idx_children);
+    }
 }
 fs::vfs::dentry::dentry(dentry&& val)
-    : children(types::move(val.children))
-    , idx_children(types::move(val.idx_children))
+    : children(val.children)
+    , idx_children(val.idx_children)
     , parent(val.parent)
     , ind(val.ind)
     , flags { val.flags }
     , name(types::move(val.name))
 {
-    for (auto& item : children)
+    for (auto& item : *children)
         item.parent = this;
+    memset(&val, 0x00, sizeof(dentry));
+}
+fs::vfs::dentry::~dentry()
+{
+    if (children) {
+        types::pdelete<allocator_type>(children);
+        types::pdelete<allocator_type>(idx_children);
+    }
 }
 fs::vfs::dentry* fs::vfs::dentry::append(inode* ind, const name_type& name)
 {
-    auto iter = children.emplace_back(this, ind, name);
-    idx_children.insert(iter->name, &iter);
+    auto iter = children->emplace_back(this, ind, name);
+    idx_children->insert(iter->name, &iter);
     return &iter;
 }
 fs::vfs::dentry* fs::vfs::dentry::append(inode* ind, name_type&& name)
 {
-    auto iter = children.emplace_back(this, ind, types::move(name));
-    idx_children.insert(iter->name, &iter);
+    auto iter = children->emplace_back(this, ind, types::move(name));
+    idx_children->insert(iter->name, &iter);
     return &iter;
 }
 fs::vfs::dentry* fs::vfs::dentry::find(const name_type& name)
@@ -63,7 +79,7 @@ fs::vfs::dentry* fs::vfs::dentry::find(const name_type& name)
     if (ind->flags.in.directory && !flags.in.present)
         ind->fs->load_dentry(this);
 
-    auto iter = idx_children.find(name);
+    auto iter = idx_children->find(name);
     if (!iter) {
         errno = ENOTFOUND;
         return nullptr;
@@ -74,15 +90,15 @@ fs::vfs::dentry* fs::vfs::dentry::find(const name_type& name)
 fs::vfs::dentry* fs::vfs::dentry::replace(dentry* val)
 {
     // TODO: prevent the dirent to be swapped out of memory
-    parent->idx_children.find(this->name)->value = val;
+    parent->idx_children->find(this->name)->value = val;
     return this;
 }
 void fs::vfs::dentry::invalidate(void)
 {
     // TODO: write back
     flags.in.dirty = 0;
-    children.clear();
-    idx_children.clear();
+    children->clear();
+    idx_children->clear();
     flags.in.present = 0;
 }
 fs::vfs::vfs(void)
@@ -133,6 +149,9 @@ int fs::vfs::mount(dentry* mnt, vfs* new_fs)
 
     auto* orig_ent = mnt->replace(new_ent);
     _mount_recover_list.insert(new_ent, orig_ent);
+
+    new_ent->ind->flags.in.mount_point = 1;
+
     return GB_OK;
 }
 size_t fs::vfs::inode_read(inode*, char*, size_t, size_t, size_t)
@@ -462,9 +481,9 @@ void init_vfs(void)
     // null
     register_special_block(0, 0, b_null_read, b_null_write, 0, 0);
 
-    fs_es = types::kernel_allocator_new<types::list<vfs*>>();
+    fs_es = types::pnew<types::kernel_ident_allocator>(fs_es);
 
-    auto* rootfs = types::kernel_allocator_new<tmpfs>();
+    auto* rootfs = types::_new<types::kernel_allocator, tmpfs>();
     fs_es->push_back(rootfs);
     fs_root = rootfs->root();
 

@@ -4,7 +4,7 @@
 #include <types/stdint.h>
 #include <types/types.h>
 
-inline void* operator new(size_t, void* ptr)
+constexpr void* operator new(size_t, void* ptr)
 {
     return ptr;
 }
@@ -31,12 +31,12 @@ class kernel_allocator {
 public:
     using value_type = T;
 
-    static value_type* allocate_memory(size_t count)
+    static constexpr value_type* allocate_memory(size_t count)
     {
         return static_cast<value_type*>(::k_malloc(count));
     }
 
-    static void deallocate_memory(value_type* ptr)
+    static constexpr void deallocate_memory(value_type* ptr)
     {
         ::k_free(ptr);
     }
@@ -47,55 +47,33 @@ class kernel_ident_allocator {
 public:
     using value_type = T;
 
-    static value_type* allocate_memory(size_t count)
+    static constexpr value_type* allocate_memory(size_t count)
     {
         return static_cast<value_type*>(::ki_malloc(count));
     }
 
-    static void deallocate_memory(value_type* ptr)
+    static constexpr void deallocate_memory(value_type* ptr)
     {
         ::ki_free(ptr);
     }
 };
 
-template <typename T, typename... Args>
-constexpr T* kernel_allocator_new(Args&&... args)
+template <template <typename _T> class Allocator, typename T, typename... Args>
+constexpr T* _new(Args&&... args)
 {
-    return allocator_traits<kernel_allocator<T>>::allocate_and_construct(forward<Args>(args)...);
+    return allocator_traits<Allocator<T>>::allocate_and_construct(forward<Args>(args)...);
 }
 
-template <PointerType T, typename... Args>
-constexpr auto kernel_allocator_pnew(T, Args&&... args)
+template <template <typename _T> class Allocator, typename T, typename... Args>
+constexpr T* pnew(T* = nullptr, Args&&... args)
 {
-    using value_type = typename traits::remove_pointer<T>::type;
-    return kernel_allocator_new<value_type>(forward<Args>(args)...);
+    return _new<Allocator, T, Args...>(forward<Args>(args)...);
 }
 
-template <typename T, typename... Args>
-constexpr T* kernel_ident_allocator_new(Args&&... args)
+template <template <typename _T> class Allocator, typename T>
+constexpr void pdelete(T* ptr)
 {
-    return allocator_traits<kernel_ident_allocator<T>>::allocate_and_construct(forward<Args>(args)...);
-}
-
-template <PointerType T, typename... Args>
-constexpr auto kernel_ident_allocator_pnew(T, Args&&... args)
-{
-    using value_type = typename traits::remove_pointer<T>::type;
-    return kernel_ident_allocator_new<value_type>(forward<Args>(args)...);
-}
-
-template <PointerType T>
-constexpr void kernel_allocator_delete(T ptr)
-{
-    using value_type = typename traits::remove_pointer<T>::type;
-    return allocator_traits<kernel_allocator<value_type>>::deconstruct_and_deallocate(ptr);
-}
-
-template <PointerType T>
-constexpr void kernel_ident_allocator_delete(T ptr)
-{
-    using value_type = typename traits::remove_pointer<T>::type;
-    return allocator_traits<kernel_ident_allocator<value_type>>::deconstruct_and_deallocate(ptr);
+    allocator_traits<Allocator<T>>::deconstruct_and_deallocate(ptr);
 }
 
 template <Allocator _allocator>
@@ -103,7 +81,7 @@ class allocator_traits {
 public:
     using value_type = typename _allocator::value_type;
 
-    static value_type* allocate(size_t count)
+    static constexpr value_type* allocate(size_t count)
     {
         if (count == 0)
             return nullptr;
@@ -111,35 +89,35 @@ public:
     }
 
     template <typename... Args>
-    static value_type* construct(value_type* ptr, Args&&... args)
+    static constexpr value_type* construct(value_type* ptr, Args&&... args)
     {
         new (ptr) value_type(forward<Args>(args)...);
         return ptr;
     }
 
     template <typename... Args>
-    static value_type* allocate_and_construct(Args&&... args)
+    static constexpr value_type* allocate_and_construct(Args&&... args)
     {
         auto* ptr = allocate(1);
         construct(ptr, forward<Args>(args)...);
         return ptr;
     }
 
-    static void deconstruct(value_type* ptr)
+    static constexpr void deconstruct(value_type* ptr)
     {
         if (!ptr)
             return;
         ptr->~value_type();
     }
 
-    static void deallocate(value_type* ptr)
+    static constexpr void deallocate(value_type* ptr)
     {
         if (!ptr)
             return;
         _allocator::deallocate_memory(ptr);
     }
 
-    static void deconstruct_and_deallocate(value_type* ptr)
+    static constexpr void deconstruct_and_deallocate(value_type* ptr)
     {
         if (!ptr)
             return;

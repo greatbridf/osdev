@@ -170,7 +170,7 @@ public:
                 },
             },
             .owner = this,
-            .pgs = ::types::kernel_ident_allocator_new<page_arr>(),
+            .pgs = types::_new<types::kernel_ident_allocator, page_arr>(),
         });
     }
 

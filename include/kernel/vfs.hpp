@@ -83,7 +83,7 @@ public:
     public:
         dentry* parent;
         inode* ind;
-        // if the entry is not a file, this flag is ignored
+        // if the entry is a file, this flag is ignored
         union {
             uint32_t v;
             struct {

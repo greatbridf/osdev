@@ -35,6 +35,7 @@ void _debugger_breakpoint(void);
 
 #else
 
-#define assert(_statement) ;
+#define assert(_statement) (void)(_statement)
+#define assert_likely(_statement) (void)(_statement)
 
 #endif

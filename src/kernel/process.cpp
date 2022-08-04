@@ -132,9 +132,6 @@ inline void NORETURN _noreturn_crash(void)
         assert(false);
 }
 
-extern "C" void NORETURN go_kernel(uint32_t* kstack, void (*k_main)(void));
-extern "C" void NORETURN go_user(void* eip, uint32_t* esp);
-
 void kernel_threadd_main(void)
 {
     tty_print(console, "kernel thread daemon started\n");
@@ -200,7 +197,27 @@ void NORETURN _kernel_init(void)
 
     is_scheduler_ready = true;
 
-    go_user(d.eip, d.sp);
+    asm volatile (
+        "movw $0x23, %%ax\n"
+        "movw %%ax, %%ds\n"
+        "movw %%ax, %%es\n"
+        "movw %%ax, %%fs\n"
+        "movw %%ax, %%gs\n"
+
+        "pushl $0x23\n"
+        "pushl %0\n"
+        "pushl $0x200\n"
+        "pushl $0x1b\n"
+        "pushl %1\n"
+
+        "iret\n"
+        :
+        : "c"(d.sp), "d"(d.eip)
+        : "eax", "memory"
+    );
+
+    for (;;)
+        assert(false);
 }
 
 void k_new_thread(void (*func)(void*), void* data)
@@ -232,7 +249,35 @@ void NORETURN init_scheduler()
 
     asm_switch_pd(current_process->mms.m_pd);
 
-    go_kernel(current_thread->esp, _kernel_init);
+    asm volatile(
+        "movl %0, %%esp\n"
+        "pushl %=f\n"
+        "pushl %1\n"
+
+        "movw $0x10, %%ax\n"
+        "movw %%ax, %%ss\n"
+        "movw %%ax, %%ds\n"
+        "movw %%ax, %%es\n"
+        "movw %%ax, %%fs\n"
+        "movw %%ax, %%gs\n"
+
+        "xorl %%ebp, %%ebp\n"
+        "xorl %%edx, %%edx\n"
+
+        "pushl $0x200\n"
+        "popfl\n"
+
+        "ret\n"
+
+        "%=:\n"
+        "ud2"
+        :
+        : "a"(current_thread->esp), "c"(_kernel_init)
+        : "memory"
+    );
+
+    for (;;)
+        assert(false);
 }
 
 pid_t add_to_process_list(process&& proc)

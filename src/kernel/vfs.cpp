@@ -65,13 +65,13 @@ fs::vfs::dentry::~dentry()
 fs::vfs::dentry* fs::vfs::dentry::append(inode* ind, const name_type& name)
 {
     auto iter = children->emplace_back(this, ind, name);
-    idx_children->insert(iter->name, &iter);
+    idx_children->emplace(iter->name, &iter);
     return &iter;
 }
 fs::vfs::dentry* fs::vfs::dentry::append(inode* ind, name_type&& name)
 {
     auto iter = children->emplace_back(this, ind, types::move(name));
-    idx_children->insert(iter->name, &iter);
+    idx_children->emplace(iter->name, &iter);
     return &iter;
 }
 fs::vfs::dentry* fs::vfs::dentry::find(const name_type& name)
@@ -113,7 +113,7 @@ fs::ino_t fs::vfs::_assign_inode_id(void)
 fs::inode* fs::vfs::cache_inode(inode_flags flags, uint32_t perm, size_t size, void* impl_data)
 {
     auto iter = _inodes.emplace_back(inode { flags, perm, impl_data, _assign_inode_id(), this, size });
-    _idx_inodes.insert(iter->ino, &iter);
+    _idx_inodes.emplace(iter->ino, &iter);
     return &iter;
 }
 fs::inode* fs::vfs::get_inode(ino_t ino)
@@ -148,7 +148,7 @@ int fs::vfs::mount(dentry* mnt, vfs* new_fs)
     new_ent->name = mnt->name;
 
     auto* orig_ent = mnt->replace(new_ent);
-    _mount_recover_list.insert(new_ent, orig_ent);
+    _mount_recover_list.emplace(new_ent, orig_ent);
 
     new_ent->ind->flags.in.mount_point = 1;
 

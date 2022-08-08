@@ -66,6 +66,19 @@ struct remove_cv<const volatile T> {
 };
 
 template <typename T>
+struct add_const {
+    using type = const T;
+};
+template <typename T>
+struct add_const<const T> {
+    using type = const T;
+};
+template <>
+struct add_const<void> {
+    using type = void;
+};
+
+template <typename T>
 struct is_pointer : false_type {
 };
 
@@ -76,7 +89,7 @@ struct is_pointer<T*> : true_type {
 template <typename T>
 struct decay {
 private:
-    using U = remove_reference<T>;
+    using U = typename remove_reference<T>::type;
 
 public:
     using type = typename remove_cv<U>::type;

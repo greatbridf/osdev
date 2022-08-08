@@ -95,6 +95,7 @@ set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
                         include/types/buffer.h
                         include/types/elf.hpp
                         include/types/hash_map.hpp
+                        include/types/pair.hpp
                         include/types/types.h
                         include/types/size.h
                         include/types/status.h

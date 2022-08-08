@@ -126,11 +126,11 @@ public:
     constexpr iterator_type emplace(Args&&... args)
     {
         auto iter = m_procs.emplace_back(types::forward<Args>(args)...);
-        m_idx.insert(iter->pid, iter);
+        m_idx.emplace(iter->pid, iter);
 
         auto children = m_child_idx.find(iter->ppid);
         if (!children) {
-            m_child_idx.insert(iter->ppid, {});
+            m_child_idx.emplace(iter->ppid, types::list<pid_t> {});
             children = m_child_idx.find(iter->ppid);
         }
 

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "types/map.hpp"
+#include "types/pair.hpp"
 #include <kernel/event/evtqueue.hpp>
 #include <kernel/interrupt.h>
 #include <kernel/mm.hpp>
@@ -110,31 +112,31 @@ private:
 
 class proclist final {
 public:
-    using list_type = types::list<process>;
-    using index_type = types::hash_map<pid_t, types::list<process>::iterator_type, types::linux_hasher<pid_t>>;
+    using list_type = types::map<pid_t, process>;
     using child_index_type = types::hash_map<pid_t, types::list<pid_t>, types::linux_hasher<pid_t>>;
     using iterator_type = list_type::iterator_type;
     using const_iterator_type = list_type::const_iterator_type;
 
 private:
     list_type m_procs;
-    index_type m_idx;
     child_index_type m_child_idx;
 
 public:
     template <typename... Args>
-    constexpr iterator_type emplace(Args&&... args)
+    iterator_type emplace(Args&&... args)
     {
-        auto iter = m_procs.emplace_back(types::forward<Args>(args)...);
-        m_idx.emplace(iter->pid, iter);
+        process _proc(types::forward<Args>(args)...);
+        auto pid = _proc.pid;
+        auto ppid = _proc.ppid;
+        auto iter = m_procs.insert(types::make_pair(pid, types::move(_proc)));
 
-        auto children = m_child_idx.find(iter->ppid);
+        auto children = m_child_idx.find(ppid);
         if (!children) {
-            m_child_idx.emplace(iter->ppid, types::list<pid_t> {});
-            children = m_child_idx.find(iter->ppid);
+            m_child_idx.emplace(ppid, types::list<pid_t> {});
+            children = m_child_idx.find(ppid);
         }
 
-        children->value.push_back(iter->pid);
+        children->value.push_back(pid);
 
         return iter;
     }
@@ -143,21 +145,20 @@ public:
     {
         make_children_orphans(pid);
 
-        auto proc_iter = m_idx.find(pid);
-        auto ppid = proc_iter->value->ppid;
+        auto proc_iter = m_procs.find(pid);
+        auto ppid = proc_iter->value.ppid;
 
         auto& parent_children = m_child_idx.find(ppid)->value;
 
         auto i = parent_children.find(pid);
         parent_children.erase(i);
 
-        m_procs.erase(proc_iter->value);
-        m_idx.remove(proc_iter);
+        m_procs.erase(proc_iter);
     }
 
     constexpr process* find(pid_t pid)
     {
-        return &m_idx.find(pid)->value;
+        return &m_procs.find(pid)->value;
     }
 
     constexpr bool has_child(pid_t pid)

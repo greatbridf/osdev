@@ -223,8 +223,8 @@ void NORETURN init_scheduler()
     // in case timer interrupt mess things up
     asm_cli();
 
-    current_process = init;
-    current_thread = &init->thds.begin();
+    current_process = &init->value;
+    current_thread = &init->value.thds.begin();
 
     tss.ss0 = KERNEL_DATA_SEGMENT;
     tss.esp0 = current_thread->kstack;

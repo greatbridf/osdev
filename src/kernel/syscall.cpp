@@ -35,7 +35,7 @@ extern "C" void _syscall_stub_fork_return(void);
 void _syscall_fork(interrupt_stack* data)
 {
     auto* newproc = &procs->emplace(*current_process, *current_thread);
-    thread* newthd = &newproc->thds.begin();
+    thread* newthd = &newproc->value.thds.begin();
 
     // create fake interrupt stack
     push_stack(&newthd->esp, data->ss);
@@ -69,7 +69,7 @@ void _syscall_fork(interrupt_stack* data)
     // eflags
     push_stack(&newthd->esp, 0);
 
-    SYSCALL_SET_RETURN_VAL(newproc->pid, 0);
+    SYSCALL_SET_RETURN_VAL(newproc->value.pid, 0);
 }
 
 void _syscall_write(interrupt_stack* data)

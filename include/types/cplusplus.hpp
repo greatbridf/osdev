@@ -17,6 +17,15 @@ using false_type = constant_value<bool, false>;
 
 namespace types::traits {
 
+template <bool Expression, typename TTrue, typename TFalse>
+struct condition {
+    using type = TFalse;
+};
+template <typename TTrue, typename TFalse>
+struct condition<true, TTrue, TFalse> {
+    using type = TTrue;
+};
+
 template <typename T>
 struct remove_pointer {
     using type = T;
@@ -84,6 +93,13 @@ struct is_pointer : false_type {
 
 template <typename T>
 struct is_pointer<T*> : true_type {
+};
+
+template <typename T>
+struct is_const : public false_type {
+};
+template <typename T>
+struct is_const<const T> : public true_type {
 };
 
 template <typename T>

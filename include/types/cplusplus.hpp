@@ -102,6 +102,13 @@ template <typename T>
 struct is_const<const T> : public true_type {
 };
 
+template <typename U, template <typename...> class T, typename...>
+struct is_template_instance : public false_type {
+};
+template <template <typename...> class T, typename... Ts>
+struct is_template_instance<T<Ts...>, T> : public true_type {
+};
+
 template <typename T>
 struct decay {
 private:

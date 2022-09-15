@@ -17,6 +17,14 @@ typedef size_t pid_t;
 class process;
 struct thread;
 
+class proclist;
+class readyqueue;
+
+inline process* volatile current_process;
+inline thread* volatile current_thread;
+inline proclist* procs;
+inline readyqueue* readythds;
+
 struct process_attr {
     uint16_t system : 1;
     uint16_t zombie : 1 = 0;
@@ -74,6 +82,12 @@ public:
         alloc_kstack();
     }
 
+    inline thread(const thread& thd, process* new_parent)
+        : thread { thd }
+    {
+        owner = new_parent;
+    }
+
     constexpr ~thread()
     {
         if (kstack)
@@ -81,10 +95,47 @@ public:
     }
 };
 
+class thdlist {
+private:
+    types::list<thread> thds;
+
+public:
+    constexpr thdlist(const thdlist& obj) = delete;
+    constexpr thdlist(thdlist&& obj) = delete;
+
+    constexpr thdlist& operator=(const thdlist& obj) = delete;
+    constexpr thdlist& operator=(thdlist&& obj) = delete;
+
+    constexpr thdlist(thdlist&& obj, process* new_parent)
+        : thds { types::move(obj.thds) }
+    {
+        for (auto& thd : thds)
+            thd.owner = new_parent;
+    }
+
+    explicit constexpr thdlist(void)
+    {
+    }
+
+    // implementation is below
+    constexpr ~thdlist();
+
+    template <typename... Args>
+    constexpr thread& Emplace(Args&&... args)
+    {
+        return *thds.emplace_back(types::forward<Args>(args)...);
+    }
+
+    constexpr size_t size(void) const
+    {
+        return thds.size();
+    }
+};
+
 class process {
 public:
     mutable kernel::mm_list mms;
-    types::list<thread> thds;
+    thdlist thds;
     kernel::evtqueue wait_lst;
     process_attr attr;
     pid_t pid;
@@ -92,14 +143,18 @@ public:
 
 public:
     process(process&& val);
-    process(const process&) = delete;
-    process(const process& proc, const thread& main_thread);
+    process(const process&);
 
-    // only used for system initialization
-    explicit process(pid_t ppid);
-    explicit process(void (*func_in_kernel_space)(void), pid_t ppid);
+    explicit process(pid_t ppid, bool system = true);
 
-    ~process();
+    constexpr bool is_system(void) const
+    {
+        return attr.system;
+    }
+    constexpr bool is_zombie(void) const
+    {
+        return attr.zombie;
+    }
 
 private:
     static inline pid_t max_pid;
@@ -233,11 +288,6 @@ public:
     }
 };
 
-inline process* volatile current_process;
-inline thread* volatile current_thread;
-inline proclist* procs;
-inline readyqueue* readythds;
-
 extern "C" void NORETURN init_scheduler();
 void schedule(void);
 
@@ -246,6 +296,13 @@ constexpr uint32_t push_stack(uint32_t** stack, uint32_t val)
     --*stack;
     **stack = val;
     return val;
+}
+
+// class thdlist
+constexpr thdlist::~thdlist()
+{
+    for (auto iter = thds.begin(); iter != thds.end(); ++iter)
+        readythds->remove_all(&iter);
 }
 
 void k_new_thread(void (*func)(void*), void* data);

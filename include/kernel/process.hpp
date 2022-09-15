@@ -96,8 +96,11 @@ public:
 };
 
 class thdlist {
+public:
+    using list_type = types::list<thread>;
+
 private:
-    types::list<thread> thds;
+    list_type thds;
 
 public:
     constexpr thdlist(const thdlist& obj) = delete;
@@ -129,6 +132,11 @@ public:
     constexpr size_t size(void) const
     {
         return thds.size();
+    }
+
+    constexpr list_type& underlying_list(void)
+    {
+        return thds;
     }
 };
 

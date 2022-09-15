@@ -132,9 +132,11 @@ void _syscall_exit(interrupt_stack* data)
 
     // terminating a whole process:
 
-    // remove this thread from ready list
-    current_thread->attr.ready = 0;
-    readythds->remove_all(current_thread);
+    // remove threads from ready list
+    for (auto& thd : current_process->thds.underlying_list()) {
+        thd.attr.ready = 0;
+        readythds->remove_all(&thd);
+    }
 
     // TODO: write back mmap'ped files and close them
 

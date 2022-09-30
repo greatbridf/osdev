@@ -260,9 +260,9 @@ public:
     {
         auto hash_value = _Hasher::hash(key, hash_length());
         const auto& bucket = buckets.at(hash_value);
-        for (const auto& item : bucket) {
-            if (key == item.key)
-                return const_iterator_type(&(*item));
+        for (auto iter = bucket.cbegin(); iter != bucket.cend(); ++iter) {
+            if (key == iter->key)
+                return const_iterator_type(&iter);
         }
         return const_iterator_type(nullptr);
     }

@@ -52,6 +52,7 @@ process::process(process&& val)
     , attr { val.attr }
     , pid(val.pid)
     , ppid(val.ppid)
+    , files(types::move(val.files))
 {
     if (current_process == &val)
         current_process = this;
@@ -71,6 +72,8 @@ process::process(const process& parent)
 
         mms.mirror_area(area);
     }
+
+    this->files.dup(parent.files);
 }
 
 process::process(pid_t _ppid, bool _system)
@@ -207,6 +210,7 @@ void NORETURN init_scheduler()
 
     // init process has no parent
     auto* init = &procs->emplace(0)->value;
+    init->files.open("/dev/console", 0);
 
     // we need interrupts enabled for cow mapping so now we disable it
     // in case timer interrupt mess things up

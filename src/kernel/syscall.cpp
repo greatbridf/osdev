@@ -7,6 +7,7 @@
 #include <kernel/process.hpp>
 #include <kernel/syscall.hpp>
 #include <kernel/tty.h>
+#include <kernel/vfs.hpp>
 #include <kernel_main.h>
 #include <types/allocator.hpp>
 #include <types/assert.h>
@@ -75,9 +76,19 @@ void _syscall_fork(interrupt_stack* data)
 
 void _syscall_write(interrupt_stack* data)
 {
-    tty_print(console, reinterpret_cast<const char*>(data->s_regs.edi));
+    int fd = data->s_regs.edi;
+    const char* buf = reinterpret_cast<const char*>(data->s_regs.esi);
+    size_t n = data->s_regs.edx;
 
-    SYSCALL_SET_RETURN_VAL(0, 0);
+    auto* file = current_process->files[fd];
+    if (file->type != fs::file::types::regular_file) {
+        SYSCALL_SET_RETURN_VAL(GB_FAILED, EINVAL);
+        return;
+    }
+
+    int n_wrote = fs::vfs_write(file->impl.ind, buf, file->cursor, n);
+    file->cursor += n_wrote;
+    SYSCALL_SET_RETURN_VAL(n_wrote, 0);
 }
 
 void _syscall_sleep(interrupt_stack* data)

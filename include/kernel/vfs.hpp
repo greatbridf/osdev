@@ -162,6 +162,17 @@ public:
     virtual int inode_stat(dentry* dir, stat* stat);
 };
 
+struct file {
+    enum class types {
+        regular_file,
+    } type;
+    union {
+        inode* ind;
+    } impl;
+    size_t cursor;
+    size_t ref;
+};
+
 inline fs::vfs::dentry* fs_root;
 
 void register_special_block(uint16_t major,

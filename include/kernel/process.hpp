@@ -1,14 +1,18 @@
 #pragma once
 
-#include "types/map.hpp"
-#include "types/pair.hpp"
+#include <kernel/errno.h>
 #include <kernel/event/evtqueue.hpp>
 #include <kernel/interrupt.h>
 #include <kernel/mm.hpp>
 #include <kernel/task.h>
+#include <kernel/vfs.hpp>
+#include <types/allocator.hpp>
 #include <types/cplusplus.hpp>
 #include <types/hash_map.hpp>
 #include <types/list.hpp>
+#include <types/map.hpp>
+#include <types/pair.hpp>
+#include <types/status.h>
 #include <types/stdint.h>
 #include <types/types.h>
 
@@ -142,12 +146,117 @@ public:
 
 class process {
 public:
+    class filearr {
+    public:
+        using container_type = types::list<fs::file>;
+        using array_type = types::hash_map<int, container_type::iterator_type, types::linux_hasher<size_t>>;
+
+    private:
+        inline static container_type* files = nullptr;
+        array_type arr;
+        int next_fd = 0;
+
+    public:
+        constexpr filearr(const filearr&) = delete;
+        constexpr filearr& operator=(const filearr&) = delete;
+        constexpr filearr& operator=(filearr&&) = delete;
+        constexpr filearr(filearr&& val)
+            : arr { types::move(val.arr) }
+            , next_fd { val.next_fd }
+        {
+            val.next_fd = 0;
+        }
+
+        explicit filearr()
+        {
+            if (!files)
+                files = types::pnew<types::kernel_allocator>(files);
+        }
+
+        constexpr void dup(const filearr& orig)
+        {
+            if (this->next_fd)
+                return;
+
+            this->next_fd = orig.next_fd;
+
+            for (int i = 0; i < this->next_fd; ++i) {
+                auto iter = orig.arr.find(i);
+                if (!iter)
+                    continue;
+
+                this->arr.emplace(iter->key, iter->value);
+                ++iter->value->ref;
+            }
+        }
+
+        constexpr fs::file* operator[](int i) const
+        {
+            auto iter = arr.find(i);
+            if (!iter)
+                return nullptr;
+            else
+                return &iter->value;
+        }
+
+        // TODO: file opening flags (permissions etc.)
+        int open(const char* filename, uint32_t)
+        {
+            auto* dentry = fs::vfs_open(filename);
+
+            if (!dentry) {
+                errno = ENOTFOUND;
+                return -1;
+            }
+
+            if (!(dentry->ind->flags.in.file || dentry->ind->flags.in.special_node)) {
+                errno = EISDIR;
+                return -1;
+            }
+
+            auto iter = files->emplace_back(fs::file {
+                fs::file::types::regular_file,
+                { .ind = dentry->ind },
+                0,
+                1 });
+
+            int fd = next_fd++;
+            arr.emplace(fd, iter);
+            return fd;
+        }
+
+        // close file descriptor
+        // where iter is guaranteed not nullptr
+        constexpr void close(array_type::iterator_type iter)
+        {
+            if (iter->value->ref == 1)
+                files->erase(iter->value);
+            else
+                --iter->value->ref;
+        }
+
+        constexpr void close(int fd)
+        {
+            auto iter = arr.find(fd);
+            if (iter)
+                close(iter);
+        }
+
+        constexpr ~filearr()
+        {
+            for (int i = 0; i < next_fd; ++i)
+                close(i);
+        }
+    };
+
+public:
     mutable kernel::mm_list mms;
     thdlist thds;
     kernel::evtqueue wait_lst;
     process_attr attr;
     pid_t pid;
     pid_t ppid;
+    filearr files;
 
 public:
     process(process&& val);

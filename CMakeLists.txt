@@ -61,7 +61,7 @@ set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
                         src/kernel/vga.c
                         src/kernel/hw/ata.cpp
                         src/kernel/hw/keyboard.cpp
-                        src/kernel/hw/serial.c
+                        src/kernel/hw/serial.cpp
                         src/kernel/hw/timer.c
                         src/kernel/event/event.cpp
                         src/types/bitmap.c

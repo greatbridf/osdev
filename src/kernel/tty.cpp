@@ -7,7 +7,7 @@
 
 static void serial_tty_put_char(struct tty* p_tty, char c)
 {
-    serial_send_data(*(port_id_t*)&p_tty->data, c);
+    serial_send_data(p_tty->data.u16[0], c);
 }
 
 static void vga_tty_put_char(struct tty* _unused, char c)
@@ -33,9 +33,15 @@ void tty_print(struct tty* p_tty, const char* str)
     }
 }
 
-int make_serial_tty(struct tty* p_tty, int id)
+int make_serial_tty(struct tty* p_tty, int id, int buffered)
 {
-    *(port_id_t*)&p_tty->data = id;
+    // 0-1: port id
+    // 2  : is_buffered
+    // 3  : unused
+    // 4-7: buffer pointer
+    p_tty->data.u16[0] = id;
+    p_tty->data.p[1] = buffered ? k_malloc(SERIAL_TTY_BUFFER_SIZE) : NULL;
+    p_tty->data.u8[2] = buffered;
     snprintf(p_tty->name, sizeof(p_tty->name), "ttyS%x", id);
     p_tty->ops = &serial_tty_ops;
     return GB_OK;

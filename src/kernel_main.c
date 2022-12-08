@@ -123,7 +123,29 @@ void init_bss_section(void)
     memset(bss_addr, 0x00, bss_size);
 }
 
-static struct tty early_console;
+int init_console(const char* name)
+{
+    console = ki_malloc(sizeof(struct tty));
+    if (name[0] == 't' && name[1] == 't' && name[2] == 'y') {
+        if (name[3] == 'S' || name[3] == 's') {
+            if (name[4] == '0') {
+                make_serial_tty(console, PORT_SERIAL0, 1);
+                return GB_OK;
+            }
+            if (name[4] == '1') {
+                make_serial_tty(console, PORT_SERIAL1, 1);
+                return GB_OK;
+            }
+        }
+        if (name[3] == 'V' && name[3] == 'G' && name[3] == 'A') {
+            make_vga_tty(console);
+            return GB_OK;
+        }
+    }
+    ki_free(console);
+    console = NULL;
+    return GB_FAILED;
+}
 
 extern void init_vfs();
 extern void NORETURN init_scheduler();
@@ -142,8 +164,9 @@ void NORETURN kernel_main(void)
 
     char buf[KERNEL_MAIN_BUF_SIZE] = { 0 };
 
+    struct tty early_console;
     assert(init_serial_port(PORT_SERIAL0) == GB_OK);
-    assert(make_serial_tty(&early_console, PORT_SERIAL0) == GB_OK);
+    assert(make_serial_tty(&early_console, PORT_SERIAL0, 0) == GB_OK);
     console = &early_console;
 
     show_mem_info(buf);
@@ -173,6 +196,8 @@ void NORETURN kernel_main(void)
     snprintf(k_malloc_buf, 4097, "This text is printed on the heap!\n");
     tty_print(console, k_malloc_buf);
     k_free(k_malloc_buf);
+
+    assert(init_console("ttyS0") == GB_OK);
 
     init_vfs();
 

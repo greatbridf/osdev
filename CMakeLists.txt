@@ -53,7 +53,7 @@ set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
                         src/kernel/errno.c
                         src/kernel/interrupt.cpp
                         src/kernel/process.cpp
-                        src/kernel/tty.c
+                        src/kernel/tty.cpp
                         src/kernel/stdio.c
                         src/kernel/syscall.cpp
                         src/kernel/mem.cpp

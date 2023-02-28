@@ -480,7 +480,7 @@ static size_t console_write(fs::special_node*, const char* buf, size_t, size_t n
 {
     size_t orig_n = n;
     while (n--)
-        console->ops->put_char(console, *(buf++));
+        console->putchar(*(buf++));
 
     return orig_n;
 }

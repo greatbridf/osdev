@@ -22,10 +22,9 @@
 
 #define KERNEL_MAIN_BUF_SIZE (128)
 
-struct tty* console = NULL;
 #define printkf(x...)                       \
     snprintf(buf, KERNEL_MAIN_BUF_SIZE, x); \
-    tty_print(console, buf)
+    console->print(buf)
 
 #define EVE_START(x) printkf(x "... ")
 #define INIT_START(x) EVE_START("initializing " x)
@@ -127,25 +126,23 @@ void init_bss_section(void)
 
 int init_console(const char* name)
 {
-    console = types::_new<types::kernel_ident_allocator, struct tty>();
     if (name[0] == 't' && name[1] == 't' && name[2] == 'y') {
         if (name[3] == 'S' || name[3] == 's') {
             if (name[4] == '0') {
-                make_serial_tty(console, PORT_SERIAL0, 1);
+                console = types::_new<types::kernel_ident_allocator, serial_tty>(PORT_SERIAL0);
                 return GB_OK;
             }
             if (name[4] == '1') {
-                make_serial_tty(console, PORT_SERIAL1, 1);
+                console = types::_new<types::kernel_ident_allocator, serial_tty>(PORT_SERIAL1);
                 return GB_OK;
             }
         }
         if (name[3] == 'V' && name[3] == 'G' && name[3] == 'A') {
-            make_vga_tty(console);
+            console = types::_new<types::kernel_ident_allocator, vga_tty>();
             return GB_OK;
         }
     }
-    ki_free(console);
-    console = NULL;
+    crash();
     return GB_FAILED;
 }
 
@@ -164,24 +161,21 @@ extern "C" void NORETURN kernel_main(void)
 
     load_new_gdt();
 
+    // NOTE:
+    // the initializer of c++ global objects MUST NOT contain
+    // all kinds of memory allocations
+    call_constructors_for_cpp();
+
     char buf[KERNEL_MAIN_BUF_SIZE] = { 0 };
 
-    struct tty early_console;
     assert(init_serial_port(PORT_SERIAL0) == GB_OK);
-    assert(make_serial_tty(&early_console, PORT_SERIAL0, 0) == GB_OK);
+    serial_tty early_console(PORT_SERIAL0);
     console = &early_console;
 
     show_mem_info(buf);
 
     INIT_START("exception handlers");
     init_idt();
-    INIT_OK();
-
-    // NOTE:
-    // the initializer of c++ global objects MUST NOT contain
-    // all kinds of memory allocations
-    INIT_START("C++ global objects");
-    call_constructors_for_cpp();
     INIT_OK();
 
     INIT_START("memory allocation");
@@ -196,7 +190,7 @@ extern "C" void NORETURN kernel_main(void)
     printkf("Testing k_malloc...\n");
     char* k_malloc_buf = (char*)k_malloc(sizeof(char) * 4097);
     snprintf(k_malloc_buf, 4097, "This text is printed on the heap!\n");
-    tty_print(console, k_malloc_buf);
+    kmsg(k_malloc_buf);
     k_free(k_malloc_buf);
 
     assert(init_console("ttyS0") == GB_OK);
@@ -209,7 +203,13 @@ extern "C" void NORETURN kernel_main(void)
 
 void NORETURN __stack_chk_fail(void)
 {
-    tty_print(console, "***** stack smashing detected! *****\n");
+    kmsg("***** stack smashing detected! *****\n");
+    for (;;)
+        assert(0);
+}
+
+extern "C" void NORETURN __cxa_pure_virtual(void)
+{
     for (;;)
         assert(0);
 }

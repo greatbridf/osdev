@@ -479,5 +479,5 @@ int strcmp(const char* s1, const char* s2)
 
 void kmsg(const char* msg)
 {
-    tty_print(console, msg);
+    console->print(msg);
 }

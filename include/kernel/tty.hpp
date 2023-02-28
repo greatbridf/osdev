@@ -1,32 +1,36 @@
 #pragma once
-#include <asm/port_io.h>
+#include <types/allocator.hpp>
+#include <types/buffer.hpp>
+#include <types/cplusplus.hpp>
 #include <types/stdint.h>
 
-#define STRUCT_TTY_NAME_LEN (32)
+class tty : public types::non_copyable {
+public:
+    static constexpr size_t BUFFER_SIZE = 4096;
+    static constexpr size_t NAME_SIZE = 32;
 
-#define SERIAL_TTY_BUFFER_SIZE (4096)
+public:
+    tty();
+    virtual void putchar(char c) = 0;
+    void print(const char* str);
 
-struct tty;
-
-struct tty_operations {
-    void (*put_char)(struct tty* p_tty, char c);
+    char name[NAME_SIZE];
+    types::buffer<types::kernel_ident_allocator> buf;
 };
 
-struct tty {
-    char name[STRUCT_TTY_NAME_LEN];
-    struct tty_operations* ops;
-    union {
-        uint8_t u8[12];
-        uint16_t u16[6];
-        uint32_t u32[3];
-        void* p[12 / sizeof(void*)];
-    } data;
+class vga_tty : public virtual tty {
+public:
+    vga_tty();
+    virtual void putchar(char c) override;
 };
 
-// in kernel_main.c
-extern struct tty* console;
+class serial_tty : public virtual tty {
+public:
+    serial_tty(int id);
+    virtual void putchar(char c) override;
 
-void tty_print(struct tty* p_tty, const char* str);
+public:
+    uint16_t id;
+};
 
-int make_serial_tty(struct tty* p_tty, int id, int buffered);
-int make_vga_tty(struct tty* p_tty);
+inline tty* console;

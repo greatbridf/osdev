@@ -1,7 +1,7 @@
 #include <kernel/errno.h>
 #include <kernel/mem.h>
-#include <kernel/stdio.h>
-#include <kernel/tty.h>
+#include <kernel/stdio.hpp>
+#include <kernel/tty.hpp>
 #include <kernel/vfs.hpp>
 #include <types/allocator.hpp>
 #include <types/assert.h>

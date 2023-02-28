@@ -3,8 +3,7 @@
 #include <kernel/event/evtqueue.hpp>
 #include <kernel/input/input_event.h>
 #include <kernel/process.hpp>
-#include <kernel/stdio.h>
-#include <kernel/tty.h>
+#include <kernel/stdio.hpp>
 #include <types/allocator.hpp>
 #include <types/assert.h>
 #include <types/cplusplus.hpp>
@@ -40,7 +39,7 @@ void dispatch_event(void)
         for (auto iter = input_event_queue.begin(); iter != input_event_queue.end(); ++iter) {
             const auto& item = *iter;
             snprintf(buf, 1024, "\rinput event: type%x, data%x, code%x\r", item.type, item.data, item.code);
-            tty_print(console, buf);
+            kmsg(buf);
             input_event_queue.erase(iter);
         }
     }

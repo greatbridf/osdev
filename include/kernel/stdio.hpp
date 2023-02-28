@@ -33,6 +33,8 @@ snprintf(
     const char* fmt,
     ...);
 
+void kmsg(const char* msg);
+
 #ifdef __cplusplus
 }
 #endif

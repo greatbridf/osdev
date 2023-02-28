@@ -6,10 +6,6 @@
 
 #define SERIAL_TTY_BUFFER_SIZE (4096)
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 struct tty;
 
 struct tty_operations {
@@ -34,7 +30,3 @@ void tty_print(struct tty* p_tty, const char* str);
 
 int make_serial_tty(struct tty* p_tty, int id, int buffered);
 int make_vga_tty(struct tty* p_tty);
-
-#ifdef __cplusplus
-}
-#endif

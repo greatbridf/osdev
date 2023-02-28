@@ -1,4 +1,5 @@
-#include <kernel/stdio.h>
+#include <kernel/stdio.hpp>
+#include <kernel/tty.hpp>
 
 #include <types/size.h>
 #include <types/stdint.h>
@@ -46,12 +47,12 @@ int64_t do_div_s(int64_t a, int64_t b, uint64_t* remainder)
     return quotient;
 }
 
-int64_t __divdi3(int64_t a, int64_t b)
+extern "C" int64_t __divdi3(int64_t a, int64_t b)
 {
     return do_div_s(a, b, (uint64_t*)0);
 }
 
-int64_t __moddi3(int64_t a, int64_t b)
+extern "C" int64_t __moddi3(int64_t a, int64_t b)
 {
     uint64_t remainder = 0;
     do_div_s(a, b, &remainder);
@@ -301,7 +302,7 @@ snprintf(
     ...)
 {
     ssize_t n_write = 0;
-    void* arg_ptr = ((void*)&buf) + sizeof(char*) + sizeof(size_t) + sizeof(const char*);
+    uint8_t* arg_ptr = ((uint8_t*)&buf) + sizeof(char*) + sizeof(size_t) + sizeof(const char*);
 
     for (char c; (c = *fmt) != 0x00; ++fmt) {
         if (c == '%') {
@@ -413,9 +414,11 @@ snprintf(
 }
 
 #define BYTES_PER_MAX_COPY_UNIT (sizeof(uint32_t) / sizeof(uint8_t))
-void* memcpy(void* dst, const void* src, size_t n)
+void* memcpy(void* _dst, const void* _src, size_t n)
 {
-    void* orig_dst = dst;
+    void* orig_dst = _dst;
+    uint8_t* dst = (uint8_t*)_dst;
+    const uint8_t* src = (const uint8_t*)_src;
     for (size_t i = 0; i < n / BYTES_PER_MAX_COPY_UNIT; ++i) {
         *(uint32_t*)dst = *(uint32_t*)src;
         dst += BYTES_PER_MAX_COPY_UNIT;
@@ -427,8 +430,9 @@ void* memcpy(void* dst, const void* src, size_t n)
     return orig_dst;
 }
 
-void* memset(void* dst, int c, size_t n)
+void* memset(void* _dst, int c, size_t n)
 {
+    uint8_t* dst = (uint8_t*)_dst;
     c &= 0xff;
     int cc = (c + (c << 8) + (c << 16) + (c << 24));
     for (size_t i = 0; i < n / BYTES_PER_MAX_COPY_UNIT; ++i) {
@@ -471,4 +475,9 @@ int strcmp(const char* s1, const char* s2)
         ++s2;
     }
     return c;
+}
+
+void kmsg(const char* msg)
+{
+    tty_print(console, msg);
 }

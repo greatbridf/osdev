@@ -5,10 +5,10 @@
 #include <kernel/mem.h>
 #include <kernel/mm.hpp>
 #include <kernel/process.hpp>
+#include <kernel/stdio.hpp>
 #include <kernel/syscall.hpp>
-#include <kernel/tty.h>
 #include <kernel/vfs.hpp>
-#include <kernel_main.h>
+#include <kernel_main.hpp>
 #include <types/allocator.hpp>
 #include <types/assert.h>
 #include <types/elf.hpp>
@@ -121,7 +121,7 @@ void _syscall_sleep(interrupt_stack* data)
 
 void _syscall_crash(interrupt_stack*)
 {
-    tty_print(console, "\nan error occurred while executing command\n");
+    kmsg("\nan error occurred while executing command\n");
     asm_cli();
     asm_hlt();
 }

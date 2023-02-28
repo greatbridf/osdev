@@ -5,10 +5,10 @@
 #include <kernel/mem.h>
 #include <kernel/mm.hpp>
 #include <kernel/process.hpp>
-#include <kernel/stdio.h>
+#include <kernel/stdio.hpp>
 #include <kernel/task.h>
-#include <kernel/vga.h>
-#include <kernel_main.h>
+#include <kernel/vga.hpp>
+#include <kernel_main.hpp>
 #include <types/allocator.hpp>
 #include <types/assert.h>
 #include <types/bitmap.h>

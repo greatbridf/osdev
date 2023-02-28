@@ -6,10 +6,9 @@
 #include <kernel/mem.h>
 #include <kernel/mm.hpp>
 #include <kernel/process.hpp>
-#include <kernel/stdio.h>
-#include <kernel/tty.h>
+#include <kernel/stdio.hpp>
 #include <kernel/vfs.hpp>
-#include <kernel_main.h>
+#include <kernel_main.hpp>
 #include <types/allocator.hpp>
 #include <types/assert.h>
 #include <types/cplusplus.hpp>
@@ -92,7 +91,7 @@ inline void NORETURN _noreturn_crash(void)
 
 void kernel_threadd_main(void)
 {
-    tty_print(console, "kernel thread daemon started\n");
+    kmsg("kernel thread daemon started\n");
 
     for (;;) {
         if (kthreadd_new_thd_func) {
@@ -203,7 +202,7 @@ void k_new_thread(void (*func)(void*), void* data)
     kthreadd_new_thd_data = data;
 }
 
-void NORETURN init_scheduler()
+void NORETURN init_scheduler(void)
 {
     procs = types::pnew<types::kernel_allocator>(procs);
     readythds = types::pnew<types::kernel_allocator>(readythds);

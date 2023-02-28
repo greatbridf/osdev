@@ -1,9 +1,7 @@
-#include <asm/port_io.h>
 #include <kernel/hw/serial.h>
-#include <kernel/mem.h>
-#include <kernel/stdio.h>
-#include <kernel/tty.h>
-#include <kernel/vga.h>
+#include <kernel/stdio.hpp>
+#include <kernel/tty.hpp>
+#include <kernel/vga.hpp>
 
 static void serial_tty_put_char(struct tty* p_tty, char c)
 {

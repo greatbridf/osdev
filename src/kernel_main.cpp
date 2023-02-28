@@ -1,4 +1,4 @@
-#include "kernel_main.h"
+#include "kernel_main.hpp"
 
 #include <asm/boot.h>
 #include <asm/port_io.h>
@@ -9,13 +9,15 @@
 #include <kernel/hw/timer.h>
 #include <kernel/interrupt.h>
 #include <kernel/mem.h>
-#include <kernel/stdio.h>
+#include <kernel/process.hpp>
+#include <kernel/stdio.hpp>
 #include <kernel/task.h>
-#include <kernel/tty.h>
-#include <kernel/vga.h>
+#include <kernel/tty.hpp>
+#include <kernel/vga.hpp>
 #include <types/assert.h>
 #include <types/bitmap.h>
 #include <types/status.h>
+#include <types/stdint.h>
 #include <types/types.h>
 
 #define KERNEL_MAIN_BUF_SIZE (128)
@@ -125,7 +127,7 @@ void init_bss_section(void)
 
 int init_console(const char* name)
 {
-    console = ki_malloc(sizeof(struct tty));
+    console = types::_new<types::kernel_ident_allocator, struct tty>();
     if (name[0] == 't' && name[1] == 't' && name[2] == 'y') {
         if (name[3] == 'S' || name[3] == 's') {
             if (name[4] == '0') {
@@ -148,9 +150,9 @@ int init_console(const char* name)
 }
 
 extern void init_vfs();
-extern void NORETURN init_scheduler();
+extern "C" uint32_t check_a20_on(void);
 
-void NORETURN kernel_main(void)
+extern "C" void NORETURN kernel_main(void)
 {
     assert(check_a20_on());
 
@@ -202,7 +204,7 @@ void NORETURN kernel_main(void)
     init_vfs();
 
     printkf("switching execution to the scheduler...\n");
-    init_scheduler(&tss);
+    init_scheduler();
 }
 
 void NORETURN __stack_chk_fail(void)

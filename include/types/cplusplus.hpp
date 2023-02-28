@@ -175,6 +175,13 @@ concept PointerType = traits::is_pointer<T>::value;
 template <typename A, typename B>
 concept same_as = is_same<A, B>::value;
 
+class non_copyable {
+public:
+    non_copyable() = default;
+    non_copyable(const non_copyable&) = delete;
+    non_copyable& operator=(const non_copyable&) = delete;
+};
+
 } // namespace types
 
 #endif

@@ -50,9 +50,9 @@ public:
 
     constexpr buffer(const buffer& buf)
         : start { types::allocator_traits<allocator_type>::allocate(buf.end + 1 - buf.start) }
-        , end { start + buf.end - buf.start }
-        , base { start + buf.base - buf.start }
-        , head { start + buf.base - buf.start }
+        , end { (uint32_t)start + (uint32_t)buf.end - (uint32_t)buf.start }
+        , base { (uint32_t)start + (uint32_t)buf.base - (uint32_t)buf.start }
+        , head { (uint32_t)start + (uint32_t)buf.base - (uint32_t)buf.start }
         , count { buf.count }
     {
     }

@@ -104,7 +104,7 @@ void _syscall_read(interrupt_stack* data)
     }
 
     // TODO: copy to user function !IMPORTANT
-    int n_wrote = fs::vfs_read(file->impl.ind, buf, 0U - 1, file->cursor, n);
+    int n_wrote = fs::vfs_read(file->impl.ind, buf, n, file->cursor, n);
     file->cursor += n_wrote;
     SYSCALL_SET_RETURN_VAL(n_wrote, 0);
 }

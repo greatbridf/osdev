@@ -18,10 +18,10 @@ private:
     size_t count;
 
 private:
-    constexpr char _get_char(void)
+    constexpr char _get_char(char* ptr)
     {
         --count;
-        return *base;
+        return *ptr;
     }
 
     constexpr void _put_char(char c)
@@ -30,12 +30,20 @@ private:
         ++count;
     }
 
-    constexpr void _forward(char*& ptr)
+    constexpr char* _forward(char* ptr)
     {
         if (ptr == end)
-            ptr = start;
+            return start;
         else
-            ++ptr;
+            return ptr + 1;
+    }
+
+    constexpr char* _backward(char* ptr)
+    {
+        if (ptr == start)
+            return end;
+        else
+            return ptr - 1;
     }
 
 public:
@@ -82,14 +90,35 @@ public:
         return count == static_cast<size_t>(end - start + 1);
     }
 
+    constexpr char front(void)
+    {
+        return *base;
+    }
+
+    constexpr char back(void)
+    {
+        return *_backward(head);
+    }
+
     constexpr char get(void)
     {
         // TODO: set error flag
         if (empty())
             return 0xff;
 
-        char c = _get_char();
-        _forward(base);
+        char c = _get_char(base);
+        base = _forward(base);
+        return c;
+    }
+
+    constexpr char pop(void)
+    {
+        // TODO: set error flag
+        if (empty())
+            return 0xff;
+
+        char c = _get_char(_backward(head));
+        head = _backward(head);
         return c;
     }
 
@@ -100,7 +129,7 @@ public:
             return 0xff;
 
         _put_char(c);
-        _forward(head);
+        head = _forward(head);
         return c;
     }
 };

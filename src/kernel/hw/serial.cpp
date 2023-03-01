@@ -61,29 +61,6 @@ void serial_receive_data_interrupt(void)
 {
     while (is_serial_has_data(PORT_SERIAL0)) {
         uint8_t data = serial_read_data(PORT_SERIAL0);
-        char buf[64] = { 0 };
-        switch (data) {
-        case '\r':
-            serial_send_data(PORT_SERIAL0, '\r');
-            serial_send_data(PORT_SERIAL0, '\n');
-            break;
-        // ^?
-        case 0x7f:
-            serial_send_data(PORT_SERIAL0, 0x08);
-            serial_send_data(PORT_SERIAL0, '\x1b');
-            serial_send_data(PORT_SERIAL0, '[');
-            serial_send_data(PORT_SERIAL0, 'K');
-            break;
-        // ^U
-        case 0x15:
-            serial_send_data(PORT_SERIAL0, '\r');
-            serial_send_data(PORT_SERIAL0, '\x1b');
-            serial_send_data(PORT_SERIAL0, '[');
-            serial_send_data(PORT_SERIAL0, '2');
-            serial_send_data(PORT_SERIAL0, 'K');
-        default:
-            serial_send_data(PORT_SERIAL0, data);
-            break;
-        }
+        console->recvchar(data);
     }
 }

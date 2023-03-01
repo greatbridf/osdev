@@ -237,6 +237,7 @@ extern "C" void irq3_handler(void)
 }
 extern "C" void irq4_handler(void)
 {
+    // TODO: register interrupt handler in serial port driver
     serial_receive_data_interrupt();
     asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
 }

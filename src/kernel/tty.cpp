@@ -37,3 +37,53 @@ void vga_tty::putchar(char c)
     vc.c = c;
     vga_put_char(&vc);
 }
+
+void vga_tty::recvchar(char c)
+{
+    // TODO: keyboard scan code
+    buf.put(c);
+}
+
+void serial_tty::recvchar(char c)
+{
+    switch (c) {
+    case '\r':
+        buf.put('\n');
+        if (echo) {
+            serial_send_data(PORT_SERIAL0, '\r');
+            serial_send_data(PORT_SERIAL0, '\n');
+        }
+        // TODO: notify
+        break;
+    // ^?: backspace
+    case 0x7f:
+        if (!buf.empty() && buf.back() != '\n')
+            buf.pop();
+
+        if (echo) {
+            serial_send_data(PORT_SERIAL0, 0x08);
+            serial_send_data(PORT_SERIAL0, '\x1b');
+            serial_send_data(PORT_SERIAL0, '[');
+            serial_send_data(PORT_SERIAL0, 'K');
+        }
+        break;
+    // ^U: clear the line
+    case 0x15:
+        while (!buf.empty() && buf.back() != '\n')
+            buf.pop();
+
+        if (echo) {
+            serial_send_data(PORT_SERIAL0, '\r');
+            serial_send_data(PORT_SERIAL0, '\x1b');
+            serial_send_data(PORT_SERIAL0, '[');
+            serial_send_data(PORT_SERIAL0, '2');
+            serial_send_data(PORT_SERIAL0, 'K');
+        }
+        break;
+    default:
+        buf.put(c);
+        if (echo)
+            serial_send_data(PORT_SERIAL0, c);
+        break;
+    }
+}

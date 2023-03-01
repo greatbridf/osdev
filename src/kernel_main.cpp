@@ -26,11 +26,6 @@
     snprintf(buf, KERNEL_MAIN_BUF_SIZE, x); \
     console->print(buf)
 
-#define EVE_START(x) printkf(x "... ")
-#define INIT_START(x) EVE_START("initializing " x)
-#define INIT_OK() printkf("ok\n")
-#define INIT_FAILED() printkf("failed\n")
-
 typedef void (*constructor)(void);
 extern constructor start_ctors;
 extern constructor end_ctors;
@@ -169,35 +164,19 @@ extern "C" void NORETURN kernel_main(void)
     char buf[KERNEL_MAIN_BUF_SIZE] = { 0 };
 
     assert(init_serial_port(PORT_SERIAL0) == GB_OK);
-    serial_tty early_console(PORT_SERIAL0);
-    console = &early_console;
 
-    show_mem_info(buf);
-
-    INIT_START("exception handlers");
     init_idt();
-    INIT_OK();
-
-    INIT_START("memory allocation");
     init_mem();
-    INIT_OK();
-
-    INIT_START("programmable interrupt controller and timer");
     init_pic();
     init_pit();
-    INIT_OK();
-
-    printkf("Testing k_malloc...\n");
-    char* k_malloc_buf = (char*)k_malloc(sizeof(char) * 4097);
-    snprintf(k_malloc_buf, 4097, "This text is printed on the heap!\n");
-    kmsg(k_malloc_buf);
-    k_free(k_malloc_buf);
 
     assert(init_console("ttyS0") == GB_OK);
 
+    show_mem_info(buf);
+
     init_vfs();
 
-    printkf("switching execution to the scheduler...\n");
+    kmsg("switching execution to the scheduler...\n");
     init_scheduler();
 }
 

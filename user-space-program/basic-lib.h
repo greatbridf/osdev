@@ -47,6 +47,10 @@ static inline uint32_t write(int fd, const char* buf, size_t count)
 {
     return syscall(0x01, fd, (uint32_t)buf, count);
 }
+static inline uint32_t read(int fd, char* buf, size_t count)
+{
+    return syscall(0x07, fd, (uint32_t)buf, count);
+}
 static inline void sleep(void)
 {
     syscall(0x02, 0, 0, 0);

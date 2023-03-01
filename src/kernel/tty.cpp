@@ -1,4 +1,5 @@
 #include <kernel/hw/serial.h>
+#include <kernel/process.hpp>
 #include <kernel/stdio.hpp>
 #include <kernel/tty.hpp>
 #include <kernel/vga.hpp>
@@ -13,6 +14,30 @@ void tty::print(const char* str)
 {
     while (*str != '\0')
         this->putchar(*(str++));
+}
+
+size_t tty::read(char* buf, size_t buf_size, size_t n)
+{
+    size_t orig_n = n;
+
+    while (buf_size && n) {
+        while (this->buf.empty()) {
+            current_thread->attr.ready = 0;
+            current_thread->attr.wait = 1;
+            this->blocklist.subscribe(current_thread);
+            schedule();
+            this->blocklist.unsubscribe(current_thread);
+        }
+
+        *buf = this->buf.get();
+        --buf_size;
+        --n;
+
+        if (*(buf++) == '\n')
+            break;
+    }
+
+    return orig_n - n;
 }
 
 vga_tty::vga_tty()
@@ -53,7 +78,7 @@ void serial_tty::recvchar(char c)
             serial_send_data(PORT_SERIAL0, '\r');
             serial_send_data(PORT_SERIAL0, '\n');
         }
-        // TODO: notify
+        this->blocklist.notify();
         break;
     // ^?: backspace
     case 0x7f:

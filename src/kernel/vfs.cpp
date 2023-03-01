@@ -473,8 +473,9 @@ size_t b_null_write(fs::special_node*, const char*, size_t, size_t n)
 {
     return n;
 }
-static size_t console_read(fs::special_node*, char* buf, size_t buf_size, size_t offset, size_t n)
+static size_t console_read(fs::special_node*, char* buf, size_t buf_size, size_t, size_t n)
 {
+    return console->read(buf, buf_size, n);
 }
 static size_t console_write(fs::special_node*, const char* buf, size_t, size_t n)
 {

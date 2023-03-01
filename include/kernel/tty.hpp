@@ -1,4 +1,5 @@
 #pragma once
+#include <kernel/event/evtqueue.hpp>
 #include <types/allocator.hpp>
 #include <types/buffer.hpp>
 #include <types/cplusplus.hpp>
@@ -14,10 +15,14 @@ public:
     virtual void putchar(char c) = 0;
     virtual void recvchar(char c) = 0;
     void print(const char* str);
+    size_t read(char* buf, size_t buf_size, size_t n);
 
     char name[NAME_SIZE];
-    types::buffer<types::kernel_ident_allocator> buf;
     bool echo = true;
+
+protected:
+    types::buffer<types::kernel_ident_allocator> buf;
+    kernel::evtqueue blocklist;
 };
 
 class vga_tty : public virtual tty {

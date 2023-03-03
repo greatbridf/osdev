@@ -1,7 +1,7 @@
 #include <kernel/errno.h>
 #include <kernel/mem.h>
-#include <kernel/stdio.h>
-#include <kernel/tty.h>
+#include <kernel/stdio.hpp>
+#include <kernel/tty.hpp>
 #include <kernel/vfs.hpp>
 #include <types/allocator.hpp>
 #include <types/assert.h>
@@ -473,11 +473,15 @@ size_t b_null_write(fs::special_node*, const char*, size_t, size_t n)
 {
     return n;
 }
+static size_t console_read(fs::special_node*, char* buf, size_t buf_size, size_t, size_t n)
+{
+    return console->read(buf, buf_size, n);
+}
 static size_t console_write(fs::special_node*, const char* buf, size_t, size_t n)
 {
     size_t orig_n = n;
     while (n--)
-        console->ops->put_char(console, *(buf++));
+        console->putchar(*(buf++));
 
     return orig_n;
 }
@@ -489,7 +493,7 @@ void init_vfs(void)
     register_special_block(0, 0, b_null_read, b_null_write, 0, 0);
     // console (supports serial console only for now)
     // TODO: add interface to bind console device to other devices
-    register_special_block(1, 0, nullptr, console_write, 0, 0);
+    register_special_block(1, 0, console_read, console_write, 0, 0);
 
     fs_es = types::pnew<types::kernel_ident_allocator>(fs_es);
 

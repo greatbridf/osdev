@@ -1,9 +1,8 @@
 #include <asm/port_io.h>
 #include <fs/fat.hpp>
 #include <kernel/hw/ata.hpp>
-#include <kernel/stdio.h>
+#include <kernel/stdio.hpp>
 #include <kernel/syscall.hpp>
-#include <kernel/tty.h>
 #include <kernel/vfs.hpp>
 #include <types/allocator.hpp>
 #include <types/assert.h>
@@ -180,7 +179,8 @@ struct PACKED mbr {
 
 static inline void mbr_part_probe(fs::inode* drive, uint16_t major, uint16_t minor)
 {
-    struct mbr hda_mbr { };
+    struct mbr hda_mbr {
+    };
     auto* dev = fs::vfs_open("/dev");
 
     fs::vfs_read(drive, (char*)&hda_mbr, 512, 0, 512);

@@ -15,6 +15,20 @@ int main(int argc, char** argv)
         write(0, "parent\n", 7);
     }
 
+    char buf[128] = {};
+    for (;;) {
+        int n = read(0, buf, 5);
+        if (n)
+            write(0, buf, n);
+        else
+            write(0, "fuck!\n", 6);
+        
+        if (buf[0] == 'e' && buf[1] == 'x' && buf[2] == 'i' && buf[3] == 't') {
+            write(0, "\nexited echo mode!\n", 19);
+            break;
+        }
+    }
+
     for (;;) {
         int ret;
         pid_t pid = wait(&ret);

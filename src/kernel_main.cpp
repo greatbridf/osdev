@@ -1,4 +1,4 @@
-#include "kernel_main.h"
+#include "kernel_main.hpp"
 
 #include <asm/boot.h>
 #include <asm/port_io.h>
@@ -9,26 +9,22 @@
 #include <kernel/hw/timer.h>
 #include <kernel/interrupt.h>
 #include <kernel/mem.h>
-#include <kernel/stdio.h>
+#include <kernel/process.hpp>
+#include <kernel/stdio.hpp>
 #include <kernel/task.h>
-#include <kernel/tty.h>
-#include <kernel/vga.h>
+#include <kernel/tty.hpp>
+#include <kernel/vga.hpp>
 #include <types/assert.h>
 #include <types/bitmap.h>
 #include <types/status.h>
+#include <types/stdint.h>
 #include <types/types.h>
 
 #define KERNEL_MAIN_BUF_SIZE (128)
 
-struct tty* console = NULL;
 #define printkf(x...)                       \
     snprintf(buf, KERNEL_MAIN_BUF_SIZE, x); \
-    tty_print(console, buf)
-
-#define EVE_START(x) printkf(x "... ")
-#define INIT_START(x) EVE_START("initializing " x)
-#define INIT_OK() printkf("ok\n")
-#define INIT_FAILED() printkf("failed\n")
+    console->print(buf)
 
 typedef void (*constructor)(void);
 extern constructor start_ctors;
@@ -123,12 +119,32 @@ void init_bss_section(void)
     memset(bss_addr, 0x00, bss_size);
 }
 
-static struct tty early_console;
+int init_console(const char* name)
+{
+    if (name[0] == 't' && name[1] == 't' && name[2] == 'y') {
+        if (name[3] == 'S' || name[3] == 's') {
+            if (name[4] == '0') {
+                console = types::_new<types::kernel_ident_allocator, serial_tty>(PORT_SERIAL0);
+                return GB_OK;
+            }
+            if (name[4] == '1') {
+                console = types::_new<types::kernel_ident_allocator, serial_tty>(PORT_SERIAL1);
+                return GB_OK;
+            }
+        }
+        if (name[3] == 'V' && name[3] == 'G' && name[3] == 'A') {
+            console = types::_new<types::kernel_ident_allocator, vga_tty>();
+            return GB_OK;
+        }
+    }
+    crash();
+    return GB_FAILED;
+}
 
 extern void init_vfs();
-extern void NORETURN init_scheduler();
+extern "C" uint32_t check_a20_on(void);
 
-void NORETURN kernel_main(void)
+extern "C" void NORETURN kernel_main(void)
 {
     assert(check_a20_on());
 
@@ -140,49 +156,39 @@ void NORETURN kernel_main(void)
 
     load_new_gdt();
 
-    char buf[KERNEL_MAIN_BUF_SIZE] = { 0 };
-
-    assert(init_serial_port(PORT_SERIAL0) == GB_OK);
-    assert(make_serial_tty(&early_console, PORT_SERIAL0) == GB_OK);
-    console = &early_console;
-
-    show_mem_info(buf);
-
-    INIT_START("exception handlers");
-    init_idt();
-    INIT_OK();
-
     // NOTE:
     // the initializer of c++ global objects MUST NOT contain
     // all kinds of memory allocations
-    INIT_START("C++ global objects");
     call_constructors_for_cpp();
-    INIT_OK();
 
-    INIT_START("memory allocation");
+    char buf[KERNEL_MAIN_BUF_SIZE] = { 0 };
+
+    assert(init_serial_port(PORT_SERIAL0) == GB_OK);
+
+    init_idt();
     init_mem();
-    INIT_OK();
-
-    INIT_START("programmable interrupt controller and timer");
     init_pic();
     init_pit();
-    INIT_OK();
 
-    printkf("Testing k_malloc...\n");
-    char* k_malloc_buf = (char*)k_malloc(sizeof(char) * 4097);
-    snprintf(k_malloc_buf, 4097, "This text is printed on the heap!\n");
-    tty_print(console, k_malloc_buf);
-    k_free(k_malloc_buf);
+    assert(init_console("ttyS0") == GB_OK);
+
+    show_mem_info(buf);
 
     init_vfs();
 
-    printkf("switching execution to the scheduler...\n");
-    init_scheduler(&tss);
+    kmsg("switching execution to the scheduler...\n");
+    init_scheduler();
 }
 
 void NORETURN __stack_chk_fail(void)
 {
-    tty_print(console, "***** stack smashing detected! *****\n");
+    kmsg("***** stack smashing detected! *****\n");
+    for (;;)
+        assert(0);
+}
+
+extern "C" void NORETURN __cxa_pure_virtual(void)
+{
     for (;;)
         assert(0);
 }

@@ -5,10 +5,10 @@
 #include <kernel/mem.h>
 #include <kernel/mm.hpp>
 #include <kernel/process.hpp>
+#include <kernel/stdio.hpp>
 #include <kernel/syscall.hpp>
-#include <kernel/tty.h>
 #include <kernel/vfs.hpp>
-#include <kernel_main.h>
+#include <kernel_main.hpp>
 #include <types/allocator.hpp>
 #include <types/assert.h>
 #include <types/elf.hpp>
@@ -91,6 +91,24 @@ void _syscall_write(interrupt_stack* data)
     SYSCALL_SET_RETURN_VAL(n_wrote, 0);
 }
 
+void _syscall_read(interrupt_stack* data)
+{
+    int fd = data->s_regs.edi;
+    char* buf = reinterpret_cast<char*>(data->s_regs.esi);
+    size_t n = data->s_regs.edx;
+
+    auto* file = current_process->files[fd];
+    if (file->type != fs::file::types::regular_file) {
+        SYSCALL_SET_RETURN_VAL(GB_FAILED, EINVAL);
+        return;
+    }
+
+    // TODO: copy to user function !IMPORTANT
+    int n_wrote = fs::vfs_read(file->impl.ind, buf, n, file->cursor, n);
+    file->cursor += n_wrote;
+    SYSCALL_SET_RETURN_VAL(n_wrote, 0);
+}
+
 void _syscall_sleep(interrupt_stack* data)
 {
     current_thread->attr.ready = 0;
@@ -103,7 +121,7 @@ void _syscall_sleep(interrupt_stack* data)
 
 void _syscall_crash(interrupt_stack*)
 {
-    tty_print(console, "\nan error occurred while executing command\n");
+    kmsg("\nan error occurred while executing command\n");
     asm_cli();
     asm_hlt();
 }
@@ -224,5 +242,5 @@ void init_syscall(void)
     syscall_handlers[4] = _syscall_exec;
     syscall_handlers[5] = _syscall_exit;
     syscall_handlers[6] = _syscall_wait;
-    syscall_handlers[7] = _syscall_not_impl;
+    syscall_handlers[7] = _syscall_read;
 }

@@ -124,7 +124,7 @@ public:
     {
         v.m_pd = nullptr;
     }
-    constexpr ~mm_list()
+    ~mm_list()
     {
         if (!m_pd)
             return;

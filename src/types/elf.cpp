@@ -1,5 +1,5 @@
 #include <kernel/errno.h>
-#include <kernel/stdio.h>
+#include <kernel/stdio.hpp>
 #include <types/assert.h>
 #include <types/elf.hpp>
 #include <types/stdint.h>

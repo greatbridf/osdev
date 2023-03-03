@@ -405,7 +405,7 @@ public:
     }
 };
 
-extern "C" void NORETURN init_scheduler();
+void NORETURN init_scheduler(void);
 void schedule(void);
 
 constexpr uint32_t push_stack(uint32_t** stack, uint32_t val)

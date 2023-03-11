@@ -209,14 +209,16 @@ public:
                 return -1;
             }
 
-            if (!(dentry->ind->flags.in.file || dentry->ind->flags.in.special_node)) {
-                errno = EISDIR;
-                return -1;
-            }
+            // TODO: check whether dentry is a file if O_DIRECTORY is set
+            // if (!(dentry->ind->flags.in.file || dentry->ind->flags.in.special_node)) {
+            //     errno = EISDIR;
+            //     return -1;
+            // }
 
             auto iter = files->emplace_back(fs::file {
                 fs::file::types::regular_file,
-                { .ind = dentry->ind },
+                dentry->ind,
+                dentry->parent,
                 0,
                 1 });
 

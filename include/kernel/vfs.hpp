@@ -166,9 +166,8 @@ struct file {
     enum class types {
         regular_file,
     } type;
-    union {
-        inode* ind;
-    } impl;
+    inode* ind;
+    vfs::dentry* parent;
     size_t cursor;
     size_t ref;
 };

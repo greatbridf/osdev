@@ -1,8 +1,8 @@
 #define _KERNEL_VGA_C_
-#include <types/stdint.h>
 
-#include <kernel/stdio.hpp>
 #include <kernel/vga.hpp>
+#include <stdint.h>
+#include <string.h>
 
 static struct vga_char* p_vga_head = VGA_MEM;
 

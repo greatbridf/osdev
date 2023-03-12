@@ -5,8 +5,6 @@ set(CMAKE_ASM_FLAGS "-m32")
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-include_directories(${PROJECT_SOURCE_DIR}/include)
-
 set(EXTRACT_DIR ${PROJECT_BINARY_DIR}/extract)
 file(MAKE_DIRECTORY ${EXTRACT_DIR})
 
@@ -54,7 +52,6 @@ set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
                         src/kernel/interrupt.cpp
                         src/kernel/process.cpp
                         src/kernel/tty.cpp
-                        src/kernel/stdio.cpp
                         src/kernel/syscall.cpp
                         src/kernel/mem.cpp
                         src/kernel/vfs.cpp
@@ -77,7 +74,6 @@ set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
                         include/kernel/tty.hpp
                         include/kernel/interrupt.h
                         include/kernel/process.hpp
-                        include/kernel/stdio.hpp
                         include/kernel/syscall.hpp
                         include/kernel/mem.h
                         include/kernel/mm.hpp
@@ -100,7 +96,6 @@ set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
                         include/types/types.h
                         include/types/size.h
                         include/types/status.h
-                        include/types/stdint.h
                         include/types/allocator.hpp
                         include/types/cplusplus.hpp
                         include/types/list.hpp
@@ -108,9 +103,13 @@ set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
                         include/types/string.hpp
                         include/types/vector.hpp
                         include/types/function.hpp
+                        include/kernel/log.hpp
                         include/kernel_main.hpp
                         )
 add_library(kernel_main STATIC ${KERNEL_MAIN_SOURCES})
+target_link_libraries(kernel_main gblibc)
+target_include_directories(kernel_main PRIVATE ${PROJECT_SOURCE_DIR}/include)
+add_subdirectory(gblibc)
 
 add_custom_command(OUTPUT extracted_kernel_main
     DEPENDS kernel_main
@@ -128,7 +127,7 @@ add_custom_target(kernel.out
     DEPENDS user_space_programs
     DEPENDS ${CMAKE_SOURCE_DIR}/src/kernel.ld
     COMMAND ${CMAKE_LINKER} -T ${CMAKE_SOURCE_DIR}/src/kernel.ld ${EXTRACT_DIR}/*.o
-    -melf_i386 -o ${CMAKE_BINARY_DIR}/kernel.out
+    -melf_i386 -o ${CMAKE_BINARY_DIR}/kernel.out -lgblibc -L${CMAKE_BINARY_DIR}/gblibc
 )
 
 add_custom_target(mbr_hole.bin

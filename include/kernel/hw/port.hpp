@@ -1,7 +1,7 @@
 #pragma once
 
+#include <stdint.h>
 #include <types/cplusplus.hpp>
-#include <types/stdint.h>
 
 namespace hw {
 template <typename port_size_t, bool r = true, bool w = true>

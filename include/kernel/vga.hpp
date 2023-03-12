@@ -2,7 +2,7 @@
 #ifndef _KERNEL_VGA_H_
 #define _KERNEL_VGA_H_
 
-#include <types/stdint.h>
+#include <stdint.h>
 
 #define VGA_CHAR_COLOR_WHITE (0x0fU)
 

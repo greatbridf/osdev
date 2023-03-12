@@ -3,9 +3,9 @@
 #include <kernel/interrupt.h>
 #include <kernel/process.hpp>
 #include <kernel/vfs.hpp>
+#include <stdint.h>
 #include <types/size.h>
 #include <types/status.h>
-#include <types/stdint.h>
 
 namespace types::elf {
 using elf32_addr_t = uint32_t;

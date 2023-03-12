@@ -1,7 +1,7 @@
 #pragma once
 
+#include <stdint.h>
 #include <types/allocator.hpp>
-#include <types/stdint.h>
 
 namespace types {
 

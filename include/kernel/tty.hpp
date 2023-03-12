@@ -1,9 +1,9 @@
 #pragma once
 #include <kernel/event/evtqueue.hpp>
+#include <stdint.h>
 #include <types/allocator.hpp>
 #include <types/buffer.hpp>
 #include <types/cplusplus.hpp>
-#include <types/stdint.h>
 
 class tty : public types::non_copyable {
 public:

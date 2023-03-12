@@ -1,6 +1,6 @@
 #pragma once
 
-#include <types/stdint.h>
+#include <stdint.h>
 
 #define KERNEL_EARLY_STACK_ADDR ((phys_ptr_t)0x01000000)
 #define KERNEL_EARLY_STACK_SIZE ((size_t)0x100000)

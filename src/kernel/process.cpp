@@ -3,12 +3,14 @@
 #include <fs/fat.hpp>
 #include <kernel/hw/ata.hpp>
 #include <kernel/interrupt.h>
+#include <kernel/log.hpp>
 #include <kernel/mem.h>
 #include <kernel/mm.hpp>
 #include <kernel/process.hpp>
-#include <kernel/stdio.hpp>
 #include <kernel/vfs.hpp>
 #include <kernel_main.hpp>
+#include <stdint.h>
+#include <stdio.h>
 #include <types/allocator.hpp>
 #include <types/assert.h>
 #include <types/cplusplus.hpp>
@@ -18,7 +20,6 @@
 #include <types/lock.hpp>
 #include <types/size.h>
 #include <types/status.h>
-#include <types/stdint.h>
 #include <types/types.h>
 
 static void (*volatile kthreadd_new_thd_func)(void*);

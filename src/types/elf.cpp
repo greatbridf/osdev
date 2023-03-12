@@ -1,8 +1,8 @@
 #include <kernel/errno.h>
-#include <kernel/stdio.hpp>
+#include <stdint.h>
+#include <stdio.h>
 #include <types/assert.h>
 #include <types/elf.hpp>
-#include <types/stdint.h>
 
 template <typename T>
 constexpr void _user_push(uint32_t** sp, T d)

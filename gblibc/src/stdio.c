@@ -1,64 +1,6 @@
-#include <kernel/stdio.hpp>
-#include <kernel/tty.hpp>
-
-#include <types/size.h>
-#include <types/stdint.h>
-
-#define __32bit_system
-
-#ifdef __32bit_system
-uint64_t do_div(uint64_t a, uint64_t b, uint64_t* remainder)
-{
-    uint64_t r = 0, q = 0;
-    int32_t i;
-    for (i = 0; i < 64; i++) {
-        r = (r << 1) + (a >> 63);
-        a <<= 1;
-        q <<= 1;
-        if (r >= b) {
-            r -= b;
-            q += 1;
-        }
-    }
-    if (remainder)
-        *remainder = r;
-    return q;
-}
-
-int64_t do_div_s(int64_t a, int64_t b, uint64_t* remainder)
-{
-    int32_t qf = 0, rf = 0;
-    if (a < 0) {
-        qf = rf = 1;
-        a = -a;
-    }
-    if (b < 0) {
-        qf ^= 1;
-        b = -b;
-    }
-
-    int64_t quotient = do_div(a, b, (uint64_t*)remainder);
-
-    if (qf)
-        quotient = -quotient;
-    if (remainder && rf)
-        *remainder = -*remainder;
-
-    return quotient;
-}
-
-extern "C" int64_t __divdi3(int64_t a, int64_t b)
-{
-    return do_div_s(a, b, (uint64_t*)0);
-}
-
-extern "C" int64_t __moddi3(int64_t a, int64_t b)
-{
-    uint64_t remainder = 0;
-    do_div_s(a, b, &remainder);
-    return remainder;
-}
-#endif
+#include <devutil.h>
+#include <stdint.h>
+#include <stdarg.h>
 
 // where n is in the range of [0, 9]
 static inline char d_to_c(int32_t n)
@@ -105,7 +47,7 @@ static inline char X_to_c(int32_t n)
         --(y);                    \
     }
 
-ssize_t
+static inline ssize_t
 snprint_decimal32(
     char* buf,
     size_t buf_size,
@@ -146,7 +88,7 @@ snprint_decimal32(
     return n_write;
 }
 
-ssize_t
+static inline ssize_t
 snprint_decimal64(
     char* buf,
     size_t buf_size,
@@ -187,7 +129,7 @@ snprint_decimal64(
     return n_write;
 }
 
-ssize_t
+static inline ssize_t
 snprint_hex32(
     char* buf,
     size_t buf_size,
@@ -235,7 +177,7 @@ snprint_hex32(
     return n_write;
 }
 
-ssize_t
+static inline ssize_t
 snprint_hex64(
     char* buf,
     size_t buf_size,
@@ -294,15 +236,12 @@ snprint_char(
     return sizeof(c);
 }
 
-ssize_t
-snprintf(
-    char* buf,
-    size_t buf_size,
-    const char* fmt,
-    ...)
+int snprintf(char* buf, size_t buf_size, const char* fmt, ...)
 {
     ssize_t n_write = 0;
-    uint8_t* arg_ptr = ((uint8_t*)&buf) + sizeof(char*) + sizeof(size_t) + sizeof(const char*);
+
+    va_list arg;
+    va_start(arg, fmt);
 
     for (char c; (c = *fmt) != 0x00; ++fmt) {
         if (c == '%') {
@@ -310,20 +249,17 @@ snprintf(
 
             switch (*(++fmt)) {
 
-            // int32 decimal
+            // int
             case 'd':
-                n_tmp_write = snprint_decimal32(buf, buf_size, *(int32_t*)arg_ptr);
-                arg_ptr += sizeof(int32_t);
+                n_tmp_write = snprint_decimal32(buf, buf_size, va_arg(arg, int));
                 break;
 
             case 'x':
-                n_tmp_write = snprint_hex32(buf, buf_size, *(uint32_t*)arg_ptr, 0);
-                arg_ptr += sizeof(uint32_t);
+                n_tmp_write = snprint_hex32(buf, buf_size, va_arg(arg, unsigned int), 0);
                 break;
 
             case 'X':
-                n_tmp_write = snprint_hex32(buf, buf_size, *(uint32_t*)arg_ptr, 1);
-                arg_ptr += sizeof(uint32_t);
+                n_tmp_write = snprint_hex32(buf, buf_size, va_arg(arg, unsigned int), 1);
                 break;
 
             // long decimal
@@ -333,54 +269,47 @@ snprintf(
                 case 'l':
                     switch (*(++fmt)) {
                     case 'd':
-                        n_tmp_write = snprint_decimal64(buf, buf_size, *(int64_t*)arg_ptr);
+                        n_tmp_write = snprint_decimal64(buf, buf_size, va_arg(arg, long long));
                         break;
                     case 'x':
-                        n_tmp_write = snprint_hex64(buf, buf_size, *(int64_t*)arg_ptr, 0);
+                        n_tmp_write = snprint_hex64(buf, buf_size, va_arg(arg, unsigned long long), 0);
                         break;
                     case 'X':
-                        n_tmp_write = snprint_hex64(buf, buf_size, *(int64_t*)arg_ptr, 1);
+                        n_tmp_write = snprint_hex64(buf, buf_size, va_arg(arg, unsigned long long), 1);
                         break;
                     }
-                    arg_ptr += sizeof(int64_t);
                     break;
                 // long int aka int32
                 case 'd':
-                    n_tmp_write = snprint_decimal32(buf, buf_size, *(int32_t*)arg_ptr);
-                    arg_ptr += sizeof(int32_t);
+                    n_tmp_write = snprint_decimal32(buf, buf_size, va_arg(arg, long));
                     break;
                 case 'x':
-                    n_tmp_write = snprint_hex32(buf, buf_size, *(uint32_t*)arg_ptr, 0);
-                    arg_ptr += sizeof(uint32_t);
+                    n_tmp_write = snprint_hex32(buf, buf_size, va_arg(arg, unsigned long), 0);
                     break;
 
                 case 'X':
-                    n_tmp_write = snprint_hex32(buf, buf_size, *(uint32_t*)arg_ptr, 1);
-                    arg_ptr += sizeof(uint32_t);
+                    n_tmp_write = snprint_hex32(buf, buf_size, va_arg(arg, unsigned long), 1);
                     break;
                 }
                 break;
 
             // c string
             case 's':
-                n_tmp_write = snprintf(buf, buf_size, *(const char**)arg_ptr);
-                arg_ptr += sizeof(const char*);
+                n_tmp_write = snprintf(buf, buf_size, va_arg(arg, const char*));
                 break;
 
             // int8 char
             case 'c':
-                n_tmp_write = snprint_char(buf, buf_size, *(char*)arg_ptr);
-                arg_ptr += sizeof(char);
+                n_tmp_write = snprint_char(buf, buf_size, va_arg(arg, int));
                 break;
 
             // pointer
             case 'p':
 #ifdef __32bit_system
-                n_tmp_write = snprint_hex32(buf, buf_size, *(ptr_t*)arg_ptr, 0);
+                n_tmp_write = snprint_hex32(buf, buf_size, va_arg(arg, size_t), 0);
 #else
-                n_tmp_write = snprint_hex64(buf, buf_size, *(ptr_t*)arg_ptr, 0);
+                n_tmp_write = snprint_hex64(buf, buf_size, va_arg(arg, size_t), 0);
 #endif
-                arg_ptr += sizeof(ptr_t);
                 break;
 
             default:
@@ -410,74 +339,7 @@ snprintf(
     if (buf_size > 0)
         *buf = 0x00;
 
+    va_end(arg);
+
     return n_write;
-}
-
-#define BYTES_PER_MAX_COPY_UNIT (sizeof(uint32_t) / sizeof(uint8_t))
-void* memcpy(void* _dst, const void* _src, size_t n)
-{
-    void* orig_dst = _dst;
-    uint8_t* dst = (uint8_t*)_dst;
-    const uint8_t* src = (const uint8_t*)_src;
-    for (size_t i = 0; i < n / BYTES_PER_MAX_COPY_UNIT; ++i) {
-        *(uint32_t*)dst = *(uint32_t*)src;
-        dst += BYTES_PER_MAX_COPY_UNIT;
-        src += BYTES_PER_MAX_COPY_UNIT;
-    }
-    for (size_t i = 0; i < (n % BYTES_PER_MAX_COPY_UNIT); ++i) {
-        *((char*)dst++) = *((char*)src++);
-    }
-    return orig_dst;
-}
-
-void* memset(void* _dst, int c, size_t n)
-{
-    uint8_t* dst = (uint8_t*)_dst;
-    c &= 0xff;
-    int cc = (c + (c << 8) + (c << 16) + (c << 24));
-    for (size_t i = 0; i < n / BYTES_PER_MAX_COPY_UNIT; ++i) {
-        *(uint32_t*)dst = cc;
-        dst += BYTES_PER_MAX_COPY_UNIT;
-    }
-    for (size_t i = 0; i < (n % BYTES_PER_MAX_COPY_UNIT); ++i) {
-        *((char*)dst++) = c;
-    }
-    return dst;
-}
-
-size_t strlen(const char* str)
-{
-    size_t n = 0;
-    while (*(str++) != '\0')
-        ++n;
-    return n;
-}
-
-char* strncpy(char* dst, const char* src, size_t n)
-{
-    size_t len = strlen(src);
-
-    if (len < n) {
-        memset(dst + len, 0x00, n - len);
-        memcpy(dst, src, len);
-    } else {
-        memcpy(dst, src, n);
-    }
-
-    return dst;
-}
-
-int strcmp(const char* s1, const char* s2)
-{
-    int c;
-    while ((c = *s1 - *s2) == 0 && *s1 != 0) {
-        ++s1;
-        ++s2;
-    }
-    return c;
-}
-
-void kmsg(const char* msg)
-{
-    console->print(msg);
 }

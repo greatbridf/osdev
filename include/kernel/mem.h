@@ -1,7 +1,7 @@
 #pragma once
 
+#include <stdint.h>
 #include <types/size.h>
-#include <types/stdint.h>
 
 #define PAGE_SIZE (4096)
 #define KERNEL_IDENTICALLY_MAPPED_AREA_LIMIT ((void*)0x30000000)

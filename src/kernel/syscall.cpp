@@ -2,18 +2,19 @@
 #include <asm/sys.h>
 #include <kernel/errno.h>
 #include <kernel/interrupt.h>
+#include <kernel/log.hpp>
 #include <kernel/mem.h>
 #include <kernel/mm.hpp>
 #include <kernel/process.hpp>
-#include <kernel/stdio.hpp>
 #include <kernel/syscall.hpp>
 #include <kernel/vfs.hpp>
 #include <kernel_main.hpp>
+#include <stdint.h>
+#include <stdio.h>
 #include <types/allocator.hpp>
 #include <types/assert.h>
 #include <types/elf.hpp>
 #include <types/status.h>
-#include <types/stdint.h>
 
 #define SYSCALL_SET_RETURN_VAL_EAX(_eax) \
     data->s_regs.eax = ((decltype(data->s_regs.eax))(_eax))

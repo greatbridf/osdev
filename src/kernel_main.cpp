@@ -8,16 +8,17 @@
 #include <kernel/hw/serial.h>
 #include <kernel/hw/timer.h>
 #include <kernel/interrupt.h>
+#include <kernel/log.hpp>
 #include <kernel/mem.h>
 #include <kernel/process.hpp>
-#include <kernel/stdio.hpp>
 #include <kernel/task.h>
 #include <kernel/tty.hpp>
 #include <kernel/vga.hpp>
+#include <stdint.h>
+#include <stdio.h>
 #include <types/assert.h>
 #include <types/bitmap.h>
 #include <types/status.h>
-#include <types/stdint.h>
 #include <types/types.h>
 
 #define KERNEL_MAIN_BUF_SIZE (128)

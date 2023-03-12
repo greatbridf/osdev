@@ -1,6 +1,6 @@
 #pragma once
 
-#include <kernel/stdio.hpp>
+#include <string.h>
 #include <types/allocator.hpp>
 #include <types/types.h>
 #include <types/vector.hpp>

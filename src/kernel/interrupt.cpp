@@ -5,17 +5,18 @@
 #include <kernel/hw/serial.h>
 #include <kernel/hw/timer.h>
 #include <kernel/interrupt.h>
+#include <kernel/log.hpp>
 #include <kernel/mem.h>
 #include <kernel/mm.hpp>
 #include <kernel/process.hpp>
-#include <kernel/stdio.hpp>
 #include <kernel/syscall.hpp>
 #include <kernel/vfs.hpp>
 #include <kernel/vga.hpp>
 #include <kernel_main.hpp>
+#include <stdint.h>
+#include <stdio.h>
 #include <types/assert.h>
 #include <types/size.h>
-#include <types/stdint.h>
 #include <types/types.h>
 
 static struct IDT_entry IDT[256];

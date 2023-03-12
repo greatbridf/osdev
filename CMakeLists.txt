@@ -66,6 +66,7 @@ set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
                         src/kernel/event/event.cpp
                         src/types/bitmap.c
                         src/types/elf.cpp
+                        src/types/libstdcpp.cpp
                         include/asm/boot.h
                         include/asm/port_io.h
                         include/asm/sys.h
@@ -106,6 +107,7 @@ set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
                         include/types/lock.hpp
                         include/types/string.hpp
                         include/types/vector.hpp
+                        include/types/function.hpp
                         include/kernel_main.hpp
                         )
 add_library(kernel_main STATIC ${KERNEL_MAIN_SOURCES})

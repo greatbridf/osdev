@@ -6,12 +6,12 @@
 #include <kernel/mem.h>
 #include <kernel/mm.hpp>
 #include <kernel/process.hpp>
-#include <kernel/stdio.h>
-#include <kernel/tty.h>
+#include <kernel/stdio.hpp>
 #include <kernel/vfs.hpp>
-#include <kernel_main.h>
+#include <kernel_main.hpp>
 #include <types/allocator.hpp>
 #include <types/assert.h>
+#include <types/cplusplus.hpp>
 #include <types/elf.hpp>
 #include <types/hash_map.hpp>
 #include <types/list.hpp>
@@ -46,74 +46,41 @@ struct no_irq_guard {
 
 process::process(process&& val)
     : mms(types::move(val.mms))
-    , thds(types::move(val.thds))
+    , thds { types::move(val.thds), this }
     , wait_lst(types::move(val.wait_lst))
+    , attr { val.attr }
     , pid(val.pid)
     , ppid(val.ppid)
+    , files(types::move(val.files))
 {
     if (current_process == &val)
         current_process = this;
 
-    attr.system = val.attr.system;
-
-    for (auto& item : thds)
-        item.owner = this;
-
+    val.pid = 0;
+    val.ppid = 0;
     val.attr.system = 0;
+    val.attr.zombie = 0;
 }
 
-process::process(const process& val, const thread& main_thd)
-    : mms(*kernel_mms)
-    , attr { .system = val.attr.system }
-    , pid { process::alloc_pid() }
-    , ppid { val.pid }
+process::process(const process& parent)
+    : process { parent.pid, parent.is_system() }
 {
-    auto* thd = &thds.emplace_back(main_thd);
-    thd->owner = this;
-
-    for (auto& area : val.mms) {
+    for (auto& area : parent.mms) {
         if (area.is_ident())
             continue;
 
         mms.mirror_area(area);
     }
 
-    readythds->push(thd);
+    this->files.dup(parent.files);
 }
 
-process::process(pid_t _ppid)
+process::process(pid_t _ppid, bool _system)
     : mms(*kernel_mms)
-    , attr { .system = 1 }
+    , attr { .system = _system }
     , pid { process::alloc_pid() }
     , ppid { _ppid }
 {
-    auto thd = thds.emplace_back(this, true);
-    readythds->push(&thd);
-}
-
-process::process(void (*func)(void), pid_t _ppid)
-    : process { _ppid }
-{
-    auto* esp = &thds.begin()->esp;
-
-    // return(start) address
-    push_stack(esp, (uint32_t)func);
-    // ebx
-    push_stack(esp, 0);
-    // edi
-    push_stack(esp, 0);
-    // esi
-    push_stack(esp, 0);
-    // ebp
-    push_stack(esp, 0);
-    // eflags
-    push_stack(esp, 0x200);
-}
-
-process::~process()
-{
-    for (auto iter = thds.begin(); iter != thds.end(); ++iter)
-        readythds->remove_all(&iter);
 }
 
 inline void NORETURN _noreturn_crash(void)
@@ -124,7 +91,7 @@ inline void NORETURN _noreturn_crash(void)
 
 void kernel_threadd_main(void)
 {
-    tty_print(console, "kernel thread daemon started\n");
+    kmsg("kernel thread daemon started\n");
 
     for (;;) {
         if (kthreadd_new_thd_func) {
@@ -161,14 +128,37 @@ void kernel_threadd_main(void)
 
 void NORETURN _kernel_init(void)
 {
-    procs->emplace(kernel_threadd_main, 1);
+    // pid 2 is kernel thread daemon
+    auto* proc = &procs->emplace(1)->value;
+
+    // create thread
+    thread thd(proc, true);
+
+    auto* esp = &thd.esp;
+
+    // return(start) address
+    push_stack(esp, (uint32_t)kernel_threadd_main);
+    // ebx
+    push_stack(esp, 0);
+    // edi
+    push_stack(esp, 0);
+    // esi
+    push_stack(esp, 0);
+    // ebp
+    push_stack(esp, 0);
+    // eflags
+    push_stack(esp, 0x200);
+
+    readythds->push(&proc->thds.Emplace(types::move(thd)));
+
+    // ------------------------------------------
 
     asm_sti();
 
     hw::init_ata();
 
     // TODO: parse kernel parameters
-    auto* _new_fs = fs::register_fs(types::kernel_allocator_new<fs::fat::fat32>(fs::vfs_open("/dev/hda1")->ind));
+    auto* _new_fs = fs::register_fs(types::_new<types::kernel_allocator, fs::fat::fat32>(fs::vfs_open("/dev/hda1")->ind));
     int ret = fs::fs_root->ind->fs->mount(fs::vfs_open("/mnt"), _new_fs);
     assert_likely(ret == GB_OK);
 
@@ -212,19 +202,22 @@ void k_new_thread(void (*func)(void*), void* data)
     kthreadd_new_thd_data = data;
 }
 
-void NORETURN init_scheduler()
+void NORETURN init_scheduler(void)
 {
-    procs = types::kernel_allocator_pnew(procs);
-    readythds = types::kernel_ident_allocator_pnew(readythds);
+    procs = types::pnew<types::kernel_allocator>(procs);
+    readythds = types::pnew<types::kernel_allocator>(readythds);
 
-    auto* init = &procs->emplace(1);
+    // init process has no parent
+    auto* init = &procs->emplace(0)->value;
+    init->files.open("/dev/console", 0);
 
     // we need interrupts enabled for cow mapping so now we disable it
     // in case timer interrupt mess things up
     asm_cli();
 
     current_process = init;
-    current_thread = &init->thds.begin();
+    current_thread = &init->thds.Emplace(init, true);
+    readythds->push(current_thread);
 
     tss.ss0 = KERNEL_DATA_SEGMENT;
     tss.esp0 = current_thread->kstack;

@@ -49,24 +49,24 @@ if (NOT DEFINED FDISK_BIN)
 endif()
 
 set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
-                        src/kernel_main.c
+                        src/kernel_main.cpp
                         src/kernel/errno.c
                         src/kernel/interrupt.cpp
                         src/kernel/process.cpp
-                        src/kernel/tty.c
-                        src/kernel/stdio.c
+                        src/kernel/tty.cpp
+                        src/kernel/stdio.cpp
                         src/kernel/syscall.cpp
                         src/kernel/mem.cpp
                         src/kernel/vfs.cpp
-                        src/kernel/vga.c
+                        src/kernel/vga.cpp
                         src/kernel/hw/ata.cpp
                         src/kernel/hw/keyboard.cpp
-                        src/kernel/hw/serial.c
+                        src/kernel/hw/serial.cpp
                         src/kernel/hw/timer.c
                         src/kernel/event/event.cpp
                         src/types/bitmap.c
-                        src/types/buffer.c
                         src/types/elf.cpp
+                        src/types/libstdcpp.cpp
                         include/asm/boot.h
                         include/asm/port_io.h
                         include/asm/sys.h
@@ -74,15 +74,15 @@ set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
                         include/kernel/event/event.h
                         include/kernel/event/evtqueue.hpp
                         include/kernel/errno.h
-                        include/kernel/tty.h
+                        include/kernel/tty.hpp
                         include/kernel/interrupt.h
                         include/kernel/process.hpp
-                        include/kernel/stdio.h
+                        include/kernel/stdio.hpp
                         include/kernel/syscall.hpp
                         include/kernel/mem.h
                         include/kernel/mm.hpp
                         include/kernel/vfs.hpp
-                        include/kernel/vga.h
+                        include/kernel/vga.hpp
                         include/kernel/hw/ata.hpp
                         include/kernel/hw/keyboard.h
                         include/kernel/hw/port.hpp
@@ -92,9 +92,11 @@ set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
                         include/kernel/input/input_event.h
                         include/types/assert.h
                         include/types/bitmap.h
-                        include/types/buffer.h
+                        include/types/buffer.hpp
                         include/types/elf.hpp
                         include/types/hash_map.hpp
+                        include/types/map.hpp
+                        include/types/pair.hpp
                         include/types/types.h
                         include/types/size.h
                         include/types/status.h
@@ -105,7 +107,8 @@ set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
                         include/types/lock.hpp
                         include/types/string.hpp
                         include/types/vector.hpp
-                        include/kernel_main.h
+                        include/types/function.hpp
+                        include/kernel_main.hpp
                         )
 add_library(kernel_main STATIC ${KERNEL_MAIN_SOURCES})
 

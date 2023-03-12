@@ -100,6 +100,7 @@ struct PACKED directory_entry {
     uint32_t size;
 };
 
+// TODO: deallocate inodes when dentry is destroyed
 class fat32 : public virtual fs::vfs {
 private:
     constexpr static uint32_t SECTOR_SIZE = 512;
@@ -113,6 +114,7 @@ private:
     uint32_t next_free_cluster_hint;
     cluster_t root_dir;
     cluster_t data_region_offset;
+    // TODO: use block device special node id
     inode* device;
     uint16_t reserved_sectors;
     uint8_t fat_copies;
@@ -120,15 +122,26 @@ private:
     char label[12];
     cluster_t* fat;
 
+    struct buf_object {
+        char* data;
+        int ref;
+        // bool dirty;
+    };
+    types::hash_map<cluster_t, buf_object, types::linux_hasher<cluster_t>> buf;
+
     // buf MUST be larger than 512 bytes
-    inline void read_sector(void* buf, uint32_t sector_no);
+    inline void _raw_read_sector(void* buf, uint32_t sector_no);
 
     // buf MUST be larger than 4096 bytes
-    inline void read_cluster(void* buf, cluster_t no);
+    inline void _raw_read_cluster(void* buf, cluster_t no);
 
-    static inline cluster_t cl(const inode* ind)
+    // buffered version, release_cluster(cluster_no) after used
+    char* read_cluster(cluster_t no);
+    void release_cluster(cluster_t no);
+
+    static constexpr cluster_t cl(const inode* ind)
     {
-        return reinterpret_cast<cluster_t>(ind->impl);
+        return ind->ino;
     }
 
     static inline cluster_t _rearrange(directory_entry* d)
@@ -147,9 +160,6 @@ private:
         }
     }
 
-protected:
-    virtual int load_dentry(dentry* ent) override;
-
 public:
     fat32(const fat32&) = delete;
     explicit fat32(inode* _device);
@@ -157,6 +167,7 @@ public:
 
     virtual size_t inode_read(inode* file, char* buf, size_t buf_size, size_t offset, size_t n) override;
     virtual int inode_stat(dentry* ent, stat* st) override;
+    virtual int inode_readdir(fs::inode* dir, size_t offset, fs::vfs::filldir_func callback) override;
 };
 
 }; // namespace fs::fat

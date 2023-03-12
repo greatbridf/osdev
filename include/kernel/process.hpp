@@ -1,12 +1,18 @@
 #pragma once
 
+#include <kernel/errno.h>
 #include <kernel/event/evtqueue.hpp>
 #include <kernel/interrupt.h>
 #include <kernel/mm.hpp>
 #include <kernel/task.h>
+#include <kernel/vfs.hpp>
+#include <types/allocator.hpp>
 #include <types/cplusplus.hpp>
 #include <types/hash_map.hpp>
 #include <types/list.hpp>
+#include <types/map.hpp>
+#include <types/pair.hpp>
+#include <types/status.h>
 #include <types/stdint.h>
 #include <types/types.h>
 
@@ -14,6 +20,14 @@ typedef size_t pid_t;
 
 class process;
 struct thread;
+
+class proclist;
+class readyqueue;
+
+inline process* volatile current_process;
+inline thread* volatile current_thread;
+inline proclist* procs;
+inline readyqueue* readythds;
 
 struct process_attr {
     uint16_t system : 1;
@@ -72,6 +86,12 @@ public:
         alloc_kstack();
     }
 
+    inline thread(const thread& thd, process* new_parent)
+        : thread { thd }
+    {
+        owner = new_parent;
+    }
+
     constexpr ~thread()
     {
         if (kstack)
@@ -79,25 +99,188 @@ public:
     }
 };
 
+class thdlist {
+public:
+    using list_type = types::list<thread>;
+
+private:
+    list_type thds;
+
+public:
+    constexpr thdlist(const thdlist& obj) = delete;
+    constexpr thdlist(thdlist&& obj) = delete;
+
+    constexpr thdlist& operator=(const thdlist& obj) = delete;
+    constexpr thdlist& operator=(thdlist&& obj) = delete;
+
+    constexpr thdlist(thdlist&& obj, process* new_parent)
+        : thds { types::move(obj.thds) }
+    {
+        for (auto& thd : thds)
+            thd.owner = new_parent;
+    }
+
+    explicit constexpr thdlist(void)
+    {
+    }
+
+    // implementation is below
+    constexpr ~thdlist();
+
+    template <typename... Args>
+    constexpr thread& Emplace(Args&&... args)
+    {
+        return *thds.emplace_back(types::forward<Args>(args)...);
+    }
+
+    constexpr size_t size(void) const
+    {
+        return thds.size();
+    }
+
+    constexpr list_type& underlying_list(void)
+    {
+        return thds;
+    }
+};
+
 class process {
 public:
+    class filearr {
+    public:
+        using container_type = types::list<fs::file>;
+        using array_type = types::hash_map<int, container_type::iterator_type, types::linux_hasher<size_t>>;
+
+    private:
+        inline static container_type* files = nullptr;
+        array_type arr;
+        int next_fd = 0;
+
+    public:
+        constexpr filearr(const filearr&) = delete;
+        constexpr filearr& operator=(const filearr&) = delete;
+        constexpr filearr& operator=(filearr&&) = delete;
+        constexpr filearr(filearr&& val)
+            : arr { types::move(val.arr) }
+            , next_fd { val.next_fd }
+        {
+            val.next_fd = 0;
+        }
+
+        explicit filearr()
+        {
+            if (!files)
+                files = types::pnew<types::kernel_allocator>(files);
+        }
+
+        constexpr void dup(const filearr& orig)
+        {
+            if (this->next_fd)
+                return;
+
+            this->next_fd = orig.next_fd;
+
+            for (int i = 0; i < this->next_fd; ++i) {
+                auto iter = orig.arr.find(i);
+                if (!iter)
+                    continue;
+
+                this->arr.emplace(iter->key, iter->value);
+                ++iter->value->ref;
+            }
+        }
+
+        constexpr fs::file* operator[](int i) const
+        {
+            auto iter = arr.find(i);
+            if (!iter)
+                return nullptr;
+            else
+                return &iter->value;
+        }
+
+        // TODO: file opening flags (permissions etc.)
+        int open(const char* filename, uint32_t)
+        {
+            auto* dentry = fs::vfs_open(filename);
+
+            if (!dentry) {
+                errno = ENOTFOUND;
+                return -1;
+            }
+
+            // TODO: check whether dentry is a file if O_DIRECTORY is set
+            // if (!(dentry->ind->flags.in.file || dentry->ind->flags.in.special_node)) {
+            //     errno = EISDIR;
+            //     return -1;
+            // }
+
+            // TODO: unify file, inode, dentry TYPE
+            fs::file::types type = fs::file::types::regular_file;
+            if (dentry->ind->flags.in.directory)
+                type = fs::file::types::directory;
+            if (dentry->ind->flags.in.special_node)
+                type = fs::file::types::block_dev;
+
+            auto iter = files->emplace_back(fs::file {
+                type,
+                dentry->ind,
+                dentry->parent,
+                0,
+                1 });
+
+            int fd = next_fd++;
+            arr.emplace(fd, iter);
+            return fd;
+        }
+
+        // close file descriptor
+        // where iter is guaranteed not nullptr
+        constexpr void close(array_type::iterator_type iter)
+        {
+            if (iter->value->ref == 1)
+                files->erase(iter->value);
+            else
+                --iter->value->ref;
+        }
+
+        constexpr void close(int fd)
+        {
+            auto iter = arr.find(fd);
+            if (iter)
+                close(iter);
+        }
+
+        constexpr ~filearr()
+        {
+            for (int i = 0; i < next_fd; ++i)
+                close(i);
+        }
+    };
+
+public:
     mutable kernel::mm_list mms;
-    types::list<thread> thds;
+    thdlist thds;
     kernel::evtqueue wait_lst;
     process_attr attr;
     pid_t pid;
     pid_t ppid;
+    filearr files;
 
 public:
     process(process&& val);
-    process(const process&) = delete;
-    process(const process& proc, const thread& main_thread);
+    process(const process&);
 
-    // only used for system initialization
-    explicit process(pid_t ppid);
-    explicit process(void (*func_in_kernel_space)(void), pid_t ppid);
+    explicit process(pid_t ppid, bool system = true);
 
-    ~process();
+    constexpr bool is_system(void) const
+    {
+        return attr.system;
+    }
+    constexpr bool is_zombie(void) const
+    {
+        return attr.zombie;
+    }
 
 private:
     static inline pid_t max_pid;
@@ -110,31 +293,31 @@ private:
 
 class proclist final {
 public:
-    using list_type = types::list<process>;
-    using index_type = types::hash_map<pid_t, types::list<process>::iterator_type, types::linux_hasher<pid_t>>;
+    using list_type = types::map<pid_t, process>;
     using child_index_type = types::hash_map<pid_t, types::list<pid_t>, types::linux_hasher<pid_t>>;
     using iterator_type = list_type::iterator_type;
     using const_iterator_type = list_type::const_iterator_type;
 
 private:
     list_type m_procs;
-    index_type m_idx;
     child_index_type m_child_idx;
 
 public:
     template <typename... Args>
-    constexpr iterator_type emplace(Args&&... args)
+    iterator_type emplace(Args&&... args)
     {
-        auto iter = m_procs.emplace_back(types::forward<Args>(args)...);
-        m_idx.insert(iter->pid, iter);
+        process _proc(types::forward<Args>(args)...);
+        auto pid = _proc.pid;
+        auto ppid = _proc.ppid;
+        auto iter = m_procs.insert(types::make_pair(pid, types::move(_proc)));
 
-        auto children = m_child_idx.find(iter->ppid);
+        auto children = m_child_idx.find(ppid);
         if (!children) {
-            m_child_idx.insert(iter->ppid, {});
-            children = m_child_idx.find(iter->ppid);
+            m_child_idx.emplace(ppid, types::list<pid_t> {});
+            children = m_child_idx.find(ppid);
         }
 
-        children->value.push_back(iter->pid);
+        children->value.push_back(pid);
 
         return iter;
     }
@@ -143,21 +326,20 @@ public:
     {
         make_children_orphans(pid);
 
-        auto proc_iter = m_idx.find(pid);
-        auto ppid = proc_iter->value->ppid;
+        auto proc_iter = m_procs.find(pid);
+        auto ppid = proc_iter->value.ppid;
 
         auto& parent_children = m_child_idx.find(ppid)->value;
 
         auto i = parent_children.find(pid);
         parent_children.erase(i);
 
-        m_procs.erase(proc_iter->value);
-        m_idx.remove(proc_iter);
+        m_procs.erase(proc_iter);
     }
 
     constexpr process* find(pid_t pid)
     {
-        return &m_idx.find(pid)->value;
+        return &m_procs.find(pid)->value;
     }
 
     constexpr bool has_child(pid_t pid)
@@ -232,12 +414,7 @@ public:
     }
 };
 
-inline process* volatile current_process;
-inline thread* volatile current_thread;
-inline proclist* procs;
-inline readyqueue* readythds;
-
-extern "C" void NORETURN init_scheduler();
+void NORETURN init_scheduler(void);
 void schedule(void);
 
 constexpr uint32_t push_stack(uint32_t** stack, uint32_t val)
@@ -245,6 +422,13 @@ constexpr uint32_t push_stack(uint32_t** stack, uint32_t val)
     --*stack;
     **stack = val;
     return val;
+}
+
+// class thdlist
+constexpr thdlist::~thdlist()
+{
+    for (auto iter = thds.begin(); iter != thds.end(); ++iter)
+        readythds->remove_all(&iter);
 }
 
 void k_new_thread(void (*func)(void*), void* data);

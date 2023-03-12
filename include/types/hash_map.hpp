@@ -3,6 +3,7 @@
 #include <types/allocator.hpp>
 #include <types/cplusplus.hpp>
 #include <types/list.hpp>
+#include <types/pair.hpp>
 #include <types/stdint.h>
 #include <types/string.hpp>
 #include <types/types.h>
@@ -89,40 +90,23 @@ concept Hasher = requires(Value&& val, uint32_t bits)
 template <typename Key, typename Value, Hasher<Key> _Hasher, template <typename _T> class Allocator = types::kernel_allocator>
 class hash_map {
 public:
-    struct pair;
     template <typename Pointer>
     class iterator;
 
-    using key_type = Key;
+    using key_type = typename traits::add_const<Key>::type;
     using value_type = Value;
-    using pair_type = pair;
+    using pair_type = pair<key_type, value_type>;
     using size_type = size_t;
     using difference_type = ssize_t;
     using iterator_type = iterator<pair_type*>;
     using const_iterator_type = iterator<const pair_type*>;
 
-    using bucket_type = list<pair, Allocator>;
+    using bucket_type = list<pair_type, Allocator>;
     using bucket_array_type = vector<bucket_type, Allocator>;
 
     static constexpr size_type INITIAL_BUCKETS_ALLOCATED = 64;
 
 public:
-    struct pair {
-        const key_type key;
-        value_type value;
-
-        constexpr pair(void) = delete;
-        constexpr pair(const key_type _key, value_type _val)
-            : key(_key)
-            , value(_val)
-        {
-        }
-        constexpr bool operator==(const pair& p)
-        {
-            return key == p.key;
-        }
-    };
-
     template <typename Pointer>
     class iterator {
     public:
@@ -226,19 +210,16 @@ public:
         buckets.clear();
     }
 
-    constexpr void insert(const pair& p)
-    {
-        auto hash_value = _Hasher::hash(p.key, hash_length());
-        buckets.at(hash_value).push_back(p);
-    }
-    constexpr void insert(pair&& p)
+    constexpr void emplace(pair_type&& p)
     {
         auto hash_value = _Hasher::hash(p.key, hash_length());
         buckets.at(hash_value).push_back(move(p));
     }
-    constexpr void insert(const key_type& key, const value_type& val)
+
+    template <typename _key_type, typename _value_type>
+    constexpr void emplace(_key_type&& key, _value_type&& value)
     {
-        insert(pair { key, val });
+        emplace(make_pair(forward<_key_type>(key), forward<_value_type>(value)));
     }
 
     constexpr void remove(const key_type& key)
@@ -279,9 +260,9 @@ public:
     {
         auto hash_value = _Hasher::hash(key, hash_length());
         const auto& bucket = buckets.at(hash_value);
-        for (const auto& item : bucket) {
-            if (key == item.key)
-                return const_iterator_type(&(*item));
+        for (auto iter = bucket.cbegin(); iter != bucket.cend(); ++iter) {
+            if (key == iter->key)
+                return const_iterator_type(&iter);
         }
         return const_iterator_type(nullptr);
     }

@@ -1,6 +1,7 @@
 #include <fs/fat.hpp>
 #include <kernel/mem.h>
 #include <kernel/mm.hpp>
+#include <kernel/stdio.hpp>
 #include <kernel/vfs.hpp>
 #include <types/allocator.hpp>
 #include <types/assert.h>
@@ -10,7 +11,7 @@
 
 namespace fs::fat {
 // buf MUST be larger than 512 bytes
-inline void fat32::read_sector(void* buf, uint32_t sector_no)
+inline void fat32::_raw_read_sector(void* buf, uint32_t sector_no)
 {
     assert(vfs_read(
                device,
@@ -22,33 +23,71 @@ inline void fat32::read_sector(void* buf, uint32_t sector_no)
 }
 
 // buf MUST be larger than 4096 bytes
-inline void fat32::read_cluster(void* buf, cluster_t no)
+inline void fat32::_raw_read_cluster(void* buf, cluster_t no)
 {
     // data cluster start from cluster #2
     no -= 2;
     for (int i = 0; i < sectors_per_cluster; ++i) {
         // skip reserved sectors
-        read_sector((char*)buf + SECTOR_SIZE * i, data_region_offset + no * sectors_per_cluster + i);
+        _raw_read_sector((char*)buf + SECTOR_SIZE * i, data_region_offset + no * sectors_per_cluster + i);
     }
 }
 
-int fat32::load_dentry(dentry* ent)
+char* fat32::read_cluster(cluster_t no)
 {
-    cluster_t next = cl(ent->ind);
-    auto buf = (char*)k_malloc(4096);
+    auto iter = buf.find(no);
+    if (iter) {
+        ++iter->value.ref;
+        return iter->value.data;
+    }
+    auto* data = (char*)k_malloc(sectors_per_cluster * SECTOR_SIZE);
+    _raw_read_cluster(data, no);
+    buf.emplace(no,
+        buf_object {
+            data,
+            1,
+            // false,
+        });
+    return data;
+}
+
+void fat32::release_cluster(cluster_t no)
+{
+    auto iter = buf.find(no);
+    if (iter)
+        --iter->value.ref;
+}
+
+int fat32::inode_readdir(fs::inode* dir, size_t offset, fs::vfs::filldir_func filldir)
+{
+    cluster_t next = cl(dir);
+    for (size_t i = 0; i < (offset / (sectors_per_cluster * SECTOR_SIZE)); ++i) {
+        if (next >= EOC)
+            return 0;
+        next = fat[next];
+    }
+    size_t nread = 0;
     do {
-        read_cluster(buf, next);
-        auto* d = reinterpret_cast<directory_entry*>(buf);
-        for (; d->filename[0]; ++d) {
+        char* buf = read_cluster(next);
+        auto* d = reinterpret_cast<directory_entry*>(buf) + (offset % (sectors_per_cluster * SECTOR_SIZE)) / sizeof(directory_entry);
+        offset = 0;
+        auto* end = d + (sectors_per_cluster * SECTOR_SIZE / sizeof(directory_entry));
+        for (; d < end && d->filename[0]; ++d) {
             if (d->attributes.volume_label)
                 continue;
-            auto* ind = cache_inode({ .in {
-                                        .file = !d->attributes.subdir,
-                                        .directory = d->attributes.subdir,
-                                        .mount_point = 0,
-                                        .special_node = 0,
-                                    } },
-                0777, d->size, (void*)_rearrange(d));
+
+            fs::ino_t ino = _rearrange(d);
+            auto* ind = get_inode(ino);
+            if (!ind) {
+                ind = cache_inode({ .in {
+                                      .file = !d->attributes.subdir,
+                                      .directory = d->attributes.subdir,
+                                      .mount_point = 0,
+                                      .special_node = 0,
+                                  } },
+                    0777, d->size, ino);
+            }
+
             types::string<> fname;
             for (int i = 0; i < 8; ++i) {
                 if (d->filename[i] == ' ')
@@ -64,12 +103,20 @@ int fat32::load_dentry(dentry* ent)
                     break;
                 fname += d->extension[i];
             }
-            ent->append(ind, fname);
+            auto ret = filldir(fname.c_str(), 0, ind->ino,
+                (ind->flags.in.directory || ind->flags.in.mount_point) ? DT_DIR : DT_REG);
+
+            if (ret != GB_OK) {
+                release_cluster(next);
+                return nread;
+            }
+
+            nread += sizeof(directory_entry);
         }
+        release_cluster(next);
         next = fat[next];
     } while (next < EOC);
-    k_free(buf);
-    return GB_OK;
+    return nread;
 }
 
 fat32::fat32(inode* _device)
@@ -77,7 +124,7 @@ fat32::fat32(inode* _device)
     , label { 0 }
 {
     char* buf = (char*)k_malloc(SECTOR_SIZE);
-    read_sector(buf, 0);
+    _raw_read_sector(buf, 0);
 
     auto* info = reinterpret_cast<ext_boot_sector*>(buf);
 
@@ -93,7 +140,7 @@ fat32::fat32(inode* _device)
     fat = (cluster_t*)k_malloc(SECTOR_SIZE * sectors_per_fat);
     // TODO: optimize
     for (uint32_t i = 0; i < 4; ++i)
-        read_sector((char*)fat + i * SECTOR_SIZE, reserved_sectors + i);
+        _raw_read_sector((char*)fat + i * SECTOR_SIZE, reserved_sectors + i);
     for (uint32_t i = 4; i < sectors_per_fat; ++i)
         memset((char*)fat + i * SECTOR_SIZE, 0x00, SECTOR_SIZE);
 
@@ -104,7 +151,7 @@ fat32::fat32(inode* _device)
     }
     label[i] = 0x00;
 
-    read_sector(buf, info->fs_info_sector);
+    _raw_read_sector(buf, info->fs_info_sector);
 
     auto* fsinfo = reinterpret_cast<fs_info_sector*>(buf);
     free_clusters = fsinfo->free_clusters;
@@ -116,7 +163,11 @@ fat32::fat32(inode* _device)
     cluster_t next = root_dir;
     while ((next = fat[next]) < EOC)
         ++_root_dir_clusters;
-    auto* n = cache_inode({ INODE_MNT | INODE_DIR }, 0777, _root_dir_clusters * sectors_per_cluster * SECTOR_SIZE, (void*)root_dir);
+    auto* n = cache_inode(
+        { INODE_MNT | INODE_DIR },
+        0777,
+        _root_dir_clusters * sectors_per_cluster * SECTOR_SIZE,
+        root_dir);
     register_root_node(n);
 }
 
@@ -127,40 +178,43 @@ fat32::~fat32()
 
 size_t fat32::inode_read(inode* file, char* buf, size_t buf_size, size_t offset, size_t n)
 {
-    cluster_t next = reinterpret_cast<cluster_t>(file->impl);
+    cluster_t next = cl(file);
     uint32_t cluster_size = SECTOR_SIZE * sectors_per_cluster;
-    auto* b = (char*)k_malloc(cluster_size);
     size_t orig_n = n;
 
     do {
         if (offset == 0) {
             if (n > cluster_size) {
-                read_cluster(buf, next);
+                auto* data = read_cluster(next);
+                memcpy(buf, data, cluster_size);
+                release_cluster(next);
+
                 buf_size -= cluster_size;
                 buf += cluster_size;
                 n -= cluster_size;
             } else {
-                read_cluster(b, next);
-                auto read = _write_buf_n(buf, buf_size, b, n);
-                k_free(b);
+                auto* data = read_cluster(next);
+                auto read = _write_buf_n(buf, buf_size, data, n);
+                release_cluster(next);
+
                 return orig_n - n + read;
             }
         } else {
             if (offset > cluster_size) {
                 offset -= cluster_size;
             } else {
-                read_cluster(b, next);
+                auto* data = read_cluster(next);
 
                 auto to_read = cluster_size - offset;
                 if (to_read > n)
                     to_read = n;
 
-                auto read = _write_buf_n(buf, buf_size, b + offset, to_read);
+                auto read = _write_buf_n(buf, buf_size, data + offset, to_read);
                 buf += read;
                 n -= read;
 
+                release_cluster(next);
                 if (read != to_read) {
-                    k_free(b);
                     return orig_n - n;
                 }
 
@@ -170,7 +224,6 @@ size_t fat32::inode_read(inode* file, char* buf, size_t buf_size, size_t offset,
         next = fat[next];
     } while (n && next < EOC);
 
-    k_free(b);
     return orig_n - n;
 }
 
@@ -180,9 +233,6 @@ int fat32::inode_stat(dentry* ent, stat* st)
     st->st_blksize = 4096;
     st->st_blocks = (ent->ind->size + 4095) / 4096;
     st->st_ino = ent->ind->ino;
-    if (ent->ind->flags.in.special_node) {
-        st->st_rdev.v = reinterpret_cast<uint32_t>(ent->ind->impl);
-    }
     return GB_OK;
 }
 } // namespace fs::fat

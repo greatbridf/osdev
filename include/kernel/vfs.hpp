@@ -1,8 +1,10 @@
 #pragma once
 
 #include <types/allocator.hpp>
+#include <types/function.hpp>
 #include <types/hash_map.hpp>
 #include <types/list.hpp>
+#include <types/map.hpp>
 #include <types/stdint.h>
 #include <types/types.h>
 #include <types/vector.hpp>
@@ -11,6 +13,19 @@
 #define INODE_DIR (1 << 1)
 #define INODE_MNT (1 << 2)
 #define INODE_NODE (1 << 3)
+
+// dirent file types
+#define DT_UNKNOWN 0
+#define DT_FIFO 1
+#define DT_CHR 2
+#define DT_DIR 4
+#define DT_BLK 6
+#define DT_REG 8
+#define DT_LNK 10
+#define DT_SOCK 12
+#define DT_WHT 14
+
+#define DT_MAX (S_DT_MASK + 1) /* 16 */
 
 namespace fs {
 using ino_t = size_t;
@@ -32,12 +47,12 @@ union inode_flags {
 struct inode {
     inode_flags flags;
     uint32_t perm;
-    void* impl;
     ino_t ino;
     vfs* fs;
     size_t size;
 };
 
+#define SN_INVALID (0xffffffff)
 union node_t {
     uint32_t v;
     struct {
@@ -70,20 +85,30 @@ struct stat {
     blkcnt_t st_blocks;
 };
 
+struct PACKED user_dirent {
+    ino_t d_ino; // inode number
+    uint32_t d_off; // ignored
+    uint16_t d_reclen; // length of this struct user_dirent
+    char d_name[1]; // file name with a padding zero
+    // uint8_t d_type; // file type, with offset of (d_reclen - 1)
+};
+
 class vfs {
 public:
     struct dentry {
     public:
         using name_type = types::string<>;
+        template <typename T>
+        using allocator_type = types::kernel_allocator<T>;
 
     private:
-        types::list<dentry> children;
-        types::hash_map<name_type, dentry*, types::string_hasher<const name_type&>> idx_children;
+        types::list<dentry, allocator_type>* children = nullptr;
+        types::hash_map<name_type, dentry*, types::string_hasher<const name_type&>, allocator_type>* idx_children = nullptr;
 
     public:
         dentry* parent;
         inode* ind;
-        // if the entry is not a file, this flag is ignored
+        // if the entry is a file, this flag is ignored
         union {
             uint32_t v;
             struct {
@@ -101,8 +126,10 @@ public:
         dentry& operator=(const dentry& val) = delete;
         dentry& operator=(dentry&& val) = delete;
 
-        dentry* append(inode* ind, const name_type& name);
-        dentry* append(inode* ind, name_type&& name);
+        ~dentry();
+
+        dentry* append(inode* ind, const name_type& name, bool set_dirty);
+        dentry* append(inode* ind, name_type&& name, bool set_dirty);
 
         dentry* find(const name_type& name);
 
@@ -111,29 +138,26 @@ public:
         void invalidate(void);
     };
 
+public:
+    using filldir_func = std::function<int(const char*, size_t, ino_t, uint8_t)>;
+
 private:
     // TODO: use allocator designed for small objects
-    using inode_list = types::list<inode>;
-    using inode_index_cache_list = types::hash_map<ino_t, inode*, types::linux_hasher<ino_t>>;
+    using inode_list = types::map<ino_t, inode>;
 
 private:
     inode_list _inodes;
-    inode_index_cache_list _idx_inodes;
     types::hash_map<dentry*, dentry*, types::linux_hasher<dentry*>> _mount_recover_list;
-    ino_t _last_inode_no;
-
-private:
-    ino_t _assign_inode_id(void);
 
 protected:
     dentry _root;
 
 protected:
-    inode* cache_inode(inode_flags flags, uint32_t perm, size_t size, void* impl_data);
+    inode* cache_inode(inode_flags flags, uint32_t perm, size_t size, ino_t ino);
     inode* get_inode(ino_t ino);
     void register_root_node(inode* root);
 
-    virtual int load_dentry(dentry* ent);
+    int load_dentry(dentry* ent);
 
 public:
     explicit vfs(void);
@@ -156,9 +180,33 @@ public:
     virtual int inode_rmfile(dentry* dir, const char* filename);
     virtual int inode_mkdir(dentry* dir, const char* dirname);
     virtual int inode_stat(dentry* dir, stat* stat);
+    virtual uint32_t inode_getnode(inode* file);
+
+    // parameter 'length' in callback:
+    // if 0, 'name' should be null terminated
+    // else, 'name' size
+    //
+    // @return
+    // return -1 if an error occurred
+    // return 0 if no more entry available
+    // otherwise, return bytes to be added to the offset
+    virtual int inode_readdir(inode* dir, size_t offset, filldir_func callback) = 0;
 };
 
-extern fs::vfs::dentry* fs_root;
+struct file {
+    enum class types {
+        regular_file,
+        directory,
+        block_dev,
+        char_dev,
+    } type;
+    inode* ind;
+    vfs::dentry* parent;
+    size_t cursor;
+    size_t ref;
+};
+
+inline fs::vfs::dentry* fs_root;
 
 void register_special_block(uint16_t major,
     uint16_t minor,

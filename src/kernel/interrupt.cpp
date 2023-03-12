@@ -8,12 +8,11 @@
 #include <kernel/mem.h>
 #include <kernel/mm.hpp>
 #include <kernel/process.hpp>
-#include <kernel/stdio.h>
+#include <kernel/stdio.hpp>
 #include <kernel/syscall.hpp>
-#include <kernel/tty.h>
 #include <kernel/vfs.hpp>
-#include <kernel/vga.h>
-#include <kernel_main.h>
+#include <kernel/vga.hpp>
+#include <kernel_main.hpp>
 #include <types/assert.h>
 #include <types/size.h>
 #include <types/stdint.h>
@@ -91,7 +90,7 @@ extern "C" void int6_handler(
 {
     char buf[512];
 
-    tty_print(console, "\n---- INVALID OPCODE ----\n");
+    kmsg("\n---- INVALID OPCODE ----\n");
 
     snprintf(
         buf, 512,
@@ -102,9 +101,9 @@ extern "C" void int6_handler(
         s_regs.edx, s_regs.esp, s_regs.ebp,
         s_regs.esi, s_regs.edi, eip,
         cs, eflags);
-    tty_print(console, buf);
+    kmsg(buf);
 
-    tty_print(console, "----   HALTING SYSTEM   ----\n");
+    kmsg("----   HALTING SYSTEM   ----\n");
 
     asm_cli();
     asm_hlt();
@@ -120,7 +119,7 @@ extern "C" void int13_handler(
 {
     char buf[512];
 
-    tty_print(console, "\n---- SEGMENTATION FAULT ----\n");
+    kmsg("\n---- SEGMENTATION FAULT ----\n");
 
     snprintf(
         buf, 512,
@@ -132,9 +131,9 @@ extern "C" void int13_handler(
         s_regs.edx, s_regs.esp, s_regs.ebp,
         s_regs.esi, s_regs.edi, eip,
         cs, error_code, eflags);
-    tty_print(console, buf);
+    kmsg(buf);
 
-    tty_print(console, "----   HALTING SYSTEM   ----\n");
+    kmsg("----   HALTING SYSTEM   ----\n");
 
     asm_cli();
     asm_hlt();
@@ -155,7 +154,7 @@ static inline void _int14_panic(void* eip, void* cr2, struct page_fault_error_co
     snprintf(
         buf, 256,
         "\nkilled: segmentation fault (eip: %x, cr2: %x, error_code: %x)\n", eip, cr2, error_code);
-    tty_print(console, buf);
+    kmsg(buf);
     assert(false);
 }
 
@@ -238,6 +237,7 @@ extern "C" void irq3_handler(void)
 }
 extern "C" void irq4_handler(void)
 {
+    // TODO: register interrupt handler in serial port driver
     serial_receive_data_interrupt();
     asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
 }

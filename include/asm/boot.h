@@ -12,8 +12,6 @@ struct __attribute__((__packed__)) gdt_descriptor {
 
 extern struct gdt_descriptor asm_gdt_descriptor;
 
-extern uint32_t check_a20_on(void);
-
 extern struct mem_size_info asm_mem_size_info;
 
 extern uint8_t asm_e820_mem_map[1024];

@@ -17,6 +17,15 @@ using false_type = constant_value<bool, false>;
 
 namespace types::traits {
 
+template <bool Expression, typename TTrue, typename TFalse>
+struct condition {
+    using type = TFalse;
+};
+template <typename TTrue, typename TFalse>
+struct condition<true, TTrue, TFalse> {
+    using type = TTrue;
+};
+
 template <typename T>
 struct remove_pointer {
     using type = T;
@@ -66,6 +75,19 @@ struct remove_cv<const volatile T> {
 };
 
 template <typename T>
+struct add_const {
+    using type = const T;
+};
+template <typename T>
+struct add_const<const T> {
+    using type = const T;
+};
+template <>
+struct add_const<void> {
+    using type = void;
+};
+
+template <typename T>
 struct is_pointer : false_type {
 };
 
@@ -74,9 +96,23 @@ struct is_pointer<T*> : true_type {
 };
 
 template <typename T>
+struct is_const : public false_type {
+};
+template <typename T>
+struct is_const<const T> : public true_type {
+};
+
+template <typename U, template <typename...> class T, typename...>
+struct is_template_instance : public false_type {
+};
+template <template <typename...> class T, typename... Ts>
+struct is_template_instance<T<Ts...>, T> : public true_type {
+};
+
+template <typename T>
 struct decay {
 private:
-    using U = remove_reference<T>;
+    using U = typename remove_reference<T>::type;
 
 public:
     using type = typename remove_cv<U>::type;
@@ -138,6 +174,13 @@ concept PointerType = traits::is_pointer<T>::value;
 
 template <typename A, typename B>
 concept same_as = is_same<A, B>::value;
+
+class non_copyable {
+public:
+    non_copyable() = default;
+    non_copyable(const non_copyable&) = delete;
+    non_copyable& operator=(const non_copyable&) = delete;
+};
 
 } // namespace types
 

@@ -5,10 +5,10 @@
 #include <kernel/mem.h>
 #include <kernel/mm.hpp>
 #include <kernel/process.hpp>
-#include <kernel/stdio.h>
+#include <kernel/stdio.hpp>
 #include <kernel/task.h>
-#include <kernel/vga.h>
-#include <kernel_main.h>
+#include <kernel/vga.hpp>
+#include <kernel_main.hpp>
 #include <types/allocator.hpp>
 #include <types/assert.h>
 #include <types/bitmap.h>
@@ -305,7 +305,7 @@ struct page allocate_page(void)
     return page {
         .phys_page_id = alloc_raw_page(),
         .pte = nullptr,
-        .ref_count = types::kernel_ident_allocator_new<size_t>(0),
+        .ref_count = types::_new<types::kernel_ident_allocator, size_t>(0),
         .attr { 0 },
     };
 }
@@ -523,13 +523,13 @@ void init_mem(void)
     // map the 16MiB-768MiB identically
     init_paging_map_low_mem_identically();
 
-    kernel_mms = types::kernel_ident_allocator_pnew(kernel_mms, KERNEL_PAGE_DIRECTORY_ADDR);
+    kernel_mms = types::pnew<types::kernel_ident_allocator>(kernel_mms, KERNEL_PAGE_DIRECTORY_ADDR);
     auto heap_mm = kernel_mms->addarea(KERNEL_HEAP_START, true, true);
 
     // create empty_page struct
     empty_page.attr.in.cow = 0;
     empty_page.phys_page_id = to_page(EMPTY_PAGE_ADDR);
-    empty_page.ref_count = types::kernel_ident_allocator_new<size_t>(1);
+    empty_page.ref_count = types::_new<types::kernel_ident_allocator, size_t>(1);
     empty_page.pte = to_pte(*KERNEL_PAGE_DIRECTORY_ADDR, empty_page.phys_page_id);
     empty_page.pte->in.rw = 0;
     invalidate_tlb(0x00000000);
@@ -538,7 +538,7 @@ void init_mem(void)
     while (heap_mm->pgs->size() < 256 * 1024 * 1024 / PAGE_SIZE)
         heap_mm->append_page(&empty_page, true, true, true, true);
 
-    kernel_heap_allocator = types::kernel_ident_allocator_pnew(kernel_heap_allocator,
+    kernel_heap_allocator = types::pnew<types::kernel_ident_allocator>(kernel_heap_allocator,
         KERNEL_HEAP_START, vptrdiff(KERNEL_HEAP_LIMIT, KERNEL_HEAP_START));
 }
 

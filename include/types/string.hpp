@@ -1,11 +1,9 @@
 #pragma once
 
-#include <kernel/stdio.h>
+#include <kernel/stdio.hpp>
 #include <types/allocator.hpp>
 #include <types/types.h>
 #include <types/vector.hpp>
-
-#ifdef __cplusplus
 
 namespace types {
 template <template <typename _value_type> class Allocator = kernel_allocator>
@@ -114,5 +112,3 @@ public:
     }
 };
 } // namespace types
-
-#endif

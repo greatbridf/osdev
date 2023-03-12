@@ -124,7 +124,7 @@ public:
     {
         v.m_pd = nullptr;
     }
-    constexpr ~mm_list()
+    ~mm_list()
     {
         if (!m_pd)
             return;
@@ -170,7 +170,7 @@ public:
                 },
             },
             .owner = this,
-            .pgs = ::types::kernel_ident_allocator_new<page_arr>(),
+            .pgs = types::_new<types::kernel_ident_allocator, page_arr>(),
         });
     }
 

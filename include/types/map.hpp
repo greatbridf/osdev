@@ -357,6 +357,11 @@ public:
 
             return ret;
         }
+
+        constexpr operator bool(void)
+        {
+            return p;
+        }
     };
 
     using iterator_type = iterator<false>;
@@ -472,10 +477,7 @@ private:
     {
         node* cur = root;
 
-        if (unlikely(!cur))
-            return nullptr;
-
-        for (;;) {
+        for (; cur;) {
             if (cur->v.key == key)
                 return cur;
 
@@ -484,6 +486,8 @@ private:
             else
                 cur = cur->right;
         }
+
+        return nullptr;
     }
 
     // this function DOES NOT dellocate the node

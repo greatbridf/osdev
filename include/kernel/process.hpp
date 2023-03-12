@@ -215,8 +215,15 @@ public:
             //     return -1;
             // }
 
+            // TODO: unify file, inode, dentry TYPE
+            fs::file::types type = fs::file::types::regular_file;
+            if (dentry->ind->flags.in.directory)
+                type = fs::file::types::directory;
+            if (dentry->ind->flags.in.special_node)
+                type = fs::file::types::block_dev;
+
             auto iter = files->emplace_back(fs::file {
-                fs::file::types::regular_file,
+                type,
                 dentry->ind,
                 dentry->parent,
                 0,

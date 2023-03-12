@@ -25,7 +25,8 @@
     SYSCALL_SET_RETURN_VAL_EAX(_eax);      \
     SYSCALL_SET_RETURN_VAL_EDX(_edx)
 
-syscall_handler syscall_handlers[8];
+#define SYSCALL_HANDLERS_SIZE (16)
+syscall_handler syscall_handlers[SYSCALL_HANDLERS_SIZE];
 
 void _syscall_not_impl(interrupt_stack* data)
 {
@@ -81,7 +82,7 @@ void _syscall_write(interrupt_stack* data)
     size_t n = data->s_regs.edx;
 
     auto* file = current_process->files[fd];
-    if (file->type != fs::file::types::regular_file) {
+    if (file->type == fs::file::types::directory) {
         SYSCALL_SET_RETURN_VAL(GB_FAILED, EINVAL);
         return;
     }
@@ -98,7 +99,7 @@ void _syscall_read(interrupt_stack* data)
     size_t n = data->s_regs.edx;
 
     auto* file = current_process->files[fd];
-    if (file->type != fs::file::types::regular_file) {
+    if (file->type == fs::file::types::directory) {
         SYSCALL_SET_RETURN_VAL(GB_FAILED, EINVAL);
         return;
     }
@@ -233,6 +234,57 @@ void _syscall_wait(interrupt_stack* data)
     SYSCALL_SET_RETURN_VAL(pid, 0);
 }
 
+void _syscall_getdents(interrupt_stack* data)
+{
+    int fd = data->s_regs.edi;
+    auto* buf = (char*)(data->s_regs.esi);
+    size_t cnt = data->s_regs.edx;
+
+    auto* dir = current_process->files[fd];
+    if (dir->type != fs::file::types::directory) {
+        data->s_regs.eax = -1;
+        return;
+    }
+
+    size_t orig_cnt = cnt;
+    int nread = dir->ind->fs->inode_readdir(dir->ind, dir->cursor,
+        [&buf, &cnt](const char* fn, size_t len, fs::ino_t ino, uint8_t type) -> int {
+            if (!len)
+                len = strlen(fn);
+
+            size_t reclen = sizeof(fs::user_dirent) + 1 + len;
+            if (cnt < reclen)
+                return GB_FAILED;
+
+            auto* dirp = (fs::user_dirent*)buf;
+            dirp->d_ino = ino;
+            dirp->d_reclen = reclen;
+            // TODO: show offset
+            // dirp->d_off = 0;
+            // TODO: use copy_to_user
+            memcpy(dirp->d_name, fn, len);
+            buf[reclen - 2] = 0;
+            buf[reclen - 1] = type;
+
+            buf += reclen;
+            cnt -= reclen;
+            return GB_OK;
+        });
+
+    if (nread > 0)
+        dir->cursor += nread;
+
+    data->s_regs.eax = orig_cnt - cnt;
+}
+
+void _syscall_open(interrupt_stack* data)
+{
+    auto* path = (const char*)data->s_regs.edi;
+    // flags are ignored for now
+    uint32_t flags = data->s_regs.esi;
+    data->s_regs.eax = current_process->files.open(path, flags);
+}
+
 void init_syscall(void)
 {
     syscall_handlers[0] = _syscall_fork;
@@ -243,4 +295,6 @@ void init_syscall(void)
     syscall_handlers[5] = _syscall_exit;
     syscall_handlers[6] = _syscall_wait;
     syscall_handlers[7] = _syscall_read;
+    syscall_handlers[8] = _syscall_getdents;
+    syscall_handlers[9] = _syscall_open;
 }

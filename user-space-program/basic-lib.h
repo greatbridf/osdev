@@ -4,9 +4,26 @@ typedef __UINT8_TYPE__ uint8_t;
 
 typedef uint32_t pid_t;
 typedef uint32_t size_t;
+typedef size_t ino_t;
 
 #define GNU_ATTRIBUTE(attr) __attribute__((attr))
 #define NORETURN GNU_ATTRIBUTE(noreturn)
+
+#define O_RDONLY (0)
+#define O_DIRECTORY (0x4)
+
+// dirent file types
+#define DT_UNKNOWN 0
+#define DT_FIFO 1
+#define DT_CHR 2
+#define DT_DIR 4
+#define DT_BLK 6
+#define DT_REG 8
+#define DT_LNK 10
+#define DT_SOCK 12
+#define DT_WHT 14
+
+#define DT_MAX (S_DT_MASK + 1) /* 16 */
 
 static inline uint32_t syscall(uint32_t num, uint32_t arg1, uint32_t arg2, uint32_t arg3)
 {
@@ -66,4 +83,22 @@ static inline void NORETURN exit(int exit_code)
 static inline uint32_t wait(int* return_value)
 {
     return syscall(0x06, (uint32_t)return_value, 0, 0);
+}
+
+struct __attribute__((__packed__)) user_dirent {
+    ino_t d_ino; // inode number
+    uint32_t d_off; // ignored
+    uint16_t d_reclen; // length of this struct user_dirent
+    char d_name[1]; // file name with a padding zero
+    // uint8_t d_type; // file type, with offset of (d_reclen - 1)
+};
+
+static inline size_t getdents(int fd, struct user_dirent* buf, size_t cnt)
+{
+    return syscall(0x08, fd, (uint32_t)buf, cnt);
+}
+
+static inline int open(const char* path, uint32_t flags)
+{
+    return syscall(0x09, (uint32_t)path, flags, 0);
 }

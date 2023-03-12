@@ -197,7 +197,7 @@ asm_load_idt_skip:
 .globl syscall_stub
 .type  syscall_stub @function
 syscall_stub:
-    cmpl $8, %eax
+    cmpl $16, %eax
     jge syscall_stub_end
     pushal
 

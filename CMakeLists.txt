@@ -24,6 +24,7 @@ if (NOT DEFINED FDISK_BIN)
 endif()
 
 add_subdirectory(gblibc)
+add_subdirectory(user-space-program)
 
 set(BOOTLOADER_SOURCES src/boot.s
                        src/asm/a20.s
@@ -93,13 +94,7 @@ set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
                         include/kernel_main.hpp
                         )
 
-add_custom_target(user_space_programs
-    COMMAND cp ${CMAKE_SOURCE_DIR}/user-space-program/Makefile.src ${CMAKE_SOURCE_DIR}/user-space-program/Makefile
-    COMMAND make -C ${CMAKE_SOURCE_DIR}/user-space-program CROSS_COMPILE=${TOOLCHAIN_PATH_AND_PREFIX} all
-)
-
 add_executable(kernel.out ${KERNEL_MAIN_SOURCES} ${BOOTLOADER_SOURCES})
-add_dependencies(kernel.out user_space_programs)
 target_link_libraries(kernel.out gblibc)
 target_include_directories(kernel.out PRIVATE ${PROJECT_SOURCE_DIR}/include)
 target_link_options(kernel.out PRIVATE
@@ -126,10 +121,10 @@ add_custom_target(boot.img
     COMMAND dd if=/dev/zero of=boot.img bs=`expr 512 \\* 1024 \\* 1024` count=0 seek=1
     COMMAND sh -c \"echo n\; echo\; echo\; echo\; echo\; echo a\; echo w\" | ${FDISK_BIN} boot.img
     COMMAND mkfs.fat --offset=2048 -v -n SYSTEM boot.img
-    COMMAND mcopy -i boot.img@@1M ${CMAKE_SOURCE_DIR}/user-space-program/build/hello-world.out ::hello.out
-    COMMAND mcopy -i boot.img@@1M ${CMAKE_SOURCE_DIR}/user-space-program/build/interrupt-test.out ::int.out
-    COMMAND mcopy -i boot.img@@1M ${CMAKE_SOURCE_DIR}/user-space-program/build/stack-test.out ::stack.out
-    COMMAND mcopy -i boot.img@@1M ${CMAKE_SOURCE_DIR}/user-space-program/build/init.out ::init.elf
+    COMMAND mcopy -i boot.img@@1M ${CMAKE_BINARY_DIR}/user-space-program/hello-world.out ::hello.out
+    COMMAND mcopy -i boot.img@@1M ${CMAKE_BINARY_DIR}/user-space-program/interrupt-test.out ::int.out
+    COMMAND mcopy -i boot.img@@1M ${CMAKE_BINARY_DIR}/user-space-program/stack-test.out ::stack.out
+    COMMAND mcopy -i boot.img@@1M ${CMAKE_BINARY_DIR}/user-space-program/init.out ::init.elf
 )
 
 add_custom_command(OUTPUT run

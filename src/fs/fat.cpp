@@ -1,13 +1,13 @@
 #include <fs/fat.hpp>
 #include <kernel/mem.h>
 #include <kernel/mm.hpp>
-#include <kernel/stdio.hpp>
 #include <kernel/vfs.hpp>
+#include <stdint.h>
+#include <stdio.h>
 #include <types/allocator.hpp>
 #include <types/assert.h>
 #include <types/hash_map.hpp>
 #include <types/status.h>
-#include <types/stdint.h>
 
 namespace fs::fat {
 // buf MUST be larger than 512 bytes

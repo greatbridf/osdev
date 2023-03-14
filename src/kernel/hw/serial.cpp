@@ -1,7 +1,7 @@
 #include <asm/port_io.h>
 #include <kernel/hw/serial.h>
-#include <kernel/stdio.hpp>
 #include <kernel/tty.hpp>
+#include <stdio.h>
 #include <types/status.h>
 
 int32_t init_serial_port(port_id_t port)

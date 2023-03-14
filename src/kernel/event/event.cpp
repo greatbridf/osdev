@@ -2,8 +2,9 @@
 #include <kernel/event/event.h>
 #include <kernel/event/evtqueue.hpp>
 #include <kernel/input/input_event.h>
+#include <kernel/log.hpp>
 #include <kernel/process.hpp>
-#include <kernel/stdio.hpp>
+#include <stdio.h>
 #include <types/allocator.hpp>
 #include <types/assert.h>
 #include <types/cplusplus.hpp>

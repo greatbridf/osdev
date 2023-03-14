@@ -3,12 +3,14 @@
 #include <fs/fat.hpp>
 #include <kernel/hw/ata.hpp>
 #include <kernel/interrupt.h>
+#include <kernel/log.hpp>
 #include <kernel/mem.h>
 #include <kernel/mm.hpp>
 #include <kernel/process.hpp>
-#include <kernel/stdio.hpp>
 #include <kernel/vfs.hpp>
 #include <kernel_main.hpp>
+#include <stdint.h>
+#include <stdio.h>
 #include <types/allocator.hpp>
 #include <types/assert.h>
 #include <types/cplusplus.hpp>
@@ -18,7 +20,6 @@
 #include <types/lock.hpp>
 #include <types/size.h>
 #include <types/status.h>
-#include <types/stdint.h>
 #include <types/types.h>
 
 static void (*volatile kthreadd_new_thd_func)(void*);
@@ -165,11 +166,13 @@ void NORETURN _kernel_init(void)
     current_process->attr.system = 0;
     current_thread->attr.system = 0;
 
-    const char* argv[] = { "/mnt/INIT.ELF", nullptr };
+    const char* argv[] = { "/mnt/INIT.ELF", "/mnt/SH.ELF", nullptr };
+    const char* envp[] = { nullptr };
 
     types::elf::elf32_load_data d;
     d.exec = "/mnt/INIT.ELF";
     d.argv = argv;
+    d.envp = envp;
     d.system = false;
 
     assert(types::elf::elf32_load(&d) == GB_OK);

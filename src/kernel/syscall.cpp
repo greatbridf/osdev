@@ -2,18 +2,20 @@
 #include <asm/sys.h>
 #include <kernel/errno.h>
 #include <kernel/interrupt.h>
+#include <kernel/log.hpp>
 #include <kernel/mem.h>
 #include <kernel/mm.hpp>
 #include <kernel/process.hpp>
-#include <kernel/stdio.hpp>
 #include <kernel/syscall.hpp>
+#include <kernel/tty.hpp>
 #include <kernel/vfs.hpp>
 #include <kernel_main.hpp>
+#include <stdint.h>
+#include <stdio.h>
 #include <types/allocator.hpp>
 #include <types/assert.h>
 #include <types/elf.hpp>
 #include <types/status.h>
-#include <types/stdint.h>
 
 #define SYSCALL_SET_RETURN_VAL_EAX(_eax) \
     data->s_regs.eax = ((decltype(data->s_regs.eax))(_eax))
@@ -130,19 +132,24 @@ void _syscall_crash(interrupt_stack*)
 // syscall_exec(const char* exec, const char** argv)
 // @param exec: the path of program to execute
 // @param argv: arguments end with nullptr
+// @param envp: environment variables end with nullptr
 void _syscall_exec(interrupt_stack* data)
 {
     const char* exec = reinterpret_cast<const char*>(data->s_regs.edi);
-    const char** argv = reinterpret_cast<const char**>(data->s_regs.esi);
-
-    current_process->mms.clear_user();
+    char* const* argv = reinterpret_cast<char* const*>(data->s_regs.esi);
+    char* const* envp = reinterpret_cast<char* const*>(data->s_regs.edx);
 
     types::elf::elf32_load_data d;
     d.argv = argv;
+    d.envp = envp;
     d.exec = exec;
     d.system = false;
 
-    assert(types::elf::elf32_load(&d) == GB_OK);
+    int ret = types::elf::elf32_load(&d);
+    if (ret != GB_OK) {
+        data->s_regs.eax = d.errcode;
+        return;
+    }
 
     data->v_eip = d.eip;
     data->esp = (uint32_t)d.sp;
@@ -172,6 +179,12 @@ void _syscall_exit(interrupt_stack* data)
 
     // unmap all user memory areas
     current_process->mms.clear_user();
+
+    // init should never exit
+    if (current_process->ppid == 0) {
+        console->print("kernel panic: init exited!\n");
+        crash();
+    }
 
     // make child processes orphans (children of init)
     procs->make_children_orphans(pid);

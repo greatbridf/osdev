@@ -1,13 +1,13 @@
 #include <asm/port_io.h>
 #include <fs/fat.hpp>
 #include <kernel/hw/ata.hpp>
-#include <kernel/stdio.hpp>
 #include <kernel/syscall.hpp>
 #include <kernel/vfs.hpp>
+#include <stdint.h>
+#include <stdio.h>
 #include <types/allocator.hpp>
 #include <types/assert.h>
 #include <types/status.h>
-#include <types/stdint.h>
 
 hw::ata::ata(port_id_t p)
     : data(p)

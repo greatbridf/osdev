@@ -1,6 +1,6 @@
 #pragma once
 
-#include <types/stdint.h>
+#include <stdint.h>
 
 inline void spin_lock(uint32_t volatile* lock_addr)
 {

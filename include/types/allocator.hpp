@@ -1,7 +1,7 @@
 #pragma once
 #include <kernel/mem.h>
+#include <stdint.h>
 #include <types/cplusplus.hpp>
-#include <types/stdint.h>
 #include <types/types.h>
 
 constexpr void* operator new(size_t, void* ptr)

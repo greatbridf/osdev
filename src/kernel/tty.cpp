@@ -1,9 +1,9 @@
 #include <kernel/hw/serial.h>
 #include <kernel/process.hpp>
-#include <kernel/stdio.hpp>
 #include <kernel/tty.hpp>
 #include <kernel/vga.hpp>
-#include <types/stdint.h>
+#include <stdint.h>
+#include <stdio.h>
 
 tty::tty()
     : buf(BUFFER_SIZE)

@@ -1,11 +1,11 @@
 #pragma once
 
+#include <stdint.h>
 #include <types/allocator.hpp>
 #include <types/function.hpp>
 #include <types/hash_map.hpp>
 #include <types/list.hpp>
 #include <types/map.hpp>
-#include <types/stdint.h>
 #include <types/types.h>
 #include <types/vector.hpp>
 

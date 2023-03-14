@@ -6,6 +6,7 @@
 #include <kernel/mm.hpp>
 #include <kernel/task.h>
 #include <kernel/vfs.hpp>
+#include <stdint.h>
 #include <types/allocator.hpp>
 #include <types/cplusplus.hpp>
 #include <types/hash_map.hpp>
@@ -13,7 +14,6 @@
 #include <types/map.hpp>
 #include <types/pair.hpp>
 #include <types/status.h>
-#include <types/stdint.h>
 #include <types/types.h>
 
 typedef size_t pid_t;

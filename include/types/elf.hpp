@@ -3,9 +3,9 @@
 #include <kernel/interrupt.h>
 #include <kernel/process.hpp>
 #include <kernel/vfs.hpp>
+#include <stdint.h>
 #include <types/size.h>
 #include <types/status.h>
-#include <types/stdint.h>
 
 namespace types::elf {
 using elf32_addr_t = uint32_t;
@@ -111,7 +111,8 @@ struct PACKED elf32_program_header_entry {
 
 struct elf32_load_data {
     const char* exec;
-    const char** argv;
+    const char* const* argv;
+    const char* const* envp;
     int errcode;
     void* eip;
     uint32_t* sp;

@@ -1,4 +1,5 @@
-#pragma once
+#ifndef __GBLIBC_SYS_TYPES_H
+#define __GBLIBC_SYS_TYPES_H
 
 #include <stdint.h>
 
@@ -6,12 +7,10 @@
 extern "C" {
 #endif
 
-void init_pit(void);
-
-void inc_tick(void);
-
-time_t current_ticks(void);
+typedef ssize_t pid_t;
 
 #ifdef __cplusplus
 }
+#endif
+
 #endif

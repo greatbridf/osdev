@@ -1,6 +1,6 @@
 #pragma once
 
-#include <types/stdint.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 

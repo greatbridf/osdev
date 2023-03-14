@@ -2,8 +2,9 @@
 
 #include <kernel/mem.h>
 #include <kernel/vfs.hpp>
+#include <stdint.h>
+#include <string.h>
 #include <types/size.h>
-#include <types/stdint.h>
 
 namespace fs::fat {
 using cluster_t = uint32_t;

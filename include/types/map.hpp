@@ -206,10 +206,6 @@ public:
 
         static constexpr void swap(node* first, node* second)
         {
-            node* p = first->parent;
-            node* cl = first->left;
-            node* cr = first->right;
-
             if (node::is_red(first)) {
                 first->color = second->color;
                 second->color = node_color::RED;
@@ -218,35 +214,67 @@ public:
                 second->color = node_color::BLACK;
             }
 
+            if (first->parent == second) {
+                node* tmp = first;
+                first = second;
+                second = tmp;
+            }
+
+            node* p = first->parent;
+            node* cl = first->left;
+            node* cr = first->right;
+
+            bool is_first_left = first->is_left_child();
+            bool is_second_left = second->is_left_child();
+
             if (!first->is_root()) {
-                if (first->is_left_child())
+                if (is_first_left)
                     p->left = second;
                 else
                     p->right = second;
             }
-            if (cl)
-                cl->parent = second;
-            if (cr)
-                cr->parent = second;
 
-            first->parent = second->parent;
             first->left = second->left;
             first->right = second->right;
+            if (first->left)
+                first->left->parent = first;
+            if (first->right)
+                first->right->parent = first;
 
-            if (!second->is_root()) {
-                if (second->is_left_child())
-                    second->parent->left = first;
-                else
-                    second->parent->right = first;
+            if (second->parent == first) {
+                first->parent = second;
+                second->parent = p;
+
+                if (is_second_left) {
+                    if (cr)
+                        cr->parent = second;
+                    second->left = first;
+                    second->right = cr;
+                } else {
+                    if (cl)
+                        cl->parent = second;
+                    second->right = first;
+                    second->left = cl;
+                }
+            } else {
+                first->parent = second->parent;
+
+                if (cl)
+                    cl->parent = second;
+                if (cr)
+                    cr->parent = second;
+                second->left = cl;
+                second->right = cr;
+
+                if (!second->is_root()) {
+                    if (is_second_left)
+                        second->parent->left = first;
+                    else
+                        second->parent->right = first;
+                }
+
+                second->parent = p;
             }
-            if (second->left)
-                second->left->parent = first;
-            if (second->right)
-                second->right->parent = first;
-
-            second->parent = p;
-            second->left = cl;
-            second->right = cr;
         }
     };
 
@@ -495,6 +523,9 @@ private:
     // @param: nd is guaranteed to be a leaf node
     constexpr void _erase(node* nd)
     {
+        if (nd->is_root())
+            return;
+
         if (node::is_black(nd)) {
             node* p = nd->parent;
             node* s = nullptr;
@@ -544,6 +575,7 @@ private:
                 }
             } else {
                 s->tored();
+                p->toblack();
                 this->_erase(p);
             }
         }
@@ -631,9 +663,11 @@ public:
         node* next = nd->next();
 
         while (!nd->is_leaf()) {
-            if (nd->is_root())
-                this->root = nd->right->leftmost();
-            node::swap(nd, nd->right->leftmost());
+            node* alt = nd->right ? nd->right->leftmost() : nd->left;
+            if (nd->is_root()) {
+                this->root = alt;
+            }
+            node::swap(nd, alt);
         }
 
         this->_erase(nd);

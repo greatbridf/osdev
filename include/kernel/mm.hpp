@@ -183,6 +183,7 @@ public:
             }
 
             this->unmap(iter);
+            // TODO: handle memory leak
             iter = m_areas.erase(iter);
         }
     }
@@ -212,6 +213,7 @@ public:
 
     constexpr void unmap(iterator_type area)
     {
+        int i = 0;
         for (auto& pg : *area->pgs) {
             if (*pg.ref_count == 1) {
                 ki_free(pg.ref_count);
@@ -223,6 +225,8 @@ public:
             pg.phys_page_id = 0;
             pg.attr.v = 0;
             pg.pte->v = 0;
+
+            invalidate_tlb((uint32_t)area->start + (i++) * PAGE_SIZE);
         }
         area->attr.v = 0;
         area->start = 0;

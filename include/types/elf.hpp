@@ -111,7 +111,8 @@ struct PACKED elf32_program_header_entry {
 
 struct elf32_load_data {
     const char* exec;
-    const char** argv;
+    const char* const* argv;
+    const char* const* envp;
     int errcode;
     void* eip;
     uint32_t* sp;

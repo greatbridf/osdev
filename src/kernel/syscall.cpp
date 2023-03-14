@@ -131,15 +131,16 @@ void _syscall_crash(interrupt_stack*)
 // syscall_exec(const char* exec, const char** argv)
 // @param exec: the path of program to execute
 // @param argv: arguments end with nullptr
+// @param envp: environment variables end with nullptr
 void _syscall_exec(interrupt_stack* data)
 {
     const char* exec = reinterpret_cast<const char*>(data->s_regs.edi);
-    const char** argv = reinterpret_cast<const char**>(data->s_regs.esi);
-
-    current_process->mms.clear_user();
+    char* const* argv = reinterpret_cast<char* const*>(data->s_regs.esi);
+    char* const* envp = reinterpret_cast<char* const*>(data->s_regs.edx);
 
     types::elf::elf32_load_data d;
     d.argv = argv;
+    d.envp = envp;
     d.exec = exec;
     d.system = false;
 

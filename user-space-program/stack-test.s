@@ -13,4 +13,4 @@ main:
 	movl %ebp, %esp
 	popl %ebp
 
-	jmp .
+	ret

@@ -14,16 +14,16 @@ main:
 	movl %eax, %ecx
 # write
 	movl $1, %eax
-	movl $__user_interrupt_test_string, %edi
+	movl $0, %edi
+	movl $__user_interrupt_test_string, %esi
+	movl $(__user_interrupt_test_string_end - __user_interrupt_test_string), %edx
 	int $0x80
-# sleep
-	movl $2, %eax
-	movl $0xffffffff, %edi
-	int $0x80
-# noreturn
-	jmp .
+
+	xorl %eax, %eax
+	ret
 
 .data
 
 __user_interrupt_test_string:
-	.asciz "syscall 0x01 write: hello from user space\n"
+	.ascii "syscall 0x01 write: hello from user space\n"
+__user_interrupt_test_string_end:

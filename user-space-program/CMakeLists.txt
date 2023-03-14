@@ -15,7 +15,8 @@ add_executable(hello-world.out hello-world.s)
 add_executable(interrupt-test.out interrupt-test.s)
 add_executable(stack-test.out stack-test.s)
 add_executable(init.out init.c)
+add_executable(sh.out sh.c)
 
 add_custom_target(user_space_programs
-    DEPENDS hello-world.out interrupt-test.out stack-test.out init.out
+    DEPENDS hello-world.out interrupt-test.out stack-test.out init.out sh.out
 )

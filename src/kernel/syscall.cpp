@@ -7,6 +7,7 @@
 #include <kernel/mm.hpp>
 #include <kernel/process.hpp>
 #include <kernel/syscall.hpp>
+#include <kernel/tty.hpp>
 #include <kernel/vfs.hpp>
 #include <kernel_main.hpp>
 #include <stdint.h>
@@ -144,7 +145,11 @@ void _syscall_exec(interrupt_stack* data)
     d.exec = exec;
     d.system = false;
 
-    assert(types::elf::elf32_load(&d) == GB_OK);
+    int ret = types::elf::elf32_load(&d);
+    if (ret != GB_OK) {
+        data->s_regs.eax = d.errcode;
+        return;
+    }
 
     data->v_eip = d.eip;
     data->esp = (uint32_t)d.sp;
@@ -174,6 +179,12 @@ void _syscall_exit(interrupt_stack* data)
 
     // unmap all user memory areas
     current_process->mms.clear_user();
+
+    // init should never exit
+    if (current_process->ppid == 0) {
+        console->print("kernel panic: init exited!\n");
+        crash();
+    }
 
     // make child processes orphans (children of init)
     procs->make_children_orphans(pid);

@@ -386,7 +386,7 @@ public:
             return ret;
         }
 
-        constexpr operator bool(void)
+        explicit constexpr operator bool(void)
         {
             return p;
         }
@@ -575,8 +575,10 @@ private:
                 }
             } else {
                 s->tored();
-                p->toblack();
-                this->_erase(p);
+                if (node::is_black(p))
+                    this->_erase(p);
+                else
+                    p->toblack();
             }
         }
     }

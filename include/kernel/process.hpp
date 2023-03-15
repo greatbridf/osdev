@@ -364,6 +364,8 @@ public:
             m_child_idx.remove(children);
         }
     }
+
+    void kill(pid_t pid, int exit_code);
 };
 
 class readyqueue final {

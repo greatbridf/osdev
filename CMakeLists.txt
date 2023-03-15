@@ -127,6 +127,7 @@ add_custom_target(boot.img
     COMMAND mcopy -i boot.img@@1M ${CMAKE_BINARY_DIR}/user-space-program/stack-test.out ::stack.out
     COMMAND mcopy -i boot.img@@1M ${CMAKE_BINARY_DIR}/user-space-program/init.out ::init.elf
     COMMAND mcopy -i boot.img@@1M ${CMAKE_BINARY_DIR}/user-space-program/sh.out ::sh.elf
+    COMMAND mcopy -i boot.img@@1M ${CMAKE_BINARY_DIR}/user-space-program/priv-test.out ::priv.elf
 )
 
 add_custom_command(OUTPUT run

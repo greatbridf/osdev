@@ -159,8 +159,6 @@ void _syscall_exec(interrupt_stack* data)
 void _syscall_exit(interrupt_stack* data)
 {
     uint32_t exit_code = data->s_regs.edi;
-    pid_t pid = current_process->pid;
-    pid_t ppid = current_process->ppid;
 
     // TODO: terminating a thread only
     if (current_thread->owner->thds.size() != 1) {
@@ -168,37 +166,7 @@ void _syscall_exit(interrupt_stack* data)
     }
 
     // terminating a whole process:
-
-    // remove threads from ready list
-    for (auto& thd : current_process->thds.underlying_list()) {
-        thd.attr.ready = 0;
-        readythds->remove_all(&thd);
-    }
-
-    // TODO: write back mmap'ped files and close them
-
-    // unmap all user memory areas
-    current_process->mms.clear_user();
-
-    // init should never exit
-    if (current_process->ppid == 0) {
-        console->print("kernel panic: init exited!\n");
-        crash();
-    }
-
-    // make child processes orphans (children of init)
-    procs->make_children_orphans(pid);
-
-    current_process->attr.zombie = 1;
-
-    // notify parent process and init
-    auto* proc = procs->find(pid);
-    auto* parent = procs->find(ppid);
-    auto* init = procs->find(1);
-    while (!proc->wait_lst.empty()) {
-        init->wait_lst.push(proc->wait_lst.front());
-    }
-    parent->wait_lst.push({ current_thread, (void*)pid, (void*)exit_code, nullptr });
+    procs->kill(current_process->pid, exit_code);
 
     // switch to new process and continue
     schedule();

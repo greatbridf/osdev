@@ -9,6 +9,7 @@ set(CMAKE_CXX_LINK_EXECUTABLE
 set(CMAKE_ASM_FLAGS "-m32")
 set(CMAKE_C_FLAGS "-nostdinc -m32 -nostdlib -W -Wall -Wextra -Wno-builtin-declaration-mismatch -Wno-format -Werror=implicit-int -Werror=implicit-function-declaration -Werror=strict-aliasing -fverbose-asm -fno-exceptions -fno-pic -ffreestanding -mstack-protector-guard=global")
 set(CMAKE_CXX_FLAGS "-nostdinc -m32 -nostdlib -W -Wall -Wextra -Wno-builtin-declaration-mismatch -Wno-format -fverbose-asm -fno-use-cxa-atexit -fno-exceptions -fno-pic -ffreestanding -fno-rtti -mstack-protector-guard=global")
+set(CMAKE_CXX_LINK_FLAGS "")
 set(CMAKE_CXX_STANDARD 20)
 
 if (CMAKE_BUILD_TYPE STREQUAL "Debug")

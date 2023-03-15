@@ -84,6 +84,42 @@ process::process(pid_t _ppid, bool _system)
 {
 }
 
+void proclist::kill(pid_t pid, int exit_code)
+{
+    process* proc = this->find(pid);
+
+    // remove threads from ready list
+    for (auto& thd : proc->thds.underlying_list()) {
+        thd.attr.ready = 0;
+        readythds->remove_all(&thd);
+    }
+
+    // write back mmap'ped files and close them
+    proc->files.close_all();
+
+    // unmap all user memory areas
+    proc->mms.clear_user();
+
+    // init should never exit
+    if (proc->ppid == 0) {
+        console->print("kernel panic: init exited!\n");
+        crash();
+    }
+
+    // make child processes orphans (children of init)
+    this->make_children_orphans(pid);
+
+    proc->attr.zombie = 1;
+
+    // notify parent process and init
+    auto* parent = this->find(proc->ppid);
+    auto* init = this->find(1);
+    while (!proc->wait_lst.empty()) {
+        init->wait_lst.push(proc->wait_lst.front());
+    }
+    parent->wait_lst.push({ nullptr, (void*)pid, (void*)exit_code, nullptr });
+}
+
 inline void NORETURN _noreturn_crash(void)
 {
     for (;;)

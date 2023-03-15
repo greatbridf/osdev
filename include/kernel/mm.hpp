@@ -183,7 +183,7 @@ public:
             }
 
             this->unmap(iter);
-            // TODO: handle memory leak
+
             iter = m_areas.erase(iter);
         }
     }
@@ -214,6 +214,12 @@ public:
     constexpr void unmap(iterator_type area)
     {
         int i = 0;
+
+        // TODO: 
+        // if there are more than 4 pages, calling invlpg
+        // should be faster. otherwise, we use movl cr3
+        // bool should_invlpg = (area->pgs->size() > 4);
+
         for (auto& pg : *area->pgs) {
             if (*pg.ref_count == 1) {
                 ki_free(pg.ref_count);
@@ -228,6 +234,7 @@ public:
 
             invalidate_tlb((uint32_t)area->start + (i++) * PAGE_SIZE);
         }
+        types::pdelete<types::kernel_ident_allocator>(area->pgs);
         area->attr.v = 0;
         area->start = 0;
     }

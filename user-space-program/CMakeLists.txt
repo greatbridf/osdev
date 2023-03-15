@@ -5,7 +5,7 @@ set(CMAKE_C_FLAGS "-nostdinc -nostdlib -static -m32 -W -Wall -Wextra -Werror -ms
 set(CMAKE_ASM_FLAGS "-m32 -static -mstack-protector-guard=global -g0")
 
 link_libraries(gblibc)
-add_link_options(-nostdlib -Ttext 0x40000000 -T ${CMAKE_CURRENT_SOURCE_DIR}/script.ld)
+add_link_options(-nostdlib -T ${CMAKE_CURRENT_SOURCE_DIR}/script.ld)
 # set(LINK_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/script.ld)
 
 set(CMAKE_C_IMPLICIT_LINK_DIRECTORIES "")

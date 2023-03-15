@@ -11,7 +11,7 @@ MEMORY
 
 SECTIONS
 {
-    .text :
+    .text 0x40000000 :
     {
         *(.text)
         *(.text*)

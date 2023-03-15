@@ -210,6 +210,8 @@ void NORETURN init_scheduler(void)
     procs = types::pnew<types::kernel_allocator>(procs);
     readythds = types::pnew<types::kernel_allocator>(readythds);
 
+    process::filearr::init_global_file_container();
+
     // init process has no parent
     auto* init = &procs->emplace(0)->value;
     init->files.open("/dev/console", 0);

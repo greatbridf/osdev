@@ -7,7 +7,7 @@
 extern "C" {
 #endif
 
-typedef ssize_t pid_t;
+typedef int pid_t;
 
 #ifdef __cplusplus
 }

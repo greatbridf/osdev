@@ -21,14 +21,6 @@
 
 static struct IDT_entry IDT[256];
 
-static inline void NORETURN _halt_forever(void)
-{
-    asm_cli();
-    asm_hlt();
-    for (;;)
-        ;
-}
-
 void init_idt()
 {
     asm_cli();
@@ -114,8 +106,7 @@ extern "C" void int6_handler(
 
     kmsg("----   HALTING SYSTEM   ----\n");
 
-    asm_cli();
-    asm_hlt();
+    freeze();
 }
 
 // general protection
@@ -144,8 +135,7 @@ extern "C" void int13_handler(
 
     kmsg("----   HALTING SYSTEM   ----\n");
 
-    asm_cli();
-    asm_hlt();
+    freeze();
 }
 
 struct PACKED int14_data {
@@ -172,9 +162,7 @@ static inline void NORETURN _int14_kill_user(void)
     char buf[256] {};
     snprintf(buf, 256, "Segmentation Fault (pid%d killed)\n", current_process->pid);
     kmsg(buf);
-    procs->kill(current_process->pid, -1);
-    schedule();
-    _halt_forever();
+    kill_current(-1);
 }
 
 // page fault

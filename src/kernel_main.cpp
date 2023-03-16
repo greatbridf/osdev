@@ -3,6 +3,7 @@
 #include <asm/boot.h>
 #include <asm/port_io.h>
 #include <asm/sys.h>
+#include <assert.h>
 #include <kernel/event/event.h>
 #include <kernel/hw/keyboard.h>
 #include <kernel/hw/serial.h>
@@ -16,7 +17,6 @@
 #include <kernel/vga.hpp>
 #include <stdint.h>
 #include <stdio.h>
-#include <types/assert.h>
 #include <types/bitmap.h>
 #include <types/status.h>
 #include <types/types.h>
@@ -138,7 +138,6 @@ int init_console(const char* name)
             return GB_OK;
         }
     }
-    crash();
     return GB_FAILED;
 }
 
@@ -147,7 +146,9 @@ extern "C" uint32_t check_a20_on(void);
 
 extern "C" void NORETURN kernel_main(void)
 {
-    assert(check_a20_on());
+    int ret;
+    ret = check_a20_on();
+    assert(ret == 1);
 
     asm_enable_sse();
 
@@ -164,14 +165,16 @@ extern "C" void NORETURN kernel_main(void)
 
     char buf[KERNEL_MAIN_BUF_SIZE] = { 0 };
 
-    assert(init_serial_port(PORT_SERIAL0) == GB_OK);
+    ret = init_serial_port(PORT_SERIAL0);
+    assert(ret == GB_OK);
 
     init_idt();
     init_mem();
     init_pic();
     init_pit();
 
-    assert(init_console("ttyS0") == GB_OK);
+    ret = init_console("ttyS0");
+    assert(ret == GB_OK);
 
     show_mem_info(buf);
 
@@ -179,31 +182,4 @@ extern "C" void NORETURN kernel_main(void)
 
     kmsg("switching execution to the scheduler...\n");
     init_scheduler();
-}
-
-void NORETURN __stack_chk_fail(void)
-{
-    kmsg("***** stack smashing detected! *****\n");
-    for (;;)
-        assert(0);
-}
-
-extern "C" void NORETURN __cxa_pure_virtual(void)
-{
-    for (;;)
-        assert(0);
-}
-
-void crash(void)
-{
-    asm volatile("ud2");
-}
-
-void _debugger_breakpoint(void)
-{
-#ifdef __BOCHS_SYSTEM__
-    asm volatile("xchgw %%bx, %%bx");
-#else
-    asm volatile("nop");
-#endif
 }

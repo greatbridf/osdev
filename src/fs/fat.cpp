@@ -1,3 +1,4 @@
+#include <assert.h>
 #include <fs/fat.hpp>
 #include <kernel/mem.h>
 #include <kernel/mm.hpp>
@@ -5,7 +6,6 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <types/allocator.hpp>
-#include <types/assert.h>
 #include <types/hash_map.hpp>
 #include <types/status.h>
 
@@ -13,13 +13,13 @@ namespace fs::fat {
 // buf MUST be larger than 512 bytes
 inline void fat32::_raw_read_sector(void* buf, uint32_t sector_no)
 {
-    assert(vfs_read(
-               device,
-               (char*)buf,
-               SECTOR_SIZE,
-               sector_no * SECTOR_SIZE,
-               SECTOR_SIZE)
-        == SECTOR_SIZE);
+    size_t n = vfs_read(
+        device,
+        (char*)buf,
+        SECTOR_SIZE,
+        sector_no * SECTOR_SIZE,
+        SECTOR_SIZE);
+    assert(n == SECTOR_SIZE);
 }
 
 // buf MUST be larger than 4096 bytes

@@ -1,5 +1,6 @@
 #include <asm/port_io.h>
 #include <asm/sys.h>
+#include <assert.h>
 #include <kernel/errno.h>
 #include <kernel/interrupt.h>
 #include <kernel/log.hpp>
@@ -13,7 +14,6 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <types/allocator.hpp>
-#include <types/assert.h>
 #include <types/elf.hpp>
 #include <types/status.h>
 

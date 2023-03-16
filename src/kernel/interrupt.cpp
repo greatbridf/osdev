@@ -1,6 +1,7 @@
 #define _INTERRUPT_C_
 
 #include <asm/port_io.h>
+#include <assert.h>
 #include <kernel/hw/keyboard.h>
 #include <kernel/hw/serial.h>
 #include <kernel/hw/timer.h>
@@ -15,7 +16,6 @@
 #include <kernel_main.hpp>
 #include <stdint.h>
 #include <stdio.h>
-#include <types/assert.h>
 #include <types/size.h>
 #include <types/types.h>
 

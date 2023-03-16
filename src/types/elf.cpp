@@ -1,9 +1,9 @@
+#include <assert.h>
 #include <kernel/errno.h>
 #include <kernel/mem.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
-#include <types/assert.h>
 #include <types/elf.hpp>
 #include <types/string.hpp>
 #include <types/vector.hpp>
@@ -94,7 +94,7 @@ int types::elf::elf32_load(types::elf::elf32_load_data* d)
     // map stack area
     auto ret = mmap((void*)types::elf::ELF_STACK_TOP, types::elf::ELF_STACK_SIZE,
         fs::vfs_open("/dev/null")->ind, 0, 1, 0);
-    assert_likely(ret == GB_OK);
+    assert(ret == GB_OK);
 
     d->eip = (void*)hdr.entry;
     d->sp = reinterpret_cast<uint32_t*>(types::elf::ELF_STACK_BOTTOM);

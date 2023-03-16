@@ -3,6 +3,13 @@
 
 #include <sys/types.h>
 
+#undef STDOUT_FILENO
+#undef STDIN_FILENO
+#undef STDERR_FILENO
+#define STDOUT_FILENO (0)
+#define STDIN_FILENO (0)
+#define STDERR_FILENO (0)
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -10,7 +17,7 @@ extern "C" {
 ssize_t read(int fd, void* buf, size_t count);
 ssize_t write(int fd, const void* buf, size_t count);
 
-_Noreturn void _exit(int code);
+void __attribute__((noreturn)) _exit(int code);
 pid_t fork(void);
 int execve(const char* pathname, char* const argv[], char* const envp[]);
 

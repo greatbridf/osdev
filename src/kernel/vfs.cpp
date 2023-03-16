@@ -1,3 +1,4 @@
+#include <assert.h>
 #include <kernel/errno.h>
 #include <kernel/mem.h>
 #include <kernel/tty.hpp>
@@ -5,7 +6,6 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <types/allocator.hpp>
-#include <types/assert.h>
 #include <types/list.hpp>
 #include <types/map.hpp>
 #include <types/pair.hpp>

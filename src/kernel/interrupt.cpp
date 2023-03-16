@@ -1,6 +1,7 @@
 #define _INTERRUPT_C_
 
 #include <asm/port_io.h>
+#include <assert.h>
 #include <kernel/hw/keyboard.h>
 #include <kernel/hw/serial.h>
 #include <kernel/hw/timer.h>
@@ -15,11 +16,18 @@
 #include <kernel_main.hpp>
 #include <stdint.h>
 #include <stdio.h>
-#include <types/assert.h>
 #include <types/size.h>
 #include <types/types.h>
 
 static struct IDT_entry IDT[256];
+
+static inline void NORETURN _halt_forever(void)
+{
+    asm_cli();
+    asm_hlt();
+    for (;;)
+        ;
+}
 
 void init_idt()
 {
@@ -159,6 +167,16 @@ static inline void _int14_panic(void* eip, void* cr2, struct page_fault_error_co
     assert(false);
 }
 
+static inline void NORETURN _int14_kill_user(void)
+{
+    char buf[256] {};
+    snprintf(buf, 256, "Segmentation Fault (pid%d killed)\n", current_process->pid);
+    kmsg(buf);
+    procs->kill(current_process->pid, -1);
+    schedule();
+    _halt_forever();
+}
+
 // page fault
 extern "C" void int14_handler(int14_data* d)
 {
@@ -169,8 +187,16 @@ extern "C" void int14_handler(int14_data* d)
         mms = kernel_mms;
 
     auto mm_area = mms->find(d->l_addr);
-    if (unlikely(mm_area == mms->end()))
-        _int14_panic(d->v_eip, d->l_addr, d->error_code);
+    if (unlikely(mm_area == mms->end())) {
+        if (d->error_code.user) {
+            // user access of address that does not exist
+            _int14_kill_user();
+        } else {
+            _int14_panic(d->v_eip, d->l_addr, d->error_code);
+        }
+    }
+    if (unlikely(d->error_code.user && mm_area->attr.in.system))
+        _int14_kill_user();
 
     pte_t* pte = to_pte(mms->m_pd, d->l_addr);
     page* page = lto_page(&mm_area, d->l_addr);

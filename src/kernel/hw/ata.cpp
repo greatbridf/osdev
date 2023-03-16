@@ -1,4 +1,5 @@
 #include <asm/port_io.h>
+#include <assert.h>
 #include <fs/fat.hpp>
 #include <kernel/hw/ata.hpp>
 #include <kernel/syscall.hpp>
@@ -6,7 +7,6 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <types/allocator.hpp>
-#include <types/assert.h>
 #include <types/status.h>
 
 hw::ata::ata(port_id_t p)
@@ -136,7 +136,7 @@ constexpr hw::ata** p_ata_sec = &ata_sec;
 template <hw::ata** ata_bus>
 size_t _ata_read(fs::special_node* sn, char* buf, size_t buf_size, size_t offset, size_t n)
 {
-    assert_likely(buf_size >= n);
+    assert(buf_size >= n);
 
     char b[512] {};
     char* orig_buf = buf;

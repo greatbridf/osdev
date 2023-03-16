@@ -1,5 +1,6 @@
 #include <asm/port_io.h>
 #include <asm/sys.h>
+#include <assert.h>
 #include <fs/fat.hpp>
 #include <kernel/hw/ata.hpp>
 #include <kernel/interrupt.h>
@@ -12,7 +13,6 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <types/allocator.hpp>
-#include <types/assert.h>
 #include <types/cplusplus.hpp>
 #include <types/elf.hpp>
 #include <types/hash_map.hpp>
@@ -82,6 +82,42 @@ process::process(pid_t _ppid, bool _system)
     , pid { process::alloc_pid() }
     , ppid { _ppid }
 {
+}
+
+void proclist::kill(pid_t pid, int exit_code)
+{
+    process* proc = this->find(pid);
+
+    // remove threads from ready list
+    for (auto& thd : proc->thds.underlying_list()) {
+        thd.attr.ready = 0;
+        readythds->remove_all(&thd);
+    }
+
+    // write back mmap'ped files and close them
+    proc->files.close_all();
+
+    // unmap all user memory areas
+    proc->mms.clear_user();
+
+    // init should never exit
+    if (proc->ppid == 0) {
+        console->print("kernel panic: init exited!\n");
+        assert(false);
+    }
+
+    // make child processes orphans (children of init)
+    this->make_children_orphans(pid);
+
+    proc->attr.zombie = 1;
+
+    // notify parent process and init
+    auto* parent = this->find(proc->ppid);
+    auto* init = this->find(1);
+    while (!proc->wait_lst.empty()) {
+        init->wait_lst.push(proc->wait_lst.front());
+    }
+    parent->wait_lst.push({ nullptr, (void*)pid, (void*)exit_code, nullptr });
 }
 
 inline void NORETURN _noreturn_crash(void)
@@ -161,7 +197,7 @@ void NORETURN _kernel_init(void)
     // TODO: parse kernel parameters
     auto* _new_fs = fs::register_fs(types::_new<types::kernel_allocator, fs::fat::fat32>(fs::vfs_open("/dev/hda1")->ind));
     int ret = fs::fs_root->ind->fs->mount(fs::vfs_open("/mnt"), _new_fs);
-    assert_likely(ret == GB_OK);
+    assert(ret == GB_OK);
 
     current_process->attr.system = 0;
     current_thread->attr.system = 0;
@@ -175,7 +211,8 @@ void NORETURN _kernel_init(void)
     d.envp = envp;
     d.system = false;
 
-    assert(types::elf::elf32_load(&d) == GB_OK);
+    ret = types::elf::elf32_load(&d);
+    assert(ret == GB_OK);
 
     asm volatile(
         "movw $0x23, %%ax\n"
@@ -209,6 +246,8 @@ void NORETURN init_scheduler(void)
 {
     procs = types::pnew<types::kernel_allocator>(procs);
     readythds = types::pnew<types::kernel_allocator>(readythds);
+
+    process::filearr::init_global_file_container();
 
     // init process has no parent
     auto* init = &procs->emplace(0)->value;

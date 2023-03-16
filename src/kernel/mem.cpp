@@ -1,6 +1,7 @@
 #include <asm/boot.h>
 #include <asm/port_io.h>
 #include <asm/sys.h>
+#include <assert.h>
 #include <kernel/errno.h>
 #include <kernel/mem.h>
 #include <kernel/mm.hpp>
@@ -10,7 +11,6 @@
 #include <kernel_main.hpp>
 #include <stdio.h>
 #include <types/allocator.hpp>
-#include <types/assert.h>
 #include <types/bitmap.h>
 #include <types/size.h>
 #include <types/status.h>
@@ -198,7 +198,7 @@ static brk_memory_allocator
 void* k_malloc(size_t size)
 {
     void* ptr = kernel_heap_allocator->alloc(size);
-    assert_likely(ptr);
+    assert(likely(ptr));
     return ptr;
 }
 
@@ -210,7 +210,7 @@ void k_free(void* ptr)
 void* ki_malloc(size_t size)
 {
     void* ptr = kernel_ident_mapped_allocator.alloc(size);
-    assert_likely(ptr);
+    assert(likely(ptr));
     return ptr;
 }
 

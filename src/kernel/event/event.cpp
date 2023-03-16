@@ -1,4 +1,5 @@
 #include <asm/port_io.h>
+#include <assert.h>
 #include <kernel/event/event.h>
 #include <kernel/event/evtqueue.hpp>
 #include <kernel/input/input_event.h>
@@ -6,7 +7,6 @@
 #include <kernel/process.hpp>
 #include <stdio.h>
 #include <types/allocator.hpp>
-#include <types/assert.h>
 #include <types/cplusplus.hpp>
 #include <types/list.hpp>
 #include <types/lock.hpp>

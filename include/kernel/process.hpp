@@ -95,7 +95,7 @@ public:
     constexpr ~thread()
     {
         if (kstack)
-            free_n_raw_pages(to_page(kstack), 2);
+            free_n_raw_pages(to_page(kstack - THREAD_KERNEL_STACK_SIZE), 2);
     }
 };
 
@@ -149,28 +149,39 @@ public:
     class filearr {
     public:
         using container_type = types::list<fs::file>;
-        using array_type = types::hash_map<int, container_type::iterator_type, types::linux_hasher<size_t>>;
+        using array_type = types::map<int, container_type::iterator_type>;
 
     private:
-        inline static container_type* files = nullptr;
+        inline static container_type* files;
         array_type arr;
         int next_fd = 0;
+
+    public:
+        inline static void init_global_file_container(void)
+        {
+            files = types::pnew<types::kernel_allocator>(files);
+        }
+
+    private:
+        // iter should not be nullptr
+        constexpr void _close(container_type::iterator_type iter)
+        {
+            if (iter->ref == 1)
+                files->erase(iter);
+            else
+                --iter->ref;
+        }
 
     public:
         constexpr filearr(const filearr&) = delete;
         constexpr filearr& operator=(const filearr&) = delete;
         constexpr filearr& operator=(filearr&&) = delete;
+        constexpr filearr(void) = default;
         constexpr filearr(filearr&& val)
             : arr { types::move(val.arr) }
             , next_fd { val.next_fd }
         {
             val.next_fd = 0;
-        }
-
-        explicit filearr()
-        {
-            if (!files)
-                files = types::pnew<types::kernel_allocator>(files);
         }
 
         constexpr void dup(const filearr& orig)
@@ -180,13 +191,9 @@ public:
 
             this->next_fd = orig.next_fd;
 
-            for (int i = 0; i < this->next_fd; ++i) {
-                auto iter = orig.arr.find(i);
-                if (!iter)
-                    continue;
-
-                this->arr.emplace(iter->key, iter->value);
-                ++iter->value->ref;
+            for (auto iter : orig.arr) {
+                this->arr.insert(types::make_pair(iter.key, iter.value));
+                ++iter.value->ref;
             }
         }
 
@@ -230,31 +237,28 @@ public:
                 1 });
 
             int fd = next_fd++;
-            arr.emplace(fd, iter);
+            arr.insert(types::make_pair(fd, iter));
             return fd;
-        }
-
-        // close file descriptor
-        // where iter is guaranteed not nullptr
-        constexpr void close(array_type::iterator_type iter)
-        {
-            if (iter->value->ref == 1)
-                files->erase(iter->value);
-            else
-                --iter->value->ref;
         }
 
         constexpr void close(int fd)
         {
             auto iter = arr.find(fd);
-            if (iter)
-                close(iter);
+            if (iter) {
+                _close(iter->value);
+                arr.erase(iter);
+            }
+        }
+
+        constexpr void close_all(void)
+        {
+            for (auto iter : this->arr)
+                close(iter.key);
         }
 
         constexpr ~filearr()
         {
-            for (int i = 0; i < next_fd; ++i)
-                close(i);
+            close_all();
         }
     };
 
@@ -360,6 +364,8 @@ public:
             m_child_idx.remove(children);
         }
     }
+
+    void kill(pid_t pid, int exit_code);
 };
 
 class readyqueue final {

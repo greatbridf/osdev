@@ -22,6 +22,7 @@ SECTIONS
         *(.text*)
         *(.rodata*)
 
+        . = ALIGN(4);
         kernel_text_and_data_size = .;
         LONG(__kernel_text_and_data_end - ADDR(.text));
         asm_kernel_size = .;

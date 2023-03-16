@@ -3,7 +3,7 @@
 #include <string.h>
 #include <unistd.h>
 
-#define print(str) write(0, str, strlen(str))
+#define print(str) write(STDOUT_FILENO, str, strlen(str))
 
 // struct cmd {
 //     enum {
@@ -56,7 +56,7 @@ int main(int argc, const char** argv)
     print("sh # ");
 
     for (;;) {
-        int n = read(0, buf, sizeof(buf));
+        int n = read(STDIN_FILENO, buf, sizeof(buf));
 
         char token[1024] = {};
         char* args[128] = { token, 0 };

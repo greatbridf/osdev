@@ -3,6 +3,13 @@
 
 #include <sys/types.h>
 
+#undef STDOUT_FILENO
+#undef STDIN_FILENO
+#undef STDERR_FILENO
+#define STDOUT_FILENO (0)
+#define STDIN_FILENO (0)
+#define STDERR_FILENO (0)
+
 #ifdef __cplusplus
 extern "C" {
 #endif

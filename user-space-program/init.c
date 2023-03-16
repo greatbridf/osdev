@@ -3,7 +3,7 @@
 #include <unistd.h>
 #include <sys/wait.h>
 
-#define print(str) write(0, str, strlen(str))
+#define print(str) write(STDERR_FILENO, str, strlen(str))
 
 int main(int argc, char** argv)
 {

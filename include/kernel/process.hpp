@@ -95,7 +95,7 @@ public:
     constexpr ~thread()
     {
         if (kstack)
-            free_n_raw_pages(to_page(kstack), 2);
+            free_n_raw_pages(to_page(kstack - THREAD_KERNEL_STACK_SIZE), 2);
     }
 };
 

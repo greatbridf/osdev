@@ -11,7 +11,7 @@
 extern "C" {
 #endif
 
-_Noreturn void
+void __attribute__((noreturn))
 __assert_fail(const char* statement, const char* file, int line, const char* func);
 
 #ifdef __cplusplus

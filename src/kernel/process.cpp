@@ -1,5 +1,6 @@
 #include <asm/port_io.h>
 #include <asm/sys.h>
+#include <assert.h>
 #include <fs/fat.hpp>
 #include <kernel/hw/ata.hpp>
 #include <kernel/interrupt.h>
@@ -12,7 +13,6 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <types/allocator.hpp>
-#include <types/assert.h>
 #include <types/cplusplus.hpp>
 #include <types/elf.hpp>
 #include <types/hash_map.hpp>
@@ -103,7 +103,7 @@ void proclist::kill(pid_t pid, int exit_code)
     // init should never exit
     if (proc->ppid == 0) {
         console->print("kernel panic: init exited!\n");
-        crash();
+        assert(false);
     }
 
     // make child processes orphans (children of init)
@@ -197,7 +197,7 @@ void NORETURN _kernel_init(void)
     // TODO: parse kernel parameters
     auto* _new_fs = fs::register_fs(types::_new<types::kernel_allocator, fs::fat::fat32>(fs::vfs_open("/dev/hda1")->ind));
     int ret = fs::fs_root->ind->fs->mount(fs::vfs_open("/mnt"), _new_fs);
-    assert_likely(ret == GB_OK);
+    assert(ret == GB_OK);
 
     current_process->attr.system = 0;
     current_thread->attr.system = 0;
@@ -211,7 +211,8 @@ void NORETURN _kernel_init(void)
     d.envp = envp;
     d.system = false;
 
-    assert(types::elf::elf32_load(&d) == GB_OK);
+    ret = types::elf::elf32_load(&d);
+    assert(ret == GB_OK);
 
     asm volatile(
         "movw $0x23, %%ax\n"

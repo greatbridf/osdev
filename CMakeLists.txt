@@ -75,7 +75,6 @@ set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
                         include/kernel/hw/timer.h
                         include/kernel/input/keycodes.h
                         include/kernel/input/input_event.h
-                        include/types/assert.h
                         include/types/bitmap.h
                         include/types/buffer.hpp
                         include/types/elf.hpp

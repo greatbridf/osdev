@@ -1,6 +1,7 @@
 #include <assert.h>
 #include <kernel/errno.h>
 #include <kernel/mem.h>
+#include <kernel/process.hpp>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -81,11 +82,7 @@ int types::elf::elf32_load(types::elf::elf32_load_data* d)
         if (ret != GB_OK) {
             k_free(phents);
 
-            // TODO: kill process
-            assert(false);
-
-            d->errcode = ret;
-            return GB_FAILED;
+            kill_current(-1);
         }
 
         ++phents;

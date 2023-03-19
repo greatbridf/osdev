@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stdint.h>
+#include <stdio.h>
 #include <types/allocator.hpp>
 
 namespace types {
@@ -90,43 +91,44 @@ public:
         return count == static_cast<size_t>(end - start + 1);
     }
 
-    constexpr char front(void)
+    constexpr int front(void)
     {
+        if (empty())
+            return EOF;
         return *base;
     }
 
-    constexpr char back(void)
+    constexpr int back(void)
     {
+        if (empty())
+            return EOF;
         return *_backward(head);
     }
 
-    constexpr char get(void)
+    constexpr int get(void)
     {
-        // TODO: set error flag
         if (empty())
-            return 0xff;
+            return EOF;
 
         char c = _get_char(base);
         base = _forward(base);
         return c;
     }
 
-    constexpr char pop(void)
+    constexpr int pop(void)
     {
-        // TODO: set error flag
         if (empty())
-            return 0xff;
+            return EOF;
 
         char c = _get_char(_backward(head));
         head = _backward(head);
         return c;
     }
 
-    constexpr char put(char c)
+    constexpr int put(char c)
     {
-        // TODO: set error flag
         if (full())
-            return 0xff;
+            return EOF;
 
         _put_char(c);
         head = _forward(head);

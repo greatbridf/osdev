@@ -120,12 +120,6 @@ void proclist::kill(pid_t pid, int exit_code)
     parent->wait_lst.push({ nullptr, (void*)pid, (void*)exit_code, nullptr });
 }
 
-inline void NORETURN _noreturn_crash(void)
-{
-    for (;;)
-        assert(false);
-}
-
 void kernel_threadd_main(void)
 {
     kmsg("kernel thread daemon started\n");
@@ -232,7 +226,7 @@ void NORETURN _kernel_init(void)
         : "c"(d.sp), "d"(d.eip)
         : "eax", "memory");
 
-    _noreturn_crash();
+    freeze();
 }
 
 void k_new_thread(void (*func)(void*), void* data)
@@ -292,7 +286,7 @@ void NORETURN init_scheduler(void)
         : "a"(current_thread->esp), "c"(_kernel_init)
         : "memory");
 
-    _noreturn_crash();
+    freeze();
 }
 
 extern "C" void asm_ctx_switch(uint32_t** curr_esp, uint32_t* next_esp);
@@ -315,4 +309,24 @@ void schedule()
     tss.esp0 = current_thread->kstack;
 
     asm_ctx_switch(&curr_thd->esp, thd->esp);
+}
+
+void NORETURN schedule_noreturn(void)
+{
+    schedule();
+    freeze();
+}
+
+void NORETURN freeze(void)
+{
+    asm_cli();
+    asm_hlt();
+    for (;;)
+        ;
+}
+
+void NORETURN kill_current(int exit_code)
+{
+    procs->kill(current_process->pid, exit_code);
+    schedule_noreturn();
 }

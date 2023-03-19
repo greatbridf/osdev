@@ -1,6 +1,7 @@
 #include <asm/port_io.h>
 #include <assert.h>
 #include <kernel/log.hpp>
+#include <kernel/process.hpp>
 #include <stdio.h>
 #include <types/types.h>
 
@@ -30,8 +31,5 @@ __assert_fail(const char* statement, const char* file, int line, const char* fun
     snprintf(buf, sizeof(buf), "Kernel assertion failed: (%s), %s:%d, %s\n",
         statement, file, line, func);
     kmsg(buf);
-    asm_cli();
-    asm_hlt();
-    for (;;)
-        ;
+    freeze();
 }

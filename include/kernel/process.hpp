@@ -422,6 +422,7 @@ public:
 
 void NORETURN init_scheduler(void);
 void schedule(void);
+void NORETURN schedule_noreturn(void);
 
 constexpr uint32_t push_stack(uint32_t** stack, uint32_t val)
 {
@@ -438,3 +439,6 @@ constexpr thdlist::~thdlist()
 }
 
 void k_new_thread(void (*func)(void*), void* data);
+
+void NORETURN freeze(void);
+void NORETURN kill_current(int exit_code);

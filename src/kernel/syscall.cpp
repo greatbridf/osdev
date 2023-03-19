@@ -125,8 +125,7 @@ void _syscall_sleep(interrupt_stack* data)
 void _syscall_crash(interrupt_stack*)
 {
     kmsg("\nan error occurred while executing command\n");
-    asm_cli();
-    asm_hlt();
+    freeze();
 }
 
 // syscall_exec(const char* exec, const char** argv)

@@ -21,12 +21,20 @@
 
 static struct IDT_entry IDT[256];
 
-static inline void NORETURN _halt_forever(void)
+static inline void NORETURN die(regs_32& regs, ptr_t eip)
 {
-    asm_cli();
-    asm_hlt();
-    for (;;)
-        ;
+    char buf[512] = {};
+    snprintf(
+        buf, sizeof(buf),
+        "***** KERNEL PANIC *****\n"
+        "eax: %x, ebx: %x, ecx: %x, edx: %x\n"
+        "esp: %x, ebp: %x, esi: %x, edi: %x\n"
+        "eip: %x\n",
+        regs.eax, regs.ebx, regs.ecx,
+        regs.edx, regs.esp, regs.ebp,
+        regs.esi, regs.edi, eip);
+    kmsg(buf);
+    freeze();
 }
 
 void init_idt()
@@ -92,30 +100,19 @@ void init_pic(void)
 }
 
 extern "C" void int6_handler(
-    struct regs_32 s_regs,
+    regs_32 s_regs,
     ptr_t eip,
     uint16_t cs,
     uint32_t eflags)
 {
-    char buf[512];
-
-    kmsg("\n---- INVALID OPCODE ----\n");
-
-    snprintf(
-        buf, 512,
-        "eax: %x, ebx: %x, ecx: %x, edx: %x\n"
-        "esp: %x, ebp: %x, esi: %x, edi: %x\n"
-        "eip: %x, cs: %x, eflags: %x       \n",
-        s_regs.eax, s_regs.ebx, s_regs.ecx,
-        s_regs.edx, s_regs.esp, s_regs.ebp,
-        s_regs.esi, s_regs.edi, eip,
-        cs, eflags);
+    char buf[128] = {};
+    snprintf(buf, sizeof(buf),
+        "[kernel] int6 data: cs: %x, eflags: %x\n", cs, eflags);
     kmsg(buf);
-
-    kmsg("----   HALTING SYSTEM   ----\n");
-
-    asm_cli();
-    asm_hlt();
+    if (!current_process->attr.system)
+        kill_current(-1);
+    else
+        die(s_regs, eip);
 }
 
 // general protection
@@ -126,26 +123,15 @@ extern "C" void int13_handler(
     uint16_t cs,
     uint32_t eflags)
 {
-    char buf[512];
-
-    kmsg("\n---- SEGMENTATION FAULT ----\n");
-
-    snprintf(
-        buf, 512,
-        "eax: %x, ebx: %x, ecx: %x, edx: %x\n"
-        "esp: %x, ebp: %x, esi: %x, edi: %x\n"
-        "eip: %x, cs: %x, error_code: %x   \n"
-        "eflags: %x                        \n",
-        s_regs.eax, s_regs.ebx, s_regs.ecx,
-        s_regs.edx, s_regs.esp, s_regs.ebp,
-        s_regs.esi, s_regs.edi, eip,
-        cs, error_code, eflags);
+    char buf[128] = {};
+    snprintf(buf, sizeof(buf),
+        "[kernel] int13 data: error_code: %x, cs: %x, eflags: %x\n",
+        error_code, cs, eflags);
     kmsg(buf);
-
-    kmsg("----   HALTING SYSTEM   ----\n");
-
-    asm_cli();
-    asm_hlt();
+    if (!current_process->attr.system)
+        kill_current(-1);
+    else
+        die(s_regs, eip);
 }
 
 struct PACKED int14_data {
@@ -159,12 +145,13 @@ struct PACKED int14_data {
 
 static inline void _int14_panic(void* eip, void* cr2, struct page_fault_error_code error_code)
 {
-    char buf[256] {};
-    snprintf(
-        buf, 256,
-        "\nkilled: segmentation fault (eip: %x, cr2: %x, error_code: %x)\n", eip, cr2, error_code);
+    char buf[128] = {};
+    snprintf(buf, sizeof(buf),
+        "[kernel] int14 data: eip: %p, cr2: %p, error_code: %x\n"
+        "[kernel] freezing...\n",
+        eip, cr2, error_code);
     kmsg(buf);
-    assert(false);
+    freeze();
 }
 
 static inline void NORETURN _int14_kill_user(void)
@@ -172,9 +159,7 @@ static inline void NORETURN _int14_kill_user(void)
     char buf[256] {};
     snprintf(buf, 256, "Segmentation Fault (pid%d killed)\n", current_process->pid);
     kmsg(buf);
-    procs->kill(current_process->pid, -1);
-    schedule();
-    _halt_forever();
+    kill_current(-1);
 }
 
 // page fault

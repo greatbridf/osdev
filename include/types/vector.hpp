@@ -1,5 +1,6 @@
 #pragma once
 
+#include <assert.h>
 #include <types/allocator.hpp>
 #include <types/cplusplus.hpp>
 #include <types/types.h>
@@ -230,13 +231,13 @@ public:
 
     constexpr value_type& at(index_type i) noexcept
     {
-        // TODO: boundary check
+        assert(i + 1 <= this->size());
         return _at(i);
     }
 
     constexpr const value_type& at(index_type i) const noexcept
     {
-        // TODO: boundary check
+        assert(i + 1 <= this->size());
         return _at(i);
     }
 

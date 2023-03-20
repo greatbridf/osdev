@@ -9,6 +9,7 @@
 #include <kernel/task.h>
 #include <kernel/vga.hpp>
 #include <kernel_main.hpp>
+#include <stdint.h>
 #include <stdio.h>
 #include <types/allocator.hpp>
 #include <types/bitmap.h>
@@ -451,14 +452,17 @@ static inline int _mmap(
         return GB_FAILED;
     }
 
-    len = (len + PAGE_SIZE - 1) & 0xfffff000;
-    size_t n_pgs = len >> 12;
+    // TODO: find another address
+    assert(((uint32_t)hint & 0xfff) == 0);
+    // TODO: return failed
+    assert((offset & 0xfff) == 0);
 
-    for (const auto& mm_area : *mms)
-        if (!mm_area.is_avail(hint, (char*)hint + len)) {
-            errno = EEXIST;
-            return GB_FAILED;
-        }
+    size_t n_pgs = align_up<12>(len) >> 12;
+
+    if (!mms->is_avail(hint, len)) {
+        errno = EEXIST;
+        return GB_FAILED;
+    }
 
     auto mm = mms->addarea(hint, write, priv);
     mm->mapped_file = file;

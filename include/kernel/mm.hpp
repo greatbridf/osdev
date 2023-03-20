@@ -2,6 +2,7 @@
 
 #include <kernel/mem.h>
 #include <kernel/vfs.hpp>
+#include <stdint.h>
 #include <types/allocator.hpp>
 #include <types/cplusplus.hpp>
 #include <types/list.hpp>
@@ -34,6 +35,7 @@ struct page {
 // TODO: shared mapping
 // @param len is aligned to 4kb boundary automatically, exceeding part will
 // be filled with '0's and not written back to the file
+// @param offset MUST be aligned to 4kb
 int mmap(
     void* hint,
     size_t len,
@@ -59,6 +61,30 @@ void dealloc_pt(pt_t pt);
 namespace kernel {
 class mm_list;
 } // namespace kernel
+
+template <uint32_t base, uint32_t expo>
+inline constexpr uint32_t pow()
+{
+    if constexpr (expo == 0)
+        return 1;
+    if constexpr (expo == 1)
+        return base;
+    if constexpr (expo % 2 == 0)
+        return pow<base, expo / 2>() * pow<base, expo / 2>();
+    else
+        return pow<base, expo / 2>() * pow<base, expo / 2 + 1>();
+}
+
+template <int n>
+inline constexpr uint32_t align_down(uint32_t v)
+{
+    return v & ~(pow<2, n>() - 1);
+}
+template <int n>
+inline constexpr uint32_t align_up(uint32_t v)
+{
+    return align_down<n>(v + pow<2, n>() - 1);
+}
 
 struct mm {
 public:
@@ -215,7 +241,7 @@ public:
     {
         int i = 0;
 
-        // TODO: 
+        // TODO:
         // if there are more than 4 pages, calling invlpg
         // should be faster. otherwise, we use movl cr3
         // bool should_invlpg = (area->pgs->size() > 4);
@@ -246,6 +272,19 @@ public:
                 return iter;
 
         return this->end();
+    }
+
+    bool is_avail(void* start, size_t len)
+    {
+        start = (void*)align_down<12>((uint32_t)start);
+        len = align_up<12>((uint32_t)start + len)
+            - (uint32_t)start;
+        for (const auto& area : *this) {
+            if (!area.is_avail(start, (char*)start + len))
+                return false;
+        }
+
+        return true;
     }
 };
 

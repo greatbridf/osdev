@@ -2,6 +2,7 @@
 #include <kernel/errno.h>
 #include <kernel/mem.h>
 #include <kernel/process.hpp>
+#include <kernel/vfs.hpp>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -75,17 +76,38 @@ int types::elf::elf32_load(types::elf::elf32_load_data* d)
     current_process->mms.clear_user();
 
     for (int i = 0; i < hdr.phnum; ++i) {
-        if (phents->type != types::elf::elf32_program_header_entry::PT_LOAD)
+        if (phents[i].type != types::elf::elf32_program_header_entry::PT_LOAD)
             continue;
 
-        auto ret = mmap((void*)phents->vaddr, phents->memsz, ent_exec->ind, phents->offset, 1, d->system);
-        if (ret != GB_OK) {
-            k_free(phents);
+        auto ret = mmap(
+            (char*)phents[i].vaddr,
+            phents[i].filesz,
+            ent_exec->ind,
+            phents[i].offset,
+            1,
+            d->system);
 
-            kill_current(-1);
+        if (ret != GB_OK)
+            goto error;
+
+        if (phents[i].memsz > align_up<12>(phents[i].filesz)) {
+            ret = mmap(
+                (char*)phents[i].vaddr + align_up<12>(phents[i].filesz),
+                align_up<12>(phents[i].memsz) - align_up<12>(phents[i].filesz),
+                fs::vfs_open("/dev/null")->ind,
+                phents[i].offset + align_up<12>(phents[i].filesz),
+                1,
+                d->system);
+
+            if (ret != GB_OK)
+                goto error;
         }
 
-        ++phents;
+        continue;
+
+    error:
+        k_free(phents);
+        kill_current(-1);
     }
 
     // map stack area

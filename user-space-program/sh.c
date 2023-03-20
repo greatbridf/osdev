@@ -52,11 +52,7 @@ int puts(const char* str)
 void* malloc(size_t n)
 {
     static char mems[1024];
-    static int pos = 0;
-    if (n == 0) {
-        pos = 0;
-        return 0;
-    }
+    static int pos;
     int orig_pos = pos;
     pos += n;
     return mems + orig_pos;
@@ -204,8 +200,6 @@ getcmd(char *buf, int nbuf)
 int
 main(void)
 {
-  void* _ = malloc(0);
-  (void)_;
   static char buf[100];
   
 //   // Assumes three file descriptors open.

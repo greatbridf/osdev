@@ -49,6 +49,7 @@ int types::elf::elf32_load(types::elf::elf32_load_data* d)
     }
 
     size_t phents_size = hdr.phentsize * hdr.phnum;
+    size_t shents_size = hdr.shentsize * hdr.shnum;
     auto* phents = (types::elf::elf32_program_header_entry*)k_malloc(phents_size);
     n_read = fs::vfs_read(
         ent_exec->ind,
@@ -64,6 +65,22 @@ int types::elf::elf32_load(types::elf::elf32_load_data* d)
         return GB_FAILED;
     }
 
+    auto* shents = (types::elf::elf32_section_header_entry*)k_malloc(shents_size);
+    n_read = fs::vfs_read(
+        ent_exec->ind,
+        (char*)shents,
+        shents_size,
+        hdr.shoff, shents_size);
+
+    // broken file or I/O error
+    if (n_read != shents_size) {
+        k_free(phents);
+        k_free(shents);
+
+        d->errcode = EINVAL;
+        return GB_FAILED;
+    }
+
     // copy argv and envp
     vector<string<>> argv, envp;
     for (const char* const* p = d->argv; *p; ++p)
@@ -74,6 +91,8 @@ int types::elf::elf32_load(types::elf::elf32_load_data* d)
     // from now on, caller process is recycled.
     // so we can't just simply return to it on error.
     current_process->mms.clear_user();
+
+    auto* null_ind = fs::vfs_open("/dev/null")->ind;
 
     for (int i = 0; i < hdr.phnum; ++i) {
         if (phents[i].type != types::elf::elf32_program_header_entry::PT_LOAD)
@@ -94,7 +113,7 @@ int types::elf::elf32_load(types::elf::elf32_load_data* d)
             ret = mmap(
                 (char*)phents[i].vaddr + align_up<12>(phents[i].filesz),
                 align_up<12>(phents[i].memsz) - align_up<12>(phents[i].filesz),
-                fs::vfs_open("/dev/null")->ind,
+                null_ind,
                 phents[i].offset + align_up<12>(phents[i].filesz),
                 1,
                 d->system);
@@ -107,12 +126,19 @@ int types::elf::elf32_load(types::elf::elf32_load_data* d)
 
     error:
         k_free(phents);
+        k_free(shents);
         kill_current(-1);
     }
 
+    for (int i = 0; i < hdr.shnum; ++i) {
+        if (shents[i].sh_type == elf32_section_header_entry::SHT_NOBITS)
+            memset((char*)shents[i].sh_addr, 0x00, shents[i].sh_size);
+    }
+
     // map stack area
-    auto ret = mmap((void*)types::elf::ELF_STACK_TOP, types::elf::ELF_STACK_SIZE,
-        fs::vfs_open("/dev/null")->ind, 0, 1, 0);
+    auto ret = mmap((void*)types::elf::ELF_STACK_TOP,
+        types::elf::ELF_STACK_SIZE,
+        null_ind, 0, 1, 0);
     assert(ret == GB_OK);
 
     d->eip = (void*)hdr.entry;
@@ -151,6 +177,9 @@ int types::elf::elf32_load(types::elf::elf32_load_data* d)
 
     // push argc
     _user_push(sp, args.size());
+
+    k_free(shents);
+    k_free(phents);
 
     return GB_OK;
 }

@@ -91,23 +91,17 @@ public:
     }
     constexpr typename inner_vector_type::iterator_type back(void)
     {
-        // TODO: assert
-        if (this->empty())
-            return typename inner_vector_type::iterator_type((void*)0xffffffff);
+        assert(!this->empty());
         return --inner_vector_type::back();
     }
     constexpr typename inner_vector_type::const_iterator_type back(void) const
     {
-        // TODO: assert
-        if (this->empty())
-            return typename inner_vector_type::iterator_type((void*)0xffffffff);
+        assert(!this->empty());
         return --inner_vector_type::back();
     }
     constexpr typename inner_vector_type::const_iterator_type cback(void) const
     {
-        // TODO: assert
-        if (this->empty())
-            return typename inner_vector_type::iterator_type((void*)0xffffffff);
+        assert(!this->empty());
         return --inner_vector_type::cback();
     }
 };

@@ -1,6 +1,7 @@
 #include <assert.h>
 #include <kernel/errno.h>
 #include <kernel/mem.h>
+#include <kernel/process.hpp>
 #include <kernel/vfs.hpp>
 #include <stdint.h>
 #include <stdio.h>
@@ -78,7 +79,13 @@ int types::elf::elf32_load(types::elf::elf32_load_data* d)
         if (phents[i].type != types::elf::elf32_program_header_entry::PT_LOAD)
             continue;
 
-        auto ret = mmap((void*)phents[i].vaddr, phents[i].filesz, ent_exec->ind, phents[i].offset, 1, d->system);
+        auto ret = mmap(
+            (char*)phents[i].vaddr,
+            phents[i].filesz,
+            ent_exec->ind,
+            phents[i].offset,
+            1,
+            d->system);
 
         if (ret != GB_OK)
             goto error;

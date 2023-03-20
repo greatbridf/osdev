@@ -109,6 +109,32 @@ struct PACKED elf32_program_header_entry {
     uint32_t align;
 };
 
+struct PACKED elf32_section_header_entry {
+    elf32_off_t sh_name;
+    enum : uint32_t {
+        SHT_NULL = 0x00,
+        SHT_PROGBITS = 0x01,
+        SHT_RELA = 0x04,
+        SHT_DYNAMIC = 0x06,
+        SHT_NOTE = 0x07,
+        SHT_NOBITS = 0x08,
+        SHT_REL = 0x09,
+        SHT_DYNSYM = 0x0b,
+        SHT_INIT_ARRAY = 0x0e,
+        SHT_FINI_ARRAY = 0x0f,
+        SHT_PREINIT_ARRAY = 0x0f,
+    } sh_type;
+    enum : uint32_t {
+        SHF_WRITE = 0x01,
+        SHF_ALLOC = 0x02,
+        SHF_EXECINSTR = 0x04,
+    } sh_flags;
+    elf32_addr_t sh_addr;
+    elf32_off_t sh_offset;
+    uint32_t sh_size;
+    char _[16];
+};
+
 struct elf32_load_data {
     const char* exec;
     const char* const* argv;

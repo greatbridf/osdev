@@ -364,7 +364,7 @@ static inline void init_mem_layout(void)
     // mark empty page
     mark_addr_range(EMPTY_PAGE_ADDR, EMPTY_PAGE_END);
     // mark EBDA and upper memory as allocated
-    mark_addr_range(0x80000, 0xfffff);
+    mark_addr_range(0x80000, 0x100000);
     // mark kernel
     mark_addr_len(0x00100000, kernel_size + bss_len);
     // mark identically mapped heap

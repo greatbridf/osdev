@@ -6,7 +6,7 @@
 DIR* opendir(const char* name)
 {
     // TODO: set flags
-    int fd = open(name, 0);
+    int fd = open(name, O_DIRECTORY);
 
     if (fd < 0)
         return NULL;

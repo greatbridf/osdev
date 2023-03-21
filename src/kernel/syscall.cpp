@@ -276,7 +276,6 @@ void _syscall_getdents(interrupt_stack* data)
 void _syscall_open(interrupt_stack* data)
 {
     auto* path = (const char*)data->s_regs.edi;
-    // flags are ignored for now
     uint32_t flags = data->s_regs.esi;
     data->s_regs.eax = current_process->files.open(path, flags);
 }

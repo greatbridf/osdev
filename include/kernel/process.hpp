@@ -1,5 +1,6 @@
 #pragma once
 
+#include <fcntl.h>
 #include <kernel/errno.h>
 #include <kernel/event/evtqueue.hpp>
 #include <kernel/interrupt.h>
@@ -207,8 +208,8 @@ public:
                 return &iter->value;
         }
 
-        // TODO: file opening flags (permissions etc.)
-        int open(const char* filename, uint32_t)
+        // TODO: file opening permissions check
+        int open(const char* filename, uint32_t flags)
         {
             auto* dentry = fs::vfs_open(filename);
 
@@ -217,18 +218,18 @@ public:
                 return -1;
             }
 
-            // TODO: check whether dentry is a file if O_DIRECTORY is set
-            // if (!(dentry->ind->flags.in.file || dentry->ind->flags.in.special_node)) {
-            //     errno = EISDIR;
-            //     return -1;
-            // }
-
             // TODO: unify file, inode, dentry TYPE
             fs::file::types type = fs::file::types::regular_file;
             if (dentry->ind->flags.in.directory)
                 type = fs::file::types::directory;
             if (dentry->ind->flags.in.special_node)
                 type = fs::file::types::block_dev;
+
+            // check whether dentry is a file if O_DIRECTORY is set
+            if ((flags & O_DIRECTORY) && type != fs::file::types::directory) {
+                errno = ENOTDIR;
+                return -1;
+            }
 
             auto iter = files->emplace_back(fs::file {
                 type,

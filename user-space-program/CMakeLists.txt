@@ -17,7 +17,9 @@ add_executable(stack-test.out stack-test.s)
 add_executable(init.out init.c)
 add_executable(sh.out sh.c)
 add_executable(priv-test.out priv-test.c)
+add_executable(lazybox.out lazybox.c)
 
 add_custom_target(user_space_programs
     DEPENDS hello-world.out interrupt-test.out stack-test.out init.out sh.out priv-test.out
+    DEPENDS lazybox.out
 )

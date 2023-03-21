@@ -1,4 +1,5 @@
-#include "unistd.h"
+#include <unistd.h>
+#include <dirent.h>
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -8,6 +9,12 @@ struct applet {
     const char* name;
     int (*func)(const char** args);
 };
+
+int putchar(int c)
+{
+    write(STDOUT_FILENO, &c, 1);
+    return c;
+}
 
 int puts(const char* str)
 {
@@ -48,6 +55,34 @@ int pwd(const char** _)
     return 0;
 }
 
+int ls(const char** args)
+{
+    const char* path = args[0];
+    DIR* dir = NULL;
+
+    if (path == NULL) {
+        char buf[256];
+        if (getcwd(buf, sizeof(buf)) == 0)
+            return -1;
+
+        dir = opendir(buf);
+    } else {
+        dir = opendir(args[0]);
+    }
+
+    if (!dir)
+        return -1;
+
+    struct dirent* dp = NULL;
+    while ((dp = readdir(dir)) != NULL) {
+        printf("%s ", dp->d_name);
+    }
+
+    printf("\n");
+
+    return 0;
+}
+
 struct applet applets[] = {
     {
         "lazybox",
@@ -56,6 +91,10 @@ struct applet applets[] = {
     {
         "pwd",
         pwd,
+    },
+    {
+        "ls",
+        ls,
     }
 };
 

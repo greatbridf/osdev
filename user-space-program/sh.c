@@ -12,7 +12,7 @@ int printf(const char* fmt, ...)
     va_start(args, fmt);
 
     char buf[256] = {};
-    int len = snprintf(buf, sizeof(buf), fmt, args);
+    int len = vsnprintf(buf, sizeof(buf), fmt, args);
 
     len = write(STDOUT_FILENO, buf, len);
 

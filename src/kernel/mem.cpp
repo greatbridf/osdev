@@ -192,7 +192,7 @@ public:
 
 static brk_memory_allocator* kernel_heap_allocator;
 static brk_memory_allocator
-    kernel_ident_mapped_allocator((void*)bss_section_end_addr,
+    kernel_ident_mapped_allocator(bss_addr + bss_len,
         IDENTICALLY_MAPPED_HEAP_SIZE);
 
 void* k_malloc(size_t size)
@@ -360,9 +360,9 @@ static inline void init_mem_layout(void)
     // mark EBDA and upper memory as allocated
     mark_addr_range(0x80000, 0xfffff);
     // mark kernel
-    mark_addr_len(0x00100000, kernel_size);
+    mark_addr_len(0x00100000, kernel_size + bss_len);
     // mark identically mapped heap
-    mark_addr_len(bss_section_end_addr, IDENTICALLY_MAPPED_HEAP_SIZE);
+    mark_addr_len((pptr_t)bss_addr + bss_len, IDENTICALLY_MAPPED_HEAP_SIZE);
 
     if (e820_mem_map_entry_size == 20) {
         struct e820_mem_map_entry_20* entry = (struct e820_mem_map_entry_20*)e820_mem_map;

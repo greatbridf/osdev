@@ -8,29 +8,26 @@ MEMORY
 
 SECTIONS
 {
-    .text.loader 0x7e00 : AT(0x00000000)
+    .stage1 0x7e00 : AT(0x00000000)
     {
-        *(.text.loader)
-        __p_kernel_text_and_data_size_addr = .;
-        LONG(__loader_end + kernel_text_and_data_size - __real_kernel_start);
-        __loader_end = .;
+        __stage1_start = .;
+        *(.stage1)
+
+        . = ALIGN(0x100);
+        __stage1_end = .;
     } > MEM
 
-    .text 0x100000 : AT(LOADADDR(.text.loader) + SIZEOF(.text.loader))
+    .kinit 0x100000 :
+        AT(LOADADDR(.stage1) + SIZEOF(.stage1))
     {
-        __real_kernel_start = .;
-        *(.text*)
-        *(.rodata*)
+        __kinit_start = .;
+        *(.text.kinit)
 
-        . = ALIGN(4);
-        kernel_text_and_data_size = .;
-        LONG(__kernel_text_and_data_end - ADDR(.text));
-        asm_kernel_size = .;
-        LONG(__real_kernel_end - ADDR(.text));
-        bss_section_start_addr = .;
-        LONG(ABSOLUTE(__bss_start));
-        bss_section_end_addr = .;
-        LONG(ABSOLUTE(__bss_end));
+        LONG(0x00000000)
+        LONG(0x19191919)
+        LONG(0x00000000)
+
+        *(.rodata.kinit)
 
         start_ctors = .;
         KEEP(*(.init_array));
@@ -39,12 +36,66 @@ SECTIONS
         KEEP(*(SORT_BY_INIT_PRIORITY(.ctors*)));
         end_ctors = .;
 
+        LONG(0x00000000)
+        LONG(0x19191919)
+        LONG(0x00000000)
+
+        *(.data.kinit)
+
+        LONG(0x00000000)
+        LONG(0x19191919)
+        LONG(0x00000000)
+
+        *(.bss.kinit)
+
+        LONG(0x00000000)
+        LONG(0x19191919)
+        LONG(0x00000000)
+
+        . = ALIGN(0x1000);
+        __kinit_end = .;
+    } > MEM
+
+    .text :
+        AT(LOADADDR(.kinit) + SIZEOF(.kinit))
+    {
+        __text_start = .;
+        *(.text)
+        *(.text*)
+
+        . = ALIGN(0x1000);
+        __text_end = .;
+    } > MEM
+
+    .rodata :
+        AT(LOADADDR(.text) + SIZEOF(.text))
+    {
+        __rodata_start = .;
+        *(.rodata)
+        *(.rodata*)
+
+        bss_addr = .;
+        LONG(ABSOLUTE(__bss_start));
+        bss_len = .;
+        LONG(__bss_end - __bss_start);
+        kernel_size = .;
+        LONG(__data_end - __kinit_start);
         __stack_chk_guard = .;
         LONG(0x19198101);
 
+        . = ALIGN(0x1000);
+        __rodata_end = .;
+    } > MEM
+
+    .data :
+        AT(LOADADDR(.rodata) + SIZEOF(.rodata))
+    {
+        __data_start = .;
         *(.data)
         *(.data*)
-        __kernel_text_and_data_end = .;
+
+        . = ALIGN(0x1000);
+        __data_end = .;
     } > MEM
 
     .bss ALIGN(0x1000) :
@@ -52,12 +103,9 @@ SECTIONS
         __bss_start = .;
         *(.bss)
         *(.bss*)
-        __bss_end = ALIGN(0x1000);
-    } > MEM
 
-    .kernel_end :
-    {
-        __real_kernel_end = .;
+        . = ALIGN(0x1000);
+        __bss_end = .;
     } > MEM
 
     /* Stabs debugging sections.  */
@@ -98,7 +146,6 @@ SECTIONS
     {
         *(.fini_array*)
         *(.eh_frame*)
-        *(.text.bootsect)
         *(.note*)
     }
 }

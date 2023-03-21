@@ -40,7 +40,6 @@ static inline void save_loader_data(void)
     memcpy(e820_mem_map, asm_e820_mem_map, sizeof(e820_mem_map));
     e820_mem_map_count = asm_e820_mem_map_count;
     e820_mem_map_entry_size = asm_e820_mem_map_entry_size;
-    kernel_size = asm_kernel_size;
     memcpy(&mem_size_info, &asm_mem_size_info, sizeof(struct mem_size_info));
 }
 
@@ -104,9 +103,7 @@ void load_new_gdt(void)
 
 void init_bss_section(void)
 {
-    void* bss_addr = (void*)bss_section_start_addr;
-    size_t bss_size = bss_section_end_addr - bss_section_start_addr;
-    memset(bss_addr, 0x00, bss_size);
+    memset(bss_addr, 0x00, bss_len);
 }
 
 int init_console(const char* name)

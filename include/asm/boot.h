@@ -18,7 +18,7 @@ extern uint8_t asm_e820_mem_map[1024];
 extern uint32_t asm_e820_mem_map_count;
 extern uint32_t asm_e820_mem_map_entry_size;
 
-extern uint32_t asm_kernel_size;
+extern const uint32_t kernel_size;
 
-extern uint32_t bss_section_start_addr;
-extern uint32_t bss_section_end_addr;
+extern char* const bss_addr;
+extern const uint32_t bss_len;

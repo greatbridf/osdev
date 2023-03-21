@@ -92,7 +92,6 @@ typedef pte_t (*pt_t)[1024];
 inline uint8_t e820_mem_map[1024];
 inline uint32_t e820_mem_map_count;
 inline uint32_t e820_mem_map_entry_size;
-inline size_t kernel_size;
 inline struct mem_size_info mem_size_info;
 
 #define KERNEL_HEAP_START ((void*)0x30000000)

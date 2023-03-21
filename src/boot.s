@@ -1,4 +1,4 @@
-.section .text.loader
+.section .stage1
 .code16
 loader_start:
 # set segment registers
@@ -173,12 +173,11 @@ _fill_zero_end:
 
 start_move_kernel:
 # move the kernel to 0x100000
-    movl $__loader_end, %eax
-    movl $__real_kernel_start, %ebx
+    movl $__stage1_end, %eax
+    movl $__kinit_start, %ebx
 
-    movl $__p_kernel_text_and_data_size_addr, %ecx
-    movl (%ecx), %ecx
-    movl (%ecx), %ecx
+    movl $__data_end, %ecx
+    subl $__kinit_start, %ecx
 
 _move_kernel:
     movl (%eax), %edx

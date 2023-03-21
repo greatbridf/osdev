@@ -191,8 +191,12 @@ void NORETURN _kernel_init(void)
     hw::init_ata();
 
     // TODO: parse kernel parameters
-    auto* _new_fs = fs::register_fs(types::_new<types::kernel_allocator, fs::fat::fat32>(fs::vfs_open("/dev/hda1")->ind));
-    int ret = fs::fs_root->ind->fs->mount(fs::vfs_open("/mnt"), _new_fs);
+    auto* drive = fs::vfs_open("/dev/hda1");
+    assert(drive);
+    auto* _new_fs = fs::register_fs(types::_new<types::kernel_allocator, fs::fat::fat32>(drive->ind));
+    auto* mnt = fs::vfs_open("/mnt");
+    assert(mnt);
+    int ret = fs::fs_root->ind->fs->mount(mnt, _new_fs);
     assert(ret == GB_OK);
 
     current_process->attr.system = 0;

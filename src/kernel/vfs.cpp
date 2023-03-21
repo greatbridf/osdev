@@ -82,6 +82,9 @@ fs::vfs::dentry* fs::vfs::dentry::append(inode* ind, name_type&& name, bool set_
 }
 fs::vfs::dentry* fs::vfs::dentry::find(const name_type& name)
 {
+    if (!ind->flags.in.directory)
+        return nullptr;
+
     if (ind->flags.in.directory && !flags.in.present)
         ind->fs->load_dentry(this);
 
@@ -530,6 +533,8 @@ fs::vfs::dentry* fs::vfs_open(const char* path)
 int fs::vfs_stat(const char* filename, stat* stat)
 {
     auto ent = vfs_open(filename);
+    if (!ent)
+        return GB_FAILED;
     return vfs_stat(ent, stat);
 }
 int fs::vfs_stat(fs::vfs::dentry* ent, stat* stat)

@@ -182,6 +182,7 @@ static inline void mbr_part_probe(fs::inode* drive, uint16_t major, uint16_t min
     struct mbr hda_mbr {
     };
     auto* dev = fs::vfs_open("/dev");
+    assert(dev);
 
     fs::vfs_read(drive, (char*)&hda_mbr, 512, 0, 512);
 
@@ -228,5 +229,6 @@ void hw::init_ata(void)
         0xffffffff);
 
     auto* hda = fs::vfs_open("/dev/hda");
+    assert(hda);
     mbr_part_probe(hda->ind, 2, 1);
 }

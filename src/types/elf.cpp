@@ -92,7 +92,16 @@ int types::elf::elf32_load(types::elf::elf32_load_data* d)
     // so we can't just simply return to it on error.
     current_process->mms.clear_user();
 
-    auto* null_ind = fs::vfs_open("/dev/null")->ind;
+    fs::inode* null_ind = nullptr;
+    {
+        auto* dent = fs::vfs_open("/dev/null");
+        if (!dent) {
+            k_free(shents);
+            k_free(phents);
+            kill_current(-1);
+        }
+        null_ind = dent->ind;
+    }
 
     for (int i = 0; i < hdr.phnum; ++i) {
         if (phents[i].type != types::elf::elf32_program_header_entry::PT_LOAD)

@@ -1,5 +1,6 @@
 #include <devutil.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdarg.h>
 
 // where n is in the range of [0, 9]
@@ -236,12 +237,21 @@ snprint_char(
     return sizeof(c);
 }
 
-int snprintf(char* buf, size_t buf_size, const char* fmt, ...)
+int snprintf(char* buf, size_t bufsize, const char* fmt, ...)
+{
+    va_list lst;
+    va_start(lst, fmt);
+
+    int ret = vsnprintf(buf, bufsize, fmt, lst);
+
+    va_end(lst);
+
+    return ret;
+}
+
+int vsnprintf(char* buf, size_t buf_size, const char* fmt, va_list arg)
 {
     ssize_t n_write = 0;
-
-    va_list arg;
-    va_start(arg, fmt);
 
     for (char c; (c = *fmt) != 0x00; ++fmt) {
         if (c == '%') {
@@ -338,8 +348,6 @@ int snprintf(char* buf, size_t buf_size, const char* fmt, ...)
 
     if (buf_size > 0)
         *buf = 0x00;
-
-    va_end(arg);
 
     return n_write;
 }

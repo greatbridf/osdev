@@ -1,5 +1,3 @@
-#include "kernel_main.hpp"
-
 #include <asm/boot.h>
 #include <asm/port_io.h>
 #include <asm/sys.h>
@@ -36,12 +34,6 @@ void call_constructors_for_cpp(void)
         (*ctor)();
     }
 }
-
-uint8_t e820_mem_map[1024];
-uint32_t e820_mem_map_count;
-uint32_t e820_mem_map_entry_size;
-size_t kernel_size;
-struct mem_size_info mem_size_info;
 
 static inline void save_loader_data(void)
 {
@@ -95,19 +87,16 @@ static inline void show_mem_info(char* buf)
     printkf("kernel size: %x\n", kernel_size);
 }
 
-static segment_descriptor new_gdt[6];
-struct tss32_t tss;
-
 void load_new_gdt(void)
 {
-    create_segment_descriptor(new_gdt + 0, 0, 0, 0, 0);
-    create_segment_descriptor(new_gdt + 1, 0, ~0, 0b1100, SD_TYPE_CODE_SYSTEM);
-    create_segment_descriptor(new_gdt + 2, 0, ~0, 0b1100, SD_TYPE_DATA_SYSTEM);
-    create_segment_descriptor(new_gdt + 3, 0, ~0, 0b1100, SD_TYPE_CODE_USER);
-    create_segment_descriptor(new_gdt + 4, 0, ~0, 0b1100, SD_TYPE_DATA_USER);
-    create_segment_descriptor(new_gdt + 5, (uint32_t)&tss, sizeof(tss), 0b0000, SD_TYPE_TSS);
+    create_segment_descriptor(gdt + 0, 0, 0, 0, 0);
+    create_segment_descriptor(gdt + 1, 0, ~0, 0b1100, SD_TYPE_CODE_SYSTEM);
+    create_segment_descriptor(gdt + 2, 0, ~0, 0b1100, SD_TYPE_DATA_SYSTEM);
+    create_segment_descriptor(gdt + 3, 0, ~0, 0b1100, SD_TYPE_CODE_USER);
+    create_segment_descriptor(gdt + 4, 0, ~0, 0b1100, SD_TYPE_DATA_USER);
+    create_segment_descriptor(gdt + 5, (uint32_t)&tss, sizeof(tss), 0b0000, SD_TYPE_TSS);
 
-    asm_load_gdt((6 * 8 - 1) << 16, (pptr_t)new_gdt);
+    asm_load_gdt((6 * 8 - 1) << 16, (pptr_t)gdt);
     asm_load_tr((6 - 1) * 8);
 
     asm_cli();

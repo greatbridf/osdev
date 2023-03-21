@@ -8,7 +8,6 @@
 #include <kernel/process.hpp>
 #include <kernel/task.h>
 #include <kernel/vga.hpp>
-#include <kernel_main.hpp>
 #include <stdint.h>
 #include <stdio.h>
 #include <types/allocator.hpp>

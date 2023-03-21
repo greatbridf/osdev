@@ -31,6 +31,8 @@ inline thread* volatile current_thread;
 inline proclist* procs;
 inline readyqueue* readythds;
 
+inline tss32_t tss;
+
 struct process_attr {
     uint16_t system : 1;
     uint16_t zombie : 1 = 0;

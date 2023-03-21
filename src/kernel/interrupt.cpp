@@ -13,7 +13,6 @@
 #include <kernel/syscall.hpp>
 #include <kernel/vfs.hpp>
 #include <kernel/vga.hpp>
-#include <kernel_main.hpp>
 #include <stdint.h>
 #include <stdio.h>
 #include <types/size.h>

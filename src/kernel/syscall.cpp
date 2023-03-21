@@ -10,7 +10,6 @@
 #include <kernel/syscall.hpp>
 #include <kernel/tty.hpp>
 #include <kernel/vfs.hpp>
-#include <kernel_main.hpp>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>

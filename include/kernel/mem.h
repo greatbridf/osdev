@@ -89,12 +89,11 @@ typedef union pte_t {
 } pte_t;
 typedef pte_t (*pt_t)[1024];
 
-// in kernel_main.c
-extern uint8_t e820_mem_map[1024];
-extern uint32_t e820_mem_map_count;
-extern uint32_t e820_mem_map_entry_size;
-extern size_t kernel_size;
-extern struct mem_size_info mem_size_info;
+inline uint8_t e820_mem_map[1024];
+inline uint32_t e820_mem_map_count;
+inline uint32_t e820_mem_map_entry_size;
+inline size_t kernel_size;
+inline struct mem_size_info mem_size_info;
 
 #define KERNEL_HEAP_START ((void*)0x30000000)
 #define KERNEL_HEAP_LIMIT ((void*)0x40000000)
@@ -135,6 +134,8 @@ typedef struct segment_descriptor_struct {
     uint64_t flags : 4;
     uint64_t base_high : 8;
 } segment_descriptor;
+
+inline segment_descriptor gdt[6];
 
 void create_segment_descriptor(
     segment_descriptor* sd,

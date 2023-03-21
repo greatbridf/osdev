@@ -9,7 +9,6 @@
 #include <kernel/mm.hpp>
 #include <kernel/process.hpp>
 #include <kernel/vfs.hpp>
-#include <kernel_main.hpp>
 #include <stdint.h>
 #include <stdio.h>
 #include <types/allocator.hpp>

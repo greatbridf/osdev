@@ -53,6 +53,7 @@ process::process(process&& val)
     , pid(val.pid)
     , ppid(val.ppid)
     , files(types::move(val.files))
+    , pwd(types::move(val.pwd))
 {
     if (current_process == &val)
         current_process = this;
@@ -64,7 +65,7 @@ process::process(process&& val)
 }
 
 process::process(const process& parent)
-    : process { parent.pid, parent.is_system() }
+    : process { parent.pid, parent.is_system(), types::string<>(parent.pwd) }
 {
     for (auto& area : parent.mms) {
         if (area.is_ident())
@@ -76,11 +77,12 @@ process::process(const process& parent)
     this->files.dup(parent.files);
 }
 
-process::process(pid_t _ppid, bool _system)
+process::process(pid_t _ppid, bool _system, types::string<>&& path)
     : mms(*kernel_mms)
     , attr { .system = _system }
     , pid { process::alloc_pid() }
     , ppid { _ppid }
+    , pwd { path }
 {
 }
 

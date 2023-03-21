@@ -14,6 +14,7 @@
 #include <types/map.hpp>
 #include <types/pair.hpp>
 #include <types/status.h>
+#include <types/string.hpp>
 #include <types/types.h>
 
 typedef size_t pid_t;
@@ -270,12 +271,13 @@ public:
     pid_t pid;
     pid_t ppid;
     filearr files;
+    types::string<> pwd;
 
 public:
     process(process&& val);
     process(const process&);
 
-    explicit process(pid_t ppid, bool system = true);
+    explicit process(pid_t ppid, bool system = true, types::string<>&& path = "/");
 
     constexpr bool is_system(void) const
     {

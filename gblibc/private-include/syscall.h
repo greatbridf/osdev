@@ -6,7 +6,7 @@
 #define SYS_fork (0x00)
 #define SYS_write (0x01)
 #define SYS_sleep (0x02)
-#define SYS_crash (0x03)
+#define SYS_chdir (0x03)
 #define SYS_exec (0x04)
 #define SYS_exit (0x05)
 #define SYS_wait (0x06)

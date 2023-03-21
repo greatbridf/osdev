@@ -32,3 +32,8 @@ unsigned int sleep(unsigned int seconds)
 {
     return syscall1(SYS_sleep, seconds);
 }
+
+int chdir(const char* path)
+{
+    return syscall1(SYS_chdir, (uint32_t)path);
+}

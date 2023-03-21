@@ -122,10 +122,25 @@ void _syscall_sleep(interrupt_stack* data)
     schedule();
 }
 
-void _syscall_crash(interrupt_stack*)
+void _syscall_chdir(interrupt_stack* data)
 {
-    kmsg("\nan error occurred while executing command\n");
-    freeze();
+    const char* path = reinterpret_cast<const char*>(data->s_regs.edi);
+    auto* dir = fs::vfs_open(path);
+    if (!dir) {
+        // set errno ENOTFOUND
+        SYSCALL_SET_RETURN_VAL_EAX(-1);
+        return;
+    }
+
+    if (!dir->ind->flags.in.directory) {
+        // set errno ENOTDIR
+        SYSCALL_SET_RETURN_VAL_EAX(-1);
+        return;
+    }
+
+    current_process->pwd = path;
+
+    SYSCALL_SET_RETURN_VAL_EAX(0);
 }
 
 // syscall_exec(const char* exec, const char** argv)
@@ -161,7 +176,7 @@ void _syscall_exit(interrupt_stack* data)
 
     // TODO: terminating a thread only
     if (current_thread->owner->thds.size() != 1) {
-        _syscall_crash(data);
+        assert(false);
     }
 
     // terminating a whole process:
@@ -270,7 +285,7 @@ void init_syscall(void)
     syscall_handlers[0] = _syscall_fork;
     syscall_handlers[1] = _syscall_write;
     syscall_handlers[2] = _syscall_sleep;
-    syscall_handlers[3] = _syscall_crash;
+    syscall_handlers[3] = _syscall_chdir;
     syscall_handlers[4] = _syscall_exec;
     syscall_handlers[5] = _syscall_exit;
     syscall_handlers[6] = _syscall_wait;

@@ -37,3 +37,8 @@ int chdir(const char* path)
 {
     return syscall1(SYS_chdir, (uint32_t)path);
 }
+
+char* getcwd(char* buf, size_t bufsize)
+{
+    return syscall2(SYS_getcwd, (uint32_t)buf, bufsize);
+}

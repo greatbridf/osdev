@@ -13,6 +13,7 @@
 #include <kernel_main.hpp>
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 #include <types/allocator.hpp>
 #include <types/elf.hpp>
 #include <types/status.h>
@@ -280,6 +281,18 @@ void _syscall_open(interrupt_stack* data)
     data->s_regs.eax = current_process->files.open(path, flags);
 }
 
+void _syscall_getcwd(interrupt_stack* data)
+{
+    char* buf = reinterpret_cast<char*>(data->s_regs.edi);
+    size_t bufsize = reinterpret_cast<size_t>(data->s_regs.esi);
+
+    // TODO: use copy_to_user
+    strncpy(buf, current_process->pwd.c_str(), bufsize);
+    buf[bufsize - 1] = 0;
+
+    SYSCALL_SET_RETURN_VAL_EAX(buf);
+}
+
 void init_syscall(void)
 {
     syscall_handlers[0] = _syscall_fork;
@@ -292,4 +305,5 @@ void init_syscall(void)
     syscall_handlers[7] = _syscall_read;
     syscall_handlers[8] = _syscall_getdents;
     syscall_handlers[9] = _syscall_open;
+    syscall_handlers[10] = _syscall_getcwd;
 }

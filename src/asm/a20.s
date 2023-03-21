@@ -1,4 +1,4 @@
-.text
+.section .text.kinit
 
 .globl check_a20_on
 .type  check_a20_on @function

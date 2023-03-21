@@ -1,4 +1,3 @@
-#include <asm/boot.h>
 #include <asm/port_io.h>
 #include <asm/sys.h>
 #include <assert.h>
@@ -20,12 +19,18 @@
 #define EMPTY_PAGE_ADDR ((pptr_t)0x0000)
 #define EMPTY_PAGE_END ((pptr_t)0x1000)
 
-#define IDENTICALLY_MAPPED_HEAP_SIZE ((size_t)0x400000)
-
 // ---------------------
 
 static size_t mem_size;
 static char mem_bitmap[1024 * 1024 / 8];
+
+// global
+segment_descriptor gdt[6];
+
+uint8_t e820_mem_map[1024];
+uint32_t e820_mem_map_count;
+uint32_t e820_mem_map_entry_size;
+struct mem_size_info mem_size_info;
 
 class brk_memory_allocator {
 public:
@@ -348,6 +353,7 @@ void dealloc_pt(pt_t pt)
     free_page(pg);
 }
 
+SECTION(".text.kinit")
 static inline void init_mem_layout(void)
 {
     mem_size = 1024 * mem_size_info.n_1k_blks;
@@ -509,6 +515,7 @@ static inline void _init_map_page_identically(page_t page)
     pt->in.page = page;
 }
 
+SECTION(".text.kinit")
 static inline void init_paging_map_low_mem_identically(void)
 {
     for (pptr_t addr = 0x01000000; addr < 0x30000000; addr += 0x1000) {
@@ -519,6 +526,7 @@ static inline void init_paging_map_low_mem_identically(void)
     }
 }
 
+SECTION(".text.kinit")
 void init_mem(void)
 {
     init_mem_layout();
@@ -545,6 +553,7 @@ void init_mem(void)
         KERNEL_HEAP_START, vptrdiff(KERNEL_HEAP_LIMIT, KERNEL_HEAP_START));
 }
 
+SECTION(".text.kinit")
 void create_segment_descriptor(
     segment_descriptor* sd,
     uint32_t base,

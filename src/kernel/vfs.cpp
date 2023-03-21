@@ -589,6 +589,7 @@ static size_t console_write(fs::special_node*, const char* buf, size_t, size_t n
     return orig_n;
 }
 
+SECTION(".text.kinit")
 void init_vfs(void)
 {
     using namespace fs;

@@ -160,6 +160,15 @@ void kernel_threadd_main(void)
 
 void NORETURN _kernel_init(void)
 {
+    // free kinit memory
+    {
+        extern char __kinit_start[];
+        extern char __kinit_end[];
+        free_n_raw_pages(
+            to_page((pptr_t)__kinit_start),
+            (__kinit_end - __kinit_start) >> 12);
+    }
+
     // pid 2 is kernel thread daemon
     auto* proc = &procs->emplace(1)->value;
 
@@ -241,6 +250,7 @@ void k_new_thread(void (*func)(void*), void* data)
     kthreadd_new_thd_data = data;
 }
 
+SECTION(".text.kinit")
 void NORETURN init_scheduler(void)
 {
     procs = types::pnew<types::kernel_allocator>(procs);

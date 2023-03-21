@@ -29,6 +29,8 @@ SECTIONS
 
         *(.rodata.kinit)
 
+        . = ALIGN(16);
+
         start_ctors = .;
         KEEP(*(.init_array));
         KEEP(*(SORT_BY_INIT_PRIORITY(.init_array*)));
@@ -73,6 +75,8 @@ SECTIONS
         __rodata_start = .;
         *(.rodata)
         *(.rodata*)
+
+        . = ALIGN(16);
 
         bss_addr = .;
         LONG(ABSOLUTE(__bss_start));

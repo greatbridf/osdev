@@ -3,6 +3,7 @@
 
 static time_t _current_ticks = 0;
 
+SECTION(".text.kinit")
 void init_pit(void)
 {
     // set interval

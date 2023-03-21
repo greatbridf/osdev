@@ -1,4 +1,3 @@
-#include <asm/boot.h>
 #include <asm/port_io.h>
 #include <asm/sys.h>
 #include <assert.h>
@@ -19,22 +18,16 @@
 #include <types/status.h>
 #include <types/types.h>
 
-#define KERNEL_MAIN_BUF_SIZE (128)
-
-#define printkf(x...)                       \
-    snprintf(buf, KERNEL_MAIN_BUF_SIZE, x); \
-    console->print(buf)
-
 typedef void (*constructor)(void);
-extern constructor start_ctors;
-extern constructor end_ctors;
-void call_constructors_for_cpp(void)
-{
-    for (constructor* ctor = &start_ctors; ctor != &end_ctors; ++ctor) {
-        (*ctor)();
-    }
-}
+extern constructor const SECTION(".rodata.kinit") start_ctors;
+extern constructor const SECTION(".rodata.kinit") end_ctors;
 
+extern struct mem_size_info SECTION(".stage1") asm_mem_size_info;
+extern uint8_t SECTION(".stage1") asm_e820_mem_map[1024];
+extern uint32_t SECTION(".stage1") asm_e820_mem_map_count;
+extern uint32_t SECTION(".stage1") asm_e820_mem_map_entry_size;
+
+SECTION(".text.kinit")
 static inline void save_loader_data(void)
 {
     memcpy(e820_mem_map, asm_e820_mem_map, sizeof(e820_mem_map));
@@ -43,50 +36,8 @@ static inline void save_loader_data(void)
     memcpy(&mem_size_info, &asm_mem_size_info, sizeof(struct mem_size_info));
 }
 
-static inline void show_mem_info(char* buf)
-{
-    uint32_t mem_size = 0;
-    mem_size += 1024 * mem_size_info.n_1k_blks;
-    mem_size += 64 * 1024 * mem_size_info.n_64k_blks;
-
-    printkf(
-        "Memory size: %d bytes (%d MB), 16k blocks: %d, 64k blocks: %d\n",
-        mem_size,
-        mem_size / 1024 / 1024,
-        (int32_t)mem_size_info.n_1k_blks,
-        (int32_t)mem_size_info.n_64k_blks);
-
-    printkf(
-        "mem_map_entry_count: %d , mem_map_entry_size: %d \n",
-        e820_mem_map_count,
-        e820_mem_map_entry_size);
-
-    if (e820_mem_map_entry_size == 20) {
-        struct e820_mem_map_entry_20* entry = (struct e820_mem_map_entry_20*)e820_mem_map;
-        for (uint32_t i = 0; i < e820_mem_map_count; ++i, ++entry) {
-            printkf(
-                "[mem] entry %d: %llx ~ %llx, type: %d\n",
-                i,
-                entry->base,
-                entry->base + entry->len,
-                entry->type);
-        }
-    } else {
-        struct e820_mem_map_entry_24* entry = (struct e820_mem_map_entry_24*)e820_mem_map;
-        for (uint32_t i = 0; i < e820_mem_map_count; ++i, ++entry) {
-            printkf(
-                "[mem] entry %d: %lld ~ %lld, type: %d, acpi_attr: %d\n",
-                i,
-                entry->in.base,
-                entry->in.base + entry->in.len,
-                entry->in.type,
-                entry->acpi_extension_attr);
-        }
-    }
-    printkf("kernel size: %x\n", kernel_size);
-}
-
-void load_new_gdt(void)
+SECTION(".text.kinit")
+static inline void load_new_gdt(void)
 {
     create_segment_descriptor(gdt + 0, 0, 0, 0, 0);
     create_segment_descriptor(gdt + 1, 0, ~0, 0b1100, SD_TYPE_CODE_SYSTEM);
@@ -101,12 +52,14 @@ void load_new_gdt(void)
     asm_cli();
 }
 
-void init_bss_section(void)
+SECTION(".text.kinit")
+static inline void init_bss_section(void)
 {
     memset(bss_addr, 0x00, bss_len);
 }
 
-int init_console(const char* name)
+SECTION(".text.kinit")
+static inline int init_console(const char* name)
 {
     if (name[0] == 't' && name[1] == 't' && name[2] == 'y') {
         if (name[3] == 'S' || name[3] == 's') {
@@ -130,7 +83,7 @@ int init_console(const char* name)
 extern void init_vfs();
 extern "C" uint32_t check_a20_on(void);
 
-extern "C" void NORETURN kernel_main(void)
+extern "C" SECTION(".text.kinit") void NORETURN kernel_main(void)
 {
     int ret;
     ret = check_a20_on();
@@ -144,12 +97,13 @@ extern "C" void NORETURN kernel_main(void)
 
     load_new_gdt();
 
+    // call global ctors
     // NOTE:
-    // the initializer of c++ global objects MUST NOT contain
+    // the initializer of global objects MUST NOT contain
     // all kinds of memory allocations
-    call_constructors_for_cpp();
-
-    char buf[KERNEL_MAIN_BUF_SIZE] = { 0 };
+    for (const constructor* ctor = &start_ctors; ctor != &end_ctors; ++ctor) {
+        (*ctor)();
+    }
 
     ret = init_serial_port(PORT_SERIAL0);
     assert(ret == GB_OK);
@@ -161,8 +115,6 @@ extern "C" void NORETURN kernel_main(void)
 
     ret = init_console("ttyS0");
     assert(ret == GB_OK);
-
-    show_mem_info(buf);
 
     init_vfs();
 

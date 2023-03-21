@@ -36,6 +36,7 @@ static inline void NORETURN die(regs_32& regs, ptr_t eip)
     freeze();
 }
 
+SECTION(".text.kinit")
 void init_idt()
 {
     asm_cli();
@@ -61,6 +62,7 @@ void init_idt()
     asm_load_idt(idt_descriptor, 0);
 }
 
+SECTION(".text.kinit")
 void init_pic(void)
 {
     asm_cli();

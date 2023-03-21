@@ -9,6 +9,14 @@ asm_switch_pd:
     movl %eax, %cr3
     ret
 
+.global current_pd
+.type   current_pd @function
+current_pd:
+    movl %cr3, %eax
+    ret
+
+.section .text.kinit
+
 .global asm_enable_paging
 .type   asm_enable_paging @function
 asm_enable_paging:
@@ -22,12 +30,6 @@ asm_enable_paging:
     orl $0x80010001, %eax
     movl %eax, %cr0
 
-    ret
-
-.global current_pd
-.type   current_pd @function
-current_pd:
-    movl %cr3, %eax
     ret
 
 .global asm_load_gdt

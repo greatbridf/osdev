@@ -4,6 +4,7 @@
 #include <types/size.h>
 
 #define PAGE_SIZE (4096)
+#define IDENTICALLY_MAPPED_HEAP_SIZE ((size_t)0x400000)
 #define KERNEL_IDENTICALLY_MAPPED_AREA_LIMIT ((void*)0x30000000)
 
 #ifdef __cplusplus
@@ -89,10 +90,11 @@ typedef union pte_t {
 } pte_t;
 typedef pte_t (*pt_t)[1024];
 
-inline uint8_t e820_mem_map[1024];
-inline uint32_t e820_mem_map_count;
-inline uint32_t e820_mem_map_entry_size;
-inline struct mem_size_info mem_size_info;
+// in mem.cpp
+extern uint8_t e820_mem_map[1024];
+extern uint32_t e820_mem_map_count;
+extern uint32_t e820_mem_map_entry_size;
+extern struct mem_size_info mem_size_info;
 
 #define KERNEL_HEAP_START ((void*)0x30000000)
 #define KERNEL_HEAP_LIMIT ((void*)0x40000000)
@@ -134,7 +136,8 @@ typedef struct segment_descriptor_struct {
     uint64_t base_high : 8;
 } segment_descriptor;
 
-inline segment_descriptor gdt[6];
+// in mem.cpp
+extern segment_descriptor gdt[6];
 
 void create_segment_descriptor(
     segment_descriptor* sd,

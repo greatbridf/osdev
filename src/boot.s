@@ -197,11 +197,6 @@ loader_halt:
 asm_gdt_descriptor:
     .word (5 * 8) - 1 # size
     .long asm_gdt_table  # address
-
-.globl asm_gdt_descriptor
-.type asm_gdt_descriptor @object
-.size asm_gdt_descriptor, (.-asm_gdt_descriptor)
-
 asm_gdt_table:
     .8byte 0         # null descriptor
 
@@ -237,26 +232,25 @@ asm_gdt_table:
     .byte 0b11001111 # flag and limit 16:20
     .byte 0x00       # base 24:31
 
+.globl asm_mem_size_info
+.type  asm_mem_size_info @object
+.size  asm_mem_size_info, (.-asm_mem_size_info)
 asm_mem_size_info:
     .word 0x12
     .word 0x34
 
-.globl asm_mem_size_info
-.type  asm_mem_size_info @object
-.size  asm_mem_size_info, (.-asm_mem_size_info)
-
-asm_e820_mem_map:
-    .space 1024
 .globl asm_e820_mem_map
 .type  asm_e820_mem_map @object
 .size  asm_e820_mem_map, (.-asm_e820_mem_map)
+asm_e820_mem_map:
+    .space 1024
 
-asm_e820_mem_map_count:
-    .long 0
 .globl asm_e820_mem_map_count
 .type  asm_e820_mem_map_count @object
-
-asm_e820_mem_map_entry_size:
+asm_e820_mem_map_count:
     .long 0
+
 .globl asm_e820_mem_map_entry_size
 .type  asm_e820_mem_map_entry_size @object
+asm_e820_mem_map_entry_size:
+    .long 0

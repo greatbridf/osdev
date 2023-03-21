@@ -291,6 +291,7 @@ void _syscall_getcwd(interrupt_stack* data)
     SYSCALL_SET_RETURN_VAL_EAX(buf);
 }
 
+SECTION(".text.kinit")
 void init_syscall(void)
 {
     syscall_handlers[0] = _syscall_fork;

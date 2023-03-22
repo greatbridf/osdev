@@ -29,7 +29,6 @@ add_subdirectory(gblibc)
 add_subdirectory(user-space-program)
 
 set(BOOTLOADER_SOURCES src/boot.s
-                       src/asm/a20.s
                        src/asm/interrupt.s
                        src/asm/port_io.s
                        src/asm/sys.s

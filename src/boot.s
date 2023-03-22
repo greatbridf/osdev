@@ -37,7 +37,7 @@ _get_memory_size_use_ax:
 
 _get_memory_size_error:
     xchgw %bx, %bx
-    jmp loader_halt
+    jmp __stage1_halt
 
 _e820_mem_map_load:
     addl $4, %esp
@@ -96,49 +96,95 @@ _load_gdt:
 .code32
 
 start_32bit:
-    movw $16, %ax
+    movw $0x10, %ax
     movw %ax, %ds
     movw %ax, %es
     movw %ax, %fs
     movw %ax, %gs
     movw %ax, %ss
 
-# set up early stack at 0x001000000
-    movl $0x01000000, %ebp
-    movl $0x01000000, %esp
+# set up temporary stack
+    movl $0x7df0, %esp
+    movl $0x7df0, %ebp
+    movl $0x0, (%esp)
+    movl $0x0, 4(%esp)
 
 setup_early_kernel_page_table:
-# set up early kernel page table
-
-# the early kernel page directory is located at physical
-# address 0x00001000, size 4k, and the empty page is at
-# 0x0000-0x0fff, so we fill the first 6KiB
+# memory map:
+# 0x0000-0x1000: empty page
+# 0x1000-0x2000: early kernel pd
+# 0x2000-0x5000: 3 pts
+# 0x5000-0x7000: early kernel stack
+# so we fill the first 7KiB with zero
     movl $0x00000000, %eax
-    movl $0x6000, %ecx
+    movl $0x7000, %ecx
     call _fill_zero
 
-# map the first 16MiB identically
-# 0x1000-0x1fff: early kernel pd
-# 0x2000-0x5fff: pde 0 - 4
+# pt#0: 0x00000000 to 0x00400000
     movl $0x00001000, %eax
-    movl $0x00002003, %ebx
-_fill_pde_loop:
-    movl %ebx, (%eax)
-    addl $4, %eax
+    movl $0x00002003, (%eax)
+# pt#1: 0xc0000000 to 0xc0400000
+    movl $0x00001c00, %eax
+    movl $0x00003003, (%eax)
+# pt#2: 0xffc00000 to 0xffffffff
+    movl $0x00001ffc, %eax
+    movl $0x00004003, (%eax)
+
+# map early kernel page directory identically
+    movl $0x00002004, %eax
+    movl $0x00001003, (%eax)
+
+# map __stage1_start ---- __kinit_end identically
+    movl $__stage1_start, %ebx
+    shrl $12, %ebx
+    movl %ebx, %edx
+    andl $0x3ff, %edx
+    shll $12, %ebx
+
+    movl $__kinit_end, %ecx
+    addl $0xfff, %ecx
+    shrl $12, %ecx
+    shll $12, %ecx
+
+__map_stage1_kinit:
+    leal 3(%ebx), %eax
+    movl %eax, 0x00002000(, %edx, 4)
     addl $0x1000, %ebx
-    cmpl $0x6003, %ebx
-    jne _fill_pde_loop
+    incl %edx
+    cmpl %ebx, %ecx
+    jne __map_stage1_kinit
 
-# then, create page tables
-    movl $0x00000003, %eax
-    movl $0x00002000, %ecx
+# map __text_start ---- __bss_end to 0xc0000000
+    movl %ecx, %ebx
+    movl $__text_start, %edx
+    shrl $12, %edx
+    andl $0x3ff, %edx
 
-_create_page_table_loop1:
-    movl %eax, (%ecx)
-    addl $4, %ecx
-    addl $0x1000, %eax
-    cmpl $0x5ffc, %ecx
-    jle _create_page_table_loop1
+    movl $__bss_end, %ecx
+    subl $__text_start, %ecx
+    addl %ebx, %ecx
+
+__map_kernel_space:
+    leal 3(%ebx), %eax
+    movl %eax, 0x00003000(, %edx, 4)
+    addl $0x1000, %ebx
+    incl %edx
+    cmpl %ebx, %ecx
+    jne __map_kernel_space
+
+# map kernel stack 0xffffe000-0xffffffff
+    movl $0x5000, %ebx
+    movl $0x7000, %ecx
+    movl $0x0ffffe, %edx
+    andl $0x3ff, %edx
+
+__map_kernel_stack:
+    leal 3(%ebx), %eax
+    movl %eax, 0x00004000(, %edx, 4)
+    addl $0x1000, %ebx
+    incl %edx
+    cmpl %ebx, %ecx
+    jne __map_kernel_stack
 
 load_early_kernel_page_table:
     movl $0x00001000, %eax
@@ -149,50 +195,33 @@ load_early_kernel_page_table:
     orl $0x80010001, %eax
     movl %eax, %cr0
 
-    jmp start_move_kernel
+# set stack pointer and clear stack bottom
+    movl $0xfffffff0, %esp
+    movl $0xfffffff0, %ebp
+
+    movl $0x00, (%esp)
+    movl $0x00, 4(%esp)
+    movl $0x00, 8(%esp)
+    movl $0x00, 12(%esp)
+
+    call kernel_init
+
+__stage1_halt:
+    hlt
+    jmp __stage1_halt
 
 # quick call
 # %eax: address to fill
 # %ecx: byte count to fill
 _fill_zero:
-    movl %ecx, -4(%esp)
-    movl %eax, -8(%esp)
-
-_fill_zero_loop:
     cmpl $0, %ecx
     jz _fill_zero_end
     subl $4, %ecx
     movl $0, (%eax)
     addl $4, %eax
-    jmp _fill_zero_loop
-
+    jmp _fill_zero
 _fill_zero_end:
-    movl -8(%esp), %eax
-    movl -4(%esp), %ecx
     ret
-
-start_move_kernel:
-# move the kernel to 0x100000
-    movl $__stage1_end, %eax
-    movl $__kinit_start, %ebx
-
-    movl $__data_end, %ecx
-    subl $__kinit_start, %ecx
-
-_move_kernel:
-    movl (%eax), %edx
-    movl %edx, (%ebx)
-    addl $4, %eax
-    addl $4, %ebx
-    subl $4, %ecx
-    cmpl $0, %ecx
-    jge _move_kernel
-
-    call kernel_main
-
-loader_halt:
-    hlt
-    jmp loader_halt
 
 asm_gdt_descriptor:
     .word (5 * 8) - 1 # size

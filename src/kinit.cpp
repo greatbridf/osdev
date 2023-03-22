@@ -81,14 +81,9 @@ static inline int init_console(const char* name)
 }
 
 extern void init_vfs();
-extern "C" uint32_t check_a20_on(void);
 
-extern "C" SECTION(".text.kinit") void NORETURN kernel_main(void)
+extern "C" SECTION(".text.kinit") void NORETURN kernel_init(void)
 {
-    int ret;
-    ret = check_a20_on();
-    assert(ret == 1);
-
     asm_enable_sse();
 
     init_bss_section();
@@ -105,7 +100,7 @@ extern "C" SECTION(".text.kinit") void NORETURN kernel_main(void)
         (*ctor)();
     }
 
-    ret = init_serial_port(PORT_SERIAL0);
+    int ret = init_serial_port(PORT_SERIAL0);
     assert(ret == GB_OK);
 
     init_idt();

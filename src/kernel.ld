@@ -17,7 +17,7 @@ SECTIONS
         __stage1_end = .;
     } > MEM
 
-    .kinit 0x100000 :
+    .kinit :
         AT(LOADADDR(.stage1) + SIZEOF(.stage1))
     {
         __kinit_start = .;
@@ -58,7 +58,7 @@ SECTIONS
         __kinit_end = .;
     } > MEM
 
-    .text :
+    .text 0xc0000000 :
         AT(LOADADDR(.kinit) + SIZEOF(.kinit))
     {
         __text_start = .;
@@ -102,7 +102,7 @@ SECTIONS
         __data_end = .;
     } > MEM
 
-    .bss ALIGN(0x1000) :
+    .bss :
     {
         __bss_start = .;
         *(.bss)

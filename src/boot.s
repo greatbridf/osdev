@@ -103,22 +103,27 @@ start_32bit:
     movw %ax, %gs
     movw %ax, %ss
 
-# set up temporary stack
-    movl $0x7df0, %esp
-    movl $0x7df0, %ebp
-    movl $0x0, (%esp)
-    movl $0x0, 4(%esp)
+    movl $0, %esp
+    movl $0, %ebp
 
 setup_early_kernel_page_table:
 # memory map:
 # 0x0000-0x1000: empty page
 # 0x1000-0x2000: early kernel pd
-# 0x2000-0x5000: 3 pts
-# 0x5000-0x7000: early kernel stack
-# so we fill the first 7KiB with zero
+# 0x2000-0x6000: 4 pts
+# 0x6000-0x8000: early kernel stack
+# so we fill the first 8KiB with zero
     movl $0x00000000, %eax
-    movl $0x7000, %ecx
-    call _fill_zero
+    movl $0x8000, %ecx
+
+_fill_zero:
+    cmpl $0, %ecx
+    jz _fill_zero_end
+    subl $4, %ecx
+    movl $0, (%eax)
+    addl $4, %eax
+    jmp _fill_zero
+_fill_zero_end:
 
 # pt#0: 0x00000000 to 0x00400000
     movl $0x00001000, %eax
@@ -126,25 +131,28 @@ setup_early_kernel_page_table:
 # pt#1: 0xc0000000 to 0xc0400000
     movl $0x00001c00, %eax
     movl $0x00003003, (%eax)
-# pt#2: 0xffc00000 to 0xffffffff
-    movl $0x00001ffc, %eax
+# pt#2: 0xff000000 to 0xff400000
+    movl $0x00001ff0, %eax
     movl $0x00004003, (%eax)
+# pt#3: 0xffc00000 to 0xffffffff
+    movl $0x00001ffc, %eax
+    movl $0x00005003, (%eax)
 
-# map early kernel page directory identically
-    movl $0x00002004, %eax
+# map early kernel page directory to 0xff000000
+    movl $0x00004000, %eax
     movl $0x00001003, (%eax)
+
+# map kernel pt#2 to 0xff001000
+    movl $0x00004004, %eax
+    movl $0x00004003, (%eax)
 
 # map __stage1_start ---- __kinit_end identically
     movl $__stage1_start, %ebx
-    shrl $12, %ebx
-    movl %ebx, %edx
-    andl $0x3ff, %edx
-    shll $12, %ebx
-
     movl $__kinit_end, %ecx
-    addl $0xfff, %ecx
-    shrl $12, %ecx
-    shll $12, %ecx
+    movl %ebx, %edx
+    shrl $12, %edx
+    andl $0x3ff, %edx
+
 
 __map_stage1_kinit:
     leal 3(%ebx), %eax
@@ -154,13 +162,13 @@ __map_stage1_kinit:
     cmpl %ebx, %ecx
     jne __map_stage1_kinit
 
-# map __text_start ---- __bss_end to 0xc0000000
+# map __text_start ---- __data_end to 0xc0000000
     movl %ecx, %ebx
     movl $__text_start, %edx
     shrl $12, %edx
     andl $0x3ff, %edx
 
-    movl $__bss_end, %ecx
+    movl $__data_end, %ecx
     subl $__text_start, %ecx
     addl %ebx, %ecx
 
@@ -172,15 +180,29 @@ __map_kernel_space:
     cmpl %ebx, %ecx
     jne __map_kernel_space
 
+# map __data_end ---- __bss_end from 0x100000
+    movl $0x100000, %ebx
+    movl $__bss_end, %ecx
+    subl $__data_end, %ecx
+    addl %ebx, %ecx
+
+__map_kernel_bss:
+    leal 3(%ebx), %eax
+    movl %eax, 0x00003000(, %edx, 4)
+    addl $0x1000, %ebx
+    incl %edx
+    cmpl %ebx, %ecx
+    jne __map_kernel_bss
+
 # map kernel stack 0xffffe000-0xffffffff
-    movl $0x5000, %ebx
-    movl $0x7000, %ecx
+    movl $0x6000, %ebx
+    movl $0x8000, %ecx
     movl $0x0ffffe, %edx
     andl $0x3ff, %edx
 
 __map_kernel_stack:
     leal 3(%ebx), %eax
-    movl %eax, 0x00004000(, %edx, 4)
+    movl %eax, 0x00005000(, %edx, 4)
     addl $0x1000, %ebx
     incl %edx
     cmpl %ebx, %ecx
@@ -209,19 +231,6 @@ load_early_kernel_page_table:
 __stage1_halt:
     hlt
     jmp __stage1_halt
-
-# quick call
-# %eax: address to fill
-# %ecx: byte count to fill
-_fill_zero:
-    cmpl $0, %ecx
-    jz _fill_zero_end
-    subl $4, %ecx
-    movl $0, (%eax)
-    addl $4, %eax
-    jmp _fill_zero
-_fill_zero_end:
-    ret
 
 asm_gdt_descriptor:
     .word (5 * 8) - 1 # size

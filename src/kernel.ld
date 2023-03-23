@@ -8,12 +8,12 @@ MEMORY
 
 SECTIONS
 {
-    .stage1 0x7e00 : AT(0x00000000)
+    .stage1 0x8000 : AT(0x00000000)
     {
         __stage1_start = .;
         *(.stage1)
 
-        . = ALIGN(0x100);
+        . = ALIGN(0x1000);
         __stage1_end = .;
     } > MEM
 

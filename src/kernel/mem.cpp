@@ -337,7 +337,7 @@ void init_mem(void)
     init_mem_layout();
 
     // TODO: replace early kernel pd
-    kernel_mms = types::pnew<types::kernel_ident_allocator>(kernel_mms, 0x00001);
+    kernel_mms = types::pnew<types::kernel_ident_allocator>(kernel_mms, EARLY_KERNEL_PD_PAGE);
     auto heap_mm = kernel_mms->addarea(KERNEL_HEAP_START, true, true);
 
     // create empty_page struct

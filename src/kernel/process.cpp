@@ -204,16 +204,6 @@ void kernel_threadd_main(void)
 
 void NORETURN _kernel_init(void)
 {
-    // TODO: free kinit memory
-    //       we should do this before we create any process
-    //       or processes should share kernel space pt
-    // {
-    //     extern char __kinit_start[];
-    //     extern char __kinit_end[];
-    //     auto iter = kernel_mms->find(__kinit_start);
-    //     kernel_mms->unmap(iter);
-    // }
-
     // pid 2 is kernel thread daemon
     auto* proc = &procs->emplace(1)->value;
 
@@ -295,9 +285,27 @@ void k_new_thread(void (*func)(void*), void* data)
     kthreadd_new_thd_data = data;
 }
 
-SECTION(".text.kinit")
 void NORETURN init_scheduler(void)
 {
+    {
+        extern char __stage1_start[];
+        extern char __kinit_end[];
+
+        kernel::paccess pa(EARLY_KERNEL_PD_PAGE);
+        auto pd = (pd_t)pa.ptr();
+        assert(pd);
+        (*pd)[0].v = 0;
+
+        // free pt#0
+        __free_raw_page(0x00002);
+
+        // free .stage1 and .kinit
+        for (uint32_t i = ((uint32_t)__stage1_start >> 12);
+             i < ((uint32_t)__kinit_end >> 12); ++i) {
+            __free_raw_page(i);
+        }
+    }
+
     procs = new proclist;
     readythds = new readyqueue;
 

@@ -107,16 +107,10 @@ constexpr void free_addr_range(pptr_t start, pptr_t end)
 page_t __alloc_raw_page(void)
 {
     for (size_t i = 0; i < sizeof(mem_bitmap); ++i) {
-        if (mem_bitmap[i] == 0xff)
-            continue;
-
-        if (mem_bitmap[i] == (uint8_t)0xff) {
-            bm_set(mem_bitmap, i << 3);
-            return i << 3;
+        if (bm_test(mem_bitmap, i) == 0) {
+            bm_set(mem_bitmap, i);
+            return i;
         }
-
-        bm_set(mem_bitmap, (i << 3) + __builtin_ctz(~mem_bitmap[i]));
-        return (i << 3) + __builtin_ctz(~mem_bitmap[i]);
     }
     return -1;
 }

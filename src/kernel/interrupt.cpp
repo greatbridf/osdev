@@ -13,7 +13,6 @@
 #include <kernel/syscall.hpp>
 #include <kernel/vfs.hpp>
 #include <kernel/vga.hpp>
-#include <kernel_main.hpp>
 #include <stdint.h>
 #include <stdio.h>
 #include <types/size.h>
@@ -37,6 +36,7 @@ static inline void NORETURN die(regs_32& regs, ptr_t eip)
     freeze();
 }
 
+SECTION(".text.kinit")
 void init_idt()
 {
     asm_cli();
@@ -62,6 +62,7 @@ void init_idt()
     asm_load_idt(idt_descriptor, 0);
 }
 
+SECTION(".text.kinit")
 void init_pic(void)
 {
     asm_cli();
@@ -183,8 +184,11 @@ extern "C" void int14_handler(int14_data* d)
     if (unlikely(d->error_code.user && mm_area->attr.in.system))
         _int14_kill_user();
 
-    pte_t* pte = to_pte(mms->m_pd, d->l_addr);
-    page* page = lto_page(&mm_area, d->l_addr);
+    page* page = &mm_area->pgs->at(vptrdiff(d->l_addr, mm_area->start) / PAGE_SIZE);
+    kernel::paccess pa(page->pg_pteidx >> 12);
+    auto pt = (pt_t)pa.ptr();
+    assert(pt);
+    pte_t* pte = *pt + (page->pg_pteidx & 0xfff);
 
     if (unlikely(d->error_code.present == 0 && !mm_area->mapped_file))
         _int14_panic(d->v_eip, d->l_addr, d->error_code);
@@ -199,14 +203,17 @@ extern "C" void int14_handler(int14_data* d)
             return;
         }
         // duplicate the page
-        page_t new_page = alloc_raw_page();
+        page_t new_page = __alloc_raw_page();
 
         // memory mapped
         if (d->error_code.present == 0)
             pte->in.p = 1;
 
-        char* new_page_data = (char*)to_vp(new_page);
-        memcpy(new_page_data, to_vp(page->phys_page_id), PAGE_SIZE);
+        kernel::paccess pdst(new_page), psrc(page->phys_page_id);
+        auto* new_page_data = (char*)pdst.ptr();
+        auto* src = psrc.ptr();
+        assert(new_page_data && src);
+        memcpy(new_page_data, src, PAGE_SIZE);
 
         pte->in.page = new_page;
         pte->in.rw = mm_area->attr.in.write;
@@ -214,8 +221,7 @@ extern "C" void int14_handler(int14_data* d)
 
         --*page->ref_count;
 
-        page->ref_count = (size_t*)ki_malloc(sizeof(size_t));
-        *page->ref_count = 1;
+        page->ref_count = types::pnew<types::kernel_ident_allocator>(page->ref_count, 1);
         page->attr.in.cow = 0;
         page->phys_page_id = new_page;
 

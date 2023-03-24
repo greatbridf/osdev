@@ -53,8 +53,10 @@ fs::vfs::dentry::dentry(dentry&& val)
     , flags { val.flags }
     , name(types::move(val.name))
 {
-    for (auto& item : *children)
-        item.parent = this;
+    if (children) {
+        for (auto& item : *children)
+            item.parent = this;
+    }
     memset(&val, 0x00, sizeof(dentry));
 }
 fs::vfs::dentry::~dentry()
@@ -589,6 +591,7 @@ static size_t console_write(fs::special_node*, const char* buf, size_t, size_t n
     return orig_n;
 }
 
+SECTION(".text.kinit")
 void init_vfs(void)
 {
     using namespace fs;
@@ -600,7 +603,7 @@ void init_vfs(void)
 
     fs_es = types::pnew<types::kernel_ident_allocator>(fs_es);
 
-    auto* rootfs = types::_new<types::kernel_allocator, tmpfs>();
+    auto* rootfs = new tmpfs;
     fs_es->push_back(rootfs);
     fs_root = rootfs->root();
 

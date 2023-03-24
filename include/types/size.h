@@ -19,4 +19,4 @@ typedef int64_t diff_t;
 #endif
 
 typedef ptr_t pptr_t;
-typedef size_t page_t;
+typedef ssize_t page_t;

@@ -182,18 +182,6 @@ irq15:
     popal
     iret
 
-.globl asm_load_idt
-.type  asm_load_idt @function
-asm_load_idt:
-    movl 4(%esp), %edx
-    lidt (%edx)
-    movl 8(%esp), %edx
-    cmpl $0, %edx
-    je asm_load_idt_skip
-    sti
-asm_load_idt_skip:
-    ret
-
 .globl syscall_stub
 .type  syscall_stub @function
 syscall_stub:
@@ -250,4 +238,18 @@ asm_ctx_switch:
     ret
 
 _ctx_switch_return:
+    ret
+
+.section .text.kinit
+
+.globl asm_load_idt
+.type  asm_load_idt @function
+asm_load_idt:
+    movl 4(%esp), %edx
+    lidt (%edx)
+    movl 8(%esp), %edx
+    cmpl $0, %edx
+    je asm_load_idt_skip
+    sti
+asm_load_idt_skip:
     ret

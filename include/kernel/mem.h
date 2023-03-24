@@ -3,8 +3,7 @@
 #include <stdint.h>
 #include <types/size.h>
 
-#define PAGE_SIZE (4096)
-#define KERNEL_IDENTICALLY_MAPPED_AREA_LIMIT ((void*)0x30000000)
+#define PAGE_SIZE (0x1000)
 
 #ifdef __cplusplus
 extern "C" {
@@ -89,25 +88,16 @@ typedef union pte_t {
 } pte_t;
 typedef pte_t (*pt_t)[1024];
 
-// in kernel_main.c
+// in mem.cpp
 extern uint8_t e820_mem_map[1024];
 extern uint32_t e820_mem_map_count;
 extern uint32_t e820_mem_map_entry_size;
-extern size_t kernel_size;
 extern struct mem_size_info mem_size_info;
 
-#define KERNEL_HEAP_START ((void*)0x30000000)
-#define KERNEL_HEAP_LIMIT ((void*)0x40000000)
+#define KERNEL_HEAP_START ((void*)0xd0000000)
+#define KERNEL_HEAP_LIMIT ((void*)0xd4000000)
 
-void* k_malloc(size_t size);
-
-void k_free(void* ptr);
-
-void* ki_malloc(size_t size);
-
-void ki_free(void* ptr);
-
-#define KERNEL_PAGE_DIRECTORY_ADDR ((pd_t)0x00001000)
+#define EARLY_KERNEL_PD_PAGE ((page_t)0x000001)
 
 void init_mem(void);
 
@@ -135,6 +125,9 @@ typedef struct segment_descriptor_struct {
     uint64_t flags : 4;
     uint64_t base_high : 8;
 } segment_descriptor;
+
+// in mem.cpp
+extern segment_descriptor gdt[6];
 
 void create_segment_descriptor(
     segment_descriptor* sd,

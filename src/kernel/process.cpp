@@ -9,10 +9,10 @@
 #include <kernel/mm.hpp>
 #include <kernel/process.hpp>
 #include <kernel/vfs.hpp>
-#include <kernel_main.hpp>
 #include <stdint.h>
 #include <stdio.h>
 #include <types/allocator.hpp>
+#include <types/bitmap.h>
 #include <types/cplusplus.hpp>
 #include <types/elf.hpp>
 #include <types/hash_map.hpp>
@@ -45,6 +45,49 @@ struct no_irq_guard {
 
 } // namespace kernel
 
+namespace __thd {
+inline uint8_t __kstack_bmp[(0x1000000 - 0xc00000) / 0x2000 / 8];
+inline int __allocated;
+} // namespace __thd
+
+void thread::alloc_kstack(void)
+{
+    for (int i = 0; i < __thd::__allocated; ++i) {
+        if (bm_test(__thd::__kstack_bmp, i) == 0) {
+            pkstack = 0xffc00000 + THREAD_KERNEL_STACK_SIZE * (i + 1);
+            esp = reinterpret_cast<uint32_t*>(pkstack);
+
+            bm_set(__thd::__kstack_bmp, i);
+            return;
+        }
+    }
+
+    // kernel stack pt is at page#0x00005
+    kernel::paccess pa(0x00005);
+    auto pt = (pt_t)pa.ptr();
+    assert(pt);
+    pte_t* pte = *pt + __thd::__allocated * 2;
+
+    pte[0].v = 0x3;
+    pte[0].in.page = __alloc_raw_page();
+    pte[1].v = 0x3;
+    pte[1].in.page = __alloc_raw_page();
+
+    pkstack = 0xffc00000 + THREAD_KERNEL_STACK_SIZE * (__thd::__allocated + 1);
+    esp = reinterpret_cast<uint32_t*>(pkstack);
+
+    bm_set(__thd::__kstack_bmp, __thd::__allocated);
+    ++__thd::__allocated;
+}
+
+void thread::free_kstack(uint32_t p)
+{
+    p -= 0xffc00000;
+    p /= THREAD_KERNEL_STACK_SIZE;
+    p -= 1;
+    bm_clear(__thd::__kstack_bmp, p);
+}
+
 process::process(process&& val)
     : mms(types::move(val.mms))
     , thds { types::move(val.thds), this }
@@ -68,7 +111,7 @@ process::process(const process& parent)
     : process { parent.pid, parent.is_system(), types::string<>(parent.pwd) }
 {
     for (auto& area : parent.mms) {
-        if (area.is_ident())
+        if (area.is_kernel_space() || area.attr.in.system)
             continue;
 
         mms.mirror_area(area);
@@ -193,7 +236,7 @@ void NORETURN _kernel_init(void)
     // TODO: parse kernel parameters
     auto* drive = fs::vfs_open("/dev/hda1");
     assert(drive);
-    auto* _new_fs = fs::register_fs(types::_new<types::kernel_allocator, fs::fat::fat32>(drive->ind));
+    auto* _new_fs = fs::register_fs(new fs::fat::fat32(drive->ind));
     auto* mnt = fs::vfs_open("/mnt");
     assert(mnt);
     int ret = fs::fs_root->ind->fs->mount(mnt, _new_fs);
@@ -244,8 +287,27 @@ void k_new_thread(void (*func)(void*), void* data)
 
 void NORETURN init_scheduler(void)
 {
-    procs = types::pnew<types::kernel_allocator>(procs);
-    readythds = types::pnew<types::kernel_allocator>(readythds);
+    {
+        extern char __stage1_start[];
+        extern char __kinit_end[];
+
+        kernel::paccess pa(EARLY_KERNEL_PD_PAGE);
+        auto pd = (pd_t)pa.ptr();
+        assert(pd);
+        (*pd)[0].v = 0;
+
+        // free pt#0
+        __free_raw_page(0x00002);
+
+        // free .stage1 and .kinit
+        for (uint32_t i = ((uint32_t)__stage1_start >> 12);
+             i < ((uint32_t)__kinit_end >> 12); ++i) {
+            __free_raw_page(i);
+        }
+    }
+
+    procs = new proclist;
+    readythds = new readyqueue;
 
     process::filearr::init_global_file_container();
 
@@ -262,7 +324,7 @@ void NORETURN init_scheduler(void)
     readythds->push(current_thread);
 
     tss.ss0 = KERNEL_DATA_SEGMENT;
-    tss.esp0 = current_thread->kstack;
+    tss.esp0 = current_thread->pkstack;
 
     asm_switch_pd(current_process->mms.m_pd);
 
@@ -312,7 +374,7 @@ void schedule()
     auto* curr_thd = current_thread;
 
     current_thread = thd;
-    tss.esp0 = current_thread->kstack;
+    tss.esp0 = current_thread->pkstack;
 
     asm_ctx_switch(&curr_thd->esp, thd->esp);
 }

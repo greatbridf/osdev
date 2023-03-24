@@ -31,6 +31,8 @@ inline thread* volatile current_thread;
 inline proclist* procs;
 inline readyqueue* readythds;
 
+inline tss32_t tss;
+
 struct process_attr {
     uint16_t system : 1;
     uint16_t zombie : 1 = 0;
@@ -44,17 +46,12 @@ struct thread_attr {
 
 struct thread {
 private:
-    inline void alloc_kstack(void)
-    {
-        // TODO: alloc low mem
-        kstack = to_pp(alloc_n_raw_pages(2));
-        kstack += THREAD_KERNEL_STACK_SIZE;
-        esp = reinterpret_cast<uint32_t*>(kstack);
-    }
+    void alloc_kstack(void);
+    void free_kstack(uint32_t p);
 
 public:
     uint32_t* esp;
-    pptr_t kstack;
+    uint32_t pkstack;
     process* owner;
     thread_attr attr;
 
@@ -71,13 +68,13 @@ public:
 
     constexpr thread(thread&& val)
         : esp { val.esp }
-        , kstack { val.kstack }
+        , pkstack { val.pkstack }
         , owner { val.owner }
         , attr { val.attr }
     {
         val.attr = {};
         val.esp = 0;
-        val.kstack = 0;
+        val.pkstack = 0;
         val.owner = nullptr;
     }
 
@@ -96,8 +93,8 @@ public:
 
     constexpr ~thread()
     {
-        if (kstack)
-            free_n_raw_pages(to_page(kstack - THREAD_KERNEL_STACK_SIZE), 2);
+        if (pkstack)
+            free_kstack(pkstack);
     }
 };
 
@@ -122,9 +119,7 @@ public:
             thd.owner = new_parent;
     }
 
-    explicit constexpr thdlist(void)
-    {
-    }
+    explicit constexpr thdlist(void) = default;
 
     // implementation is below
     constexpr ~thdlist();
@@ -161,7 +156,7 @@ public:
     public:
         inline static void init_global_file_container(void)
         {
-            files = types::pnew<types::kernel_allocator>(files);
+            files = new container_type;
         }
 
     private:

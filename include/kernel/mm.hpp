@@ -20,8 +20,10 @@ constexpr size_t THREAD_KERNEL_STACK_SIZE = 2 * PAGE_SIZE;
 
 struct page {
     page_t phys_page_id;
-    pte_t* pte;
     size_t* ref_count;
+    // 0 :11 : pte_index
+    // 12:31 : pt_page
+    uint32_t pg_pteidx;
     union {
         uint32_t v;
         struct {
@@ -45,17 +47,6 @@ int mmap(
     int priv);
 
 using page_arr = types::vector<page, types::kernel_ident_allocator>;
-
-// allocate n raw page(s)
-// @return the id of the first page allocated
-page_t alloc_n_raw_pages(size_t n);
-void free_n_raw_pages(page_t start_pg, size_t n);
-
-pd_t alloc_pd(void);
-pt_t alloc_pt(void);
-
-void dealloc_pd(pd_t pd);
-void dealloc_pt(pt_t pt);
 
 // forward declaration
 namespace kernel {
@@ -86,6 +77,17 @@ inline constexpr uint32_t align_up(uint32_t v)
     return align_down<n>(v + pow<2, n>() - 1);
 }
 
+void dealloc_pd(page_t pd);
+
+// allocate a struct page together with the raw page
+page allocate_page(void);
+void free_page(page* pg);
+
+// TODO: this is for alloc_kstack()
+// CHANGE THIS
+page_t __alloc_raw_page(void);
+void __free_raw_page(page_t pg);
+
 struct mm {
 public:
     void* start;
@@ -108,9 +110,9 @@ public:
         return (char*)this->start + this->pgs->size() * PAGE_SIZE;
     }
 
-    inline bool is_ident(void) const
+    inline bool is_kernel_space(void) const
     {
-        return this->end() <= (void*)0x40000000U;
+        return this->start >= (void*)0xc0000000;
     }
 
     constexpr bool is_avail(void* start, void* end) const
@@ -126,6 +128,34 @@ public:
 
 namespace kernel {
 
+uint8_t* pmap(page_t pg);
+void pfree(page_t pg);
+
+class paccess : public types::non_copyable {
+private:
+    page_t m_pg;
+    void* m_ptr;
+
+public:
+    paccess(void) = delete;
+    paccess(paccess&&) = delete;
+    paccess& operator=(paccess&&) = delete;
+
+    constexpr explicit paccess(page_t pg)
+        : m_pg(pg)
+    {
+        m_ptr = pmap(pg);
+    }
+    constexpr void* ptr(void) const
+    {
+        return m_ptr;
+    }
+    ~paccess()
+    {
+        pfree(m_pg);
+    }
+};
+
 class mm_list {
 public:
     using list_type = ::types::list<mm, types::kernel_ident_allocator>;
@@ -136,10 +166,10 @@ private:
     list_type m_areas;
 
 public:
-    pd_t m_pd;
+    page_t m_pd;
 
 public:
-    explicit constexpr mm_list(pd_t pd)
+    explicit constexpr mm_list(page_t pd)
         : m_pd(pd)
     {
     }
@@ -148,7 +178,7 @@ public:
         : m_areas(::types::move(v.m_areas))
         , m_pd(v.m_pd)
     {
-        v.m_pd = nullptr;
+        v.m_pd = 0;
     }
     ~mm_list()
     {
@@ -203,7 +233,7 @@ public:
     constexpr void clear_user()
     {
         for (auto iter = this->begin(); iter != this->end();) {
-            if (iter->is_ident()) {
+            if (iter->is_kernel_space()) {
                 ++iter;
                 continue;
             }
@@ -237,7 +267,7 @@ public:
         return GB_OK;
     }
 
-    constexpr void unmap(iterator_type area)
+    inline void unmap(iterator_type area)
     {
         int i = 0;
 
@@ -247,16 +277,13 @@ public:
         // bool should_invlpg = (area->pgs->size() > 4);
 
         for (auto& pg : *area->pgs) {
-            if (*pg.ref_count == 1) {
-                ki_free(pg.ref_count);
-                free_n_raw_pages(pg.phys_page_id, 1);
-            } else {
-                --*pg.ref_count;
-            }
+            kernel::paccess pa(pg.pg_pteidx >> 12);
+            auto pt = (pt_t)pa.ptr();
+            assert(pt);
+            auto* pte = *pt + (pg.pg_pteidx & 0xfff);
+            pte->v = 0;
 
-            pg.phys_page_id = 0;
-            pg.attr.v = 0;
-            pg.pte->v = 0;
+            free_page(&pg);
 
             invalidate_tlb((uint32_t)area->start + (i++) * PAGE_SIZE);
         }
@@ -295,88 +322,76 @@ inline kernel::mm_list* kernel_mms;
 inline page empty_page;
 // --------------------------------
 
-// translate physical address to virtual(mapped) address
-void* ptovp(pptr_t p_ptr);
-
 inline constexpr size_t vptrdiff(void* p1, void* p2)
 {
     return (uint8_t*)p1 - (uint8_t*)p2;
 }
-inline constexpr page* lto_page(mm* mm_area, void* l_ptr)
+// inline constexpr page* lto_page(mm* mm_area, void* l_ptr)
+// {
+//     size_t offset = vptrdiff(l_ptr, mm_area->start);
+//     return &mm_area->pgs->at(offset / PAGE_SIZE);
+// }
+// inline constexpr page_t to_page(pptr_t ptr)
+// {
+//     return ptr >> 12;
+// }
+// inline constexpr size_t to_pdi(page_t pg)
+// {
+//     return pg >> 10;
+// }
+// inline constexpr size_t to_pti(page_t pg)
+// {
+//     return pg & (1024 - 1);
+// }
+// inline constexpr pptr_t to_pp(page_t p)
+// {
+//     return p << 12;
+// }
+inline size_t v_to_pdi(void* addr)
 {
-    size_t offset = vptrdiff(l_ptr, mm_area->start);
-    return &mm_area->pgs->at(offset / PAGE_SIZE);
+    return (uint32_t)addr >> 22;
 }
-inline constexpr page_t to_page(pptr_t ptr)
+inline size_t v_to_pti(void* addr)
 {
-    return ptr >> 12;
+    return ((uint32_t)addr >> 12) & 0x3ff;
 }
-inline constexpr size_t to_pdi(page_t pg)
-{
-    return pg >> 10;
-}
-inline constexpr size_t to_pti(page_t pg)
-{
-    return pg & (1024 - 1);
-}
-inline constexpr pptr_t to_pp(page_t p)
-{
-    return p << 12;
-}
-inline constexpr size_t lto_pdi(pptr_t ptr)
-{
-    return to_pdi(to_page(ptr));
-}
-inline constexpr size_t lto_pti(pptr_t ptr)
-{
-    return to_pti(to_page(ptr));
-}
-inline constexpr pte_t* to_pte(pt_t pt, page_t pg)
-{
-    return *pt + to_pti(pg);
-}
-inline void* to_vp(page_t pg)
-{
-    return ptovp(to_pp(pg));
-}
-inline pd_t to_pd(page_t pg)
-{
-    return reinterpret_cast<pd_t>(to_vp(pg));
-}
-inline pt_t to_pt(page_t pg)
-{
-    return reinterpret_cast<pt_t>(to_vp(pg));
-}
-inline pt_t to_pt(pde_t* pde)
-{
-    return to_pt(pde->in.pt_page);
-}
-inline pde_t* to_pde(pd_t pd, void* addr)
-{
-    return *pd + lto_pdi((pptr_t)addr);
-}
-inline pte_t* to_pte(pt_t pt, void* addr)
-{
-    return *pt + lto_pti((pptr_t)addr);
-}
-inline pte_t* to_pte(pde_t* pde, void* addr)
-{
-    return to_pte(to_pt(pde), addr);
-}
-inline pte_t* to_pte(pd_t pd, void* addr)
-{
-    return to_pte(to_pde(pd, addr), addr);
-}
-inline pte_t* to_pte(pde_t* pde, page_t pg)
-{
-    return to_pte(to_pt(pde), pg);
-}
-
-// allocate a raw page
-inline page_t alloc_raw_page(void)
-{
-    return alloc_n_raw_pages(1);
-}
-
-// allocate a struct page together with the raw page
-struct page allocate_page(void);
+// inline constexpr pte_t* to_pte(pt_t pt, page_t pg)
+// {
+//     return *pt + to_pti(pg);
+// }
+// inline void* to_vp(page_t pg)
+// {
+//     return ptovp(to_pp(pg));
+// }
+// inline pd_t to_pd(page_t pg)
+// {
+//     return reinterpret_cast<pd_t>(to_vp(pg));
+// }
+// inline pt_t to_pt(page_t pg)
+// {
+//     return reinterpret_cast<pt_t>(to_vp(pg));
+// }
+// inline pt_t to_pt(pde_t* pde)
+// {
+//     return to_pt(pde->in.pt_page);
+// }
+// inline pde_t* to_pde(pd_t pd, void* addr)
+// {
+//     return *pd + lto_pdi((pptr_t)addr);
+// }
+// inline pte_t* to_pte(pt_t pt, void* addr)
+// {
+//     return *pt + lto_pti((pptr_t)addr);
+// }
+// inline pte_t* to_pte(pde_t* pde, void* addr)
+// {
+//     return to_pte(to_pt(pde), addr);
+// }
+// inline pte_t* to_pte(pd_t pd, void* addr)
+// {
+//     return to_pte(to_pde(pd, addr), addr);
+// }
+// inline pte_t* to_pte(pde_t* pde, page_t pg)
+// {
+//     return to_pte(to_pt(pde), pg);
+// }

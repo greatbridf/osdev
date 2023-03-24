@@ -29,14 +29,13 @@ add_subdirectory(gblibc)
 add_subdirectory(user-space-program)
 
 set(BOOTLOADER_SOURCES src/boot.s
-                       src/asm/a20.s
                        src/asm/interrupt.s
                        src/asm/port_io.s
                        src/asm/sys.s
                        )
 
 set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
-                        src/kernel_main.cpp
+                        src/kinit.cpp
                         src/kernel/errno.c
                         src/kernel/interrupt.cpp
                         src/kernel/process.cpp
@@ -53,7 +52,6 @@ set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
                         src/types/bitmap.c
                         src/types/elf.cpp
                         src/types/libstdcpp.cpp
-                        include/asm/boot.h
                         include/asm/port_io.h
                         include/asm/sys.h
                         include/fs/fat.hpp
@@ -92,7 +90,6 @@ set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
                         include/types/vector.hpp
                         include/types/function.hpp
                         include/kernel/log.hpp
-                        include/kernel_main.hpp
                         )
 
 add_executable(kernel.out ${KERNEL_MAIN_SOURCES} ${BOOTLOADER_SOURCES})

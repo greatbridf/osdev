@@ -5,15 +5,6 @@
 #include <stdio.h>
 #include <types/types.h>
 
-void operator delete(void*)
-{
-    assert(false);
-}
-void operator delete(void*, unsigned int)
-{
-    assert(false);
-}
-
 extern "C" void NORETURN __stack_chk_fail(void)
 {
     assert(false);

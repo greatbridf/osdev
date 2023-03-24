@@ -195,6 +195,7 @@ void _syscall_wait(interrupt_stack* data)
 {
     auto* arg1 = reinterpret_cast<int*>(data->s_regs.edi);
 
+    // TODO: check valid address
     if (arg1 < (int*)0x40000000) {
         SYSCALL_SET_RETURN_VAL(-1, EINVAL);
         return;

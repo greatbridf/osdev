@@ -3,9 +3,7 @@
 #include <stdint.h>
 #include <types/size.h>
 
-#define PAGE_SIZE (4096)
-#define IDENTICALLY_MAPPED_HEAP_SIZE ((size_t)0x400000)
-#define KERNEL_IDENTICALLY_MAPPED_AREA_LIMIT ((void*)0x30000000)
+#define PAGE_SIZE (0x1000)
 
 #ifdef __cplusplus
 extern "C" {
@@ -96,18 +94,10 @@ extern uint32_t e820_mem_map_count;
 extern uint32_t e820_mem_map_entry_size;
 extern struct mem_size_info mem_size_info;
 
-#define KERNEL_HEAP_START ((void*)0x30000000)
-#define KERNEL_HEAP_LIMIT ((void*)0x40000000)
+#define KERNEL_HEAP_START ((void*)0xd0000000)
+#define KERNEL_HEAP_LIMIT ((void*)0xd4000000)
 
-void* k_malloc(size_t size);
-
-void k_free(void* ptr);
-
-void* ki_malloc(size_t size);
-
-void ki_free(void* ptr);
-
-#define KERNEL_PAGE_DIRECTORY_ADDR ((pd_t)0x00001000)
+#define EARLY_KERNEL_PD_PAGE ((page_t)0x000001)
 
 void init_mem(void);
 

@@ -50,7 +50,7 @@ int types::elf::elf32_load(types::elf::elf32_load_data* d)
 
     size_t phents_size = hdr.phentsize * hdr.phnum;
     size_t shents_size = hdr.shentsize * hdr.shnum;
-    auto* phents = (types::elf::elf32_program_header_entry*)k_malloc(phents_size);
+    auto* phents = new types::elf::elf32_program_header_entry[hdr.phnum];
     n_read = fs::vfs_read(
         ent_exec->ind,
         (char*)phents,
@@ -59,13 +59,13 @@ int types::elf::elf32_load(types::elf::elf32_load_data* d)
 
     // broken file or I/O error
     if (n_read != phents_size) {
-        k_free(phents);
+        delete[] phents;
 
         d->errcode = EINVAL;
         return GB_FAILED;
     }
 
-    auto* shents = (types::elf::elf32_section_header_entry*)k_malloc(shents_size);
+    auto* shents = new types::elf::elf32_section_header_entry[hdr.shnum];
     n_read = fs::vfs_read(
         ent_exec->ind,
         (char*)shents,
@@ -74,8 +74,8 @@ int types::elf::elf32_load(types::elf::elf32_load_data* d)
 
     // broken file or I/O error
     if (n_read != shents_size) {
-        k_free(phents);
-        k_free(shents);
+        delete[] phents;
+        delete[] shents;
 
         d->errcode = EINVAL;
         return GB_FAILED;
@@ -96,8 +96,8 @@ int types::elf::elf32_load(types::elf::elf32_load_data* d)
     {
         auto* dent = fs::vfs_open("/dev/null");
         if (!dent) {
-            k_free(shents);
-            k_free(phents);
+            delete[] phents;
+            delete[] shents;
             kill_current(-1);
         }
         null_ind = dent->ind;
@@ -107,23 +107,28 @@ int types::elf::elf32_load(types::elf::elf32_load_data* d)
         if (phents[i].type != types::elf::elf32_program_header_entry::PT_LOAD)
             continue;
 
+        auto vaddr = align_down<12>(phents[i].vaddr);
+        auto vlen = align_up<12>(phents[i].vaddr + phents[i].memsz) - vaddr;
+        auto flen = align_up<12>(phents[i].vaddr + phents[i].filesz) - vaddr;
+        auto fileoff = align_down<12>(phents[i].offset);
+
         auto ret = mmap(
-            (char*)phents[i].vaddr,
-            phents[i].filesz,
+            (char*)vaddr,
+            phents[i].filesz + (phents[i].vaddr & 0xfff),
             ent_exec->ind,
-            phents[i].offset,
+            fileoff,
             1,
             d->system);
 
         if (ret != GB_OK)
             goto error;
 
-        if (phents[i].memsz > align_up<12>(phents[i].filesz)) {
+        if (vlen > flen) {
             ret = mmap(
-                (char*)phents[i].vaddr + align_up<12>(phents[i].filesz),
-                align_up<12>(phents[i].memsz) - align_up<12>(phents[i].filesz),
+                (char*)vaddr + flen,
+                vlen - flen,
                 null_ind,
-                phents[i].offset + align_up<12>(phents[i].filesz),
+                0,
                 1,
                 d->system);
 
@@ -134,8 +139,8 @@ int types::elf::elf32_load(types::elf::elf32_load_data* d)
         continue;
 
     error:
-        k_free(phents);
-        k_free(shents);
+        delete[] phents;
+        delete[] shents;
         kill_current(-1);
     }
 
@@ -187,8 +192,8 @@ int types::elf::elf32_load(types::elf::elf32_load_data* d)
     // push argc
     _user_push(sp, args.size());
 
-    k_free(shents);
-    k_free(phents);
+    delete[] phents;
+    delete[] shents;
 
     return GB_OK;
 }

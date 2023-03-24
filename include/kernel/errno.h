@@ -1,4 +1,5 @@
-#pragma once
+#ifndef __GBOS_ERRNO_H
+#define __GBOS_ERRNO_H
 
 #include <types/types.h>
 
@@ -22,3 +23,5 @@ extern uint32_t* _get_errno(void);
 #define ENOTDIR (1 << 5)
 #define ENOTFOUND (1 << 6)
 #define ECHILD (1 << 7)
+
+#endif

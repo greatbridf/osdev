@@ -12,6 +12,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <types/allocator.hpp>
+#include <types/bitmap.h>
 #include <types/cplusplus.hpp>
 #include <types/elf.hpp>
 #include <types/hash_map.hpp>
@@ -44,6 +45,47 @@ struct no_irq_guard {
 
 } // namespace kernel
 
+namespace __thd {
+inline uint8_t __kstack_bmp[(0x1000000 - 0xc00000) / 0x2000 / 8];
+inline int __allocated;
+} // namespace __thd
+
+void thread::alloc_kstack(void)
+{
+    for (int i = 0; i < __thd::__allocated; ++i) {
+        if (bm_test(__thd::__kstack_bmp, i) == 0) {
+            pkstack = 0xffc00000 + THREAD_KERNEL_STACK_SIZE * (i + 1);
+            esp = reinterpret_cast<uint32_t*>(pkstack);
+            return;
+        }
+    }
+
+    // kernel stack pt is at page#0x00005
+    kernel::paccess pa(0x00005);
+    auto pt = (pt_t)pa.ptr();
+    assert(pt);
+    pte_t* pte = *pt + __thd::__allocated * 2;
+
+    pte[0].v = 0x3;
+    pte[0].in.page = __alloc_raw_page();
+    pte[1].v = 0x3;
+    pte[1].in.page = __alloc_raw_page();
+
+    pkstack = 0xffc00000 + THREAD_KERNEL_STACK_SIZE * (__thd::__allocated + 1);
+    esp = reinterpret_cast<uint32_t*>(pkstack);
+
+    bm_set(__thd::__kstack_bmp, __thd::__allocated);
+    ++__thd::__allocated;
+}
+
+void thread::free_kstack(uint32_t p)
+{
+    p -= 0xffc00000;
+    p /= THREAD_KERNEL_STACK_SIZE;
+    p -= 1;
+    bm_clear(__thd::__kstack_bmp, p);
+}
+
 process::process(process&& val)
     : mms(types::move(val.mms))
     , thds { types::move(val.thds), this }
@@ -67,7 +109,7 @@ process::process(const process& parent)
     : process { parent.pid, parent.is_system(), types::string<>(parent.pwd) }
 {
     for (auto& area : parent.mms) {
-        if (area.is_ident())
+        if (area.is_kernel_space() || area.attr.in.system)
             continue;
 
         mms.mirror_area(area);
@@ -160,14 +202,15 @@ void kernel_threadd_main(void)
 
 void NORETURN _kernel_init(void)
 {
-    // free kinit memory
-    {
-        extern char __kinit_start[];
-        extern char __kinit_end[];
-        free_n_raw_pages(
-            to_page((pptr_t)__kinit_start),
-            (__kinit_end - __kinit_start) >> 12);
-    }
+    // TODO: free kinit memory
+    //       we should do this before we create any process
+    //       or processes should share kernel space pt
+    // {
+    //     extern char __kinit_start[];
+    //     extern char __kinit_end[];
+    //     auto iter = kernel_mms->find(__kinit_start);
+    //     kernel_mms->unmap(iter);
+    // }
 
     // pid 2 is kernel thread daemon
     auto* proc = &procs->emplace(1)->value;
@@ -271,7 +314,7 @@ void NORETURN init_scheduler(void)
     readythds->push(current_thread);
 
     tss.ss0 = KERNEL_DATA_SEGMENT;
-    tss.esp0 = current_thread->kstack;
+    tss.esp0 = current_thread->pkstack;
 
     asm_switch_pd(current_process->mms.m_pd);
 
@@ -321,7 +364,7 @@ void schedule()
     auto* curr_thd = current_thread;
 
     current_thread = thd;
-    tss.esp0 = current_thread->kstack;
+    tss.esp0 = current_thread->pkstack;
 
     asm_ctx_switch(&curr_thd->esp, thd->esp);
 }

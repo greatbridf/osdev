@@ -53,8 +53,10 @@ fs::vfs::dentry::dentry(dentry&& val)
     , flags { val.flags }
     , name(types::move(val.name))
 {
-    for (auto& item : *children)
-        item.parent = this;
+    if (children) {
+        for (auto& item : *children)
+            item.parent = this;
+    }
     memset(&val, 0x00, sizeof(dentry));
 }
 fs::vfs::dentry::~dentry()

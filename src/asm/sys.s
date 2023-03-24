@@ -6,6 +6,7 @@
 .type   asm_switch_pd @function
 asm_switch_pd:
     movl 4(%esp), %eax
+    shll $12, %eax
     movl %eax, %cr3
     ret
 

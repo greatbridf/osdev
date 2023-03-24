@@ -7,7 +7,7 @@
 extern "C" {
 #endif
 
-void asm_switch_pd(pd_t pd_addr);
+void asm_switch_pd(page_t pd_addr);
 void asm_enable_paging(pd_t pd_addr);
 
 pptr_t current_pd(void);

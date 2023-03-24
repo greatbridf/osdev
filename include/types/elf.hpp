@@ -14,7 +14,7 @@ using elf32_off_t = uint32_t;
 using elf_addr_t = elf32_addr_t;
 using elf_off_t = elf32_off_t;
 
-constexpr elf32_addr_t ELF_STACK_BOTTOM = 0xfffff000;
+constexpr elf32_addr_t ELF_STACK_BOTTOM = 0xbffff000;
 constexpr elf32_off_t ELF_STACK_SIZE = 8 * 1024 * 1024;
 constexpr elf32_addr_t ELF_STACK_TOP = ELF_STACK_BOTTOM - ELF_STACK_SIZE;
 

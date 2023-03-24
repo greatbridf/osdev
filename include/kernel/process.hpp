@@ -156,7 +156,7 @@ public:
     public:
         inline static void init_global_file_container(void)
         {
-            files = types::pnew<types::kernel_allocator>(files);
+            files = new container_type;
         }
 
     private:

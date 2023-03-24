@@ -244,7 +244,7 @@ void NORETURN _kernel_init(void)
     // TODO: parse kernel parameters
     auto* drive = fs::vfs_open("/dev/hda1");
     assert(drive);
-    auto* _new_fs = fs::register_fs(types::_new<types::kernel_allocator, fs::fat::fat32>(drive->ind));
+    auto* _new_fs = fs::register_fs(new fs::fat::fat32(drive->ind));
     auto* mnt = fs::vfs_open("/mnt");
     assert(mnt);
     int ret = fs::fs_root->ind->fs->mount(mnt, _new_fs);
@@ -296,8 +296,8 @@ void k_new_thread(void (*func)(void*), void* data)
 SECTION(".text.kinit")
 void NORETURN init_scheduler(void)
 {
-    procs = types::pnew<types::kernel_allocator>(procs);
-    readythds = types::pnew<types::kernel_allocator>(readythds);
+    procs = new proclist;
+    readythds = new readyqueue;
 
     process::filearr::init_global_file_container();
 

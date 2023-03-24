@@ -603,7 +603,7 @@ void init_vfs(void)
 
     fs_es = types::pnew<types::kernel_ident_allocator>(fs_es);
 
-    auto* rootfs = types::_new<types::kernel_allocator, tmpfs>();
+    auto* rootfs = new tmpfs;
     fs_es->push_back(rootfs);
     fs_root = rootfs->root();
 

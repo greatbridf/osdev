@@ -82,28 +82,47 @@ void serial_tty::recvchar(char c)
         break;
     // ^?: backspace
     case 0x7f:
-        if (!buf.empty() && buf.back() != '\n')
+        if (!buf.empty() && buf.back() != '\n') {
             buf.pop();
 
-        if (echo) {
-            serial_send_data(PORT_SERIAL0, 0x08);
-            serial_send_data(PORT_SERIAL0, '\x1b');
-            serial_send_data(PORT_SERIAL0, '[');
-            serial_send_data(PORT_SERIAL0, 'K');
+            if (echo) {
+                serial_send_data(PORT_SERIAL0, 0x08);
+                serial_send_data(PORT_SERIAL0, '\x1b');
+                serial_send_data(PORT_SERIAL0, '[');
+                serial_send_data(PORT_SERIAL0, 'K');
+            }
         }
         break;
     // ^U: clear the line
     case 0x15:
-        while (!buf.empty() && buf.back() != '\n')
+        while (!buf.empty() && buf.back() != '\n') {
             buf.pop();
 
-        if (echo) {
-            serial_send_data(PORT_SERIAL0, '\r');
-            serial_send_data(PORT_SERIAL0, '\x1b');
-            serial_send_data(PORT_SERIAL0, '[');
-            serial_send_data(PORT_SERIAL0, '2');
-            serial_send_data(PORT_SERIAL0, 'K');
+            if (echo) {
+                // clear the line
+                // serial_send_data(PORT_SERIAL0, '\r');
+                // serial_send_data(PORT_SERIAL0, '\x1b');
+                // serial_send_data(PORT_SERIAL0, '[');
+                // serial_send_data(PORT_SERIAL0, '2');
+                // serial_send_data(PORT_SERIAL0, 'K');
+                serial_send_data(PORT_SERIAL0, 0x08);
+                serial_send_data(PORT_SERIAL0, '\x1b');
+                serial_send_data(PORT_SERIAL0, '[');
+                serial_send_data(PORT_SERIAL0, 'K');
+            }
         }
+        break;
+    // ^C: SIGINT
+    case 0x03:
+        console->print("sigint");
+        break;
+    // ^D: EOF
+    case 0x04:
+        console->print("EOF");
+        break;
+    // ^Z: SIGSTOP
+    case 0x1a:
+        console->print("sigstop");
         break;
     default:
         buf.put(c);

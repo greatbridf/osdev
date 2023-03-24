@@ -56,6 +56,8 @@ void thread::alloc_kstack(void)
         if (bm_test(__thd::__kstack_bmp, i) == 0) {
             pkstack = 0xffc00000 + THREAD_KERNEL_STACK_SIZE * (i + 1);
             esp = reinterpret_cast<uint32_t*>(pkstack);
+
+            bm_set(__thd::__kstack_bmp, i);
             return;
         }
     }

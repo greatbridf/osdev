@@ -8,6 +8,7 @@
 #include <kernel/task.h>
 #include <kernel/vfs.hpp>
 #include <stdint.h>
+#include <sys/types.h>
 #include <types/allocator.hpp>
 #include <types/cplusplus.hpp>
 #include <types/hash_map.hpp>
@@ -17,8 +18,6 @@
 #include <types/status.h>
 #include <types/string.hpp>
 #include <types/types.h>
-
-typedef size_t pid_t;
 
 class process;
 struct thread;

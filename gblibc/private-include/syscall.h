@@ -14,6 +14,8 @@
 #define SYS_getdents (0x08)
 #define SYS_open (0x09)
 #define SYS_getcwd (0x0a)
+#define SYS_setsid (0x0b)
+#define SYS_getsid (0x0c)
 
 #ifdef __cplusplus
 extern "C" {

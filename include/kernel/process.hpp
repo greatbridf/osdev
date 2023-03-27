@@ -6,6 +6,7 @@
 #include <kernel/interrupt.h>
 #include <kernel/mm.hpp>
 #include <kernel/task.h>
+#include <kernel/tty.hpp>
 #include <kernel/vfs.hpp>
 #include <stdint.h>
 #include <sys/types.h>
@@ -263,10 +264,13 @@ public:
     thdlist thds;
     kernel::evtqueue wait_lst;
     process_attr attr;
-    pid_t pid;
-    pid_t ppid;
     filearr files;
     types::string<> pwd;
+
+    pid_t pid;
+    pid_t ppid;
+    pid_t pgid;
+    pid_t sid;
 
 public:
     process(process&& val);
@@ -296,12 +300,14 @@ class proclist final {
 public:
     using list_type = types::map<pid_t, process>;
     using child_index_type = types::hash_map<pid_t, types::list<pid_t>, types::linux_hasher<pid_t>>;
+    using tty_index_type = types::map<pid_t, tty*>;
     using iterator_type = list_type::iterator_type;
     using const_iterator_type = list_type::const_iterator_type;
 
 private:
     list_type m_procs;
     child_index_type m_child_idx;
+    tty_index_type m_tty_idx;
 
 public:
     template <typename... Args>
@@ -321,6 +327,25 @@ public:
         children->value.push_back(pid);
 
         return iter;
+    }
+
+    constexpr void set_ctrl_tty(pid_t pid, tty* _tty)
+    {
+        auto iter = m_tty_idx.find(pid);
+        _tty->set_pgrp(pid);
+        if (iter) {
+            iter->value = _tty;
+        } else {
+            m_tty_idx.insert(types::make_pair(pid, _tty));
+        }
+    }
+
+    constexpr tty* get_ctrl_tty(pid_t pid)
+    {
+        auto iter = m_tty_idx.find(pid);
+        if (!iter)
+            return nullptr;
+        return iter->value;
     }
 
     constexpr void remove(pid_t pid)

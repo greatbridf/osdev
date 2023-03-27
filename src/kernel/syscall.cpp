@@ -292,6 +292,35 @@ void _syscall_getcwd(interrupt_stack* data)
     SYSCALL_SET_RETURN_VAL_EAX(buf);
 }
 
+void _syscall_setsid(interrupt_stack* data)
+{
+    if (current_process->pid == current_process->pgid) {
+        SYSCALL_SET_RETURN_VAL_EAX(-1);
+        return;
+    }
+
+    current_process->sid = current_process->pid;
+    current_process->pgid = current_process->pid;
+
+    // TODO: get tty* from fd or block device id
+    procs->set_ctrl_tty(current_process->pid, console);
+
+    SYSCALL_SET_RETURN_VAL_EAX(current_process->pid);
+}
+
+void _syscall_getsid(interrupt_stack* data)
+{
+    pid_t pid = data->s_regs.edi;
+
+    auto* proc = procs->find(pid);
+    if (!proc || proc->sid != current_process->sid) {
+        SYSCALL_SET_RETURN_VAL_EAX(-1);
+        return;
+    }
+
+    SYSCALL_SET_RETURN_VAL_EAX(proc->sid);
+}
+
 SECTION(".text.kinit")
 void init_syscall(void)
 {
@@ -306,4 +335,6 @@ void init_syscall(void)
     syscall_handlers[8] = _syscall_getdents;
     syscall_handlers[9] = _syscall_open;
     syscall_handlers[10] = _syscall_getcwd;
+    syscall_handlers[11] = _syscall_setsid;
+    syscall_handlers[12] = _syscall_getsid;
 }

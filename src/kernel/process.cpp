@@ -93,23 +93,23 @@ process::process(process&& val)
     , thds { types::move(val.thds), this }
     , wait_lst(types::move(val.wait_lst))
     , attr { val.attr }
-    , pid(val.pid)
-    , ppid(val.ppid)
     , files(types::move(val.files))
     , pwd(types::move(val.pwd))
+    , pid(val.pid)
+    , ppid(val.ppid)
+    , pgid(val.pgid)
+    , sid(val.sid)
 {
     if (current_process == &val)
         current_process = this;
-
-    val.pid = 0;
-    val.ppid = 0;
-    val.attr.system = 0;
-    val.attr.zombie = 0;
 }
 
 process::process(const process& parent)
     : process { parent.pid, parent.is_system(), types::string<>(parent.pwd) }
 {
+    this->pgid = parent.pgid;
+    this->sid = parent.sid;
+
     for (auto& area : parent.mms) {
         if (area.is_kernel_space() || area.attr.in.system)
             continue;
@@ -123,9 +123,11 @@ process::process(const process& parent)
 process::process(pid_t _ppid, bool _system, types::string<>&& path)
     : mms(*kernel_mms)
     , attr { .system = _system }
+    , pwd { path }
     , pid { process::alloc_pid() }
     , ppid { _ppid }
-    , pwd { path }
+    , pgid { 0 }
+    , sid { 0 }
 {
 }
 

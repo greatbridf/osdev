@@ -21,13 +21,16 @@ size_t tty::read(char* buf, size_t buf_size, size_t n)
     size_t orig_n = n;
 
     while (buf_size && n) {
-        while (this->buf.empty()) {
+        if (this->buf.empty()) {
             current_thread->attr.ready = 0;
             current_thread->attr.wait = 1;
             this->blocklist.subscribe(current_thread);
             schedule();
             this->blocklist.unsubscribe(current_thread);
         }
+
+        if (this->buf.empty())
+            break;
 
         *buf = this->buf.get();
         --buf_size;
@@ -118,7 +121,7 @@ void serial_tty::recvchar(char c)
         break;
     // ^D: EOF
     case 0x04:
-        console->print("EOF");
+        this->blocklist.notify();
         break;
     // ^Z: SIGSTOP
     case 0x1a:

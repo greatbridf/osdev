@@ -127,6 +127,10 @@ void serial_tty::recvchar(char c)
     case 0x1a:
         console->print("sigstop");
         break;
+    // ^\: SIGQUIT
+    case 0x1c:
+        console->print("sigquit");
+        break;
     default:
         buf.put(c);
         if (echo)

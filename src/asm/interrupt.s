@@ -189,16 +189,13 @@ syscall_stub:
     jge syscall_stub_end
     pushal
 
-    # syscall function no. is in %eax
-    # store it in %ebx
-    movl %eax, %ebx
     # stack alignment and push *data
     movl %esp, %eax
     subl $0x4, %esp
     andl $0xfffffff0, %esp
     movl %eax, (%esp)
 
-    call *syscall_handlers(,%ebx,4)
+    call syscall_entry
 
     # restore stack
     popl %esp

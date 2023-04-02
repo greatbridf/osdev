@@ -21,6 +21,11 @@ int dup2(int oldfd, int newfd)
     return syscall2(SYS_dup2, oldfd, newfd);
 }
 
+int pipe(int pipefd[2])
+{
+    return syscall1(SYS_pipe, (uint32_t)pipefd);
+}
+
 int close(int fd)
 {
     return syscall1(SYS_close, fd);

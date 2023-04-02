@@ -163,9 +163,15 @@ public:
         // iter should not be nullptr
         constexpr void _close(container_type::iterator_type iter)
         {
-            if (iter->ref == 1)
+            if (iter->ref == 1) {
+                if (iter->type == fs::file::types::pipe) {
+                    iter->ptr.pp->close_one();
+                    if (iter->ptr.pp->is_free())
+                        delete iter->ptr.pp;
+                }
+
                 files->erase(iter);
-            else
+            } else
                 --iter->ref;
         }
 
@@ -207,6 +213,7 @@ public:
                 return -EBADF;
 
             this->arr.insert(types::make_pair(new_fd, iter->value));
+            ++iter->value->ref;
             return new_fd;
         }
 
@@ -227,6 +234,40 @@ public:
                 return &iter->value;
         }
 
+        int pipe(int pipefd[2])
+        {
+            // TODO: set read/write flags
+            auto* pipe = new fs::pipe;
+
+            auto iter = files->emplace_back(fs::file {
+                fs::file::types::pipe,
+                { .pp = pipe },
+                nullptr,
+                0,
+                1,
+            });
+            int fd = _next_fd();
+            arr.insert(types::make_pair(fd, iter));
+
+            // TODO: use copy_to_user()
+            pipefd[0] = fd;
+
+            iter = files->emplace_back(fs::file {
+                fs::file::types::pipe,
+                { .pp = pipe },
+                nullptr,
+                0,
+                1,
+            });
+            fd = _next_fd();
+            arr.insert(types::make_pair(fd, iter));
+
+            // TODO: use copy_to_user()
+            pipefd[1] = fd;
+
+            return 0;
+        }
+
         // TODO: file opening permissions check
         int open(const char* filename, uint32_t flags)
         {
@@ -237,22 +278,15 @@ public:
                 return -1;
             }
 
-            // TODO: unify file, inode, dentry TYPE
-            fs::file::types type = fs::file::types::regular_file;
-            if (dentry->ind->flags.in.directory)
-                type = fs::file::types::directory;
-            if (dentry->ind->flags.in.special_node)
-                type = fs::file::types::block_dev;
-
             // check whether dentry is a file if O_DIRECTORY is set
-            if ((flags & O_DIRECTORY) && type != fs::file::types::directory) {
+            if ((flags & O_DIRECTORY) && !dentry->ind->flags.in.directory) {
                 errno = ENOTDIR;
                 return -1;
             }
 
             auto iter = files->emplace_back(fs::file {
-                type,
-                dentry->ind,
+                fs::file::types::ind,
+                { .ind = dentry->ind },
                 dentry->parent,
                 0,
                 1 });

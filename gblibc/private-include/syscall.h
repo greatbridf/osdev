@@ -19,6 +19,7 @@
 #define SYS_close (0x0d)
 #define SYS_dup (0x0e)
 #define SYS_dup2 (0x0f)
+#define SYS_pipe (0x10)
 
 #ifdef __cplusplus
 extern "C" {

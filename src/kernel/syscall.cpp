@@ -17,7 +17,7 @@
 #include <types/elf.hpp>
 #include <types/status.h>
 
-#define SYSCALL_HANDLERS_SIZE (16)
+#define SYSCALL_HANDLERS_SIZE (32)
 syscall_handler syscall_handlers[SYSCALL_HANDLERS_SIZE];
 
 extern "C" void _syscall_stub_fork_return(void);
@@ -73,12 +73,25 @@ int _syscall_write(interrupt_stack* data)
     if (!file)
         return -EBADF;
 
-    if (file->type == fs::file::types::directory)
-        return -EBADF;
+    switch (file->type) {
+    case fs::file::types::ind: {
+        if (file->ptr.ind->flags.in.directory)
+            return -EBADF;
 
-    int n_wrote = fs::vfs_write(file->ind, buf, file->cursor, n);
-    file->cursor += n_wrote;
-    return n_wrote;
+        int n_wrote = fs::vfs_write(file->ptr.ind, buf, file->cursor, n);
+        if (n_wrote >= 0)
+            file->cursor += n_wrote;
+        return n_wrote;
+    }
+    case fs::file::types::pipe:
+        return file->ptr.pp->write(buf, n);
+
+    case fs::file::types::socket:
+        // TODO
+        return -EINVAL;
+    default:
+        assert(false);
+    }
 }
 
 int _syscall_read(interrupt_stack* data)
@@ -92,14 +105,26 @@ int _syscall_read(interrupt_stack* data)
     if (!file)
         return -EBADF;
 
-    if (file->type == fs::file::types::directory)
-        return -EBADF;
+    switch (file->type) {
+    case fs::file::types::ind: {
+        if (file->ptr.ind->flags.in.directory)
+            return -EBADF;
 
-    // TODO: copy to user function !IMPORTANT
-    int n_wrote = fs::vfs_read(file->ind, buf, n, file->cursor, n);
-    if (n_wrote >= 0)
-        file->cursor += n_wrote;
-    return n_wrote;
+        // TODO: copy to user function !IMPORTANT
+        int n_wrote = fs::vfs_read(file->ptr.ind, buf, n, file->cursor, n);
+        if (n_wrote >= 0)
+            file->cursor += n_wrote;
+        return n_wrote;
+    }
+    case fs::file::types::pipe:
+        return file->ptr.pp->read(buf, n);
+
+    case fs::file::types::socket:
+        // TODO
+        return -EINVAL;
+    default:
+        assert(false);
+    }
 }
 
 int _syscall_sleep(interrupt_stack* data)
@@ -213,11 +238,11 @@ int _syscall_getdents(interrupt_stack* data)
     size_t cnt = data->s_regs.edx;
 
     auto* dir = current_process->files[fd];
-    if (dir->type != fs::file::types::directory)
+    if (dir->type != fs::file::types::ind || !dir->ptr.ind->flags.in.directory)
         return -ENOTDIR;
 
     size_t orig_cnt = cnt;
-    int nread = dir->ind->fs->inode_readdir(dir->ind, dir->cursor,
+    int nread = dir->ptr.ind->fs->inode_readdir(dir->ptr.ind, dir->cursor,
         [&buf, &cnt](const char* fn, size_t len, fs::ino_t ino, uint8_t type) -> int {
             if (!len)
                 len = strlen(fn);
@@ -313,6 +338,12 @@ int _syscall_dup2(interrupt_stack* data)
     return current_process->files.dup2(old_fd, new_fd);
 }
 
+int _syscall_pipe(interrupt_stack* data)
+{
+    auto& pipefd = *(int(*)[2])data->s_regs.edi;
+    return current_process->files.pipe(pipefd);
+}
+
 extern "C" void syscall_entry(interrupt_stack* data)
 {
     int syscall_no = data->s_regs.eax;
@@ -345,4 +376,5 @@ void init_syscall(void)
     syscall_handlers[13] = _syscall_close;
     syscall_handlers[14] = _syscall_dup;
     syscall_handlers[15] = _syscall_dup2;
+    syscall_handlers[16] = _syscall_pipe;
 }

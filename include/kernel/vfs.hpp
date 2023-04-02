@@ -1,10 +1,14 @@
 #pragma once
 
+#include <assert.h>
 #include <stdint.h>
 #include <types/allocator.hpp>
+#include <types/buffer.hpp>
+#include <types/cplusplus.hpp>
 #include <types/function.hpp>
 #include <types/hash_map.hpp>
 #include <types/list.hpp>
+#include <types/lock.hpp>
 #include <types/map.hpp>
 #include <types/types.h>
 #include <types/vector.hpp>
@@ -193,14 +197,82 @@ public:
     virtual int inode_readdir(inode* dir, size_t offset, filldir_func callback) = 0;
 };
 
+class pipe : public types::non_copyable {
+private:
+    static constexpr size_t PIPE_SIZE = 4096;
+    static constexpr uint32_t READABLE = 1;
+    static constexpr uint32_t WRITABLE = 2;
+
+private:
+    types::buffer<types::kernel_allocator> buf;
+    types::mutex mtx;
+    uint32_t flags;
+
+public:
+    pipe(void)
+        : buf { PIPE_SIZE }
+        , flags { READABLE | WRITABLE }
+    {
+    }
+
+    void close_read(void)
+    {
+        flags &= (~READABLE);
+    }
+
+    void close_write(void)
+    {
+        flags &= (~WRITABLE);
+    }
+
+    void close_one(void)
+    {
+        if (flags & READABLE)
+            close_read();
+        else
+            close_write();
+    }
+
+    bool is_free(void) const
+    {
+        return (flags & (READABLE | WRITABLE)) == 0;
+    }
+
+    int write(const char* buf, size_t n)
+    {
+        // TODO: check privilege
+        for (size_t i = 0; i < n; ++i) {
+            if (this->buf.full())
+                assert(false);
+            this->buf.put(*(buf++));
+        }
+
+        return n;
+    }
+
+    int read(char* buf, size_t n)
+    {
+        // TODO: check privilege
+        for (size_t i = 0; i < n; ++i) {
+            if (this->buf.empty())
+                assert(false);
+            *(buf++) = this->buf.pop();
+        }
+
+        return n;
+    }
+};
+
 struct file {
     enum class types {
-        regular_file,
-        directory,
-        block_dev,
-        char_dev,
+        ind,
+        pipe,
+        socket,
     } type;
-    inode* ind;
+    union {
+        inode* ind;
+        pipe* pp;
+    } ptr;
     vfs::dentry* parent;
     size_t cursor;
     size_t ref;

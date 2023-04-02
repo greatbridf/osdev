@@ -220,97 +220,74 @@ public:
                 second = tmp;
             }
 
-            if (second->is_root()) {
-                node* tmp = first;
-                first = second;
-                second = tmp;
-            }
+            bool f_is_left_child = first->parent ? first->is_left_child() : false;
+            bool s_is_left_child = second->parent ? second->is_left_child() : false;
 
-            if (first->is_root()) {
-                node* sl = second->left;
-                node* sr = second->right;
+            node* fp = first->parent;
+            node* fl = first->left;
+            node* fr = first->right;
 
+            node* sp = second->parent;
+            node* sl = second->left;
+            node* sr = second->right;
+
+            if (second->parent != first) {
+                first->parent = sp;
+                if (sp) {
+                    if (s_is_left_child)
+                        sp->left = first;
+                    else
+                        sp->right = first;
+                }
+                first->left = sl;
                 if (sl)
                     sl->parent = first;
+                first->right = sr;
                 if (sr)
                     sr->parent = first;
 
-                if (second->is_right_child()) {
-                    second->left = first->left;
-                    second->right = first;
-
-                    if (second->left)
-                        second->left->parent = second;
-                } else {
-                    second->right = first->right;
-                    second->left = first;
-
-                    if (second->right)
-                        second->right->parent = second;
-                }
-
-                first->left = sl;
-                first->right = sr;
-                first->parent = second;
-
-                second->parent = nullptr;
-                return;
-            }
-
-            node* p = first->parent;
-            node* cl = first->left;
-            node* cr = first->right;
-
-            bool is_first_left = first->is_left_child();
-            bool is_second_left = second->is_left_child();
-
-            if (!first->is_root()) {
-                if (is_first_left)
-                    p->left = second;
-                else
-                    p->right = second;
-            }
-
-            first->left = second->left;
-            first->right = second->right;
-            if (first->left)
-                first->left->parent = first;
-            if (first->right)
-                first->right->parent = first;
-
-            if (second->parent == first) {
-                first->parent = second;
-                second->parent = p;
-
-                if (is_second_left) {
-                    if (cr)
-                        cr->parent = second;
-                    second->left = first;
-                    second->right = cr;
-                } else {
-                    if (cl)
-                        cl->parent = second;
-                    second->right = first;
-                    second->left = cl;
-                }
-            } else {
-                first->parent = second->parent;
-
-                if (cl)
-                    cl->parent = second;
-                if (cr)
-                    cr->parent = second;
-                second->left = cl;
-                second->right = cr;
-
-                if (!second->is_root()) {
-                    if (is_second_left)
-                        second->parent->left = first;
+                second->parent = fp;
+                if (fp) {
+                    if (f_is_left_child)
+                        fp->left = second;
                     else
-                        second->parent->right = first;
+                        fp->right = second;
                 }
 
-                second->parent = p;
+                second->left = fl;
+                if (fl)
+                    fl->parent = second;
+                second->right = fr;
+                if (fr)
+                    fr->parent = second;
+            } else {
+                first->left = sl;
+                if (sl)
+                    sl->parent = first;
+                first->right = sr;
+                if (sr)
+                    sr->parent = first;
+
+                second->parent = fp;
+                if (fp) {
+                    if (f_is_left_child)
+                        fp->left = second;
+                    else
+                        fp->right = second;
+                }
+                first->parent = second;
+
+                if (s_is_left_child) {
+                    second->left = first;
+                    second->right = fr;
+                    if (fr)
+                        fr->parent = second;
+                } else {
+                    second->right = first;
+                    second->left = fl;
+                    if (fl)
+                        fl->parent = second;
+                }
             }
         }
     };

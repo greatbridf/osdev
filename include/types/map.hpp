@@ -323,12 +323,14 @@ public:
         constexpr iterator& operator=(const iterator& iter)
         {
             p = iter.p;
+            return *this;
         }
 
         constexpr iterator& operator=(iterator&& iter)
         {
             p = iter.p;
             iter.p = nullptr;
+            return *this;
         }
 
         constexpr bool operator==(const iterator& iter) const

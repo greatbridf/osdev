@@ -319,12 +319,9 @@ public:
 
     template <bool Const>
     class iterator {
-    private:
-        static constexpr bool _is_const_iterator = Const;
-
     public:
-        using node_pointer_type = typename traits::condition<_is_const_iterator, const node*, node*>::type;
-        using value_type = typename traits::condition<_is_const_iterator, const pair_type, pair_type>::type;
+        using node_pointer_type = typename traits::condition<Const, const node*, node*>::type;
+        using value_type = typename traits::condition<Const, const pair_type, pair_type>::type;
         using pointer_type = typename traits::add_pointer<value_type>::type;
         using reference_type = typename traits::add_reference<value_type>::type;
 

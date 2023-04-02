@@ -136,6 +136,37 @@ class listPrinter:
             idx += 1
             node = node['next']
 
+class listIteratorPrinter:
+    def __init__(self, val):
+        self.val = val
+    
+    def children(self):
+        yield '[addr]', self.val['n']
+        if self.val['n'] == 0:
+            return
+
+        for field in self.val['n']['value'].type.fields():
+            yield field.name, self.val['n']['value'][field.name]
+
+class mapIteratorPrinter:
+    def __init__(self, val):
+        self.val = val
+    
+    def children(self):
+        yield '[addr]', self.val['p']
+        if self.val['p'] == 0:
+            return
+        
+        yield '[key]', self.val['p']['v']['key']
+        yield '[value]', self.val['p']['v']['value']
+
+class vectorIteratorPrinter:
+    def __init__(self, val):
+        self.val = val
+    
+    def children(self):
+        yield 'value', self.val['p'].dereference()
+
 def build_pretty_printer(val):
     type = val.type
 
@@ -149,7 +180,19 @@ def build_pretty_printer(val):
 
     if typename == None:
         return None
+
+    if re.compile(r"^types::list<.*?>::node<.*?>$").match(typename):
+        return None
+
+    if re.compile(r"^types::map<.*?,.*?,.*?>::iterator<.*?>$").match(typename):
+        return mapIteratorPrinter(val)
     
+    if re.compile(r"^types::list<.*?>::iterator<.*?>$").match(typename):
+        return listIteratorPrinter(val)
+
+    if re.compile(r"^types::vector<.*?>::iterator<.*?>$").match(typename):
+        return vectorIteratorPrinter(val)
+
     if re.compile(r"^types::list<.*?>$").match(typename):
         return listPrinter(val)
 

@@ -74,7 +74,7 @@ int _syscall_write(interrupt_stack* data)
         return -EBADF;
 
     if (file->type == fs::file::types::directory)
-        return GB_FAILED;
+        return -EBADF;
 
     int n_wrote = fs::vfs_write(file->ind, buf, file->cursor, n);
     file->cursor += n_wrote;
@@ -93,7 +93,7 @@ int _syscall_read(interrupt_stack* data)
         return -EBADF;
 
     if (file->type == fs::file::types::directory)
-        return GB_FAILED;
+        return -EBADF;
 
     // TODO: copy to user function !IMPORTANT
     int n_wrote = fs::vfs_read(file->ind, buf, n, file->cursor, n);
@@ -115,15 +115,11 @@ int _syscall_chdir(interrupt_stack* data)
 {
     const char* path = reinterpret_cast<const char*>(data->s_regs.edi);
     auto* dir = fs::vfs_open(path);
-    if (!dir) {
-        // set errno ENOTFOUND
-        return -1;
-    }
+    if (!dir)
+        return -ENOENT;
 
-    if (!dir->ind->flags.in.directory) {
-        // set errno ENOTDIR
-        return -1;
-    }
+    if (!dir->ind->flags.in.directory)
+        return -ENOTDIR;
 
     current_process->pwd = path;
 
@@ -148,7 +144,7 @@ int _syscall_exec(interrupt_stack* data)
 
     int ret = types::elf::elf32_load(&d);
     if (ret != GB_OK)
-        return d.errcode;
+        return -d.errcode;
 
     data->v_eip = d.eip;
     data->esp = (uint32_t)d.sp;
@@ -183,13 +179,9 @@ int _syscall_wait(interrupt_stack* data)
 {
     auto* arg1 = reinterpret_cast<int*>(data->s_regs.edi);
 
-    // TODO: check valid address
-    if (arg1 < (int*)0x40000000)
-        return -1;
-
     auto& waitlst = current_process->wait_lst;
     if (waitlst.empty() && !procs->has_child(current_process->pid))
-        return -1;
+        return -ECHILD;
 
     while (waitlst.empty()) {
         current_thread->attr.ready = 0;
@@ -222,7 +214,7 @@ int _syscall_getdents(interrupt_stack* data)
 
     auto* dir = current_process->files[fd];
     if (dir->type != fs::file::types::directory)
-        return -1;
+        return -ENOTDIR;
 
     size_t orig_cnt = cnt;
     int nread = dir->ind->fs->inode_readdir(dir->ind, dir->cursor,
@@ -277,7 +269,7 @@ int _syscall_getcwd(interrupt_stack* data)
 int _syscall_setsid(interrupt_stack* data)
 {
     if (current_process->pid == current_process->pgid)
-        return -1;
+        return -EPERM;
 
     current_process->sid = current_process->pid;
     current_process->pgid = current_process->pid;
@@ -293,8 +285,10 @@ int _syscall_getsid(interrupt_stack* data)
     pid_t pid = data->s_regs.edi;
 
     auto* proc = procs->find(pid);
-    if (!proc || proc->sid != current_process->sid)
-        return -1;
+    if (!proc)
+        return -ESRCH;
+    if (proc->sid != current_process->sid)
+        return -EPERM;
 
     return proc->sid;
 }

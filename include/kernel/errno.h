@@ -24,5 +24,7 @@ extern uint32_t* _get_errno(void);
 #define ENOTFOUND (1 << 6)
 #define ECHILD (1 << 7)
 #define EBADF (1 << 8)
+#define EPERM (1 << 9)
+#define ESRCH (1 << 10)
 
 #endif

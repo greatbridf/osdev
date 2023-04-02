@@ -185,8 +185,6 @@ irq15:
 .globl syscall_stub
 .type  syscall_stub @function
 syscall_stub:
-    cmpl $16, %eax
-    jge syscall_stub_end
     pushal
 
     # stack alignment and push *data
@@ -204,7 +202,6 @@ syscall_stub:
 .type  _syscall_stub_fork_return @function
 _syscall_stub_fork_return:
     popal
-syscall_stub_end:
     iret
 
 # parameters

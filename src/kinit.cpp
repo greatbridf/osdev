@@ -9,6 +9,7 @@
 #include <kernel/log.hpp>
 #include <kernel/mem.h>
 #include <kernel/process.hpp>
+#include <kernel/syscall.hpp>
 #include <kernel/task.h>
 #include <kernel/tty.hpp>
 #include <kernel/vga.hpp>
@@ -112,6 +113,7 @@ extern "C" SECTION(".text.kinit") void NORETURN kernel_init(void)
     assert(ret == GB_OK);
 
     init_vfs();
+    init_syscall();
 
     kmsg("switching execution to the scheduler...\n");
     init_scheduler();

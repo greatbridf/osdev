@@ -315,7 +315,11 @@ int _syscall_dup2(interrupt_stack* data)
 
 extern "C" void syscall_entry(interrupt_stack* data)
 {
-    int ret = syscall_handlers[data->s_regs.eax](data);
+    int syscall_no = data->s_regs.eax;
+    if (syscall_no >= SYSCALL_HANDLERS_SIZE)
+        kill_current(-1);
+
+    int ret = syscall_handlers[syscall_no](data);
 
     data->s_regs.eax = ret;
 

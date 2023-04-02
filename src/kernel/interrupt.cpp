@@ -10,7 +10,6 @@
 #include <kernel/mem.h>
 #include <kernel/mm.hpp>
 #include <kernel/process.hpp>
-#include <kernel/syscall.hpp>
 #include <kernel/vfs.hpp>
 #include <kernel/vga.hpp>
 #include <stdint.h>
@@ -53,7 +52,6 @@ void init_idt()
     SET_IDT_ENTRY_FN(14, int14, 0x08, KERNEL_INTERRUPT_GATE_TYPE);
     // system call
     SET_IDT_ENTRY_FN(0x80, syscall_stub, 0x08, USER_INTERRUPT_GATE_TYPE);
-    init_syscall();
 
     uint16_t idt_descriptor[3];
     idt_descriptor[0] = sizeof(struct IDT_entry) * 256;

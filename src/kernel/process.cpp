@@ -120,7 +120,7 @@ process::process(const process& parent)
         mms.mirror_area(area);
     }
 
-    this->files.dup(parent.files);
+    this->files.dup_all(parent.files);
 }
 
 process::process(pid_t _ppid,

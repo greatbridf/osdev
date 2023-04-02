@@ -17,6 +17,9 @@ extern "C" {
 ssize_t read(int fd, void* buf, size_t count);
 ssize_t write(int fd, const void* buf, size_t count);
 
+int dup(int oldfd);
+int dup2(int oldfd, int newfd);
+
 int close(int fd);
 
 void __attribute__((noreturn)) _exit(int code);

@@ -300,6 +300,19 @@ int _syscall_close(interrupt_stack* data)
     return 0;
 }
 
+int _syscall_dup(interrupt_stack* data)
+{
+    int old_fd = data->s_regs.edi;
+    return current_process->files.dup(old_fd);
+}
+
+int _syscall_dup2(interrupt_stack* data)
+{
+    int old_fd = data->s_regs.edi;
+    int new_fd = data->s_regs.esi;
+    return current_process->files.dup2(old_fd, new_fd);
+}
+
 extern "C" void syscall_entry(interrupt_stack* data)
 {
     int ret = syscall_handlers[data->s_regs.eax](data);
@@ -326,4 +339,6 @@ void init_syscall(void)
     syscall_handlers[11] = _syscall_setsid;
     syscall_handlers[12] = _syscall_getsid;
     syscall_handlers[13] = _syscall_close;
+    syscall_handlers[14] = _syscall_dup;
+    syscall_handlers[15] = _syscall_dup2;
 }

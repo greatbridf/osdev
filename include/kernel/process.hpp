@@ -169,16 +169,6 @@ public:
                 --iter->ref;
         }
 
-    public:
-        constexpr filearr(const filearr&) = delete;
-        constexpr filearr& operator=(const filearr&) = delete;
-        constexpr filearr& operator=(filearr&&) = delete;
-        constexpr filearr(void) = default;
-        constexpr filearr(filearr&& val)
-            : arr { types::move(val.arr) }
-        {
-        }
-
         constexpr int _next_fd(void) const
         {
             int fd = 0;
@@ -190,7 +180,37 @@ public:
             return fd;
         }
 
-        constexpr void dup(const filearr& orig)
+    public:
+        constexpr filearr(const filearr&) = delete;
+        constexpr filearr& operator=(const filearr&) = delete;
+        constexpr filearr& operator=(filearr&&) = delete;
+        constexpr filearr(void) = default;
+        constexpr filearr(filearr&& val)
+            : arr { types::move(val.arr) }
+        {
+        }
+
+        constexpr int dup(int old_fd)
+        {
+            return dup2(old_fd, _next_fd());
+        }
+
+        // TODO: the third parameter should be int flags
+        //       determining whether the fd should be closed
+        //       after exec() (FD_CLOEXEC)
+        constexpr int dup2(int old_fd, int new_fd)
+        {
+            close(new_fd);
+
+            auto iter = arr.find(old_fd);
+            if (!iter)
+                return -EBADF;
+
+            this->arr.insert(types::make_pair(new_fd, iter->value));
+            return new_fd;
+        }
+
+        constexpr void dup_all(const filearr& orig)
         {
             for (auto iter : orig.arr) {
                 this->arr.insert(types::make_pair(iter.key, iter.value));

@@ -17,6 +17,8 @@
 #define SYS_setsid (0x0b)
 #define SYS_getsid (0x0c)
 #define SYS_close (0x0d)
+#define SYS_dup (0x0e)
+#define SYS_dup2 (0x0f)
 
 #ifdef __cplusplus
 extern "C" {

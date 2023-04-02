@@ -11,6 +11,16 @@ ssize_t write(int fd, const void* buf, size_t count)
     return syscall3(SYS_write, fd, (uint32_t)buf, count);
 }
 
+int dup(int oldfd)
+{
+    return syscall1(SYS_dup, oldfd);
+}
+
+int dup2(int oldfd, int newfd)
+{
+    return syscall2(SYS_dup2, oldfd, newfd);
+}
+
 int close(int fd)
 {
     return syscall1(SYS_close, fd);

@@ -93,23 +93,26 @@ process::process(process&& val)
     , thds { types::move(val.thds), this }
     , wait_lst(types::move(val.wait_lst))
     , attr { val.attr }
-    , pid(val.pid)
-    , ppid(val.ppid)
     , files(types::move(val.files))
     , pwd(types::move(val.pwd))
+    , pid(val.pid)
+    , ppid(val.ppid)
+    , pgid(val.pgid)
+    , sid(val.sid)
 {
     if (current_process == &val)
         current_process = this;
-
-    val.pid = 0;
-    val.ppid = 0;
-    val.attr.system = 0;
-    val.attr.zombie = 0;
 }
 
 process::process(const process& parent)
-    : process { parent.pid, parent.is_system(), types::string<>(parent.pwd) }
+    : process { parent.pid,
+        parent.is_system(),
+        types::string<>(parent.pwd),
+        kernel::signal_list(parent.signals) }
 {
+    this->pgid = parent.pgid;
+    this->sid = parent.sid;
+
     for (auto& area : parent.mms) {
         if (area.is_kernel_space() || area.attr.in.system)
             continue;
@@ -120,12 +123,18 @@ process::process(const process& parent)
     this->files.dup(parent.files);
 }
 
-process::process(pid_t _ppid, bool _system, types::string<>&& path)
+process::process(pid_t _ppid,
+    bool _system,
+    types::string<>&& path,
+    kernel::signal_list&& _sigs)
     : mms(*kernel_mms)
     , attr { .system = _system }
+    , pwd { types::move(path) }
+    , signals(types::move(_sigs))
     , pid { process::alloc_pid() }
     , ppid { _ppid }
-    , pwd { path }
+    , pgid { 0 }
+    , sid { 0 }
 {
 }
 
@@ -397,4 +406,17 @@ void NORETURN kill_current(int exit_code)
 {
     procs->kill(current_process->pid, exit_code);
     schedule_noreturn();
+}
+
+void check_signal()
+{
+    switch (current_process->signals.pop()) {
+    case kernel::SIGINT:
+    case kernel::SIGQUIT:
+    case kernel::SIGSTOP:
+        kill_current(-1);
+        break;
+    case 0:
+        break;
+    }
 }

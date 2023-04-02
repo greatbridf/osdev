@@ -26,6 +26,9 @@ unsigned int sleep(unsigned int seconds);
 int chdir(const char* path);
 char* getcwd(char* buf, size_t bufsize);
 
+pid_t setsid(void);
+pid_t getsid(pid_t pid);
+
 #ifdef __cplusplus
 }
 #endif

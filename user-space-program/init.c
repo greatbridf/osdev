@@ -9,6 +9,7 @@ int main(int argc, char** argv)
 {
     print("***** GBOS INIT SYSTEM *****\n");
 
+_run_sh:;
     pid_t sh_pid = fork();
     if (sh_pid < 0) {
         print("[init] unable to fork(), exiting...\n");
@@ -17,6 +18,12 @@ int main(int argc, char** argv)
 
     // child
     if (sh_pid == 0) {
+        pid_t sid = setsid();
+        if (sid < 0) {
+            print("[init] unable to setsid, exiting...\n");
+            return -1;
+        }
+
         char* shell_argv[128] = {};
         char* envp[1] = { NULL };
 
@@ -40,6 +47,9 @@ int main(int argc, char** argv)
         pid = wait(&ret);
         snprintf(buf, sizeof(buf), "[init] pid%d has exited with code %d\n", pid, ret);
         print(buf);
+        // sh
+        if (pid == sh_pid)
+            goto _run_sh;
     }
 
     return 0;

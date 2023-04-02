@@ -49,6 +49,7 @@ set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
                         src/kernel/hw/serial.cpp
                         src/kernel/hw/timer.c
                         src/kernel/event/event.cpp
+                        src/kernel/signal.cpp
                         src/types/bitmap.c
                         src/types/elf.cpp
                         src/types/libstdcpp.cpp
@@ -66,6 +67,7 @@ set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
                         include/kernel/mm.hpp
                         include/kernel/vfs.hpp
                         include/kernel/vga.hpp
+                        include/kernel/signal.hpp
                         include/kernel/hw/ata.hpp
                         include/kernel/hw/keyboard.h
                         include/kernel/hw/port.hpp

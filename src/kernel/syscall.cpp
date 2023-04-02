@@ -17,26 +17,11 @@
 #include <types/elf.hpp>
 #include <types/status.h>
 
-#define SYSCALL_SET_RETURN_VAL_EAX(_eax) \
-    data->s_regs.eax = ((decltype(data->s_regs.eax))(_eax))
-
-#define SYSCALL_SET_RETURN_VAL_EDX(_edx) \
-    data->s_regs.edx = ((decltype(data->s_regs.edx))(_edx))
-
-#define SYSCALL_SET_RETURN_VAL(_eax, _edx) \
-    SYSCALL_SET_RETURN_VAL_EAX(_eax);      \
-    SYSCALL_SET_RETURN_VAL_EDX(_edx)
-
 #define SYSCALL_HANDLERS_SIZE (16)
 syscall_handler syscall_handlers[SYSCALL_HANDLERS_SIZE];
 
-void _syscall_not_impl(interrupt_stack* data)
-{
-    SYSCALL_SET_RETURN_VAL(0xffffffff, 0xffffffff);
-}
-
 extern "C" void _syscall_stub_fork_return(void);
-void _syscall_fork(interrupt_stack* data)
+int _syscall_fork(interrupt_stack* data)
 {
     auto* newproc = &procs->emplace(*current_process)->value;
     auto* newthd = &newproc->thds.Emplace(*current_thread, newproc);
@@ -74,80 +59,74 @@ void _syscall_fork(interrupt_stack* data)
     // eflags
     push_stack(&newthd->esp, 0);
 
-    SYSCALL_SET_RETURN_VAL(newproc->pid, 0);
+    return newproc->pid;
 }
 
-void _syscall_write(interrupt_stack* data)
+int _syscall_write(interrupt_stack* data)
 {
     int fd = data->s_regs.edi;
     const char* buf = reinterpret_cast<const char*>(data->s_regs.esi);
     size_t n = data->s_regs.edx;
 
     auto* file = current_process->files[fd];
-    if (file->type == fs::file::types::directory) {
-        SYSCALL_SET_RETURN_VAL(GB_FAILED, EINVAL);
-        return;
-    }
+    if (file->type == fs::file::types::directory)
+        return GB_FAILED;
 
     int n_wrote = fs::vfs_write(file->ind, buf, file->cursor, n);
     file->cursor += n_wrote;
-    SYSCALL_SET_RETURN_VAL(n_wrote, 0);
+    return n_wrote;
 }
 
-void _syscall_read(interrupt_stack* data)
+int _syscall_read(interrupt_stack* data)
 {
     int fd = data->s_regs.edi;
     char* buf = reinterpret_cast<char*>(data->s_regs.esi);
     size_t n = data->s_regs.edx;
 
     auto* file = current_process->files[fd];
-    if (file->type == fs::file::types::directory) {
-        SYSCALL_SET_RETURN_VAL(GB_FAILED, EINVAL);
-        return;
-    }
+    if (file->type == fs::file::types::directory)
+        return GB_FAILED;
 
     // TODO: copy to user function !IMPORTANT
     int n_wrote = fs::vfs_read(file->ind, buf, n, file->cursor, n);
-    file->cursor += n_wrote;
-    SYSCALL_SET_RETURN_VAL(n_wrote, 0);
+    if (n_wrote >= 0)
+        file->cursor += n_wrote;
+    return n_wrote;
 }
 
-void _syscall_sleep(interrupt_stack* data)
+int _syscall_sleep(interrupt_stack* data)
 {
     current_thread->attr.ready = 0;
     current_thread->attr.wait = 1;
 
-    SYSCALL_SET_RETURN_VAL(0, 0);
-
     schedule();
+    return 0;
 }
 
-void _syscall_chdir(interrupt_stack* data)
+int _syscall_chdir(interrupt_stack* data)
 {
     const char* path = reinterpret_cast<const char*>(data->s_regs.edi);
     auto* dir = fs::vfs_open(path);
     if (!dir) {
         // set errno ENOTFOUND
-        SYSCALL_SET_RETURN_VAL_EAX(-1);
-        return;
+        return -1;
     }
 
     if (!dir->ind->flags.in.directory) {
         // set errno ENOTDIR
-        SYSCALL_SET_RETURN_VAL_EAX(-1);
-        return;
+        return -1;
     }
 
     current_process->pwd = path;
 
-    SYSCALL_SET_RETURN_VAL_EAX(0);
+    return 0;
 }
 
 // syscall_exec(const char* exec, const char** argv)
 // @param exec: the path of program to execute
 // @param argv: arguments end with nullptr
 // @param envp: environment variables end with nullptr
-void _syscall_exec(interrupt_stack* data)
+int _syscall_exec(interrupt_stack* data)
 {
     const char* exec = reinterpret_cast<const char*>(data->s_regs.edi);
     char* const* argv = reinterpret_cast<char* const*>(data->s_regs.esi);
@@ -160,17 +139,17 @@ void _syscall_exec(interrupt_stack* data)
     d.system = false;
 
     int ret = types::elf::elf32_load(&d);
-    if (ret != GB_OK) {
-        data->s_regs.eax = d.errcode;
-        return;
-    }
+    if (ret != GB_OK)
+        return d.errcode;
 
     data->v_eip = d.eip;
     data->esp = (uint32_t)d.sp;
+
+    return 0;
 }
 
 // @param exit_code
-void _syscall_exit(interrupt_stack* data)
+int _syscall_exit(interrupt_stack* data)
 {
     uint32_t exit_code = data->s_regs.edi;
 
@@ -187,25 +166,22 @@ void _syscall_exit(interrupt_stack* data)
 
     // we should not return to here
     assert(false);
+    return -1;
 }
 
 // @param address of exit code: int*
 // @return pid of the exited process
-void _syscall_wait(interrupt_stack* data)
+int _syscall_wait(interrupt_stack* data)
 {
     auto* arg1 = reinterpret_cast<int*>(data->s_regs.edi);
 
     // TODO: check valid address
-    if (arg1 < (int*)0x40000000) {
-        SYSCALL_SET_RETURN_VAL(-1, EINVAL);
-        return;
-    }
+    if (arg1 < (int*)0x40000000)
+        return -1;
 
     auto& waitlst = current_process->wait_lst;
-    if (waitlst.empty() && !procs->has_child(current_process->pid)) {
-        SYSCALL_SET_RETURN_VAL(-1, ECHILD);
-        return;
-    }
+    if (waitlst.empty() && !procs->has_child(current_process->pid))
+        return -1;
 
     while (waitlst.empty()) {
         current_thread->attr.ready = 0;
@@ -227,20 +203,18 @@ void _syscall_wait(interrupt_stack* data)
     *arg1 = (int)evt.data2;
 
     procs->remove(pid);
-    SYSCALL_SET_RETURN_VAL(pid, 0);
+    return pid;
 }
 
-void _syscall_getdents(interrupt_stack* data)
+int _syscall_getdents(interrupt_stack* data)
 {
     int fd = data->s_regs.edi;
     auto* buf = (char*)(data->s_regs.esi);
     size_t cnt = data->s_regs.edx;
 
     auto* dir = current_process->files[fd];
-    if (dir->type != fs::file::types::directory) {
-        data->s_regs.eax = -1;
-        return;
-    }
+    if (dir->type != fs::file::types::directory)
+        return -1;
 
     size_t orig_cnt = cnt;
     int nread = dir->ind->fs->inode_readdir(dir->ind, dir->cursor,
@@ -270,17 +244,17 @@ void _syscall_getdents(interrupt_stack* data)
     if (nread > 0)
         dir->cursor += nread;
 
-    data->s_regs.eax = orig_cnt - cnt;
+    return orig_cnt - cnt;
 }
 
-void _syscall_open(interrupt_stack* data)
+int _syscall_open(interrupt_stack* data)
 {
     auto* path = (const char*)data->s_regs.edi;
     uint32_t flags = data->s_regs.esi;
-    data->s_regs.eax = current_process->files.open(path, flags);
+    return current_process->files.open(path, flags);
 }
 
-void _syscall_getcwd(interrupt_stack* data)
+int _syscall_getcwd(interrupt_stack* data)
 {
     char* buf = reinterpret_cast<char*>(data->s_regs.edi);
     size_t bufsize = reinterpret_cast<size_t>(data->s_regs.esi);
@@ -289,7 +263,41 @@ void _syscall_getcwd(interrupt_stack* data)
     strncpy(buf, current_process->pwd.c_str(), bufsize);
     buf[bufsize - 1] = 0;
 
-    SYSCALL_SET_RETURN_VAL_EAX(buf);
+    return (uint32_t)buf;
+}
+
+int _syscall_setsid(interrupt_stack* data)
+{
+    if (current_process->pid == current_process->pgid)
+        return -1;
+
+    current_process->sid = current_process->pid;
+    current_process->pgid = current_process->pid;
+
+    // TODO: get tty* from fd or block device id
+    procs->set_ctrl_tty(current_process->pid, console);
+
+    return current_process->pid;
+}
+
+int _syscall_getsid(interrupt_stack* data)
+{
+    pid_t pid = data->s_regs.edi;
+
+    auto* proc = procs->find(pid);
+    if (!proc || proc->sid != current_process->sid)
+        return -1;
+
+    return proc->sid;
+}
+
+extern "C" void syscall_entry(interrupt_stack* data)
+{
+    int ret = syscall_handlers[data->s_regs.eax](data);
+
+    data->s_regs.eax = ret;
+
+    check_signal();
 }
 
 SECTION(".text.kinit")
@@ -306,4 +314,6 @@ void init_syscall(void)
     syscall_handlers[8] = _syscall_getdents;
     syscall_handlers[9] = _syscall_open;
     syscall_handlers[10] = _syscall_getcwd;
+    syscall_handlers[11] = _syscall_setsid;
+    syscall_handlers[12] = _syscall_getsid;
 }

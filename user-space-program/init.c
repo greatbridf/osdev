@@ -1,12 +1,22 @@
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
+#include <fcntl.h>
 #include <sys/wait.h>
 
 #define print(str) write(STDERR_FILENO, str, strlen(str))
 
 int main(int argc, char** argv)
 {
+    int fd = 0;
+    // Assumes three file descriptors open.
+    while((fd = open("/dev/console", 0)) >= 0){
+        if(fd >= 3){
+            close(fd);
+            break;
+        }
+    }
+
     print("***** GBOS INIT SYSTEM *****\n");
 
 _run_sh:;

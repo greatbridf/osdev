@@ -220,6 +220,43 @@ public:
                 second = tmp;
             }
 
+            if (second->is_root()) {
+                node* tmp = first;
+                first = second;
+                second = tmp;
+            }
+
+            if (first->is_root()) {
+                node* sl = second->left;
+                node* sr = second->right;
+
+                if (sl)
+                    sl->parent = first;
+                if (sr)
+                    sr->parent = first;
+
+                if (second->is_right_child()) {
+                    second->left = first->left;
+                    second->right = first;
+
+                    if (second->left)
+                        second->left->parent = second;
+                } else {
+                    second->right = first->right;
+                    second->left = first;
+
+                    if (second->right)
+                        second->right->parent = second;
+                }
+
+                first->left = sl;
+                first->right = sr;
+                first->parent = second;
+
+                second->parent = nullptr;
+                return;
+            }
+
             node* p = first->parent;
             node* cl = first->left;
             node* cr = first->right;

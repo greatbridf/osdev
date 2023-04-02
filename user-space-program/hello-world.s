@@ -8,7 +8,7 @@ main:
 	movl $0xacacacac, %edx
 
 	movl $0x01, %eax
-	movl $0, %edi
+	movl $1, %edi
 	movl $_str, %esi
 	movl $_str_size, %ecx
 	movl (%ecx), %edx

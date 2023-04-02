@@ -69,6 +69,10 @@ int _syscall_write(interrupt_stack* data)
     size_t n = data->s_regs.edx;
 
     auto* file = current_process->files[fd];
+
+    if (!file)
+        return -EBADF;
+
     if (file->type == fs::file::types::directory)
         return GB_FAILED;
 
@@ -84,6 +88,10 @@ int _syscall_read(interrupt_stack* data)
     size_t n = data->s_regs.edx;
 
     auto* file = current_process->files[fd];
+
+    if (!file)
+        return -EBADF;
+
     if (file->type == fs::file::types::directory)
         return GB_FAILED;
 
@@ -291,6 +299,13 @@ int _syscall_getsid(interrupt_stack* data)
     return proc->sid;
 }
 
+int _syscall_close(interrupt_stack* data)
+{
+    int fd = data->s_regs.edi;
+    current_process->files.close(fd);
+    return 0;
+}
+
 extern "C" void syscall_entry(interrupt_stack* data)
 {
     int ret = syscall_handlers[data->s_regs.eax](data);
@@ -316,4 +331,5 @@ void init_syscall(void)
     syscall_handlers[10] = _syscall_getcwd;
     syscall_handlers[11] = _syscall_setsid;
     syscall_handlers[12] = _syscall_getsid;
+    syscall_handlers[13] = _syscall_close;
 }

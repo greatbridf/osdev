@@ -11,6 +11,11 @@ ssize_t write(int fd, const void* buf, size_t count)
     return syscall3(SYS_write, fd, (uint32_t)buf, count);
 }
 
+int close(int fd)
+{
+    return syscall1(SYS_close, fd);
+}
+
 _Noreturn void _exit(int code)
 {
     (void)syscall1(SYS_exit, code);

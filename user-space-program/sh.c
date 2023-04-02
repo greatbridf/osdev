@@ -116,7 +116,7 @@ runcmd(struct cmd *cmd)
   struct execcmd *ecmd;
   struct listcmd *lcmd;
 //   struct pipecmd *pcmd;
-//   struct redircmd *rcmd;
+  struct redircmd *rcmd;
 
   if(cmd == 0)
     _exit(-1);
@@ -134,15 +134,15 @@ runcmd(struct cmd *cmd)
     printf("exec %s failed\n", ecmd->argv[0]);
     break;
 
-//   case REDIR:
-//     rcmd = (struct redircmd*)cmd;
-//     close(rcmd->fd);
-//     if(open(rcmd->file, rcmd->mode) < 0){
-//       printf("open %s failed\n", rcmd->file);
-//       _exit(-1);
-//     }
-//     runcmd(rcmd->cmd);
-//     break;
+  case REDIR:
+    rcmd = (struct redircmd*)cmd;
+    close(rcmd->fd);
+    if(open(rcmd->file, rcmd->mode) < 0){
+      printf("open %s failed\n", rcmd->file);
+      _exit(-1);
+    }
+    runcmd(rcmd->cmd);
+    break;
 
   case LIST:
     lcmd = (struct listcmd*)cmd;
@@ -202,13 +202,14 @@ main(void)
 {
   static char buf[100];
   
-//   // Assumes three file descriptors open.
-//   while((fd = open("console", 0)) >= 0){
-//     if(fd >= 3){
-//       close(fd);
-//       break;
-//     }
-//   }
+  int fd = 0;
+  // Assumes three file descriptors open.
+  while((fd = open("/dev/console", 0)) >= 0){
+    if(fd >= 3){
+      close(fd);
+      break;
+    }
+  }
   
   // Read and run input commands.
   while(getcmd(buf, sizeof(buf)) >= 0){

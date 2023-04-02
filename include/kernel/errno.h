@@ -23,5 +23,6 @@ extern uint32_t* _get_errno(void);
 #define ENOTDIR (1 << 5)
 #define ENOTFOUND (1 << 6)
 #define ECHILD (1 << 7)
+#define EBADF (1 << 8)
 
 #endif

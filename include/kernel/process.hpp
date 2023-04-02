@@ -152,7 +152,6 @@ public:
     private:
         inline static container_type* files;
         array_type arr;
-        int next_fd = 0;
 
     public:
         inline static void init_global_file_container(void)
@@ -177,18 +176,22 @@ public:
         constexpr filearr(void) = default;
         constexpr filearr(filearr&& val)
             : arr { types::move(val.arr) }
-            , next_fd { val.next_fd }
         {
-            val.next_fd = 0;
+        }
+
+        constexpr int _next_fd(void) const
+        {
+            int fd = 0;
+
+            for (auto iter = arr.cbegin(); iter != arr.cend(); ++iter)
+                if (iter->key == fd)
+                    ++fd;
+
+            return fd;
         }
 
         constexpr void dup(const filearr& orig)
         {
-            if (this->next_fd)
-                return;
-
-            this->next_fd = orig.next_fd;
-
             for (auto iter : orig.arr) {
                 this->arr.insert(types::make_pair(iter.key, iter.value));
                 ++iter.value->ref;
@@ -234,7 +237,7 @@ public:
                 0,
                 1 });
 
-            int fd = next_fd++;
+            int fd = _next_fd();
             arr.insert(types::make_pair(fd, iter));
             return fd;
         }

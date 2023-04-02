@@ -16,6 +16,7 @@
 #define SYS_getcwd (0x0a)
 #define SYS_setsid (0x0b)
 #define SYS_getsid (0x0c)
+#define SYS_close (0x0d)
 
 #ifdef __cplusplus
 extern "C" {

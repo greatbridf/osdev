@@ -5,6 +5,7 @@
 #include <kernel/event/evtqueue.hpp>
 #include <kernel/interrupt.h>
 #include <kernel/mm.hpp>
+#include <kernel/signal.hpp>
 #include <kernel/task.h>
 #include <kernel/tty.hpp>
 #include <kernel/vfs.hpp>
@@ -266,6 +267,7 @@ public:
     process_attr attr;
     filearr files;
     types::string<> pwd;
+    kernel::signal_list signals;
 
     pid_t pid;
     pid_t ppid;
@@ -276,7 +278,10 @@ public:
     process(process&& val);
     process(const process&);
 
-    explicit process(pid_t ppid, bool system = true, types::string<>&& path = "/");
+    explicit process(pid_t ppid,
+        bool system = true,
+        types::string<>&& path = "/",
+        kernel::signal_list&& sigs = {});
 
     constexpr bool is_system(void) const
     {
@@ -387,6 +392,20 @@ public:
         }
     }
 
+    void send_signal(pid_t pid, kernel::sig_t signal)
+    {
+        auto iter = this->find(pid);
+        if (!iter)
+            return iter->signals.set(signal);
+    }
+    void send_signal_grp(pid_t pgid, kernel::sig_t signal)
+    {
+        for (auto& proc : m_procs) {
+            if (proc.value.pgid == pgid)
+                proc.value.signals.set(signal);
+        }
+    }
+
     void kill(pid_t pid, int exit_code);
 };
 
@@ -464,3 +483,5 @@ void k_new_thread(void (*func)(void*), void* data);
 
 void NORETURN freeze(void);
 void NORETURN kill_current(int exit_code);
+
+void check_signal(void);

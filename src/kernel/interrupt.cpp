@@ -244,10 +244,16 @@ extern "C" void int14_handler(int14_data* d)
     }
 }
 
+void after_irq(void)
+{
+    check_signal();
+}
+
 extern "C" void irq0_handler(interrupt_stack*)
 {
     inc_tick();
     asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
+    after_irq();
     schedule();
 }
 // keyboard interrupt
@@ -255,70 +261,85 @@ extern "C" void irq1_handler(void)
 {
     asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
     handle_keyboard_interrupt();
+    after_irq();
 }
 extern "C" void irq2_handler(void)
 {
     asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
+    after_irq();
 }
 extern "C" void irq3_handler(void)
 {
     asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
+    after_irq();
 }
 extern "C" void irq4_handler(void)
 {
     // TODO: register interrupt handler in serial port driver
     serial_receive_data_interrupt();
     asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
+    after_irq();
 }
 extern "C" void irq5_handler(void)
 {
     asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
+    after_irq();
 }
 extern "C" void irq6_handler(void)
 {
     asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
+    after_irq();
 }
 extern "C" void irq7_handler(void)
 {
     asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
+    after_irq();
 }
 extern "C" void irq8_handler(void)
 {
     asm_outb(PORT_PIC2_COMMAND, PIC_EOI);
     asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
+    after_irq();
 }
 extern "C" void irq9_handler(void)
 {
     asm_outb(PORT_PIC2_COMMAND, PIC_EOI);
     asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
+    after_irq();
 }
 extern "C" void irq10_handler(void)
 {
     asm_outb(PORT_PIC2_COMMAND, PIC_EOI);
     asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
+    after_irq();
 }
 extern "C" void irq11_handler(void)
 {
     asm_outb(PORT_PIC2_COMMAND, PIC_EOI);
     asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
+    after_irq();
 }
 extern "C" void irq12_handler(void)
 {
     asm_outb(PORT_PIC2_COMMAND, PIC_EOI);
     asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
+    after_irq();
 }
 extern "C" void irq13_handler(void)
 {
     asm_outb(PORT_PIC2_COMMAND, PIC_EOI);
     asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
+    after_irq();
 }
 extern "C" void irq14_handler(void)
 {
     asm_outb(PORT_PIC2_COMMAND, PIC_EOI);
     asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
+    after_irq();
 }
 extern "C" void irq15_handler(void)
 {
     asm_outb(PORT_PIC2_COMMAND, PIC_EOI);
     asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
+    after_irq();
 }

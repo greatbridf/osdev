@@ -89,7 +89,8 @@ int _syscall_read(interrupt_stack* data)
 
     // TODO: copy to user function !IMPORTANT
     int n_wrote = fs::vfs_read(file->ind, buf, n, file->cursor, n);
-    file->cursor += n_wrote;
+    if (n_wrote >= 0)
+        file->cursor += n_wrote;
     return n_wrote;
 }
 
@@ -296,7 +297,7 @@ extern "C" void syscall_entry(interrupt_stack* data)
 
     data->s_regs.eax = ret;
 
-    // TODO: check signal
+    check_signal();
 }
 
 SECTION(".text.kinit")

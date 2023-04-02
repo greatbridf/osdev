@@ -105,7 +105,10 @@ process::process(process&& val)
 }
 
 process::process(const process& parent)
-    : process { parent.pid, parent.is_system(), types::string<>(parent.pwd) }
+    : process { parent.pid,
+        parent.is_system(),
+        types::string<>(parent.pwd),
+        kernel::signal_list(parent.signals) }
 {
     this->pgid = parent.pgid;
     this->sid = parent.sid;
@@ -120,10 +123,14 @@ process::process(const process& parent)
     this->files.dup(parent.files);
 }
 
-process::process(pid_t _ppid, bool _system, types::string<>&& path)
+process::process(pid_t _ppid,
+    bool _system,
+    types::string<>&& path,
+    kernel::signal_list&& _sigs)
     : mms(*kernel_mms)
     , attr { .system = _system }
-    , pwd { path }
+    , pwd { types::move(path) }
+    , signals(types::move(_sigs))
     , pid { process::alloc_pid() }
     , ppid { _ppid }
     , pgid { 0 }
@@ -399,4 +406,17 @@ void NORETURN kill_current(int exit_code)
 {
     procs->kill(current_process->pid, exit_code);
     schedule_noreturn();
+}
+
+void check_signal()
+{
+    switch (current_process->signals.pop()) {
+    case kernel::SIGINT:
+    case kernel::SIGQUIT:
+    case kernel::SIGSTOP:
+        kill_current(-1);
+        break;
+    case 0:
+        break;
+    }
 }

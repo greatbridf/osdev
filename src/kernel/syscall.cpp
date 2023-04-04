@@ -17,7 +17,7 @@
 #include <types/elf.hpp>
 #include <types/status.h>
 
-#define SYSCALL_HANDLERS_SIZE (32)
+#define SYSCALL_HANDLERS_SIZE (128)
 syscall_handler syscall_handlers[SYSCALL_HANDLERS_SIZE];
 
 extern "C" void _syscall_stub_fork_return(void);
@@ -155,7 +155,7 @@ int _syscall_chdir(interrupt_stack* data)
 // @param exec: the path of program to execute
 // @param argv: arguments end with nullptr
 // @param envp: environment variables end with nullptr
-int _syscall_exec(interrupt_stack* data)
+int _syscall_execve(interrupt_stack* data)
 {
     const char* exec = reinterpret_cast<const char*>(data->s_regs.edi);
     char* const* argv = reinterpret_cast<char* const*>(data->s_regs.esi);
@@ -360,21 +360,23 @@ extern "C" void syscall_entry(interrupt_stack* data)
 SECTION(".text.kinit")
 void init_syscall(void)
 {
-    syscall_handlers[0] = _syscall_fork;
+    memset(syscall_handlers, 0x00, sizeof(syscall_handlers));
+
+    syscall_handlers[0] = _syscall_read;
     syscall_handlers[1] = _syscall_write;
-    syscall_handlers[2] = _syscall_sleep;
-    syscall_handlers[3] = _syscall_chdir;
-    syscall_handlers[4] = _syscall_exec;
-    syscall_handlers[5] = _syscall_exit;
-    syscall_handlers[6] = _syscall_wait;
-    syscall_handlers[7] = _syscall_read;
-    syscall_handlers[8] = _syscall_getdents;
-    syscall_handlers[9] = _syscall_open;
-    syscall_handlers[10] = _syscall_getcwd;
-    syscall_handlers[11] = _syscall_setsid;
-    syscall_handlers[12] = _syscall_getsid;
-    syscall_handlers[13] = _syscall_close;
-    syscall_handlers[14] = _syscall_dup;
-    syscall_handlers[15] = _syscall_dup2;
-    syscall_handlers[16] = _syscall_pipe;
+    syscall_handlers[2] = _syscall_open;
+    syscall_handlers[3] = _syscall_close;
+    syscall_handlers[22] = _syscall_pipe;
+    syscall_handlers[32] = _syscall_dup;
+    syscall_handlers[33] = _syscall_dup2;
+    syscall_handlers[35] = _syscall_sleep;
+    syscall_handlers[57] = _syscall_fork;
+    syscall_handlers[59] = _syscall_execve;
+    syscall_handlers[60] = _syscall_exit;
+    syscall_handlers[61] = _syscall_wait;
+    syscall_handlers[78] = _syscall_getdents;
+    syscall_handlers[79] = _syscall_getcwd;
+    syscall_handlers[80] = _syscall_chdir;
+    syscall_handlers[112] = _syscall_setsid;
+    syscall_handlers[124] = _syscall_getsid;
 }

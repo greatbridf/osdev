@@ -5,11 +5,11 @@
 .globl main
 main:
 # fork 1 -> 2
-	xorl %eax, %eax
+	movl $57, %eax
 	int $0x80
 	movl %eax, %esi
 # fork 2 -> 4
-	xorl %eax, %eax
+	movl $57, %eax
 	int $0x80
 	movl %eax, %ecx
 # write

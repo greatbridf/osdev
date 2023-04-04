@@ -45,7 +45,7 @@ pid_t fork(void)
 
 int execve(const char* pathname, char* const argv[], char* const envp[])
 {
-    return syscall3(SYS_exec, (uint32_t)pathname, (uint32_t)argv, (uint32_t)envp);
+    return syscall3(SYS_execve, (uint32_t)pathname, (uint32_t)argv, (uint32_t)envp);
 }
 
 unsigned int sleep(unsigned int seconds)

@@ -1,6 +1,9 @@
 #pragma once
 
+#include "errno.h"
+
 #include <assert.h>
+#include <kernel/event/evtqueue.hpp>
 #include <stdint.h>
 #include <types/allocator.hpp>
 #include <types/buffer.hpp>
@@ -205,7 +208,7 @@ private:
 
 private:
     types::buffer<types::kernel_allocator> buf;
-    types::mutex mtx;
+    kernel::cond_var m_cv;
     uint32_t flags;
 
 public:
@@ -217,16 +220,19 @@ public:
 
     void close_read(void)
     {
+        // TODO: lock
         flags &= (~READABLE);
     }
 
     void close_write(void)
     {
+        // TODO: lock
         flags &= (~WRITABLE);
     }
 
     void close_one(void)
     {
+        // TODO: lock
         if (flags & READABLE)
             close_read();
         else
@@ -235,30 +241,47 @@ public:
 
     bool is_free(void) const
     {
+        // TODO: lock
         return (flags & (READABLE | WRITABLE)) == 0;
     }
 
     int write(const char* buf, size_t n)
     {
         // TODO: check privilege
-        for (size_t i = 0; i < n; ++i) {
-            if (this->buf.full())
-                assert(false);
-            this->buf.put(*(buf++));
+        // TODO: check EPIPE
+        {
+            auto& mtx = m_cv.mtx();
+            types::lock_guard lck(mtx);
+
+            while (this->buf.avail() < n)
+                if (!m_cv.wait(mtx))
+                    return -EINTR;
+
+            for (size_t i = 0; i < n; ++i)
+                this->buf.put(*(buf++));
         }
 
+        m_cv.notify();
         return n;
     }
 
     int read(char* buf, size_t n)
     {
         // TODO: check privilege
-        for (size_t i = 0; i < n; ++i) {
-            if (this->buf.empty())
-                assert(false);
-            *(buf++) = this->buf.pop();
+        // TODO: check EPIPE
+        {
+            auto& mtx = m_cv.mtx();
+            types::lock_guard lck(mtx);
+
+            while (this->buf.size() < n)
+                if (!m_cv.wait(mtx))
+                    return -EINTR;
+
+            for (size_t i = 0; i < n; ++i)
+                *(buf++) = this->buf.get();
         }
 
+        m_cv.notify();
         return n;
     }
 };

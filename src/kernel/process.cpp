@@ -168,6 +168,7 @@ void proclist::kill(pid_t pid, int exit_code)
     auto* parent = this->find(proc->ppid);
     auto* init = this->find(1);
 
+    bool flag = false;
     {
         auto& mtx = init->cv_wait.mtx();
         types::lock_guard lck(mtx);
@@ -176,13 +177,16 @@ void proclist::kill(pid_t pid, int exit_code)
             auto& mtx = proc->cv_wait.mtx();
             types::lock_guard lck(mtx);
 
-            for (const auto& item : proc->waitlist)
+            for (const auto& item : proc->waitlist) {
                 init->waitlist.push_back(item);
+                flag = true;
+            }
 
             proc->waitlist.clear();
         }
     }
-    init->cv_wait.notify();
+    if (flag)
+        init->cv_wait.notify();
 
     {
         auto& mtx = parent->cv_wait.mtx();

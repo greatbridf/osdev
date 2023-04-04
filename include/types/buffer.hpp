@@ -134,6 +134,16 @@ public:
         head = _forward(head);
         return c;
     }
+
+    constexpr size_t size(void) const
+    {
+        return count;
+    }
+
+    constexpr size_t avail(void) const
+    {
+        return end - start + 1 - count;
+    }
 };
 
 } // namespace types

@@ -206,28 +206,28 @@ int _syscall_wait(interrupt_stack* data)
     types::lock_guard lck(mtx);
 
     auto& waitlist = current_process->waitlist;
-    if (waitlist.empty() && !procs->has_child(current_process->pid))
-        return -ECHILD;
 
-    while (cv.wait(mtx)) {
-        if (!waitlist.empty()) {
-            auto iter = waitlist.begin();
-            assert(iter != waitlist.end());
+    while (waitlist.empty()) {
+        if (!procs->has_child(current_process->pid))
+            return -ECHILD;
 
-            auto& obj = *iter;
-            pid_t pid = obj.pid;
-
-            // TODO: copy_to_user check privilege
-            *arg1 = obj.code;
-
-            procs->remove(pid);
-            waitlist.erase(iter);
-
-            return pid;
-        }
+        if (!cv.wait(mtx))
+            return -EINTR;
     }
 
-    return -EINTR;
+    auto iter = waitlist.begin();
+    assert(iter != waitlist.end());
+
+    auto& obj = *iter;
+    pid_t pid = obj.pid;
+
+    // TODO: copy_to_user check privilege
+    *arg1 = obj.code;
+
+    procs->remove(pid);
+    waitlist.erase(iter);
+
+    return pid;
 }
 
 int _syscall_getdents(interrupt_stack* data)

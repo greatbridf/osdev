@@ -1,6 +1,7 @@
 #include <asm/port_io.h>
 #include <asm/sys.h>
 #include <assert.h>
+#include <bits/ioctl.h>
 #include <kernel/errno.h>
 #include <kernel/interrupt.h>
 #include <kernel/log.hpp>
@@ -370,6 +371,43 @@ int _syscall_setpgid(interrupt_stack* data)
     return 0;
 }
 
+int _syscall_ioctl(interrupt_stack* data)
+{
+    int fd = data->s_regs.edi;
+    unsigned long request = data->s_regs.esi;
+
+    // TODO: check fd type and get tty* from fd
+    //
+    //       we use a trick for now, check whether
+    //       the file that fd points to is a pipe or
+    //       not. and we suppose that stdin will be
+    //       either a tty or a pipe.
+    auto* file = current_process->files[fd];
+    if (!file || file->type != fs::file::types::ind)
+        return -ENOTTY;
+
+    switch (request) {
+    case TIOCGPGRP: {
+        auto* pgid = (pid_t*)data->s_regs.edx;
+        tty* ctrl_tty = procs->get_ctrl_tty(current_process->pid);
+        // TODO: copy_to_user
+        *pgid = ctrl_tty->get_pgrp();
+        break;
+    }
+    case TIOCSPGRP: {
+        // TODO: copy_from_user
+        pid_t pgid = *(const pid_t*)data->s_regs.edx;
+        tty* ctrl_tty = procs->get_ctrl_tty(current_process->pid);
+        ctrl_tty->set_pgrp(pgid);
+        break;
+    }
+    default:
+        return -EINVAL;
+    }
+
+    return 0;
+}
+
 extern "C" void syscall_entry(interrupt_stack* data)
 {
     int syscall_no = data->s_regs.eax;
@@ -392,6 +430,7 @@ void init_syscall(void)
     syscall_handlers[1] = _syscall_write;
     syscall_handlers[2] = _syscall_open;
     syscall_handlers[3] = _syscall_close;
+    syscall_handlers[16] = _syscall_ioctl;
     syscall_handlers[22] = _syscall_pipe;
     syscall_handlers[32] = _syscall_dup;
     syscall_handlers[33] = _syscall_dup2;

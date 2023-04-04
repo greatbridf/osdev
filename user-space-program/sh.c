@@ -229,9 +229,11 @@ main(void)
       setpgid(0, 0);
       runcmd(parsecmd(buf));
     }
+    tcsetpgrp(STDOUT_FILENO, pid);
     setpgid(pid, 0);
     int code;
     wait(&code);
+    tcsetpgrp(STDOUT_FILENO, 3);
   }
   _exit(0);
 }

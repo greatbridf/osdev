@@ -1,3 +1,5 @@
+#include <stdarg.h>
+#include <sys/ioctl.h>
 #include <unistd.h>
 #include <syscall.h>
 
@@ -76,4 +78,37 @@ pid_t setsid(void)
 pid_t getsid(pid_t pid)
 {
     return syscall1(SYS_getsid, pid);
+}
+
+pid_t tcgetpgrp(int fd)
+{
+    pid_t pgrp;
+    return ioctl(fd, TIOCGPGRP, &pgrp);
+}
+
+int tcsetpgrp(int fd, pid_t pgrp)
+{
+    return ioctl(fd, TIOCSPGRP, &pgrp);
+}
+
+int ioctl(int fd, unsigned long request, ...)
+{
+    int ret = -1;
+
+    va_list args;
+    va_start(args, request);
+
+    switch (request) {
+    case TIOCGPGRP:
+        ret = syscall3(SYS_ioctl, fd, request, va_arg(args, uint32_t));
+        break;
+    case TIOCSPGRP:
+        ret = syscall3(SYS_ioctl, fd, request, va_arg(args, uint32_t));
+        break;
+    default:
+        break;
+    }
+
+    va_end(args);
+    return ret;
 }

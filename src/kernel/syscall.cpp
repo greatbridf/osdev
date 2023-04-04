@@ -128,7 +128,8 @@ int _syscall_read(interrupt_stack* data)
     }
 }
 
-int _syscall_sleep(interrupt_stack* data)
+// TODO: sleep seconds
+int _syscall_sleep(interrupt_stack*)
 {
     current_thread->attr.ready = 0;
     current_thread->attr.wait = 1;
@@ -290,7 +291,7 @@ int _syscall_getcwd(interrupt_stack* data)
     return (uint32_t)buf;
 }
 
-int _syscall_setsid(interrupt_stack* data)
+int _syscall_setsid(interrupt_stack*)
 {
     if (current_process->pid == current_process->pgid)
         return -EPERM;

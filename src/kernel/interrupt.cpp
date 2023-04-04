@@ -251,8 +251,8 @@ extern "C" void irq0_handler(interrupt_stack*)
 {
     inc_tick();
     asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
-    after_irq();
     schedule();
+    after_irq();
 }
 // keyboard interrupt
 extern "C" void irq1_handler(void)

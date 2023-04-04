@@ -367,25 +367,30 @@ void NORETURN init_scheduler(void)
 }
 
 extern "C" void asm_ctx_switch(uint32_t** curr_esp, uint32_t* next_esp);
-void schedule()
+bool schedule()
 {
     auto thd = readythds->query();
+    process* proc = nullptr;
+    thread* curr_thd = nullptr;
 
     if (current_thread == thd)
-        return;
+        goto _end;
 
-    process* proc = thd->owner;
+    proc = thd->owner;
     if (current_process != proc) {
         asm_switch_pd(proc->mms.m_pd);
         current_process = proc;
     }
 
-    auto* curr_thd = current_thread;
+    curr_thd = current_thread;
 
     current_thread = thd;
     tss.esp0 = current_thread->pkstack;
 
     asm_ctx_switch(&curr_thd->esp, thd->esp);
+
+_end:
+    return current_process->signals.empty();
 }
 
 void NORETURN schedule_noreturn(void)

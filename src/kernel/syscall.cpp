@@ -213,7 +213,10 @@ int _syscall_wait(interrupt_stack* data)
         current_thread->attr.wait = 1;
         waitlst.subscribe(current_thread);
 
-        schedule();
+        if (!schedule()) {
+            waitlst.unsubscribe(current_thread);
+            return -EINTR;
+        }
 
         if (!waitlst.empty()) {
             waitlst.unsubscribe(current_thread);

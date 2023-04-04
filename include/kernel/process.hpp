@@ -519,7 +519,8 @@ public:
 };
 
 void NORETURN init_scheduler(void);
-void schedule(void);
+/// @return true if returned normally, false if being interrupted
+bool schedule(void);
 void NORETURN schedule_noreturn(void);
 
 constexpr uint32_t push_stack(uint32_t** stack, uint32_t val)

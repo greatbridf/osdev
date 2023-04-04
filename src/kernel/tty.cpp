@@ -6,10 +6,6 @@
 #include <stdint.h>
 #include <stdio.h>
 
-#define TTY_DATA (1 << 0)
-#define TTY_EOF (1 << 1)
-#define TTY_INT (1 << 2)
-
 tty::tty()
     : buf(BUFFER_SIZE)
 {
@@ -27,30 +23,14 @@ size_t tty::read(char* buf, size_t buf_size, size_t n)
 
     while (buf_size && n) {
         if (this->buf.empty()) {
-            while (this->blocklist.empty()) {
-                current_thread->attr.ready = 0;
-                current_thread->attr.wait = 1;
-                this->blocklist.subscribe(current_thread);
-                schedule();
+            current_thread->attr.ready = 0;
+            current_thread->attr.wait = 1;
+            this->blocklist.subscribe(current_thread);
 
-                if (!this->blocklist.empty()) {
-                    this->blocklist.unsubscribe(current_thread);
-                    break;
-                }
-            }
-
-            auto evt = this->blocklist.front();
-            switch ((int)evt.data1) {
-            // INTERRUPT
-            case TTY_INT:
-                return -1;
-            // DATA
-            case TTY_DATA:
-                break;
-            // EOF
-            case TTY_EOF:
-                return orig_n - n;
-            }
+            bool intr = !schedule();
+            this->blocklist.unsubscribe(current_thread);
+            if (intr || this->buf.empty())
+                goto _end;
         }
 
         *buf = this->buf.get();
@@ -61,6 +41,7 @@ size_t tty::read(char* buf, size_t buf_size, size_t n)
             break;
     }
 
+_end:
     return orig_n - n;
 }
 
@@ -102,7 +83,6 @@ void serial_tty::recvchar(char c)
             serial_send_data(PORT_SERIAL0, '\r');
             serial_send_data(PORT_SERIAL0, '\n');
         }
-        this->blocklist.push(kernel::evt { nullptr, (void*)TTY_DATA, nullptr, nullptr });
         this->blocklist.notify();
         break;
     // ^?: backspace
@@ -139,26 +119,22 @@ void serial_tty::recvchar(char c)
         break;
     // ^C: SIGINT
     case 0x03:
-        this->blocklist.push(kernel::evt { nullptr, (void*)TTY_INT, nullptr, nullptr });
-        this->blocklist.notify();
         procs->send_signal_grp(fg_pgroup, kernel::SIGINT);
+        this->blocklist.notify();
         break;
     // ^D: EOF
     case 0x04:
-        this->blocklist.push(kernel::evt { nullptr, (void*)TTY_EOF, nullptr, nullptr });
         this->blocklist.notify();
         break;
     // ^Z: SIGSTOP
     case 0x1a:
-        this->blocklist.push(kernel::evt { nullptr, (void*)TTY_INT, nullptr, nullptr });
-        this->blocklist.notify();
         procs->send_signal_grp(fg_pgroup, kernel::SIGSTOP);
+        this->blocklist.notify();
         break;
     // ^\: SIGQUIT
     case 0x1c:
-        this->blocklist.push(kernel::evt { nullptr, (void*)TTY_INT, nullptr, nullptr });
-        this->blocklist.notify();
         procs->send_signal_grp(fg_pgroup, kernel::SIGQUIT);
+        this->blocklist.notify();
         break;
     default:
         buf.put(c);

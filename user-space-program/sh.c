@@ -224,8 +224,12 @@ main(void)
         printf("cannot cd %s\n", buf+3);
       continue;
     }
-    if(fork1() == 0)
+    pid_t pid = 0;
+    if((pid = fork1()) == 0) {
+      setpgid(0, 0);
       runcmd(parsecmd(buf));
+    }
+    setpgid(pid, 0);
     int code;
     wait(&code);
   }

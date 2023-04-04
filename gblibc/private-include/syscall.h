@@ -18,6 +18,7 @@
 #define SYS_getdents (78)
 #define SYS_getcwd (79)
 #define SYS_chdir (80)
+#define SYS_setpgid (109)
 #define SYS_setsid (112)
 #define SYS_getsid (124)
 

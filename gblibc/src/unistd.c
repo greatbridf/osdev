@@ -63,6 +63,11 @@ char* getcwd(char* buf, size_t bufsize)
     return (char*)syscall2(SYS_getcwd, (uint32_t)buf, bufsize);
 }
 
+int setpgid(pid_t pid, pid_t pgid)
+{
+    return syscall2(SYS_setpgid, pid, pgid);
+}
+
 pid_t setsid(void)
 {
     return syscall0(SYS_setsid);

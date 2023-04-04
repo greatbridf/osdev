@@ -28,5 +28,6 @@ extern uint32_t* _get_errno(void);
 #define ESRCH (1 << 10)
 #define EINTR (1 << 11)
 #define EPIPE (1 << 12)
+#define ENOTTY (1 << 13)
 
 #endif

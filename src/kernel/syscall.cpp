@@ -344,6 +344,32 @@ int _syscall_pipe(interrupt_stack* data)
     return current_process->files.pipe(pipefd);
 }
 
+int _syscall_setpgid(interrupt_stack* data)
+{
+    pid_t pid = data->s_regs.edi;
+    pid_t pgid = data->s_regs.esi;
+
+    if (pgid < 0)
+        return -EINVAL;
+
+    if (pid == 0)
+        pid = current_process->pid;
+
+    if (pgid == 0)
+        pgid = pid;
+
+    auto* proc = procs->find(pid);
+    // TODO: check whether the process exists
+    // if (!proc)
+    //     return -ESRCH;
+
+    // TODO: check whether pgid and the original
+    //       pgid is in the same session
+    proc->pgid = pgid;
+
+    return 0;
+}
+
 extern "C" void syscall_entry(interrupt_stack* data)
 {
     int syscall_no = data->s_regs.eax;
@@ -377,6 +403,7 @@ void init_syscall(void)
     syscall_handlers[78] = _syscall_getdents;
     syscall_handlers[79] = _syscall_getcwd;
     syscall_handlers[80] = _syscall_chdir;
+    syscall_handlers[109] = _syscall_setpgid;
     syscall_handlers[112] = _syscall_setsid;
     syscall_handlers[124] = _syscall_getsid;
 }

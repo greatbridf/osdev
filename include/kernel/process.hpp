@@ -453,7 +453,10 @@ public:
 
     constexpr process* find(pid_t pid)
     {
-        return &m_procs.find(pid)->value;
+        auto iter = m_procs.find(pid);
+        // TODO: change this
+        assert(!!iter);
+        return &iter->value;
     }
 
     constexpr bool has_child(pid_t pid)

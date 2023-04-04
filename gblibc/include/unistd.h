@@ -33,6 +33,8 @@ unsigned int sleep(unsigned int seconds);
 int chdir(const char* path);
 char* getcwd(char* buf, size_t bufsize);
 
+int setpgid(pid_t pid, pid_t pgid);
+
 pid_t setsid(void);
 pid_t getsid(pid_t pid);
 

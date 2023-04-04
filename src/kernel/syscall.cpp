@@ -178,7 +178,7 @@ int _syscall_execve(interrupt_stack* data)
 }
 
 // @param exit_code
-int _syscall_exit(interrupt_stack* data)
+int NORETURN _syscall_exit(interrupt_stack* data)
 {
     uint32_t exit_code = data->s_regs.edi;
 
@@ -191,11 +191,7 @@ int _syscall_exit(interrupt_stack* data)
     procs->kill(current_process->pid, exit_code);
 
     // switch to new process and continue
-    schedule();
-
-    // we should not return to here
-    assert(false);
-    return -1;
+    schedule_noreturn();
 }
 
 // @param address of exit code: int*

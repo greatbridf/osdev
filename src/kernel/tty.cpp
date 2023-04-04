@@ -5,6 +5,7 @@
 #include <kernel/vga.hpp>
 #include <stdint.h>
 #include <stdio.h>
+#include <types/lock.hpp>
 
 tty::tty()
     : buf(BUFFER_SIZE)
@@ -22,15 +23,14 @@ size_t tty::read(char* buf, size_t buf_size, size_t n)
     size_t orig_n = n;
 
     while (buf_size && n) {
-        if (this->buf.empty()) {
-            current_thread->attr.ready = 0;
-            current_thread->attr.wait = 1;
-            this->blocklist.subscribe(current_thread);
+        auto& mtx = this->m_cv.mtx();
+        types::lock_guard lck(mtx);
 
-            bool intr = !schedule();
-            this->blocklist.unsubscribe(current_thread);
+        if (this->buf.empty()) {
+            bool intr = !this->m_cv.wait(mtx);
+
             if (intr || this->buf.empty())
-                goto _end;
+                break;
         }
 
         *buf = this->buf.get();
@@ -41,7 +41,6 @@ size_t tty::read(char* buf, size_t buf_size, size_t n)
             break;
     }
 
-_end:
     return orig_n - n;
 }
 
@@ -83,7 +82,7 @@ void serial_tty::recvchar(char c)
             serial_send_data(PORT_SERIAL0, '\r');
             serial_send_data(PORT_SERIAL0, '\n');
         }
-        this->blocklist.notify();
+        this->m_cv.notify();
         break;
     // ^?: backspace
     case 0x7f:
@@ -120,21 +119,21 @@ void serial_tty::recvchar(char c)
     // ^C: SIGINT
     case 0x03:
         procs->send_signal_grp(fg_pgroup, kernel::SIGINT);
-        this->blocklist.notify();
+        this->m_cv.notify();
         break;
     // ^D: EOF
     case 0x04:
-        this->blocklist.notify();
+        this->m_cv.notify();
         break;
     // ^Z: SIGSTOP
     case 0x1a:
         procs->send_signal_grp(fg_pgroup, kernel::SIGSTOP);
-        this->blocklist.notify();
+        this->m_cv.notify();
         break;
     // ^\: SIGQUIT
     case 0x1c:
         procs->send_signal_grp(fg_pgroup, kernel::SIGQUIT);
-        this->blocklist.notify();
+        this->m_cv.notify();
         break;
     default:
         buf.put(c);

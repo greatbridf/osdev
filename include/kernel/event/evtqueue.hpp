@@ -1,5 +1,6 @@
 #pragma once
 
+#include <types/cplusplus.hpp>
 #include <types/list.hpp>
 #include <types/lock.hpp>
 
@@ -8,38 +9,25 @@ struct thread;
 
 namespace kernel {
 
-struct evt {
-    thread* emitter;
-    void* data1;
-    void* data2;
-    void* data3;
-};
-
-class evtqueue {
-public:
-    // TODO: use small object allocator
-    using evt_list_type = types::list<evt>;
-    using subscriber_list_type = types::list<thread*>;
-
+class cond_var : public types::non_copyable {
 private:
+    using list_type = types::list<thread*>;
+
     types::mutex m_mtx;
-    evt_list_type m_evts;
-    subscriber_list_type m_subscribers;
+    list_type m_subscribers;
 
 public:
-    evtqueue(void) = default;
-    evtqueue(const evtqueue&) = delete;
-    evtqueue(evtqueue&&);
+    cond_var(void) = default;
 
-    void push(evt&& event);
-    evt front();
-    const evt* peek(void) const;
+    constexpr types::mutex& mtx(void)
+    {
+        return m_mtx;
+    }
 
-    bool empty(void) const;
+    /// @param lock should have already been locked
+    bool wait(types::mutex& lock);
     void notify(void);
-
-    void subscribe(thread* thd);
-    void unsubscribe(thread* thd);
+    void notify_all(void);
 };
 
 } // namespace kernel

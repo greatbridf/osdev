@@ -15,6 +15,7 @@
 #include <string.h>
 #include <types/allocator.hpp>
 #include <types/elf.hpp>
+#include <types/lock.hpp>
 #include <types/status.h>
 
 #define SYSCALL_HANDLERS_SIZE (128)
@@ -200,34 +201,33 @@ int _syscall_wait(interrupt_stack* data)
 {
     auto* arg1 = reinterpret_cast<int*>(data->s_regs.edi);
 
-    auto& waitlst = current_process->wait_lst;
-    if (waitlst.empty() && !procs->has_child(current_process->pid))
+    auto& cv = current_process->cv_wait;
+    auto& mtx = cv.mtx();
+    types::lock_guard lck(mtx);
+
+    auto& waitlist = current_process->waitlist;
+    if (waitlist.empty() && !procs->has_child(current_process->pid))
         return -ECHILD;
 
-    while (waitlst.empty()) {
-        current_thread->attr.ready = 0;
-        current_thread->attr.wait = 1;
-        waitlst.subscribe(current_thread);
+    while (cv.wait(mtx)) {
+        if (!waitlist.empty()) {
+            auto iter = waitlist.begin();
+            assert(iter != waitlist.end());
 
-        if (!schedule()) {
-            waitlst.unsubscribe(current_thread);
-            return -EINTR;
-        }
+            auto& obj = *iter;
+            pid_t pid = obj.pid;
 
-        if (!waitlst.empty()) {
-            waitlst.unsubscribe(current_thread);
-            break;
+            // TODO: copy_to_user check privilege
+            *arg1 = obj.code;
+
+            procs->remove(pid);
+            waitlist.erase(iter);
+
+            return pid;
         }
     }
 
-    auto evt = waitlst.front();
-
-    pid_t pid = (pid_t)evt.data1;
-    // TODO: copy_to_user check privilege
-    *arg1 = (int)evt.data2;
-
-    procs->remove(pid);
-    return pid;
+    return -EINTR;
 }
 
 int _syscall_getdents(interrupt_stack* data)

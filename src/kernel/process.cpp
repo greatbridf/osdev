@@ -91,7 +91,6 @@ void thread::free_kstack(uint32_t p)
 process::process(process&& val)
     : mms(types::move(val.mms))
     , thds { types::move(val.thds), this }
-    , wait_lst(types::move(val.wait_lst))
     , attr { val.attr }
     , files(types::move(val.files))
     , pwd(types::move(val.pwd))
@@ -168,10 +167,29 @@ void proclist::kill(pid_t pid, int exit_code)
     // notify parent process and init
     auto* parent = this->find(proc->ppid);
     auto* init = this->find(1);
-    while (!proc->wait_lst.empty()) {
-        init->wait_lst.push(proc->wait_lst.front());
+
+    {
+        auto& mtx = init->cv_wait.mtx();
+        types::lock_guard lck(mtx);
+
+        {
+            auto& mtx = proc->cv_wait.mtx();
+            types::lock_guard lck(mtx);
+
+            for (const auto& item : proc->waitlist)
+                init->waitlist.push_back(item);
+
+            proc->waitlist.clear();
+        }
     }
-    parent->wait_lst.push({ nullptr, (void*)pid, (void*)exit_code, nullptr });
+    init->cv_wait.notify();
+
+    {
+        auto& mtx = parent->cv_wait.mtx();
+        types::lock_guard lck(mtx);
+        parent->waitlist.push_back({ pid, exit_code });
+    }
+    parent->cv_wait.notify();
 }
 
 void kernel_threadd_main(void)

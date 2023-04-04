@@ -33,7 +33,7 @@ public:
 
 protected:
     types::buffer<types::kernel_ident_allocator> buf;
-    kernel::evtqueue blocklist;
+    kernel::cond_var m_cv;
 
     pid_t fg_pgroup;
 };

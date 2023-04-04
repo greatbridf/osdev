@@ -317,10 +317,16 @@ public:
         }
     };
 
+    struct wait_obj {
+        pid_t pid;
+        int code;
+    };
+
 public:
     mutable kernel::mm_list mms;
     thdlist thds;
-    kernel::evtqueue wait_lst;
+    kernel::cond_var cv_wait;
+    types::list<wait_obj> waitlist;
     process_attr attr;
     filearr files;
     types::string<> pwd;
@@ -332,6 +338,8 @@ public:
     pid_t sid;
 
 public:
+    // if waitlist is not empty or mutex in cv_wait
+    // is locked, its behavior is undefined
     process(process&& val);
     process(const process&);
 

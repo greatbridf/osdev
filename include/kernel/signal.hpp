@@ -11,6 +11,7 @@ using sig_t = uint32_t;
 constexpr sig_t SIGINT = 1 << 0;
 constexpr sig_t SIGQUIT = 1 << 1;
 constexpr sig_t SIGSTOP = 1 << 2;
+constexpr sig_t SIGPIPE = 1 << 3;
 
 class signal_list {
 public:

@@ -8,6 +8,7 @@
 #include <kernel/mem.h>
 #include <kernel/mm.hpp>
 #include <kernel/process.hpp>
+#include <kernel/signal.hpp>
 #include <kernel/vfs.hpp>
 #include <stdint.h>
 #include <stdio.h>
@@ -442,6 +443,7 @@ void check_signal()
     switch (current_process->signals.pop()) {
     case kernel::SIGINT:
     case kernel::SIGQUIT:
+    case kernel::SIGPIPE:
     case kernel::SIGSTOP:
         kill_current(-1);
         break;

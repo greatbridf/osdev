@@ -1,7 +1,5 @@
 #pragma once
 
-#include "errno.h"
-
 #include <assert.h>
 #include <kernel/event/evtqueue.hpp>
 #include <stdint.h>
@@ -212,99 +210,27 @@ private:
     uint32_t flags;
 
 public:
-    pipe(void)
-        : buf { PIPE_SIZE }
-        , flags { READABLE | WRITABLE }
-    {
-    }
+    pipe(void);
 
-    void close_read(void)
-    {
-        {
-            types::lock_guard lck(m_cv.mtx());
-            flags &= (~READABLE);
-        }
-        m_cv.notify_all();
-    }
+    void close_read(void);
+    void close_write(void);
 
-    void close_write(void)
-    {
-        {
-            types::lock_guard lck(m_cv.mtx());
-            flags &= (~WRITABLE);
-        }
-        m_cv.notify_all();
-    }
+    int write(const char* buf, size_t n);
+    int read(char* buf, size_t n);
 
-    bool is_readable(void) const
+    constexpr bool is_readable(void) const
     {
         return flags & READABLE;
     }
 
-    bool is_writeable(void) const
+    constexpr bool is_writeable(void) const
     {
         return flags & WRITABLE;
     }
 
-    bool is_free(void) const
+    constexpr bool is_free(void) const
     {
         return !(flags & (READABLE | WRITABLE));
-    }
-
-    int write(const char* buf, size_t n)
-    {
-        // TODO: check privilege
-        // TODO: check EPIPE
-        {
-            auto& mtx = m_cv.mtx();
-            types::lock_guard lck(mtx);
-
-            while (this->buf.avail() < n)
-                if (!m_cv.wait(mtx))
-                    return -EINTR;
-
-            for (size_t i = 0; i < n; ++i)
-                this->buf.put(*(buf++));
-        }
-
-        m_cv.notify();
-        return n;
-    }
-
-    int read(char* buf, size_t n)
-    {
-        // TODO: check privilege
-        {
-            auto& mtx = m_cv.mtx();
-            types::lock_guard lck(mtx);
-
-            if (!is_writeable()) {
-                size_t orig_n = n;
-                while (!this->buf.empty() && n--)
-                    *(buf++) = this->buf.get();
-
-                return orig_n - n;
-            }
-
-            while (this->buf.size() < n) {
-                if (!m_cv.wait(mtx))
-                    return -EINTR;
-
-                if (!is_writeable()) {
-                    size_t orig_n = n;
-                    while (!this->buf.empty() && n--)
-                        *(buf++) = this->buf.get();
-
-                    return orig_n - n;
-                }
-            }
-
-            for (size_t i = 0; i < n; ++i)
-                *(buf++) = this->buf.get();
-        }
-
-        m_cv.notify();
-        return n;
     }
 };
 

@@ -1,6 +1,7 @@
 #include <assert.h>
 #include <kernel/errno.h>
 #include <kernel/mem.h>
+#include <kernel/process.hpp>
 #include <kernel/tty.hpp>
 #include <kernel/vfs.hpp>
 #include <stdint.h>
@@ -589,6 +590,97 @@ static size_t console_write(fs::special_node*, const char* buf, size_t, size_t n
         console->putchar(*(buf++));
 
     return orig_n;
+}
+
+fs::pipe::pipe(void)
+    : buf { PIPE_SIZE }
+    , flags { READABLE | WRITABLE }
+{
+}
+
+void fs::pipe::close_read(void)
+{
+    {
+        types::lock_guard lck(m_cv.mtx());
+        flags &= (~READABLE);
+    }
+    m_cv.notify_all();
+}
+
+void fs::pipe::close_write(void)
+{
+    {
+        types::lock_guard lck(m_cv.mtx());
+        flags &= (~WRITABLE);
+    }
+    m_cv.notify_all();
+}
+
+int fs::pipe::write(const char* buf, size_t n)
+{
+    // TODO: check privilege
+    // TODO: check EPIPE
+    {
+        auto& mtx = m_cv.mtx();
+        types::lock_guard lck(mtx);
+
+        if (!is_readable()) {
+            current_process->signals.set(kernel::SIGPIPE);
+            return -EPIPE;
+        }
+
+        while (this->buf.avail() < n) {
+            if (!m_cv.wait(mtx))
+                return -EINTR;
+
+            if (!is_readable()) {
+                current_process->signals.set(kernel::SIGPIPE);
+                return -EPIPE;
+            }
+        }
+
+        for (size_t i = 0; i < n; ++i)
+            this->buf.put(*(buf++));
+    }
+
+    m_cv.notify();
+    return n;
+}
+
+int fs::pipe::read(char* buf, size_t n)
+{
+    // TODO: check privilege
+    {
+        auto& mtx = m_cv.mtx();
+        types::lock_guard lck(mtx);
+
+        if (!is_writeable()) {
+            size_t orig_n = n;
+            while (!this->buf.empty() && n--)
+                *(buf++) = this->buf.get();
+
+            return orig_n - n;
+        }
+
+        while (this->buf.size() < n) {
+            if (!m_cv.wait(mtx))
+                return -EINTR;
+
+            if (!is_writeable()) {
+                size_t orig_n = n;
+                while (!this->buf.empty() && n--)
+                    *(buf++) = this->buf.get();
+
+                return orig_n - n;
+            }
+        }
+
+        for (size_t i = 0; i < n; ++i)
+            *(buf++) = this->buf.get();
+    }
+
+    m_cv.notify();
+    return n;
 }
 
 SECTION(".text.kinit")

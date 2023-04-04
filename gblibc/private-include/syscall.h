@@ -12,6 +12,7 @@
 #define SYS_dup (32)
 #define SYS_dup2 (33)
 #define SYS_sleep (35)
+#define SYS_getpid (39)
 #define SYS_fork (57)
 #define SYS_execve (59)
 #define SYS_exit (60)
@@ -20,6 +21,7 @@
 #define SYS_getcwd (79)
 #define SYS_chdir (80)
 #define SYS_setpgid (109)
+#define SYS_getppid (110)
 #define SYS_setsid (112)
 #define SYS_getsid (124)
 

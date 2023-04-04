@@ -408,6 +408,16 @@ int _syscall_ioctl(interrupt_stack* data)
     return 0;
 }
 
+int _syscall_getpid(interrupt_stack*)
+{
+    return current_process->pid;
+}
+
+int _syscall_getppid(interrupt_stack*)
+{
+    return current_process->ppid;
+}
+
 extern "C" void syscall_entry(interrupt_stack* data)
 {
     int syscall_no = data->s_regs.eax;
@@ -435,6 +445,7 @@ void init_syscall(void)
     syscall_handlers[32] = _syscall_dup;
     syscall_handlers[33] = _syscall_dup2;
     syscall_handlers[35] = _syscall_sleep;
+    syscall_handlers[39] = _syscall_getpid;
     syscall_handlers[57] = _syscall_fork;
     syscall_handlers[59] = _syscall_execve;
     syscall_handlers[60] = _syscall_exit;
@@ -443,6 +454,7 @@ void init_syscall(void)
     syscall_handlers[79] = _syscall_getcwd;
     syscall_handlers[80] = _syscall_chdir;
     syscall_handlers[109] = _syscall_setpgid;
+    syscall_handlers[110] = _syscall_getppid;
     syscall_handlers[112] = _syscall_setsid;
     syscall_handlers[124] = _syscall_getsid;
 }

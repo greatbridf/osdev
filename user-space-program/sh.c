@@ -233,7 +233,7 @@ main(void)
     setpgid(pid, 0);
     int code;
     wait(&code);
-    tcsetpgrp(STDOUT_FILENO, 3);
+    tcsetpgrp(STDOUT_FILENO, getpid());
   }
   _exit(0);
 }

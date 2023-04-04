@@ -35,9 +35,12 @@ char* strchr(const char* str, int c)
 char* gets(char* buf, int bufsize)
 {
     int n = read(STDIN_FILENO, buf, bufsize);
-    if (n > 0 && buf[n-1] == '\n') {
+    if (n > 0) {
+      if (buf[n-1] == '\n')
         buf[n-1] = 0;
-        return buf;
+      else
+        buf[n] = 0;
+      return buf;
     }
     return NULL;
 }

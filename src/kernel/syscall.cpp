@@ -71,7 +71,7 @@ int _syscall_write(interrupt_stack* data)
 
     auto* file = current_process->files[fd];
 
-    if (!file)
+    if (!file || !file->flags.write)
         return -EBADF;
 
     switch (file->type) {
@@ -103,7 +103,7 @@ int _syscall_read(interrupt_stack* data)
 
     auto* file = current_process->files[fd];
 
-    if (!file)
+    if (!file || !file->flags.read)
         return -EBADF;
 
     switch (file->type) {

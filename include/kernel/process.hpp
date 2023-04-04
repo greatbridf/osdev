@@ -165,7 +165,12 @@ public:
         {
             if (iter->ref == 1) {
                 if (iter->type == fs::file::types::pipe) {
-                    iter->ptr.pp->close_one();
+                    assert(iter->flags.read | iter->flags.write);
+                    if (iter->flags.read)
+                        iter->ptr.pp->close_read();
+                    else
+                        iter->ptr.pp->close_write();
+
                     if (iter->ptr.pp->is_free())
                         delete iter->ptr.pp;
                 }
@@ -245,6 +250,10 @@ public:
                 nullptr,
                 0,
                 1,
+                {
+                    .read = 1,
+                    .write = 0,
+                },
             });
             int fd = _next_fd();
             arr.insert(types::make_pair(fd, iter));
@@ -258,6 +267,10 @@ public:
                 nullptr,
                 0,
                 1,
+                {
+                    .read = 0,
+                    .write = 1,
+                },
             });
             fd = _next_fd();
             arr.insert(types::make_pair(fd, iter));
@@ -289,7 +302,12 @@ public:
                 { .ind = dentry->ind },
                 dentry->parent,
                 0,
-                1 });
+                1,
+                {
+                    .read = !!(flags & (O_RDONLY | O_RDWR)),
+                    .write = !!(flags & (O_WRONLY | O_RDWR)),
+                },
+            });
 
             int fd = _next_fd();
             arr.insert(types::make_pair(fd, iter));

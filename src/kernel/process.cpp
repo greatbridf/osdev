@@ -344,7 +344,9 @@ void NORETURN init_scheduler(void)
 
     // init process has no parent
     auto* init = &procs->emplace(0)->value;
-    init->files.open("/dev/console", 0);
+    init->files.open("/dev/console", O_RDONLY);
+    init->files.open("/dev/console", O_WRONLY);
+    init->files.open("/dev/console", O_WRONLY);
 
     // we need interrupts enabled for cow mapping so now we disable it
     // in case timer interrupt mess things up

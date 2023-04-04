@@ -220,29 +220,35 @@ public:
 
     void close_read(void)
     {
-        // TODO: lock
-        flags &= (~READABLE);
+        {
+            types::lock_guard lck(m_cv.mtx());
+            flags &= (~READABLE);
+        }
+        m_cv.notify_all();
     }
 
     void close_write(void)
     {
-        // TODO: lock
-        flags &= (~WRITABLE);
+        {
+            types::lock_guard lck(m_cv.mtx());
+            flags &= (~WRITABLE);
+        }
+        m_cv.notify_all();
     }
 
-    void close_one(void)
+    bool is_readable(void) const
     {
-        // TODO: lock
-        if (flags & READABLE)
-            close_read();
-        else
-            close_write();
+        return flags & READABLE;
+    }
+
+    bool is_writeable(void) const
+    {
+        return flags & WRITABLE;
     }
 
     bool is_free(void) const
     {
-        // TODO: lock
-        return (flags & (READABLE | WRITABLE)) == 0;
+        return !(flags & (READABLE | WRITABLE));
     }
 
     int write(const char* buf, size_t n)
@@ -268,14 +274,30 @@ public:
     int read(char* buf, size_t n)
     {
         // TODO: check privilege
-        // TODO: check EPIPE
         {
             auto& mtx = m_cv.mtx();
             types::lock_guard lck(mtx);
 
-            while (this->buf.size() < n)
+            if (!is_writeable()) {
+                size_t orig_n = n;
+                while (!this->buf.empty() && n--)
+                    *(buf++) = this->buf.get();
+
+                return orig_n - n;
+            }
+
+            while (this->buf.size() < n) {
                 if (!m_cv.wait(mtx))
                     return -EINTR;
+
+                if (!is_writeable()) {
+                    size_t orig_n = n;
+                    while (!this->buf.empty() && n--)
+                        *(buf++) = this->buf.get();
+
+                    return orig_n - n;
+                }
+            }
 
             for (size_t i = 0; i < n; ++i)
                 *(buf++) = this->buf.get();
@@ -299,6 +321,10 @@ struct file {
     vfs::dentry* parent;
     size_t cursor;
     size_t ref;
+    struct file_flags {
+        uint32_t read : 1;
+        uint32_t write : 1;
+    } flags;
 };
 
 inline fs::vfs::dentry* fs_root;

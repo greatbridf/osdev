@@ -121,12 +121,12 @@ add_custom_target(boot.img
     COMMAND dd if=/dev/zero of=boot.img bs=`expr 512 \\* 1024 \\* 1024` count=0 seek=1
     COMMAND sh -c \"echo n\; echo\; echo\; echo\; echo\; echo a\; echo w\" | ${FDISK_BIN} boot.img
     COMMAND mkfs.fat --offset=2048 -v -n SYSTEM boot.img
-    COMMAND mcopy -i boot.img@@1M ${CMAKE_BINARY_DIR}/user-space-program/hello-world.out ::hello.out
-    COMMAND mcopy -i boot.img@@1M ${CMAKE_BINARY_DIR}/user-space-program/interrupt-test.out ::int.out
-    COMMAND mcopy -i boot.img@@1M ${CMAKE_BINARY_DIR}/user-space-program/stack-test.out ::stack.out
-    COMMAND mcopy -i boot.img@@1M ${CMAKE_BINARY_DIR}/user-space-program/init.out ::init.elf
-    COMMAND mcopy -i boot.img@@1M ${CMAKE_BINARY_DIR}/user-space-program/sh.out ::sh.elf
-    COMMAND mcopy -i boot.img@@1M ${CMAKE_BINARY_DIR}/user-space-program/priv-test.out ::priv.elf
+    COMMAND mcopy -i boot.img@@1M ${CMAKE_BINARY_DIR}/user-space-program/hello-world.out ::hello
+    COMMAND mcopy -i boot.img@@1M ${CMAKE_BINARY_DIR}/user-space-program/interrupt-test.out ::int
+    COMMAND mcopy -i boot.img@@1M ${CMAKE_BINARY_DIR}/user-space-program/stack-test.out ::stack
+    COMMAND mcopy -i boot.img@@1M ${CMAKE_BINARY_DIR}/user-space-program/init.out ::init
+    COMMAND mcopy -i boot.img@@1M ${CMAKE_BINARY_DIR}/user-space-program/sh.out ::sh
+    COMMAND mcopy -i boot.img@@1M ${CMAKE_BINARY_DIR}/user-space-program/priv-test.out ::priv
     COMMAND mcopy -i boot.img@@1M ${CMAKE_BINARY_DIR}/user-space-program/lazybox.out ::lazybox
     COMMAND mcopy -i boot.img@@1M ${CMAKE_BINARY_DIR}/user-space-program/lazybox.out ::pwd
 )

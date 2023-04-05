@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <ctype.h>
 #include <fs/fat.hpp>
 #include <kernel/mem.h>
 #include <kernel/mm.hpp>
@@ -8,6 +9,9 @@
 #include <types/allocator.hpp>
 #include <types/hash_map.hpp>
 #include <types/status.h>
+
+#define VFAT_FILENAME_LOWERCASE (0x08)
+#define VFAT_EXTENSION_LOWERCASE (0x10)
 
 namespace fs::fat {
 // buf MUST be larger than 512 bytes
@@ -73,8 +77,10 @@ int fat32::inode_readdir(fs::inode* dir, size_t offset, fs::vfs::filldir_func fi
         offset = 0;
         auto* end = d + (sectors_per_cluster * SECTOR_SIZE / sizeof(directory_entry));
         for (; d < end && d->filename[0]; ++d) {
-            if (d->attributes.volume_label)
+            if (d->attributes.volume_label) {
+                nread += sizeof(directory_entry);
                 continue;
+            }
 
             fs::ino_t ino = _rearrange(d);
             auto* ind = get_inode(ino);
@@ -92,16 +98,20 @@ int fat32::inode_readdir(fs::inode* dir, size_t offset, fs::vfs::filldir_func fi
             for (int i = 0; i < 8; ++i) {
                 if (d->filename[i] == ' ')
                     break;
-                fname += d->filename[i];
+                if (d->_reserved & VFAT_FILENAME_LOWERCASE)
+                    fname += tolower(d->filename[i]);
+                else
+                    fname += toupper(d->filename[i]);
             }
-            if (d->extension[0] != ' ') {
+            if (d->extension[0] != ' ')
                 fname += '.';
-                fname += d->extension[0];
-            }
             for (int i = 1; i < 3; ++i) {
                 if (d->extension[i] == ' ')
                     break;
-                fname += d->extension[i];
+                if (d->_reserved & VFAT_EXTENSION_LOWERCASE)
+                    fname += tolower(d->extension[i]);
+                else
+                    fname += toupper(d->extension[i]);
             }
             auto ret = filldir(fname.c_str(), 0, ind->ino,
                 (ind->flags.in.directory || ind->flags.in.mount_point) ? DT_DIR : DT_REG);

@@ -133,6 +133,9 @@ const char* find_file_name(const char* path)
 
 int parse_applet(const char* name)
 {
+    if (!name)
+        return -1;
+
     for (size_t i = 0; i < (sizeof(applets) / sizeof(struct applet)); ++i) {
         if (strcmpi(applets[i].name, name) == 0) {
             return i;
@@ -144,6 +147,7 @@ int parse_applet(const char* name)
 
 int main(int argc, const char** argv)
 {
+    (void)argc;
     int offset = 0;
     const char* name = find_file_name(argv[offset++]);
     int type = -1;
@@ -155,7 +159,7 @@ run:
         return -1;
     }
 
-    if (type == 0 && argc != 1) {
+    if (type == 0 && offset == 1) {
         name = argv[offset++];
         goto run;
     }

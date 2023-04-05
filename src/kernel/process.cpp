@@ -277,11 +277,11 @@ void NORETURN _kernel_init(void)
     current_process->attr.system = 0;
     current_thread->attr.system = 0;
 
-    const char* argv[] = { "/mnt/INIT.ELF", "/mnt/SH.ELF", nullptr };
+    const char* argv[] = { "/mnt/init", "/mnt/sh", nullptr };
     const char* envp[] = { nullptr };
 
     types::elf::elf32_load_data d;
-    d.exec = "/mnt/INIT.ELF";
+    d.exec = "/mnt/init";
     d.argv = argv;
     d.envp = envp;
     d.system = false;

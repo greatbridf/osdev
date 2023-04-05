@@ -126,7 +126,7 @@ page allocate_page(void)
         .phys_page_id = __alloc_raw_page(),
         .ref_count = types::_new<types::kernel_ident_allocator, size_t>(0),
         .pg_pteidx = 0,
-        .attr { 0 },
+        .attr = 0,
     };
 }
 
@@ -228,7 +228,7 @@ inline void map_raw_page_to_pte(
     pte->in.page = page;
 }
 
-int mm::append_page(page* pg, bool present, bool write, bool priv, bool cow)
+int mm::append_page(page& pg, uint32_t attr, bool priv)
 {
     void* addr = this->end();
     kernel::paccess pa(this->owner->m_pd);
@@ -263,24 +263,31 @@ int mm::append_page(page* pg, bool present, bool write, bool priv, bool cow)
     int pti = v_to_pti(addr);
     pte += pti;
 
-    map_raw_page_to_pte(pte, pg->phys_page_id, present, (write && !cow), priv);
+    map_raw_page_to_pte(
+        pte,
+        pg.phys_page_id,
+        !(attr & PAGE_MMAP),
+        false,
+        priv);
 
     kernel::pfree(pt_pg);
 
-    if (unlikely(cow && !pg->attr.in.cow)) {
-        kernel::paccess pa(pg->pg_pteidx >> 12);
+    if (unlikely((attr & PAGE_COW) && !(pg.attr & PAGE_COW))) {
+        kernel::paccess pa(pg.pg_pteidx >> 12);
         auto* pg_pte = (pte_t*)pa.ptr();
         assert(pg_pte);
-        pg_pte += (pg->pg_pteidx & 0xfff);
-        pg->attr.in.cow = 1;
+        pg_pte += (pg.pg_pteidx & 0xfff);
+        pg.attr |= PAGE_COW;
         pg_pte->in.rw = 0;
         pg_pte->in.a = 0;
         invalidate_tlb(addr);
     }
-    ++*pg->ref_count;
+    ++*pg.ref_count;
 
-    auto iter = this->pgs->emplace_back(*pg);
+    auto iter = this->pgs->emplace_back(pg);
     iter->pg_pteidx = (pt_pg << 12) + pti;
+    iter->attr = attr;
+
     return GB_OK;
 }
 
@@ -316,7 +323,7 @@ int mmap(
     mm->file_offset = offset;
 
     for (size_t i = 0; i < n_pgs; ++i)
-        mm->append_page(&empty_page, false, write, priv, true);
+        mm->append_page(empty_page, PAGE_MMAP | PAGE_COW, priv);
 
     return GB_OK;
 }
@@ -331,14 +338,14 @@ void init_mem(void)
     auto heap_mm = kernel_mms->addarea(KERNEL_HEAP_START, true, true);
 
     // create empty_page struct
-    empty_page.attr.in.cow = 0;
+    empty_page.attr = 0;
     empty_page.phys_page_id = EMPTY_PAGE;
-    empty_page.ref_count = types::_new<types::kernel_ident_allocator, size_t>(1);
+    empty_page.ref_count = types::_new<types::kernel_ident_allocator, size_t>(2);
     empty_page.pg_pteidx = 0x00002000;
 
     // 0xd0000000 to 0xd4000000 or 3.5GiB, size 64MiB
     while (heap_mm->pgs->size() < 64 * 1024 * 1024 / PAGE_SIZE)
-        heap_mm->append_page(&empty_page, true, true, true, true);
+        heap_mm->append_page(empty_page, PAGE_COW, true);
 
     types::__allocator::init_kernel_heap(KERNEL_HEAP_START,
         vptrdiff(KERNEL_HEAP_LIMIT, KERNEL_HEAP_START));

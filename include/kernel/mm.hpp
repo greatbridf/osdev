@@ -18,18 +18,18 @@
 
 constexpr size_t THREAD_KERNEL_STACK_SIZE = 2 * PAGE_SIZE;
 
+constexpr uint32_t PAGE_COW = (1 << 0);
+constexpr uint32_t PAGE_MMAP = (1 << 1);
+#define PAGE_COW PAGE_COW
+#define PAGE_MMAP PAGE_MMAP
+
 struct page {
     page_t phys_page_id;
     size_t* ref_count;
     // 0 :11 : pte_index
     // 12:31 : pt_page
     uint32_t pg_pteidx;
-    union {
-        uint32_t v;
-        struct {
-            uint32_t cow : 1;
-        } in;
-    } attr;
+    uint32_t attr;
 };
 
 // private memory mapping
@@ -123,7 +123,7 @@ public:
         return (start >= m_end || end <= m_start);
     }
 
-    int append_page(page* pg, bool present, bool write, bool priv, bool cow);
+    int append_page(page& pg, uint32_t attr, bool priv);
 };
 
 namespace kernel {
@@ -250,17 +250,16 @@ public:
     {
         auto area = this->addarea(
             src.start, src.attr.in.write, src.attr.in.system);
+
         if (src.mapped_file) {
             area->mapped_file = src.mapped_file;
             area->file_offset = src.file_offset;
         }
 
         for (auto& pg : *src.pgs) {
-            if (area->append_page(&pg,
-                    true,
-                    src.attr.in.write,
-                    src.attr.in.system,
-                    true)
+            if (area->append_page(pg,
+                    PAGE_COW | (pg.attr & PAGE_MMAP),
+                    src.attr.in.system)
                 != GB_OK) {
                 return GB_FAILED;
             }

@@ -191,11 +191,10 @@ extern "C" void int14_handler(int14_data* d)
     if (unlikely(d->error_code.present == 0 && !mm_area->mapped_file))
         _int14_panic(d->v_eip, d->l_addr, d->error_code);
 
-    // copy on write
-    if (page->attr.in.cow == 1) {
+    if (page->attr & PAGE_COW) {
         // if it is a dying page
         if (*page->ref_count == 1) {
-            page->attr.in.cow = 0;
+            page->attr &= ~PAGE_COW;
             pte->in.p = 1;
             pte->in.a = 0;
             pte->in.rw = mm_area->attr.in.write;
@@ -204,15 +203,13 @@ extern "C" void int14_handler(int14_data* d)
         // duplicate the page
         page_t new_page = __alloc_raw_page();
 
-        // memory mapped
-        if (d->error_code.present == 0)
-            pte->in.p = 1;
-
-        kernel::paccess pdst(new_page), psrc(page->phys_page_id);
-        auto* new_page_data = (char*)pdst.ptr();
-        auto* src = psrc.ptr();
-        assert(new_page_data && src);
-        memcpy(new_page_data, src, PAGE_SIZE);
+        {
+            kernel::paccess pdst(new_page), psrc(page->phys_page_id);
+            auto* new_page_data = (char*)pdst.ptr();
+            auto* src = psrc.ptr();
+            assert(new_page_data && src);
+            memcpy(new_page_data, src, PAGE_SIZE);
+        }
 
         pte->in.page = new_page;
         pte->in.rw = mm_area->attr.in.write;
@@ -221,25 +218,32 @@ extern "C" void int14_handler(int14_data* d)
         --*page->ref_count;
 
         page->ref_count = types::pnew<types::kernel_ident_allocator>(page->ref_count, 1);
-        page->attr.in.cow = 0;
+        page->attr &= ~PAGE_COW;
         page->phys_page_id = new_page;
+    }
 
-        // memory mapped
-        if (d->error_code.present == 0) {
-            size_t offset = align_down<12>((uint32_t)d->l_addr);
-            offset -= (uint32_t)mm_area->start;
+    if (page->attr & PAGE_MMAP) {
+        pte->in.p = 1;
 
-            int n = vfs_read(
-                mm_area->mapped_file,
-                new_page_data,
-                PAGE_SIZE,
-                mm_area->file_offset + offset,
-                PAGE_SIZE);
+        size_t offset = align_down<12>((uint32_t)d->l_addr);
+        offset -= (uint32_t)mm_area->start;
 
-            // TODO: send SIGBUS if offset is greater than real size
-            if (n != PAGE_SIZE)
-                memset(new_page_data + n, 0x00, PAGE_SIZE - n);
-        }
+        kernel::paccess pa(page->phys_page_id);
+        auto* data = (char*)pa.ptr();
+        assert(data);
+
+        int n = vfs_read(
+            mm_area->mapped_file,
+            data,
+            PAGE_SIZE,
+            mm_area->file_offset + offset,
+            PAGE_SIZE);
+
+        // TODO: send SIGBUS if offset is greater than real size
+        if (n != PAGE_SIZE)
+            memset(data + n, 0x00, PAGE_SIZE - n);
+
+        page->attr &= ~PAGE_MMAP;
     }
 }
 

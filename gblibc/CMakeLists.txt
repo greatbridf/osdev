@@ -11,6 +11,7 @@ add_library(gblibc STATIC
     src/wait.c
     src/assert.c
     src/dirent.c
+    src/ctype.c
 )
 
 file(GLOB_RECURSE GBLIBC_PUBLIC_HEADERS ${CMAKE_CURRENT_SOURCE_DIR}/include)

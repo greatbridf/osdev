@@ -284,8 +284,7 @@ int mm::append_page(page* pg, bool present, bool write, bool priv, bool cow)
     return GB_OK;
 }
 
-static inline int _mmap(
-    mm_list* mms,
+int mmap(
     void* hint,
     size_t len,
     fs::inode* file,
@@ -293,6 +292,8 @@ static inline int _mmap(
     int write,
     int priv)
 {
+    auto& mms = current_process->mms;
+
     if (unlikely(!file->flags.in.file && !file->flags.in.special_node)) {
         errno = EINVAL;
         return GB_FAILED;
@@ -305,12 +306,12 @@ static inline int _mmap(
 
     size_t n_pgs = align_up<12>(len) >> 12;
 
-    if (!mms->is_avail(hint, len)) {
+    if (!mms.is_avail(hint, len)) {
         errno = EEXIST;
         return GB_FAILED;
     }
 
-    auto mm = mms->addarea(hint, write, priv);
+    auto mm = mms.addarea(hint, write, priv);
     mm->mapped_file = file;
     mm->file_offset = offset;
 
@@ -318,17 +319,6 @@ static inline int _mmap(
         mm->append_page(&empty_page, false, write, priv, true);
 
     return GB_OK;
-}
-
-int mmap(
-    void* hint,
-    size_t len,
-    fs::inode* file,
-    size_t offset,
-    int write,
-    int priv)
-{
-    return _mmap(&current_process->mms, hint, len, file, offset, write, priv);
 }
 
 SECTION(".text.kinit")

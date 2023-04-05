@@ -3,16 +3,27 @@
 
 #include <stdint.h>
 
-#define SYS_fork (0x00)
-#define SYS_write (0x01)
-#define SYS_sleep (0x02)
-#define SYS_crash (0x03)
-#define SYS_exec (0x04)
-#define SYS_exit (0x05)
-#define SYS_wait (0x06)
-#define SYS_read (0x07)
-#define SYS_getdents (0x08)
-#define SYS_open (0x09)
+#define SYS_read (0)
+#define SYS_write (1)
+#define SYS_open (2)
+#define SYS_close (3)
+#define SYS_ioctl (16)
+#define SYS_pipe (22)
+#define SYS_dup (32)
+#define SYS_dup2 (33)
+#define SYS_sleep (35)
+#define SYS_getpid (39)
+#define SYS_fork (57)
+#define SYS_execve (59)
+#define SYS_exit (60)
+#define SYS_wait (61)
+#define SYS_getdents (78)
+#define SYS_getcwd (79)
+#define SYS_chdir (80)
+#define SYS_setpgid (109)
+#define SYS_getppid (110)
+#define SYS_setsid (112)
+#define SYS_getsid (124)
 
 #ifdef __cplusplus
 extern "C" {

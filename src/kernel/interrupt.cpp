@@ -10,10 +10,8 @@
 #include <kernel/mem.h>
 #include <kernel/mm.hpp>
 #include <kernel/process.hpp>
-#include <kernel/syscall.hpp>
 #include <kernel/vfs.hpp>
 #include <kernel/vga.hpp>
-#include <kernel_main.hpp>
 #include <stdint.h>
 #include <stdio.h>
 #include <types/size.h>
@@ -37,6 +35,7 @@ static inline void NORETURN die(regs_32& regs, ptr_t eip)
     freeze();
 }
 
+SECTION(".text.kinit")
 void init_idt()
 {
     asm_cli();
@@ -53,7 +52,6 @@ void init_idt()
     SET_IDT_ENTRY_FN(14, int14, 0x08, KERNEL_INTERRUPT_GATE_TYPE);
     // system call
     SET_IDT_ENTRY_FN(0x80, syscall_stub, 0x08, USER_INTERRUPT_GATE_TYPE);
-    init_syscall();
 
     uint16_t idt_descriptor[3];
     idt_descriptor[0] = sizeof(struct IDT_entry) * 256;
@@ -62,6 +60,7 @@ void init_idt()
     asm_load_idt(idt_descriptor, 0);
 }
 
+SECTION(".text.kinit")
 void init_pic(void)
 {
     asm_cli();
@@ -183,30 +182,34 @@ extern "C" void int14_handler(int14_data* d)
     if (unlikely(d->error_code.user && mm_area->attr.in.system))
         _int14_kill_user();
 
-    pte_t* pte = to_pte(mms->m_pd, d->l_addr);
-    page* page = lto_page(&mm_area, d->l_addr);
+    page* page = &mm_area->pgs->at(vptrdiff(d->l_addr, mm_area->start) / PAGE_SIZE);
+    kernel::paccess pa(page->pg_pteidx >> 12);
+    auto pt = (pt_t)pa.ptr();
+    assert(pt);
+    pte_t* pte = *pt + (page->pg_pteidx & 0xfff);
 
     if (unlikely(d->error_code.present == 0 && !mm_area->mapped_file))
         _int14_panic(d->v_eip, d->l_addr, d->error_code);
 
-    // copy on write
-    if (page->attr.in.cow == 1) {
+    if (page->attr & PAGE_COW) {
         // if it is a dying page
         if (*page->ref_count == 1) {
-            page->attr.in.cow = 0;
+            page->attr &= ~PAGE_COW;
+            pte->in.p = 1;
             pte->in.a = 0;
             pte->in.rw = mm_area->attr.in.write;
             return;
         }
         // duplicate the page
-        page_t new_page = alloc_raw_page();
+        page_t new_page = __alloc_raw_page();
 
-        // memory mapped
-        if (d->error_code.present == 0)
-            pte->in.p = 1;
-
-        char* new_page_data = (char*)to_vp(new_page);
-        memcpy(new_page_data, to_vp(page->phys_page_id), PAGE_SIZE);
+        {
+            kernel::paccess pdst(new_page), psrc(page->phys_page_id);
+            auto* new_page_data = (char*)pdst.ptr();
+            auto* src = psrc.ptr();
+            assert(new_page_data && src);
+            memcpy(new_page_data, src, PAGE_SIZE);
+        }
 
         pte->in.page = new_page;
         pte->in.rw = mm_area->attr.in.write;
@@ -214,28 +217,39 @@ extern "C" void int14_handler(int14_data* d)
 
         --*page->ref_count;
 
-        page->ref_count = (size_t*)ki_malloc(sizeof(size_t));
-        *page->ref_count = 1;
-        page->attr.in.cow = 0;
+        page->ref_count = types::pnew<types::kernel_ident_allocator>(page->ref_count, 1);
+        page->attr &= ~PAGE_COW;
         page->phys_page_id = new_page;
-
-        // memory mapped
-        if (d->error_code.present == 0) {
-            size_t offset = align_down<12>((uint32_t)d->l_addr);
-            offset -= (uint32_t)mm_area->start;
-
-            int n = vfs_read(
-                mm_area->mapped_file,
-                new_page_data,
-                PAGE_SIZE,
-                mm_area->file_offset + offset,
-                PAGE_SIZE);
-
-            // TODO: send SIGBUS if offset is greater than real size
-            if (n != PAGE_SIZE)
-                memset(new_page_data + n, 0x00, PAGE_SIZE - n);
-        }
     }
+
+    if (page->attr & PAGE_MMAP) {
+        pte->in.p = 1;
+
+        size_t offset = align_down<12>((uint32_t)d->l_addr);
+        offset -= (uint32_t)mm_area->start;
+
+        kernel::paccess pa(page->phys_page_id);
+        auto* data = (char*)pa.ptr();
+        assert(data);
+
+        int n = vfs_read(
+            mm_area->mapped_file,
+            data,
+            PAGE_SIZE,
+            mm_area->file_offset + offset,
+            PAGE_SIZE);
+
+        // TODO: send SIGBUS if offset is greater than real size
+        if (n != PAGE_SIZE)
+            memset(data + n, 0x00, PAGE_SIZE - n);
+
+        page->attr &= ~PAGE_MMAP;
+    }
+}
+
+void after_irq(void)
+{
+    check_signal();
 }
 
 extern "C" void irq0_handler(interrupt_stack*)
@@ -243,76 +257,92 @@ extern "C" void irq0_handler(interrupt_stack*)
     inc_tick();
     asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
     schedule();
+    after_irq();
 }
 // keyboard interrupt
 extern "C" void irq1_handler(void)
 {
     asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
     handle_keyboard_interrupt();
+    after_irq();
 }
 extern "C" void irq2_handler(void)
 {
     asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
+    after_irq();
 }
 extern "C" void irq3_handler(void)
 {
     asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
+    after_irq();
 }
 extern "C" void irq4_handler(void)
 {
     // TODO: register interrupt handler in serial port driver
     serial_receive_data_interrupt();
     asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
+    after_irq();
 }
 extern "C" void irq5_handler(void)
 {
     asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
+    after_irq();
 }
 extern "C" void irq6_handler(void)
 {
     asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
+    after_irq();
 }
 extern "C" void irq7_handler(void)
 {
     asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
+    after_irq();
 }
 extern "C" void irq8_handler(void)
 {
     asm_outb(PORT_PIC2_COMMAND, PIC_EOI);
     asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
+    after_irq();
 }
 extern "C" void irq9_handler(void)
 {
     asm_outb(PORT_PIC2_COMMAND, PIC_EOI);
     asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
+    after_irq();
 }
 extern "C" void irq10_handler(void)
 {
     asm_outb(PORT_PIC2_COMMAND, PIC_EOI);
     asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
+    after_irq();
 }
 extern "C" void irq11_handler(void)
 {
     asm_outb(PORT_PIC2_COMMAND, PIC_EOI);
     asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
+    after_irq();
 }
 extern "C" void irq12_handler(void)
 {
     asm_outb(PORT_PIC2_COMMAND, PIC_EOI);
     asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
+    after_irq();
 }
 extern "C" void irq13_handler(void)
 {
     asm_outb(PORT_PIC2_COMMAND, PIC_EOI);
     asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
+    after_irq();
 }
 extern "C" void irq14_handler(void)
 {
     asm_outb(PORT_PIC2_COMMAND, PIC_EOI);
     asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
+    after_irq();
 }
 extern "C" void irq15_handler(void)
 {
     asm_outb(PORT_PIC2_COMMAND, PIC_EOI);
     asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
+    after_irq();
 }

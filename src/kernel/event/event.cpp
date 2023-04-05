@@ -17,7 +17,7 @@ namespace event {
 ::types::list<::input_event>& input_event_queue(void)
 {
     if (!_input_event_queue) {
-        _input_event_queue = types::pnew<types::kernel_allocator>(_input_event_queue);
+        _input_event_queue = new types::list<input_event>;
     }
     return *_input_event_queue;
 }
@@ -46,55 +46,46 @@ void dispatch_event(void)
     }
 }
 
-kernel::evtqueue::evtqueue(evtqueue&& q)
-    : m_evts { types::move(q.m_evts) }
-    , m_subscribers { types::move(q.m_subscribers) }
+bool kernel::cond_var::wait(types::mutex& lock)
 {
-}
+    thread* thd = current_thread;
 
-void kernel::evtqueue::push(kernel::evt&& event)
-{
-    types::lock_guard lck(m_mtx);
-    m_evts.push_back(types::move(event));
-    this->notify();
-}
-
-kernel::evt kernel::evtqueue::front()
-{
-    assert(!this->empty());
-    types::lock_guard lck(m_mtx);
-
-    auto iter = m_evts.begin();
-    evt e = types::move(*iter);
-    m_evts.erase(iter);
-    return e;
-}
-
-const kernel::evt* kernel::evtqueue::peek(void) const
-{
-    return &m_evts.begin();
-}
-
-bool kernel::evtqueue::empty(void) const
-{
-    return m_evts.empty();
-}
-
-void kernel::evtqueue::notify(void)
-{
-    for (auto* sub : m_subscribers) {
-        sub->attr.ready = 1;
-        sub->attr.wait = 0;
-        readythds->push(sub);
-    }
-}
-
-void kernel::evtqueue::subscribe(thread* thd)
-{
+    current_thread->attr.ready = 0;
+    current_thread->attr.wait = 1;
     m_subscribers.push_back(thd);
+
+    lock.unlock();
+    bool ret = schedule();
+    lock.lock();
+
+    return ret;
 }
 
-void kernel::evtqueue::unsubscribe(thread* thd)
+void kernel::cond_var::notify(void)
 {
-    m_subscribers.erase(m_subscribers.find(thd));
+    types::lock_guard lck(m_mtx);
+
+    auto iter = m_subscribers.begin();
+    if (iter == m_subscribers.end())
+        return;
+
+    auto* thd = *iter;
+    thd->attr.ready = 1;
+    thd->attr.wait = 0;
+    readythds->push(thd);
+
+    m_subscribers.erase(iter);
+}
+
+void kernel::cond_var::notify_all(void)
+{
+    types::lock_guard lck(m_mtx);
+
+    for (auto& thd : m_subscribers) {
+        thd->attr.ready = 1;
+        thd->attr.wait = 0;
+        readythds->push(thd);
+    }
+
+    m_subscribers.clear();
 }

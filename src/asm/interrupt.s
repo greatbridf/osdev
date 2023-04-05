@@ -182,35 +182,18 @@ irq15:
     popal
     iret
 
-.globl asm_load_idt
-.type  asm_load_idt @function
-asm_load_idt:
-    movl 4(%esp), %edx
-    lidt (%edx)
-    movl 8(%esp), %edx
-    cmpl $0, %edx
-    je asm_load_idt_skip
-    sti
-asm_load_idt_skip:
-    ret
-
 .globl syscall_stub
 .type  syscall_stub @function
 syscall_stub:
-    cmpl $16, %eax
-    jge syscall_stub_end
     pushal
 
-    # syscall function no. is in %eax
-    # store it in %ebx
-    movl %eax, %ebx
     # stack alignment and push *data
     movl %esp, %eax
     subl $0x4, %esp
     andl $0xfffffff0, %esp
     movl %eax, (%esp)
 
-    call *syscall_handlers(,%ebx,4)
+    call syscall_entry
 
     # restore stack
     popl %esp
@@ -219,7 +202,6 @@ syscall_stub:
 .type  _syscall_stub_fork_return @function
 _syscall_stub_fork_return:
     popal
-syscall_stub_end:
     iret
 
 # parameters
@@ -250,4 +232,18 @@ asm_ctx_switch:
     ret
 
 _ctx_switch_return:
+    ret
+
+.section .text.kinit
+
+.globl asm_load_idt
+.type  asm_load_idt @function
+asm_load_idt:
+    movl 4(%esp), %edx
+    lidt (%edx)
+    movl 8(%esp), %edx
+    cmpl $0, %edx
+    je asm_load_idt_skip
+    sti
+asm_load_idt_skip:
     ret

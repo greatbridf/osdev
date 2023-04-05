@@ -12,7 +12,7 @@ int printf(const char* fmt, ...)
     va_start(args, fmt);
 
     char buf[256] = {};
-    int len = snprintf(buf, sizeof(buf), fmt, args);
+    int len = vsnprintf(buf, sizeof(buf), fmt, args);
 
     len = write(STDOUT_FILENO, buf, len);
 
@@ -35,9 +35,12 @@ char* strchr(const char* str, int c)
 char* gets(char* buf, int bufsize)
 {
     int n = read(STDIN_FILENO, buf, bufsize);
-    if (n > 0 && buf[n-1] == '\n') {
+    if (n > 0) {
+      if (buf[n-1] == '\n')
         buf[n-1] = 0;
-        return buf;
+      else
+        buf[n] = 0;
+      return buf;
     }
     return NULL;
 }
@@ -52,11 +55,7 @@ int puts(const char* str)
 void* malloc(size_t n)
 {
     static char mems[1024];
-    static int pos = 0;
-    if (n == 0) {
-        pos = 0;
-        return 0;
-    }
+    static int pos;
     int orig_pos = pos;
     pos += n;
     return mems + orig_pos;
@@ -115,12 +114,13 @@ struct cmd *parsecmd(char*);
 void
 runcmd(struct cmd *cmd)
 {
-//   int p[2];
+  int p[2];
+  int code;
   struct backcmd *bcmd;
   struct execcmd *ecmd;
   struct listcmd *lcmd;
-//   struct pipecmd *pcmd;
-//   struct redircmd *rcmd;
+  struct pipecmd *pcmd;
+  struct redircmd *rcmd;
 
   if(cmd == 0)
     _exit(-1);
@@ -138,48 +138,47 @@ runcmd(struct cmd *cmd)
     printf("exec %s failed\n", ecmd->argv[0]);
     break;
 
-//   case REDIR:
-//     rcmd = (struct redircmd*)cmd;
-//     close(rcmd->fd);
-//     if(open(rcmd->file, rcmd->mode) < 0){
-//       printf("open %s failed\n", rcmd->file);
-//       _exit(-1);
-//     }
-//     runcmd(rcmd->cmd);
-//     break;
+  case REDIR:
+    rcmd = (struct redircmd*)cmd;
+    close(rcmd->fd);
+    if(open(rcmd->file, rcmd->mode) < 0){
+      printf("open %s failed\n", rcmd->file);
+      _exit(-1);
+    }
+    runcmd(rcmd->cmd);
+    break;
 
   case LIST:
     lcmd = (struct listcmd*)cmd;
     if(fork1() == 0)
       runcmd(lcmd->left);
-    int code;
     wait(&code);
     runcmd(lcmd->right);
     break;
 
-//   case PIPE:
-//     pcmd = (struct pipecmd*)cmd;
-//     if(pipe(p) < 0)
-//       panic("pipe");
-//     if(fork1() == 0){
-//       close(1);
-//       dup(p[1]);
-//       close(p[0]);
-//       close(p[1]);
-//       runcmd(pcmd->left);
-//     }
-//     if(fork1() == 0){
-//       close(0);
-//       dup(p[0]);
-//       close(p[0]);
-//       close(p[1]);
-//       runcmd(pcmd->right);
-//     }
-//     close(p[0]);
-//     close(p[1]);
-//     wait();
-//     wait();
-//     break;
+   case PIPE:
+     pcmd = (struct pipecmd*)cmd;
+     if(pipe(p) < 0)
+       panic("pipe");
+     if(fork1() == 0){
+       close(1);
+       dup(p[1]);
+       close(p[0]);
+       close(p[1]);
+       runcmd(pcmd->left);
+     }
+     if(fork1() == 0){
+       close(0);
+       dup(p[0]);
+       close(p[0]);
+       close(p[1]);
+       runcmd(pcmd->right);
+     }
+     close(p[0]);
+     close(p[1]);
+     wait(&code);
+     wait(&code);
+     break;
     
   case BACK:
     bcmd = (struct backcmd*)cmd;
@@ -204,32 +203,37 @@ getcmd(char *buf, int nbuf)
 int
 main(void)
 {
-  void* _ = malloc(0);
-  (void)_;
   static char buf[100];
   
-//   // Assumes three file descriptors open.
-//   while((fd = open("console", 0)) >= 0){
-//     if(fd >= 3){
-//       close(fd);
-//       break;
-//     }
-//   }
+  int fd = 0;
+  // Assumes three file descriptors open.
+  while((fd = open("/dev/console", 0)) >= 0){
+    if(fd >= 3){
+      close(fd);
+      break;
+    }
+  }
   
   // Read and run input commands.
   while(getcmd(buf, sizeof(buf)) >= 0){
-    // if(buf[0] == 'c' && buf[1] == 'd' && buf[2] == ' '){
-    //   // Clumsy but will have to do for now.
-    //   // Chdir has no effect on the parent if run in the child.
-    //   buf[strlen(buf)-1] = 0;  // chop \n
-    //   if(chdir(buf+3) < 0)
-    //     printf("cannot cd %s\n", buf+3);
-    //   continue;
-    // }
-    if(fork1() == 0)
+    if(buf[0] == 'c' && buf[1] == 'd' && buf[2] == ' ')
+    {
+      // Clumsy but will have to do for now.
+      // Chdir has no effect on the parent if run in the child.
+      if(chdir(buf+3) < 0)
+        printf("cannot cd %s\n", buf+3);
+      continue;
+    }
+    pid_t pid = 0;
+    if((pid = fork1()) == 0) {
+      setpgid(0, 0);
       runcmd(parsecmd(buf));
+    }
+    tcsetpgrp(STDOUT_FILENO, pid);
+    setpgid(pid, 0);
     int code;
     wait(&code);
+    tcsetpgrp(STDOUT_FILENO, getpid());
   }
   _exit(0);
 }

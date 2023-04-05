@@ -182,6 +182,7 @@ static inline void mbr_part_probe(fs::inode* drive, uint16_t major, uint16_t min
     struct mbr hda_mbr {
     };
     auto* dev = fs::vfs_open("/dev");
+    assert(dev);
 
     fs::vfs_read(drive, (char*)&hda_mbr, 512, 0, 512);
 
@@ -201,13 +202,13 @@ static inline void mbr_part_probe(fs::inode* drive, uint16_t major, uint16_t min
 // data: void (*func_to_call_next)(void)
 void hw::init_ata(void)
 {
-    ata_pri = types::pnew<types::kernel_allocator>(ata_pri, ATA_PRIMARY_BUS_BASE);
+    ata_pri = new hw::ata(ATA_PRIMARY_BUS_BASE);
     if (ata_pri->identify())
         ata_pri->select(true);
 
-    ata_sec = types::pnew<types::kernel_allocator>(ata_pri, ATA_SECONDARY_BUS_BASE);
-    if (ata_pri->identify())
-        ata_pri->select(true);
+    ata_sec = new hw::ata(ATA_SECONDARY_BUS_BASE);
+    if (ata_sec->identify())
+        ata_sec->select(true);
 
     // data1: offset sectors
     // data2: limit sectors
@@ -228,5 +229,6 @@ void hw::init_ata(void)
         0xffffffff);
 
     auto* hda = fs::vfs_open("/dev/hda");
+    assert(hda);
     mbr_part_probe(hda->ind, 2, 1);
 }

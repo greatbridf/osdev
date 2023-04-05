@@ -1,10 +1,15 @@
 #pragma once
 
+#include <assert.h>
+#include <kernel/event/evtqueue.hpp>
 #include <stdint.h>
 #include <types/allocator.hpp>
+#include <types/buffer.hpp>
+#include <types/cplusplus.hpp>
 #include <types/function.hpp>
 #include <types/hash_map.hpp>
 #include <types/list.hpp>
+#include <types/lock.hpp>
 #include <types/map.hpp>
 #include <types/types.h>
 #include <types/vector.hpp>
@@ -193,17 +198,59 @@ public:
     virtual int inode_readdir(inode* dir, size_t offset, filldir_func callback) = 0;
 };
 
+class pipe : public types::non_copyable {
+private:
+    static constexpr size_t PIPE_SIZE = 4096;
+    static constexpr uint32_t READABLE = 1;
+    static constexpr uint32_t WRITABLE = 2;
+
+private:
+    types::buffer<types::kernel_allocator> buf;
+    kernel::cond_var m_cv;
+    uint32_t flags;
+
+public:
+    pipe(void);
+
+    void close_read(void);
+    void close_write(void);
+
+    int write(const char* buf, size_t n);
+    int read(char* buf, size_t n);
+
+    constexpr bool is_readable(void) const
+    {
+        return flags & READABLE;
+    }
+
+    constexpr bool is_writeable(void) const
+    {
+        return flags & WRITABLE;
+    }
+
+    constexpr bool is_free(void) const
+    {
+        return !(flags & (READABLE | WRITABLE));
+    }
+};
+
 struct file {
     enum class types {
-        regular_file,
-        directory,
-        block_dev,
-        char_dev,
+        ind,
+        pipe,
+        socket,
     } type;
-    inode* ind;
+    union {
+        inode* ind;
+        pipe* pp;
+    } ptr;
     vfs::dentry* parent;
     size_t cursor;
     size_t ref;
+    struct file_flags {
+        uint32_t read : 1;
+        uint32_t write : 1;
+    } flags;
 };
 
 inline fs::vfs::dentry* fs_root;

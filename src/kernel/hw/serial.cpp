@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <types/status.h>
 
+SECTION(".text.kinit")
 int32_t init_serial_port(port_id_t port)
 {
     // taken from osdev.org

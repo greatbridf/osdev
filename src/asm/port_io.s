@@ -41,6 +41,7 @@ asm_sti:
     sti
     ret
 
+.section .text.kinit
 .globl asm_enable_sse
 .type  asm_enable_sse @function
 asm_enable_sse:

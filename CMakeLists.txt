@@ -29,14 +29,13 @@ add_subdirectory(gblibc)
 add_subdirectory(user-space-program)
 
 set(BOOTLOADER_SOURCES src/boot.s
-                       src/asm/a20.s
                        src/asm/interrupt.s
                        src/asm/port_io.s
                        src/asm/sys.s
                        )
 
 set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
-                        src/kernel_main.cpp
+                        src/kinit.cpp
                         src/kernel/errno.c
                         src/kernel/interrupt.cpp
                         src/kernel/process.cpp
@@ -50,10 +49,10 @@ set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
                         src/kernel/hw/serial.cpp
                         src/kernel/hw/timer.c
                         src/kernel/event/event.cpp
+                        src/kernel/signal.cpp
                         src/types/bitmap.c
                         src/types/elf.cpp
                         src/types/libstdcpp.cpp
-                        include/asm/boot.h
                         include/asm/port_io.h
                         include/asm/sys.h
                         include/fs/fat.hpp
@@ -68,6 +67,7 @@ set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
                         include/kernel/mm.hpp
                         include/kernel/vfs.hpp
                         include/kernel/vga.hpp
+                        include/kernel/signal.hpp
                         include/kernel/hw/ata.hpp
                         include/kernel/hw/keyboard.h
                         include/kernel/hw/port.hpp
@@ -92,7 +92,6 @@ set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
                         include/types/vector.hpp
                         include/types/function.hpp
                         include/kernel/log.hpp
-                        include/kernel_main.hpp
                         )
 
 add_executable(kernel.out ${KERNEL_MAIN_SOURCES} ${BOOTLOADER_SOURCES})
@@ -122,12 +121,14 @@ add_custom_target(boot.img
     COMMAND dd if=/dev/zero of=boot.img bs=`expr 512 \\* 1024 \\* 1024` count=0 seek=1
     COMMAND sh -c \"echo n\; echo\; echo\; echo\; echo\; echo a\; echo w\" | ${FDISK_BIN} boot.img
     COMMAND mkfs.fat --offset=2048 -v -n SYSTEM boot.img
-    COMMAND mcopy -i boot.img@@1M ${CMAKE_BINARY_DIR}/user-space-program/hello-world.out ::hello.out
-    COMMAND mcopy -i boot.img@@1M ${CMAKE_BINARY_DIR}/user-space-program/interrupt-test.out ::int.out
-    COMMAND mcopy -i boot.img@@1M ${CMAKE_BINARY_DIR}/user-space-program/stack-test.out ::stack.out
-    COMMAND mcopy -i boot.img@@1M ${CMAKE_BINARY_DIR}/user-space-program/init.out ::init.elf
-    COMMAND mcopy -i boot.img@@1M ${CMAKE_BINARY_DIR}/user-space-program/sh.out ::sh.elf
-    COMMAND mcopy -i boot.img@@1M ${CMAKE_BINARY_DIR}/user-space-program/priv-test.out ::priv.elf
+    COMMAND mcopy -i boot.img@@1M ${CMAKE_BINARY_DIR}/user-space-program/hello-world.out ::hello
+    COMMAND mcopy -i boot.img@@1M ${CMAKE_BINARY_DIR}/user-space-program/interrupt-test.out ::int
+    COMMAND mcopy -i boot.img@@1M ${CMAKE_BINARY_DIR}/user-space-program/stack-test.out ::stack
+    COMMAND mcopy -i boot.img@@1M ${CMAKE_BINARY_DIR}/user-space-program/init.out ::init
+    COMMAND mcopy -i boot.img@@1M ${CMAKE_BINARY_DIR}/user-space-program/sh.out ::sh
+    COMMAND mcopy -i boot.img@@1M ${CMAKE_BINARY_DIR}/user-space-program/priv-test.out ::priv
+    COMMAND mcopy -i boot.img@@1M ${CMAKE_BINARY_DIR}/user-space-program/lazybox.out ::lazybox
+    COMMAND mcopy -i boot.img@@1M ${CMAKE_BINARY_DIR}/user-space-program/lazybox.out ::pwd
 )
 
 add_custom_command(OUTPUT run

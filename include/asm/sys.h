@@ -7,7 +7,7 @@
 extern "C" {
 #endif
 
-void asm_switch_pd(pd_t pd_addr);
+void asm_switch_pd(page_t pd_addr);
 void asm_enable_paging(pd_t pd_addr);
 
 pptr_t current_pd(void);
@@ -18,7 +18,9 @@ void asm_load_gdt(uint32_t limit, pptr_t addr);
 
 void asm_load_tr(uint16_t index);
 
-extern void* __real_kernel_end;
+extern const uint32_t kernel_size;
+extern char* const bss_addr;
+extern const uint32_t bss_len;
 
 #ifdef __cplusplus
 }

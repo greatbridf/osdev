@@ -1,12 +1,16 @@
 #pragma once
 
+#include <fcntl.h>
 #include <kernel/errno.h>
 #include <kernel/event/evtqueue.hpp>
 #include <kernel/interrupt.h>
 #include <kernel/mm.hpp>
+#include <kernel/signal.hpp>
 #include <kernel/task.h>
+#include <kernel/tty.hpp>
 #include <kernel/vfs.hpp>
 #include <stdint.h>
+#include <sys/types.h>
 #include <types/allocator.hpp>
 #include <types/cplusplus.hpp>
 #include <types/hash_map.hpp>
@@ -14,9 +18,8 @@
 #include <types/map.hpp>
 #include <types/pair.hpp>
 #include <types/status.h>
+#include <types/string.hpp>
 #include <types/types.h>
-
-typedef size_t pid_t;
 
 class process;
 struct thread;
@@ -28,6 +31,8 @@ inline process* volatile current_process;
 inline thread* volatile current_thread;
 inline proclist* procs;
 inline readyqueue* readythds;
+
+inline tss32_t tss;
 
 struct process_attr {
     uint16_t system : 1;
@@ -42,17 +47,12 @@ struct thread_attr {
 
 struct thread {
 private:
-    inline void alloc_kstack(void)
-    {
-        // TODO: alloc low mem
-        kstack = to_pp(alloc_n_raw_pages(2));
-        kstack += THREAD_KERNEL_STACK_SIZE;
-        esp = reinterpret_cast<uint32_t*>(kstack);
-    }
+    void alloc_kstack(void);
+    void free_kstack(uint32_t p);
 
 public:
     uint32_t* esp;
-    pptr_t kstack;
+    uint32_t pkstack;
     process* owner;
     thread_attr attr;
 
@@ -69,13 +69,13 @@ public:
 
     constexpr thread(thread&& val)
         : esp { val.esp }
-        , kstack { val.kstack }
+        , pkstack { val.pkstack }
         , owner { val.owner }
         , attr { val.attr }
     {
         val.attr = {};
         val.esp = 0;
-        val.kstack = 0;
+        val.pkstack = 0;
         val.owner = nullptr;
     }
 
@@ -94,8 +94,8 @@ public:
 
     constexpr ~thread()
     {
-        if (kstack)
-            free_n_raw_pages(to_page(kstack - THREAD_KERNEL_STACK_SIZE), 2);
+        if (pkstack)
+            free_kstack(pkstack);
     }
 };
 
@@ -120,9 +120,7 @@ public:
             thd.owner = new_parent;
     }
 
-    explicit constexpr thdlist(void)
-    {
-    }
+    explicit constexpr thdlist(void) = default;
 
     // implementation is below
     constexpr ~thdlist();
@@ -154,22 +152,43 @@ public:
     private:
         inline static container_type* files;
         array_type arr;
-        int next_fd = 0;
 
     public:
         inline static void init_global_file_container(void)
         {
-            files = types::pnew<types::kernel_allocator>(files);
+            files = new container_type;
         }
 
     private:
         // iter should not be nullptr
         constexpr void _close(container_type::iterator_type iter)
         {
-            if (iter->ref == 1)
+            if (iter->ref == 1) {
+                if (iter->type == fs::file::types::pipe) {
+                    assert(iter->flags.read | iter->flags.write);
+                    if (iter->flags.read)
+                        iter->ptr.pp->close_read();
+                    else
+                        iter->ptr.pp->close_write();
+
+                    if (iter->ptr.pp->is_free())
+                        delete iter->ptr.pp;
+                }
+
                 files->erase(iter);
-            else
+            } else
                 --iter->ref;
+        }
+
+        constexpr int _next_fd(void) const
+        {
+            int fd = 0;
+
+            for (auto iter = arr.cbegin(); iter != arr.cend(); ++iter)
+                if (iter->key == fd)
+                    ++fd;
+
+            return fd;
         }
 
     public:
@@ -179,18 +198,32 @@ public:
         constexpr filearr(void) = default;
         constexpr filearr(filearr&& val)
             : arr { types::move(val.arr) }
-            , next_fd { val.next_fd }
         {
-            val.next_fd = 0;
         }
 
-        constexpr void dup(const filearr& orig)
+        constexpr int dup(int old_fd)
         {
-            if (this->next_fd)
-                return;
+            return dup2(old_fd, _next_fd());
+        }
 
-            this->next_fd = orig.next_fd;
+        // TODO: the third parameter should be int flags
+        //       determining whether the fd should be closed
+        //       after exec() (FD_CLOEXEC)
+        constexpr int dup2(int old_fd, int new_fd)
+        {
+            close(new_fd);
 
+            auto iter = arr.find(old_fd);
+            if (!iter)
+                return -EBADF;
+
+            this->arr.insert(types::make_pair(new_fd, iter->value));
+            ++iter->value->ref;
+            return new_fd;
+        }
+
+        constexpr void dup_all(const filearr& orig)
+        {
             for (auto iter : orig.arr) {
                 this->arr.insert(types::make_pair(iter.key, iter.value));
                 ++iter.value->ref;
@@ -206,8 +239,50 @@ public:
                 return &iter->value;
         }
 
-        // TODO: file opening flags (permissions etc.)
-        int open(const char* filename, uint32_t)
+        int pipe(int pipefd[2])
+        {
+            // TODO: set read/write flags
+            auto* pipe = new fs::pipe;
+
+            auto iter = files->emplace_back(fs::file {
+                fs::file::types::pipe,
+                { .pp = pipe },
+                nullptr,
+                0,
+                1,
+                {
+                    .read = 1,
+                    .write = 0,
+                },
+            });
+            int fd = _next_fd();
+            arr.insert(types::make_pair(fd, iter));
+
+            // TODO: use copy_to_user()
+            pipefd[0] = fd;
+
+            iter = files->emplace_back(fs::file {
+                fs::file::types::pipe,
+                { .pp = pipe },
+                nullptr,
+                0,
+                1,
+                {
+                    .read = 0,
+                    .write = 1,
+                },
+            });
+            fd = _next_fd();
+            arr.insert(types::make_pair(fd, iter));
+
+            // TODO: use copy_to_user()
+            pipefd[1] = fd;
+
+            return 0;
+        }
+
+        // TODO: file opening permissions check
+        int open(const char* filename, uint32_t flags)
         {
             auto* dentry = fs::vfs_open(filename);
 
@@ -216,27 +291,25 @@ public:
                 return -1;
             }
 
-            // TODO: check whether dentry is a file if O_DIRECTORY is set
-            // if (!(dentry->ind->flags.in.file || dentry->ind->flags.in.special_node)) {
-            //     errno = EISDIR;
-            //     return -1;
-            // }
-
-            // TODO: unify file, inode, dentry TYPE
-            fs::file::types type = fs::file::types::regular_file;
-            if (dentry->ind->flags.in.directory)
-                type = fs::file::types::directory;
-            if (dentry->ind->flags.in.special_node)
-                type = fs::file::types::block_dev;
+            // check whether dentry is a file if O_DIRECTORY is set
+            if ((flags & O_DIRECTORY) && !dentry->ind->flags.in.directory) {
+                errno = ENOTDIR;
+                return -1;
+            }
 
             auto iter = files->emplace_back(fs::file {
-                type,
-                dentry->ind,
+                fs::file::types::ind,
+                { .ind = dentry->ind },
                 dentry->parent,
                 0,
-                1 });
+                1,
+                {
+                    .read = !!(flags & (O_RDONLY | O_RDWR)),
+                    .write = !!(flags & (O_WRONLY | O_RDWR)),
+                },
+            });
 
-            int fd = next_fd++;
+            int fd = _next_fd();
             arr.insert(types::make_pair(fd, iter));
             return fd;
         }
@@ -262,20 +335,36 @@ public:
         }
     };
 
+    struct wait_obj {
+        pid_t pid;
+        int code;
+    };
+
 public:
     mutable kernel::mm_list mms;
     thdlist thds;
-    kernel::evtqueue wait_lst;
+    kernel::cond_var cv_wait;
+    types::list<wait_obj> waitlist;
     process_attr attr;
+    filearr files;
+    types::string<> pwd;
+    kernel::signal_list signals;
+
     pid_t pid;
     pid_t ppid;
-    filearr files;
+    pid_t pgid;
+    pid_t sid;
 
 public:
+    // if waitlist is not empty or mutex in cv_wait
+    // is locked, its behavior is undefined
     process(process&& val);
     process(const process&);
 
-    explicit process(pid_t ppid, bool system = true);
+    explicit process(pid_t ppid,
+        bool system = true,
+        types::string<>&& path = "/",
+        kernel::signal_list&& sigs = {});
 
     constexpr bool is_system(void) const
     {
@@ -299,12 +388,14 @@ class proclist final {
 public:
     using list_type = types::map<pid_t, process>;
     using child_index_type = types::hash_map<pid_t, types::list<pid_t>, types::linux_hasher<pid_t>>;
+    using tty_index_type = types::map<pid_t, tty*>;
     using iterator_type = list_type::iterator_type;
     using const_iterator_type = list_type::const_iterator_type;
 
 private:
     list_type m_procs;
     child_index_type m_child_idx;
+    tty_index_type m_tty_idx;
 
 public:
     template <typename... Args>
@@ -326,6 +417,25 @@ public:
         return iter;
     }
 
+    constexpr void set_ctrl_tty(pid_t pid, tty* _tty)
+    {
+        auto iter = m_tty_idx.find(pid);
+        _tty->set_pgrp(pid);
+        if (iter) {
+            iter->value = _tty;
+        } else {
+            m_tty_idx.insert(types::make_pair(pid, _tty));
+        }
+    }
+
+    constexpr tty* get_ctrl_tty(pid_t pid)
+    {
+        auto iter = m_tty_idx.find(pid);
+        if (!iter)
+            return nullptr;
+        return iter->value;
+    }
+
     constexpr void remove(pid_t pid)
     {
         make_children_orphans(pid);
@@ -343,7 +453,10 @@ public:
 
     constexpr process* find(pid_t pid)
     {
-        return &m_procs.find(pid)->value;
+        auto iter = m_procs.find(pid);
+        // TODO: change this
+        assert(!!iter);
+        return &iter->value;
     }
 
     constexpr bool has_child(pid_t pid)
@@ -362,6 +475,20 @@ public:
                 this->find(*iter)->ppid = 1;
             }
             m_child_idx.remove(children);
+        }
+    }
+
+    void send_signal(pid_t pid, kernel::sig_t signal)
+    {
+        auto iter = this->find(pid);
+        if (!iter)
+            return iter->signals.set(signal);
+    }
+    void send_signal_grp(pid_t pgid, kernel::sig_t signal)
+    {
+        for (auto& proc : m_procs) {
+            if (proc.value.pgid == pgid)
+                proc.value.signals.set(signal);
         }
     }
 
@@ -421,7 +548,8 @@ public:
 };
 
 void NORETURN init_scheduler(void);
-void schedule(void);
+/// @return true if returned normally, false if being interrupted
+bool schedule(void);
 void NORETURN schedule_noreturn(void);
 
 constexpr uint32_t push_stack(uint32_t** stack, uint32_t val)
@@ -442,3 +570,5 @@ void k_new_thread(void (*func)(void*), void* data);
 
 void NORETURN freeze(void);
 void NORETURN kill_current(int exit_code);
+
+void check_signal(void);

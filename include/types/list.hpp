@@ -313,7 +313,9 @@ public:
 
     constexpr iterator_type begin() noexcept
     {
-        return iterator_type(head->next);
+        if (head)
+            return iterator_type(head->next);
+        return end();
     }
 
     constexpr iterator_type end() noexcept
@@ -323,7 +325,9 @@ public:
 
     constexpr const_iterator_type begin() const noexcept
     {
-        return const_iterator_type(head->next);
+        if (head)
+            return const_iterator_type(head->next);
+        return end();
     }
 
     constexpr const_iterator_type end() const noexcept

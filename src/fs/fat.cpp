@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <ctype.h>
 #include <fs/fat.hpp>
 #include <kernel/mem.h>
 #include <kernel/mm.hpp>
@@ -8,6 +9,9 @@
 #include <types/allocator.hpp>
 #include <types/hash_map.hpp>
 #include <types/status.h>
+
+#define VFAT_FILENAME_LOWERCASE (0x08)
+#define VFAT_EXTENSION_LOWERCASE (0x10)
 
 namespace fs::fat {
 // buf MUST be larger than 512 bytes
@@ -40,7 +44,7 @@ char* fat32::read_cluster(cluster_t no)
         ++iter->value.ref;
         return iter->value.data;
     }
-    auto* data = (char*)k_malloc(sectors_per_cluster * SECTOR_SIZE);
+    auto* data = new char[sectors_per_cluster * SECTOR_SIZE];
     _raw_read_cluster(data, no);
     buf.emplace(no,
         buf_object {
@@ -73,8 +77,10 @@ int fat32::inode_readdir(fs::inode* dir, size_t offset, fs::vfs::filldir_func fi
         offset = 0;
         auto* end = d + (sectors_per_cluster * SECTOR_SIZE / sizeof(directory_entry));
         for (; d < end && d->filename[0]; ++d) {
-            if (d->attributes.volume_label)
+            if (d->attributes.volume_label) {
+                nread += sizeof(directory_entry);
                 continue;
+            }
 
             fs::ino_t ino = _rearrange(d);
             auto* ind = get_inode(ino);
@@ -92,16 +98,20 @@ int fat32::inode_readdir(fs::inode* dir, size_t offset, fs::vfs::filldir_func fi
             for (int i = 0; i < 8; ++i) {
                 if (d->filename[i] == ' ')
                     break;
-                fname += d->filename[i];
+                if (d->_reserved & VFAT_FILENAME_LOWERCASE)
+                    fname += tolower(d->filename[i]);
+                else
+                    fname += toupper(d->filename[i]);
             }
-            if (d->extension[0] != ' ') {
+            if (d->extension[0] != ' ')
                 fname += '.';
-                fname += d->extension[0];
-            }
             for (int i = 1; i < 3; ++i) {
                 if (d->extension[i] == ' ')
                     break;
-                fname += d->extension[i];
+                if (d->_reserved & VFAT_EXTENSION_LOWERCASE)
+                    fname += tolower(d->extension[i]);
+                else
+                    fname += toupper(d->extension[i]);
             }
             auto ret = filldir(fname.c_str(), 0, ind->ino,
                 (ind->flags.in.directory || ind->flags.in.mount_point) ? DT_DIR : DT_REG);
@@ -123,7 +133,7 @@ fat32::fat32(inode* _device)
     : device(_device)
     , label { 0 }
 {
-    char* buf = (char*)k_malloc(SECTOR_SIZE);
+    auto* buf = new char[SECTOR_SIZE];
     _raw_read_sector(buf, 0);
 
     auto* info = reinterpret_cast<ext_boot_sector*>(buf);
@@ -137,7 +147,7 @@ fat32::fat32(inode* _device)
     fat_copies = info->old.fat_copies;
 
     data_region_offset = reserved_sectors + fat_copies * sectors_per_fat;
-    fat = (cluster_t*)k_malloc(SECTOR_SIZE * sectors_per_fat);
+    fat = (cluster_t*)new char[SECTOR_SIZE * sectors_per_fat];
     // TODO: optimize
     for (uint32_t i = 0; i < 4; ++i)
         _raw_read_sector((char*)fat + i * SECTOR_SIZE, reserved_sectors + i);
@@ -157,7 +167,7 @@ fat32::fat32(inode* _device)
     free_clusters = fsinfo->free_clusters;
     next_free_cluster_hint = fsinfo->next_free_cluster;
 
-    k_free(buf);
+    delete[] buf;
 
     size_t _root_dir_clusters = 1;
     cluster_t next = root_dir;
@@ -173,7 +183,7 @@ fat32::fat32(inode* _device)
 
 fat32::~fat32()
 {
-    k_free(fat);
+    delete[]((char*)fat);
 }
 
 size_t fat32::inode_read(inode* file, char* buf, size_t buf_size, size_t offset, size_t n)

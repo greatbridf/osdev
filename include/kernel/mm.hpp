@@ -179,6 +179,8 @@ public:
         , m_pd(v.m_pd)
     {
         v.m_pd = 0;
+        for (auto& area : m_areas)
+            area.owner = this;
     }
     ~mm_list()
     {

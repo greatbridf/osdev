@@ -196,6 +196,7 @@ extern "C" void int14_handler(int14_data* d)
         // if it is a dying page
         if (*page->ref_count == 1) {
             page->attr.in.cow = 0;
+            pte->in.p = 1;
             pte->in.a = 0;
             pte->in.rw = mm_area->attr.in.write;
             return;

@@ -284,7 +284,7 @@ public:
         // TODO: file opening permissions check
         int open(const char* filename, uint32_t flags)
         {
-            auto* dentry = fs::vfs_open(filename);
+            auto* dentry = fs::vfs_open_proc(filename);
 
             if (!dentry) {
                 errno = ENOTFOUND;

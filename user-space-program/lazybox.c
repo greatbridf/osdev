@@ -128,7 +128,7 @@ const char* find_file_name(const char* path)
         if (*last == '/')
             break;
     }
-    return last + 1;
+    return last == path ? path : last + 1;
 }
 
 int parse_applet(const char* name)
@@ -159,7 +159,7 @@ run:
         return -1;
     }
 
-    if (type == 0 && offset == 1) {
+    if (type == 0 && offset == 1 && argv[1]) {
         name = argv[offset++];
         goto run;
     }

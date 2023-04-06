@@ -29,16 +29,10 @@ inline void _user_push(char** sp, const char* str)
 
 int types::elf::elf32_load(types::elf::elf32_load_data* d)
 {
-    auto* ent_exec = fs::vfs_open(d->exec);
-    if (!ent_exec) {
-        d->errcode = ENOENT;
-        return GB_FAILED;
-    }
-
     // TODO: detect file format
     types::elf::elf32_header hdr {};
     auto n_read = fs::vfs_read(
-        ent_exec->ind,
+        d->exec,
         (char*)&hdr,
         sizeof(types::elf::elf32_header),
         0, sizeof(types::elf::elf32_header));
@@ -52,7 +46,7 @@ int types::elf::elf32_load(types::elf::elf32_load_data* d)
     size_t shents_size = hdr.shentsize * hdr.shnum;
     auto* phents = new types::elf::elf32_program_header_entry[hdr.phnum];
     n_read = fs::vfs_read(
-        ent_exec->ind,
+        d->exec,
         (char*)phents,
         phents_size,
         hdr.phoff, phents_size);
@@ -67,7 +61,7 @@ int types::elf::elf32_load(types::elf::elf32_load_data* d)
 
     auto* shents = new types::elf::elf32_section_header_entry[hdr.shnum];
     n_read = fs::vfs_read(
-        ent_exec->ind,
+        d->exec,
         (char*)shents,
         shents_size,
         hdr.shoff, shents_size);
@@ -115,7 +109,7 @@ int types::elf::elf32_load(types::elf::elf32_load_data* d)
         auto ret = mmap(
             (char*)vaddr,
             phents[i].filesz + (phents[i].vaddr & 0xfff),
-            ent_exec->ind,
+            d->exec,
             fileoff,
             1,
             d->system);

@@ -275,6 +275,7 @@ int vfs_stat(fs::vfs::dentry* ent, stat* stat);
 
 // @return pointer to the dentry if found, nullptr if not
 fs::vfs::dentry* vfs_open(const char* path);
+vfs::dentry* vfs_open_proc(const char* path);
 
 } // namespace fs
 

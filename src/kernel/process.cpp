@@ -281,7 +281,9 @@ void NORETURN _kernel_init(void)
     const char* envp[] = { nullptr };
 
     types::elf::elf32_load_data d;
-    d.exec = "/mnt/init";
+    auto* dent = fs::vfs_open("/mnt/init");
+    assert(dent && dent->ind);
+    d.exec = dent->ind;
     d.argv = argv;
     d.envp = envp;
     d.system = false;

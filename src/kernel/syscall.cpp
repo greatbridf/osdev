@@ -18,6 +18,7 @@
 #include <types/elf.hpp>
 #include <types/lock.hpp>
 #include <types/status.h>
+#include <types/string.hpp>
 
 #define SYSCALL_HANDLERS_SIZE (128)
 syscall_handler syscall_handlers[SYSCALL_HANDLERS_SIZE];
@@ -139,17 +140,29 @@ int _syscall_sleep(interrupt_stack*)
     return 0;
 }
 
+void __temporary_recursive_get_path(types::string<>& path, const fs::vfs::dentry* dent)
+{
+    if (dent == fs::fs_root)
+        return;
+
+    __temporary_recursive_get_path(path, dent->parent);
+    path += '/';
+    path += dent->name;
+}
+
 int _syscall_chdir(interrupt_stack* data)
 {
     const char* path = reinterpret_cast<const char*>(data->s_regs.edi);
-    auto* dir = fs::vfs_open(path);
+    auto* dir = fs::vfs_open_proc(path);
     if (!dir)
         return -ENOENT;
 
     if (!dir->ind->flags.in.directory)
         return -ENOTDIR;
 
-    current_process->pwd = path;
+    auto& pwd = current_process->pwd;
+    pwd.clear();
+    __temporary_recursive_get_path(pwd, dir);
 
     return 0;
 }
@@ -164,10 +177,14 @@ int _syscall_execve(interrupt_stack* data)
     char* const* argv = reinterpret_cast<char* const*>(data->s_regs.esi);
     char* const* envp = reinterpret_cast<char* const*>(data->s_regs.edx);
 
+    auto* dent = fs::vfs_open_proc(exec);
+    if (!dent || !dent->ind)
+        return -ENOENT;
+
     types::elf::elf32_load_data d;
     d.argv = argv;
     d.envp = envp;
-    d.exec = exec;
+    d.exec = dent->ind;
     d.system = false;
 
     int ret = types::elf::elf32_load(&d);

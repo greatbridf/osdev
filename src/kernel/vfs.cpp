@@ -506,6 +506,11 @@ fs::vfs::dentry* fs::vfs_open(const char* path)
                 return cur;
             }
             if (path[n] == '/') {
+                if (n == 0) {
+                    ++path;
+                    continue;
+                }
+
                 cur = cur->find(string(path, n));
 
                 if (!cur)
@@ -543,6 +548,16 @@ int fs::vfs_stat(const char* filename, stat* stat)
 int fs::vfs_stat(fs::vfs::dentry* ent, stat* stat)
 {
     return ent->ind->fs->inode_stat(ent, stat);
+}
+fs::vfs::dentry* fs::vfs_open_proc(const char* path)
+{
+    if (!path)
+        return nullptr;
+
+    if (path[0] == '/')
+        return fs::vfs_open(path);
+
+    return fs::vfs_open(types::string<>(current_process->pwd).append("/").append(path).c_str());
 }
 
 static types::list<fs::vfs*>* fs_es;

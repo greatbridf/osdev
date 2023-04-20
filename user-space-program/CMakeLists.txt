@@ -4,7 +4,7 @@ project(user_space_program C ASM)
 set(CMAKE_C_FLAGS "-nostdlib -nostdinc -static -m32 -W -Wall -Wextra -Werror -mstack-protector-guard=global")
 set(CMAKE_ASM_FLAGS "-nostdlib -m32 -static -mstack-protector-guard=global -g0")
 
-link_libraries(gblibc)
+link_libraries(gblibc crt0)
 
 set(CMAKE_C_IMPLICIT_LINK_DIRECTORIES "")
 set(CMAKE_C_IMPLICIT_LINK_LIBRARIES "")

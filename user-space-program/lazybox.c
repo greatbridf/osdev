@@ -16,13 +16,6 @@ int putchar(int c)
     return c;
 }
 
-int puts(const char* str)
-{
-    size_t ret = write(STDOUT_FILENO, str, strlen(str));
-    ret += write(STDOUT_FILENO, "\n", 1);
-    return ret;
-}
-
 int printf(const char* fmt, ...)
 {
     va_list args;

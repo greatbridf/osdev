@@ -11,6 +11,7 @@ add_library(gblibc STATIC
     src/assert.c
     src/dirent.c
     src/ctype.c
+    src/stdlib.c
 )
 
 add_library(crt0 OBJECT

@@ -21,37 +21,6 @@ int printf(const char* fmt, ...)
     return len;
 }
 
-char* strchr(const char* str, int c)
-{
-    const char* p = str;
-    while (*p) {
-        if (*p == c)
-            return (char*)p;
-        ++p;
-    }
-    return NULL;
-}
-
-char* gets(char* buf, int bufsize)
-{
-    int n = read(STDIN_FILENO, buf, bufsize);
-    if (n > 0) {
-      if (buf[n-1] == '\n')
-        buf[n-1] = 0;
-      else
-        buf[n] = 0;
-      return buf;
-    }
-    return NULL;
-}
-
-int puts(const char* str)
-{
-    int len = strlen(str);
-    write(STDOUT_FILENO, str, len);
-    return len + 1;
-}
-
 void* malloc(size_t n)
 {
     static char mems[1024];
@@ -194,7 +163,7 @@ getcmd(char *buf, int nbuf)
 {
   printf("$ ");
   memset(buf, 0, nbuf);
-  gets(buf, nbuf);
+  gets(buf);
   if(buf[0] == 0) // EOF
     return -1;
   return 0;

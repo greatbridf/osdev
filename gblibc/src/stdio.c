@@ -2,6 +2,8 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdarg.h>
+#include <string.h>
+#include <unistd.h>
 
 // where n is in the range of [0, 9]
 static inline char d_to_c(int32_t n)
@@ -350,4 +352,37 @@ int vsnprintf(char* buf, size_t buf_size, const char* fmt, va_list arg)
         *buf = 0x00;
 
     return n_write;
+}
+
+int sprintf(char* buf, const char* fmt, ...)
+{
+    va_list lst;
+    va_start(lst, fmt);
+
+    int ret = vsnprintf(buf, __SIZE_MAX__, fmt, lst);
+
+    va_end(lst);
+
+    return ret;
+}
+
+int puts(const char* str)
+{
+    int len = strlen(str);
+    write(STDOUT_FILENO, str, len);
+    write(STDOUT_FILENO, "\n", 1);
+    return len + 1;
+}
+
+char* gets(char* buf)
+{
+    int n = read(STDIN_FILENO, buf, __SIZE_MAX__);
+    if (n > 0) {
+      if (buf[n-1] == '\n')
+        buf[n-1] = 0;
+      else
+        buf[n] = 0;
+      return buf;
+    }
+    return NULL;
 }

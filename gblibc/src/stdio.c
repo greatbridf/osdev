@@ -368,10 +368,19 @@ int sprintf(char* buf, const char* fmt, ...)
 
 int puts(const char* str)
 {
-    int len = strlen(str);
-    write(STDOUT_FILENO, str, len);
-    write(STDOUT_FILENO, "\n", 1);
-    return len + 1;
+    int len = 0;
+
+    int ret = write(STDOUT_FILENO, str, strlen(str));
+    if (ret < 0)
+        return EOF;
+    len += ret;
+
+    ret = write(STDOUT_FILENO, "\n", 1);
+    if (ret < 0)
+        return EOF;
+    len += ret;
+
+    return len;
 }
 
 char* gets(char* buf)

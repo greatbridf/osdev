@@ -30,6 +30,7 @@ char* strrchr(const char* str, int character);
 char* strchrnul(const char* str, int character);
 size_t strcspn(const char* str1, const char* str2);
 char* strstr(const char* str1, const char* str2);
+char* strpbrk(const char* str1, const char* str2);
 
 char* strcpy(char* dst, const char* src);
 char* strncpy(char* dst, const char* src, size_t n);

@@ -1,3 +1,4 @@
+#include <errno.h>
 #include <fcntl.h>
 #include <dirent.h>
 #include <string.h>
@@ -62,8 +63,13 @@ struct dirent* readdir(DIR* dirp)
         sizeof(dirp->buffer)
     );
 
-    if (dirp->blen <= 0)
+    if (dirp->blen <= 0) {
+        if (dirp->blen < 0) {
+            errno = -dirp->blen;
+            dirp->blen = 0;
+        }
         return NULL;
+    }
 
 fill:
     dirp->bpos = fill_dirent(&dirp->dent, dirp->buffer, dirp->bpos);

@@ -306,7 +306,7 @@ int _syscall_getcwd(interrupt_stack* data)
     strncpy(buf, current_process->pwd.c_str(), bufsize);
     buf[bufsize - 1] = 0;
 
-    return (uint32_t)buf;
+    return 0;
 }
 
 int _syscall_setsid(interrupt_stack*)

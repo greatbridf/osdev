@@ -205,6 +205,14 @@ char* strstr(const char* str1, const char* str2)
     return NULL;
 }
 
+char* strpbrk(const char* str1, const char* str2)
+{
+    size_t n = strcspn(str1, str2);
+    if (str1[n])
+        return (char*)str1 + n;
+    return NULL;
+}
+
 char* strerror(int errnum)
 {
     switch (errnum) {

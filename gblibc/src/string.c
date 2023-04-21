@@ -175,3 +175,31 @@ size_t strcspn(const char* str1, const char* str2)
     }
     return ret;
 }
+
+char* strstr(const char* str1, const char* str2)
+{
+    const char* p = str1;
+
+    while (*p) {
+        if (*p != *str2) {
+            ++p;
+            continue;
+        }
+
+        const char* p1 = p;
+        const char* q = str2;
+        while (*q) {
+            if (*p1 != *q)
+                break;
+            ++p1;
+            ++q;
+        }
+        if (!*q)
+            break;
+        p = p1;
+    }
+
+    if (*p)
+        return (char*)p;
+    return NULL;
+}

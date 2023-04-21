@@ -1,3 +1,4 @@
+#include <ctype.h>
 #include <stdint.h>
 
 #define BYTES_PER_MAX_COPY_UNIT (sizeof(uint32_t) / sizeof(uint8_t))
@@ -136,9 +137,27 @@ char* stpncpy(char* restrict dst, const char* restrict src, size_t n)
 int strcmp(const char* s1, const char* s2)
 {
     int c;
-    while ((c = *s1 - *s2) == 0 && *s1 != 0) {
+    while ((c = *s1 - *s2) == 0 && *s1) {
         ++s1;
         ++s2;
     }
     return c;
+}
+
+int strncasecmp(const char* s1, const char* s2, size_t n)
+{
+    if (n == 0)
+        return 0;
+
+    int c;
+    while (n-- && (c = tolower(*s1) - tolower(*s2)) == 0 && *s1) {
+        ++s1;
+        ++s2;
+    }
+    return c;
+}
+
+int strcasecmp(const char* s1, const char* s2)
+{
+    return strncasecmp(s1, s2, __SIZE_MAX__);
 }

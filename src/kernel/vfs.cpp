@@ -1,5 +1,5 @@
 #include <assert.h>
-#include <kernel/errno.h>
+#include <errno.h>
 #include <kernel/mem.h>
 #include <kernel/process.hpp>
 #include <kernel/tty.hpp>
@@ -93,7 +93,7 @@ fs::vfs::dentry* fs::vfs::dentry::find(const name_type& name)
 
     auto iter = idx_children->find(name);
     if (!iter) {
-        errno = ENOTFOUND;
+        errno = ENOENT;
         return nullptr;
     }
 

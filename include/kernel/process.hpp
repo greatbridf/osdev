@@ -1,7 +1,7 @@
 #pragma once
 
+#include <errno.h>
 #include <fcntl.h>
-#include <kernel/errno.h>
 #include <kernel/event/evtqueue.hpp>
 #include <kernel/interrupt.h>
 #include <kernel/mm.hpp>
@@ -287,7 +287,7 @@ public:
             auto* dentry = fs::vfs_open_proc(filename);
 
             if (!dentry) {
-                errno = ENOTFOUND;
+                errno = ENOENT;
                 return -1;
             }
 

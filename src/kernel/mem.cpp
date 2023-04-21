@@ -1,7 +1,7 @@
 #include <asm/port_io.h>
 #include <asm/sys.h>
 #include <assert.h>
-#include <kernel/errno.h>
+#include <errno.h>
 #include <kernel/mem.h>
 #include <kernel/mm.hpp>
 #include <kernel/process.hpp>

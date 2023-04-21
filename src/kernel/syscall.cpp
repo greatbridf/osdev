@@ -2,7 +2,7 @@
 #include <asm/sys.h>
 #include <assert.h>
 #include <bits/ioctl.h>
-#include <kernel/errno.h>
+#include <errno.h>
 #include <kernel/interrupt.h>
 #include <kernel/log.hpp>
 #include <kernel/mem.h>

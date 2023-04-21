@@ -12,6 +12,7 @@ add_library(gblibc STATIC
     src/dirent.c
     src/ctype.c
     src/stdlib.c
+    src/errno.c
 )
 
 add_library(crt0 OBJECT

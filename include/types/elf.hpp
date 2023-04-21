@@ -1,5 +1,5 @@
 #pragma once
-#include <kernel/errno.h>
+#include <errno.h>
 #include <kernel/interrupt.h>
 #include <kernel/process.hpp>
 #include <kernel/vfs.hpp>

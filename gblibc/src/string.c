@@ -1,4 +1,5 @@
 #include <ctype.h>
+#include <errno.h>
 #include <stdint.h>
 
 #define BYTES_PER_MAX_COPY_UNIT (sizeof(uint32_t) / sizeof(uint8_t))
@@ -202,4 +203,38 @@ char* strstr(const char* str1, const char* str2)
     if (*p)
         return (char*)p;
     return NULL;
+}
+
+char* strerror(int errnum)
+{
+    switch (errnum) {
+    case EPERM:
+        return "Operation not permitted";
+    case ENOENT:
+        return "No such file or directory";
+    case ESRCH:
+        return "No such process";
+    case EINTR:
+        return "Interrupted system call";
+    case EBADF:
+        return "Bad file descriptor";
+    case ECHILD:
+        return "No child process";
+    case ENOMEM:
+        return "Out of memory";
+    case EEXIST:
+        return "File exists";
+    case ENOTDIR:
+        return "Not a directory";
+    case EISDIR:
+        return "Is a directory";
+    case EINVAL:
+        return "Invalid argument";
+    case ENOTTY:
+        return "Not a tty";
+    case EPIPE:
+        return "Broken pipe";
+    default:
+        return "No error information";
+    }
 }

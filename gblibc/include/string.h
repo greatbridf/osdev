@@ -19,6 +19,8 @@ void* memcpy(void* dst, const void* src, size_t n);
 void* mempcpy(void* dst, const void* src, size_t n);
 void* memset(void* dst, int c, size_t n);
 
+char* strerror(int errnum);
+
 int strcmp(const char* s1, const char* s2);
 int strcasecmp(const char* s1, const char* s2);
 int strncasecmp(const char* s1, const char* s2, size_t n);

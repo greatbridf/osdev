@@ -161,3 +161,17 @@ int strcasecmp(const char* s1, const char* s2)
 {
     return strncasecmp(s1, s2, __SIZE_MAX__);
 }
+
+size_t strcspn(const char* str1, const char* str2)
+{
+    size_t ret = 0;
+    while (*str1) {
+        ++ret;
+        for (const char* p = str2; *p; ++p) {
+            if (*str1 == *p)
+                return ret;
+        }
+        ++str1;
+    }
+    return ret;
+}

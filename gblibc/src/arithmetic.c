@@ -51,3 +51,15 @@ int64_t __moddi3(int64_t a, int64_t b)
     do_div_s(a, b, &remainder);
     return remainder;
 }
+
+uint64_t __udivdi3(uint64_t a, uint64_t b)
+{
+    return do_div(a, b, NULL);
+}
+
+uint64_t __umoddi3(uint64_t a, uint64_t b)
+{
+    uint64_t rem = 0;
+    do_div(a, b, &rem);
+    return rem;
+}

@@ -10,25 +10,6 @@ struct applet {
     int (*func)(const char** args);
 };
 
-int putchar(int c)
-{
-    write(STDOUT_FILENO, &c, 1);
-    return c;
-}
-
-int printf(const char* fmt, ...)
-{
-    va_list args;
-    va_start(args, fmt);
-
-    char buf[128];
-    int n = vsnprintf(buf, sizeof(buf), fmt, args);
-    n = write(STDOUT_FILENO, buf, n);
-
-    va_end(args);
-    return n;
-}
-
 int lazybox_version(const char** _)
 {
     (void)_;

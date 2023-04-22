@@ -7,21 +7,6 @@
 #include <unistd.h>
 #include <stdlib.h>
 
-int printf(const char* fmt, ...)
-{
-    va_list args;
-    va_start(args, fmt);
-
-    char buf[256] = {};
-    int len = vsnprintf(buf, sizeof(buf), fmt, args);
-
-    len = write(STDOUT_FILENO, buf, len);
-
-    va_end(args);
-
-    return len;
-}
-
 // Parsed command representation
 #define EXEC  1
 #define REDIR 2
@@ -153,7 +138,7 @@ runcmd(struct cmd *cmd)
 int
 getcmd(char *buf, int nbuf)
 {
-  printf("$ ");
+  printf("[root@localhost] #\n");
   memset(buf, 0, nbuf);
   gets(buf);
   if(buf[0] == 0) // EOF

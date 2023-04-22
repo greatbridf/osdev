@@ -11,12 +11,17 @@
 extern "C" {
 #endif
 
+int putchar(int character);
+
 int puts(const char* str);
 char* gets(char* str);
 
 int vsnprintf(char* buf, size_t bufsize, const char* fmt, va_list args);
 int snprintf(char* buf, size_t bufsize, const char* fmt, ...);
 int sprintf(char* buf, const char* fmt, ...);
+
+int vprintf(const char* fmt, va_list args);
+int printf(const char* fmt, ...);
 
 #ifdef __cplusplus
 }

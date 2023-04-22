@@ -295,9 +295,16 @@ public:
 
     constexpr iterator_type find(void* lp)
     {
-        for (auto iter = this->begin(); iter != this->end(); ++iter)
-            if (lp >= iter->start && lp < iter->end())
+        for (auto iter = this->begin(); iter != this->end(); ++iter) {
+            void* start = iter->start;
+            void* end = iter->end();
+
+            if (start == end && lp == start)
                 return iter;
+
+            if (lp >= start && lp < end)
+                return iter;
+        }
 
         return this->end();
     }

@@ -99,6 +99,8 @@ process::process(process&& val)
     , ppid(val.ppid)
     , pgid(val.pgid)
     , sid(val.sid)
+    , start_brk(val.start_brk)
+    , brk(val.brk)
 {
     if (current_process == &val)
         current_process = this;
@@ -112,6 +114,9 @@ process::process(const process& parent)
 {
     this->pgid = parent.pgid;
     this->sid = parent.sid;
+
+    this->start_brk = parent.start_brk;
+    this->brk = parent.brk;
 
     for (auto& area : parent.mms) {
         if (area.is_kernel_space() || area.attr.in.system)
@@ -135,6 +140,8 @@ process::process(pid_t _ppid,
     , ppid { _ppid }
     , pgid { 0 }
     , sid { 0 }
+    , start_brk(nullptr)
+    , brk(nullptr)
 {
 }
 

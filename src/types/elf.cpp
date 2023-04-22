@@ -149,6 +149,13 @@ int types::elf::elf32_load(types::elf::elf32_load_data* d)
         null_ind, 0, 1, 0);
     assert(ret == GB_OK);
 
+    // map heap area
+    // TODO: randomize heap start address
+    current_process->start_brk = current_process->brk = (void*)0xa0000000;
+    ret = mmap(current_process->start_brk,
+        0, null_ind, 0, 1, 0);
+    assert(ret == GB_OK);
+
     d->eip = (void*)hdr.entry;
     d->sp = reinterpret_cast<uint32_t*>(types::elf::ELF_STACK_BOTTOM);
 

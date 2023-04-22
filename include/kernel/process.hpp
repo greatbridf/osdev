@@ -355,6 +355,9 @@ public:
     pid_t pgid;
     pid_t sid;
 
+    void* start_brk;
+    void* brk;
+
 public:
     // if waitlist is not empty or mutex in cv_wait
     // is locked, its behavior is undefined

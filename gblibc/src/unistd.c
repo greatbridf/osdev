@@ -1,4 +1,5 @@
 #include <errno.h>
+#include <priv-vars.h>
 #include <stdarg.h>
 #include <stdint.h>
 #include <sys/ioctl.h>
@@ -204,4 +205,49 @@ int ioctl(int fd, unsigned long request, ...)
     }
 
     return ret;
+}
+
+static inline void* _sys_brk(void* addr)
+{
+    return (void*)syscall1(SYS_brk, (uint32_t)addr);
+}
+
+void** __start_brk_location(void)
+{
+    static void* __start_brk = NULL;
+    return &__start_brk;
+}
+void** __curr_brk_location(void)
+{
+    static void* __curr_brk = NULL;
+    return &__curr_brk;
+}
+
+int brk(void* addr)
+{
+    if (!curr_brk)
+        start_brk = curr_brk = _sys_brk(NULL);
+    
+    void* new_brk = _sys_brk(addr);
+    if (new_brk == curr_brk) {
+        errno = 0;
+        return -1;
+    }
+
+    if (new_brk != addr) {
+        errno = ENOMEM;
+        return -1;
+    }
+
+    return 0;
+}
+
+void* sbrk(ssize_t increment)
+{
+    if (!curr_brk)
+        start_brk = curr_brk = _sys_brk(NULL);
+
+    if (brk(curr_brk + increment) == 0)
+        return curr_brk += increment;
+    return (void*)-1;
 }

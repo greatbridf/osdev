@@ -435,6 +435,29 @@ int _syscall_getppid(interrupt_stack*)
     return current_process->ppid;
 }
 
+int _syscall_brk(interrupt_stack* data)
+{
+    void* brk = (void*)data->s_regs.edi;
+
+    if (brk < current_process->start_brk)
+        return (int)current_process->brk;
+
+    auto& mm = *current_process->mms.find(current_process->start_brk);
+
+    // TODO: unmap released heap memory
+    if (brk < current_process->brk)
+        return (int)(current_process->brk = brk);
+
+    ssize_t diff = align_up<12>((uint32_t)brk);
+    diff -= align_up<12>((uint32_t)current_process->brk);
+    diff /= 0x1000;
+    for (ssize_t i = 0; i < diff; ++i)
+        mm.append_page(empty_page, PAGE_COW, false);
+    current_process->brk = brk;
+
+    return (int)brk;
+}
+
 extern "C" void syscall_entry(interrupt_stack* data)
 {
     int syscall_no = data->s_regs.eax;
@@ -457,6 +480,7 @@ void init_syscall(void)
     syscall_handlers[1] = _syscall_write;
     syscall_handlers[2] = _syscall_open;
     syscall_handlers[3] = _syscall_close;
+    syscall_handlers[12] = _syscall_brk;
     syscall_handlers[16] = _syscall_ioctl;
     syscall_handlers[22] = _syscall_pipe;
     syscall_handlers[32] = _syscall_dup;

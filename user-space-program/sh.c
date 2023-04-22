@@ -5,6 +5,7 @@
 #include <string.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <stdlib.h>
 
 int printf(const char* fmt, ...)
 {
@@ -19,15 +20,6 @@ int printf(const char* fmt, ...)
     va_end(args);
 
     return len;
-}
-
-void* malloc(size_t n)
-{
-    static char mems[1024];
-    static int pos;
-    int orig_pos = pos;
-    pos += n;
-    return mems + orig_pos;
 }
 
 // Parsed command representation

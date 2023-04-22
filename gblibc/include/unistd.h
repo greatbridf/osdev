@@ -44,6 +44,9 @@ pid_t getsid(pid_t pid);
 pid_t tcgetpgrp(int fd);
 int tcsetpgrp(int fd, pid_t pgrp);
 
+int brk(void* addr);
+void* sbrk(ssize_t increment);
+
 #ifdef __cplusplus
 }
 #endif

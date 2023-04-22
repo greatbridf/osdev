@@ -1,26 +1,14 @@
+#include <assert.h>
 #include <devutil.h>
+#include <fcntl.h>
+#include <list.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdarg.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-
-#define BUFSIZ (4096)
-static char __stdout_buf[BUFSIZ];
-static size_t __stdout_buf_cnt;
-
-static inline void __buf_flush(void)
-{
-    write(STDOUT_FILENO, __stdout_buf, __stdout_buf_cnt);
-    __stdout_buf_cnt = 0;
-}
-
-static inline void __buf_put(int c)
-{
-    __stdout_buf[__stdout_buf_cnt++] = c;
-    if (__stdout_buf_cnt == BUFSIZ || c == '\n')
-        __buf_flush();
-}
+#include <priv-vars.h>
 
 // where n is in the range of [0, 9]
 static inline char d_to_c(int32_t n)
@@ -385,15 +373,7 @@ int sprintf(char* buf, const char* fmt, ...)
 
 int puts(const char* str)
 {
-    // 1 is for \n at the end
-    int len = 1;
-
-    // TODO: FILE*
-    for (const char* p = str; *p; ++p, ++len)
-        __buf_put(*p);
-    
-    __buf_put('\n');
-    return len;
+    return fputs(str, stdout);
 }
 
 char* gets(char* buf)
@@ -409,89 +389,89 @@ char* gets(char* buf)
     return NULL;
 }
 
-int vprintf_u32(uint32_t num)
+int vfprintf_u32(uint32_t num, FILE* stream)
 {
     if (num <= 9) {
-        __buf_put(d_to_c(num));
+        fputc(d_to_c(num), stream);
         return 1;
     }
 
-    int ret = vprintf_u32(num / 10);
-    __buf_put(d_to_c(num % 10));
+    int ret = vfprintf_u32(num / 10, stream);
+    fputc(d_to_c(num % 10), stream);
     return ret + 1;
 }
 
-int vprintf_d32(int32_t num)
+int vfprintf_d32(int32_t num, FILE* stream)
 {
     if (num < 0) {
-        __buf_put('-');
-        return vprintf_u32(-num) + 1;
+        fputc('-', stream);
+        return vfprintf_u32(-num, stream) + 1;
     }
-    return vprintf_u32(num);
+    return vfprintf_u32(num, stream);
 }
 
-int vprintf_u64(uint64_t num)
+int vfprintf_u64(uint64_t num, FILE* stream)
 {
     if (num <= 9) {
-        __buf_put(d_to_c(num));
+        fputc(d_to_c(num), stream);
         return 1;
     }
 
-    int ret = vprintf_u64(num / 10);
-    __buf_put(d_to_c(num % 10));
+    int ret = vfprintf_u64(num / 10, stream);
+    fputc(d_to_c(num % 10), stream);
     return ret + 1;
 }
 
-int vprintf_d64(int64_t num)
+int vfprintf_d64(int64_t num, FILE* stream)
 {
     if (num < 0) {
-        __buf_put('-');
-        return vprintf_u64(-num) + 1;
+        fputc('-', stream);
+        return vfprintf_u64(-num, stream) + 1;
     }
-    return vprintf_u64(num);
+    return vfprintf_u64(num, stream);
 }
 
-int vprintf_x32(uint32_t num, int off)
+int vfprintf_x32(uint32_t num, int off, FILE* stream)
 {
     // print leading 0x
     if (off & 1) {
         --off;
-        __buf_put('0');
-        __buf_put('X' + off);
-        return vprintf_x32(num, off) + 2;
+        fputc('0', stream);
+        fputc('X' + off, stream);
+        return vfprintf_x32(num, off, stream) + 2;
     }
 
     if (num <= 15) {
-        __buf_put(X_to_c(num) + off);
+        fputc(X_to_c(num) + off, stream);
         return 1;
     }
 
-    int ret = vprintf_x32(num >> 4, off);
-    __buf_put(X_to_c(num & 0xf) + off);
+    int ret = vfprintf_x32(num >> 4, off, stream);
+    fputc(X_to_c(num & 0xf) + off, stream);
     return ret + 1;
 }
 
-int vprintf_x64(uint64_t num, int off)
+int vfprintf_x64(uint64_t num, int off, FILE* stream)
 {
     // print leading 0x
     if (off & 1) {
         --off;
-        __buf_put('0');
-        __buf_put('X' + off);
-        return vprintf_x64(num, off) + 2;
+        fputc('0', stream);
+        fputc('X' + off, stream);
+        return vfprintf_x64(num, off, stream) + 2;
     }
 
     if (num <= 15) {
-        __buf_put(X_to_c(num) + off);
+        fputc(X_to_c(num) + off, stream);
         return 1;
     }
 
-    int ret = vprintf_x64(num >> 4, off);
-    __buf_put(X_to_c(num & 0xf) + off);
+    int ret = vfprintf_x64(num >> 4, off, stream);
+    fputc(X_to_c(num & 0xf) + off, stream);
     return ret + 1;
 }
 
-int vprintf(const char* fmt, va_list args)
+int vfprintf(FILE* stream, const char* fmt, va_list args)
 {
     int n = 0;
 
@@ -501,15 +481,15 @@ int vprintf(const char* fmt, va_list args)
 
             // int
             case 'd':
-                n += vprintf_d32(va_arg(args, int));
+                n += vfprintf_d32(va_arg(args, int), stream);
                 break;
 
             case 'x':
-                n += vprintf_x32(va_arg(args, unsigned int), 'a' - 'A' + 1);
+                n += vfprintf_x32(va_arg(args, unsigned int), 'a' - 'A' + 1, stream);
                 break;
 
             case 'X':
-                n += vprintf_x32(va_arg(args, unsigned int), 1);
+                n += vfprintf_x32(va_arg(args, unsigned int), 1, stream);
                 break;
 
             // long decimal
@@ -519,62 +499,78 @@ int vprintf(const char* fmt, va_list args)
                 case 'l':
                     switch (*(++fmt)) {
                     case 'd':
-                        n += vprintf_d64(va_arg(args, long long));
+                        n += vfprintf_d64(va_arg(args, long long), stream);
                         break;
                     case 'x':
-                        n += vprintf_x64(va_arg(args, unsigned long long), 'a' - 'A' + 1);
+                        n += vfprintf_x64(va_arg(args, unsigned long long), 'a' - 'A' + 1, stream);
                         break;
                     case 'X':
-                        n += vprintf_x64(va_arg(args, unsigned long long), 'a' - 'A' + 1);
+                        n += vfprintf_x64(va_arg(args, unsigned long long), 'a' - 'A' + 1, stream);
                         break;
                     }
                     break;
                 // long int aka int32
                 case 'd':
-                    n += vprintf_d32(va_arg(args, int));
+                    n += vfprintf_d32(va_arg(args, int), stream);
                     break;
                 case 'x':
-                    n += vprintf_x32(va_arg(args, unsigned int), 'a' - 'A' + 1);
+                    n += vfprintf_x32(va_arg(args, unsigned int), 'a' - 'A' + 1, stream);
                     break;
 
                 case 'X':
-                    n += vprintf_x32(va_arg(args, unsigned int), 1);
+                    n += vfprintf_x32(va_arg(args, unsigned int), 1, stream);
                     break;
                 }
                 break;
 
             // c string
             case 's':
-                n += printf(va_arg(args, const char*));
+                n += fprintf(stream, va_arg(args, const char*));
                 break;
 
             // int8 char
             case 'c':
                 ++n;
-                __buf_put(va_arg(args, int));
+                fputc(va_arg(args, int), stream);
                 break;
 
             // pointer
             case 'p':
 #ifdef __32bit_system
-                n += vprintf_x32(va_arg(args, size_t), 'a' - 'A' + 1);
+                n += vfprintf_x32(va_arg(args, size_t), 'a' - 'A' + 1, stream);
 #else
-                n += vprintf_x64(va_arg(args, size_t), 'a' - 'A' + 1);
+                n += vfprintf_x64(va_arg(args, size_t), 'a' - 'A' + 1, stream);
 #endif
                 break;
 
             default:
                 ++n;
-                __buf_put(*(fmt - 1));
+                fputc(*(fmt - 1), stream);
                 break;
             }
         } else {
             ++n;
-            __buf_put(c);
+            fputc(c, stream);
         }
     }
 
     return n;
+}
+
+int fprintf(FILE* stream, const char* fmt, ...)
+{
+    va_list args;
+    va_start(args, fmt);
+
+    int ret = vfprintf(stream, fmt, args);
+
+    va_end(args);
+    return ret;
+}
+
+int vprintf(const char* fmt, va_list args)
+{
+    return vfprintf(stdout, fmt, args);
 }
 
 int printf(const char* fmt, ...)
@@ -590,6 +586,131 @@ int printf(const char* fmt, ...)
 
 int putchar(int c)
 {
-    __buf_put(c);
+    fputc(c, stdout);
     return c;
+}
+
+FILE* fopen(const char* path, const char* mode)
+{
+    uint32_t flags = 0, file_flags = 0;
+
+    if (strcmp(mode, "r") == 0)
+        flags = O_RDONLY, file_flags = FILE_READ;
+
+    if (strcmp(mode, "r+") == 0)
+        flags = O_RDWR, file_flags = FILE_READ | FILE_WRITE;
+
+    if (strcmp(mode, "w") == 0)
+        flags = O_WRONLY | O_CREAT | O_TRUNC, file_flags = FILE_WRITE;
+
+    if (strcmp(mode, "w+") == 0)
+        flags = O_RDWR | O_CREAT | O_TRUNC, file_flags = FILE_READ | FILE_WRITE;
+    
+    assert(flags);
+
+    int fd = open(path, flags, 0644);
+    if (fd < 0)
+        goto open_fail;
+    
+    FILE* file = malloc(sizeof(FILE));
+    if (!file)
+        goto file_malloc_fail;
+    
+    file->fd = fd;
+    file->flags = file_flags;
+
+    if (file_flags & FILE_READ) {
+        file->rbuf = malloc(BUFSIZ);
+        if (!file->rbuf)
+            goto rbuf_malloc_fail;
+        file->rbsz = BUFSIZ;
+    }
+
+    if (file_flags & FILE_WRITE) {
+        file->wbuf = malloc(BUFSIZ);
+        if (!file->wbuf)
+            goto wbuf_malloc_fail;
+        file->wbsz = BUFSIZ;
+    }
+
+    return file;
+
+wbuf_malloc_fail:
+    free(file->rbuf);
+
+rbuf_malloc_fail:
+    free(file);
+
+file_malloc_fail:
+    close(fd);
+
+open_fail:
+    return NULL;
+}
+
+int fflush(FILE* stream)
+{
+    if (stream->wbuf && stream->wpos) {
+        if (write(stream->fd, stream->wbuf, stream->wpos) < 0)
+            return EOF;
+        stream->wpos = 0;
+    }
+
+    // TODO: call flush()
+
+    return 0;
+}
+
+int fclose(FILE* stream)
+{
+    if (fflush(stream) == EOF)
+        return EOF;
+    
+    free(stream->rbuf);
+    free(stream->wbuf);
+    stream->rbsz = 0;
+    stream->wbsz = 0;
+    
+    if (close(stream->fd) < 0)
+        return EOF;
+    
+    NDERASE(NDPTR(stream));
+    
+    return 0;
+}
+
+int fputc_unlocked(int c, FILE* stream)
+{
+    if (stream->wbuf) {
+        stream->wbuf[stream->wpos++] = c;
+        if (stream->wpos == stream->wbsz || c == '\n')
+            fflush(stream);
+    } else {
+        // TODO: set EOF on error
+        write(stream->fd, &c, 1);
+    }
+
+    return c;
+}
+
+int fputs_unlocked(const char* s, FILE* stream)
+{
+    // 1 is for the trailing '\n'
+    int len = 1;
+    for (const char* p = s; *p; ++p, ++len)
+        fputc_unlocked(*p, stream);
+    fputc_unlocked('\n', stream);
+    return len;
+}
+
+int fputc(int c, FILE* stream)
+{
+    // TODO: locked version
+    return fputc_unlocked(c, stream);
+}
+
+int fputs(const char* s, FILE* stream)
+{
+    // TODO: locked version
+    return fputs_unlocked(s, stream);
 }

@@ -8,17 +8,19 @@
 _start:
     movl (%esp), %eax   # argc
     leal 4(%esp), %ecx  # argv
-    movl %esp, %edx
+    movl %esp, %ebx
 
     andl $0xfffffff0, %esp
 
-    pushl %edx
+    pushl %ebx
     pushl $0
 
     movl %esp, %ebp
 
     pushl %ecx
     pushl %eax
+
+    call __init_gblibc
 
     call main
 

@@ -225,9 +225,6 @@ void** __curr_brk_location(void)
 
 int brk(void* addr)
 {
-    if (!curr_brk)
-        start_brk = curr_brk = _sys_brk(NULL);
-    
     void* new_brk = _sys_brk(addr);
     if (new_brk == curr_brk) {
         errno = 0;
@@ -244,9 +241,6 @@ int brk(void* addr)
 
 void* sbrk(ssize_t increment)
 {
-    if (!curr_brk)
-        start_brk = curr_brk = _sys_brk(NULL);
-
     if (brk(curr_brk + increment) == 0)
         return curr_brk += increment;
     return (void*)-1;

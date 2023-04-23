@@ -189,3 +189,22 @@ void srand(unsigned int seed)
     __next_rand = seed;
     rand();
 }
+
+void* bsearch(const void* key, const void* base, size_t num, size_t size, comparator_t cmp)
+{
+    if (num == 0)
+        return NULL;
+
+    size_t mid = num / 2;
+    int result = cmp(key, base + size * mid);
+
+    if (result == 0)
+        return (void*)base + size * mid;
+    
+    if (result > 0) {
+        ++mid;
+        return bsearch(key, base + size * mid, num - mid, size, cmp);
+    }
+    
+    return bsearch(key, base, mid, size, cmp);
+}

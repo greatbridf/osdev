@@ -14,6 +14,7 @@ add_library(gblibc STATIC
     src/stdlib.c
     src/errno.c
     src/init.c
+    src/internal.c
 )
 
 add_library(crt0 OBJECT

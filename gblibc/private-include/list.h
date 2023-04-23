@@ -21,19 +21,11 @@ typedef list_node list_head;
 #define NEWNODE(type) ((struct list_node*)malloc(sizeof(list_node) + sizeof(type)))
 #define NDPTR(p_data) ((list_node*)((char*)p_data - sizeof(list_node)))
 
-#define NDINSERT(node, newnode)          \
-    NDNEXT(*newnode) = NDNEXT(node);     \
-    if (NDNEXT(node))                    \
-        NDPREV(*NDNEXT(node)) = newnode; \
-    NDNEXT(node) = newnode;              \
-    NDPREV(*newnode) = &node
+void __node_insert(list_node* node, list_node* new_node);
+void __node_erase(list_node* node);
 
-#define NDERASE(p_node)                             \
-    if (NDPREV(*p_node))                            \
-        NDNEXT(*NDPREV(*p_node)) = NDNEXT(*p_node); \
-    if (NDNEXT(*p_node))                            \
-        NDPREV(*NDNEXT(*p_node)) = NDPREV(*p_node); \
-    free(p_node)
+#define NDINSERT(node, newnode) __node_insert(node, newnode)
+#define NDERASE(p_node) __node_erase(p_node)
 
 #ifdef __cplusplus
 }

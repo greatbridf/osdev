@@ -34,7 +34,7 @@ void __init_gblibc(void)
     stdout->wbuf = malloc(BUFSIZ);
     stdout->wbsz = BUFSIZ;
 
-    NDINSERT(iofiles, node);
+    NDINSERT(&iofiles, node);
 
     // stdin
     node = NEWNODE(FILE);
@@ -46,7 +46,7 @@ void __init_gblibc(void)
     stdin->rbuf = malloc(BUFSIZ);
     stdin->rbsz = BUFSIZ;
 
-    NDINSERT(iofiles, node);
+    NDINSERT(&iofiles, node);
 
     // stderr
     node = NEWNODE(FILE);
@@ -56,5 +56,5 @@ void __init_gblibc(void)
     stderr->fd = STDERR_FILENO;
     stderr->flags = FILE_WRITE;
 
-    NDINSERT(iofiles, node);
+    NDINSERT(&iofiles, node);
 }

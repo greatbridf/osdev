@@ -217,10 +217,10 @@ int fs::vfs::inode_stat(dentry*, stat*)
     assert(false);
     return GB_FAILED;
 }
-uint32_t fs::vfs::inode_getnode(fs::inode*)
+fs::node_t fs::vfs::inode_getnode(fs::inode*)
 {
     assert(false);
-    return 0xffffffff;
+    return { SN_INVALID };
 }
 
 class tmpfs : public virtual fs::vfs {
@@ -417,9 +417,9 @@ public:
         return GB_OK;
     }
 
-    virtual uint32_t inode_getnode(fs::inode* file) override
+    virtual fs::node_t inode_getnode(fs::inode* file) override
     {
-        return as_val(_getdata(file->ino));
+        return { as_val(_getdata(file->ino)) };
     }
 };
 
@@ -429,14 +429,11 @@ static fs::special_node sns[8][8];
 size_t fs::vfs_read(fs::inode* file, char* buf, size_t buf_size, size_t offset, size_t n)
 {
     if (file->flags.in.special_node) {
-        uint32_t ret = file->fs->inode_getnode(file);
-        if (ret == SN_INVALID) {
+        fs::node_t sn = file->fs->inode_getnode(file);
+        if (sn.v == SN_INVALID) {
             errno = EINVAL;
             return 0xffffffff;
         }
-        fs::node_t sn {
-            .v = ret
-        };
         auto* ptr = &sns[sn.in.major][sn.in.minor];
         auto* ops = &ptr->ops;
         if (ops && ops->read)
@@ -452,14 +449,11 @@ size_t fs::vfs_read(fs::inode* file, char* buf, size_t buf_size, size_t offset, 
 size_t fs::vfs_write(fs::inode* file, const char* buf, size_t offset, size_t n)
 {
     if (file->flags.in.special_node) {
-        uint32_t ret = file->fs->inode_getnode(file);
-        if (ret == SN_INVALID) {
+        fs::node_t sn = file->fs->inode_getnode(file);
+        if (sn.v == SN_INVALID) {
             errno = EINVAL;
             return 0xffffffff;
         }
-        fs::node_t sn {
-            .v = ret
-        };
         auto* ptr = &sns[sn.in.major][sn.in.minor];
         auto* ops = &ptr->ops;
         if (ops && ops->write)

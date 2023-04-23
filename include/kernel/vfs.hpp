@@ -185,7 +185,7 @@ public:
     virtual int inode_rmfile(dentry* dir, const char* filename);
     virtual int inode_mkdir(dentry* dir, const char* dirname);
     virtual int inode_stat(dentry* dir, stat* stat);
-    virtual uint32_t inode_getnode(inode* file);
+    virtual node_t inode_getnode(inode* file);
 
     // parameter 'length' in callback:
     // if 0, 'name' should be null terminated

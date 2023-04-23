@@ -388,6 +388,23 @@ int _syscall_setpgid(interrupt_stack* data)
     return 0;
 }
 
+constexpr bool is_tty(fs::file* file)
+{
+    if (file->type != fs::file::types::ind)
+        return false;
+
+    fs::inode* ind = file->ptr.ind;
+
+    if (!ind->flags.in.special_node)
+        return false;
+
+    fs::node_t nd = ind->fs->inode_getnode(ind);
+    if (nd.in.major != 1 || nd.in.minor != 0)
+        return false;
+
+    return true;
+}
+
 int _syscall_ioctl(interrupt_stack* data)
 {
     int fd = data->s_regs.edi;
@@ -396,18 +413,17 @@ int _syscall_ioctl(interrupt_stack* data)
     // TODO: check fd type and get tty* from fd
     //
     //       we use a trick for now, check whether
-    //       the file that fd points to is a pipe or
-    //       not. and we suppose that stdin will be
-    //       either a tty or a pipe.
+    //       the file that fd points to is special
+    //       block 1:0
     auto* file = current_process->files[fd];
     if (!file)
         return -EBADF;
 
-    if (file->type != fs::file::types::ind)
-        return -ENOTTY;
-
     switch (request) {
     case TIOCGPGRP: {
+        if (!is_tty(file))
+            return -ENOTTY;
+
         auto* pgid = (pid_t*)data->s_regs.edx;
         tty* ctrl_tty = procs->get_ctrl_tty(current_process->pid);
         // TODO: copy_to_user
@@ -415,6 +431,9 @@ int _syscall_ioctl(interrupt_stack* data)
         break;
     }
     case TIOCSPGRP: {
+        if (!is_tty(file))
+            return -ENOTTY;
+
         // TODO: copy_from_user
         pid_t pgid = *(const pid_t*)data->s_regs.edx;
         tty* ctrl_tty = procs->get_ctrl_tty(current_process->pid);

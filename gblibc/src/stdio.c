@@ -793,6 +793,12 @@ int fgetc(FILE* stream)
 
 int ferror(FILE* stream)
 {
+    // TODO: lock the stream
+    return ferror_unlocked(stream);
+}
+
+int ferror_unlocked(FILE* stream)
+{
     return stream->flags & FILE_ERROR;
 }
 

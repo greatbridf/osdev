@@ -57,6 +57,7 @@ int fgetc(FILE* stream);
 int fputc(int character, FILE* stream);
 
 int ferror(FILE* stream);
+int ferror_unlocked(FILE* stream);
 int feof(FILE* stream);
 void clearerr(FILE* stream);
 

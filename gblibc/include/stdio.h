@@ -16,16 +16,20 @@ extern "C" {
 
 typedef struct __io_file {
     int fd;
-    char* rbuf;
-    char* wbuf;
-    size_t rpos;
-    size_t wpos;
-    size_t rbsz;
-    size_t wbsz;
     uint32_t flags;
+
+    char* rbuf;
+    size_t rpos;
+    size_t rcnt;
+    size_t rbsz;
+
+    char* wbuf;
+    size_t wpos;
+    size_t wbsz;
 } FILE;
 
 int putchar(int character);
+int getchar(void);
 
 int puts(const char* str);
 char* gets(char* str);
@@ -44,9 +48,12 @@ FILE* fopen(const char* path, const char* mode);
 int fflush(FILE* stream);
 int fclose(FILE* stream);
 
+int getc_unlocked(FILE* stream);
+int putc_unlocked(int character, FILE* stream);
 int fputs_unlocked(const char* s, FILE* stream);
 int fputc_unlocked(int character, FILE* stream);
 int fputs(const char* s, FILE* stream);
+int fgetc(FILE* stream);
 int fputc(int character, FILE* stream);
 
 extern FILE* stdout;

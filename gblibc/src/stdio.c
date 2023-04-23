@@ -378,15 +378,14 @@ int puts(const char* str)
 
 char* gets(char* buf)
 {
-    int n = read(STDIN_FILENO, buf, __SIZE_MAX__);
-    if (n > 0) {
-      if (buf[n-1] == '\n')
-        buf[n-1] = 0;
-      else
-        buf[n] = 0;
-      return buf;
-    }
-    return NULL;
+    int c, num = 0;
+    while ((c = getchar()) != EOF && c != '\n')
+        buf[num++] = c;
+    buf[num] = 0;
+
+    if (c == EOF)
+        return NULL;
+    return buf;
 }
 
 int vfprintf_u32(uint32_t num, FILE* stream)
@@ -681,16 +680,7 @@ int fclose(FILE* stream)
 
 int fputc_unlocked(int c, FILE* stream)
 {
-    if (stream->wbuf) {
-        stream->wbuf[stream->wpos++] = c;
-        if (stream->wpos == stream->wbsz || c == '\n')
-            fflush(stream);
-    } else {
-        // TODO: set EOF on error
-        write(stream->fd, &c, 1);
-    }
-
-    return c;
+    return putc_unlocked(c, stream);
 }
 
 int fputs_unlocked(const char* s, FILE* stream)
@@ -705,12 +695,65 @@ int fputs_unlocked(const char* s, FILE* stream)
 
 int fputc(int c, FILE* stream)
 {
-    // TODO: locked version
-    return fputc_unlocked(c, stream);
+    // TODO: lock the stream
+    return putc_unlocked(c, stream);
 }
 
 int fputs(const char* s, FILE* stream)
 {
-    // TODO: locked version
+    // TODO: lock the stream
     return fputs_unlocked(s, stream);
+}
+
+static inline int __fillbuf(FILE* stream)
+{
+    // TODO: set EOF flag
+    if ((stream->rcnt = read(stream->fd, stream->rbuf, stream->rbsz)) >= 2147483648U) {
+        stream->rcnt = 0;
+        return EOF;
+    }
+    stream->rpos = 0;
+    return 0;
+}
+
+int getc_unlocked(FILE* stream)
+{
+    if (stream->rbuf) {
+        if (stream->rpos == stream->rcnt) {
+            if (__fillbuf(stream) < 0)
+                return EOF;
+        }
+        return stream->rbuf[stream->rpos++];
+    } else {
+        int c;
+        // TODO: set EOF on error
+        if (read(stream->fd, &c, 1) < 0)
+            return EOF;
+        return c;
+    }
+}
+
+int putc_unlocked(int c, FILE* stream)
+{
+    if (stream->wbuf) {
+        stream->wbuf[stream->wpos++] = c;
+        if (stream->wpos == stream->wbsz || c == '\n')
+            fflush(stream);
+    } else {
+        // TODO: set EOF on error
+        if (write(stream->fd, &c, 1) < 0)
+            return EOF;
+    }
+
+    return c;
+}
+
+int getchar(void)
+{
+    return fgetc(stdin);
+}
+
+int fgetc(FILE* stream)
+{
+    return getc_unlocked(stream);
 }

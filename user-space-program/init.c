@@ -1,4 +1,6 @@
+#include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <fcntl.h>
@@ -52,11 +54,12 @@ _run_sh:;
     }
 
     int ret, pid;
-    char buf[512] = {};
     for (;;) {
         pid = wait(&ret);
-        snprintf(buf, sizeof(buf), "[init] pid%d has exited with code %d\n", pid, ret);
+        char* buf = NULL;
+        assert(asprintf(&buf, "[init] pid%d has exited with code %d\n", pid, ret) >= 0);
         print(buf);
+        free(buf);
         // sh
         if (pid == sh_pid)
             goto _run_sh;

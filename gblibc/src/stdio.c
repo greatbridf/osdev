@@ -811,3 +811,37 @@ void clearerr(FILE* stream)
 {
     stream->flags &= ~FILE_ERROR;
 }
+
+int vasprintf(char** strp, const char* fmt, va_list args)
+{
+    // TODO: this is WAY TOO SLOWWWWWWWWW
+    int sz = 8, n;
+    char* buf = NULL;
+
+    do {
+        buf = malloc(sz *= 2);
+        if (!buf)
+            return -1;
+        
+        n = vsnprintf(buf, sz, fmt, args);
+        if (sz > n)
+            break;
+
+        free(buf);
+    } while (1);
+    
+    *strp = buf;
+    return n;
+}
+
+int asprintf(char** strp, const char* fmt, ...)
+{
+    va_list lst;
+    va_start(lst, fmt);
+
+    int ret = vasprintf(strp, fmt, lst);
+
+    va_end(lst);
+
+    return ret;
+}

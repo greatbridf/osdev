@@ -37,6 +37,8 @@ char* gets(char* str);
 int vsnprintf(char* buf, size_t bufsize, const char* fmt, va_list args);
 int snprintf(char* buf, size_t bufsize, const char* fmt, ...);
 int sprintf(char* buf, const char* fmt, ...);
+int vasprintf(char** strp, const char* fmt, va_list args);
+int asprintf(char** strp, const char* fmt, ...);
 
 int vfprintf(FILE* stream, const char* fmt, va_list args);
 int fprintf(FILE* stream, const char* fmt, ...);

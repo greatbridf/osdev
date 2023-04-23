@@ -41,6 +41,8 @@ char* stpncpy(char* dst, const char* src, size_t n);
 char* strdup(const char* str);
 char* strndup(const char* str, size_t n);
 
+char* strsignal(int sig);
+
 #ifdef __cplusplus
 }
 #endif

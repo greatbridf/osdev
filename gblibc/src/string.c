@@ -1,5 +1,6 @@
 #include <ctype.h>
 #include <errno.h>
+#include <signal.h>
 #include <stdint.h>
 #include <stdlib.h>
 
@@ -273,4 +274,20 @@ char* strndup(const char* str, size_t n)
 char* strdup(const char* str)
 {
     return strndup(str, __SIZE_MAX__);
+}
+
+char* strsignal(int sig)
+{
+    switch (sig) {
+    default:
+        return "Unknown signal";
+    case SIGINT:
+        return "Interrupt";
+    case SIGQUIT:
+        return "Quit";
+    case SIGSTOP:
+        return "Stopped (signal)";
+    case SIGPIPE:
+        return "Broken pipe";
+    }
 }

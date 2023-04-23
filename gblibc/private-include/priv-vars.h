@@ -9,6 +9,8 @@ extern "C" {
 
 #define FILE_READ (1 << 0)
 #define FILE_WRITE (1 << 1)
+#define FILE_ERROR (1 << 2)
+#define FILE_EOF (1 << 3)
 
 void** __start_brk_location(void);
 void** __curr_brk_location(void);

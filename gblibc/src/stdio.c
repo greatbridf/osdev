@@ -10,6 +10,11 @@
 #include <unistd.h>
 #include <priv-vars.h>
 
+static inline int __feof_or_error(FILE* stream)
+{
+    return !!(stream->flags & (FILE_ERROR | FILE_EOF));
+}
+
 // where n is in the range of [0, 9]
 static inline char d_to_c(int32_t n)
 {
@@ -649,9 +654,19 @@ open_fail:
 
 int fflush(FILE* stream)
 {
+    if (__feof_or_error(stream))
+        return EOF;
+
     if (stream->wbuf && stream->wpos) {
-        if (write(stream->fd, stream->wbuf, stream->wpos) < 0)
+        int ret = write(stream->fd, stream->wbuf, stream->wpos);
+        if (ret < 0) {
+            stream->flags |= FILE_ERROR;
             return EOF;
+        }
+        if (ret == 0) {
+            stream->flags |= FILE_EOF;
+            return EOF;
+        }
         stream->wpos = 0;
     }
 
@@ -707,9 +722,13 @@ int fputs(const char* s, FILE* stream)
 
 static inline int __fillbuf(FILE* stream)
 {
-    // TODO: set EOF flag
     if ((stream->rcnt = read(stream->fd, stream->rbuf, stream->rbsz)) >= 2147483648U) {
         stream->rcnt = 0;
+        stream->flags |= FILE_ERROR;
+        return EOF;
+    }
+    if (stream->rcnt == 0) {
+        stream->flags |= FILE_EOF;
         return EOF;
     }
     stream->rpos = 0;
@@ -718,6 +737,9 @@ static inline int __fillbuf(FILE* stream)
 
 int getc_unlocked(FILE* stream)
 {
+    if (__feof_or_error(stream))
+        return EOF;
+
     if (stream->rbuf) {
         if (stream->rpos == stream->rcnt) {
             if (__fillbuf(stream) < 0)
@@ -726,23 +748,34 @@ int getc_unlocked(FILE* stream)
         return stream->rbuf[stream->rpos++];
     } else {
         int c;
-        // TODO: set EOF on error
-        if (read(stream->fd, &c, 1) < 0)
+        int ret = read(stream->fd, &c, 1);
+        if (ret < 0) {
+            stream->flags |= FILE_ERROR;
             return EOF;
+        }
+        if (ret == 0) {
+            stream->flags |= FILE_EOF;
+            return EOF;
+        }
         return c;
     }
 }
 
 int putc_unlocked(int c, FILE* stream)
 {
+    if (__feof_or_error(stream))
+        return EOF;
+
     if (stream->wbuf) {
         stream->wbuf[stream->wpos++] = c;
         if (stream->wpos == stream->wbsz || c == '\n')
-            fflush(stream);
+            if (fflush(stream) == EOF)
+                return EOF;
     } else {
-        // TODO: set EOF on error
-        if (write(stream->fd, &c, 1) < 0)
+        if (write(stream->fd, &c, 1) < 0) {
+            stream->flags |= FILE_ERROR;
             return EOF;
+        }
     }
 
     return c;
@@ -756,4 +789,19 @@ int getchar(void)
 int fgetc(FILE* stream)
 {
     return getc_unlocked(stream);
+}
+
+int ferror(FILE* stream)
+{
+    return stream->flags & FILE_ERROR;
+}
+
+int feof(FILE* stream)
+{
+    return stream->flags & FILE_EOF;
+}
+
+void clearerr(FILE* stream)
+{
+    stream->flags &= ~FILE_ERROR;
 }

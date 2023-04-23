@@ -56,6 +56,10 @@ int fputs(const char* s, FILE* stream);
 int fgetc(FILE* stream);
 int fputc(int character, FILE* stream);
 
+int ferror(FILE* stream);
+int feof(FILE* stream);
+void clearerr(FILE* stream);
+
 extern FILE* stdout;
 extern FILE* stdin;
 extern FILE* stderr;

@@ -1,8 +1,10 @@
+#include <alloca.h>
 #include <priv-vars.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <syscall.h>
 #include <unistd.h>
+#include <string.h>
 
 int atoi(const char* str)
 {
@@ -138,4 +140,52 @@ void free(void* ptr)
     struct mem* p = ptr - sizeof(struct mem);
     p->flag &= ~MEM_ALLOCATED;
     _union(p);
+}
+
+static inline void _swap(void* a, void* b, size_t sz)
+{
+    void* tmp = alloca(sz);
+    memcpy(tmp, a, sz);
+    memcpy(a, b, sz);
+    memcpy(b, tmp, sz);
+}
+
+void qsort(void* arr, size_t len, size_t sz, comparator_t cmp) {
+    if (len <= 1)
+        return;
+
+    char* pivot = alloca(sz);
+    memcpy(pivot, arr + sz * (rand() % len), sz);
+
+    int i = 0, j = 0, k = len;
+    while (i < k) {
+        int res = cmp(arr + sz * i, pivot);
+        if (res < 0)
+            _swap(arr + sz * i++, arr + sz * j++, sz);
+        else if (res > 0)
+            _swap(arr + sz * i, arr + sz * --k, sz);
+        else
+            i++;
+    }
+
+    qsort(arr, j, sz, cmp);
+    qsort(arr + sz * k, len - k, sz, cmp);
+}
+
+static unsigned int __next_rand;
+int rand(void)
+{
+    return rand_r(&__next_rand);
+}
+
+int rand_r(unsigned int* seedp)
+{
+    *seedp = *seedp * 1103515245 + 12345;
+    return (unsigned int) (*seedp / 65536) % 32768;
+}
+
+void srand(unsigned int seed)
+{
+    __next_rand = seed;
+    rand();
 }

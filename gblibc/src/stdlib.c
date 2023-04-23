@@ -26,18 +26,6 @@ void __attribute__((noreturn)) exit(int status)
 
 #define MINIMUM_ALLOCATION_SIZE (8)
 #define MEM_ALLOCATED (1)
-struct mem {
-    uint32_t sz;
-    uint32_t flag;
-};
-
-static inline void _init_heap(void)
-{
-    sbrk(128 * 1024);
-    struct mem* first = start_brk;
-    first->sz = 0;
-    first->flag = 0;
-}
 
 static inline int _is_end(struct mem* p)
 {
@@ -90,11 +78,19 @@ static inline void _union(struct mem* p)
     }
 }
 
+static inline void _cut_block(struct mem* p, size_t mem_size, size_t block_size)
+{
+    if (block_size >= mem_size + sizeof(struct mem) + MINIMUM_ALLOCATION_SIZE) {
+        p->sz = mem_size;
+
+        struct mem* next = _next(p, mem_size);
+        next->flag = 0;
+        next->sz = block_size - mem_size - sizeof(struct mem);
+    }
+}
+
 void* malloc(size_t size)
 {
-    if (curr_brk == start_brk)
-        _init_heap();
-
     if (size < MINIMUM_ALLOCATION_SIZE)
         size = MINIMUM_ALLOCATION_SIZE;
 
@@ -124,16 +120,44 @@ void* malloc(size_t size)
     }
 
     p->flag |= MEM_ALLOCATED;
-
-    if (sz >= size + sizeof(struct mem) + MINIMUM_ALLOCATION_SIZE) {
-        p->sz = size;
-
-        struct mem* next = _next(p, size);
-        next->flag = 0;
-        next->sz = sz - size - sizeof(struct mem);
-    }
+    _cut_block(p, size, sz);
 
     return _next(p, 0);
+}
+
+void* realloc(void* ptr, size_t newsize)
+{
+    if (!ptr)
+        return malloc(newsize);
+
+    struct mem* p = ptr - sizeof(struct mem);
+    size_t oldsize = p->sz;
+
+    _union(p);
+    if (_is_end(p)) {
+        if (_size(p) < newsize + sizeof(struct mem))
+            sbrk(_max(128 * 1024, newsize + sizeof(struct mem)));
+
+        p->sz = newsize;
+        struct mem* next = _next(p, newsize);
+        next->flag = 0;
+        next->sz = 0;
+
+        return ptr;
+    }
+
+    if (p->sz >= newsize) {
+        _cut_block(p, newsize, p->sz);
+        return ptr;
+    }
+
+    void* newptr = malloc(newsize);
+    if (!newptr)
+        return NULL;
+    
+    memcpy(newptr, ptr, oldsize);
+    free(ptr);
+    return newptr;
 }
 
 void free(void* ptr)

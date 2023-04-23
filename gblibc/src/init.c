@@ -26,8 +26,13 @@ size_t* __environ_size_location(void)
 void __init_gblibc(int argc, char** argv, char** envp)
 {
     (void)argc, (void)argv;
-    // initialize program break position
+    // initialize program break position and heap
     start_brk = curr_brk = (void*)syscall1(SYS_brk, (uint32_t)NULL);
+
+    sbrk(128 * 1024);
+    struct mem* first = start_brk;
+    first->sz = 0;
+    first->flag = 0;
 
     // save environ vector
     environ_size = 4;

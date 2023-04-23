@@ -8,6 +8,11 @@
 extern "C" {
 #endif
 
+struct mem {
+    uint32_t sz;
+    uint32_t flag;
+};
+
 #define FILE_READ (1 << 0)
 #define FILE_WRITE (1 << 1)
 #define FILE_ERROR (1 << 2)

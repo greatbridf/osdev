@@ -819,15 +819,13 @@ int vasprintf(char** strp, const char* fmt, va_list args)
     char* buf = NULL;
 
     do {
-        buf = malloc(sz *= 2);
+        buf = realloc(buf, sz *= 2);
         if (!buf)
             return -1;
         
         n = vsnprintf(buf, sz, fmt, args);
         if (sz > n)
             break;
-
-        free(buf);
     } while (1);
     
     *strp = buf;

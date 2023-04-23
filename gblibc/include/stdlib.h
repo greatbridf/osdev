@@ -12,6 +12,7 @@ int atoi(const char* str);
 void __attribute__((noreturn)) exit(int status);
 
 void* malloc(size_t size);
+void* realloc(void* ptr, size_t newsize);
 void free(void* ptr);
 
 typedef int (*comparator_t)(const void* a, const void* b);

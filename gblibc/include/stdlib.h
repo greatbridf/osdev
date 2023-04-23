@@ -27,6 +27,8 @@ int rand(void);
 int rand_r(unsigned int* seedp);
 void srand(unsigned int seed);
 
+int setenv(const char* name, const char* value, int overwrite);
+
 #ifdef __cplusplus
 }
 #endif

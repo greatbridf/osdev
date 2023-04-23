@@ -135,14 +135,22 @@ char* stpncpy(char* restrict dst, const char* restrict src, size_t n)
     return dst + len;
 }
 
-int strcmp(const char* s1, const char* s2)
+int strncmp(const char* s1, const char* s2, size_t n)
 {
+    if (n == 0)
+        return 0;
+
     int c;
-    while ((c = *s1 - *s2) == 0 && *s1) {
+    while (n-- && (c = *s1 - *s2) == 0 && *s1) {
         ++s1;
         ++s2;
     }
     return c;
+}
+
+int strcmp(const char* s1, const char* s2)
+{
+    return strncmp(s1, s2, __SIZE_MAX__);
 }
 
 int strncasecmp(const char* s1, const char* s2, size_t n)

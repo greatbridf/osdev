@@ -49,6 +49,8 @@ void* sbrk(ssize_t increment);
 
 int isatty(int fd);
 
+extern char** environ;
+
 #ifdef __cplusplus
 }
 #endif

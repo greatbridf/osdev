@@ -37,7 +37,6 @@ _run_sh:;
         }
 
         char* shell_argv[128] = {};
-        char* envp[1] = { NULL };
 
         if (argc < 2)
             shell_argv[0] = "/bin/sh";
@@ -47,7 +46,7 @@ _run_sh:;
         for (int i = 2; i < argc; ++i)
             shell_argv[i - 1] = argv[i];
         
-        execve(shell_argv[0], shell_argv, envp);
+        execve(shell_argv[0], shell_argv, environ);
 
         print("[init] unable to run sh, exiting...\n");
         return -1;

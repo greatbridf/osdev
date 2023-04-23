@@ -250,3 +250,5 @@ int isatty(int fd)
 {
     return tcgetpgrp(fd) != -1;
 }
+
+char** environ;

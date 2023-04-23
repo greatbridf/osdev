@@ -1,6 +1,7 @@
 #include <alloca.h>
 #include <priv-vars.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <syscall.h>
 #include <unistd.h>
@@ -207,4 +208,37 @@ void* bsearch(const void* key, const void* base, size_t num, size_t size, compar
     }
     
     return bsearch(key, base, mid, size, cmp);
+}
+
+int setenv(const char* name, const char* value, int overwrite)
+{
+    size_t i = 0;
+    for (; environ[i]; ++i) {
+        char* eqpos = strchr(environ[i], '=');
+        if (strncmp(name, environ[i], eqpos - environ[i]) == 0) {
+            if (overwrite)
+                goto fill_p;
+            return 0;
+        }
+    }
+
+    if (i + 2 == environ_size) {
+        environ_size *= 2;
+        char** newarr = malloc(environ_size * sizeof(char*));
+        if (!newarr)
+            return -1;
+        
+        memcpy(newarr, environ, sizeof(char*) * environ_size / 2);
+        free(environ);
+        environ = newarr;
+    }
+    environ[i + 1] = NULL;
+
+fill_p:;
+    char* newenv = NULL;
+    if (asprintf(&newenv, "%s=%s", name, value) < 0)
+        return -1;
+
+    environ[i] = newenv;
+    return 0;
 }

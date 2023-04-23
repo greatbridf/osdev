@@ -1,3 +1,4 @@
+#include <assert.h>
 #include <priv-vars.h>
 #include <stdlib.h>
 #include <syscall.h>
@@ -16,10 +17,35 @@ list_head* __io_files_location(void)
     return &__io_files;
 }
 
-void __init_gblibc(void)
+size_t* __environ_size_location(void)
 {
+    static size_t __environ_size;
+    return &__environ_size;
+}
+
+void __init_gblibc(int argc, char** argv, char** envp)
+{
+    (void)argc, (void)argv;
     // initialize program break position
     start_brk = curr_brk = (void*)syscall1(SYS_brk, (uint32_t)NULL);
+
+    // save environ vector
+    environ_size = 4;
+    environ = malloc(environ_size * sizeof(char*));
+    assert(environ);
+
+    while (*envp) {
+        char* eqp = strchr(*envp, '=');
+        if (!eqp || eqp == *envp)
+            goto next;
+
+        *eqp = 0;
+        char* value = eqp + 1;
+        setenv(*envp, value, 1);
+
+    next:;
+        ++envp;
+    }
 
     // stdout, stdin, stderr objects
     list_node* node = NULL;

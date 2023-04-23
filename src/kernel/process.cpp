@@ -285,7 +285,7 @@ void NORETURN _kernel_init(void)
     current_thread->attr.system = 0;
 
     const char* argv[] = { "/mnt/init", "/mnt/sh", nullptr };
-    const char* envp[] = { nullptr };
+    const char* envp[] = { "LANG=C", "HOME=/", nullptr };
 
     types::elf::elf32_load_data d;
     auto* dent = fs::vfs_open("/mnt/init");

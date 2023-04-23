@@ -2,6 +2,7 @@
 #define __GBLIBC_PRIV_VARS_H_
 
 #include <list.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -15,6 +16,7 @@ extern "C" {
 void** __start_brk_location(void);
 void** __curr_brk_location(void);
 list_head* __io_files_location(void);
+size_t* __environ_size_location(void);
 
 #undef start_brk
 #define start_brk (*__start_brk_location())
@@ -23,6 +25,9 @@ list_head* __io_files_location(void);
 
 #undef iofiles
 #define iofiles (*__io_files_location())
+
+#undef environ_size
+#define environ_size (*__environ_size_location())
 
 #ifdef __cplusplus
 }

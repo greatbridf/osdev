@@ -13,14 +13,18 @@ _start:
     andl $0xfffffff0, %esp
 
     pushl %ebx
-    pushl $0
-
     movl %esp, %ebp
+
+    leal (%ebx, %eax, 4), %ebx
+    addl $8, %ebx
+    pushl %ebx
 
     pushl %ecx
     pushl %eax
 
     call __init_gblibc
+
+    subl $4, %ebp
 
     call main
 

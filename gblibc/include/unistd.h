@@ -47,6 +47,8 @@ int tcsetpgrp(int fd, pid_t pgrp);
 int brk(void* addr);
 void* sbrk(ssize_t increment);
 
+int isatty(int fd);
+
 #ifdef __cplusplus
 }
 #endif

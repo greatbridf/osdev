@@ -245,3 +245,8 @@ void* sbrk(ssize_t increment)
         return curr_brk += increment;
     return (void*)-1;
 }
+
+int isatty(int fd)
+{
+    return tcgetpgrp(fd) != -1;
+}

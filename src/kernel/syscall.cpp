@@ -400,7 +400,10 @@ int _syscall_ioctl(interrupt_stack* data)
     //       not. and we suppose that stdin will be
     //       either a tty or a pipe.
     auto* file = current_process->files[fd];
-    if (!file || file->type != fs::file::types::ind)
+    if (!file)
+        return -EBADF;
+
+    if (file->type != fs::file::types::ind)
         return -ENOTTY;
 
     switch (request) {

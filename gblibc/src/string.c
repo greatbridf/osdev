@@ -1,6 +1,7 @@
 #include <ctype.h>
 #include <errno.h>
 #include <stdint.h>
+#include <stdlib.h>
 
 #define BYTES_PER_MAX_COPY_UNIT (sizeof(uint32_t) / sizeof(uint8_t))
 
@@ -253,4 +254,23 @@ char* strerror(int errnum)
     default:
         return "No error information";
     }
+}
+
+char* strndup(const char* str, size_t n)
+{
+    size_t len = strlen(str);
+    if (len > n)
+        len = n;
+    char* ret = malloc(len + 1);
+    if (!ret)
+        return NULL;
+    
+    memcpy(ret, str, len);
+    ret[len] = 0;
+    return ret;
+}
+
+char* strdup(const char* str)
+{
+    return strndup(str, __SIZE_MAX__);
 }

@@ -38,6 +38,9 @@ char* strncpy(char* dst, const char* src, size_t n);
 char* stpcpy(char* dst, const char* src);
 char* stpncpy(char* dst, const char* src, size_t n);
 
+char* strdup(const char* str);
+char* strndup(const char* str, size_t n);
+
 #ifdef __cplusplus
 }
 #endif

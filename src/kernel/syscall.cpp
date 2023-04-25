@@ -480,6 +480,25 @@ int _syscall_brk(interrupt_stack* data)
     return (int)brk;
 }
 
+static inline int __stat(fs::inode* ind, fs::user_stat* buf)
+{
+    // TODO: use copy_to_user
+    assert(ind->fs->inode_stat(ind, buf) == GB_OK);
+    return 0;
+}
+
+int _syscall_stat(interrupt_stack* data)
+{
+    auto* pathname = (const char*)data->s_regs.edi;
+    auto* buf = (fs::user_stat*)data->s_regs.esi;
+
+    auto* dent = fs::vfs_open_proc(pathname);
+    if (!dent)
+        return -ENOENT;
+
+    return __stat(dent->ind, buf);
+}
+
 int _syscall_fstat(interrupt_stack* data)
 {
     int fd = data->s_regs.edi;
@@ -489,11 +508,7 @@ int _syscall_fstat(interrupt_stack* data)
     if (!file || file->type != fs::file::types::ind)
         return -EBADF;
 
-    auto* inode = file->ptr.ind;
-    // TODO: use copy_to_user
-    assert(inode->fs->inode_stat(inode, buf) == GB_OK);
-
-    return 0;
+    return __stat(file->ptr.ind, buf);
 }
 
 extern "C" void syscall_entry(interrupt_stack* data)
@@ -518,6 +533,7 @@ void init_syscall(void)
     syscall_handlers[1] = _syscall_write;
     syscall_handlers[2] = _syscall_open;
     syscall_handlers[3] = _syscall_close;
+    syscall_handlers[4] = _syscall_stat;
     syscall_handlers[5] = _syscall_fstat;
     syscall_handlers[12] = _syscall_brk;
     syscall_handlers[16] = _syscall_ioctl;

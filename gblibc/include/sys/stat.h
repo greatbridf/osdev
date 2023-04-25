@@ -25,6 +25,7 @@ struct stat {
     struct timespec st_ctim;
 };
 
+int stat(const char* pathname, struct stat* statbuf);
 int fstat(int fd, struct stat* statbuf);
 
 #ifdef __cplusplus

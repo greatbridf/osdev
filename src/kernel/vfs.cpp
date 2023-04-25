@@ -197,7 +197,7 @@ int fs::vfs::inode_mkfile(dentry*, const char*)
     assert(false);
     return GB_FAILED;
 }
-int fs::vfs::inode_mknode(dentry*, const char*, node_t)
+int fs::vfs::inode_mknode(dentry*, const char*, dev_t)
 {
     assert(false);
     return GB_FAILED;
@@ -212,15 +212,15 @@ int fs::vfs::inode_mkdir(dentry*, const char*)
     assert(false);
     return GB_FAILED;
 }
-int fs::vfs::inode_stat(dentry*, stat*)
+int fs::vfs::inode_stat(fs::inode*, user_stat*)
 {
     assert(false);
     return GB_FAILED;
 }
-fs::node_t fs::vfs::inode_getnode(fs::inode*)
+dev_t fs::vfs::inode_devid(fs::inode*)
 {
     assert(false);
-    return { SN_INVALID };
+    return INVALID_DEVICE;
 }
 
 class tmpfs : public virtual fs::vfs {
@@ -337,9 +337,9 @@ public:
         return GB_OK;
     }
 
-    virtual int inode_mknode(dentry* dir, const char* filename, fs::node_t sn) override
+    virtual int inode_mknode(dentry* dir, const char* filename, dev_t dev) override
     {
-        auto& node = *cache_inode({ .v = INODE_NODE }, 0777, 0, _savedata(sn.v));
+        auto& node = *cache_inode({ .v = INODE_NODE }, 0777, 0, _savedata(dev));
         mklink(dir->ind, &node, filename);
         dir->append(get_inode(node.ino), filename, true);
         return GB_OK;
@@ -392,34 +392,40 @@ public:
         return n;
     }
 
-    virtual int inode_stat(dentry* dir, fs::stat* stat) override
+    virtual int inode_stat(fs::inode* file_inode, fs::user_stat* stat) override
     {
-        auto* file_inode = dir->ind;
-
+        // TODO: fill in these fields with REAL DATA
+        stat->st_dev = 0;
         stat->st_ino = file_inode->ino;
+        stat->st_mode = file_inode->perm;
+        stat->st_uid = 0;
+        stat->st_gid = 0;
         stat->st_size = file_inode->size;
+        stat->st_blocks = file_inode->size / 512;
+        stat->st_atim = {};
+        stat->st_ctim = {};
+        stat->st_mtim = {};
         if (file_inode->flags.in.file) {
-            stat->st_rdev.v = 0;
-            stat->st_blksize = 1;
-            stat->st_blocks = file_inode->size;
+            stat->st_nlink = 1;
+            stat->st_rdev = 0;
+            stat->st_blksize = 512;
         }
         if (file_inode->flags.in.directory) {
-            stat->st_rdev.v = 0;
+            stat->st_nlink = 2;
+            stat->st_rdev = 0;
             stat->st_blksize = sizeof(fe_t);
-            stat->st_blocks = file_inode->size;
         }
         if (file_inode->flags.in.special_node) {
-            stat->st_rdev.v = as_val(_getdata(file_inode->ino));
+            stat->st_rdev = as_val(_getdata(file_inode->ino));
             stat->st_blksize = 0;
-            stat->st_blocks = 0;
         }
 
         return GB_OK;
     }
 
-    virtual fs::node_t inode_getnode(fs::inode* file) override
+    virtual dev_t inode_devid(fs::inode* file) override
     {
-        return { as_val(_getdata(file->ino)) };
+        return as_val(_getdata(file->ino));
     }
 };
 
@@ -429,12 +435,12 @@ static fs::special_node sns[8][8];
 size_t fs::vfs_read(fs::inode* file, char* buf, size_t buf_size, size_t offset, size_t n)
 {
     if (file->flags.in.special_node) {
-        fs::node_t sn = file->fs->inode_getnode(file);
-        if (sn.v == SN_INVALID) {
+        dev_t dev = file->fs->inode_devid(file);
+        if (dev == INVALID_DEVICE) {
             errno = EINVAL;
             return 0xffffffff;
         }
-        auto* ptr = &sns[sn.in.major][sn.in.minor];
+        auto* ptr = &sns[major(dev)][minor(dev)];
         auto* ops = &ptr->ops;
         if (ops && ops->read)
             return ops->read(ptr, buf, buf_size, offset, n);
@@ -449,12 +455,12 @@ size_t fs::vfs_read(fs::inode* file, char* buf, size_t buf_size, size_t offset, 
 size_t fs::vfs_write(fs::inode* file, const char* buf, size_t offset, size_t n)
 {
     if (file->flags.in.special_node) {
-        fs::node_t sn = file->fs->inode_getnode(file);
-        if (sn.v == SN_INVALID) {
+        dev_t dev = file->fs->inode_devid(file);
+        if (dev == INVALID_DEVICE) {
             errno = EINVAL;
             return 0xffffffff;
         }
-        auto* ptr = &sns[sn.in.major][sn.in.minor];
+        auto* ptr = &sns[major(dev)][minor(dev)];
         auto* ops = &ptr->ops;
         if (ops && ops->write)
             return ops->write(ptr, buf, offset, n);
@@ -470,9 +476,9 @@ int fs::vfs_mkfile(fs::vfs::dentry* dir, const char* filename)
 {
     return dir->ind->fs->inode_mkfile(dir, filename);
 }
-int fs::vfs_mknode(fs::vfs::dentry* dir, const char* filename, fs::node_t sn)
+int fs::vfs_mknode(fs::vfs::dentry* dir, const char* filename, dev_t dev)
 {
-    return dir->ind->fs->inode_mknode(dir, filename, sn);
+    return dir->ind->fs->inode_mknode(dir, filename, dev);
 }
 int fs::vfs_rmfile(fs::vfs::dentry* dir, const char* filename)
 {
@@ -532,16 +538,16 @@ fs::vfs::dentry* fs::vfs_open(const char* path)
     }
     return nullptr;
 }
-int fs::vfs_stat(const char* filename, stat* stat)
+int fs::vfs_stat(const char* filename, user_stat* stat)
 {
     auto ent = vfs_open(filename);
     if (!ent)
         return GB_FAILED;
     return vfs_stat(ent, stat);
 }
-int fs::vfs_stat(fs::vfs::dentry* ent, stat* stat)
+int fs::vfs_stat(fs::vfs::dentry* ent, user_stat* stat)
 {
-    return ent->ind->fs->inode_stat(ent, stat);
+    return ent->ind->fs->inode_stat(ent->ind, stat);
 }
 fs::vfs::dentry* fs::vfs_open_proc(const char* path)
 {
@@ -718,11 +724,12 @@ void init_vfs(void)
     vfs_write(init->ind, str, 0, strlen(str));
 
     auto* dev = vfs_open("/dev");
-    vfs_mknode(dev, "null", { .in { .major = 0, .minor = 0 } });
-    vfs_mknode(dev, "console", { .in { .major = 1, .minor = 0 } });
-    vfs_mknode(dev, "hda", { .in { .major = 2, .minor = 0 } });
+    vfs_mknode(dev, "null", makedev(0, 0));
+    vfs_mknode(dev, "console", makedev(1, 0));
+    vfs_mknode(dev, "hda", makedev(2, 0));
 
-    stat _stat {};
+#ifndef NDEBUG
+    user_stat _stat {};
 
     vfs_stat("/init", &_stat);
     vfs_stat("/", &_stat);
@@ -730,4 +737,5 @@ void init_vfs(void)
     vfs_stat("/dev/null", &_stat);
     vfs_stat("/dev/console", &_stat);
     vfs_stat("/dev/hda", &_stat);
+#endif
 }

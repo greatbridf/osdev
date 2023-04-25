@@ -195,7 +195,7 @@ static inline void mbr_part_probe(fs::inode* drive, uint16_t major, uint16_t min
             nullptr,
             part.lba_start, part.cnt);
 
-        fs::vfs_mknode(dev, "hda1", { .in { .major = 2, .minor = 1 } });
+        fs::vfs_mknode(dev, "hda1", fs::makedev(2, 1));
     }
 }
 

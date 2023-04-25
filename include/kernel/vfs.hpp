@@ -3,6 +3,7 @@
 #include <assert.h>
 #include <kernel/event/evtqueue.hpp>
 #include <stdint.h>
+#include <sys/types.h>
 #include <types/allocator.hpp>
 #include <types/buffer.hpp>
 #include <types/cplusplus.hpp>
@@ -57,15 +58,6 @@ struct inode {
     size_t size;
 };
 
-#define SN_INVALID (0xffffffff)
-union node_t {
-    uint32_t v;
-    struct {
-        uint32_t major : 16;
-        uint32_t minor : 16;
-    } in;
-};
-
 struct special_node;
 
 typedef size_t (*special_node_read)(special_node* sn, char* buf, size_t buf_size, size_t offset, size_t n);
@@ -82,14 +74,6 @@ struct special_node {
     uint32_t data2;
 };
 
-struct stat {
-    ino_t st_ino;
-    node_t st_rdev;
-    size_t st_size;
-    blksize_t st_blksize;
-    blkcnt_t st_blocks;
-};
-
 struct PACKED user_dirent {
     ino_t d_ino; // inode number
     uint32_t d_off; // ignored
@@ -97,6 +81,44 @@ struct PACKED user_dirent {
     char d_name[1]; // file name with a padding zero
     // uint8_t d_type; // file type, with offset of (d_reclen - 1)
 };
+
+struct user_timespec {
+    time_t tv_sec;
+    long tv_nsec;
+};
+
+struct user_stat {
+    dev_t st_dev;
+    ino_t st_ino;
+    int32_t st_mode;
+    size_t st_nlink;
+    int32_t st_uid;
+    int32_t st_gid;
+    dev_t st_rdev;
+    off_t st_size;
+    blksize_t st_blksize;
+    blkcnt_t st_blocks;
+
+    user_timespec st_atim;
+    user_timespec st_mtim;
+    user_timespec st_ctim;
+};
+
+constexpr unsigned int major(dev_t dev)
+{
+    return dev >> (sizeof(dev_t) * 8 / 2);
+}
+
+constexpr unsigned int minor(dev_t dev)
+{
+    return dev & ((1 << (sizeof(dev_t) * 8 / 2)) - 1);
+}
+
+constexpr dev_t makedev(unsigned int major, unsigned int minor)
+{
+    return (major << (sizeof(dev_t) * 8 / 2))
+        | (minor & ((1 << (sizeof(dev_t) * 8 / 2)) - 1));
+}
 
 class vfs {
 public:
@@ -181,11 +203,11 @@ public:
     virtual size_t inode_read(inode* file, char* buf, size_t buf_size, size_t offset, size_t n);
     virtual size_t inode_write(inode* file, const char* buf, size_t offset, size_t n);
     virtual int inode_mkfile(dentry* dir, const char* filename);
-    virtual int inode_mknode(dentry* dir, const char* filename, union node_t sn);
+    virtual int inode_mknode(dentry* dir, const char* filename, dev_t dev);
     virtual int inode_rmfile(dentry* dir, const char* filename);
     virtual int inode_mkdir(dentry* dir, const char* dirname);
-    virtual int inode_stat(dentry* dir, stat* stat);
-    virtual node_t inode_getnode(inode* file);
+    virtual int inode_stat(inode* ind, user_stat* stat);
+    virtual dev_t inode_devid(inode* file);
 
     // parameter 'length' in callback:
     // if 0, 'name' should be null terminated
@@ -267,11 +289,11 @@ vfs* register_fs(vfs* fs);
 size_t vfs_read(inode* file, char* buf, size_t buf_size, size_t offset, size_t n);
 size_t vfs_write(inode* file, const char* buf, size_t offset, size_t n);
 int vfs_mkfile(fs::vfs::dentry* dir, const char* filename);
-int vfs_mknode(fs::vfs::dentry* dir, const char* filename, node_t sn);
+int vfs_mknode(fs::vfs::dentry* dir, const char* filename, dev_t dev);
 int vfs_rmfile(fs::vfs::dentry* dir, const char* filename);
 int vfs_mkdir(fs::vfs::dentry* dir, const char* dirname);
-int vfs_stat(const char* filename, stat* stat);
-int vfs_stat(fs::vfs::dentry* ent, stat* stat);
+int vfs_stat(const char* filename, user_stat* stat);
+int vfs_stat(fs::vfs::dentry* ent, user_stat* stat);
 
 // @return pointer to the dentry if found, nullptr if not
 fs::vfs::dentry* vfs_open(const char* path);

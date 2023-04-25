@@ -237,12 +237,16 @@ size_t fat32::inode_read(inode* file, char* buf, size_t buf_size, size_t offset,
     return orig_n - n;
 }
 
-int fat32::inode_stat(dentry* ent, stat* st)
+int fat32::inode_stat(inode* ind, user_stat* st)
 {
-    st->st_size = ent->ind->size;
+    memset(st, 0x00, sizeof(user_stat));
+    st->st_mode = ind->perm;
+    st->st_dev = device->fs->inode_devid(device);
+    st->st_nlink = ind->flags.in.directory ? 2 : 1;
+    st->st_size = ind->size;
     st->st_blksize = 4096;
-    st->st_blocks = (ent->ind->size + 4095) / 4096;
-    st->st_ino = ent->ind->ino;
+    st->st_blocks = (ind->size + 511) / 512;
+    st->st_ino = ind->ino;
     return GB_OK;
 }
 } // namespace fs::fat

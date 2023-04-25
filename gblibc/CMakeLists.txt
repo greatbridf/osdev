@@ -16,6 +16,7 @@ add_library(gblibc STATIC
     src/init.c
     src/internal.c
     src/alloca.c
+    src/stat.c
 )
 
 add_library(crt0 OBJECT

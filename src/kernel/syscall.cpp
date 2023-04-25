@@ -398,8 +398,8 @@ constexpr bool is_tty(fs::file* file)
     if (!ind->flags.in.special_node)
         return false;
 
-    fs::node_t nd = ind->fs->inode_getnode(ind);
-    if (nd.in.major != 1 || nd.in.minor != 0)
+    dev_t dev = ind->fs->inode_devid(ind);
+    if (fs::major(dev) != 1 || fs::minor(dev) != 0)
         return false;
 
     return true;
@@ -480,6 +480,22 @@ int _syscall_brk(interrupt_stack* data)
     return (int)brk;
 }
 
+int _syscall_fstat(interrupt_stack* data)
+{
+    int fd = data->s_regs.edi;
+    auto* buf = (fs::user_stat*)data->s_regs.esi;
+
+    auto* file = current_process->files[fd];
+    if (!file || file->type != fs::file::types::ind)
+        return -EBADF;
+
+    auto* inode = file->ptr.ind;
+    // TODO: use copy_to_user
+    assert(inode->fs->inode_stat(inode, buf) == GB_OK);
+
+    return 0;
+}
+
 extern "C" void syscall_entry(interrupt_stack* data)
 {
     int syscall_no = data->s_regs.eax;
@@ -502,6 +518,7 @@ void init_syscall(void)
     syscall_handlers[1] = _syscall_write;
     syscall_handlers[2] = _syscall_open;
     syscall_handlers[3] = _syscall_close;
+    syscall_handlers[5] = _syscall_fstat;
     syscall_handlers[12] = _syscall_brk;
     syscall_handlers[16] = _syscall_ioctl;
     syscall_handlers[22] = _syscall_pipe;

@@ -3,6 +3,7 @@
 #include <assert.h>
 #include <bits/ioctl.h>
 #include <errno.h>
+#include <kernel/hw/timer.h>
 #include <kernel/interrupt.h>
 #include <kernel/log.hpp>
 #include <kernel/mem.h>
@@ -19,6 +20,7 @@
 #include <types/lock.hpp>
 #include <types/status.h>
 #include <types/string.hpp>
+#include <types/types.h>
 
 #define SYSCALL_HANDLERS_SIZE (128)
 syscall_handler syscall_handlers[SYSCALL_HANDLERS_SIZE];
@@ -511,6 +513,24 @@ int _syscall_fstat(interrupt_stack* data)
     return __stat(file->ptr.ind, buf);
 }
 
+int _syscall_gettimeofday(interrupt_stack* data)
+{
+    auto* tv = (struct user_timeval*)data->s_regs.edi;
+    auto* tz = (void*)data->s_regs.esi;
+    // TODO: return time of the day, not time from this boot
+
+    if (unlikely(tz))
+        return -EINVAL;
+
+    if (likely(tv)) {
+        // TODO: use copy_to_user
+        tv->tv_sec = current_ticks() / 100;
+        tv->tv_usec = current_ticks() * 10 * 1000;
+    }
+
+    return 0;
+}
+
 extern "C" void syscall_entry(interrupt_stack* data)
 {
     int syscall_no = data->s_regs.eax;
@@ -549,6 +569,7 @@ void init_syscall(void)
     syscall_handlers[78] = _syscall_getdents;
     syscall_handlers[79] = _syscall_getcwd;
     syscall_handlers[80] = _syscall_chdir;
+    syscall_handlers[96] = _syscall_gettimeofday;
     syscall_handlers[109] = _syscall_setpgid;
     syscall_handlers[110] = _syscall_getppid;
     syscall_handlers[112] = _syscall_setsid;

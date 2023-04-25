@@ -6,6 +6,11 @@
 extern "C" {
 #endif
 
+struct user_timeval {
+    time_t tv_sec;
+    size_t tv_usec;
+};
+
 void init_pit(void);
 
 void inc_tick(void);

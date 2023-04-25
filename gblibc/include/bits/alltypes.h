@@ -12,7 +12,17 @@ typedef size_t blkcnt_t;
 
 struct timespec {
     time_t tv_sec;
-    long tv_nsec;
+    size_t tv_nsec;
+};
+
+struct timeval {
+    time_t tv_sec;
+    size_t tv_usec;
+};
+
+struct timezone {
+    int tz_minuteswest;
+    int tz_dsttime;
 };
 
 #ifdef __cplusplus

@@ -23,6 +23,7 @@
 #define SYS_getdents (78)
 #define SYS_getcwd (79)
 #define SYS_chdir (80)
+#define SYS_gettimeofday (96)
 #define SYS_setpgid (109)
 #define SYS_getppid (110)
 #define SYS_setsid (112)

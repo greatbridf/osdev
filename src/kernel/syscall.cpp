@@ -380,9 +380,8 @@ int _syscall_setpgid(interrupt_stack* data)
         pgid = pid;
 
     auto* proc = procs->find(pid);
-    // TODO: check whether the process exists
-    // if (!proc)
-    //     return -ESRCH;
+    if (!proc)
+        return -ESRCH;
 
     // TODO: check whether pgid and the original
     //       pgid is in the same session

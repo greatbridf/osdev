@@ -152,6 +152,7 @@ process::process(pid_t _ppid,
 void proclist::kill(pid_t pid, int exit_code)
 {
     process* proc = this->find(pid);
+    assert(proc);
 
     // remove threads from ready list
     for (auto& thd : proc->thds.underlying_list()) {
@@ -179,6 +180,7 @@ void proclist::kill(pid_t pid, int exit_code)
     // notify parent process and init
     auto* parent = this->find(proc->ppid);
     auto* init = this->find(1);
+    assert(parent && init);
 
     bool flag = false;
     {

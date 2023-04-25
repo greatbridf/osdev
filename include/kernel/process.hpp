@@ -459,8 +459,8 @@ public:
     constexpr process* find(pid_t pid)
     {
         auto iter = m_procs.find(pid);
-        // TODO: change this
-        assert(!!iter);
+        if (!iter)
+            return nullptr;
         return &iter->value;
     }
 
@@ -476,8 +476,11 @@ public:
         if (children) {
             auto init_children = m_child_idx.find(1);
             for (auto iter = children->value.begin(); iter != children->value.end(); ++iter) {
-                init_children->value.push_back(*iter);
-                this->find(*iter)->ppid = 1;
+                auto* proc = this->find(*iter);
+                if (proc) {
+                    init_children->value.push_back(*iter);
+                    proc->ppid = 1;
+                }
             }
             m_child_idx.remove(children);
         }

@@ -28,6 +28,8 @@ struct stat {
 int stat(const char* pathname, struct stat* statbuf);
 int fstat(int fd, struct stat* statbuf);
 
+mode_t umask(mode_t mask);
+
 #ifdef __cplusplus
 }
 #endif

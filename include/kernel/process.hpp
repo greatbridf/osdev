@@ -358,6 +358,8 @@ public:
     void* start_brk;
     void* brk;
 
+    mode_t umask;
+
 public:
     // if waitlist is not empty or mutex in cv_wait
     // is locked, its behavior is undefined

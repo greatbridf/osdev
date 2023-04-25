@@ -22,3 +22,8 @@ int fstat(int fd, struct stat* statbuf)
     }
     return ret;
 }
+
+mode_t umask(mode_t mask)
+{
+    return syscall1(SYS_umask, mask);
+}

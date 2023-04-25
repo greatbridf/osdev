@@ -101,6 +101,7 @@ process::process(process&& val)
     , sid(val.sid)
     , start_brk(val.start_brk)
     , brk(val.brk)
+    , umask(val.umask)
 {
     if (current_process == &val)
         current_process = this;
@@ -117,6 +118,8 @@ process::process(const process& parent)
 
     this->start_brk = parent.start_brk;
     this->brk = parent.brk;
+
+    this->umask = parent.umask;
 
     for (auto& area : parent.mms) {
         if (area.is_kernel_space() || area.attr.in.system)
@@ -142,6 +145,7 @@ process::process(pid_t _ppid,
     , sid { 0 }
     , start_brk(nullptr)
     , brk(nullptr)
+    , umask(0022)
 {
 }
 

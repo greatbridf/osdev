@@ -15,6 +15,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/types.h>
 #include <types/allocator.hpp>
 #include <types/elf.hpp>
 #include <types/lock.hpp>
@@ -531,6 +532,16 @@ int _syscall_gettimeofday(interrupt_stack* data)
     return 0;
 }
 
+int _syscall_umask(interrupt_stack* data)
+{
+    mode_t mask = data->s_regs.edi;
+
+    mode_t old = current_process->umask;
+    current_process->umask = mask;
+
+    return old;
+}
+
 extern "C" void syscall_entry(interrupt_stack* data)
 {
     int syscall_no = data->s_regs.eax;
@@ -569,6 +580,7 @@ void init_syscall(void)
     syscall_handlers[78] = _syscall_getdents;
     syscall_handlers[79] = _syscall_getcwd;
     syscall_handlers[80] = _syscall_chdir;
+    syscall_handlers[95] = _syscall_umask;
     syscall_handlers[96] = _syscall_gettimeofday;
     syscall_handlers[109] = _syscall_setpgid;
     syscall_handlers[110] = _syscall_getppid;

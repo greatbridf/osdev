@@ -9,6 +9,7 @@
 #include <kernel/mem.h>
 #include <kernel/mm.hpp>
 #include <kernel/process.hpp>
+#include <kernel/signal.hpp>
 #include <kernel/syscall.hpp>
 #include <kernel/tty.hpp>
 #include <kernel/vfs.hpp>
@@ -541,6 +542,24 @@ int _syscall_umask(interrupt_stack* data)
     return old;
 }
 
+int _syscall_kill(interrupt_stack* data)
+{
+    pid_t pid = data->s_regs.edi;
+    int sig = data->s_regs.esi;
+
+    auto* proc = procs->find(pid);
+    if (!proc)
+        return -ESRCH;
+
+    if (!kernel::signal_list::check_valid(sig))
+        return -EINVAL;
+
+    // TODO: check permission
+    procs->send_signal(pid, sig);
+
+    return 0;
+}
+
 extern "C" void syscall_entry(interrupt_stack* data)
 {
     int syscall_no = data->s_regs.eax;
@@ -576,6 +595,7 @@ void init_syscall(void)
     syscall_handlers[59] = _syscall_execve;
     syscall_handlers[60] = _syscall_exit;
     syscall_handlers[61] = _syscall_wait;
+    syscall_handlers[62] = _syscall_kill;
     syscall_handlers[78] = _syscall_getdents;
     syscall_handlers[79] = _syscall_getcwd;
     syscall_handlers[80] = _syscall_chdir;

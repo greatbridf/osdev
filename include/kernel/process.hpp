@@ -489,7 +489,7 @@ public:
     void send_signal(pid_t pid, kernel::sig_t signal)
     {
         auto iter = this->find(pid);
-        if (!iter)
+        if (iter)
             return iter->signals.set(signal);
     }
     void send_signal_grp(pid_t pgid, kernel::sig_t signal)

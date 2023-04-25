@@ -18,6 +18,7 @@ add_library(gblibc STATIC
     src/alloca.c
     src/stat.c
     src/time.c
+    src/signal.c
 )
 
 add_library(crt0 OBJECT

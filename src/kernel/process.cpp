@@ -458,10 +458,13 @@ void check_signal()
     switch (current_process->signals.pop()) {
     case kernel::SIGINT:
     case kernel::SIGQUIT:
-    case kernel::SIGSTOP:
-        procs->get_ctrl_tty(current_process->pid)->clear_read_buf();
+    case kernel::SIGSTOP: {
+        tty* ctrl_tty = procs->get_ctrl_tty(current_process->pid);
+        if (ctrl_tty)
+            ctrl_tty->clear_read_buf();
         kill_current(-1);
         break;
+    }
     case kernel::SIGPIPE:
         kill_current(-1);
         break;

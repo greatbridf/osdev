@@ -8,10 +8,10 @@ namespace kernel {
 
 using sig_t = uint32_t;
 
-constexpr sig_t SIGINT = 1 << 0;
-constexpr sig_t SIGQUIT = 1 << 1;
-constexpr sig_t SIGSTOP = 1 << 2;
-constexpr sig_t SIGPIPE = 1 << 3;
+constexpr sig_t SIGINT = 2;
+constexpr sig_t SIGQUIT = 3;
+constexpr sig_t SIGSTOP = 13;
+constexpr sig_t SIGPIPE = 19;
 
 class signal_list {
 public:
@@ -20,6 +20,20 @@ public:
 private:
     list_type m_list;
     sig_t m_mask;
+
+public:
+    static constexpr bool check_valid(sig_t sig)
+    {
+        switch (sig) {
+        case SIGINT:
+        case SIGQUIT:
+        case SIGSTOP:
+        case SIGPIPE:
+            return true;
+        default:
+            return false;
+        }
+    }
 
 public:
     constexpr signal_list(void)

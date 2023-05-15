@@ -10,9 +10,8 @@ struct applet {
     int (*func)(const char** args);
 };
 
-int lazybox_version(const char** _)
+int lazybox_version(void)
 {
-    (void)_;
     printf("lazybox by greatbridf\n");
     return 0;
 }
@@ -60,7 +59,7 @@ int ls(const char** args)
 struct applet applets[] = {
     {
         "lazybox",
-        lazybox_version,
+        NULL,
     },
     {
         "pwd",
@@ -121,22 +120,19 @@ int parse_applet(const char* name)
 
 int main(int argc, const char** argv)
 {
-    (void)argc;
-    int offset = 0;
-    const char* name = find_file_name(argv[offset++]);
-    int type = -1;
+    if (argc == 0)
+        return lazybox_version();
 
-run:
-    type = parse_applet(name);
-    if (type == -1) {
+    const char* name = find_file_name(*argv);
+    int type = parse_applet(find_file_name(*argv));
+
+    if (type < 0) {
         printf("applet not found: %s\n", name);
         return -1;
     }
 
-    if (type == 0 && offset == 1 && argv[1]) {
-        name = argv[offset++];
-        goto run;
-    }
-
-    return applets[type].func(argv + offset);
+    if (type == 0)
+        return main(argc - 1, argv + 1);
+    
+    return applets[type].func(argv + 1);
 }

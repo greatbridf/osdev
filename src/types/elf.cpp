@@ -106,16 +106,20 @@ int types::elf::elf32_load(types::elf::elf32_load_data* d)
         auto flen = align_up<12>(phents[i].vaddr + phents[i].filesz) - vaddr;
         auto fileoff = align_down<12>(phents[i].offset);
 
-        auto ret = mmap(
-            (char*)vaddr,
-            phents[i].filesz + (phents[i].vaddr & 0xfff),
-            d->exec,
-            fileoff,
-            1,
-            d->system);
+        size_t mapped_size = phents[i].filesz + (phents[i].vaddr & 0xfff);
+        int ret;
+        if (mapped_size > 0) {
+            ret = mmap(
+                (char*)vaddr,
+                mapped_size,
+                d->exec,
+                fileoff,
+                1,
+                d->system);
 
-        if (ret != GB_OK)
-            goto error;
+            if (ret != GB_OK)
+                goto error;
+        }
 
         if (vlen > flen) {
             ret = mmap(

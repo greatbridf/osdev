@@ -141,7 +141,7 @@ public:
     paccess(paccess&&) = delete;
     paccess& operator=(paccess&&) = delete;
 
-    constexpr explicit paccess(page_t pg)
+    inline explicit paccess(page_t pg)
         : m_pg(pg)
     {
         m_ptr = pmap(pg);

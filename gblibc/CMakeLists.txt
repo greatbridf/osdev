@@ -19,6 +19,7 @@ add_library(gblibc STATIC
     src/stat.c
     src/time.c
     src/signal.c
+    src/platform-independent.s
 )
 
 add_library(crt0 OBJECT

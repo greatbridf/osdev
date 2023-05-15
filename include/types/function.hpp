@@ -39,7 +39,7 @@ class function;
 template <typename Ret, typename... Args>
 class function<Ret(Args...)> {
 private:
-    char _data[sizeof(void*) * 2];
+    char _data[sizeof(void*) * 4];
     using fb_t = __inner::_function_base<Ret, Args...>;
     constexpr fb_t* _f(void) const
     {
@@ -50,8 +50,9 @@ public:
     template <typename FuncLike>
     constexpr function(FuncLike&& func)
     {
-        static_assert(sizeof(FuncLike) <= sizeof(_data));
-        new (_f()) __inner::_function<FuncLike, Ret, Args...>(types::forward<FuncLike>(func));
+        using underlying_function_type = __inner::_function<FuncLike, Ret, Args...>;
+        static_assert(sizeof(underlying_function_type) <= sizeof(_data), "Too large FuncLike object");
+        new (_f()) underlying_function_type(types::forward<FuncLike>(func));
     }
 
     template <typename FuncPtr>

@@ -258,6 +258,7 @@ int mm::append_page(page& pg, uint32_t attr, bool priv)
         assert(pt);
         pte = *pt;
     }
+    memory_fence;
 
     // map the page in the page table
     int pti = v_to_pti(addr);
@@ -270,6 +271,7 @@ int mm::append_page(page& pg, uint32_t attr, bool priv)
         false,
         priv);
 
+    memory_fence;
     kernel::pfree(pt_pg);
 
     if (unlikely((attr & PAGE_COW) && !(pg.attr & PAGE_COW))) {
@@ -282,11 +284,15 @@ int mm::append_page(page& pg, uint32_t attr, bool priv)
         pg_pte->in.a = 0;
         invalidate_tlb(addr);
     }
+
+    memory_fence;
     ++*pg.ref_count;
+    memory_fence;
 
     auto iter = this->pgs->emplace_back(pg);
     iter->pg_pteidx = (pt_pg << 12) + pti;
     iter->attr = attr;
+    memory_fence;
 
     return GB_OK;
 }

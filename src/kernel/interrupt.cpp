@@ -198,6 +198,7 @@ extern "C" void int14_handler(int14_data* d)
             pte->in.p = 1;
             pte->in.a = 0;
             pte->in.rw = mm_area->attr.in.write;
+            memory_fence;
             return;
         }
         // duplicate the page
@@ -214,6 +215,7 @@ extern "C" void int14_handler(int14_data* d)
         pte->in.page = new_page;
         pte->in.rw = mm_area->attr.in.write;
         pte->in.a = 0;
+        memory_fence;
 
         --*page->ref_count;
 
@@ -224,6 +226,7 @@ extern "C" void int14_handler(int14_data* d)
 
     if (page->attr & PAGE_MMAP) {
         pte->in.p = 1;
+        memory_fence;
 
         size_t offset = align_down<12>((uint32_t)d->l_addr);
         offset -= (uint32_t)mm_area->start;

@@ -16,6 +16,8 @@
                                  : "r"(addr)   \
                                  : "memory")
 
+#define memory_fence asm volatile("" ::: "memory")
+
 constexpr size_t THREAD_KERNEL_STACK_SIZE = 2 * PAGE_SIZE;
 
 constexpr uint32_t PAGE_COW = (1 << 0);

@@ -428,7 +428,7 @@ int _syscall_ioctl(interrupt_stack* data)
             return -ENOTTY;
 
         auto* pgid = (pid_t*)data->s_regs.edx;
-        tty* ctrl_tty = procs->get_ctrl_tty(current_process->pid);
+        tty* ctrl_tty = procs->get_ctrl_tty(current_process->sid);
         // TODO: copy_to_user
         *pgid = ctrl_tty->get_pgrp();
         break;
@@ -439,7 +439,7 @@ int _syscall_ioctl(interrupt_stack* data)
 
         // TODO: copy_from_user
         pid_t pgid = *(const pid_t*)data->s_regs.edx;
-        tty* ctrl_tty = procs->get_ctrl_tty(current_process->pid);
+        tty* ctrl_tty = procs->get_ctrl_tty(current_process->sid);
         ctrl_tty->set_pgrp(pgid);
         break;
     }

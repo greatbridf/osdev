@@ -6,28 +6,30 @@
 .globl _start
 .type  _start @function
 _start:
-    movl (%esp), %eax   # argc
-    leal 4(%esp), %ecx  # argv
-    movl %esp, %ebx
-
+    movl %esp, %ebx     # initial stack
     andl $0xfffffff0, %esp
-
-    pushl %ebx
+    pushl $0
     movl %esp, %ebp
 
-    leal (%ebx, %eax, 4), %ebx
-    addl $8, %ebx
-    pushl %ebx
+    movl (%ebx), %eax           # %eax = argc
 
+    leal 8(%ebx, %eax, 4), %ecx # %ecx = envp
     pushl %ecx
+
+    leal 4(%ebx), %ecx          # %ecx = argv
+    pushl %ecx
+
     pushl %eax
 
     call __init_gblibc
 
-    subl $4, %ebp
+    movl (%ebx), %eax # %eax = argc
+    movl %eax, (%esp)
+    leal 4(%ebx), %eax
+    movl %eax, 4(%esp)
 
     call main
 
     movl %eax, %edi  # code
-    movl $60, %eax # SYS_exit
+    movl $60, %eax   # SYS_exit
     int $0x80        # syscall

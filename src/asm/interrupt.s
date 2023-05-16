@@ -40,14 +40,21 @@ int14:
 
     # stack alignment and push *data
     movl %esp, %eax
-    subl $0x4, %esp
+    subl $0x210, %esp
     andl $0xfffffff0, %esp
     movl %eax, (%esp)
+    movl %eax, 4(%esp)
+
+    # save sse registers
+    fxsave 16(%esp)
 
     call int14_handler
 
+    # restore sse registers
+    fxrstor 16(%esp)
+
     # restore stack
-    popl %esp
+    movl 4(%esp), %esp
 
     popl %eax
     popal

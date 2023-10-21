@@ -114,7 +114,7 @@ public:
     constexpr thdlist& operator=(thdlist&& obj) = delete;
 
     constexpr thdlist(thdlist&& obj, process* new_parent)
-        : thds { types::move(obj.thds) }
+        : thds { std::move(obj.thds) }
     {
         for (auto& thd : thds)
             thd.owner = new_parent;
@@ -128,7 +128,7 @@ public:
     template <typename... Args>
     constexpr thread& Emplace(Args&&... args)
     {
-        return *thds.emplace_back(types::forward<Args>(args)...);
+        return *thds.emplace_back(std::forward<Args>(args)...);
     }
 
     constexpr size_t size(void) const
@@ -197,7 +197,7 @@ public:
         constexpr filearr& operator=(filearr&&) = delete;
         constexpr filearr(void) = default;
         constexpr filearr(filearr&& val)
-            : arr { types::move(val.arr) }
+            : arr { std::move(val.arr) }
         {
         }
 
@@ -401,10 +401,10 @@ public:
     template <typename... Args>
     iterator_type emplace(Args&&... args)
     {
-        process _proc(types::forward<Args>(args)...);
+        process _proc(std::forward<Args>(args)...);
         auto pid = _proc.pid;
         auto ppid = _proc.ppid;
-        auto iter = m_procs.insert(types::make_pair(pid, types::move(_proc)));
+        auto iter = m_procs.insert(types::make_pair(pid, std::move(_proc)));
 
         auto children = m_child_idx.find(ppid);
         if (!children) {

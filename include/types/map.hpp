@@ -1,4 +1,5 @@
 #pragma once
+#include <utility>
 
 #include <types/allocator.hpp>
 #include <types/cplusplus.hpp>
@@ -29,7 +30,7 @@ public:
         pair_type v;
 
         constexpr node(pair_type&& pair)
-            : v(move(pair))
+            : v(std::move(pair))
         {
         }
         constexpr node(const pair_type& pair)
@@ -420,7 +421,7 @@ private:
     }
     static constexpr node* newnode(node* parent, pair_type&& val)
     {
-        auto* ptr = allocator_traits<allocator_type>::allocate_and_construct(move(val));
+        auto* ptr = allocator_traits<allocator_type>::allocate_and_construct(std::move(val));
         ptr->parent = parent;
         return ptr;
     }
@@ -639,7 +640,7 @@ public:
         while (likely(cur)) {
             if (val.key < cur->v.key) {
                 if (!cur->left) {
-                    node* nd = newnode(cur, move(val));
+                    node* nd = newnode(cur, std::move(val));
                     cur->left = nd;
                     this->balance(nd);
                     return iterator_type(nd);
@@ -648,7 +649,7 @@ public:
                 }
             } else {
                 if (!cur->right) {
-                    node* nd = newnode(cur, move(val));
+                    node* nd = newnode(cur, std::move(val));
                     cur->right = nd;
                     this->balance(nd);
                     return iterator_type(nd);
@@ -658,7 +659,7 @@ public:
             }
         }
 
-        root = newnode(nullptr, move(val));
+        root = newnode(nullptr, std::move(val));
         root->toblack();
         return iterator_type(root);
     }

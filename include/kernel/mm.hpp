@@ -1,5 +1,7 @@
 #pragma once
 
+#include <utility>
+
 #include <kernel/mem.h>
 #include <kernel/vfs.hpp>
 #include <stdint.h>
@@ -175,7 +177,7 @@ public:
     }
     mm_list(const mm_list& v);
     constexpr mm_list(mm_list&& v)
-        : m_areas(::types::move(v.m_areas))
+        : m_areas(std::move(v.m_areas))
         , m_pd(v.m_pd)
     {
         v.m_pd = 0;

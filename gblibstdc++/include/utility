@@ -1,0 +1,35 @@
+#ifndef __GBLIBCPP_UTILITY__
+#define __GBLIBCPP_UTILITY__
+
+#include <type_traits>
+
+namespace std {
+
+template <typename T>
+constexpr remove_reference_t<T>&& move(T&& val)
+{
+    return static_cast<remove_reference_t<T>&&>(val);
+}
+
+template <typename T>
+constexpr T&& forward(remove_reference_t<T>& val)
+{
+    return static_cast<T&&>(val);
+}
+template <typename T>
+constexpr T&& forward(remove_reference_t<T>&& val)
+{
+    return static_cast<T&&>(val);
+}
+
+template <typename T, typename U = T>
+constexpr T exchange(T& dst, U&& val)
+{
+    T tmp = move(dst);
+    dst = forward<U>(val);
+    return tmp;
+}
+
+} // namespace std
+
+#endif

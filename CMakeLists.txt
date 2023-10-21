@@ -26,6 +26,7 @@ if (NOT DEFINED FDISK_BIN)
 endif()
 
 add_subdirectory(gblibc)
+add_subdirectory(gblibstdc++)
 add_subdirectory(user-space-program)
 
 set(BOOTLOADER_SOURCES src/boot.s
@@ -95,7 +96,7 @@ set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
                         )
 
 add_executable(kernel.out ${KERNEL_MAIN_SOURCES} ${BOOTLOADER_SOURCES})
-target_link_libraries(kernel.out gblibc)
+target_link_libraries(kernel.out gblibc gblibstdc++)
 target_include_directories(kernel.out PRIVATE ${PROJECT_SOURCE_DIR}/include)
 target_link_options(kernel.out PRIVATE
     -T ${CMAKE_SOURCE_DIR}/src/kernel.ld -melf_i386 -lgblibc -L${CMAKE_BINARY_DIR}/gblibc)

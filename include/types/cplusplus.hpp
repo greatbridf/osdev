@@ -121,22 +121,6 @@ public:
 } // namespace types::traits
 
 namespace types {
-template <typename T>
-constexpr typename traits::remove_reference<T>::type&& move(T&& val)
-{
-    return static_cast<typename traits::remove_reference<T>::type&&>(val);
-}
-template <typename T>
-constexpr T&& forward(typename traits::remove_reference<T>::type& val)
-{
-    return static_cast<T&&>(val);
-}
-template <typename T>
-constexpr T&& forward(typename traits::remove_reference<T>::type&& val)
-{
-    return static_cast<T&&>(val);
-}
-
 template <typename>
 struct template_true_type : public true_type {
 };

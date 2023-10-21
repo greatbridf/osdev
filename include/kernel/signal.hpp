@@ -33,7 +33,7 @@ public:
     }
 
     constexpr signal_list(signal_list&& val)
-        : m_list(types::move(val.m_list))
+        : m_list(std::move(val.m_list))
         , m_mask(val.m_mask)
     {
     }

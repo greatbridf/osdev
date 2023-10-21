@@ -39,7 +39,7 @@ fs::vfs::dentry::dentry(dentry* _parent, inode* _ind, name_type&& _name)
     : parent(_parent)
     , ind(_ind)
     , flags { 0 }
-    , name(types::move(_name))
+    , name(std::move(_name))
 {
     if (!_ind || _ind->flags.in.directory) {
         children = types::pnew<allocator_type>(children);
@@ -52,7 +52,7 @@ fs::vfs::dentry::dentry(dentry&& val)
     , parent(val.parent)
     , ind(val.ind)
     , flags { val.flags }
-    , name(types::move(val.name))
+    , name(std::move(val.name))
 {
     if (children) {
         for (auto& item : *children)
@@ -77,7 +77,7 @@ fs::vfs::dentry* fs::vfs::dentry::append(inode* ind, const name_type& name, bool
 }
 fs::vfs::dentry* fs::vfs::dentry::append(inode* ind, name_type&& name, bool set_dirty)
 {
-    auto iter = children->emplace_back(this, ind, types::move(name));
+    auto iter = children->emplace_back(this, ind, std::move(name));
     idx_children->emplace(iter->name, &iter);
     if (set_dirty)
         this->flags.in.dirty = 1;

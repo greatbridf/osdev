@@ -90,11 +90,11 @@ void thread::free_kstack(uint32_t p)
 }
 
 process::process(process&& val)
-    : mms(types::move(val.mms))
-    , thds { types::move(val.thds), this }
+    : mms(std::move(val.mms))
+    , thds { std::move(val.thds), this }
     , attr { val.attr }
-    , files(types::move(val.files))
-    , pwd(types::move(val.pwd))
+    , files(std::move(val.files))
+    , pwd(std::move(val.pwd))
     , pid(val.pid)
     , ppid(val.ppid)
     , pgid(val.pgid)
@@ -129,8 +129,8 @@ process::process(pid_t _ppid,
     kernel::signal_list&& _sigs)
     : mms(*kernel_mms)
     , attr { .system = _system }
-    , pwd { types::move(path) }
-    , signals(types::move(_sigs))
+    , pwd { std::move(path) }
+    , signals(std::move(_sigs))
     , pid { process::alloc_pid() }
     , ppid { _ppid }
     , pgid { 0 }
@@ -257,7 +257,7 @@ void NORETURN _kernel_init(void)
     // eflags
     push_stack(esp, 0x200);
 
-    readythds->push(&proc->thds.Emplace(types::move(thd)));
+    readythds->push(&proc->thds.Emplace(std::move(thd)));
 
     // ------------------------------------------
 

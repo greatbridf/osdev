@@ -52,7 +52,7 @@ private:
         }
 
         explicit constexpr node(NodeValue&& v) noexcept
-            : value(move(v))
+            : value(std::move(v))
         {
         }
 
@@ -265,7 +265,7 @@ public:
     // insert the value v in front of the given iterator
     constexpr iterator_type insert(const iterator_type& iter, value_type&& v) noexcept
     {
-        node_type* new_node = allocator_traits<allocator_type>::allocate_and_construct(move(v));
+        node_type* new_node = allocator_traits<allocator_type>::allocate_and_construct(std::move(v));
         iterator_type ret(new_node);
         iter._node()->prev->connect(new_node);
         new_node->connect(static_cast<node_type*>(iter._node()));
@@ -281,13 +281,13 @@ public:
 
     constexpr void push_back(value_type&& v) noexcept
     {
-        insert(end(), move(v));
+        insert(end(), std::move(v));
     }
 
     template <typename... Args>
     constexpr iterator_type emplace_back(Args&&... args)
     {
-        return insert(end(), value_type(forward<Args>(args)...));
+        return insert(end(), value_type(std::forward<Args>(args)...));
     }
 
     constexpr void push_front(const value_type& v) noexcept
@@ -297,13 +297,13 @@ public:
 
     constexpr void push_front(value_type&& v) noexcept
     {
-        insert(begin(), move(v));
+        insert(begin(), std::move(v));
     }
 
     template <typename... Args>
     constexpr iterator_type emplace_front(Args&&... args)
     {
-        return insert(begin(), value_type(forward<Args>(args)...));
+        return insert(begin(), value_type(std::forward<Args>(args)...));
     }
 
     constexpr size_t size(void) const noexcept

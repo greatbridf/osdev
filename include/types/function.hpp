@@ -20,14 +20,14 @@ namespace __inner {
 
     public:
         constexpr _function(FuncLike&& _func)
-            : func(types::forward<FuncLike>(_func))
+            : func(std::forward<FuncLike>(_func))
         {
         }
         constexpr ~_function() = default;
 
         constexpr Ret operator()(Args&&... args) const override
         {
-            return func(types::forward<Args>(args)...);
+            return func(std::forward<Args>(args)...);
         }
     };
 
@@ -51,14 +51,14 @@ public:
     constexpr function(FuncLike&& func)
     {
         static_assert(sizeof(FuncLike) <= sizeof(_data));
-        new (_f()) __inner::_function<FuncLike, Ret, Args...>(types::forward<FuncLike>(func));
+        new (_f()) __inner::_function<FuncLike, Ret, Args...>(std::forward<FuncLike>(func));
     }
 
     template <typename FuncPtr>
     constexpr function(FuncPtr* funcPtr)
     {
         new (_f()) __inner::_function<typename types::traits::decay<FuncPtr>::type, Ret, Args...>(
-            types::forward<typename types::traits::decay<FuncPtr>::type>(funcPtr));
+            std::forward<typename types::traits::decay<FuncPtr>::type>(funcPtr));
     }
 
     constexpr ~function()
@@ -68,7 +68,7 @@ public:
 
     constexpr Ret operator()(Args... args) const
     {
-        return (*_f())(types::forward<Args>(args)...);
+        return (*_f())(std::forward<Args>(args)...);
     }
 };
 

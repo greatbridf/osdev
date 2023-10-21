@@ -1,4 +1,5 @@
 #pragma once
+#include <utility>
 
 #include <stdint.h>
 #include <types/allocator.hpp>
@@ -201,7 +202,7 @@ public:
     }
 
     constexpr hash_map(hash_map&& v)
-        : buckets(move(v.buckets))
+        : buckets(std::move(v.buckets))
     {
     }
 
@@ -213,13 +214,13 @@ public:
     constexpr void emplace(pair_type&& p)
     {
         auto hash_value = _Hasher::hash(p.key, hash_length());
-        buckets.at(hash_value).push_back(move(p));
+        buckets.at(hash_value).push_back(std::move(p));
     }
 
     template <typename _key_type, typename _value_type>
     constexpr void emplace(_key_type&& key, _value_type&& value)
     {
-        emplace(make_pair(forward<_key_type>(key), forward<_value_type>(value)));
+        emplace(make_pair(std::forward<_key_type>(key), std::forward<_value_type>(value)));
     }
 
     constexpr void remove(const key_type& key)

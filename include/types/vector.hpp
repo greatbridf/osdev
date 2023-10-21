@@ -1,4 +1,5 @@
 #pragma once
+#include <utility>
 
 #include <assert.h>
 #include <types/allocator.hpp>
@@ -264,14 +265,14 @@ public:
     {
         if (m_size == m_capacity)
             resize(m_capacity * 2);
-        allocator_traits<allocator_type>::construct(m_arr + m_size, move(v));
+        allocator_traits<allocator_type>::construct(m_arr + m_size, std::move(v));
         ++m_size;
     }
 
     template <typename... Args>
     constexpr iterator_type emplace_back(Args&&... args)
     {
-        push_back(value_type(forward<Args>(args)...));
+        push_back(value_type(std::forward<Args>(args)...));
         return back();
     }
 

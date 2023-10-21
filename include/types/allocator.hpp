@@ -1,4 +1,5 @@
 #pragma once
+#include <utility>
 #include <assert.h>
 #include <stdint.h>
 #include <types/cplusplus.hpp>
@@ -205,13 +206,13 @@ public:
 template <template <typename _T> class Allocator, typename T, typename... Args>
 constexpr T* _new(Args&&... args)
 {
-    return allocator_traits<Allocator<T>>::allocate_and_construct(forward<Args>(args)...);
+    return allocator_traits<Allocator<T>>::allocate_and_construct(std::forward<Args>(args)...);
 }
 
 template <template <typename _T> class Allocator, typename T, typename... Args>
 constexpr T* pnew(T* = nullptr, Args&&... args)
 {
-    return _new<Allocator, T, Args...>(forward<Args>(args)...);
+    return _new<Allocator, T, Args...>(std::forward<Args>(args)...);
 }
 
 template <template <typename _T> class Allocator, typename T>
@@ -235,7 +236,7 @@ public:
     template <typename... Args>
     static constexpr value_type* construct(value_type* ptr, Args&&... args)
     {
-        new (ptr) value_type(forward<Args>(args)...);
+        new (ptr) value_type(std::forward<Args>(args)...);
         return ptr;
     }
 
@@ -243,7 +244,7 @@ public:
     static constexpr value_type* allocate_and_construct(Args&&... args)
     {
         auto* ptr = allocate(1);
-        construct(ptr, forward<Args>(args)...);
+        construct(ptr, std::forward<Args>(args)...);
         return ptr;
     }
 

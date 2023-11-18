@@ -128,7 +128,7 @@ private:
         int ref;
         // bool dirty;
     };
-    types::hash_map<cluster_t, buf_object, types::linux_hasher<cluster_t>> buf;
+    types::hash_map<cluster_t, buf_object> buf;
 
     // buf MUST be larger than 512 bytes
     inline void _raw_read_sector(void* buf, uint32_t sector_no);

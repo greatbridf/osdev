@@ -1,7 +1,6 @@
 #pragma once
 #include <utility>
-
-#include <types/cplusplus.hpp>
+#include <type_traits>
 
 namespace types {
 
@@ -30,16 +29,16 @@ struct pair {
         : key(val.key)
         , value(val.value)
     {
-        static_assert(is_same<typename traits::decay<_key_type>::type, typename traits::decay<key_type>::type>::value);
-        static_assert(is_same<typename traits::decay<_value_type>::type, typename traits::decay<value_type>::type>::value);
+        static_assert(std::is_same_v<std::decay_t<_key_type>, std::decay_t<key_type>>);
+        static_assert(std::is_same_v<std::decay_t<_value_type>, std::decay_t<value_type>>);
     }
     template <typename _key_type, typename _value_type>
     constexpr pair(pair<_key_type, _value_type>&& val)
         : key(std::move(val.key))
         , value(std::move(val.value))
     {
-        static_assert(is_same<typename traits::decay<_key_type>::type, typename traits::decay<key_type>::type>::value);
-        static_assert(is_same<typename traits::decay<_value_type>::type, typename traits::decay<value_type>::type>::value);
+        static_assert(std::is_same_v<std::decay_t<_key_type>, std::decay_t<key_type>>);
+        static_assert(std::is_same_v<std::decay_t<_value_type>, std::decay_t<value_type>>);
     }
     constexpr pair(const pair& val)
         : key(val.key)
@@ -84,10 +83,10 @@ struct pair {
 };
 
 template <typename T1, typename T2>
-constexpr pair<typename traits::decay<T1>::type, typename traits::decay<T2>::type>
+constexpr pair<std::decay_t<T1>, std::decay_t<T2>>
 make_pair(T1&& t1, T2&& t2)
 {
-    return pair<typename traits::decay<T1>::type, typename traits::decay<T2>::type> { std::forward<T1>(t1), std::forward<T2>(t2) };
+    return pair<std::decay_t<T1>, std::decay_t<T2>> { std::forward<T1>(t1), std::forward<T2>(t2) };
 }
 
 } // namespace types

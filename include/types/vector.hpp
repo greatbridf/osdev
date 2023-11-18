@@ -1,9 +1,9 @@
 #pragma once
 #include <utility>
+#include <type_traits>
 
 #include <assert.h>
 #include <types/allocator.hpp>
-#include <types/cplusplus.hpp>
 #include <types/types.h>
 
 namespace types {
@@ -28,8 +28,8 @@ public:
     template <typename Pointer>
     class iterator {
     public:
-        using Value = typename types::traits::remove_pointer<Pointer>::type;
-        using Reference = typename types::traits::add_reference<Value>::type;
+        using Value = std::remove_pointer_t<Pointer>;
+        using Reference = std::add_lvalue_reference_t<Value>;
 
     public:
         constexpr iterator(const iterator& iter) noexcept

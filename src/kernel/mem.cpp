@@ -375,7 +375,7 @@ struct mapped_area {
 };
 
 static types::hash_map<page_t, mapped_area,
-    types::linux_hasher<page_t>, types::kernel_ident_allocator>
+    types::linux_hasher, types::kernel_ident_allocator>
     mapped;
 static uint8_t freebm[0x400 / 8];
 } // namespace __physmapper

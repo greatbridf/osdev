@@ -1,5 +1,6 @@
 #pragma once
 #include <utility>
+#include <type_traits>
 
 #include <stdint.h>
 #include <types/allocator.hpp>
@@ -29,31 +30,31 @@ static inline constexpr hash_t hash32(uint32_t val, uint32_t bits)
     return _hash32(val) >> (32 - bits);
 }
 
-template <convertible_to<uint32_t> T>
-struct linux_hasher {
+template <typename T, typename = void>
+struct linux_hasher {};
+
+template <typename T>
+inline constexpr bool is_c_string_v = std::is_same_v<std::decay_t<T>, char*>
+    || std::is_same_v<std::decay_t<T>, const char*>;
+
+template <typename T>
+struct linux_hasher<T, std::enable_if_t<std::is_convertible_v<T, uint32_t>>> {
     static inline constexpr hash_t hash(T val, uint32_t bits)
     {
         return hash32(static_cast<uint32_t>(val), bits);
     }
 };
 template <typename T>
-struct linux_hasher<T*> {
-    static inline constexpr hash_t hash(T* val, uint32_t bits)
+struct linux_hasher<T,
+    std::enable_if_t<std::is_pointer_v<T> && !is_c_string_v<T>>> {
+    static inline constexpr hash_t hash(T val, uint32_t bits)
     {
         return hash32(reinterpret_cast<uint32_t>(val), bits);
     }
 };
 
 template <typename T>
-struct string_hasher {
-    static inline constexpr hash_t hash(T, uint32_t)
-    {
-        static_assert(types::template_false_type<T>::value, "string hasher does not support this type");
-        return (hash_t)0;
-    }
-};
-template <>
-struct string_hasher<const char*> {
+struct linux_hasher<T, std::enable_if_t<is_c_string_v<T>>> {
     static inline constexpr hash_t hash(const char* str, uint32_t bits)
     {
         constexpr uint32_t seed = 131;
@@ -65,36 +66,38 @@ struct string_hasher<const char*> {
         return hash32(hash, bits);
     }
 };
-template <template <typename> class Allocator>
-struct string_hasher<const types::string<Allocator>&> {
+template <
+    template <template <typename> class> class String,
+    template <typename> class Allocator>
+struct linux_hasher<String<Allocator>,
+    std::enable_if_t<
+        std::is_same_v<
+            std::decay_t<String<Allocator>>, types::string<Allocator>
+        >
+    >
+> {
+    static inline constexpr hash_t hash(types::string<Allocator>&& str, uint32_t bits)
+    {
+        return linux_hasher<const char*>::hash(str.c_str(), bits);
+    }
     static inline constexpr hash_t hash(const types::string<Allocator>& str, uint32_t bits)
     {
-        return string_hasher<const char*>::hash(str.c_str(), bits);
-    }
-};
-template <template <typename> class Allocator>
-struct string_hasher<types::string<Allocator>&&> {
-    static inline constexpr uint32_t hash(types::string<Allocator>&& str, uint32_t bits)
-    {
-        return string_hasher<const char*>::hash(str.c_str(), bits);
+        return linux_hasher<const char*>::hash(str.c_str(), bits);
     }
 };
 
-template <typename _Hasher, typename Value>
-concept Hasher = requires(Value&& val, uint32_t bits)
-{
-    {
-        _Hasher::hash(val, bits)
-        } -> convertible_to<size_t>;
-};
-
-template <typename Key, typename Value, Hasher<Key> _Hasher, template <typename _T> class Allocator = types::kernel_allocator>
+template <typename Key, typename Value,
+    template <typename _Key, typename...> class Hasher = types::linux_hasher,
+    template <typename _T> class Allocator = types::kernel_allocator,
+    std::enable_if_t<std::is_convertible_v<hash_t, decltype(
+        Hasher<Key>::hash(std::declval<Key>(), std::declval<uint32_t>())
+    )>, bool> = true>
 class hash_map {
 public:
     template <typename Pointer>
     class iterator;
 
-    using key_type = typename traits::add_const<Key>::type;
+    using key_type = std::add_const_t<Key>;
     using value_type = Value;
     using pair_type = pair<key_type, value_type>;
     using size_type = size_t;
@@ -105,14 +108,16 @@ public:
     using bucket_type = list<pair_type, Allocator>;
     using bucket_array_type = vector<bucket_type, Allocator>;
 
+    using hasher_type = Hasher<Key>;
+
     static constexpr size_type INITIAL_BUCKETS_ALLOCATED = 64;
 
 public:
     template <typename Pointer>
     class iterator {
     public:
-        using _Value = typename traits::remove_pointer<Pointer>::type;
-        using Reference = typename traits::add_reference<_Value>::type;
+        using _Value = std::remove_pointer_t<Pointer>;
+        using Reference = std::add_lvalue_reference_t<_Value>;
 
         friend class hash_map;
 
@@ -213,7 +218,7 @@ public:
 
     constexpr void emplace(pair_type&& p)
     {
-        auto hash_value = _Hasher::hash(p.key, hash_length());
+        auto hash_value = hasher_type::hash(p.key, hash_length());
         buckets.at(hash_value).push_back(std::move(p));
     }
 
@@ -225,7 +230,7 @@ public:
 
     constexpr void remove(const key_type& key)
     {
-        auto hash_value = _Hasher::hash(key, hash_length());
+        auto hash_value = hasher_type::hash(key, hash_length());
         auto& bucket = buckets.at(hash_value);
         for (auto iter = bucket.begin(); iter != bucket.end(); ++iter) {
             if (iter->key == key) {
@@ -248,7 +253,7 @@ public:
 
     constexpr iterator_type find(const key_type& key)
     {
-        auto hash_value = _Hasher::hash(key, hash_length());
+        auto hash_value = hasher_type::hash(key, hash_length());
         auto& bucket = buckets.at(hash_value);
         for (auto& item : bucket) {
             if (key == item.key)
@@ -259,7 +264,7 @@ public:
 
     constexpr const_iterator_type find(const key_type& key) const
     {
-        auto hash_value = _Hasher::hash(key, hash_length());
+        auto hash_value = hasher_type::hash(key, hash_length());
         const auto& bucket = buckets.at(hash_value);
         for (auto iter = bucket.cbegin(); iter != bucket.cend(); ++iter) {
             if (key == iter->key)

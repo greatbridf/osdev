@@ -1,5 +1,6 @@
 #pragma once
 #include <utility>
+#include <type_traits>
 #include <assert.h>
 #include <stdint.h>
 #include <types/cplusplus.hpp>
@@ -172,10 +173,12 @@ concept Allocator = requires(size_t size, typename T::value_type* ptr)
     typename T::value_type;
     {
         T::allocate_memory(size)
-        } -> same_as<typename T::value_type*>;
+    };
     {
         T::deallocate_memory(ptr)
-        } -> same_as<void>;
+    };
+    std::is_same_v<typename T::value_type*, decltype(T::allocate_memory(size))>;
+    std::is_same_v<void, decltype(T::deallocate_memory(ptr))>;
 };
 
 template <Allocator T>

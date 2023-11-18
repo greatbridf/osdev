@@ -705,10 +705,12 @@ void init_vfs(void)
     vfs_mkfile(fs_root, "init");
 
     auto* init = vfs_open("/init");
+    assert(init);
     const char* str = "#/bin/sh\nexec /bin/sh\n";
     vfs_write(init->ind, str, 0, strlen(str));
 
     auto* dev = vfs_open("/dev");
+    assert(dev);
     vfs_mknode(dev, "null", { .in { .major = 0, .minor = 0 } });
     vfs_mknode(dev, "console", { .in { .major = 1, .minor = 0 } });
     vfs_mknode(dev, "hda", { .in { .major = 2, .minor = 0 } });

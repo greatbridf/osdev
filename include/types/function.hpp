@@ -1,5 +1,6 @@
 #pragma once
-#include <types/cplusplus.hpp>
+#include <utility>
+#include <type_traits>
 
 namespace std {
 
@@ -57,8 +58,8 @@ public:
     template <typename FuncPtr>
     constexpr function(FuncPtr* funcPtr)
     {
-        new (_f()) __inner::_function<typename types::traits::decay<FuncPtr>::type, Ret, Args...>(
-            std::forward<typename types::traits::decay<FuncPtr>::type>(funcPtr));
+        new (_f()) __inner::_function<std::decay_t<FuncPtr>, Ret, Args...>(
+            std::forward<std::decay_t<FuncPtr>>(funcPtr));
     }
 
     constexpr ~function()

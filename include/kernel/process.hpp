@@ -387,7 +387,7 @@ private:
 class proclist final {
 public:
     using list_type = types::map<pid_t, process>;
-    using child_index_type = types::hash_map<pid_t, types::list<pid_t>, types::linux_hasher<pid_t>>;
+    using child_index_type = types::hash_map<pid_t, types::list<pid_t>>;
     using tty_index_type = types::map<pid_t, tty*>;
     using iterator_type = list_type::iterator_type;
     using const_iterator_type = list_type::const_iterator_type;

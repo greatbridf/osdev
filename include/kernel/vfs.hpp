@@ -108,7 +108,7 @@ public:
 
     private:
         types::list<dentry, allocator_type>* children = nullptr;
-        types::hash_map<name_type, dentry*, types::string_hasher<const name_type&>, allocator_type>* idx_children = nullptr;
+        types::hash_map<name_type, dentry*, types::linux_hasher, allocator_type>* idx_children = nullptr;
 
     public:
         dentry* parent;
@@ -152,7 +152,7 @@ private:
 
 private:
     inode_list _inodes;
-    types::hash_map<dentry*, dentry*, types::linux_hasher<dentry*>> _mount_recover_list;
+    types::hash_map<dentry*, dentry*> _mount_recover_list;
 
 protected:
     dentry _root;

@@ -1,7 +1,7 @@
 #pragma once
 
 #include <stdint.h>
-#include <types/cplusplus.hpp>
+#include <type_traits>
 
 namespace hw {
 template <typename port_size_t, bool r = true, bool w = true>
@@ -18,15 +18,15 @@ public:
     port_size_t operator*(void) const
     {
         static_assert(
-            types::is_same<port_size_t, uint8_t>::value || types::is_same<port_size_t, uint16_t>::value,
+            std::is_same_v<port_size_t, uint8_t> || std::is_same_v<port_size_t, uint16_t>,
             "this type is not implemented yet.");
         port_size_t ret;
-        if constexpr (types::is_same<port_size_t, uint8_t>::value)
+        if constexpr (std::is_same_v<port_size_t, uint8_t>)
             asm volatile(
                 "inb %1, %0"
                 : "=a"(ret)
                 : "d"(mp));
-        if constexpr (types::is_same<port_size_t, uint16_t>::value)
+        if constexpr (std::is_same_v<port_size_t, uint16_t>)
             asm volatile(
                 "inw %1, %0"
                 : "=a"(ret)
@@ -37,14 +37,14 @@ public:
     port_size_t operator=(port_size_t n) const
     {
         static_assert(
-            types::is_same<port_size_t, uint8_t>::value || types::is_same<port_size_t, uint16_t>::value,
+            std::is_same_v<port_size_t, uint8_t> || std::is_same_v<port_size_t, uint16_t>,
             "this type is not implemented yet.");
-        if constexpr (types::is_same<port_size_t, uint8_t>::value)
+        if constexpr (std::is_same_v<port_size_t, uint8_t>)
             asm volatile(
                 "outb %1, %0"
                 :
                 : "d"(mp), "a"(n));
-        if constexpr (types::is_same<port_size_t, uint16_t>::value)
+        if constexpr (std::is_same_v<port_size_t, uint16_t>)
             asm volatile(
                 "outw %1, %0"
                 :

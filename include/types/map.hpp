@@ -1,8 +1,8 @@
 #pragma once
 #include <utility>
+#include <type_traits>
 
 #include <types/allocator.hpp>
-#include <types/cplusplus.hpp>
 #include <types/pair.hpp>
 #include <types/types.h>
 
@@ -11,7 +11,7 @@ namespace types {
 template <typename Key, typename Value, template <typename _T> class _Allocator = kernel_allocator>
 class map {
 public:
-    using key_type = typename traits::add_const<Key>::type;
+    using key_type = std::add_const_t<Key>;
     using value_type = Value;
     using pair_type = pair<key_type, value_type>;
 
@@ -298,10 +298,10 @@ public:
     template <bool Const>
     class iterator {
     public:
-        using node_pointer_type = typename traits::condition<Const, const node*, node*>::type;
-        using value_type = typename traits::condition<Const, const pair_type, pair_type>::type;
-        using pointer_type = typename traits::add_pointer<value_type>::type;
-        using reference_type = typename traits::add_reference<value_type>::type;
+        using node_pointer_type = std::conditional_t<Const, const node*, node*>;
+        using value_type = std::conditional_t<Const, const pair_type, pair_type>;
+        using pointer_type = std::add_pointer_t<value_type>;
+        using reference_type = std::add_lvalue_reference_t<value_type>;
 
         friend class map;
 

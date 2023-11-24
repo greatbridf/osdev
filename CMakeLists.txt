@@ -91,7 +91,6 @@ set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
                         include/types/lock.hpp
                         include/types/string.hpp
                         include/types/vector.hpp
-                        include/types/function.hpp
                         include/kernel/log.hpp
                         )
 

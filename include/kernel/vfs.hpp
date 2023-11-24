@@ -1,12 +1,13 @@
 #pragma once
 
+#include <functional>
+
 #include <assert.h>
 #include <kernel/event/evtqueue.hpp>
 #include <stdint.h>
 #include <types/allocator.hpp>
 #include <types/buffer.hpp>
 #include <types/cplusplus.hpp>
-#include <types/function.hpp>
 #include <types/hash_map.hpp>
 #include <types/list.hpp>
 #include <types/lock.hpp>

@@ -1,0 +1,42 @@
+#ifndef __GBLIBCPP_BITS_FWD_FUNCTIONAL__
+#define __GBLIBCPP_BITS_FWD_FUNCTIONAL__
+
+#include <cstddef>
+
+namespace std {
+
+template <typename T>
+class reference_wrapper;
+
+template <typename>
+class function;
+
+template <typename Ret, typename... Args>
+bool operator==(const std::function<Ret(Args...)>& func, std::nullptr_t) noexcept;
+
+template <typename Ret, typename... Args>
+void swap(std::function<Ret(Args...)>& lhs, std::function<Ret(Args...)>& rhs) noexcept;
+
+template <typename T>
+constexpr std::reference_wrapper<T> ref(T& t) noexcept;
+
+template <typename T>
+constexpr std::reference_wrapper<T>
+    ref(std::reference_wrapper<T> t) noexcept;
+
+template <typename T>
+void ref(const T&&) = delete;
+
+template <typename T>
+constexpr std::reference_wrapper<const T> cref(const T& t) noexcept;
+
+template <typename T>
+constexpr std::reference_wrapper<const T>
+    cref(std::reference_wrapper<T> t) noexcept;
+
+template <typename T>
+void cref(const T&&) = delete;
+
+} // namespace std
+
+#endif

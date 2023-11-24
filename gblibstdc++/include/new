@@ -1,0 +1,11 @@
+#ifndef __GBLIBCPP_NEW__
+#define __GBLIBCPP_NEW__
+
+#include <cstddef>
+
+constexpr void* operator new(std::size_t, void* ptr) noexcept
+{
+    return ptr;
+}
+
+#endif

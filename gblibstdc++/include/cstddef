@@ -1,0 +1,15 @@
+#ifndef __GBLIBCPP_CSTDDEF__
+#define __GBLIBCPP_CSTDDEF__
+
+#undef NULL
+#define NULL (nullptr)
+
+namespace std {
+
+using nullptr_t = decltype(nullptr);
+
+using size_t = __SIZE_TYPE__;
+
+}; // namespace std
+
+#endif

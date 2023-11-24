@@ -1,23 +1,35 @@
 #ifndef __GBLIBCPP_UTILITY__
 #define __GBLIBCPP_UTILITY__
 
-#include <type_traits>
-
 namespace std {
 
+namespace __helpers {
 template <typename T>
-constexpr remove_reference_t<T>&& move(T&& val)
+struct __utility_remove_reference { using type = T; };
+template <typename T>
+struct __utility_remove_reference<T&> { using type = T; };
+template <typename T>
+struct __utility_remove_reference<T&&> { using type = T; };
+};
+
+template <typename T>
+constexpr typename __helpers::__utility_remove_reference<T>::type&&
+move(T&& val) noexcept
 {
-    return static_cast<remove_reference_t<T>&&>(val);
+    return static_cast<
+        typename __helpers::__utility_remove_reference<T>::type&&
+        >(val);
 }
 
 template <typename T>
-constexpr T&& forward(remove_reference_t<T>& val)
+constexpr T&& forward(
+    typename __helpers::__utility_remove_reference<T>::type& val) noexcept
 {
     return static_cast<T&&>(val);
 }
 template <typename T>
-constexpr T&& forward(remove_reference_t<T>&& val)
+constexpr T&& forward(
+    typename __helpers::__utility_remove_reference<T>::type&& val) noexcept
 {
     return static_cast<T&&>(val);
 }

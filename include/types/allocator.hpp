@@ -1,15 +1,11 @@
 #pragma once
+#include <new>
 #include <utility>
 #include <type_traits>
 #include <assert.h>
 #include <stdint.h>
 #include <types/cplusplus.hpp>
 #include <types/types.h>
-
-constexpr void* operator new(size_t, void* ptr)
-{
-    return ptr;
-}
 
 namespace types {
 

@@ -79,8 +79,8 @@ void serial_tty::recvchar(char c)
     case '\r':
         buf.put('\n');
         if (echo) {
-            serial_send_data(PORT_SERIAL0, '\r');
-            serial_send_data(PORT_SERIAL0, '\n');
+            serial_send_data(id, '\r');
+            serial_send_data(id, '\n');
         }
         this->m_cv.notify();
         break;
@@ -90,10 +90,10 @@ void serial_tty::recvchar(char c)
             buf.pop();
 
             if (echo) {
-                serial_send_data(PORT_SERIAL0, 0x08);
-                serial_send_data(PORT_SERIAL0, '\x1b');
-                serial_send_data(PORT_SERIAL0, '[');
-                serial_send_data(PORT_SERIAL0, 'K');
+                serial_send_data(id, 0x08);
+                serial_send_data(id, '\x1b');
+                serial_send_data(id, '[');
+                serial_send_data(id, 'K');
             }
         }
         break;
@@ -104,15 +104,15 @@ void serial_tty::recvchar(char c)
 
             if (echo) {
                 // clear the line
-                // serial_send_data(PORT_SERIAL0, '\r');
-                // serial_send_data(PORT_SERIAL0, '\x1b');
-                // serial_send_data(PORT_SERIAL0, '[');
-                // serial_send_data(PORT_SERIAL0, '2');
-                // serial_send_data(PORT_SERIAL0, 'K');
-                serial_send_data(PORT_SERIAL0, 0x08);
-                serial_send_data(PORT_SERIAL0, '\x1b');
-                serial_send_data(PORT_SERIAL0, '[');
-                serial_send_data(PORT_SERIAL0, 'K');
+                // serial_send_data(id, '\r');
+                // serial_send_data(id, '\x1b');
+                // serial_send_data(id, '[');
+                // serial_send_data(id, '2');
+                // serial_send_data(id, 'K');
+                serial_send_data(id, 0x08);
+                serial_send_data(id, '\x1b');
+                serial_send_data(id, '[');
+                serial_send_data(id, 'K');
             }
         }
         break;
@@ -130,6 +130,14 @@ void serial_tty::recvchar(char c)
         procs->send_signal_grp(fg_pgroup, kernel::SIGSTOP);
         this->m_cv.notify();
         break;
+    // ^[: ESCAPE
+    case 0x1b:
+        buf.put('\x1b');
+        if (echo) {
+            serial_send_data(id, '^');
+            serial_send_data(id, '[');
+        }
+        break;
     // ^\: SIGQUIT
     case 0x1c:
         procs->send_signal_grp(fg_pgroup, kernel::SIGQUIT);
@@ -138,7 +146,7 @@ void serial_tty::recvchar(char c)
     default:
         buf.put(c);
         if (echo)
-            serial_send_data(PORT_SERIAL0, c);
+            serial_send_data(id, c);
         break;
     }
 }

@@ -419,18 +419,19 @@ void kernel::pfree(page_t pg)
     auto iter = __physmapper::mapped.find(pg);
     if (!iter)
         return;
+    auto& [ ref, ptr ] = iter->value;
 
-    if (iter->value.ref > 1) {
-        --iter->value.ref;
+    if (ref > 1) {
+        --ref;
         return;
     }
 
-    int i = vptrdiff(iter->value.ptr, mapped_start);
+    int i = vptrdiff(ptr, mapped_start);
     i /= 0x1000;
 
     auto* pte = pmap_pt + i;
     pte->v = 0;
-    invalidate_tlb(iter->value.ptr);
+    invalidate_tlb(ptr);
 
     bm_clear(__physmapper::freebm, i);
     __physmapper::mapped.remove(iter);

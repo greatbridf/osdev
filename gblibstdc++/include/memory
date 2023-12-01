@@ -25,7 +25,7 @@ addressof(T& arg) noexcept
 }
 
 template <typename T>
-T* addressof(const T&&) = delete;
+const T* addressof(const T&&) = delete;
 
 } // namespace std
 

@@ -1,3 +1,5 @@
+#include <utility>
+
 #include <asm/port_io.h>
 #include <asm/sys.h>
 #include <assert.h>
@@ -209,11 +211,8 @@ void kernel_threadd_main(void)
 
             {
                 types::lock_guard lck(kthreadd_mtx);
-                func = kthreadd_new_thd_func;
-                data = kthreadd_new_thd_data;
-
-                kthreadd_new_thd_func = nullptr;
-                kthreadd_new_thd_data = nullptr;
+                func = std::exchange(kthreadd_new_thd_func, nullptr);
+                data = std::exchange(kthreadd_new_thd_data, nullptr);
             }
 
             // TODO

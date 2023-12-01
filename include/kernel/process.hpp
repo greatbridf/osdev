@@ -1,5 +1,7 @@
 #pragma once
 
+#include <utility>
+
 #include <fcntl.h>
 #include <kernel/errno.h>
 #include <kernel/event/evtqueue.hpp>
@@ -68,16 +70,10 @@ public:
     }
 
     constexpr thread(thread&& val)
-        : esp { val.esp }
-        , pkstack { val.pkstack }
-        , owner { val.owner }
-        , attr { val.attr }
-    {
-        val.attr = {};
-        val.esp = 0;
-        val.pkstack = 0;
-        val.owner = nullptr;
-    }
+        : esp { std::exchange(val.esp, nullptr) }
+        , pkstack { std::exchange(val.pkstack, 0) }
+        , owner { std::exchange(val.owner, nullptr) }
+        , attr { std::exchange(val.attr, {}) } { }
 
     inline thread(const thread& val)
         : owner { val.owner }
@@ -184,9 +180,10 @@ public:
         {
             int fd = 0;
 
-            for (auto iter = arr.cbegin(); iter != arr.cend(); ++iter)
-                if (iter->key == fd)
+            for (auto&& [ item_fd, iter_file ] : arr) {
+                if (item_fd == fd)
                     ++fd;
+            }
 
             return fd;
         }
@@ -224,9 +221,9 @@ public:
 
         constexpr void dup_all(const filearr& orig)
         {
-            for (auto iter : orig.arr) {
-                this->arr.insert(types::make_pair(iter.key, iter.value));
-                ++iter.value->ref;
+            for (auto&& [ fd, file ] : orig.arr) {
+                this->arr.insert(types::make_pair(fd, file));
+                ++file->ref;
             }
         }
 
@@ -235,8 +232,7 @@ public:
             auto iter = arr.find(i);
             if (!iter)
                 return nullptr;
-            else
-                return &iter->value;
+            return &iter->value;
         }
 
         int pipe(int pipefd[2])
@@ -325,8 +321,8 @@ public:
 
         constexpr void close_all(void)
         {
-            for (auto iter : this->arr)
-                close(iter.key);
+            for (auto&& [ fd, file ] : arr)
+                close(fd);
         }
 
         constexpr ~filearr()
@@ -468,27 +464,31 @@ public:
     constexpr void make_children_orphans(pid_t pid)
     {
         auto children = m_child_idx.find(pid);
-        if (children) {
-            auto init_children = m_child_idx.find(1);
-            for (auto iter = children->value.begin(); iter != children->value.end(); ++iter) {
-                init_children->value.push_back(*iter);
-                this->find(*iter)->ppid = 1;
-            }
-            m_child_idx.remove(children);
+        auto init_children = m_child_idx.find(1);
+
+        if (!children || !init_children)
+            return;
+
+        for (auto item : children->value) {
+            init_children->value.push_back(item);
+            find(item)->ppid = 1;
         }
+
+        m_child_idx.remove(children);
     }
 
     void send_signal(pid_t pid, kernel::sig_t signal)
     {
         auto iter = this->find(pid);
         if (!iter)
-            return iter->signals.set(signal);
+            return;
+        iter->signals.set(signal);
     }
     void send_signal_grp(pid_t pgid, kernel::sig_t signal)
     {
-        for (auto& proc : m_procs) {
-            if (proc.value.pgid == pgid)
-                proc.value.signals.set(signal);
+        for (auto& [ pid, proc ] : m_procs) {
+            if (proc.pgid == pgid)
+                proc.signals.set(signal);
         }
     }
 

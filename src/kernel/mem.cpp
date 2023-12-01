@@ -1,3 +1,5 @@
+#include <cstddef>
+
 #include <asm/port_io.h>
 #include <asm/sys.h>
 #include <assert.h>
@@ -371,7 +373,7 @@ void create_segment_descriptor(
 namespace __physmapper {
 struct mapped_area {
     size_t ref;
-    uint8_t* ptr;
+    void* ptr;
 };
 
 static types::hash_map<page_t, mapped_area,
@@ -380,8 +382,11 @@ static types::hash_map<page_t, mapped_area,
 static uint8_t freebm[0x400 / 8];
 } // namespace __physmapper
 
-uint8_t* kernel::pmap(page_t pg)
+void* kernel::pmap(page_t pg)
 {
+    auto* const pmap_pt = std::bit_cast<pte_t*>(0xff001000);
+    auto* const mapped_start = std::bit_cast<void*>(0xff000000);
+
     auto iter = __physmapper::mapped.find(pg);
     if (iter) {
         ++iter->value.ref;
@@ -390,11 +395,11 @@ uint8_t* kernel::pmap(page_t pg)
 
     for (int i = 2; i < 0x400; ++i) {
         if (bm_test(__physmapper::freebm, i) == 0) {
-            auto* pte = (pte_t*)(0xff001000) + i;
+            auto* pte = pmap_pt + i;
             pte->v = 0x3;
             pte->in.page = pg;
 
-            uint8_t* ptr = (uint8_t*)0xff000000 + 0x1000 * i;
+            void* ptr = vptradd(mapped_start, 0x1000 * i);
             invalidate_tlb(ptr);
 
             bm_set(__physmapper::freebm, i);
@@ -408,6 +413,9 @@ uint8_t* kernel::pmap(page_t pg)
 }
 void kernel::pfree(page_t pg)
 {
+    auto* const pmap_pt = std::bit_cast<pte_t*>(0xff001000);
+    auto* const mapped_start = std::bit_cast<void*>(0xff000000);
+
     auto iter = __physmapper::mapped.find(pg);
     if (!iter)
         return;
@@ -417,10 +425,10 @@ void kernel::pfree(page_t pg)
         return;
     }
 
-    int i = (uint32_t)iter->value.ptr - 0xff000000;
+    int i = vptrdiff(iter->value.ptr, mapped_start);
     i /= 0x1000;
 
-    auto* pte = (pte_t*)(0xff001000) + i;
+    auto* pte = pmap_pt + i;
     pte->v = 0;
     invalidate_tlb(iter->value.ptr);
 

@@ -1,3 +1,5 @@
+#include <bit>
+
 #include <assert.h>
 #include <kernel/errno.h>
 #include <kernel/mem.h>
@@ -247,9 +249,9 @@ private:
     {
         return static_cast<fdata_t*>(data);
     }
-    static inline ptr_t as_val(void* data)
+    static constexpr ptr_t as_val(void* data)
     {
-        return reinterpret_cast<ptr_t>(data);
+        return std::bit_cast<ptr_t>(data);
     }
     inline void* _getdata(fs::ino_t ino) const
     {

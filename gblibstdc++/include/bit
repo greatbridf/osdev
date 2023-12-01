@@ -1,0 +1,14 @@
+#ifndef __GBLIBCPP_BIT__
+#define __GBLIBCPP_BIT__
+
+namespace std {
+
+template <typename To, typename From>
+constexpr To bit_cast(const From& from) noexcept
+{
+    return __builtin_bit_cast(To, from);
+}
+
+} // namespace std
+
+#endif

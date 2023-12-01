@@ -10,6 +10,8 @@ using nullptr_t = decltype(nullptr);
 
 using size_t = __SIZE_TYPE__;
 
+enum class byte : unsigned char {};
+
 }; // namespace std
 
 #endif

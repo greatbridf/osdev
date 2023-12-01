@@ -1,5 +1,7 @@
 #pragma once
 
+#include <bit>
+#include <cstddef>
 #include <utility>
 
 #include <kernel/mem.h>
@@ -56,7 +58,7 @@ class mm_list;
 } // namespace kernel
 
 template <uint32_t base, uint32_t expo>
-inline constexpr uint32_t pow()
+constexpr uint32_t pow()
 {
     if constexpr (expo == 0)
         return 1;
@@ -68,15 +70,38 @@ inline constexpr uint32_t pow()
         return pow<base, expo / 2>() * pow<base, expo / 2 + 1>();
 }
 
-template <int n>
-inline constexpr uint32_t align_down(uint32_t v)
+template <int N>
+constexpr uint32_t align_down(uint32_t v)
 {
-    return v & ~(pow<2, n>() - 1);
+    return v & ~(pow<2, N>() - 1);
 }
-template <int n>
-inline constexpr uint32_t align_up(uint32_t v)
+template <int N>
+constexpr void* align_down(void* v)
 {
-    return align_down<n>(v + pow<2, n>() - 1);
+    return std::bit_cast<void*>(align_down<N>(std::bit_cast<uint32_t>(v)));
+}
+template <int N>
+constexpr uint32_t align_up(uint32_t v)
+{
+    return align_down<N>(v + pow<2, N>() - 1);
+}
+template <int N>
+constexpr void* align_up(void* v)
+{
+    return std::bit_cast<void*>(align_up<N>(std::bit_cast<uint32_t>(v)));
+}
+
+constexpr size_t vptrdiff(void* p1, void* p2)
+{
+    auto* _p1 = static_cast<std::byte*>(p1);
+    auto* _p2 = static_cast<std::byte*>(p2);
+    return _p1 - _p2;
+}
+
+constexpr void* vptradd(void* p, std::size_t off)
+{
+    auto* _p = static_cast<std::byte*>(p);
+    return _p + off;
 }
 
 void dealloc_pd(page_t pd);
@@ -112,9 +137,9 @@ public:
         return (char*)this->start + this->pgs->size() * PAGE_SIZE;
     }
 
-    inline bool is_kernel_space(void) const
+    constexpr bool is_kernel_space(void) const
     {
-        return this->start >= (void*)0xc0000000;
+        return this->start >= std::bit_cast<void*>(0xc0000000);
     }
 
     constexpr bool is_avail(void* start, void* end) const
@@ -130,7 +155,7 @@ public:
 
 namespace kernel {
 
-uint8_t* pmap(page_t pg);
+void* pmap(page_t pg);
 void pfree(page_t pg);
 
 class paccess : public types::non_copyable {
@@ -304,11 +329,10 @@ public:
         return this->end();
     }
 
-    bool is_avail(void* start, size_t len)
+    constexpr bool is_avail(void* start, size_t len)
     {
-        start = (void*)align_down<12>((uint32_t)start);
-        len = align_up<12>((uint32_t)start + len)
-            - (uint32_t)start;
+        start = align_down<12>(start);
+        len = vptrdiff(align_up<12>(vptradd(start, len)), start);
         for (const auto& area : *this) {
             if (!area.is_avail(start, (char*)start + len))
                 return false;
@@ -325,10 +349,6 @@ inline kernel::mm_list* kernel_mms;
 inline page empty_page;
 // --------------------------------
 
-inline constexpr size_t vptrdiff(void* p1, void* p2)
-{
-    return (uint8_t*)p1 - (uint8_t*)p2;
-}
 // inline constexpr page* lto_page(mm* mm_area, void* l_ptr)
 // {
 //     size_t offset = vptrdiff(l_ptr, mm_area->start);
@@ -350,13 +370,13 @@ inline constexpr size_t vptrdiff(void* p1, void* p2)
 // {
 //     return p << 12;
 // }
-inline size_t v_to_pdi(void* addr)
+constexpr size_t v_to_pdi(void* addr)
 {
-    return (uint32_t)addr >> 22;
+    return std::bit_cast<uint32_t>(addr) >> 22;
 }
-inline size_t v_to_pti(void* addr)
+constexpr size_t v_to_pti(void* addr)
 {
-    return ((uint32_t)addr >> 12) & 0x3ff;
+    return (std::bit_cast<uint32_t>(addr) >> 12) & 0x3ff;
 }
 // inline constexpr pte_t* to_pte(pt_t pt, page_t pg)
 // {

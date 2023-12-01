@@ -1,4 +1,5 @@
 #pragma once
+#include <bit>
 #include <utility>
 #include <type_traits>
 
@@ -49,7 +50,7 @@ struct linux_hasher<T,
     std::enable_if_t<std::is_pointer_v<T> && !is_c_string_v<T>>> {
     static inline constexpr hash_t hash(T val, uint32_t bits)
     {
-        return hash32(reinterpret_cast<uint32_t>(val), bits);
+        return hash32(std::bit_cast<uint32_t>(val), bits);
     }
 };
 

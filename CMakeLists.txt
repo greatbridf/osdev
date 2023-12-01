@@ -51,7 +51,6 @@ set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
                         src/kernel/hw/timer.c
                         src/kernel/event/event.cpp
                         src/kernel/signal.cpp
-                        src/types/bitmap.c
                         src/types/elf.cpp
                         src/types/libstdcpp.cpp
                         include/asm/port_io.h
@@ -76,7 +75,7 @@ set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
                         include/kernel/hw/timer.h
                         include/kernel/input/keycodes.h
                         include/kernel/input/input_event.h
-                        include/types/bitmap.h
+                        include/types/bitmap.hpp
                         include/types/buffer.hpp
                         include/types/elf.hpp
                         include/types/hash_map.hpp

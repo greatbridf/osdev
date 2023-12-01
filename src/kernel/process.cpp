@@ -13,7 +13,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <types/allocator.hpp>
-#include <types/bitmap.h>
+#include <types/bitmap.hpp>
 #include <types/cplusplus.hpp>
 #include <types/elf.hpp>
 #include <types/hash_map.hpp>
@@ -46,19 +46,20 @@ struct no_irq_guard {
 
 } // namespace kernel
 
-namespace __thd {
-inline uint8_t __kstack_bmp[(0x1000000 - 0xc00000) / 0x2000 / 8];
-inline int __allocated;
-} // namespace __thd
+static types::bitmap* pkstack_bmp;
 
 void thread::alloc_kstack(void)
 {
-    for (int i = 0; i < __thd::__allocated; ++i) {
-        if (bm_test(__thd::__kstack_bmp, i) == 0) {
+    static int __allocated;
+    if (!pkstack_bmp)
+        pkstack_bmp = new types::bitmap((0x1000000 - 0xc00000) / 0x2000);
+
+    for (int i = 0; i < __allocated; ++i) {
+        if (pkstack_bmp->test(i) == 0) {
             pkstack = 0xffc00000 + THREAD_KERNEL_STACK_SIZE * (i + 1);
             esp = reinterpret_cast<uint32_t*>(pkstack);
 
-            bm_set(__thd::__kstack_bmp, i);
+            pkstack_bmp->set(i);
             return;
         }
     }
@@ -67,18 +68,18 @@ void thread::alloc_kstack(void)
     kernel::paccess pa(0x00005);
     auto pt = (pt_t)pa.ptr();
     assert(pt);
-    pte_t* pte = *pt + __thd::__allocated * 2;
+    pte_t* pte = *pt + __allocated * 2;
 
     pte[0].v = 0x3;
     pte[0].in.page = __alloc_raw_page();
     pte[1].v = 0x3;
     pte[1].in.page = __alloc_raw_page();
 
-    pkstack = 0xffc00000 + THREAD_KERNEL_STACK_SIZE * (__thd::__allocated + 1);
+    pkstack = 0xffc00000 + THREAD_KERNEL_STACK_SIZE * (__allocated + 1);
     esp = reinterpret_cast<uint32_t*>(pkstack);
 
-    bm_set(__thd::__kstack_bmp, __thd::__allocated);
-    ++__thd::__allocated;
+    pkstack_bmp->set(__allocated);
+    ++__allocated;
 }
 
 void thread::free_kstack(uint32_t p)
@@ -86,7 +87,7 @@ void thread::free_kstack(uint32_t p)
     p -= 0xffc00000;
     p /= THREAD_KERNEL_STACK_SIZE;
     p -= 1;
-    bm_clear(__thd::__kstack_bmp, p);
+    pkstack_bmp->clear(p);
 }
 
 process::process(process&& val)

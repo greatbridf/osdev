@@ -12,7 +12,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <types/allocator.hpp>
-#include <types/bitmap.h>
+#include <types/bitmap.hpp>
 #include <types/size.h>
 #include <types/status.h>
 
@@ -23,7 +23,10 @@
 // ---------------------
 
 static size_t mem_size;
-static uint8_t mem_bitmap[1024 * 1024 / 8];
+static uint8_t _mem_bitmap[1024 * 1024 / 8];
+static types::bitmap mem_bitmap(
+    [](unsigned char*, std::size_t){}, _mem_bitmap,
+    1024 * 1024);
 
 // global
 segment_descriptor gdt[6];
@@ -67,15 +70,6 @@ void operator delete[](void* ptr, size_t)
     types::__allocator::m_palloc->free(ptr);
 }
 
-inline void mark_page(page_t n)
-{
-    bm_set(mem_bitmap, n);
-}
-inline void free_page(page_t n)
-{
-    bm_clear(mem_bitmap, n);
-}
-
 constexpr void mark_addr_len(pptr_t start, size_t n)
 {
     if (n == 0)
@@ -83,7 +77,7 @@ constexpr void mark_addr_len(pptr_t start, size_t n)
     page_t start_page = align_down<12>(start) >> 12;
     page_t end_page = align_up<12>(start + n) >> 12;
     for (page_t i = start_page; i < end_page; ++i)
-        mark_page(i);
+        mem_bitmap.set(i);
 }
 
 constexpr void free_addr_len(pptr_t start, size_t n)
@@ -93,7 +87,7 @@ constexpr void free_addr_len(pptr_t start, size_t n)
     page_t start_page = align_down<12>(start) >> 12;
     page_t end_page = align_up<12>(start + n) >> 12;
     for (page_t i = start_page; i < end_page; ++i)
-        free_page(i);
+        mem_bitmap.clear(i);
 }
 
 constexpr void mark_addr_range(pptr_t start, pptr_t end)
@@ -108,9 +102,10 @@ constexpr void free_addr_range(pptr_t start, pptr_t end)
 
 page_t __alloc_raw_page(void)
 {
-    for (size_t i = 0; i < sizeof(mem_bitmap); ++i) {
-        if (bm_test(mem_bitmap, i) == 0) {
-            bm_set(mem_bitmap, i);
+    const auto size = mem_bitmap.size();
+    for (size_t i = 0; i < size; ++i) {
+        if (mem_bitmap.test(i) == 0) {
+            mem_bitmap.set(i);
             return i;
         }
     }
@@ -119,7 +114,7 @@ page_t __alloc_raw_page(void)
 
 void __free_raw_page(page_t pg)
 {
-    bm_clear(mem_bitmap, pg);
+    mem_bitmap.clear(pg);
 }
 
 page allocate_page(void)
@@ -379,7 +374,9 @@ struct mapped_area {
 static types::hash_map<page_t, mapped_area,
     types::linux_hasher, types::kernel_ident_allocator>
     mapped;
-static uint8_t freebm[0x400 / 8];
+static uint8_t _freebm[0x400 / 8];
+static types::bitmap freebm(
+    [](unsigned char*, std::size_t){}, _freebm, 0x400);
 } // namespace __physmapper
 
 void* kernel::pmap(page_t pg)
@@ -394,7 +391,7 @@ void* kernel::pmap(page_t pg)
     }
 
     for (int i = 2; i < 0x400; ++i) {
-        if (bm_test(__physmapper::freebm, i) == 0) {
+        if (__physmapper::freebm.test(i) == 0) {
             auto* pte = pmap_pt + i;
             pte->v = 0x3;
             pte->in.page = pg;
@@ -402,7 +399,7 @@ void* kernel::pmap(page_t pg)
             void* ptr = vptradd(mapped_start, 0x1000 * i);
             invalidate_tlb(ptr);
 
-            bm_set(__physmapper::freebm, i);
+            __physmapper::freebm.set(i);
             __physmapper::mapped.emplace(pg,
                 __physmapper::mapped_area { 1, ptr });
             return ptr;
@@ -433,6 +430,6 @@ void kernel::pfree(page_t pg)
     pte->v = 0;
     invalidate_tlb(ptr);
 
-    bm_clear(__physmapper::freebm, i);
+    __physmapper::freebm.clear(i);
     __physmapper::mapped.remove(iter);
 }

@@ -15,7 +15,6 @@
 #include <kernel/vga.hpp>
 #include <stdint.h>
 #include <stdio.h>
-#include <types/bitmap.h>
 #include <types/status.h>
 #include <types/types.h>
 

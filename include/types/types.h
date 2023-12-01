@@ -1,6 +1,5 @@
 #pragma once
 
-#include "bitmap.h"
 #include "size.h"
 #include "status.h"
 #include "stdint.h"

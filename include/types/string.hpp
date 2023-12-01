@@ -15,9 +15,10 @@ public:
     static inline constexpr size_type npos = (-1U);
 
 public:
-    explicit constexpr string(size_type capacity = 8)
-        : inner_vector_type(capacity)
+    constexpr string()
+        : inner_vector_type()
     {
+        this->reserve(8);
         this->push_back(0x00);
     }
     constexpr string(const char* str, size_type n = npos)
@@ -84,9 +85,9 @@ public:
     constexpr char pop(void)
     {
         this->pop_back();
-        auto iter = inner_vector_type::back();
-        char c = *iter;
-        *iter = 0x00;
+        auto& ref = inner_vector_type::back();
+        char c = ref;
+        ref = 0x00;
         return c;
     }
     constexpr typename inner_vector_type::iterator_type back(void)

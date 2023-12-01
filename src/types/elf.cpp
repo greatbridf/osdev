@@ -50,33 +50,28 @@ int types::elf::elf32_load(types::elf::elf32_load_data* d)
 
     size_t phents_size = hdr.phentsize * hdr.phnum;
     size_t shents_size = hdr.shentsize * hdr.shnum;
-    auto* phents = new types::elf::elf32_program_header_entry[hdr.phnum];
+    vector<types::elf::elf32_program_header_entry> phents(hdr.phnum);
     n_read = fs::vfs_read(
         ent_exec->ind,
-        (char*)phents,
+        (char*)phents.data(),
         phents_size,
         hdr.phoff, phents_size);
 
     // broken file or I/O error
     if (n_read != phents_size) {
-        delete[] phents;
-
         d->errcode = EINVAL;
         return GB_FAILED;
     }
 
-    auto* shents = new types::elf::elf32_section_header_entry[hdr.shnum];
+    vector<types::elf::elf32_section_header_entry> shents(hdr.shnum);
     n_read = fs::vfs_read(
         ent_exec->ind,
-        (char*)shents,
+        (char*)shents.data(),
         shents_size,
         hdr.shoff, shents_size);
 
     // broken file or I/O error
     if (n_read != shents_size) {
-        delete[] phents;
-        delete[] shents;
-
         d->errcode = EINVAL;
         return GB_FAILED;
     }
@@ -95,33 +90,30 @@ int types::elf::elf32_load(types::elf::elf32_load_data* d)
     fs::inode* null_ind = nullptr;
     {
         auto* dent = fs::vfs_open("/dev/null");
-        if (!dent) {
-            delete[] phents;
-            delete[] shents;
+        if (!dent)
             kill_current(-1);
-        }
         null_ind = dent->ind;
     }
 
-    for (int i = 0; i < hdr.phnum; ++i) {
-        if (phents[i].type != types::elf::elf32_program_header_entry::PT_LOAD)
+    for (const auto& phent : phents) {
+        if (phent.type != types::elf::elf32_program_header_entry::PT_LOAD)
             continue;
 
-        auto vaddr = align_down<12>(phents[i].vaddr);
-        auto vlen = align_up<12>(phents[i].vaddr + phents[i].memsz) - vaddr;
-        auto flen = align_up<12>(phents[i].vaddr + phents[i].filesz) - vaddr;
-        auto fileoff = align_down<12>(phents[i].offset);
+        auto vaddr = align_down<12>(phent.vaddr);
+        auto vlen = align_up<12>(phent.vaddr + phent.memsz) - vaddr;
+        auto flen = align_up<12>(phent.vaddr + phent.filesz) - vaddr;
+        auto fileoff = align_down<12>(phent.offset);
 
         auto ret = mmap(
             (char*)vaddr,
-            phents[i].filesz + (phents[i].vaddr & 0xfff),
+            phent.filesz + (phent.vaddr & 0xfff),
             ent_exec->ind,
             fileoff,
             1,
             d->system);
 
         if (ret != GB_OK)
-            goto error;
+            kill_current(-1);
 
         if (vlen > flen) {
             ret = mmap(
@@ -133,20 +125,13 @@ int types::elf::elf32_load(types::elf::elf32_load_data* d)
                 d->system);
 
             if (ret != GB_OK)
-                goto error;
+                kill_current(-1);
         }
-
-        continue;
-
-    error:
-        delete[] phents;
-        delete[] shents;
-        kill_current(-1);
     }
 
-    for (int i = 0; i < hdr.shnum; ++i) {
-        if (shents[i].sh_type == elf32_section_header_entry::SHT_NOBITS)
-            memset((char*)shents[i].sh_addr, 0x00, shents[i].sh_size);
+    for (const auto& shent : shents) {
+        if (shent.sh_type == elf32_section_header_entry::SHT_NOBITS)
+            memset((char*)shent.sh_addr, 0x00, shent.sh_size);
     }
 
     // map stack area
@@ -191,9 +176,6 @@ int types::elf::elf32_load(types::elf::elf32_load_data* d)
 
     // push argc
     _user_push(sp, args.size());
-
-    delete[] phents;
-    delete[] shents;
 
     return GB_OK;
 }

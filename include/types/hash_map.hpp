@@ -196,21 +196,13 @@ protected:
 
 public:
     explicit constexpr hash_map(void)
-        : buckets(INITIAL_BUCKETS_ALLOCATED)
-    {
-        for (size_type i = 0; i < INITIAL_BUCKETS_ALLOCATED; ++i)
-            buckets.emplace_back();
-    }
+        : buckets(INITIAL_BUCKETS_ALLOCATED) {}
 
     constexpr hash_map(const hash_map& v)
-        : buckets(v.buckets)
-    {
-    }
+        : buckets(v.buckets) {}
 
     constexpr hash_map(hash_map&& v)
-        : buckets(std::move(v.buckets))
-    {
-    }
+        : buckets(std::move(v.buckets)) {}
 
     constexpr ~hash_map()
     {
@@ -276,8 +268,8 @@ public:
 
     constexpr void clear(void)
     {
-        for (size_t i = 0; i < buckets.size(); ++i)
-            buckets.at(i).clear();
+        for (auto& bucket : buckets)
+            bucket.clear();
     }
 };
 

@@ -20,6 +20,14 @@ constexpr auto invoke(Func&& func, Args&&... args)
     return __helpers::INVOKE(std::forward<Func>(func), std::forward<Args>(args)...);
 }
 
+template <typename R, typename Func, typename... Args>
+constexpr auto invoke_r(Func&& func, Args&&... args)
+    noexcept(std::is_nothrow_invocable_r_v<R, Func, Args...>)
+    -> std::enable_if_t<std::is_invocable_r_v<R, Func, Args...>, R>
+{
+    return __helpers::INVOKE_R<R>(std::forward<Func>(func), std::forward<Args>(args)...);
+}
+
 namespace __helpers {
 template <typename T> constexpr void __reference_wrapper_check(T&) noexcept {}
 template <typename T> void __reference_wrapper_check(T&&) = delete;

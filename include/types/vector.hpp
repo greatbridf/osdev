@@ -173,6 +173,9 @@ public:
 
     constexpr void resize(size_type n)
     {
+        if (m_size == n)
+            return;
+
         value_type* new_ptr = allocator_traits<allocator_type>::allocate(n);
         assert(!n || (n && new_ptr));
 

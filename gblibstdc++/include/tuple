@@ -257,8 +257,8 @@ public:
     
     // TODO: std::pair constructors
 
-    tuple(const tuple&) = default;
-    tuple(tuple&&) = default;
+    constexpr tuple(const tuple&) = default;
+    constexpr tuple(tuple&&) = default;
 
     constexpr tuple& operator=(const tuple& other) = default;
     constexpr tuple& operator=(tuple&& other) = default;

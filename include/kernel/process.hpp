@@ -180,7 +180,7 @@ public:
         {
             int fd = 0;
 
-            for (auto&& [ item_fd, iter_file ] : arr) {
+            for (auto [ item_fd, iter_file ] : arr) {
                 if (item_fd == fd)
                     ++fd;
             }
@@ -221,9 +221,9 @@ public:
 
         constexpr void dup_all(const filearr& orig)
         {
-            for (auto&& [ fd, file ] : orig.arr) {
-                this->arr.insert(types::make_pair(fd, file));
-                ++file->ref;
+            for (auto [ fd, iter_file ] : orig.arr) {
+                this->arr.insert(types::make_pair(fd, iter_file));
+                ++iter_file->ref;
             }
         }
 

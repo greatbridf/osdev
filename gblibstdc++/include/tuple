@@ -1,0 +1,373 @@
+#ifndef __GBLIBCPP_TUPLE__
+#define __GBLIBCPP_TUPLE__
+
+#include <cstddef>
+#include <type_traits>
+#include <utility>
+
+#include <functional>
+
+namespace std {
+
+template <std::size_t I, typename T>
+struct tuple_element;
+
+template <std::size_t I, typename T>
+using tuple_element_t = typename tuple_element<I, T>::type;
+
+template <typename T>
+struct tuple_size;
+
+template <typename T>
+inline constexpr std::size_t tuple_size_v = tuple_size<T>::value;
+
+template <std::size_t I, typename T>
+struct tuple_element<I, const T> {
+    using type = std::add_const_t<tuple_element_t<I, T>>;
+};
+template <std::size_t I, typename T>
+struct tuple_element<I, volatile T> {
+    using type = std::add_volatile_t<tuple_element_t<I, T>>;
+};
+template <std::size_t I, typename T>
+struct tuple_element<I, const volatile T> {
+    using type = std::add_cv_t<tuple_element_t<I, T>>;
+};
+
+namespace __helpers {
+
+template <typename T, typename = void>
+struct __const_tuple_size {};
+
+template <typename T>
+struct __const_tuple_size<T, void_t<decltype(std::tuple_size<T>::value)>>
+    : std::integral_constant<std::size_t, std::tuple_size<T>::value> {};
+
+} // namespace __helpers
+
+template <typename T>
+struct tuple_size<const T> : __helpers::__const_tuple_size<T> {};
+
+template <typename... Types>
+class tuple;
+
+template <std::size_t I, typename Type, typename... Types>
+struct tuple_element<I, std::tuple<Type, Types...>>
+    : tuple_element<I-1, std::tuple<Types...>> {};
+
+template <typename Type, typename... Types>
+struct tuple_element<0, std::tuple<Type, Types...>> { using type = Type; };
+
+template <typename... Types>
+struct tuple_size<std::tuple<Types...>>
+    : std::integral_constant<std::size_t, sizeof...(Types)> {};
+
+template <std::size_t I, typename... Types>
+constexpr auto get(std::tuple<Types...>& tpl) noexcept
+    -> tuple_element_t<I, std::tuple<Types...>>&
+{ return tpl.template _getl<I>(); }
+
+template <std::size_t I, typename... Types>
+constexpr auto get(std::tuple<Types...>&& tpl) noexcept
+    -> tuple_element_t<I, std::tuple<Types...>>&&
+{ return tpl.template _getr<I>(); }
+
+template <std::size_t I, typename... Types>
+constexpr auto get(const std::tuple<Types...>& tpl) noexcept
+    -> tuple_element_t<I, std::tuple<Types...>> const&
+{ return tpl.template _getl<I>(); }
+
+template <std::size_t I, typename... Types>
+constexpr auto get(const std::tuple<Types...>&& tpl) noexcept
+    -> tuple_element_t<I, std::tuple<Types...>> const&&
+{ return tpl.template _getr<I>(); }
+
+namespace __helpers {
+
+template <std::size_t I, typename Type, typename... Types>
+class tuple_impl {
+    template <std::size_t, typename, typename...>
+    friend class tuple_impl;
+
+    template <std::size_t J, typename... UTypes>
+    friend constexpr auto std::get(std::tuple<UTypes...>& tpl) noexcept
+        -> tuple_element_t<J, std::tuple<UTypes...>>&;
+    template <std::size_t J, typename... UTypes>
+    friend constexpr auto std::get(std::tuple<UTypes...>&& tpl) noexcept
+        -> tuple_element_t<J, std::tuple<UTypes...>>&&;
+    template <std::size_t J, typename... UTypes>
+    friend constexpr auto std::get(const std::tuple<UTypes...>& tpl) noexcept
+        -> tuple_element_t<J, std::tuple<UTypes...>> const&;
+    template <std::size_t J, typename... UTypes>
+    friend constexpr auto std::get(const std::tuple<UTypes...>&& tpl) noexcept
+        -> tuple_element_t<J, std::tuple<UTypes...>> const&&;
+
+    Type val;
+    tuple_impl<I+1, Types...> next;
+
+    template <std::size_t J>
+    constexpr auto& _getl(void)
+    {
+        if constexpr (I == J)
+            return val;
+        else
+            return next.template _getl<J>();
+    }
+
+    template <std::size_t J>
+    constexpr const auto& _getl(void) const
+    {
+        if constexpr (I == J)
+            return val;
+        else
+            return next.template _getl<J>();
+    }
+
+    template <std::size_t J>
+    constexpr auto&& _getr(void)
+    {
+        if constexpr (I == J)
+            return std::move(val);
+        else
+            return std::move(next.template _getr<J>());
+    }
+
+    template <std::size_t J>
+    constexpr const auto&& _getr(void) const
+    {
+        if constexpr (I == J)
+            return std::move(val);
+        else
+            return std::move(next.template _getr<J>());
+    }
+
+public:
+    constexpr tuple_impl()
+        : val(), next() {}
+    
+    constexpr tuple_impl(const tuple_impl& arg) = default;
+    constexpr tuple_impl(tuple_impl&& arg) = default;
+
+    constexpr tuple_impl(const Type& val, const Types&... vals)
+        : val(val), next(vals...) {}
+    
+    template <typename UType, typename... UTypes>
+    constexpr tuple_impl(UType&& val, UTypes&&... vals)
+        : val(std::forward<UType>(val)), next(std::forward<UTypes>(vals)...) {}
+
+    template <typename... UTypes>
+    constexpr tuple_impl(const std::tuple<UTypes...>& other)
+        : val(std::get<I>(other)), next(other) {}
+    template <typename... UTypes>
+    constexpr tuple_impl(std::tuple<UTypes...>&& other)
+        : val(std::get<I>(other)), next(std::move(other)) {}
+    
+    constexpr tuple_impl& operator=(const tuple_impl& other) = default;
+    constexpr tuple_impl& operator=(tuple_impl&& other) = default;
+};
+
+template <std::size_t I, typename Type>
+class tuple_impl<I, Type> {
+    template <std::size_t, typename, typename...>
+    friend class tuple_impl;
+
+    template <std::size_t J, typename... UTypes>
+    friend constexpr auto std::get(std::tuple<UTypes...>& tpl) noexcept
+        -> tuple_element_t<J, std::tuple<UTypes...>>&;
+    template <std::size_t J, typename... UTypes>
+    friend constexpr auto std::get(std::tuple<UTypes...>&& tpl) noexcept
+        -> tuple_element_t<J, std::tuple<UTypes...>>&&;
+    template <std::size_t J, typename... UTypes>
+    friend constexpr auto std::get(const std::tuple<UTypes...>& tpl) noexcept
+        -> tuple_element_t<J, std::tuple<UTypes...>> const&;
+    template <std::size_t J, typename... UTypes>
+    friend constexpr auto std::get(const std::tuple<UTypes...>&& tpl) noexcept
+        -> tuple_element_t<J, std::tuple<UTypes...>> const&&;
+
+    Type val;
+
+    template <std::size_t>
+    constexpr Type& _getl(void) { return val; }
+    template <std::size_t>
+    constexpr Type const& _getl(void) const { return val; }
+    template <std::size_t>
+    constexpr Type&& _getr(void) { return std::move(val); }
+    template <std::size_t>
+    constexpr Type const&& _getr(void) const { return std::move(val); }
+
+public:
+    constexpr tuple_impl()
+        : val() {}
+    
+    constexpr tuple_impl(const tuple_impl& arg) = default;
+    constexpr tuple_impl(tuple_impl&& arg) = default;
+
+    constexpr tuple_impl(const Type& val) : val(val) {}
+
+    template <typename UType>
+    constexpr tuple_impl(UType&& val) : val(std::forward<UType>(val)) {}
+
+    template <typename... UTypes>
+    constexpr tuple_impl(const std::tuple<UTypes...>& other)
+        : val(std::get<I>(other)) {}
+    template <typename... UTypes>
+    constexpr tuple_impl(std::tuple<UTypes...>&& other)
+        : val(std::get<I>(other)) {}
+
+    constexpr tuple_impl& operator=(const tuple_impl& other) = default;
+    constexpr tuple_impl& operator=(tuple_impl&& other) = default;
+};
+
+} // namespace __helpers
+
+template <typename... Types>
+class tuple : public __helpers::tuple_impl<0, Types...> {
+private:
+    using base = __helpers::tuple_impl<0, Types...>;
+
+    template <typename... UTypes, std::size_t... I>
+    constexpr void __copy_assignment(const tuple<UTypes...>& other, std::index_sequence<I...>)
+    { ((std::get<I>(*this) = std::get<I>(other)), ...); }
+
+    template <typename... UTypes, std::size_t... I>
+    constexpr void __move_assignment(tuple<UTypes...>&& other, std::index_sequence<I...>)
+    { ((std::get<I>(*this) = std::forward<UTypes>(std::get<I>(other))), ...); }
+
+public:
+    constexpr tuple() : base() {}
+
+    constexpr tuple(const Types&... args)
+        : base(args...) {}
+    
+    template <typename... UTypes, enable_if_t<
+        sizeof...(UTypes) == sizeof...(Types)
+        && sizeof...(Types) >= 1
+        && !(sizeof...(Types) == 1 && (... && std::is_same_v<tuple, UTypes>))
+    , bool> = true>
+    constexpr tuple(UTypes&&... args)
+        : base(std::forward<UTypes>(args)...) {}
+
+    template <typename... UTypes>
+    constexpr tuple(const tuple<UTypes...>& other)
+        : base(other) {}
+
+    template <typename... UTypes>
+    constexpr tuple(tuple<UTypes...>&& other)
+        : base(std::move(other)) {}
+    
+    // TODO: std::pair constructors
+
+    tuple(const tuple&) = default;
+    tuple(tuple&&) = default;
+
+    constexpr tuple& operator=(const tuple& other) = default;
+    constexpr tuple& operator=(tuple&& other) = default;
+
+    template <typename... UTypes, enable_if_t<
+        sizeof...(Types) == sizeof...(UTypes)
+        && (... && std::is_assignable_v<Types&, const UTypes&>)
+        , bool> = true>
+    constexpr tuple& operator=(const tuple<UTypes...>& other)
+    {
+        __copy_assignment(other, index_sequence_for<Types...> {});
+        return *this;
+    }
+
+    template <typename... UTypes, enable_if_t<
+        sizeof...(Types) == sizeof...(UTypes)
+        && (... && std::is_assignable_v<Types&, UTypes>)
+        , bool> = true>
+    constexpr tuple& operator=(tuple<UTypes...>&& other)
+    {
+        __move_assignment(std::move(other), index_sequence_for<Types...> {});
+        return *this;
+    }
+
+    constexpr void swap(tuple& other) { std::swap(*this, other); }
+};
+
+template <typename... Types>
+tuple(Types...) -> tuple<Types...>;
+
+namespace __helpers {
+
+struct ignore_t {
+    template <typename T>
+    constexpr void operator=(T&&) const noexcept {}
+};
+
+template <typename _T, typename T = std::decay_t<_T>>
+struct __to_tuple_type { using type = T; };
+
+template <typename _T, typename T>
+struct __to_tuple_type<_T, std::reference_wrapper<T>>
+{ using type = std::add_lvalue_reference_t<T>; };
+
+template <typename T, typename Tuple, std::size_t... I>
+constexpr T make_from_tuple_impl(Tuple&& tpl, std::index_sequence<I...>)
+{
+    return T { std::get<I>(std::forward<Tuple>(tpl))... };
+}
+
+template <typename Func, typename Tuple, std::size_t... I>
+constexpr auto apply_impl(Func&& func, Tuple&& tpl, std::index_sequence<I...>)
+{
+    return std::invoke(
+        std::forward<Func>(func),
+        std::get<I>(std::forward<Tuple>(tpl))...);
+}
+
+} // namespace __helpers
+
+inline constexpr __helpers::ignore_t ignore;
+
+template <typename... Types>
+constexpr void swap(std::tuple<Types...>& lhs, std::tuple<Types...>& rhs)
+    noexcept(noexcept(lhs.swap(rhs)))
+{
+    lhs.swap(rhs);
+}
+
+template <typename... Types>
+constexpr auto make_tuple(Types&&... args)
+    -> std::tuple<typename __helpers::__to_tuple_type<Types>::type...>
+{
+    return std::tuple<typename __helpers::__to_tuple_type<Types>::type...>
+        { std::forward<Types>(args)... };
+}
+
+template <typename... Types>
+constexpr std::tuple<Types&...> tie(Types&... args) noexcept
+{
+    return { args... };
+}
+
+template <typename... Types>
+constexpr std::tuple<Types&&...> forward_as_tuple(Types&&... args) noexcept
+{
+    return { std::forward<Types>(args)... };
+}
+
+template <typename T, typename Tuple>
+constexpr T make_from_tuple(Tuple&& tpl)
+{
+    return __helpers::make_from_tuple_impl<T>(
+        std::forward<Tuple>(tpl),
+        std::make_index_sequence<
+            std::tuple_size_v<std::remove_cvref_t<Tuple>>> {}
+    );
+}
+
+template <typename Func, typename Tuple>
+constexpr decltype(auto) apply(Func&& func, Tuple&& tpl)
+{
+    return __helpers::apply_impl(
+        std::forward<Func>(func), std::forward<Tuple>(tpl),
+        std::make_index_sequence<
+            std::tuple_size_v<std::remove_cvref_t<Tuple>>> {}
+    );
+}
+
+} // namespace std
+
+#endif

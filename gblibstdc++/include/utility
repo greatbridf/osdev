@@ -1,6 +1,8 @@
 #ifndef __GBLIBCPP_UTILITY__
 #define __GBLIBCPP_UTILITY__
 
+#include <cstddef>
+
 namespace std {
 
 namespace __helpers {
@@ -41,6 +43,31 @@ constexpr T exchange(T& dst, U&& val)
     dst = forward<U>(val);
     return tmp;
 }
+
+template <typename T>
+constexpr void swap(T& a, T& b)
+{
+    T tmp(std::move(a));
+    a = std::move(b);
+    b = std::move(tmp);
+}
+
+template <typename T, T... Ints>
+struct integer_sequence {
+    static constexpr std::size_t size() noexcept { return sizeof...(Ints); }
+};
+
+template <std::size_t... Indicies>
+using index_sequence = integer_sequence<std::size_t, Indicies...>;
+
+template <std::size_t N, std::size_t... Indicies>
+struct make_index_sequence : public make_index_sequence<N-1, N-1, Indicies...> {};
+
+template <std::size_t... Indicies>
+struct make_index_sequence<0, Indicies...> : public index_sequence<Indicies...> {};
+
+template <typename... Ts>
+using index_sequence_for = make_index_sequence<sizeof...(Ts)>;
 
 } // namespace std
 

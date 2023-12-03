@@ -157,8 +157,8 @@ class mapIteratorPrinter:
         if self.val['p'] == 0:
             return
         
-        yield '[key]', self.val['p']['v']['key']
-        yield '[value]', self.val['p']['v']['value']
+        yield '[first]', self.val['p']['v']['first']
+        yield '[second]', self.val['p']['v']['second']
 
 class vectorIteratorPrinter:
     def __init__(self, val):

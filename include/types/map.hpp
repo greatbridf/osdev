@@ -3,7 +3,6 @@
 #include <type_traits>
 
 #include <types/allocator.hpp>
-#include <types/pair.hpp>
 #include <types/types.h>
 
 namespace types {
@@ -13,7 +12,7 @@ class map {
 public:
     using key_type = std::add_const_t<Key>;
     using value_type = Value;
-    using pair_type = pair<key_type, value_type>;
+    using pair_type = std::pair<key_type, value_type>;
 
     struct node {
         node* parent = nullptr;
@@ -517,13 +516,11 @@ private:
 
     constexpr node* _find(const key_type& key) const
     {
-        node* cur = root;
-
-        for (; cur;) {
-            if (cur->v.key == key)
+        for (node* cur = root; cur;) {
+            if (cur->v.first == key)
                 return cur;
 
-            if (key < cur->v.key)
+            if (key < cur->v.first)
                 cur = cur->left;
             else
                 cur = cur->right;
@@ -633,12 +630,12 @@ public:
         return const_iterator_type(_find(key));
     }
 
-    constexpr iterator_type insert(pair_type&& val)
+    constexpr iterator_type insert(pair_type val)
     {
         node* cur = root;
 
         while (likely(cur)) {
-            if (val.key < cur->v.key) {
+            if (val.first < cur->v.first) {
                 if (!cur->left) {
                     node* nd = newnode(cur, std::move(val));
                     cur->left = nd;

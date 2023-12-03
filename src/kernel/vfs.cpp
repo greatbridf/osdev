@@ -1,4 +1,5 @@
 #include <bit>
+#include <utility>
 
 #include <assert.h>
 #include <kernel/errno.h>
@@ -11,7 +12,6 @@
 #include <types/allocator.hpp>
 #include <types/list.hpp>
 #include <types/map.hpp>
-#include <types/pair.hpp>
 #include <types/status.h>
 #include <types/string.hpp>
 #include <types/vector.hpp>
@@ -99,12 +99,12 @@ fs::vfs::dentry* fs::vfs::dentry::find(const name_type& name)
         return nullptr;
     }
 
-    return iter->value;
+    return iter->second;
 }
 fs::vfs::dentry* fs::vfs::dentry::replace(dentry* val)
 {
     // TODO: prevent the dirent to be swapped out of memory
-    parent->idx_children->find(this->name)->value = val;
+    parent->idx_children->find(this->name)->second = val;
     return this;
 }
 void fs::vfs::dentry::invalidate(void)
@@ -121,15 +121,15 @@ fs::vfs::vfs(void)
 }
 fs::inode* fs::vfs::cache_inode(inode_flags flags, uint32_t perm, size_t size, ino_t ino)
 {
-    auto iter = _inodes.insert(types::make_pair(ino, inode { flags, perm, ino, this, size }));
-    return &iter->value;
+    auto iter = _inodes.insert(std::make_pair(ino, inode { flags, perm, ino, this, size }));
+    return &iter->second;
 }
 fs::inode* fs::vfs::get_inode(ino_t ino)
 {
     auto iter = _inodes.find(ino);
     // TODO: load inode from disk if not found
     if (iter)
-        return &iter->value;
+        return &iter->second;
     else
         return nullptr;
 }
@@ -255,12 +255,12 @@ private:
     }
     inline void* _getdata(fs::ino_t ino) const
     {
-        return inode_data.find(ino)->value;
+        return inode_data.find(ino)->second;
     }
     inline fs::ino_t _savedata(void* data)
     {
         fs::ino_t ino = _assign_ino();
-        inode_data.insert(types::make_pair(ino, data));
+        inode_data.insert(std::make_pair(ino, data));
         return ino;
     }
     inline fs::ino_t _savedata(ptr_t data)

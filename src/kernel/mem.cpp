@@ -386,8 +386,9 @@ void* kernel::pmap(page_t pg)
 
     auto iter = __physmapper::mapped.find(pg);
     if (iter) {
-        ++iter->value.ref;
-        return iter->value.ptr;
+        auto [ idx, area ] = *iter;
+        ++area.ref;
+        return area.ptr;
     }
 
     for (int i = 2; i < 0x400; ++i) {
@@ -416,7 +417,7 @@ void kernel::pfree(page_t pg)
     auto iter = __physmapper::mapped.find(pg);
     if (!iter)
         return;
-    auto& [ ref, ptr ] = iter->value;
+    auto& [ ref, ptr ] = iter->second;
 
     if (ref > 1) {
         --ref;

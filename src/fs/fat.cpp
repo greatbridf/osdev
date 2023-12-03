@@ -41,8 +41,9 @@ char* fat32::read_cluster(cluster_t no)
 {
     auto iter = buf.find(no);
     if (iter) {
-        ++iter->value.ref;
-        return iter->value.data;
+        auto [ idx, buf ] = *iter;
+        ++buf.ref;
+        return buf.data;
     }
     auto* data = new char[sectors_per_cluster * SECTOR_SIZE];
     _raw_read_cluster(data, no);
@@ -59,7 +60,7 @@ void fat32::release_cluster(cluster_t no)
 {
     auto iter = buf.find(no);
     if (iter)
-        --iter->value.ref;
+        --iter->second.ref;
 }
 
 int fat32::inode_readdir(fs::inode* dir, size_t offset, fs::vfs::filldir_func filldir)

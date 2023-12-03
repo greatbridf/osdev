@@ -237,7 +237,7 @@ void kernel_threadd_main(void)
 void NORETURN _kernel_init(void)
 {
     // pid 2 is kernel thread daemon
-    auto* proc = &procs->emplace(1)->value;
+    auto* proc = &procs->emplace(1)->second;
 
     // create thread
     thread thd(proc, true);
@@ -344,7 +344,7 @@ void NORETURN init_scheduler(void)
     process::filearr::init_global_file_container();
 
     // init process has no parent
-    auto* init = &procs->emplace(0)->value;
+    auto* init = &procs->emplace(0)->second;
     init->files.open("/dev/console", O_RDONLY);
     init->files.open("/dev/console", O_WRONLY);
     init->files.open("/dev/console", O_WRONLY);

@@ -7,7 +7,6 @@
 #include <types/allocator.hpp>
 #include <types/cplusplus.hpp>
 #include <types/list.hpp>
-#include <types/pair.hpp>
 #include <types/string.hpp>
 #include <types/types.h>
 #include <types/vector.hpp>
@@ -100,7 +99,7 @@ public:
 
     using key_type = std::add_const_t<Key>;
     using value_type = Value;
-    using pair_type = pair<key_type, value_type>;
+    using pair_type = std::pair<key_type, value_type>;
     using size_type = size_t;
     using difference_type = ssize_t;
     using iterator_type = iterator<pair_type*>;
@@ -209,16 +208,16 @@ public:
         buckets.clear();
     }
 
-    constexpr void emplace(pair_type&& p)
+    constexpr void emplace(pair_type p)
     {
-        auto hash_value = hasher_type::hash(p.key, hash_length());
+        auto hash_value = hasher_type::hash(p.first, hash_length());
         buckets.at(hash_value).push_back(std::move(p));
     }
 
     template <typename _key_type, typename _value_type>
     constexpr void emplace(_key_type&& key, _value_type&& value)
     {
-        emplace(make_pair(std::forward<_key_type>(key), std::forward<_value_type>(value)));
+        emplace(std::make_pair(std::forward<_key_type>(key), std::forward<_value_type>(value)));
     }
 
     constexpr void remove(const key_type& key)
@@ -226,7 +225,7 @@ public:
         auto hash_value = hasher_type::hash(key, hash_length());
         auto& bucket = buckets.at(hash_value);
         for (auto iter = bucket.begin(); iter != bucket.end(); ++iter) {
-            if (iter->key == key) {
+            if (iter->first == key) {
                 bucket.erase(iter);
                 return;
             }
@@ -235,12 +234,12 @@ public:
 
     constexpr void remove(iterator_type iter)
     {
-        remove(iter->key);
+        remove(iter->first);
         iter.p = nullptr;
     }
     constexpr void remove(const_iterator_type iter)
     {
-        remove(iter->key);
+        remove(iter->first);
         iter.p = nullptr;
     }
 
@@ -249,7 +248,7 @@ public:
         auto hash_value = hasher_type::hash(key, hash_length());
         auto& bucket = buckets.at(hash_value);
         for (auto& item : bucket) {
-            if (key == item.key)
+            if (key == item.first)
                 return iterator_type(&item);
         }
         return iterator_type(nullptr);

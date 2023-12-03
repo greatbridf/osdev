@@ -18,7 +18,6 @@
 #include <types/hash_map.hpp>
 #include <types/list.hpp>
 #include <types/map.hpp>
-#include <types/pair.hpp>
 #include <types/status.h>
 #include <types/string.hpp>
 #include <types/types.h>
@@ -214,15 +213,17 @@ public:
             if (!iter)
                 return -EBADF;
 
-            this->arr.insert(types::make_pair(new_fd, iter->value));
-            ++iter->value->ref;
+            auto [ _, iter_file ] = *iter;
+
+            this->arr.insert(std::make_pair(new_fd, iter_file));
+            ++iter_file->ref;
             return new_fd;
         }
 
         constexpr void dup_all(const filearr& orig)
         {
             for (auto [ fd, iter_file ] : orig.arr) {
-                this->arr.insert(types::make_pair(fd, iter_file));
+                this->arr.insert(std::make_pair(fd, iter_file));
                 ++iter_file->ref;
             }
         }
@@ -232,7 +233,7 @@ public:
             auto iter = arr.find(i);
             if (!iter)
                 return nullptr;
-            return &iter->value;
+            return &iter->second;
         }
 
         int pipe(int pipefd[2])
@@ -252,7 +253,7 @@ public:
                 },
             });
             int fd = _next_fd();
-            arr.insert(types::make_pair(fd, iter));
+            arr.insert(std::make_pair(fd, iter));
 
             // TODO: use copy_to_user()
             pipefd[0] = fd;
@@ -269,7 +270,7 @@ public:
                 },
             });
             fd = _next_fd();
-            arr.insert(types::make_pair(fd, iter));
+            arr.insert(std::make_pair(fd, iter));
 
             // TODO: use copy_to_user()
             pipefd[1] = fd;
@@ -306,7 +307,7 @@ public:
             });
 
             int fd = _next_fd();
-            arr.insert(types::make_pair(fd, iter));
+            arr.insert(std::make_pair(fd, iter));
             return fd;
         }
 
@@ -314,7 +315,7 @@ public:
         {
             auto iter = arr.find(fd);
             if (iter) {
-                _close(iter->value);
+                _close(iter->second);
                 arr.erase(iter);
             }
         }
@@ -400,7 +401,7 @@ public:
         process _proc(std::forward<Args>(args)...);
         auto pid = _proc.pid;
         auto ppid = _proc.ppid;
-        auto iter = m_procs.insert(types::make_pair(pid, std::move(_proc)));
+        auto iter = m_procs.insert(std::make_pair(pid, std::move(_proc)));
 
         auto children = m_child_idx.find(ppid);
         if (!children) {
@@ -408,7 +409,7 @@ public:
             children = m_child_idx.find(ppid);
         }
 
-        children->value.push_back(pid);
+        children->second.push_back(pid);
 
         return iter;
     }
@@ -418,9 +419,9 @@ public:
         auto iter = m_tty_idx.find(pid);
         _tty->set_pgrp(pid);
         if (iter) {
-            iter->value = _tty;
+            iter->second = _tty;
         } else {
-            m_tty_idx.insert(types::make_pair(pid, _tty));
+            m_tty_idx.insert(std::make_pair(pid, _tty));
         }
     }
 
@@ -429,7 +430,7 @@ public:
         auto iter = m_tty_idx.find(pid);
         if (!iter)
             return nullptr;
-        return iter->value;
+        return iter->second;
     }
 
     constexpr void remove(pid_t pid)
@@ -437,9 +438,9 @@ public:
         make_children_orphans(pid);
 
         auto proc_iter = m_procs.find(pid);
-        auto ppid = proc_iter->value.ppid;
+        auto ppid = proc_iter->second.ppid;
 
-        auto& parent_children = m_child_idx.find(ppid)->value;
+        auto& [ idx, parent_children ] = *m_child_idx.find(ppid);
 
         auto i = parent_children.find(pid);
         parent_children.erase(i);
@@ -452,13 +453,13 @@ public:
         auto iter = m_procs.find(pid);
         // TODO: change this
         assert(!!iter);
-        return &iter->value;
+        return &iter->second;
     }
 
     constexpr bool has_child(pid_t pid)
     {
         auto children = m_child_idx.find(pid);
-        return children && !children->value.empty();
+        return children && !children->second.empty();
     }
 
     constexpr void make_children_orphans(pid_t pid)
@@ -469,8 +470,8 @@ public:
         if (!children || !init_children)
             return;
 
-        for (auto item : children->value) {
-            init_children->value.push_back(item);
+        for (auto item : children->second) {
+            init_children->second.push_back(item);
             find(item)->ppid = 1;
         }
 

@@ -25,7 +25,7 @@ syscall_handler syscall_handlers[SYSCALL_HANDLERS_SIZE];
 extern "C" void _syscall_stub_fork_return(void);
 int _syscall_fork(interrupt_stack* data)
 {
-    auto* newproc = &procs->emplace(*current_process)->value;
+    auto* newproc = &procs->emplace(*current_process)->second;
     auto* newthd = &newproc->thds.Emplace(*current_thread, newproc);
     readythds->push(newthd);
 

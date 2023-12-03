@@ -1,0 +1,46 @@
+#ifndef __GBLIBCPP_BITS_TYPE_TRAITS_BASE__
+#define __GBLIBCPP_BITS_TYPE_TRAITS_BASE__
+
+#include <cstddef>
+
+namespace std {
+
+template <typename... Ts>
+using void_t = void;
+
+template <typename T, T _value>
+struct integral_constant {
+    using value_type = T;
+    using type = integral_constant;
+
+    static constexpr value_type value = _value;
+    constexpr operator value_type() const noexcept { return value; }
+    constexpr value_type operator()() const noexcept { return value; }
+};
+
+template <bool _value>
+using bool_constant = integral_constant<bool, _value>;
+
+using true_type = bool_constant<true>;
+using false_type = bool_constant<false>;
+
+template <bool condition, typename T, typename F>
+struct conditional { using type = F; };
+template <typename T, typename F>
+struct conditional<true, T, F> { using type = T; };
+
+template <bool condition, typename T, typename F>
+using conditional_t = typename conditional<condition, T, F>::type;
+
+namespace __helpers {
+
+template <typename>
+struct template_true_type : public true_type {};
+template <typename>
+struct template_false_type : public false_type {};
+
+} // namespace __helpers
+
+} // namespace std
+
+#endif

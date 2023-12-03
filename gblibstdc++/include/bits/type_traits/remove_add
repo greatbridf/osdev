@@ -1,0 +1,123 @@
+#ifndef __GBLIBCPP_BITS_TYPE_TRAITS_REMOVE_ADD__
+#define __GBLIBCPP_BITS_TYPE_TRAITS_REMOVE_ADD__
+
+#include <cstddef>
+
+#include <bits/type_traits/is_es>
+
+namespace std {
+
+// REMOVES
+
+template <typename T>
+struct remove_reference { using type = T; };
+template <typename T>
+struct remove_reference<T&> { using type = T; };
+template <typename T>
+struct remove_reference<T&&> { using type = T; };
+
+template <typename T>
+using remove_reference_t = typename remove_reference<T>::type;
+
+template <typename T>
+struct remove_pointer { using type = T; };
+template <typename T>
+struct remove_pointer<T*> { using type = T; };
+template <typename T>
+struct remove_pointer<T* const> { using type = T; };
+template <typename T>
+struct remove_pointer<T* volatile> { using type = T; };
+template <typename T>
+struct remove_pointer<T* const volatile> { using type = T; };
+
+template <typename T>
+using remove_pointer_t = typename remove_pointer<T>::type;
+
+template <typename T>
+struct remove_extent { using type = T; };
+template <typename T>
+struct remove_extent<T[]> { using type = T; };
+template <typename T, std::size_t N>
+struct remove_extent<T[N]> { using type = T; };
+
+template <typename T>
+using remove_extent_t = typename remove_extent<T>::type;
+
+template <typename T>
+struct remove_cv { using type = T; };
+template <typename T>
+struct remove_cv<T const> { using type = T; };
+template <typename T>
+struct remove_cv<T volatile> { using type = T; };
+template <typename T>
+struct remove_cv<T const volatile> { using type = T; };
+
+template <typename T>
+using remove_cv_t = typename remove_cv<T>::type;
+
+template <typename T>
+struct remove_cvref {
+    using type = remove_cv_t<remove_reference_t<T>>;
+};
+
+template <typename T>
+using remove_cvref_t = typename remove_cvref<T>::type;
+
+// ADDS
+
+template <typename T>
+struct add_pointer { using type = remove_reference_t<T>*; };
+
+template <typename T>
+using add_pointer_t = typename add_pointer<T>::type;
+
+namespace __helpers {
+
+template <typename T, typename = void> // for cv-void
+struct add_rvalue_reference { using type = T; };
+template <typename T> // cv-void will fail in substitution
+struct add_rvalue_reference<T, void_t<T&&> > { using type = T&&; };
+
+template <typename T, typename = void> // for cv-void
+struct add_lvalue_reference { using type = T; };
+template <typename T> // cv-void will fail in substitution
+struct add_lvalue_reference<T, void_t<T&> > { using type = T&; };
+
+} // namespace __helpers
+
+template <typename T>
+struct add_rvalue_reference {
+    using type = typename __helpers::add_rvalue_reference<T>::type;
+};
+template <typename T>
+struct add_lvalue_reference {
+    using type = typename __helpers::add_lvalue_reference<T>::type;
+};
+
+template <typename T>
+using add_rvalue_reference_t = typename add_rvalue_reference<T>::type;
+template <typename T>
+using add_lvalue_reference_t = typename add_lvalue_reference<T>::type;
+
+template <typename T>
+struct decay {
+private:
+    using U = remove_reference_t<T>;
+public:
+    using type = conditional_t<
+        is_array_v<U>,
+        add_pointer_t<remove_extent_t<U>>,
+        conditional_t<
+            is_function_v<U>,
+            add_pointer_t<U>,
+            remove_cv_t<U>
+        >
+    >;
+};
+
+template <typename T>
+using decay_t = typename decay<T>::type;
+
+} // namespace std
+
+#endif

@@ -1,0 +1,27 @@
+#ifndef __GBLIBCPP_BITS_SEQUENCE__
+#define __GBLIBCPP_BITS_SEQUENCE__
+
+#include <cstddef>
+
+namespace std {
+
+template <typename T, T... Ints>
+struct integer_sequence {
+    static constexpr std::size_t size() noexcept { return sizeof...(Ints); }
+};
+
+template <std::size_t... Indicies>
+using index_sequence = integer_sequence<std::size_t, Indicies...>;
+
+template <std::size_t N, std::size_t... Indicies>
+struct make_index_sequence : public make_index_sequence<N-1, N-1, Indicies...> {};
+
+template <std::size_t... Indicies>
+struct make_index_sequence<0, Indicies...> : public index_sequence<Indicies...> {};
+
+template <typename... Ts>
+using index_sequence_for = make_index_sequence<sizeof...(Ts)>;
+
+} // namespace std
+
+#endif

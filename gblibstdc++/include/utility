@@ -2,39 +2,13 @@
 #define __GBLIBCPP_UTILITY__
 
 #include <cstddef>
+#include <bits/forward>
+#include <bits/sequence>
+#include <bits/tuple_tools>
+
+#include <type_traits>
 
 namespace std {
-
-namespace __helpers {
-template <typename T>
-struct __utility_remove_reference { using type = T; };
-template <typename T>
-struct __utility_remove_reference<T&> { using type = T; };
-template <typename T>
-struct __utility_remove_reference<T&&> { using type = T; };
-};
-
-template <typename T>
-constexpr typename __helpers::__utility_remove_reference<T>::type&&
-move(T&& val) noexcept
-{
-    return static_cast<
-        typename __helpers::__utility_remove_reference<T>::type&&
-        >(val);
-}
-
-template <typename T>
-constexpr T&& forward(
-    typename __helpers::__utility_remove_reference<T>::type& val) noexcept
-{
-    return static_cast<T&&>(val);
-}
-template <typename T>
-constexpr T&& forward(
-    typename __helpers::__utility_remove_reference<T>::type&& val) noexcept
-{
-    return static_cast<T&&>(val);
-}
 
 template <typename T, typename U = T>
 constexpr T exchange(T& dst, U&& val)
@@ -52,22 +26,159 @@ constexpr void swap(T& a, T& b)
     b = std::move(tmp);
 }
 
-template <typename T, T... Ints>
-struct integer_sequence {
-    static constexpr std::size_t size() noexcept { return sizeof...(Ints); }
+struct piecewise_construct_t { explicit piecewise_construct_t() = default; };
+
+inline constexpr piecewise_construct_t piecewise_construct {};
+
+template <typename... Types>
+class tuple;
+
+template <typename T1, typename T2>
+struct pair;
+
+template <typename T1, typename T2>
+struct tuple_size<std::pair<T1, T2>>
+    : public std::integral_constant<std::size_t, 2> {};
+
+template <typename T1, typename T2>
+struct tuple_element<0, std::pair<T1, T2>> { using type = T1; };
+template <typename T1, typename T2>
+struct tuple_element<1, std::pair<T1, T2>> { using type = T2; };
+template <std::size_t I, typename T1, typename T2>
+struct tuple_element<I, std::pair<T1, T2>> {
+    static_assert(I < 2, "std::pair has only 2 elements");
 };
 
-template <std::size_t... Indicies>
-using index_sequence = integer_sequence<std::size_t, Indicies...>;
+template <typename T1, typename T2>
+struct pair {
+    using first_type = T1;
+    using second_type = T2;
 
-template <std::size_t N, std::size_t... Indicies>
-struct make_index_sequence : public make_index_sequence<N-1, N-1, Indicies...> {};
+    T1 first;
+    T2 second;
 
-template <std::size_t... Indicies>
-struct make_index_sequence<0, Indicies...> : public index_sequence<Indicies...> {};
+    template <typename U1 = T1, typename U2 = T2, std::enable_if_t<
+        std::is_default_constructible_v<U1>
+        && std::is_default_constructible_v<U2>
+    , bool> = true>
+    constexpr pair() : first(), second() {}
 
-template <typename... Ts>
-using index_sequence_for = make_index_sequence<sizeof...(Ts)>;
+    template <typename U1 = T1, typename U2 = T2, std::enable_if_t<
+        std::is_copy_constructible_v<U1>
+        && std::is_copy_constructible_v<U2>
+    , bool> = true>
+    constexpr pair(const T1& t1, const T2& t2)
+        : first(t1), second(t2) {}
+
+    template <typename U1, typename U2, std::enable_if_t<
+        std::is_constructible_v<T1, U1> && std::is_constructible_v<T2, U2>
+    , bool> = true>
+    constexpr pair(U1&& t1, U2&& t2)
+        : first(std::forward<U1>(t1))
+        , second(std::forward<U2>(t2)) {}
+
+    template <typename U1, typename U2, std::enable_if_t<
+        std::is_constructible_v<T1, const U1&>
+        && std::is_constructible_v<T2, const U2&>
+    , bool> = true>
+    constexpr pair(const pair<U1, U2>& p)
+        : first(p.first) , second(p.second) {}
+
+    template <typename U1, typename U2, std::enable_if_t<
+        std::is_constructible_v<T1, U1>
+        && std::is_constructible_v<T2, U2>
+    , bool> = true>
+    constexpr pair(pair<U1, U2>&& p)
+        : first(std::forward<U1>(p.first))
+        , second(std::forward<U2>(p.second)) {}
+
+    template <typename... Args1, typename... Args2>
+    constexpr pair(std::piecewise_construct_t,
+        std::tuple<Args1...> first_args,
+        std::tuple<Args2...> second_args)
+        : first(std::make_from_tuple<T1>(std::move(first_args)))
+        , second(std::make_from_tuple<T2>(std::move(second_args))) {}
+
+    constexpr pair(const pair&) = default;
+    constexpr pair(pair&&) = default;
+
+    constexpr pair& operator=(const pair& other) = default;
+    constexpr pair& operator=(pair&& other) = default;
+
+    template <typename U1, typename U2, std::enable_if_t<
+        std::is_assignable_v<T1&, const U1&>
+        && std::is_assignable_v<T2&, const U2&>
+    , bool> = true>
+    constexpr pair& operator=(const pair<U1, U2>& other)
+    {
+        first = other.first;
+        second = other.second;
+        return *this;
+    }
+
+    template <typename U1, typename U2, std::enable_if_t<
+        std::is_assignable_v<T1&, U1>
+        && std::is_assignable_v<T2&, U2>
+    , bool> = true>
+    constexpr pair& operator=(pair<U1, U2>&& other)
+    {
+        first = std::forward<U1>(other.first);
+        second = std::forward<U2>(other.second);
+        return *this;
+    }
+    
+    constexpr void swap(pair& other)
+    {
+        std::swap(first, other.first);
+        std::swap(second, other.second);
+    }
+};
+
+template <typename T1, typename T2>
+pair(T1, T2) -> pair<T1, T2>;
+
+template <typename T1, typename T2>
+constexpr auto make_pair(T1&& t1, T2&& t2)
+    -> std::pair<__helpers::to_tuple_type_t<T1>, __helpers::to_tuple_type_t<T2>>
+{
+    return { std::forward<T1>(t1), std::forward<T2>(t2) };
+}
+
+template <std::size_t I, typename T1, typename T2>
+constexpr auto get(std::pair<T1, T2>& p) noexcept
+    -> std::tuple_element_t<I, std::pair<T1, T2>>&
+{
+    if constexpr (I == 0) return p.first;
+    else return p.second;
+}
+template <std::size_t I, typename T1, typename T2>
+constexpr auto get(std::pair<T1, T2>&& p) noexcept
+    -> std::tuple_element_t<I, std::pair<T1, T2>>&&
+{
+    if constexpr (I == 0) return std::forward<T1>(p.first);
+    else return std::forward<T2>(p.second);
+}
+template <std::size_t I, typename T1, typename T2>
+constexpr auto get(const std::pair<T1, T2>& p) noexcept
+    -> std::tuple_element_t<I, std::pair<T1, T2>> const&
+{
+    if constexpr (I == 0) return p.first;
+    else return p.second;
+}
+template <std::size_t I, typename T1, typename T2>
+constexpr auto get(const std::pair<T1, T2>&& p) noexcept
+    -> std::tuple_element_t<I, std::pair<T1, T2>> const&&
+{
+    if constexpr (I == 0) return std::forward<T1>(p.first);
+    else return std::forward<T2>(p.second);
+}
+
+template <typename T1, typename T2>
+constexpr void swap(std::pair<T1, T2>& lhs, std::pair<T1, T2>& rhs)
+    noexcept(noexcept(lhs.swap(rhs)))
+{
+    lhs.swap(rhs);
+}
 
 } // namespace std
 

@@ -1,0 +1,34 @@
+#ifndef __GBLIBCPP_BITS_FORWARD__
+#define __GBLIBCPP_BITS_FORWARD__
+
+#include <bits/type_traits/remove_add>
+
+namespace std {
+
+template <typename T>
+constexpr std::remove_reference_t<T>&& move(T&& val) noexcept
+{
+    return static_cast<std::remove_reference_t<T>&&>(val);
+}
+
+template <typename T>
+constexpr T&& forward(std::remove_reference_t<T>& val) noexcept
+{
+    return static_cast<T&&>(val);
+}
+template <typename T>
+constexpr T&& forward(std::remove_reference_t<T>&& val) noexcept
+{
+    return static_cast<T&&>(val);
+}
+
+template <typename T>
+add_rvalue_reference_t<T> declval(void) noexcept
+{
+    static_assert(__helpers::template_false_type<T>::value,
+        "declval cannot be evaluated.");
+}
+
+} // namespace std
+
+#endif

@@ -352,25 +352,36 @@ public:
     pid_t pgid;
     pid_t sid;
 
+    tty* control_tty;
+
 public:
     // if waitlist is not empty or mutex in cv_wait
     // is locked, its behavior is undefined
-    process(process&& val);
+    constexpr process(process&& val)
+        : mms(std::move(val.mms))
+        , thds { std::move(val.thds), this }
+        , attr { val.attr }
+        , files(std::move(val.files))
+        , pwd(std::move(val.pwd))
+        , pid(val.pid)
+        , ppid(val.ppid)
+        , pgid(val.pgid)
+        , sid(val.sid)
+    {
+        if (current_process == &val)
+            current_process = this;
+    }
+
     process(const process&);
 
-    explicit process(pid_t ppid,
-        bool system = true,
-        types::string<>&& path = "/",
-        kernel::signal_list&& sigs = {});
+    // this function is used for system initialization
+    // DO NOT use this after the system is on
+    explicit process(pid_t ppid);
 
     constexpr bool is_system(void) const
-    {
-        return attr.system;
-    }
+    { return attr.system; }
     constexpr bool is_zombie(void) const
-    {
-        return attr.zombie;
-    }
+    { return attr.zombie; }
 
 private:
     static inline pid_t max_pid;
@@ -385,14 +396,12 @@ class proclist final {
 public:
     using list_type = types::map<pid_t, process>;
     using child_index_type = types::hash_map<pid_t, types::list<pid_t>>;
-    using tty_index_type = types::map<pid_t, tty*>;
     using iterator_type = list_type::iterator_type;
     using const_iterator_type = list_type::const_iterator_type;
 
 private:
     list_type m_procs;
     child_index_type m_child_idx;
-    tty_index_type m_tty_idx;
 
 public:
     template <typename... Args>
@@ -414,25 +423,6 @@ public:
         return iter;
     }
 
-    constexpr void set_ctrl_tty(pid_t pid, tty* _tty)
-    {
-        auto iter = m_tty_idx.find(pid);
-        _tty->set_pgrp(pid);
-        if (iter) {
-            iter->second = _tty;
-        } else {
-            m_tty_idx.insert(std::make_pair(pid, _tty));
-        }
-    }
-
-    constexpr tty* get_ctrl_tty(pid_t pid)
-    {
-        auto iter = m_tty_idx.find(pid);
-        if (!iter)
-            return nullptr;
-        return iter->second;
-    }
-
     constexpr void remove(pid_t pid)
     {
         make_children_orphans(pid);
@@ -448,12 +438,17 @@ public:
         m_procs.erase(proc_iter);
     }
 
-    constexpr process* find(pid_t pid)
+    constexpr bool try_find(pid_t pid) const
+    {
+        return !!m_procs.find(pid);
+    }
+
+    // if process doesn't exist, the behavior is undefined
+    constexpr process& find(pid_t pid)
     {
         auto iter = m_procs.find(pid);
-        // TODO: change this
         assert(!!iter);
-        return &iter->second;
+        return iter->second;
     }
 
     constexpr bool has_child(pid_t pid)
@@ -472,18 +467,17 @@ public:
 
         for (auto item : children->second) {
             init_children->second.push_back(item);
-            find(item)->ppid = 1;
+            find(item).ppid = 1;
         }
 
         m_child_idx.remove(children);
     }
 
+    // the process MUST exist, or the behavior is undefined
     void send_signal(pid_t pid, kernel::sig_t signal)
     {
-        auto iter = this->find(pid);
-        if (!iter)
-            return;
-        iter->signals.set(signal);
+        auto proc = this->find(pid);
+        proc.signals.set(signal);
     }
     void send_signal_grp(pid_t pgid, kernel::sig_t signal)
     {

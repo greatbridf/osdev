@@ -301,7 +301,8 @@ int _syscall_setsid(interrupt_stack*)
     current_process->pgid = current_process->pid;
 
     // TODO: get tty* from fd or block device id
-    procs->set_ctrl_tty(current_process->pid, console);
+    console->set_pgrp(current_process->pid);
+    current_process->control_tty = console;
 
     return current_process->pid;
 }
@@ -310,13 +311,13 @@ int _syscall_getsid(interrupt_stack* data)
 {
     pid_t pid = data->s_regs.edi;
 
-    auto* proc = procs->find(pid);
-    if (!proc)
+    if (!procs->try_find(pid))
         return -ESRCH;
-    if (proc->sid != current_process->sid)
+    auto& proc = procs->find(pid);
+    if (proc.sid != current_process->sid)
         return -EPERM;
 
-    return proc->sid;
+    return proc.sid;
 }
 
 int _syscall_close(interrupt_stack* data)
@@ -359,14 +360,15 @@ int _syscall_setpgid(interrupt_stack* data)
     if (pgid == 0)
         pgid = pid;
 
-    auto* proc = procs->find(pid);
-    // TODO: check whether the process exists
-    // if (!proc)
-    //     return -ESRCH;
+    if (!procs->try_find(pid))
+        return -ESRCH;
+
+    auto& proc = procs->find(pid);
 
     // TODO: check whether pgid and the original
     //       pgid is in the same session
-    proc->pgid = pgid;
+
+    proc.pgid = pgid;
 
     return 0;
 }
@@ -389,7 +391,7 @@ int _syscall_ioctl(interrupt_stack* data)
     switch (request) {
     case TIOCGPGRP: {
         auto* pgid = (pid_t*)data->s_regs.edx;
-        tty* ctrl_tty = procs->get_ctrl_tty(current_process->pid);
+        tty* ctrl_tty = current_process->control_tty;
         // TODO: copy_to_user
         *pgid = ctrl_tty->get_pgrp();
         break;
@@ -397,7 +399,7 @@ int _syscall_ioctl(interrupt_stack* data)
     case TIOCSPGRP: {
         // TODO: copy_from_user
         pid_t pgid = *(const pid_t*)data->s_regs.edx;
-        tty* ctrl_tty = procs->get_ctrl_tty(current_process->pid);
+        tty* ctrl_tty = current_process->control_tty;
         ctrl_tty->set_pgrp(pgid);
         break;
     }

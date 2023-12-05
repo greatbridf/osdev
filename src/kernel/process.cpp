@@ -92,30 +92,15 @@ void thread::free_kstack(uint32_t p)
     pkstack_bmp->clear(p);
 }
 
-process::process(process&& val)
-    : mms(std::move(val.mms))
-    , thds { std::move(val.thds), this }
-    , attr { val.attr }
-    , files(std::move(val.files))
-    , pwd(std::move(val.pwd))
-    , pid(val.pid)
-    , ppid(val.ppid)
-    , pgid(val.pgid)
-    , sid(val.sid)
-{
-    if (current_process == &val)
-        current_process = this;
-}
-
 process::process(const process& parent)
-    : process { parent.pid,
-        parent.is_system(),
-        types::string<>(parent.pwd),
-        kernel::signal_list(parent.signals) }
+    : mms { *kernel_mms }
+    , attr { .system = parent.is_system() }
+    , pwd { parent.pwd }
+    , signals { parent.signals }
+    , pid { process::alloc_pid() }
+    , ppid { parent.pid } , pgid { parent.pgid } , sid { parent.sid }
+    , control_tty { parent.control_tty }
 {
-    this->pgid = parent.pgid;
-    this->sid = parent.sid;
-
     for (auto& area : parent.mms) {
         if (area.is_kernel_space() || area.attr.in.system)
             continue;
@@ -126,39 +111,32 @@ process::process(const process& parent)
     this->files.dup_all(parent.files);
 }
 
-process::process(pid_t _ppid,
-    bool _system,
-    types::string<>&& path,
-    kernel::signal_list&& _sigs)
+process::process(pid_t ppid)
     : mms(*kernel_mms)
-    , attr { .system = _system }
-    , pwd { std::move(path) }
-    , signals(std::move(_sigs))
+    , attr { .system = true }
+    , pwd { "/" }
     , pid { process::alloc_pid() }
-    , ppid { _ppid }
-    , pgid { 0 }
-    , sid { 0 }
-{
-}
+    , ppid { ppid }
+    , pgid {} , sid {} , control_tty {} { }
 
 void proclist::kill(pid_t pid, int exit_code)
 {
-    process* proc = this->find(pid);
+    auto& proc = this->find(pid);
 
     // remove threads from ready list
-    for (auto& thd : proc->thds.underlying_list()) {
+    for (auto& thd : proc.thds.underlying_list()) {
         thd.attr.ready = 0;
         readythds->remove_all(&thd);
     }
 
     // write back mmap'ped files and close them
-    proc->files.close_all();
+    proc.files.close_all();
 
     // unmap all user memory areas
-    proc->mms.clear_user();
+    proc.mms.clear_user();
 
     // init should never exit
-    if (proc->ppid == 0) {
+    if (proc.ppid == 0) {
         console->print("kernel panic: init exited!\n");
         assert(false);
     }
@@ -166,38 +144,38 @@ void proclist::kill(pid_t pid, int exit_code)
     // make child processes orphans (children of init)
     this->make_children_orphans(pid);
 
-    proc->attr.zombie = 1;
+    proc.attr.zombie = 1;
 
     // notify parent process and init
-    auto* parent = this->find(proc->ppid);
-    auto* init = this->find(1);
+    auto& parent = this->find(proc.ppid);
+    auto& init = this->find(1);
 
     bool flag = false;
     {
-        auto& mtx = init->cv_wait.mtx();
+        auto& mtx = init.cv_wait.mtx();
         types::lock_guard lck(mtx);
 
         {
-            auto& mtx = proc->cv_wait.mtx();
+            auto& mtx = proc.cv_wait.mtx();
             types::lock_guard lck(mtx);
 
-            for (const auto& item : proc->waitlist) {
-                init->waitlist.push_back(item);
+            for (const auto& item : proc.waitlist) {
+                init.waitlist.push_back(item);
                 flag = true;
             }
 
-            proc->waitlist.clear();
+            proc.waitlist.clear();
         }
     }
     if (flag)
-        init->cv_wait.notify();
+        init.cv_wait.notify();
 
     {
-        auto& mtx = parent->cv_wait.mtx();
+        auto& mtx = parent.cv_wait.mtx();
         types::lock_guard lck(mtx);
-        parent->waitlist.push_back({ pid, exit_code });
+        parent.waitlist.push_back({ pid, exit_code });
     }
-    parent->cv_wait.notify();
+    parent.cv_wait.notify();
 }
 
 void kernel_threadd_main(void)

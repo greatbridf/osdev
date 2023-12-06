@@ -239,25 +239,26 @@ struct rbtree {
 
     using node_allocator = typename
         std::allocator_traits<Allocator>::template rebind_alloc<node>;
+    using node_alloc_traits = std::allocator_traits<node_allocator>;
 
     node* root;
+    std::size_t _size;
     Compare comp;
     node_allocator alloc;
 
 private:
-    template <typename UKey>
-    constexpr node* newnode(UKey&& key)
+    template <typename... Args>
+    constexpr node* newnode(Args&&... key)
     {
-        node* ptr = std::allocator_traits<node_allocator>::allocate(alloc, 1);
-        std::allocator_traits<node_allocator>::construct(
-            alloc, ptr, std::forward<UKey>(key));
+        node* ptr = node_alloc_traits::allocate(alloc, 1);
+        node_alloc_traits::construct(alloc, ptr, std::forward<Args>(key)...);
         return ptr;
     }
 
     constexpr void delnode(node* nd)
     {
-        std::allocator_traits<node_allocator>::destroy(alloc, nd);
-        std::allocator_traits<node_allocator>::deallocate(alloc, nd, 1);
+        node_alloc_traits::destroy(alloc, nd);
+        node_alloc_traits::deallocate(alloc, nd, 1);
     }
 
 public:
@@ -284,7 +285,7 @@ public:
         delnode(nd);
     }
 
-    constexpr void destroy() { destroy(root); root = nullptr; }
+    constexpr void destroy() { destroy(root); root = nullptr; _size = 0; }
 
     constexpr node* copy(node* nd)
     {
@@ -293,6 +294,7 @@ public:
 
         node* newnd = newnode(nd->value);
         newnd->color = nd->color;
+        ++_size;
 
         newnd->left = copy(nd->left);
         if (newnd->left)
@@ -306,7 +308,7 @@ public:
     }
 
     explicit constexpr rbtree(const Compare& comp, const node_allocator& alloc)
-        : root(), comp(comp), alloc(alloc) {}
+        : root(), _size(), comp(comp), alloc(alloc) {}
 
     constexpr rbtree(const rbtree& other)
         : rbtree(other.comp, other.alloc)
@@ -326,10 +328,12 @@ public:
     
     constexpr rbtree(rbtree&& other) noexcept
         : root(std::exchange(other.root, nullptr))
+        , _size(std::exchange(other._size, 0))
         , comp(std::move(other.comp)), alloc(std::move(other.alloc)) {}
 
     constexpr rbtree(rbtree&& other, const node_allocator& alloc) noexcept
         : root(std::exchange(other.root, nullptr))
+        , _size(std::exchange(other._size, 0))
         , comp(std::move(other.comp)), alloc(alloc) {}
     
     constexpr ~rbtree() { destroy(); }
@@ -339,7 +343,8 @@ public:
         destroy(root);
 
         comp = other.comp;
-        alloc = other.alloc;
+        if constexpr (node_alloc_traits::propagate_on_copy_assignment::value)
+            alloc = other.alloc;
 
         root = copy(other.root);
         if (root)
@@ -350,8 +355,10 @@ public:
     {
         destroy(root);
         root = std::exchange(other.root, nullptr);
+        _size = std::exchange(other._size, 0);
         comp = std::move(other.comp);
-        alloc = std::move(other.alloc);
+        if constexpr (node_alloc_traits::propagate_on_move_assignment::value)
+            alloc = std::move(other.alloc);
     }
 
     constexpr void rotateleft(node* rt)
@@ -571,6 +578,7 @@ public:
     {
         node* nextpos = erase(pos.p);
         delnode(pos.p);
+        --_size;
         return iterator { nextpos };
     }
 
@@ -578,6 +586,7 @@ public:
     {
         node* nextpos = erase(pos.p);
         delnode(pos.p);
+        --_size;
         return const_iterator { nextpos };
     }
 
@@ -593,6 +602,7 @@ public:
                     nd->parent = cur;
                     cur->left = nd;
                     this->balance(nd);
+                    ++_size;
                     return;
                 } else {
                     cur = cur->left;
@@ -602,6 +612,7 @@ public:
                     nd->parent = cur;
                     cur->right = nd;
                     this->balance(nd);
+                    ++_size;
                     return;
                 } else {
                     cur = cur->right;
@@ -611,6 +622,7 @@ public:
 
         root = nd;
         root->toblack();
+        ++_size;
     }
 
     template <typename U>
@@ -626,7 +638,30 @@ public:
         return { iterator { ptr }, true };
     }
 
+    template <typename... Args>
+    constexpr std::pair<iterator, bool> emplace(Args&&... args)
+    {
+        node* nd = newnode(std::forward<Args>(args)...);
+        node* exist_nd = _find(nd->value);
+        if (exist_nd) {
+            delnode(nd);
+            return { iterator { exist_nd }, false };
+        }
+        insert(nd);
+        return { iterator { nd }, true };
+    }
+
     constexpr bool empty() const noexcept { return !root; }
+    constexpr std::size_t size() const noexcept { return _size; }
+
+    constexpr void swap(rbtree& other)
+    {
+        std::swap(root, other.root);
+        std::swap(_size, other._size);
+        std::swap(comp, other.comp);
+        if constexpr (node_alloc_traits::propagate_on_container_swap::value)
+            std::swap(alloc, other.alloc);
+    }
 };
 
 } // namespace std::impl

@@ -121,6 +121,10 @@ public:
             insert(*first);
     }
 
+    template <typename... Args>
+    std::pair<iterator, bool> emplace(Args&&... args)
+    { return tree.emplace(std::forward<Args>(args)...); }
+
     __GBLIBCPP_CONSTEXPR
     iterator erase(iterator pos) noexcept { return tree.erase(pos); }
     __GBLIBCPP_CONSTEXPR
@@ -148,7 +152,25 @@ public:
 
     __GBLIBCPP_CONSTEXPR
     bool empty() const noexcept { return tree.empty(); }
+
+    __GBLIBCPP_CONSTEXPR
+    size_type size() const noexcept { return tree.size(); }
+
+    __GBLIBCPP_CONSTEXPR
+    void swap(set& other) { tree.swap(other.tree); }
+
+    __GBLIBCPP_CONSTEXPR
+    size_type count(const Key& key) const
+    { return find(key) ? 1 : 0; }
+
+    __GBLIBCPP_CONSTEXPR
+    bool contains(const Key& key) const { return count(key) != 0; }
 };
+
+template <typename Key, typename Compare, typename Allocator>
+void swap(std::set<Key, Compare, Allocator>& lhs,
+    std::set<Key, Compare, Allocator>& rhs)
+{ lhs.swap(rhs); }
 
 } // namespace std
 

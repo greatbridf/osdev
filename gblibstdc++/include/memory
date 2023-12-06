@@ -34,11 +34,79 @@ constexpr T* addressof(T& arg) noexcept
 template <typename T>
 const T* addressof(const T&&) = delete;
 
+namespace __helpers {
+
+template <typename Alloc, typename = void>
+struct allocator_pointer
+{ using type = std::add_pointer_t<typename Alloc::value_type>; };
+template <typename Alloc>
+struct allocator_pointer<Alloc,
+    std::void_t<typename Alloc::pointer>>
+{ using type = typename Alloc::pointer; };
+template <typename Alloc>
+using allocator_pointer_t =
+    typename allocator_pointer<Alloc>::type;
+
+template <typename Alloc, typename = void>
+struct allocator_difference_type
+{ using type = std::ptrdiff_t; };
+template <typename Alloc>
+struct allocator_difference_type<Alloc,
+    std::void_t<typename Alloc::difference_type>>
+{ using type = typename Alloc::difference_type; };
+template <typename Alloc>
+using allocator_difference_type_t =
+    typename allocator_difference_type<Alloc>::type;
+
+template <typename Alloc, typename = void>
+struct allocator_size_type
+{ using type = std::size_t; };
+template <typename Alloc>
+struct allocator_size_type<Alloc,
+    std::void_t<typename Alloc::size_type>>
+{ using type = typename Alloc::size_type; };
+template <typename Alloc>
+using allocator_size_type_t =
+    typename allocator_size_type<Alloc>::type;
+
+template <typename Alloc, typename = void>
+struct allocator_prop_copy
+{ using type = std::false_type; };
+template <typename Alloc>
+struct allocator_prop_copy<Alloc,
+    std::void_t<typename Alloc::propagate_on_container_copy_assignment>>
+{ using type = typename Alloc::propagate_on_container_copy_assignment; };
+template <typename Alloc>
+using allocator_prop_copy_t =
+    typename allocator_prop_copy<Alloc>::type;
+
+template <typename Alloc, typename = void>
+struct allocator_prop_move
+{ using type = std::false_type; };
+template <typename Alloc>
+struct allocator_prop_move<Alloc,
+    std::void_t<typename Alloc::propagate_on_container_move_assignment>>
+{ using type = typename Alloc::propagate_on_container_move_assignment; };
+template <typename Alloc>
+using allocator_prop_move_t =
+    typename allocator_prop_move<Alloc>::type;
+
+template <typename Alloc, typename = void>
+struct allocator_prop_swap
+{ using type = std::false_type; };
+template <typename Alloc>
+struct allocator_prop_swap<Alloc,
+    std::void_t<typename Alloc::propagate_on_container_swap>>
+{ using type = typename Alloc::propagate_on_container_swap; };
+template <typename Alloc>
+using allocator_prop_swap_t =
+    typename allocator_prop_swap<Alloc>::type;
+
+} // namespace __helpers
+
 template <typename T>
 struct allocator {
     using value_type = T;
-    using size_type = std::size_t;
-    using difference_type = std::ptrdiff_t;
 
     constexpr allocator() noexcept = default;
     constexpr allocator(const allocator& other) noexcept = default;
@@ -93,8 +161,18 @@ template <typename Allocator>
 struct allocator_traits {
     using allocator_type = Allocator;
     using value_type = typename Allocator::value_type;
-    using pointer = value_type*;
-    using size_type = std::size_t;
+    using pointer =
+        __helpers::allocator_pointer_t<Allocator>;
+    using difference_type =
+        __helpers::allocator_difference_type_t<Allocator>;
+    using size_type =
+        __helpers::allocator_size_type_t<Allocator>;
+    using propagate_on_container_copy_assignment =
+        __helpers::allocator_prop_copy_t<Allocator>;
+    using propagate_on_container_move_assignment =
+        __helpers::allocator_prop_move_t<Allocator>;
+    using propagate_on_container_swap =
+        __helpers::allocator_prop_swap_t<Allocator>;
 
     template <typename T>
     using rebind_alloc = typename __helpers::rebind<Allocator, T>::type;

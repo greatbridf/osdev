@@ -1,0 +1,155 @@
+#ifndef __GBLIBCPP_SET__
+#define __GBLIBCPP_SET__
+
+#include <bits/rbtree>
+#include <functional>
+#include <memory>
+#include <cstddef>
+
+namespace std {
+
+template <typename Key,
+    typename Compare = std::less<Key>,
+    typename Allocator = std::allocator<Key>>
+class set {
+private:
+    using rbtree_type = impl::rbtree<Key, Compare, Allocator>;
+    using node_allocator = typename rbtree_type::node_allocator;
+
+private:
+    rbtree_type tree;
+
+public:
+    using key_type = Key;
+    using value_type = Key;
+    using size_type = std::size_t;
+    using allocator_type = Allocator;
+    using iterator = typename rbtree_type::iterator;
+    using const_iterator = typename rbtree_type::const_iterator;
+
+public:
+    __GBLIBCPP_CONSTEXPR
+    iterator end(void) noexcept { return tree.end(); }
+    __GBLIBCPP_CONSTEXPR
+    const_iterator end(void) const noexcept { return tree.cend(); }
+    __GBLIBCPP_CONSTEXPR
+    const_iterator cend(void) const noexcept { return tree.cend(); }
+
+    __GBLIBCPP_CONSTEXPR
+    iterator begin(void) noexcept { return tree.begin(); }
+    __GBLIBCPP_CONSTEXPR
+    const_iterator begin(void) const noexcept { return tree.cbegin(); }
+    __GBLIBCPP_CONSTEXPR
+    const_iterator cbegin(void) const noexcept { return tree.cbegin(); }
+
+    explicit __GBLIBCPP_CONSTEXPR
+    set(const Compare& comp,
+        const Allocator& alloc = Allocator())
+        : tree(comp, alloc) {}
+    
+    explicit __GBLIBCPP_CONSTEXPR
+    set(const Allocator& alloc)
+        : set(Compare(), alloc) {}
+
+    __GBLIBCPP_CONSTEXPR
+    set() : set(Compare()) {}
+
+    template <typename InputIter>
+    __GBLIBCPP_CONSTEXPR
+    set(InputIter first, InputIter last,
+        const Compare& comp = Compare(),
+        const Allocator& alloc = Allocator())
+        : set(comp, alloc)
+    {
+        insert(first, last);
+    }
+
+    template <typename InputIter>
+    __GBLIBCPP_CONSTEXPR
+    set(InputIter first, InputIter last,
+        const Allocator& alloc = Allocator())
+        : set(first, last, Compare(), alloc) {}
+
+    __GBLIBCPP_CONSTEXPR
+    set(const set& other) : tree(other) {}
+    __GBLIBCPP_CONSTEXPR
+    set(const set& other, const Allocator& alloc)
+        : tree(other, alloc) { }
+
+    __GBLIBCPP_CONSTEXPR
+    set(set&& other) : tree(std::move(other.tree)) {}
+    __GBLIBCPP_CONSTEXPR
+    set(set&& other, const Allocator& alloc)
+        : tree(std::move(other.tree), alloc) {}
+    
+    __GBLIBCPP_CONSTEXPR
+    ~set() { clear(); }
+    
+    __GBLIBCPP_CONSTEXPR
+    set& operator=(const set& other) = default;
+    __GBLIBCPP_CONSTEXPR
+    set& operator=(set&& other) = default;
+
+    // TODO: std::initializer_list
+    // set(std::initializer_list<Key> init,
+    //     const Compare& comp = Compare(),
+    //     const Allocator& alloc = Allocator());
+    //
+    // set(std::initializer_list<Key> init,
+    //     const Allocator& alloc = Allocator())
+    //     : set(init, Compare(), alloc) {}
+    //
+    // set& operator=(std::initializer_list<Key> ilist);
+
+    __GBLIBCPP_CONSTEXPR
+    iterator find(const Key& key) { return tree.find(key); }
+    __GBLIBCPP_CONSTEXPR
+    const_iterator find(const Key& key) const { return tree.find(key); }
+
+    __GBLIBCPP_CONSTEXPR
+    std::pair<iterator, bool> insert(const value_type& value)
+    { return tree.insert(value); }
+    __GBLIBCPP_CONSTEXPR
+    std::pair<iterator, bool> insert(value_type&& value)
+    { return tree.insert(std::move(value)); }
+
+    template <typename InputIter>
+    __GBLIBCPP_CONSTEXPR
+    void insert(InputIter first, InputIter last)
+    {
+        for ( ; first != last; ++first)
+            insert(*first);
+    }
+
+    __GBLIBCPP_CONSTEXPR
+    iterator erase(iterator pos) noexcept { return tree.erase(pos); }
+    __GBLIBCPP_CONSTEXPR
+    iterator erase(const_iterator pos) noexcept { return tree.erase(pos); }
+    __GBLIBCPP_CONSTEXPR
+    iterator erase(const_iterator first, const_iterator last) noexcept
+    {
+        while (first != last)
+            first = erase(first);
+        return first;
+    }
+
+    __GBLIBCPP_CONSTEXPR
+    size_type erase(const Key& key)
+    {
+        auto iter = find(key);
+        if (!iter)
+            return 0;
+        erase(iter);
+        return 1;
+    }
+
+    __GBLIBCPP_CONSTEXPR
+    void clear() noexcept { tree.destroy(); }
+
+    __GBLIBCPP_CONSTEXPR
+    bool empty() const noexcept { return tree.empty(); }
+};
+
+} // namespace std
+
+#endif

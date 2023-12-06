@@ -1,6 +1,8 @@
 #ifndef __GBLIBCPP_CSTDDEF__
 #define __GBLIBCPP_CSTDDEF__
 
+#define __GBLIBCPP_CONSTEXPR constexpr
+
 #undef NULL
 #define NULL (nullptr)
 
@@ -9,6 +11,7 @@ namespace std {
 using nullptr_t = decltype(nullptr);
 
 using size_t = __SIZE_TYPE__;
+using ptrdiff_t = __PTRDIFF_TYPE__;
 
 enum class byte : unsigned char {};
 

@@ -1,6 +1,7 @@
 #ifndef __GBLIBCPP_MEMORY__
 #define __GBLIBCPP_MEMORY__
 
+#include <cstddef>
 #include <type_traits>
 #include <utility>
 
@@ -32,6 +33,83 @@ constexpr T* addressof(T& arg) noexcept
 
 template <typename T>
 const T* addressof(const T&&) = delete;
+
+template <typename T>
+struct allocator {
+    using value_type = T;
+    using size_type = std::size_t;
+    using difference_type = std::ptrdiff_t;
+
+    constexpr allocator() noexcept = default;
+    constexpr allocator(const allocator& other) noexcept = default;
+
+    template <typename U>
+    constexpr allocator(const allocator<U>&) noexcept {}
+
+    constexpr ~allocator() = default;
+
+    // throws std::bad_alloc
+    [[nodiscard]] constexpr T* allocate(std::size_t n)
+    { return static_cast<T*>(::operator new(n * sizeof(T))); }
+
+    // TODO: check allocated size
+    constexpr void deallocate(T* ptr, std::size_t)
+    { ::operator delete(ptr); }
+};
+
+template <typename T1, typename T2>
+constexpr bool operator==(const allocator<T1>&, const allocator<T2>&) noexcept
+{ return true; }
+
+template <typename T, typename... Args>
+constexpr std::enable_if_t<std::is_same_v<T*,
+    decltype(::new(std::declval<void*>()) T(std::declval<Args>()...))> , T*>
+construct_at(T* p, Args&&... args)
+{
+    return ::new (static_cast<void*>(p)) T(std::forward<Args>(args)...);
+}
+
+template <typename T>
+constexpr void destroy_at(T* p)
+{
+    // TODO: destroy array
+    p->~T();
+}
+
+namespace __helpers {
+
+template <typename Allocator, typename T>
+struct rebind;
+
+template <template <typename, typename...> typename Allocator,
+    typename NewType, typename OldType, typename... Args>
+struct rebind<Allocator<OldType, Args...>, NewType> {
+    using type = Allocator<NewType, Args...>;
+};
+
+} // namespace __helpers
+
+template <typename Allocator>
+struct allocator_traits {
+    using allocator_type = Allocator;
+    using value_type = typename Allocator::value_type;
+    using pointer = value_type*;
+    using size_type = std::size_t;
+
+    template <typename T>
+    using rebind_alloc = typename __helpers::rebind<Allocator, T>::type;
+
+    [[nodiscard]] static constexpr pointer allocate(Allocator& alloc, size_type n)
+    { return alloc.allocate(n); }
+    static constexpr void deallocate(Allocator& alloc, pointer p, size_type n)
+    { return alloc.deallocate(p, n); }
+    template <typename T, typename... Args>
+    static constexpr void construct(Allocator&, T* p, Args&&... args)
+    { std::construct_at(p, std::forward<Args>(args)...); }
+    template <typename T>
+    static constexpr void destroy(Allocator&, T* p)
+    { std::destroy_at(p); }
+};
 
 } // namespace std
 

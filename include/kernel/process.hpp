@@ -1,5 +1,7 @@
 #pragma once
 
+#include <set>
+#include <tuple>
 #include <utility>
 
 #include <fcntl.h>
@@ -353,6 +355,7 @@ public:
     pid_t sid;
 
     tty* control_tty;
+    std::set<pid_t> children;
 
 public:
     // if waitlist is not empty or mutex in cv_wait
@@ -367,6 +370,8 @@ public:
         , ppid(val.ppid)
         , pgid(val.pgid)
         , sid(val.sid)
+        , control_tty(val.control_tty)
+        , children(std::move(val.children))
     {
         if (current_process == &val)
             current_process = this;
@@ -395,13 +400,11 @@ private:
 class proclist final {
 public:
     using list_type = types::map<pid_t, process>;
-    using child_index_type = types::hash_map<pid_t, types::list<pid_t>>;
     using iterator_type = list_type::iterator_type;
     using const_iterator_type = list_type::const_iterator_type;
 
 private:
     list_type m_procs;
-    child_index_type m_child_idx;
 
 public:
     template <typename... Args>
@@ -412,13 +415,11 @@ public:
         auto ppid = _proc.ppid;
         auto iter = m_procs.insert(std::make_pair(pid, std::move(_proc)));
 
-        auto children = m_child_idx.find(ppid);
-        if (!children) {
-            m_child_idx.emplace(ppid, types::list<pid_t> {});
-            children = m_child_idx.find(ppid);
+        if (ppid) {
+            bool success = false;
+            std::tie(std::ignore, success) = find(ppid).children.insert(pid);
+            assert(success);
         }
-
-        children->second.push_back(pid);
 
         return iter;
     }
@@ -428,20 +429,15 @@ public:
         make_children_orphans(pid);
 
         auto proc_iter = m_procs.find(pid);
+
         auto ppid = proc_iter->second.ppid;
-
-        auto& [ idx, parent_children ] = *m_child_idx.find(ppid);
-
-        auto i = parent_children.find(pid);
-        parent_children.erase(i);
+        find(ppid).children.erase(pid);
 
         m_procs.erase(proc_iter);
     }
 
     constexpr bool try_find(pid_t pid) const
-    {
-        return !!m_procs.find(pid);
-    }
+    { return !!m_procs.find(pid); }
 
     // if process doesn't exist, the behavior is undefined
     constexpr process& find(pid_t pid)
@@ -453,24 +449,21 @@ public:
 
     constexpr bool has_child(pid_t pid)
     {
-        auto children = m_child_idx.find(pid);
-        return children && !children->second.empty();
+        auto& proc = find(pid);
+        return !proc.children.empty();
     }
 
     constexpr void make_children_orphans(pid_t pid)
     {
-        auto children = m_child_idx.find(pid);
-        auto init_children = m_child_idx.find(1);
+        auto& children = find(pid).children;
+        auto& init_children = find(1).children;
 
-        if (!children || !init_children)
-            return;
-
-        for (auto item : children->second) {
-            init_children->second.push_back(item);
+        for (auto item : children) {
+            init_children.insert(item);
             find(item).ppid = 1;
         }
 
-        m_child_idx.remove(children);
+        children.clear();
     }
 
     // the process MUST exist, or the behavior is undefined

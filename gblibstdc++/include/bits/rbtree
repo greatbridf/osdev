@@ -1,0 +1,634 @@
+#ifndef __GBLIBCPP_BITS_RBTREE__
+#define __GBLIBCPP_BITS_RBTREE__
+
+#include <functional>
+#include <utility>
+#include <memory>
+
+namespace std::impl {
+
+template <typename T, typename Compare, typename Allocator>
+struct rbtree {
+    struct node {
+        node* parent;
+        node* left;
+        node* right;
+        T value;
+        enum class node_color : unsigned char { RED, BLACK, } color;
+
+        constexpr node(const T& val)
+            : parent {}, left {}, right {}
+            , value { val } , color {node_color::RED} {}
+
+        constexpr node(T&& val)
+            : parent {}, left {}, right {}
+            , value { std::move(val) } , color {node_color::RED} {}
+
+        constexpr node* grandparent(void) const
+        { return this->parent->parent; }
+
+        constexpr node* uncle(void) const
+        {
+            node* pp = this->grandparent();
+            if (this->parent == pp->left)
+                return pp->right;
+            return pp->left;
+        }
+
+        constexpr node* leftmost(void)
+        {
+            node* nd = this;
+            while (nd->left)
+                nd = nd->left;
+            return nd;
+        }
+
+        constexpr node* rightmost(void)
+        {
+            node* nd = this;
+            while (nd->right)
+                nd = nd->right;
+            return nd;
+        }
+
+        constexpr node* next(void)
+        {
+            if (this->right)
+                return this->right->leftmost();
+            if (this->is_root())
+                return nullptr;
+            if (this->is_left_child())
+                return this->parent;
+            node* ret = this;
+            do {
+                ret = ret->parent;
+            } while (!ret->is_root() && !ret->is_left_child());
+            return ret->parent;
+        }
+
+        constexpr node* prev(void)
+        {
+            if (this->left)
+                return this->left->rightmost();
+            if (this->is_root())
+                return nullptr;
+            if (this->is_right_child())
+                return this->parent;
+            node* ret = this;
+            do {
+                ret = ret->parent;
+            } while (!ret->is_root() && !ret->is_right_child());
+            return ret->parent;
+        }
+
+        static constexpr bool is_red(node* nd)
+        { return nd && nd->color == node_color::RED; }
+        static constexpr bool is_black(node* nd)
+        { return !node::is_red(nd); }
+
+        constexpr bool is_root(void) const
+        { return this->parent == nullptr; }
+        constexpr bool is_full(void) const
+        { return this->left && this->right; }
+        constexpr bool has_child(void) const
+        { return this->left || this->right; }
+        constexpr bool is_leaf(void) const
+        { return !this->has_child(); }
+
+        constexpr bool is_left_child(void) const
+        { return this == this->parent->left; }
+        constexpr bool is_right_child(void) const
+        { return this == this->parent->right; }
+
+        constexpr void tored(void)
+        { this->color = node_color::RED; }
+        constexpr void toblack(void)
+        { this->color = node_color::BLACK; }
+
+        static constexpr void swap(node* first, node* second)
+        {
+            if (node::is_red(first)) {
+                first->color = second->color;
+                second->color = node_color::RED;
+            } else {
+                first->color = second->color;
+                second->color = node_color::BLACK;
+            }
+
+            if (first->parent == second) {
+                node* tmp = first;
+                first = second;
+                second = tmp;
+            }
+
+            bool f_is_left_child = first->parent ? first->is_left_child() : false;
+            bool s_is_left_child = second->parent ? second->is_left_child() : false;
+
+            node* fp = first->parent;
+            node* fl = first->left;
+            node* fr = first->right;
+
+            node* sp = second->parent;
+            node* sl = second->left;
+            node* sr = second->right;
+
+            if (second->parent != first) {
+                first->parent = sp;
+                if (sp) {
+                    if (s_is_left_child)
+                        sp->left = first;
+                    else
+                        sp->right = first;
+                }
+                first->left = sl;
+                if (sl)
+                    sl->parent = first;
+                first->right = sr;
+                if (sr)
+                    sr->parent = first;
+
+                second->parent = fp;
+                if (fp) {
+                    if (f_is_left_child)
+                        fp->left = second;
+                    else
+                        fp->right = second;
+                }
+
+                second->left = fl;
+                if (fl)
+                    fl->parent = second;
+                second->right = fr;
+                if (fr)
+                    fr->parent = second;
+            } else {
+                first->left = sl;
+                if (sl)
+                    sl->parent = first;
+                first->right = sr;
+                if (sr)
+                    sr->parent = first;
+
+                second->parent = fp;
+                if (fp) {
+                    if (f_is_left_child)
+                        fp->left = second;
+                    else
+                        fp->right = second;
+                }
+                first->parent = second;
+
+                if (s_is_left_child) {
+                    second->left = first;
+                    second->right = fr;
+                    if (fr)
+                        fr->parent = second;
+                } else {
+                    second->right = first;
+                    second->left = fl;
+                    if (fl)
+                        fl->parent = second;
+                }
+            }
+        }
+    };
+
+    template <bool Const>
+    class _iterator {
+    public:
+        using node_pointer = node*;
+        using value_type = std::conditional_t<Const, const T, T>;
+        using pointer = std::add_pointer_t<value_type>;
+        using reference = std::add_lvalue_reference_t<value_type>;
+
+        friend rbtree;
+
+    private:
+        node_pointer p;
+
+    public:
+        constexpr _iterator() = default;
+        explicit constexpr _iterator(node_pointer ptr)
+            : p { ptr } {}
+        constexpr _iterator(const _iterator& iter) = default;
+        constexpr _iterator(_iterator&& iter) = default;
+        constexpr ~_iterator() = default;
+        constexpr _iterator& operator=(const _iterator& iter) = default;
+        constexpr _iterator& operator=(_iterator&& iter) = default;
+        constexpr bool operator==(const _iterator& iter) const = default;
+
+        constexpr reference operator*(void) const { return p->value; }
+        constexpr pointer operator&(void) const { return std::addressof(p->value); }
+        constexpr pointer operator->(void) const { return this->operator&(); }
+        constexpr _iterator& operator++(void)
+        { p = p->next(); return *this; }
+        constexpr _iterator operator++(int)
+        { _iterator ret(p); (void)this->operator++(); return ret; }
+        constexpr _iterator& operator--(void)
+        { p = p->prev(); return *this; }
+        constexpr _iterator operator--(int)
+        { _iterator ret(p); (void)this->operator--(); return ret; }
+        explicit constexpr operator bool(void)
+        { return p; }
+        constexpr operator _iterator<true>()
+        { return _iterator<true> { p }; }
+    };
+
+    using iterator = _iterator<false>;
+    using const_iterator = _iterator<true>;
+
+    using node_allocator = typename
+        std::allocator_traits<Allocator>::template rebind_alloc<node>;
+
+    node* root;
+    Compare comp;
+    node_allocator alloc;
+
+private:
+    template <typename UKey>
+    constexpr node* newnode(UKey&& key)
+    {
+        node* ptr = std::allocator_traits<node_allocator>::allocate(alloc, 1);
+        std::allocator_traits<node_allocator>::construct(
+            alloc, ptr, std::forward<UKey>(key));
+        return ptr;
+    }
+
+    constexpr void delnode(node* nd)
+    {
+        std::allocator_traits<node_allocator>::destroy(alloc, nd);
+        std::allocator_traits<node_allocator>::deallocate(alloc, nd, 1);
+    }
+
+public:
+    constexpr iterator end(void) noexcept
+    { return iterator(nullptr); }
+    constexpr const_iterator end(void) const noexcept
+    { return const_iterator(nullptr); }
+    constexpr const_iterator cend(void) const noexcept
+    { return const_iterator(nullptr); }
+
+    constexpr iterator begin(void) noexcept
+    { return root ? iterator(root->leftmost()) : end(); }
+    constexpr const_iterator begin(void) const noexcept
+    { return root ? const_iterator(root->leftmost()) : end(); }
+    constexpr const_iterator cbegin(void) const noexcept
+    { return root ? const_iterator(root->leftmost()) : end(); }
+
+    constexpr void destroy(node* nd)
+    {
+        if (!nd)
+            return;
+        destroy(nd->left);
+        destroy(nd->right);
+        delnode(nd);
+    }
+
+    constexpr void destroy() { destroy(root); root = nullptr; }
+
+    constexpr node* copy(node* nd)
+    {
+        if (!nd)
+            return nullptr;
+
+        node* newnd = newnode(nd->value);
+        newnd->color = nd->color;
+
+        newnd->left = copy(nd->left);
+        if (newnd->left)
+            newnd->left->parent = newnd->left;
+
+        newnd->right = copy(nd->right);
+        if (newnd->right)
+            newnd->right->parent = newnd->right;
+
+        return newnd;
+    }
+
+    explicit constexpr rbtree(const Compare& comp, const node_allocator& alloc)
+        : root(), comp(comp), alloc(alloc) {}
+
+    constexpr rbtree(const rbtree& other)
+        : rbtree(other.comp, other.alloc)
+    {
+        root = copy(other.root);
+        if (root)
+            root->parent = nullptr;
+    }
+
+    constexpr rbtree(const rbtree& other, const node_allocator& alloc)
+        : rbtree(other.comp, alloc)
+    {
+        root = copy(other.root);
+        if (root)
+            root->parent = nullptr;
+    }
+    
+    constexpr rbtree(rbtree&& other) noexcept
+        : root(std::exchange(other.root, nullptr))
+        , comp(std::move(other.comp)), alloc(std::move(other.alloc)) {}
+
+    constexpr rbtree(rbtree&& other, const node_allocator& alloc) noexcept
+        : root(std::exchange(other.root, nullptr))
+        , comp(std::move(other.comp)), alloc(alloc) {}
+    
+    constexpr ~rbtree() { destroy(); }
+
+    constexpr rbtree& operator=(const rbtree& other)
+    {
+        destroy(root);
+
+        comp = other.comp;
+        alloc = other.alloc;
+
+        root = copy(other.root);
+        if (root)
+            root->parent = nullptr;
+    }
+    
+    constexpr rbtree& operator=(rbtree&& other) noexcept
+    {
+        destroy(root);
+        root = std::exchange(other.root, nullptr);
+        comp = std::move(other.comp);
+        alloc = std::move(other.alloc);
+    }
+
+    constexpr void rotateleft(node* rt)
+    {
+        node* nrt = rt->right;
+
+        if (!rt->is_root()) {
+            if (rt->is_left_child())
+                rt->parent->left = nrt;
+            else
+                rt->parent->right = nrt;
+        } else {
+            this->root = nrt;
+        }
+
+        nrt->parent = rt->parent;
+        rt->parent = nrt;
+
+        rt->right = nrt->left;
+        nrt->left = rt;
+    }
+
+    constexpr void rotateright(node* rt)
+    {
+        node* nrt = rt->left;
+
+        if (!rt->is_root()) {
+            if (rt->is_left_child())
+                rt->parent->left = nrt;
+            else
+                rt->parent->right = nrt;
+        } else {
+            this->root = nrt;
+        }
+
+        nrt->parent = rt->parent;
+        rt->parent = nrt;
+
+        rt->left = nrt->right;
+        nrt->right = rt;
+    }
+
+    constexpr void balance(node* nd)
+    {
+        if (nd->is_root()) {
+            nd->toblack();
+            return;
+        }
+
+        if (node::is_black(nd->parent))
+            return;
+
+        node* p = nd->parent;
+        node* pp = nd->grandparent();
+        node* uncle = nd->uncle();
+
+        if (node::is_red(uncle)) {
+            p->toblack();
+            uncle->toblack();
+            pp->tored();
+            this->balance(pp);
+            return;
+        }
+
+        if (p->is_left_child()) {
+            if (nd->is_left_child()) {
+                p->toblack();
+                pp->tored();
+                this->rotateright(pp);
+            } else {
+                this->rotateleft(p);
+                this->balance(p);
+            }
+        } else {
+            if (nd->is_right_child()) {
+                p->toblack();
+                pp->tored();
+                this->rotateleft(pp);
+            } else {
+                this->rotateright(p);
+                this->balance(p);
+            }
+        }
+    }
+
+    constexpr node* _find(const T& key) const
+    {
+        for (node* cur = root; cur; ) {
+            if (comp(key, cur->value))
+                cur = cur->left;
+            else if (comp(cur->value, key))
+                cur = cur->right;
+            else
+                return cur;
+        }
+
+        return nullptr;
+    }
+
+    template <typename U, typename UCompare>
+    constexpr node* _find(const U& key, const UCompare& ucomp) const
+    {
+        for (node* cur = root; cur; ) {
+            if (ucomp(key, cur->value))
+                cur = cur->left;
+            else if (ucomp(cur->value, key))
+                cur = cur->right;
+            else
+                return cur;
+        }
+
+        return nullptr;
+    }
+
+    constexpr iterator find(const T& key)
+    { return iterator { _find(key) }; }
+
+    constexpr const_iterator find(const T& key) const
+    { return const_iterator { _find(key) }; }
+
+    // RBTREE RECURSIVE DELETE
+    // THIS FUNCTION DOES NOT DELLOCATE THE NODE
+    // CALLER IS RESPONSIBLE FOR FREEING THE MEMORY
+    // @param: nd is guaranteed to be a leaf node
+    constexpr void _erase(node* nd)
+    {
+        if (nd->is_root())
+            return;
+
+        if (node::is_black(nd)) {
+            node* p = nd->parent;
+            node* s = nullptr;
+            if (nd->is_left_child())
+                s = p->right;
+            else
+                s = p->left;
+
+            if (node::is_red(s)) {
+                p->tored();
+                s->toblack();
+                if (nd->is_right_child()) {
+                    this->rotateright(p);
+                    s = p->left;
+                } else {
+                    this->rotateleft(p);
+                    s = p->right;
+                }
+            }
+
+            node* r = nullptr;
+            if (node::is_red(s->left)) {
+                r = s->left;
+                if (s->is_left_child()) {
+                    r->toblack();
+                    s->color = p->color;
+                    this->rotateright(p);
+                    p->toblack();
+                } else {
+                    r->color = p->color;
+                    this->rotateright(s);
+                    this->rotateleft(p);
+                    p->toblack();
+                }
+            } else if (node::is_red(s->right)) {
+                r = s->right;
+                if (s->is_left_child()) {
+                    r->color = p->color;
+                    this->rotateleft(s);
+                    this->rotateright(p);
+                    p->toblack();
+                } else {
+                    r->toblack();
+                    s->color = p->color;
+                    this->rotateleft(p);
+                    p->toblack();
+                }
+            } else {
+                s->tored();
+                if (node::is_black(p))
+                    this->_erase(p);
+                else
+                    p->toblack();
+            }
+        }
+    }
+
+    // delete nd from the tree. make nd safe to deallocate
+    // THIS FUNCTION DOES NOT DELLOCATE THE NODE
+    // CALLER IS RESPONSIBLE FOR FREEING THE MEMORY
+    constexpr node* erase(node* nd)
+    {
+        if (nd->is_root() && nd->is_leaf()) {
+            root = nullptr;
+            return nullptr;
+        }
+
+        node* next = nd->next();
+
+        while (!nd->is_leaf()) {
+            node* alt = nd->right ? nd->right->leftmost() : nd->left;
+            if (nd->is_root())
+                this->root = alt;
+            node::swap(nd, alt);
+        }
+
+        this->_erase(nd);
+
+        if (nd->is_left_child())
+            nd->parent->left = nullptr;
+        else
+            nd->parent->right = nullptr;
+
+        return next;
+    }
+
+    constexpr iterator erase(iterator pos) noexcept
+    {
+        node* nextpos = erase(pos.p);
+        delnode(pos.p);
+        return iterator { nextpos };
+    }
+
+    constexpr iterator erase(const_iterator pos) noexcept
+    {
+        node* nextpos = erase(pos.p);
+        delnode(pos.p);
+        return const_iterator { nextpos };
+    }
+
+    // value in nd MUST NOT exist in the rbtree,
+    // that is, if a < b, then a > b
+    constexpr void insert(node* nd)
+    {
+        node* cur = root;
+
+        while (cur) [[likely]] {
+            if (comp(nd->value, cur->value)) {
+                if (!cur->left) {
+                    nd->parent = cur;
+                    cur->left = nd;
+                    this->balance(nd);
+                    return;
+                } else {
+                    cur = cur->left;
+                }
+            } else {
+                if (!cur->right) {
+                    nd->parent = cur;
+                    cur->right = nd;
+                    this->balance(nd);
+                    return;
+                } else {
+                    cur = cur->right;
+                }
+            }
+        }
+
+        root = nd;
+        root->toblack();
+    }
+
+    template <typename U>
+    constexpr std::pair<iterator, bool> insert(U&& value)
+    {
+        auto iter = find(value);
+        if (iter)
+            return { iter, false };
+
+        node* ptr = newnode(std::forward<U>(value));
+        insert(ptr);
+
+        return { iterator { ptr }, true };
+    }
+
+    constexpr bool empty() const noexcept { return !root; }
+};
+
+} // namespace std::impl
+
+#endif

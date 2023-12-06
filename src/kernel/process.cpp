@@ -100,6 +100,7 @@ process::process(const process& parent)
     , pid { process::alloc_pid() }
     , ppid { parent.pid } , pgid { parent.pgid } , sid { parent.sid }
     , control_tty { parent.control_tty }
+    , children {}
 {
     for (auto& area : parent.mms) {
         if (area.is_kernel_space() || area.attr.in.system)
@@ -117,7 +118,8 @@ process::process(pid_t ppid)
     , pwd { "/" }
     , pid { process::alloc_pid() }
     , ppid { ppid }
-    , pgid {} , sid {} , control_tty {} { }
+    , pgid {} , sid {} , control_tty {}
+    , children {} { }
 
 void proclist::kill(pid_t pid, int exit_code)
 {

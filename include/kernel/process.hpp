@@ -1,5 +1,6 @@
 #pragma once
 
+#include <map>
 #include <set>
 #include <tuple>
 #include <utility>
@@ -18,8 +19,6 @@
 #include <types/allocator.hpp>
 #include <types/cplusplus.hpp>
 #include <types/hash_map.hpp>
-#include <types/list.hpp>
-#include <types/map.hpp>
 #include <types/status.h>
 #include <types/string.hpp>
 #include <types/types.h>
@@ -144,7 +143,7 @@ public:
     class filearr {
     public:
         using container_type = types::list<fs::file>;
-        using array_type = types::map<int, container_type::iterator_type>;
+        using array_type = std::map<int, container_type::iterator_type>;
 
     private:
         inline static container_type* files;
@@ -399,21 +398,24 @@ private:
 
 class proclist final {
 public:
-    using list_type = types::map<pid_t, process>;
-    using iterator_type = list_type::iterator_type;
-    using const_iterator_type = list_type::const_iterator_type;
+    using list_type = std::map<pid_t, process>;
+    using iterator = list_type::iterator;
+    using const_iterator = list_type::const_iterator;
 
 private:
     list_type m_procs;
 
 public:
     template <typename... Args>
-    iterator_type emplace(Args&&... args)
+    iterator emplace(Args&&... args)
     {
         process _proc(std::forward<Args>(args)...);
         auto pid = _proc.pid;
         auto ppid = _proc.ppid;
-        auto iter = m_procs.insert(std::make_pair(pid, std::move(_proc)));
+        auto [ iter, inserted ] =
+            m_procs.insert(std::make_pair(pid, std::move(_proc)));
+        
+        assert(inserted);
 
         if (ppid) {
             bool success = false;

@@ -1,3 +1,4 @@
+#include <map>
 #include <bit>
 #include <utility>
 
@@ -11,7 +12,6 @@
 #include <stdio.h>
 #include <types/allocator.hpp>
 #include <types/list.hpp>
-#include <types/map.hpp>
 #include <types/status.h>
 #include <types/string.hpp>
 #include <types/vector.hpp>
@@ -121,7 +121,8 @@ fs::vfs::vfs(void)
 }
 fs::inode* fs::vfs::cache_inode(inode_flags flags, uint32_t perm, size_t size, ino_t ino)
 {
-    auto iter = _inodes.insert(std::make_pair(ino, inode { flags, perm, ino, this, size }));
+    auto [ iter, inserted ] =
+        _inodes.insert(std::make_pair(ino, inode { flags, perm, ino, this, size }));
     return &iter->second;
 }
 fs::inode* fs::vfs::get_inode(ino_t ino)
@@ -233,7 +234,7 @@ private:
 
 private:
     fs::ino_t _next_ino;
-    types::map<fs::ino_t, void*> inode_data;
+    std::map<fs::ino_t, void*> inode_data;
 
 private:
     fs::ino_t _assign_ino(void)

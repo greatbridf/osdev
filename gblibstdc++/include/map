@@ -1,0 +1,202 @@
+#ifndef __GBLIBCPP_MAP__
+#define __GBLIBCPP_MAP__
+
+#include <bits/rbtree>
+#include <functional>
+#include <memory>
+#include <utility>
+#include <cstddef>
+
+namespace std {
+
+template <typename Key, typename T,
+    typename Compare = std::less<Key>,
+    typename Allocator = std::allocator<std::pair<const Key, T>>>
+class map {
+public:
+    using key_type = Key;
+    using mapped_type = T;
+    using value_type = std::pair<const Key, T>;
+    using size_type = std::size_t;
+    using allocator_type = Allocator;
+
+private:
+    class value_compare {
+    protected:
+        Compare comp;
+        constexpr value_compare(Compare c) : comp(c) {}
+
+        friend class map;
+
+    public:
+        constexpr bool operator()(
+            const value_type& lhs, const value_type& rhs) const
+        { return comp(lhs.first, rhs.first); }
+
+        constexpr bool operator()(
+            const Key& lhs, const value_type& rhs) const
+        { return comp(lhs, rhs.first); }
+
+        constexpr bool operator()(
+            const value_type& lhs, const Key& rhs) const
+        { return comp(lhs.first, rhs); }
+    };
+
+    using rbtree_type = impl::rbtree<value_type, value_compare, Allocator>;
+    using node_allocator = typename rbtree_type::node_allocator;
+
+private:
+    rbtree_type tree;
+
+public:
+    using iterator = typename rbtree_type::iterator;
+    using const_iterator = typename rbtree_type::const_iterator;
+
+public:
+    __GBLIBCPP_CONSTEXPR
+    iterator end(void) noexcept { return tree.end(); }
+    __GBLIBCPP_CONSTEXPR
+    const_iterator end(void) const noexcept { return tree.cend(); }
+    __GBLIBCPP_CONSTEXPR
+    const_iterator cend(void) const noexcept { return tree.cend(); }
+
+    __GBLIBCPP_CONSTEXPR
+    iterator begin(void) noexcept { return tree.begin(); }
+    __GBLIBCPP_CONSTEXPR
+    const_iterator begin(void) const noexcept { return tree.cbegin(); }
+    __GBLIBCPP_CONSTEXPR
+    const_iterator cbegin(void) const noexcept { return tree.cbegin(); }
+
+    explicit __GBLIBCPP_CONSTEXPR
+    map(const Compare& comp,
+        const Allocator& alloc = Allocator())
+        : tree(comp, alloc) {}
+    
+    explicit __GBLIBCPP_CONSTEXPR
+    map(const Allocator& alloc)
+        : map(Compare(), alloc) {}
+
+    __GBLIBCPP_CONSTEXPR
+    map() : map(Compare()) {}
+
+    template <typename InputIter>
+    __GBLIBCPP_CONSTEXPR
+    map(InputIter first, InputIter last,
+        const Compare& comp = Compare(),
+        const Allocator& alloc = Allocator())
+        : map(comp, alloc)
+    {
+        insert(first, last);
+    }
+
+    template <typename InputIter>
+    __GBLIBCPP_CONSTEXPR
+    map(InputIter first, InputIter last,
+        const Allocator& alloc = Allocator())
+        : map(first, last, Compare(), alloc) {}
+
+    __GBLIBCPP_CONSTEXPR
+    map(const map& other) : tree(other) {}
+    __GBLIBCPP_CONSTEXPR
+    map(const map& other, const Allocator& alloc)
+        : tree(other, alloc) { }
+
+    __GBLIBCPP_CONSTEXPR
+    map(map&& other) : tree(std::move(other.tree)) {}
+    __GBLIBCPP_CONSTEXPR
+    map(map&& other, const Allocator& alloc)
+        : tree(std::move(other.tree), alloc) {}
+    
+    __GBLIBCPP_CONSTEXPR
+    ~map() { clear(); }
+    
+    __GBLIBCPP_CONSTEXPR
+    map& operator=(const map& other) = default;
+    __GBLIBCPP_CONSTEXPR
+    map& operator=(map&& other) = default;
+
+    // TODO: std::initializer_list
+    // set(std::initializer_list<Key> init,
+    //     const Compare& comp = Compare(),
+    //     const Allocator& alloc = Allocator());
+    //
+    // set(std::initializer_list<Key> init,
+    //     const Allocator& alloc = Allocator())
+    //     : set(init, Compare(), alloc) {}
+    //
+    // set& operator=(std::initializer_list<Key> ilist);
+
+    __GBLIBCPP_CONSTEXPR
+    iterator find(const Key& key) { return tree.find(key); }
+    __GBLIBCPP_CONSTEXPR
+    const_iterator find(const Key& key) const { return tree.find(key); }
+
+    __GBLIBCPP_CONSTEXPR
+    std::pair<iterator, bool> insert(const value_type& value)
+    { return tree.insert(value); }
+    __GBLIBCPP_CONSTEXPR
+    std::pair<iterator, bool> insert(value_type&& value)
+    { return tree.insert(std::move(value)); }
+
+    template <typename InputIter>
+    __GBLIBCPP_CONSTEXPR
+    void insert(InputIter first, InputIter last)
+    {
+        for ( ; first != last; ++first)
+            insert(*first);
+    }
+
+    template <typename... Args>
+    std::pair<iterator, bool> emplace(Args&&... args)
+    { return tree.emplace(std::forward<Args>(args)...); }
+
+    __GBLIBCPP_CONSTEXPR
+    iterator erase(iterator pos) noexcept { return tree.erase(pos); }
+    __GBLIBCPP_CONSTEXPR
+    iterator erase(const_iterator pos) noexcept { return tree.erase(pos); }
+    __GBLIBCPP_CONSTEXPR
+    iterator erase(const_iterator first, const_iterator last) noexcept
+    {
+        while (first != last)
+            first = erase(first);
+        return first;
+    }
+
+    __GBLIBCPP_CONSTEXPR
+    size_type erase(const Key& key)
+    {
+        auto iter = find(key);
+        if (!iter)
+            return 0;
+        erase(iter);
+        return 1;
+    }
+
+    __GBLIBCPP_CONSTEXPR
+    void clear() noexcept { tree.destroy(); }
+
+    __GBLIBCPP_CONSTEXPR
+    bool empty() const noexcept { return tree.empty(); }
+
+    __GBLIBCPP_CONSTEXPR
+    size_type size() const noexcept { return tree.size(); }
+
+    __GBLIBCPP_CONSTEXPR
+    void swap(map& other) { tree.swap(other.tree); }
+
+    __GBLIBCPP_CONSTEXPR
+    size_type count(const Key& key) const
+    { return find(key) ? 1 : 0; }
+
+    __GBLIBCPP_CONSTEXPR
+    bool contains(const Key& key) const { return count(key) != 0; }
+};
+
+template <typename Key, typename T, typename Compare, typename Allocator>
+void swap(std::map<Key, T, Compare, Allocator>& lhs,
+    std::map<Key, T, Compare, Allocator>& rhs)
+{ lhs.swap(rhs); }
+
+} // namespace std
+
+#endif

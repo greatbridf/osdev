@@ -444,7 +444,8 @@ public:
         }
     }
 
-    constexpr node* _find(const T& key) const
+    template <typename U>
+    constexpr node* _find(const U& key) const
     {
         for (node* cur = root; cur; ) {
             if (comp(key, cur->value))
@@ -458,26 +459,9 @@ public:
         return nullptr;
     }
 
-    template <typename U, typename UCompare>
-    constexpr node* _find(const U& key, const UCompare& ucomp) const
-    {
-        for (node* cur = root; cur; ) {
-            if (ucomp(key, cur->value))
-                cur = cur->left;
-            else if (ucomp(cur->value, key))
-                cur = cur->right;
-            else
-                return cur;
-        }
-
-        return nullptr;
-    }
-
-    constexpr iterator find(const T& key)
+    template <typename U>
+    constexpr iterator find(const U& key) const
     { return iterator { _find(key) }; }
-
-    constexpr const_iterator find(const T& key) const
-    { return const_iterator { _find(key) }; }
 
     // RBTREE RECURSIVE DELETE
     // THIS FUNCTION DOES NOT DELLOCATE THE NODE

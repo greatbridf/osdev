@@ -1,5 +1,6 @@
 #pragma once
 
+#include <map>
 #include <functional>
 
 #include <assert.h>
@@ -11,7 +12,6 @@
 #include <types/hash_map.hpp>
 #include <types/list.hpp>
 #include <types/lock.hpp>
-#include <types/map.hpp>
 #include <types/types.h>
 #include <types/vector.hpp>
 
@@ -149,7 +149,7 @@ public:
 
 private:
     // TODO: use allocator designed for small objects
-    using inode_list = types::map<ino_t, inode>;
+    using inode_list = std::map<ino_t, inode>;
 
 private:
     inode_list _inodes;

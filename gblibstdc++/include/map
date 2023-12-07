@@ -4,6 +4,8 @@
 #include <bits/rbtree>
 #include <functional>
 #include <memory>
+#include <tuple>
+#include <type_traits>
 #include <utility>
 #include <cstddef>
 
@@ -131,12 +133,30 @@ public:
     __GBLIBCPP_CONSTEXPR
     const_iterator find(const Key& key) const { return tree.find(key); }
 
+    // if the container does not have an element with
+    // the specified key, it should throw an exception
+    // TODO: exceptions
+    __GBLIBCPP_CONSTEXPR
+    T& at(const Key& key) { return *find(key); }
+
+    // if the container does not have an element with
+    // the specified key, it should throw an exception
+    // TODO: exceptions
+    __GBLIBCPP_CONSTEXPR
+    const T& at(const Key& key) const { return *find(key); }
+
     __GBLIBCPP_CONSTEXPR
     std::pair<iterator, bool> insert(const value_type& value)
     { return tree.insert(value); }
     __GBLIBCPP_CONSTEXPR
     std::pair<iterator, bool> insert(value_type&& value)
     { return tree.insert(std::move(value)); }
+
+    template <typename Pair>
+    __GBLIBCPP_CONSTEXPR
+    std::enable_if_t<std::is_constructible_v<value_type, Pair&&>,
+        std::pair<iterator, bool>> insert(Pair&& p)
+    { return emplace(std::forward<Pair>(p)); }
 
     template <typename InputIter>
     __GBLIBCPP_CONSTEXPR
@@ -147,8 +167,43 @@ public:
     }
 
     template <typename... Args>
+    __GBLIBCPP_CONSTEXPR
     std::pair<iterator, bool> emplace(Args&&... args)
     { return tree.emplace(std::forward<Args>(args)...); }
+
+    template <typename... Args>
+    __GBLIBCPP_CONSTEXPR
+    std::pair<iterator, bool> try_emplace(const Key& key, Args&&... args)
+    {
+        auto iter = find(key);
+        if (iter)
+            return { iter, false };
+        return emplace(
+            std::piecewise_construct,
+            std::forward_as_tuple(key),
+            std::forward_as_tuple(std::forward<Args>(args)...));
+    }
+
+    template <typename... Args>
+    __GBLIBCPP_CONSTEXPR
+    std::pair<iterator, bool> try_emplace(Key&& key, Args&&... args)
+    {
+        auto iter = find(key);
+        if (iter)
+            return { iter, false };
+        return emplace(
+            std::piecewise_construct,
+            std::forward_as_tuple(std::move(key)),
+            std::forward_as_tuple(std::forward<Args>(args)...));
+    }
+
+    __GBLIBCPP_CONSTEXPR
+    T& operator[](const Key& key)
+    { return try_emplace(key).first->second; }
+
+    __GBLIBCPP_CONSTEXPR
+    T& operator[](Key&& key)
+    { return try_emplace(std::move(key)).first->second; }
 
     __GBLIBCPP_CONSTEXPR
     iterator erase(iterator pos) noexcept { return tree.erase(pos); }

@@ -122,6 +122,7 @@ public:
     }
 
     template <typename... Args>
+    __GBLIBCPP_CONSTEXPR
     std::pair<iterator, bool> emplace(Args&&... args)
     { return tree.emplace(std::forward<Args>(args)...); }
 

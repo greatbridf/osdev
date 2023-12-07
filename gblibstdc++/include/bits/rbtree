@@ -23,6 +23,14 @@ struct rbtree {
         constexpr node(T&& val)
             : parent {}, left {}, right {}
             , value { std::move(val) } , color {node_color::RED} {}
+        
+        template <typename... Args, std::enable_if_t<
+            (sizeof...(Args) > 1)
+            || !(... && std::is_same_v<T, std::remove_cvref_t<Args>>)
+        , bool> = true>
+        constexpr node(Args&&... args)
+            : parent {}, left {}, right {}
+            , value { std::forward<Args>(args)... }, color { node_color::RED } {}
 
         constexpr node* grandparent(void) const
         { return this->parent->parent; }

@@ -122,7 +122,7 @@ fs::vfs::vfs(void)
 fs::inode* fs::vfs::cache_inode(inode_flags flags, uint32_t perm, size_t size, ino_t ino)
 {
     auto [ iter, inserted ] =
-        _inodes.insert(std::make_pair(ino, inode { flags, perm, ino, this, size }));
+        _inodes.try_emplace(ino, inode { flags, perm, ino, this, size });
     return &iter->second;
 }
 fs::inode* fs::vfs::get_inode(ino_t ino)
@@ -233,8 +233,8 @@ private:
     using fdata_t = vector<char>;
 
 private:
-    fs::ino_t _next_ino;
     std::map<fs::ino_t, void*> inode_data;
+    fs::ino_t _next_ino;
 
 private:
     fs::ino_t _assign_ino(void)

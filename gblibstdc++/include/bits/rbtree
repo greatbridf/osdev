@@ -236,7 +236,7 @@ struct rbtree {
         { p = p->prev(); return *this; }
         constexpr _iterator operator--(int)
         { _iterator ret(p); (void)this->operator--(); return ret; }
-        explicit constexpr operator bool(void)
+        constexpr operator bool(void)
         { return p; }
         constexpr operator _iterator<true>()
         { return _iterator<true> { p }; }
@@ -250,9 +250,9 @@ struct rbtree {
     using node_alloc_traits = std::allocator_traits<node_allocator>;
 
     node* root;
+    node_allocator alloc;
     std::size_t _size;
     Compare comp;
-    node_allocator alloc;
 
 private:
     template <typename... Args>
@@ -316,7 +316,7 @@ public:
     }
 
     explicit constexpr rbtree(const Compare& comp, const node_allocator& alloc)
-        : root(), _size(), comp(comp), alloc(alloc) {}
+        : root(), alloc(alloc), _size(), comp(comp) {}
 
     constexpr rbtree(const rbtree& other)
         : rbtree(other.comp, other.alloc)
@@ -336,13 +336,14 @@ public:
     
     constexpr rbtree(rbtree&& other) noexcept
         : root(std::exchange(other.root, nullptr))
+        , alloc(std::move(other.alloc))
         , _size(std::exchange(other._size, 0))
-        , comp(std::move(other.comp)), alloc(std::move(other.alloc)) {}
+        , comp(std::move(other.comp)) {}
 
     constexpr rbtree(rbtree&& other, const node_allocator& alloc) noexcept
         : root(std::exchange(other.root, nullptr))
-        , _size(std::exchange(other._size, 0))
-        , comp(std::move(other.comp)), alloc(alloc) {}
+        , alloc(alloc) , _size(std::exchange(other._size, 0))
+        , comp(std::move(other.comp)) {}
     
     constexpr ~rbtree() { destroy(); }
 

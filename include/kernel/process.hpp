@@ -194,9 +194,7 @@ public:
         constexpr filearr& operator=(filearr&&) = delete;
         constexpr filearr(void) = default;
         constexpr filearr(filearr&& val)
-            : arr { std::move(val.arr) }
-        {
-        }
+            : arr { std::move(val.arr) } { }
 
         constexpr int dup(int old_fd)
         {
@@ -216,7 +214,7 @@ public:
 
             auto [ _, iter_file ] = *iter;
 
-            this->arr.insert(std::make_pair(new_fd, iter_file));
+            this->arr.emplace(new_fd, iter_file);
             ++iter_file->ref;
             return new_fd;
         }
@@ -224,7 +222,7 @@ public:
         constexpr void dup_all(const filearr& orig)
         {
             for (auto [ fd, iter_file ] : orig.arr) {
-                this->arr.insert(std::make_pair(fd, iter_file));
+                this->arr.emplace(fd, iter_file);
                 ++iter_file->ref;
             }
         }
@@ -253,8 +251,12 @@ public:
                     .write = 0,
                 },
             });
+
+            bool inserted = false;
             int fd = _next_fd();
-            arr.insert(std::make_pair(fd, iter));
+            std::tie(std::ignore, inserted) =
+                arr.insert(std::make_pair(fd, iter));
+            assert(inserted);
 
             // TODO: use copy_to_user()
             pipefd[0] = fd;
@@ -271,7 +273,8 @@ public:
                 },
             });
             fd = _next_fd();
-            arr.insert(std::make_pair(fd, iter));
+            std::tie(std::ignore, inserted) = arr.emplace(fd, iter);
+            assert(inserted);
 
             // TODO: use copy_to_user()
             pipefd[1] = fd;
@@ -308,23 +311,26 @@ public:
             });
 
             int fd = _next_fd();
-            arr.insert(std::make_pair(fd, iter));
+            auto [ _, inserted ] = arr.emplace(fd, iter);
+            assert(inserted);
             return fd;
         }
 
         constexpr void close(int fd)
         {
             auto iter = arr.find(fd);
-            if (iter) {
-                _close(iter->second);
-                arr.erase(iter);
-            }
+            if (!iter)
+                return;
+
+            _close(iter->second);
+            arr.erase(iter);
         }
 
         constexpr void close_all(void)
         {
             for (auto&& [ fd, file ] : arr)
-                close(fd);
+                _close(file);
+            arr.clear();
         }
 
         constexpr ~filearr()
@@ -376,24 +382,16 @@ public:
             current_process = this;
     }
 
-    process(const process&);
+    explicit process(const process& parent, pid_t pid);
 
     // this function is used for system initialization
     // DO NOT use this after the system is on
-    explicit process(pid_t ppid);
+    explicit process(pid_t pid, pid_t ppid);
 
     constexpr bool is_system(void) const
     { return attr.system; }
     constexpr bool is_zombie(void) const
     { return attr.zombie; }
-
-private:
-    static inline pid_t max_pid;
-
-    static inline pid_t alloc_pid(void)
-    {
-        return ++max_pid;
-    }
 };
 
 class proclist final {
@@ -404,26 +402,35 @@ public:
 
 private:
     list_type m_procs;
+    pid_t m_nextpid = 1;
+
+    constexpr pid_t next_pid() { return m_nextpid++; }
 
 public:
-    template <typename... Args>
-    iterator emplace(Args&&... args)
+    process& emplace(pid_t ppid)
     {
-        process _proc(std::forward<Args>(args)...);
-        auto pid = _proc.pid;
-        auto ppid = _proc.ppid;
-        auto [ iter, inserted ] =
-            m_procs.insert(std::make_pair(pid, std::move(_proc)));
-        
+        pid_t pid = next_pid();
+        auto [ iter, inserted ] = m_procs.try_emplace(pid, pid, ppid);
         assert(inserted);
 
-        if (ppid) {
+        if (try_find(ppid)) {
             bool success = false;
-            std::tie(std::ignore, success) = find(ppid).children.insert(pid);
+            std::tie(std::ignore, success) =
+                find(ppid).children.insert(pid);
             assert(success);
         }
 
-        return iter;
+        return iter->second;
+    }
+
+    process& copy_from(process& proc)
+    {
+        pid_t pid = next_pid();
+        auto [ iter, inserted ] = m_procs.try_emplace(pid, proc, pid);
+        assert(inserted);
+
+        proc.children.insert(pid);
+        return iter->second;
     }
 
     constexpr void remove(pid_t pid)
@@ -439,13 +446,13 @@ public:
     }
 
     constexpr bool try_find(pid_t pid) const
-    { return !!m_procs.find(pid); }
+    { return m_procs.find(pid); }
 
     // if process doesn't exist, the behavior is undefined
     constexpr process& find(pid_t pid)
     {
         auto iter = m_procs.find(pid);
-        assert(!!iter);
+        assert(iter);
         return iter->second;
     }
 
@@ -471,7 +478,7 @@ public:
     // the process MUST exist, or the behavior is undefined
     void send_signal(pid_t pid, kernel::sig_t signal)
     {
-        auto proc = this->find(pid);
+        auto& proc = this->find(pid);
         proc.signals.set(signal);
     }
     void send_signal_grp(pid_t pgid, kernel::sig_t signal)

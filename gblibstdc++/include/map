@@ -137,13 +137,13 @@ public:
     // the specified key, it should throw an exception
     // TODO: exceptions
     __GBLIBCPP_CONSTEXPR
-    T& at(const Key& key) { return *find(key); }
+    T& at(const Key& key) { return find(key)->second; }
 
     // if the container does not have an element with
     // the specified key, it should throw an exception
     // TODO: exceptions
     __GBLIBCPP_CONSTEXPR
-    const T& at(const Key& key) const { return *find(key); }
+    const T& at(const Key& key) const { return find(key)->second; }
 
     __GBLIBCPP_CONSTEXPR
     std::pair<iterator, bool> insert(const value_type& value)

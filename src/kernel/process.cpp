@@ -92,15 +92,12 @@ void thread::free_kstack(uint32_t p)
     pkstack_bmp->clear(p);
 }
 
-process::process(const process& parent)
+process::process(const process& parent, pid_t pid)
     : mms { *kernel_mms }
-    , attr { .system = parent.is_system() }
-    , pwd { parent.pwd }
-    , signals { parent.signals }
-    , pid { process::alloc_pid() }
+    , attr { parent.attr } , pwd { parent.pwd }
+    , signals { parent.signals } , pid { pid }
     , ppid { parent.pid } , pgid { parent.pgid } , sid { parent.sid }
-    , control_tty { parent.control_tty }
-    , children {}
+    , control_tty { parent.control_tty } , children {}
 {
     for (auto& area : parent.mms) {
         if (area.is_kernel_space() || area.attr.in.system)
@@ -112,11 +109,11 @@ process::process(const process& parent)
     this->files.dup_all(parent.files);
 }
 
-process::process(pid_t ppid)
+process::process(pid_t pid, pid_t ppid)
     : mms(*kernel_mms)
     , attr { .system = true }
     , pwd { "/" }
-    , pid { process::alloc_pid() }
+    , pid { pid }
     , ppid { ppid }
     , pgid {} , sid {} , control_tty {}
     , children {} { }
@@ -217,10 +214,11 @@ void kernel_threadd_main(void)
 void NORETURN _kernel_init(void)
 {
     // pid 2 is kernel thread daemon
-    auto* proc = &procs->emplace(1)->second;
+    auto& proc = procs->emplace(1);
+    assert(proc.pid == 2);
 
     // create thread
-    thread thd(proc, true);
+    thread thd(&proc, true);
 
     auto* esp = &thd.esp;
 
@@ -237,7 +235,7 @@ void NORETURN _kernel_init(void)
     // eflags
     push_stack(esp, 0x200);
 
-    readythds->push(&proc->thds.Emplace(std::move(thd)));
+    readythds->push(&proc.thds.Emplace(std::move(thd)));
 
     // ------------------------------------------
 
@@ -324,17 +322,19 @@ void NORETURN init_scheduler(void)
     process::filearr::init_global_file_container();
 
     // init process has no parent
-    auto* init = &procs->emplace(0)->second;
-    init->files.open("/dev/console", O_RDONLY);
-    init->files.open("/dev/console", O_WRONLY);
-    init->files.open("/dev/console", O_WRONLY);
+    auto& init = procs->emplace(0);
+    assert(init.pid == 1);
+
+    init.files.open("/dev/console", O_RDONLY);
+    init.files.open("/dev/console", O_WRONLY);
+    init.files.open("/dev/console", O_WRONLY);
 
     // we need interrupts enabled for cow mapping so now we disable it
     // in case timer interrupt mess things up
     asm_cli();
 
-    current_process = init;
-    current_thread = &init->thds.Emplace(init, true);
+    current_process = &init;
+    current_thread = &init.thds.Emplace(&init, true);
     readythds->push(current_thread);
 
     tss.ss0 = KERNEL_DATA_SEGMENT;

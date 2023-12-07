@@ -25,9 +25,11 @@ syscall_handler syscall_handlers[SYSCALL_HANDLERS_SIZE];
 extern "C" void _syscall_stub_fork_return(void);
 int _syscall_fork(interrupt_stack* data)
 {
-    process& curproc = *current_process;
-    auto& newproc = procs->copy_from(curproc);
-    auto* newthd = &newproc.thds.Emplace(*current_thread, &newproc);
+    auto& newproc = procs->copy_from(*current_process);
+    auto [ iter_newthd, inserted ] = newproc.thds.emplace(*current_thread, newproc.pid);
+    assert(inserted);
+    auto* newthd = &*iter_newthd;
+
     readythds->push(newthd);
 
     // create fake interrupt stack
@@ -187,9 +189,8 @@ int NORETURN _syscall_exit(interrupt_stack* data)
     uint32_t exit_code = data->s_regs.edi;
 
     // TODO: terminating a thread only
-    if (current_thread->owner->thds.size() != 1) {
+    if (current_process->thds.size() != 1)
         assert(false);
-    }
 
     // terminating a whole process:
     procs->kill(current_process->pid, exit_code);

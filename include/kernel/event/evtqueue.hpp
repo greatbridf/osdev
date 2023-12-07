@@ -4,14 +4,18 @@
 #include <types/list.hpp>
 #include <types/lock.hpp>
 
+namespace kernel {
+
+namespace tasks {
+
 // declaration in kernel/process.hpp
 struct thread;
 
-namespace kernel {
+} // namespace tasks
 
 class cond_var : public types::non_copyable {
 private:
-    using list_type = types::list<thread*>;
+    using list_type = types::list<tasks::thread*>;
 
     types::mutex m_mtx;
     list_type m_subscribers;

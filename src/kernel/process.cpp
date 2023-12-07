@@ -50,7 +50,7 @@ struct no_irq_guard {
 
 static types::bitmap* pkstack_bmp;
 
-void thread::alloc_kstack(void)
+void kernel::tasks::thread::alloc_kstack(void)
 {
     static int __allocated;
     if (!pkstack_bmp)
@@ -84,7 +84,7 @@ void thread::alloc_kstack(void)
     ++__allocated;
 }
 
-void thread::free_kstack(uint32_t p)
+void kernel::tasks::thread::free_kstack(uint32_t p)
 {
     p -= 0xffc00000;
     p /= THREAD_KERNEL_STACK_SIZE;
@@ -123,7 +123,7 @@ void proclist::kill(pid_t pid, int exit_code)
     auto& proc = this->find(pid);
 
     // remove threads from ready list
-    for (auto& thd : proc.thds.underlying_list()) {
+    for (auto& thd : proc.thds) {
         thd.attr.ready = 0;
         readythds->remove_all(&thd);
     }
@@ -218,7 +218,9 @@ void NORETURN _kernel_init(void)
     assert(proc.pid == 2);
 
     // create thread
-    thread thd(&proc, true);
+    auto [ iter_thd, inserted] = proc.thds.emplace(proc.pid);
+    assert(inserted);
+    auto& thd = *iter_thd;
 
     auto* esp = &thd.esp;
 
@@ -235,7 +237,7 @@ void NORETURN _kernel_init(void)
     // eflags
     push_stack(esp, 0x200);
 
-    readythds->push(&proc.thds.Emplace(std::move(thd)));
+    readythds->push(&thd);
 
     // ------------------------------------------
 
@@ -319,11 +321,15 @@ void NORETURN init_scheduler(void)
     procs = new proclist;
     readythds = new readyqueue;
 
-    process::filearr::init_global_file_container();
+    filearr::init_global_file_container();
 
     // init process has no parent
     auto& init = procs->emplace(0);
     assert(init.pid == 1);
+
+    auto [ iter_thd, inserted ] = init.thds.emplace(init.pid);
+    assert(inserted);
+    auto& thd = *iter_thd;
 
     init.files.open("/dev/console", O_RDONLY);
     init.files.open("/dev/console", O_WRONLY);
@@ -334,7 +340,7 @@ void NORETURN init_scheduler(void)
     asm_cli();
 
     current_process = &init;
-    current_thread = &init.thds.Emplace(&init, true);
+    current_thread = &thd;
     readythds->push(current_thread);
 
     tss.ss0 = KERNEL_DATA_SEGMENT;
@@ -376,12 +382,12 @@ bool schedule()
 {
     auto thd = readythds->query();
     process* proc = nullptr;
-    thread* curr_thd = nullptr;
+    kernel::tasks::thread* curr_thd = nullptr;
 
     if (current_thread == thd)
         goto _end;
 
-    proc = thd->owner;
+    proc = &procs->find(thd->owner);
     if (current_process != proc) {
         asm_switch_pd(proc->mms.m_pd);
         current_process = proc;

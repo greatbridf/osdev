@@ -48,7 +48,7 @@ void dispatch_event(void)
 
 bool kernel::cond_var::wait(types::mutex& lock)
 {
-    thread* thd = current_thread;
+    kernel::tasks::thread* thd = current_thread;
 
     current_thread->attr.ready = 0;
     current_thread->attr.wait = 1;

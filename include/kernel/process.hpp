@@ -24,13 +24,18 @@
 #include <types/types.h>
 
 class process;
+
+namespace kernel::tasks {
+
 struct thread;
+
+} // namespace kernel::tasks
 
 class proclist;
 class readyqueue;
 
 inline process* volatile current_process;
-inline thread* volatile current_thread;
+inline kernel::tasks::thread* volatile current_thread;
 inline proclist* procs;
 inline readyqueue* readythds;
 
@@ -47,6 +52,8 @@ struct thread_attr {
     uint32_t wait : 1;
 };
 
+namespace kernel::tasks {
+
 struct thread {
 private:
     void alloc_kstack(void);
@@ -55,290 +62,233 @@ private:
 public:
     uint32_t* esp;
     uint32_t pkstack;
-    process* owner;
+    pid_t owner;
     thread_attr attr;
 
-    explicit inline thread(process* _owner, bool system)
-        : owner { _owner }
-        , attr {
-            .system = system,
-            .ready = 1,
-            .wait = 0,
-        }
+    explicit inline thread(pid_t owner)
+        : owner { owner }
+        , attr { .system = 1, .ready = 1, .wait = 0, }
     {
         alloc_kstack();
     }
 
-    constexpr thread(thread&& val)
-        : esp { std::exchange(val.esp, nullptr) }
-        , pkstack { std::exchange(val.pkstack, 0) }
-        , owner { std::exchange(val.owner, nullptr) }
-        , attr { std::exchange(val.attr, {}) } { }
-
-    inline thread(const thread& val)
-        : owner { val.owner }
-        , attr { val.attr }
+    inline thread(const thread& val, pid_t owner)
+        : owner { owner } , attr { val.attr }
     {
         alloc_kstack();
     }
 
-    inline thread(const thread& thd, process* new_parent)
-        : thread { thd }
-    {
-        owner = new_parent;
-    }
+    constexpr thread(thread&& val) = default;
+    inline ~thread() { free_kstack(pkstack); }
 
-    constexpr ~thread()
-    {
-        if (pkstack)
-            free_kstack(pkstack);
-    }
+    constexpr bool operator==(const thread& rhs) const
+    { return pkstack == rhs.pkstack; }
+    constexpr bool operator<(const thread& rhs) const
+    { return pkstack < rhs.pkstack; }
 };
 
-class thdlist {
+}
+
+class filearr {
 public:
-    using list_type = types::list<thread>;
+    using container_type = types::list<fs::file>;
+    using array_type = std::map<int, container_type::iterator_type>;
 
 private:
-    list_type thds;
+    inline static container_type* files;
+    array_type arr;
 
 public:
-    constexpr thdlist(const thdlist& obj) = delete;
-    constexpr thdlist(thdlist&& obj) = delete;
-
-    constexpr thdlist& operator=(const thdlist& obj) = delete;
-    constexpr thdlist& operator=(thdlist&& obj) = delete;
-
-    constexpr thdlist(thdlist&& obj, process* new_parent)
-        : thds { std::move(obj.thds) }
+    inline static void init_global_file_container(void)
     {
-        for (auto& thd : thds)
-            thd.owner = new_parent;
+        files = new container_type;
     }
 
-    explicit constexpr thdlist(void) = default;
-
-    // implementation is below
-    constexpr ~thdlist();
-
-    template <typename... Args>
-    constexpr thread& Emplace(Args&&... args)
+private:
+    // iter should not be nullptr
+    constexpr void _close(container_type::iterator_type iter)
     {
-        return *thds.emplace_back(std::forward<Args>(args)...);
+        if (iter->ref == 1) {
+            if (iter->type == fs::file::types::pipe) {
+                assert(iter->flags.read | iter->flags.write);
+                if (iter->flags.read)
+                    iter->ptr.pp->close_read();
+                else
+                    iter->ptr.pp->close_write();
+
+                if (iter->ptr.pp->is_free())
+                    delete iter->ptr.pp;
+            }
+
+            files->erase(iter);
+        } else
+            --iter->ref;
     }
 
-    constexpr size_t size(void) const
+    constexpr int _next_fd(void) const
     {
-        return thds.size();
+        int fd = 0;
+
+        for (auto [ item_fd, iter_file ] : arr) {
+            if (item_fd == fd)
+                ++fd;
+        }
+
+        return fd;
     }
 
-    constexpr list_type& underlying_list(void)
+public:
+    constexpr filearr(const filearr&) = delete;
+    constexpr filearr& operator=(const filearr&) = delete;
+    constexpr filearr& operator=(filearr&&) = delete;
+    constexpr filearr(void) = default;
+    constexpr filearr(filearr&& val) = default;
+
+    constexpr int dup(int old_fd)
     {
-        return thds;
+        return dup2(old_fd, _next_fd());
+    }
+
+    // TODO: the third parameter should be int flags
+    //       determining whether the fd should be closed
+    //       after exec() (FD_CLOEXEC)
+    constexpr int dup2(int old_fd, int new_fd)
+    {
+        close(new_fd);
+
+        auto iter = arr.find(old_fd);
+        if (!iter)
+            return -EBADF;
+
+        auto [ _, iter_file ] = *iter;
+
+        this->arr.emplace(new_fd, iter_file);
+        ++iter_file->ref;
+        return new_fd;
+    }
+
+    constexpr void dup_all(const filearr& orig)
+    {
+        for (auto [ fd, iter_file ] : orig.arr) {
+            this->arr.emplace(fd, iter_file);
+            ++iter_file->ref;
+        }
+    }
+
+    constexpr fs::file* operator[](int i) const
+    {
+        auto iter = arr.find(i);
+        if (!iter)
+            return nullptr;
+        return &iter->second;
+    }
+
+    int pipe(int pipefd[2])
+    {
+        // TODO: set read/write flags
+        auto* pipe = new fs::pipe;
+
+        auto iter = files->emplace_back(fs::file {
+            fs::file::types::pipe,
+            { .pp = pipe },
+            nullptr,
+            0,
+            1,
+            {
+                .read = 1,
+                .write = 0,
+            },
+        });
+
+        bool inserted = false;
+        int fd = _next_fd();
+        std::tie(std::ignore, inserted) =
+            arr.insert(std::make_pair(fd, iter));
+        assert(inserted);
+
+        // TODO: use copy_to_user()
+        pipefd[0] = fd;
+
+        iter = files->emplace_back(fs::file {
+            fs::file::types::pipe,
+            { .pp = pipe },
+            nullptr,
+            0,
+            1,
+            {
+                .read = 0,
+                .write = 1,
+            },
+        });
+        fd = _next_fd();
+        std::tie(std::ignore, inserted) = arr.emplace(fd, iter);
+        assert(inserted);
+
+        // TODO: use copy_to_user()
+        pipefd[1] = fd;
+
+        return 0;
+    }
+
+    // TODO: file opening permissions check
+    int open(const char* filename, uint32_t flags)
+    {
+        auto* dentry = fs::vfs_open(filename);
+
+        if (!dentry) {
+            errno = ENOTFOUND;
+            return -1;
+        }
+
+        // check whether dentry is a file if O_DIRECTORY is set
+        if ((flags & O_DIRECTORY) && !dentry->ind->flags.in.directory) {
+            errno = ENOTDIR;
+            return -1;
+        }
+
+        auto iter = files->emplace_back(fs::file {
+            fs::file::types::ind,
+            { .ind = dentry->ind },
+            dentry->parent,
+            0,
+            1,
+            {
+                .read = !!(flags & (O_RDONLY | O_RDWR)),
+                .write = !!(flags & (O_WRONLY | O_RDWR)),
+            },
+        });
+
+        int fd = _next_fd();
+        auto [ _, inserted ] = arr.emplace(fd, iter);
+        assert(inserted);
+        return fd;
+    }
+
+    constexpr void close(int fd)
+    {
+        auto iter = arr.find(fd);
+        if (!iter)
+            return;
+
+        _close(iter->second);
+        arr.erase(iter);
+    }
+
+    constexpr void close_all(void)
+    {
+        for (auto&& [ fd, file ] : arr)
+            _close(file);
+        arr.clear();
+    }
+
+    constexpr ~filearr()
+    {
+        close_all();
     }
 };
 
 class process {
 public:
-    class filearr {
-    public:
-        using container_type = types::list<fs::file>;
-        using array_type = std::map<int, container_type::iterator_type>;
-
-    private:
-        inline static container_type* files;
-        array_type arr;
-
-    public:
-        inline static void init_global_file_container(void)
-        {
-            files = new container_type;
-        }
-
-    private:
-        // iter should not be nullptr
-        constexpr void _close(container_type::iterator_type iter)
-        {
-            if (iter->ref == 1) {
-                if (iter->type == fs::file::types::pipe) {
-                    assert(iter->flags.read | iter->flags.write);
-                    if (iter->flags.read)
-                        iter->ptr.pp->close_read();
-                    else
-                        iter->ptr.pp->close_write();
-
-                    if (iter->ptr.pp->is_free())
-                        delete iter->ptr.pp;
-                }
-
-                files->erase(iter);
-            } else
-                --iter->ref;
-        }
-
-        constexpr int _next_fd(void) const
-        {
-            int fd = 0;
-
-            for (auto [ item_fd, iter_file ] : arr) {
-                if (item_fd == fd)
-                    ++fd;
-            }
-
-            return fd;
-        }
-
-    public:
-        constexpr filearr(const filearr&) = delete;
-        constexpr filearr& operator=(const filearr&) = delete;
-        constexpr filearr& operator=(filearr&&) = delete;
-        constexpr filearr(void) = default;
-        constexpr filearr(filearr&& val)
-            : arr { std::move(val.arr) } { }
-
-        constexpr int dup(int old_fd)
-        {
-            return dup2(old_fd, _next_fd());
-        }
-
-        // TODO: the third parameter should be int flags
-        //       determining whether the fd should be closed
-        //       after exec() (FD_CLOEXEC)
-        constexpr int dup2(int old_fd, int new_fd)
-        {
-            close(new_fd);
-
-            auto iter = arr.find(old_fd);
-            if (!iter)
-                return -EBADF;
-
-            auto [ _, iter_file ] = *iter;
-
-            this->arr.emplace(new_fd, iter_file);
-            ++iter_file->ref;
-            return new_fd;
-        }
-
-        constexpr void dup_all(const filearr& orig)
-        {
-            for (auto [ fd, iter_file ] : orig.arr) {
-                this->arr.emplace(fd, iter_file);
-                ++iter_file->ref;
-            }
-        }
-
-        constexpr fs::file* operator[](int i) const
-        {
-            auto iter = arr.find(i);
-            if (!iter)
-                return nullptr;
-            return &iter->second;
-        }
-
-        int pipe(int pipefd[2])
-        {
-            // TODO: set read/write flags
-            auto* pipe = new fs::pipe;
-
-            auto iter = files->emplace_back(fs::file {
-                fs::file::types::pipe,
-                { .pp = pipe },
-                nullptr,
-                0,
-                1,
-                {
-                    .read = 1,
-                    .write = 0,
-                },
-            });
-
-            bool inserted = false;
-            int fd = _next_fd();
-            std::tie(std::ignore, inserted) =
-                arr.insert(std::make_pair(fd, iter));
-            assert(inserted);
-
-            // TODO: use copy_to_user()
-            pipefd[0] = fd;
-
-            iter = files->emplace_back(fs::file {
-                fs::file::types::pipe,
-                { .pp = pipe },
-                nullptr,
-                0,
-                1,
-                {
-                    .read = 0,
-                    .write = 1,
-                },
-            });
-            fd = _next_fd();
-            std::tie(std::ignore, inserted) = arr.emplace(fd, iter);
-            assert(inserted);
-
-            // TODO: use copy_to_user()
-            pipefd[1] = fd;
-
-            return 0;
-        }
-
-        // TODO: file opening permissions check
-        int open(const char* filename, uint32_t flags)
-        {
-            auto* dentry = fs::vfs_open(filename);
-
-            if (!dentry) {
-                errno = ENOTFOUND;
-                return -1;
-            }
-
-            // check whether dentry is a file if O_DIRECTORY is set
-            if ((flags & O_DIRECTORY) && !dentry->ind->flags.in.directory) {
-                errno = ENOTDIR;
-                return -1;
-            }
-
-            auto iter = files->emplace_back(fs::file {
-                fs::file::types::ind,
-                { .ind = dentry->ind },
-                dentry->parent,
-                0,
-                1,
-                {
-                    .read = !!(flags & (O_RDONLY | O_RDWR)),
-                    .write = !!(flags & (O_WRONLY | O_RDWR)),
-                },
-            });
-
-            int fd = _next_fd();
-            auto [ _, inserted ] = arr.emplace(fd, iter);
-            assert(inserted);
-            return fd;
-        }
-
-        constexpr void close(int fd)
-        {
-            auto iter = arr.find(fd);
-            if (!iter)
-                return;
-
-            _close(iter->second);
-            arr.erase(iter);
-        }
-
-        constexpr void close_all(void)
-        {
-            for (auto&& [ fd, file ] : arr)
-                _close(file);
-            arr.clear();
-        }
-
-        constexpr ~filearr()
-        {
-            close_all();
-        }
-    };
-
     struct wait_obj {
         pid_t pid;
         int code;
@@ -346,7 +296,7 @@ public:
 
 public:
     mutable kernel::mm_list mms;
-    thdlist thds;
+    std::set<kernel::tasks::thread> thds;
     kernel::cond_var cv_wait;
     types::list<wait_obj> waitlist;
     process_attr attr;
@@ -363,25 +313,7 @@ public:
     std::set<pid_t> children;
 
 public:
-    // if waitlist is not empty or mutex in cv_wait
-    // is locked, its behavior is undefined
-    constexpr process(process&& val)
-        : mms(std::move(val.mms))
-        , thds { std::move(val.thds), this }
-        , attr { val.attr }
-        , files(std::move(val.files))
-        , pwd(std::move(val.pwd))
-        , pid(val.pid)
-        , ppid(val.ppid)
-        , pgid(val.pgid)
-        , sid(val.sid)
-        , control_tty(val.control_tty)
-        , children(std::move(val.children))
-    {
-        if (current_process == &val)
-            current_process = this;
-    }
-
+    process(const process&) = delete;
     explicit process(const process& parent, pid_t pid);
 
     // this function is used for system initialization
@@ -494,6 +426,8 @@ public:
 
 class readyqueue final {
 public:
+    using thread = kernel::tasks::thread;
+
     using list_type = types::list<thread*>;
     using iterator_type = list_type::iterator_type;
     using const_iterator_type = list_type::const_iterator_type;
@@ -554,13 +488,6 @@ constexpr uint32_t push_stack(uint32_t** stack, uint32_t val)
     --*stack;
     **stack = val;
     return val;
-}
-
-// class thdlist
-constexpr thdlist::~thdlist()
-{
-    for (auto iter = thds.begin(); iter != thds.end(); ++iter)
-        readythds->remove_all(&iter);
 }
 
 void k_new_thread(void (*func)(void*), void* data);

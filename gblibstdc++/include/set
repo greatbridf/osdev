@@ -166,6 +166,20 @@ public:
 
     __GBLIBCPP_CONSTEXPR
     bool contains(const Key& key) const { return count(key) != 0; }
+
+    __GBLIBCPP_CONSTEXPR
+    iterator upper_bound(const Key& key)
+    { return tree.upper_bound(key); }
+    __GBLIBCPP_CONSTEXPR
+    const_iterator upper_bound(const Key& key) const
+    { return tree.upper_bound(key); }
+
+    __GBLIBCPP_CONSTEXPR
+    iterator lower_bound(const Key& key)
+    { return tree.lower_bound(key); }
+    __GBLIBCPP_CONSTEXPR
+    const_iterator lower_bound(const Key& key) const
+    { return tree.lower_bound(key); }
 };
 
 template <typename Key, typename Compare, typename Allocator>

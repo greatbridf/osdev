@@ -1,6 +1,7 @@
 #ifndef __GBLIBCPP_BITS_RBTREE__
 #define __GBLIBCPP_BITS_RBTREE__
 
+#include <cstddef>
 #include <functional>
 #include <utility>
 #include <memory>
@@ -267,6 +268,15 @@ private:
     {
         node_alloc_traits::destroy(alloc, nd);
         node_alloc_traits::deallocate(alloc, nd, 1);
+    }
+
+    constexpr void do_insertion(node* parent,
+        node*& child_inserted, node* nd)
+    {
+        nd->parent = parent;
+        child_inserted = nd;
+        this->balance(nd);
+        ++_size;
     }
 
 public:
@@ -583,39 +593,56 @@ public:
         return const_iterator { nextpos };
     }
 
+    template <typename U>
+    constexpr iterator lower_bound(U&& val) const
+    {
+        node* cur = root;
+        node* result = nullptr;
+
+        while (cur) {
+            if (!comp(cur->value, val)) {
+                result = cur;
+                cur = cur->left;
+            }
+            else {
+                cur = cur->right;
+            }
+        }
+
+        return iterator { result };
+    }
+
+    template <typename U>
+    constexpr iterator upper_bound(U&& val) const
+    {
+        iterator iter = lower_bound(std::forward<U>(val));
+        if (iter && !comp(*iter, val) && !comp(val, *iter))
+            return ++iter;
+        return iter;
+    }
+
     // value in nd MUST NOT exist in the rbtree,
     // that is, if a < b, then a > b
     constexpr void insert(node* nd)
     {
         node* cur = root;
 
-        while (cur) [[likely]] {
+        while (cur) {
             if (comp(nd->value, cur->value)) {
                 if (!cur->left) {
-                    nd->parent = cur;
-                    cur->left = nd;
-                    this->balance(nd);
-                    ++_size;
+                    do_insertion(cur, cur->left, nd);
                     return;
-                } else {
-                    cur = cur->left;
                 }
+                cur = cur->left;
             } else {
                 if (!cur->right) {
-                    nd->parent = cur;
-                    cur->right = nd;
-                    this->balance(nd);
-                    ++_size;
+                    do_insertion(cur, cur->right, nd);
                     return;
-                } else {
-                    cur = cur->right;
                 }
+                cur = cur->right;
             }
         }
-
-        root = nd;
-        root->toblack();
-        ++_size;
+        do_insertion(cur, root, nd);
     }
 
     template <typename U>

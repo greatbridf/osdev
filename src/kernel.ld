@@ -112,6 +112,19 @@ SECTIONS
         __bss_end = .;
     } > MEM
 
+    .sentry :
+        AT(0x30000)
+    { LONG(0x01145140); } > MEM
+
+    .eh_frame :
+        AT(LOADADDR(.sentry) + SIZEOF(.sentry))
+    {
+        __eh_frame_start = .;
+        *(.eh_frame*)
+        . = ALIGN(0x1000);
+        __eh_frame_end = .;
+    } > MEM
+
     /* Stabs debugging sections.  */
     .stab          0 : { *(.stab) }
     .stabstr       0 : { *(.stabstr) }
@@ -149,7 +162,7 @@ SECTIONS
     /DISCARD/ :
     {
         *(.fini_array*)
-        *(.eh_frame*)
         *(.note*)
+        *(.dtors*)
     }
 }

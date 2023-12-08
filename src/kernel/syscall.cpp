@@ -96,6 +96,7 @@ int _syscall_write(interrupt_stack* data)
         return -EINVAL;
     default:
         assert(false);
+        for ( ; ; ) ;
     }
 }
 
@@ -129,6 +130,7 @@ int _syscall_read(interrupt_stack* data)
         return -EINVAL;
     default:
         assert(false);
+        for ( ; ; ) ;
     }
 }
 

@@ -27,7 +27,7 @@ namespace __allocator {
             struct mem_blk_flags flags;
             // the first byte of the memory space
             // the minimal allocated space is 4 bytes
-            uint8_t data[4];
+            byte data[];
         };
 
     private:
@@ -61,7 +61,6 @@ namespace __allocator {
             byte* p = (byte*)blk;
             p += sizeof(mem_blk);
             p += blk_size;
-            p -= (4 * sizeof(byte));
             return (mem_blk*)p;
         }
 
@@ -85,7 +84,7 @@ namespace __allocator {
 
         inline mem_blk* allocate_new_block(mem_blk* blk_before, size_type size)
         {
-            auto ret = sbrk(sizeof(mem_blk) + size - 4 * sizeof(byte));
+            auto ret = sbrk(sizeof(mem_blk) + size);
             if (!ret)
                 return nullptr;
 
@@ -111,8 +110,7 @@ namespace __allocator {
 
             blk_next->size = blk->size
                 - this_size
-                - sizeof(mem_blk)
-                + 4 * sizeof(byte);
+                - sizeof(mem_blk);
 
             blk_next->flags.has_next = blk->flags.has_next;
             blk_next->flags.is_free = 1;
@@ -128,7 +126,7 @@ namespace __allocator {
         {
             brk(p_start);
             mem_blk* p_blk = (mem_blk*)sbrk(0);
-            p_blk->size = 4;
+            p_blk->size = 8;
             p_blk->flags.has_next = 0;
             p_blk->flags.is_free = 1;
         }
@@ -137,6 +135,9 @@ namespace __allocator {
         inline void* alloc(size_type size)
         {
             struct mem_blk* block_allocated;
+
+            if (size < 8)
+                size = 8;
 
             block_allocated = find_blk((mem_blk*)p_start, size);
             if (!block_allocated->flags.has_next

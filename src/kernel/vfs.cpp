@@ -48,27 +48,7 @@ fs::vfs::dentry::dentry(dentry* _parent, inode* _ind, name_type&& _name)
         idx_children = types::pnew<allocator_type>(idx_children);
     }
 }
-fs::vfs::dentry::dentry(dentry&& val)
-    : children(val.children)
-    , idx_children(val.idx_children)
-    , parent(val.parent)
-    , ind(val.ind)
-    , flags { val.flags }
-    , name(std::move(val.name))
-{
-    if (children) {
-        for (auto& item : *children)
-            item.parent = this;
-    }
-    memset(&val, 0x00, sizeof(dentry));
-}
-fs::vfs::dentry::~dentry()
-{
-    if (children) {
-        types::pdelete<allocator_type>(children);
-        types::pdelete<allocator_type>(idx_children);
-    }
-}
+
 fs::vfs::dentry* fs::vfs::dentry::append(inode* ind, const name_type& name, bool set_dirty)
 {
     auto iter = children->emplace_back(this, ind, name);

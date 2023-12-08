@@ -127,12 +127,34 @@ public:
         explicit dentry(dentry* parent, inode* ind, const name_type& name);
         explicit dentry(dentry* parent, inode* ind, name_type&& name);
         dentry(const dentry& val) = delete;
-        dentry(dentry&& val);
+        constexpr dentry(dentry&& val)
+            : children(std::exchange(val.children, nullptr))
+            , idx_children(std::exchange(val.idx_children, nullptr))
+            , parent(std::exchange(val.parent, nullptr))
+            , ind(std::exchange(val.ind, nullptr))
+            , flags { val.flags }
+            , name(std::move(val.name))
+        {
+            if (children) {
+                for (auto& item : *children)
+                    item.parent = this;
+            }
+        }
 
         dentry& operator=(const dentry& val) = delete;
         dentry& operator=(dentry&& val) = delete;
 
-        ~dentry();
+        constexpr ~dentry()
+        {
+            if (children) {
+                types::pdelete<allocator_type>(children);
+                children = nullptr;
+            }
+            if (idx_children) {
+                types::pdelete<allocator_type>(idx_children);
+                idx_children = nullptr;
+            }
+        }
 
         dentry* append(inode* ind, const name_type& name, bool set_dirty);
         dentry* append(inode* ind, name_type&& name, bool set_dirty);

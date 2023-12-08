@@ -34,22 +34,34 @@ int13:
 .globl int14
 .type  int14 @function
 int14:
+    # push general purpose registers
     pushal
+
+    # save %cr2
     movl %cr2, %eax
     pushl %eax
 
-    # stack alignment and push *data
-    movl %esp, %eax
-    subl $0x4, %esp
-    andl $0xfffffff0, %esp
-    movl %eax, (%esp)
+    # save current esp (also pointer to struct int14_data)
+    mov %esp, %ebx
+
+    # align stack to 16byte boundary
+    and $0xfffffff0, %esp
+
+    # save mmx registers
+    subl $512, %esp
+    fxsave (%esp)
+
+    # push *data
+    sub $16, %esp
+    mov %ebx, (%esp)
 
     call int14_handler
 
-    # restore stack
-    popl %esp
+    # restore mmx registers
+    fxrstor 16(%esp)
 
-    popl %eax
+    # restore stack and general purpose registers
+    leal 4(%ebx), %esp
     popal
 
 # remove the 32bit error code from stack

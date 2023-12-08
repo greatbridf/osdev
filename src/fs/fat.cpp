@@ -63,7 +63,7 @@ void fat32::release_cluster(cluster_t no)
         --iter->second.ref;
 }
 
-int fat32::inode_readdir(fs::inode* dir, size_t offset, fs::vfs::filldir_func filldir)
+int fat32::inode_readdir(fs::inode* dir, size_t offset, const fs::vfs::filldir_func& filldir)
 {
     cluster_t next = cl(dir);
     for (size_t i = 0; i < (offset / (sectors_per_cluster * SECTOR_SIZE)); ++i) {

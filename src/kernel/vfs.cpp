@@ -152,7 +152,7 @@ int fs::vfs::load_dentry(dentry* ent)
 
     for (int ret = 1; ret > 0; offset += ret) {
         ret = this->inode_readdir(ind, offset,
-            [&, this](const char* name, size_t len, ino_t ino, uint8_t) -> int {
+            [ent, this](const char* name, size_t len, ino_t ino, uint8_t) -> int {
                 if (!len)
                     ent->append(get_inode(ino), name, false);
                 else
@@ -291,7 +291,7 @@ protected:
         dir->size += sizeof(fe_t);
     }
 
-    virtual int inode_readdir(fs::inode* dir, size_t offset, fs::vfs::filldir_func filldir) override
+    virtual int inode_readdir(fs::inode* dir, size_t offset, const fs::vfs::filldir_func& filldir) override
     {
         if (!dir->flags.in.directory) {
             return -1;

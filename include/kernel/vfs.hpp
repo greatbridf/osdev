@@ -196,7 +196,7 @@ public:
     // return -1 if an error occurred
     // return 0 if no more entry available
     // otherwise, return bytes to be added to the offset
-    virtual int inode_readdir(inode* dir, size_t offset, filldir_func callback) = 0;
+    virtual int inode_readdir(inode* dir, size_t offset, const filldir_func& callback) = 0;
 };
 
 class pipe : public types::non_copyable {

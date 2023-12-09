@@ -294,4 +294,25 @@ public:
         __allocator::m_palloc->free(ptr);
     }
 };
+
+template <typename T, template <typename> typename Allocator>
+struct allocator_adapter {
+    using value_type = typename Allocator<T>::value_type;
+    using propagate_on_container_move_assignment = std::true_type;
+
+    constexpr allocator_adapter() = default;
+
+    template <template <typename> typename UAlloc, typename U>
+    constexpr allocator_adapter(const allocator_adapter<U, UAlloc>&)
+        noexcept {}
+    
+    constexpr T* allocate(std::size_t n)
+    { return types::allocator_traits<Allocator<T>>::allocate(n); }
+    constexpr void deallocate(T* ptr, std::size_t)
+    { return types::allocator_traits<Allocator<T>>::deallocate(ptr); }
+
+    template <typename U>
+    struct rebind { using other = allocator_adapter<U, Allocator>; };
+};
+
 } // namespace types

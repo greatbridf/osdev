@@ -315,12 +315,12 @@ int mmap(
         return GB_FAILED;
     }
 
-    auto mm = mms.addarea(hint, write, priv);
-    mm->mapped_file = file;
-    mm->file_offset = offset;
+    auto& mm = mms.addarea(hint, write, priv);
+    mm.mapped_file = file;
+    mm.file_offset = offset;
 
     for (size_t i = 0; i < n_pgs; ++i)
-        mm->append_page(empty_page, PAGE_MMAP | PAGE_COW, priv);
+        mm.append_page(empty_page, PAGE_MMAP | PAGE_COW, priv);
 
     return GB_OK;
 }
@@ -332,7 +332,7 @@ void init_mem(void)
 
     // TODO: replace early kernel pd
     kernel_mms = types::pnew<types::kernel_ident_allocator>(kernel_mms, EARLY_KERNEL_PD_PAGE);
-    auto heap_mm = kernel_mms->addarea(KERNEL_HEAP_START, true, true);
+    auto& heap_mm = kernel_mms->addarea(KERNEL_HEAP_START, true, true);
 
     // create empty_page struct
     empty_page.attr = 0;
@@ -341,8 +341,8 @@ void init_mem(void)
     empty_page.pg_pteidx = 0x00002000;
 
     // 0xd0000000 to 0xd4000000 or 3.5GiB, size 64MiB
-    while (heap_mm->pgs->size() < 64 * 1024 * 1024 / PAGE_SIZE)
-        heap_mm->append_page(empty_page, PAGE_COW, true);
+    while (heap_mm.pgs->size() < 64 * 1024 * 1024 / PAGE_SIZE)
+        heap_mm.append_page(empty_page, PAGE_COW, true);
 
     types::__allocator::init_kernel_heap(KERNEL_HEAP_START,
         vptrdiff(KERNEL_HEAP_LIMIT, KERNEL_HEAP_START));

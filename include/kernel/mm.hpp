@@ -1,5 +1,6 @@
 #pragma once
 
+#include <list>
 #include <bit>
 #include <cstddef>
 #include <utility>
@@ -9,7 +10,6 @@
 #include <stdint.h>
 #include <types/allocator.hpp>
 #include <types/cplusplus.hpp>
-#include <types/list.hpp>
 #include <types/size.h>
 #include <types/status.h>
 #include <types/types.h>
@@ -185,9 +185,10 @@ public:
 
 class mm_list {
 public:
-    using list_type = ::types::list<mm, types::kernel_ident_allocator>;
-    using iterator_type = list_type::iterator_type;
-    using const_iterator_type = list_type::const_iterator_type;
+    using list_type = std::list<mm,
+        types::allocator_adapter<mm, types::kernel_ident_allocator>>;
+    using iterator_type = list_type::iterator;
+    using const_iterator_type = list_type::const_iterator;
 
 private:
     list_type m_areas;
@@ -243,7 +244,7 @@ public:
         return m_areas.cend();
     }
 
-    constexpr iterator_type addarea(void* start, bool w, bool system)
+    constexpr mm& addarea(void* start, bool w, bool system)
     {
         return m_areas.emplace_back(mm {
             .start = start,
@@ -275,16 +276,16 @@ public:
 
     constexpr int mirror_area(mm& src)
     {
-        auto area = this->addarea(
+        auto& area = this->addarea(
             src.start, src.attr.in.write, src.attr.in.system);
 
         if (src.mapped_file) {
-            area->mapped_file = src.mapped_file;
-            area->file_offset = src.file_offset;
+            area.mapped_file = src.mapped_file;
+            area.file_offset = src.file_offset;
         }
 
         for (auto& pg : *src.pgs) {
-            if (area->append_page(pg,
+            if (area.append_page(pg,
                     PAGE_COW | (pg.attr & PAGE_MMAP),
                     src.attr.in.system)
                 != GB_OK) {

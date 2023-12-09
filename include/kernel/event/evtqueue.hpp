@@ -1,7 +1,8 @@
 #pragma once
 
+#include <list>
+
 #include <types/cplusplus.hpp>
-#include <types/list.hpp>
 #include <types/lock.hpp>
 
 namespace kernel {
@@ -15,7 +16,7 @@ struct thread;
 
 class cond_var : public types::non_copyable {
 private:
-    using list_type = types::list<tasks::thread*>;
+    using list_type = std::list<tasks::thread*>;
 
     types::mutex m_mtx;
     list_type m_subscribers;

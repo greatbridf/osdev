@@ -1,6 +1,7 @@
 #pragma once
 
 #include <map>
+#include <list>
 #include <functional>
 
 #include <assert.h>
@@ -10,7 +11,6 @@
 #include <types/buffer.hpp>
 #include <types/cplusplus.hpp>
 #include <types/hash_map.hpp>
-#include <types/list.hpp>
 #include <types/lock.hpp>
 #include <types/types.h>
 #include <types/vector.hpp>
@@ -108,7 +108,7 @@ public:
         using allocator_type = types::kernel_allocator<T>;
 
     private:
-        types::list<dentry, allocator_type>* children = nullptr;
+        std::list<dentry, types::allocator_adapter<dentry, allocator_type>>* children = nullptr;
         types::hash_map<name_type, dentry*, types::linux_hasher, allocator_type>* idx_children = nullptr;
 
     public:

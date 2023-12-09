@@ -1,6 +1,7 @@
 #pragma once
 
 #include <map>
+#include <list>
 #include <set>
 #include <tuple>
 #include <utility>
@@ -91,8 +92,8 @@ public:
 
 class filearr {
 public:
-    using container_type = types::list<fs::file>;
-    using array_type = std::map<int, container_type::iterator_type>;
+    using container_type = std::list<fs::file>;
+    using array_type = std::map<int, container_type::iterator>;
 
 private:
     inline static container_type* files;
@@ -106,7 +107,7 @@ public:
 
 private:
     // iter should not be nullptr
-    constexpr void _close(container_type::iterator_type iter)
+    constexpr void _close(container_type::iterator iter)
     {
         if (iter->ref == 1) {
             if (iter->type == fs::file::types::pipe) {
@@ -188,7 +189,7 @@ public:
         // TODO: set read/write flags
         auto* pipe = new fs::pipe;
 
-        auto iter = files->emplace_back(fs::file {
+        auto iter = files->emplace(files->cend(), fs::file {
             fs::file::types::pipe,
             { .pp = pipe },
             nullptr,
@@ -202,14 +203,13 @@ public:
 
         bool inserted = false;
         int fd = _next_fd();
-        std::tie(std::ignore, inserted) =
-            arr.insert(std::make_pair(fd, iter));
+        std::tie(std::ignore, inserted) = arr.emplace(fd, iter);
         assert(inserted);
 
         // TODO: use copy_to_user()
         pipefd[0] = fd;
 
-        iter = files->emplace_back(fs::file {
+        iter = files->emplace(files->cend(), fs::file {
             fs::file::types::pipe,
             { .pp = pipe },
             nullptr,
@@ -246,7 +246,7 @@ public:
             return -1;
         }
 
-        auto iter = files->emplace_back(fs::file {
+        auto iter = files->emplace(files->cend(), fs::file {
             fs::file::types::ind,
             { .ind = dentry->ind },
             dentry->parent,
@@ -298,7 +298,7 @@ public:
     mutable kernel::mm_list mms;
     std::set<kernel::tasks::thread> thds;
     kernel::cond_var cv_wait;
-    types::list<wait_obj> waitlist;
+    std::list<wait_obj> waitlist;
     process_attr attr;
     filearr files;
     types::string<> pwd;
@@ -424,13 +424,11 @@ public:
     void kill(pid_t pid, int exit_code);
 };
 
+// TODO: lock and unlock
 class readyqueue final {
 public:
     using thread = kernel::tasks::thread;
-
-    using list_type = types::list<thread*>;
-    using iterator_type = list_type::iterator_type;
-    using const_iterator_type = list_type::const_iterator_type;
+    using list_type = std::list<thread*>;
 
 private:
     list_type m_thds;
@@ -447,18 +445,16 @@ public:
     constexpr explicit readyqueue(void) = default;
 
     constexpr void push(thread* thd)
-    {
-        m_thds.push_back(thd);
-    }
+    { m_thds.push_back(thd); }
 
     constexpr thread* pop(void)
     {
-        auto iter = m_thds.begin();
-        while (!((*iter)->attr.ready))
-            iter = m_thds.erase(iter);
-        auto* ptr = *iter;
-        m_thds.erase(iter);
-        return ptr;
+        m_thds.remove_if([](thread* item) {
+            return !item->attr.ready;
+        });
+        auto* retval = m_thds.front();
+        m_thds.pop_front();
+        return retval;
     }
 
     constexpr thread* query(void)
@@ -469,13 +465,7 @@ public:
     }
 
     constexpr void remove_all(thread* thd)
-    {
-        auto iter = m_thds.find(thd);
-        while (iter != m_thds.end()) {
-            m_thds.erase(iter);
-            iter = m_thds.find(thd);
-        }
-    }
+    { m_thds.remove(thd); }
 };
 
 void NORETURN init_scheduler(void);

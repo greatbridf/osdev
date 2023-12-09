@@ -8,16 +8,15 @@
 #include <stdio.h>
 #include <types/allocator.hpp>
 #include <types/cplusplus.hpp>
-#include <types/list.hpp>
 #include <types/lock.hpp>
 
-static ::types::list<::input_event>* _input_event_queue;
+static std::list<::input_event>* _input_event_queue;
 
 namespace event {
-::types::list<::input_event>& input_event_queue(void)
+std::list<::input_event>& input_event_queue(void)
 {
     if (!_input_event_queue) {
-        _input_event_queue = new types::list<input_event>;
+        _input_event_queue = new std::list<input_event>;
     }
     return *_input_event_queue;
 }

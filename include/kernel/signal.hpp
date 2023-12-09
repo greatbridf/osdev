@@ -1,8 +1,9 @@
 #pragma once
 
+#include <list>
+
 #include <stdint.h>
 #include <types/cplusplus.hpp>
-#include <types/list.hpp>
 
 namespace kernel {
 
@@ -15,7 +16,7 @@ constexpr sig_t SIGPIPE = 1 << 3;
 
 class signal_list {
 public:
-    using list_type = types::list<sig_t>;
+    using list_type = std::list<sig_t>;
 
 private:
     list_type m_list;

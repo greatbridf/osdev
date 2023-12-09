@@ -11,7 +11,6 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <types/allocator.hpp>
-#include <types/list.hpp>
 #include <types/status.h>
 #include <types/string.hpp>
 #include <types/vector.hpp>
@@ -51,19 +50,19 @@ fs::vfs::dentry::dentry(dentry* _parent, inode* _ind, name_type&& _name)
 
 fs::vfs::dentry* fs::vfs::dentry::append(inode* ind, const name_type& name, bool set_dirty)
 {
-    auto iter = children->emplace_back(this, ind, name);
-    idx_children->emplace(iter->name, &iter);
+    auto& ent = children->emplace_back(this, ind, name);
+    idx_children->emplace(ent.name, &ent);
     if (set_dirty)
         this->flags.in.dirty = 1;
-    return &iter;
+    return &ent;
 }
 fs::vfs::dentry* fs::vfs::dentry::append(inode* ind, name_type&& name, bool set_dirty)
 {
-    auto iter = children->emplace_back(this, ind, std::move(name));
-    idx_children->emplace(iter->name, &iter);
+    auto& ent = children->emplace_back(this, ind, std::move(name));
+    idx_children->emplace(ent.name, &ent);
     if (set_dirty)
         this->flags.in.dirty = 1;
-    return &iter;
+    return &ent;
 }
 fs::vfs::dentry* fs::vfs::dentry::find(const name_type& name)
 {
@@ -528,7 +527,7 @@ int fs::vfs_stat(fs::vfs::dentry* ent, stat* stat)
     return ent->ind->fs->inode_stat(ent, stat);
 }
 
-static types::list<fs::vfs*>* fs_es;
+static std::list<fs::vfs*>* fs_es;
 
 void fs::register_special_block(
     uint16_t major,

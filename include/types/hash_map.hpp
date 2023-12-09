@@ -1,4 +1,5 @@
 #pragma once
+#include <list>
 #include <bit>
 #include <utility>
 #include <type_traits>
@@ -6,7 +7,6 @@
 #include <stdint.h>
 #include <types/allocator.hpp>
 #include <types/cplusplus.hpp>
-#include <types/list.hpp>
 #include <types/string.hpp>
 #include <types/types.h>
 #include <types/vector.hpp>
@@ -105,7 +105,8 @@ public:
     using iterator_type = iterator<pair_type*>;
     using const_iterator_type = iterator<const pair_type*>;
 
-    using bucket_type = list<pair_type, Allocator>;
+    using bucket_type = std::list<pair_type,
+        types::allocator_adapter<pair_type, Allocator>>;
     using bucket_array_type = vector<bucket_type, Allocator>;
 
     using hasher_type = Hasher<Key>;

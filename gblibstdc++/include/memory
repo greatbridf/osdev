@@ -36,16 +36,148 @@ const T* addressof(const T&&) = delete;
 
 namespace __helpers {
 
+template <typename Ptr, typename = void>
+struct pointer_difference_type
+{ using type = std::ptrdiff_t; };
+
+template <typename Ptr>
+struct pointer_difference_type<Ptr,
+    std::void_t<typename Ptr::difference_type>>
+{ using type = typename Ptr::difference_type; };
+
+template <typename Ptr>
+using pointer_difference_type_t =
+    typename pointer_difference_type<Ptr>::type;
+
+template <typename Base, typename T>
+struct rebind;
+
+template <template <typename, typename...> typename Template,
+    typename NewType, typename OldType, typename... Args>
+struct rebind<Template<OldType, Args...>, NewType> {
+    using type = Template<NewType, Args...>;
+};
+
+template <typename Ptr, typename T, typename = void>
+struct try_rebind { using type = typename rebind<Ptr, T>::type; };
+
+template <typename Ptr, typename T>
+struct try_rebind<Ptr, T,
+    std::void_t<typename Ptr::template rebind<T>>> {
+    using type = typename Ptr::template rebind<T>;
+};
+
+template <typename Ptr, typename = void>
+struct pointer_element {};
+
+template <typename Ptr>
+struct pointer_element<Ptr, std::enable_if_t<
+    std::is_same_v<void, std::void_t<typename Ptr::element_type>>
+>> { using type = typename Ptr::element_type; };
+
+template <template <typename, typename...> typename Template,
+    typename T, typename... Args>
+struct pointer_element<Template<T, Args...>, void>
+{ using type = T; };
+
+template <typename Ptr, typename = void>
+struct pointer_traits_impl {};
+
+template <typename Ptr>
+struct pointer_traits_impl<Ptr,
+    std::void_t<typename pointer_element<Ptr>::type>> {
+    using pointer = Ptr;
+    using element_type = typename pointer_element<Ptr>::type;
+    using difference_type = pointer_difference_type_t<Ptr>;
+
+    template <typename U>
+    using rebind = typename try_rebind<Ptr, U>::type;
+
+    static pointer pointer_to(element_type& ref)
+    { return Ptr::pointer_to(ref); }
+};
+
+template <typename T>
+struct pointer_traits_impl<T*, void> {
+    using pointer = T*;
+    using element_type = T;
+    using difference_type = std::ptrdiff_t;
+
+    template <typename U>
+    using rebind = U*;
+
+    static pointer pointer_to(element_type& ref)
+    { return std::addressof(ref); }
+};
+
+} // namespace __helpers
+
+template <typename Ptr>
+struct pointer_traits : public __helpers::pointer_traits_impl<Ptr> {};
+
+namespace __helpers {
+
 template <typename Alloc, typename = void>
 struct allocator_pointer
-{ using type = std::add_pointer_t<typename Alloc::value_type>; };
+{ using type = typename Alloc::value_type*; };
+
 template <typename Alloc>
 struct allocator_pointer<Alloc,
     std::void_t<typename Alloc::pointer>>
 { using type = typename Alloc::pointer; };
+
 template <typename Alloc>
 using allocator_pointer_t =
     typename allocator_pointer<Alloc>::type;
+
+
+template <typename Alloc, typename Pointer, typename = void>
+struct allocator_const_pointer {
+    using type = typename std::pointer_traits<Pointer>::template
+        rebind<const typename Alloc::value_type>;
+};
+
+template <typename Alloc, typename Pointer>
+struct allocator_const_pointer<Alloc, Pointer,
+    std::void_t<typename Alloc::const_pointer>>
+{ using type = typename Alloc::const_pointer; };
+
+template <typename Alloc, typename Pointer>
+using allocator_const_pointer_t =
+    typename allocator_const_pointer<Alloc, Pointer>::type;
+
+
+template <typename Alloc, typename Pointer, typename = void>
+struct allocator_void_pointer {
+    using type = typename std::pointer_traits<Pointer>::template
+        rebind<void>;
+};
+
+template <typename Alloc, typename Pointer>
+struct allocator_void_pointer<Alloc, Pointer,
+    std::void_t<typename Alloc::void_pointer>>
+{ using type = typename Alloc::void_pointer; };
+
+template <typename Alloc, typename Pointer>
+using allocator_void_pointer_t =
+    typename allocator_void_pointer<Alloc, Pointer>::type;
+
+
+template <typename Alloc, typename Pointer, typename = void>
+struct allocator_const_void_pointer {
+    using type = typename std::pointer_traits<Pointer>::template
+        rebind<const void>;
+};
+
+template <typename Alloc, typename Pointer>
+struct allocator_const_void_pointer<Alloc, Pointer,
+    std::void_t<typename Alloc::const_void_pointer>>
+{ using type = typename Alloc::const_void_pointer; };
+
+template <typename Alloc, typename Pointer>
+using allocator_const_void_pointer_t =
+    typename allocator_const_void_pointer<Alloc, Pointer>::type;
+
 
 template <typename Alloc, typename = void>
 struct allocator_difference_type
@@ -102,11 +234,39 @@ template <typename Alloc>
 using allocator_prop_swap_t =
     typename allocator_prop_swap<Alloc>::type;
 
+template <typename Alloc, typename = void>
+struct allocator_select_on_copy {
+    static constexpr Alloc get(const Alloc& alloc)
+    { return alloc; }
+};
+
+template <typename Alloc>
+struct allocator_select_on_copy<Alloc, std::enable_if_t<
+    std::is_same_v<void, std::void_t<decltype(
+        std::declval<Alloc>().select_on_container_copy_construction()
+    )>> >> {
+    static constexpr Alloc get(const Alloc& alloc)
+    { return alloc.select_on_container_copy_construction(); }
+};
+
+template <typename Allocator, typename T, typename = void>
+struct allocator_rebind_type {
+    using type = typename rebind<Allocator, T>::type;
+};
+
+template <typename Allocator, typename T>
+struct allocator_rebind_type<Allocator, T, std::void_t<
+    typename Allocator::template rebind<T>::other
+>> {
+    using type = typename Allocator::template rebind<T>::other;
+};
+
 } // namespace __helpers
 
 template <typename T>
 struct allocator {
     using value_type = T;
+    using propagate_on_container_move_assignment = std::true_type;
 
     constexpr allocator() noexcept = default;
     constexpr allocator(const allocator& other) noexcept = default;
@@ -144,25 +304,18 @@ constexpr void destroy_at(T* p)
     p->~T();
 }
 
-namespace __helpers {
-
-template <typename Allocator, typename T>
-struct rebind;
-
-template <template <typename, typename...> typename Allocator,
-    typename NewType, typename OldType, typename... Args>
-struct rebind<Allocator<OldType, Args...>, NewType> {
-    using type = Allocator<NewType, Args...>;
-};
-
-} // namespace __helpers
-
 template <typename Allocator>
 struct allocator_traits {
     using allocator_type = Allocator;
     using value_type = typename Allocator::value_type;
     using pointer =
         __helpers::allocator_pointer_t<Allocator>;
+    using const_pointer =
+        __helpers::allocator_const_pointer_t<Allocator, pointer>;
+    using void_pointer =
+        __helpers::allocator_void_pointer_t<Allocator, pointer>;
+    using const_void_pointer =
+        __helpers::allocator_const_void_pointer_t<Allocator, pointer>;
     using difference_type =
         __helpers::allocator_difference_type_t<Allocator>;
     using size_type =
@@ -175,7 +328,8 @@ struct allocator_traits {
         __helpers::allocator_prop_swap_t<Allocator>;
 
     template <typename T>
-    using rebind_alloc = typename __helpers::rebind<Allocator, T>::type;
+    using rebind_alloc =
+        typename __helpers::allocator_rebind_type<Allocator, T>::type;
 
     [[nodiscard]] static constexpr pointer allocate(Allocator& alloc, size_type n)
     { return alloc.allocate(n); }
@@ -187,6 +341,10 @@ struct allocator_traits {
     template <typename T>
     static constexpr void destroy(Allocator&, T* p)
     { std::destroy_at(p); }
+
+    static constexpr Allocator
+        select_on_container_copy_construction(const Allocator& alloc)
+    { return __helpers::allocator_select_on_copy<Allocator>::get(alloc); }
 };
 
 } // namespace std

@@ -362,7 +362,8 @@ public:
         destroy(root);
 
         comp = other.comp;
-        if constexpr (node_alloc_traits::propagate_on_copy_assignment::value)
+        if constexpr (node_alloc_traits::
+            propagate_on_container_copy_assignment::value)
             alloc = other.alloc;
 
         root = copy(other.root);
@@ -376,7 +377,8 @@ public:
         root = std::exchange(other.root, nullptr);
         _size = std::exchange(other._size, 0);
         comp = std::move(other.comp);
-        if constexpr (node_alloc_traits::propagate_on_move_assignment::value)
+        if constexpr (node_alloc_traits::
+            propagate_on_container_move_assignment::value)
             alloc = std::move(other.alloc);
     }
 

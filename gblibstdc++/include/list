@@ -1,7 +1,10 @@
 #ifndef __GBLIBCPP_LIST__
 #define __GBLIBCPP_LIST__
 
+#include <bits/iter_ops>
+
 #include <memory>
+#include <initializer_list>
 #include <type_traits>
 #include <utility>
 #include <cstddef>
@@ -224,6 +227,15 @@ public:
 
         _move_from(std::move(other));
     }
+
+    __GBLIBCPP_CONSTEXPR
+    list(std::initializer_list<T> ilist,
+        const Allocator& alloc = Allocator())
+        : list(alloc)
+    {
+        for (const auto& item : ilist)
+            emplace_back(item);
+    }
     
     __GBLIBCPP_CONSTEXPR
     ~list()
@@ -276,11 +288,43 @@ public:
         return *this;
     }
 
-    // TODO: std::initializer_list
-    // list(std::initializer_list<Key> init,
-    //     const Allocator& alloc = Allocator());
-    //
-    // list& operator=(std::initializer_list<Key> ilist);
+    __GBLIBCPP_CONSTEXPR
+    list& operator=(std::initializer_list<T> ilist)
+    {
+        // TODO: reuse memory
+        clear();
+        for (const auto& item : ilist)
+            emplace_back(item);
+        return *this;
+    }
+
+    __GBLIBCPP_CONSTEXPR
+    void assign(size_type count, const T& value)
+    {
+        clear();
+        while (count--)
+            emplace_back(value);
+    }
+
+    template <typename InputIter>
+    __GBLIBCPP_CONSTEXPR
+    void assign(InputIter first, InputIter last)
+    {
+        clear();
+        insert(first, last);
+    }
+
+    __GBLIBCPP_CONSTEXPR
+    void assign(std::initializer_list<T> ilist)
+    {
+        clear();
+        for (const auto& item : ilist)
+            emplace_back(item);
+    }
+
+    __GBLIBCPP_CONSTEXPR
+    allocator_type get_allocator() const noexcept { return m_alloc; }
+
     __GBLIBCPP_CONSTEXPR
     reference front() { return *begin(); }
     __GBLIBCPP_CONSTEXPR

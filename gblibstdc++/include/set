@@ -1,8 +1,11 @@
 #ifndef __GBLIBCPP_SET__
 #define __GBLIBCPP_SET__
 
+#include <bits/iter_ops>
+
 #include <bits/rbtree>
 #include <functional>
+#include <initializer_list>
 #include <memory>
 #include <cstddef>
 
@@ -81,6 +84,18 @@ public:
     __GBLIBCPP_CONSTEXPR
     set(set&& other, const Allocator& alloc)
         : tree(std::move(other.tree), alloc) {}
+
+    __GBLIBCPP_CONSTEXPR
+    set(std::initializer_list<Key> ilist,
+        const Compare& comp = Compare(),
+        const Allocator& alloc = Allocator())
+        : set(comp, alloc)
+    { insert(ilist.begin(), ilist.end()); }
+    
+    __GBLIBCPP_CONSTEXPR
+    set(std::initializer_list<Key> ilist,
+        const Allocator& alloc)
+        : set(ilist, Compare(), alloc) {}
     
     __GBLIBCPP_CONSTEXPR
     ~set() { clear(); }
@@ -89,17 +104,13 @@ public:
     set& operator=(const set& other) = default;
     __GBLIBCPP_CONSTEXPR
     set& operator=(set&& other) = default;
-
-    // TODO: std::initializer_list
-    // set(std::initializer_list<Key> init,
-    //     const Compare& comp = Compare(),
-    //     const Allocator& alloc = Allocator());
-    //
-    // set(std::initializer_list<Key> init,
-    //     const Allocator& alloc = Allocator())
-    //     : set(init, Compare(), alloc) {}
-    //
-    // set& operator=(std::initializer_list<Key> ilist);
+    __GBLIBCPP_CONSTEXPR
+    set& operator=(std::initializer_list<Key> ilist)
+    {
+        clear();
+        insert(ilist.begin(), ilist.end());
+        return *this;
+    }
 
     __GBLIBCPP_CONSTEXPR
     iterator find(const Key& key) { return tree.find(key); }
@@ -186,6 +197,34 @@ template <typename Key, typename Compare, typename Allocator>
 void swap(std::set<Key, Compare, Allocator>& lhs,
     std::set<Key, Compare, Allocator>& rhs)
 { lhs.swap(rhs); }
+
+template <typename Key, typename Compare,
+    typename Allocator, typename Pred>
+typename std::set<Key, Compare, Allocator>::size_type
+erase_if(std::set<Key, Compare, Allocator>& set, Pred pred)
+{
+    auto iter = set.begin();
+    typename std::set<Key, Compare, Allocator>::size_type count = 0;
+    while (iter != set.end()) {
+        if (pred(*iter)) {
+            iter = set.erase(iter);
+            ++count;
+        } else {
+            ++iter;
+        }
+    }
+    return count;
+}
+
+template <typename Key,
+    typename Compare = std::less<Key>,
+    typename Allocator = std::allocator<Key>>
+set(std::initializer_list<Key>, Compare = Compare(),
+    Allocator = Allocator()) -> set<Key, Compare, Allocator>;
+
+template <typename Key, typename Allocator>
+set(std::initializer_list<Key>, Allocator)
+    -> set<Key, std::less<Key>, Allocator>;
 
 } // namespace std
 

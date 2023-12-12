@@ -1,0 +1,34 @@
+#ifndef __GBLIBCPP_BITS_ITER_OPS__
+#define __GBLIBCPP_BITS_ITER_OPS__
+
+namespace std {
+
+template <typename Container>
+constexpr auto begin(Container& c) -> decltype(c.begin())
+{ return c.begin(); }
+
+template <typename Container>
+constexpr auto begin(const Container& c) -> decltype(c.begin())
+{ return c.begin(); }
+
+template <typename Container>
+constexpr auto end(Container& c) -> decltype(c.end())
+{ return c.end(); }
+
+template <typename Container>
+constexpr auto end(const Container& c) -> decltype(c.end())
+{ return c.end(); }
+
+template <typename Container>
+constexpr auto cbegin(const Container& c)
+    noexcept(noexcept(std::begin(c))) -> decltype(c.begin())
+{ return c.begin(); }
+
+template <typename Container>
+constexpr auto cend(const Container& c)
+    noexcept(noexcept(std::end(c))) -> decltype(c.end())
+{ return c.end(); }
+
+} // namespace std
+
+#endif

@@ -28,13 +28,13 @@ class vectorPrinter:
         self.val = val
 
     def to_string(self):
-        return "vector of size %d, capacity %d" % (self.val['m_size'], self.val['m_capacity'])
+        return "std::vector of size %d, capacity %d" % (self.val['m_size'], self.val['m_capacity'])
 
     def display_hint(self):
         return 'array'
 
     def children(self):
-        return self._iterator(self.val['m_arr'], self.val['m_arr'] + self.val['m_size'], 0)
+        return self._iterator(self.val['m_data'], self.val['m_data'] + self.val['m_size'], 0)
 
 def _leftmost(node):
     ret = node
@@ -60,25 +60,28 @@ def _next(node):
                 break
         return ret['parent'].dereference()
 
-class mapPrinter:
-    def __init__(self, val):
-        self.val = val
+class rbtreePrinter:
+    def __init__(self, type, val):
+        self.type = type
+        self.val = val['tree']
 
     def to_string(self):
-        return "types::map"
+        return "%s of size %d" % (self.type, self.val['_size'])
 
     def display_hint(self):
         return 'array'
 
     def children(self):
-        yield '[root]', self.val['root']
+        yield 'root', self.val['root']
         if self.val['root'] == 0:
             return
+
+        yield 'size', self.val['_size']
 
         nd = _leftmost(self.val['root'].dereference())
         i = 0
         while True:
-            yield "[%d]" % i, nd['v']
+            yield "[%d]" % i, nd['value']
             nd = _next(nd)
             i += 1
             if nd == None:
@@ -89,17 +92,17 @@ class stringPrinter:
         self.val = val
     
     def to_string(self):
-        return self.val['m_arr']
+        return self.val['m_data']
     
     def children(self):
-        yield 'str', self.val['m_arr']
+        yield 'str', self.val['m_data']
 
-        if self.val['m_arr'] == 0:
+        if self.val['m_data'] == 0:
             return
 
         yield 'length', self.val['m_size'] - 1
 
-        ptr = self.val['m_arr']
+        ptr = self.val['m_data']
         i = 0
 
         while ptr.dereference() != 0:
@@ -114,25 +117,23 @@ class listPrinter:
         self.val = val
     
     def to_string(self):
-        return "list of size %d" % (self.val['head'].reinterpret_cast(gdb.lookup_type("size_t").pointer()) + 2).dereference()
+        return "std::list of size %d" % self.val['m_size']
 
     def display_hint(self):
         return 'array'
 
     def children(self):
-        head = self.val['head']
-        end = self.val['tail']
+        head = self.val['m_head']
 
-        yield '[head]', head
-        yield '[tail]', end
-        
-        if head == 0 or end == 0:
-            return
+        yield 'head', head.address
 
         node = head['next']
         idx = 0
-        while node != end:
-            yield '[%d]' % idx, node['value']
+        while node != head.address:
+            nodeval = node.reinterpret_cast(
+                gdb.lookup_type(self.val.type.unqualified().strip_typedefs().tag + '::node').pointer()
+                )
+            yield '[%d]' % idx, nodeval['value']
             idx += 1
             node = node['next']
 
@@ -141,31 +142,80 @@ class listIteratorPrinter:
         self.val = val
     
     def children(self):
-        yield '[addr]', self.val['n']
-        if self.val['n'] == 0:
+        yield 'addr', self.val['p']
+        if self.val['p'] == 0:
             return
+        
+        nodeptr = self.val['p']
+        iter_type = self.val.type.unqualified().strip_typedefs().tag
+        iter_type = iter_type[:iter_type.rfind('::')]
+        nodeptr = nodeptr.cast(gdb.lookup_type(iter_type + '::node').pointer())
+        
+        yield 'value', nodeptr['value']
 
-        for field in self.val['n']['value'].type.fields():
-            yield field.name, self.val['n']['value'][field.name]
-
-class mapIteratorPrinter:
+class rbtreeIteratorPrinter:
     def __init__(self, val):
         self.val = val
     
     def children(self):
-        yield '[addr]', self.val['p']
+        yield 'addr', self.val['p']
         if self.val['p'] == 0:
             return
         
-        yield '[first]', self.val['p']['v']['first']
-        yield '[second]', self.val['p']['v']['second']
+        yield 'value', self.val['p']['value']
 
 class vectorIteratorPrinter:
     def __init__(self, val):
         self.val = val
     
     def children(self):
-        yield 'value', self.val['p'].dereference()
+        yield 'value', self.val['m_ptr'].dereference()
+
+class pairPrinter:
+    def __init__(self, val):
+        self.val = val
+    
+    def children(self):
+        yield 'first', self.val['first']
+        yield 'second', self.val['second']
+
+class tuplePrinter:
+    def __init__(self, val):
+        self.val = val
+    
+    def children(self):
+        i = 0
+        try:
+            cur = self.val
+            while True:
+                yield '<%d>' % i, cur['val']
+                i += 1
+                cur = cur['next']
+        except Exception:
+            if i == 0:
+                yield 'tuple of size 0', ''
+
+class functionPrinter:
+    def __init__(self, val):
+        self.val = val
+    
+    def to_string(self):
+        return self.val.type.tag
+    
+    def children(self):
+        print(self.val['_data'].type)
+        yield 'function data', self.val['_data']
+
+class referenceWrapperPrinter:
+    def __init__(self, val):
+        self.val = val
+    
+    def to_string(self):
+        return "std::reference_wrapper to %x" % self.val['_ptr']
+    
+    def children(self):
+        yield 'addr', self.val['_ptr'].cast(gdb.lookup_type('void').pointer())
+        yield 'reference', self.val['_ptr']
 
 def build_pretty_printer(val):
     type = val.type
@@ -180,30 +230,45 @@ def build_pretty_printer(val):
 
     if typename == None:
         return None
-
-    if re.compile(r"^types::list<.*?>::node<.*?>$").match(typename):
-        return None
-
-    if re.compile(r"^types::map<.*?,.*?,.*?>::iterator<.*?>$").match(typename):
-        return mapIteratorPrinter(val)
     
-    if re.compile(r"^types::list<.*?>::iterator<.*?>$").match(typename):
+    if re.compile(r"^std::pair<.*, .*>$").match(typename):
+        return pairPrinter(val)
+    
+    if re.compile(r"^std::tuple<.*>$").match(typename):
+        return tuplePrinter(val)
+
+    if re.compile(r"^std::function<.*>$").match(typename):
+        return functionPrinter(val)
+    
+    if re.compile(r"^std::reference_wrapper<.*>$").match(typename):
+        return referenceWrapperPrinter(val)
+
+    # if re.compile(r"^std::list<.*, .*>::node$").match(typename):
+    #     return None
+    
+    if re.compile(r"^std::list<.*, .*>::_iterator<.*?>$").match(typename):
         return listIteratorPrinter(val)
 
-    if re.compile(r"^types::vector<.*?>::iterator<.*?>$").match(typename):
+    if re.compile(r"^std::vector<.*, .*>::_iterator<.*?>$").match(typename):
         return vectorIteratorPrinter(val)
 
-    if re.compile(r"^types::list<.*?>$").match(typename):
+    if re.compile(r"^std::list<.*, .*>$").match(typename):
         return listPrinter(val)
 
-    if re.compile(r"^types::vector<.*?>$").match(typename):
+    if re.compile(r"^std::vector<.*, .*>$").match(typename):
         return vectorPrinter(val)
 
-    if re.compile(r"^types::string<.*?>$").match(typename):
-        return stringPrinter(val)
+    if re.compile(r"^std::map<.*, .*, .*, .*>$").match(typename):
+        return rbtreePrinter("std::map", val)
 
-    if re.compile(r"^types::map<.*?>$").match(typename):
-        return mapPrinter(val)
+    if re.compile(r"^std::set<.*, .*, .*>$").match(typename):
+        return rbtreePrinter("std::set", val)
+
+    if re.compile(r"^std::impl::rbtree<.*, .*, .*>::_iterator<.*?>$").match(typename):
+        return rbtreeIteratorPrinter(val)
+
+    if re.compile(r"^types::string<.*>$").match(typename):
+        return stringPrinter(val)
     
     return None
 

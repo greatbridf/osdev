@@ -1,9 +1,12 @@
 #ifndef __GBLIBCPP_MAP__
 #define __GBLIBCPP_MAP__
 
+#include <bits/iter_ops>
+
 #include <bits/rbtree>
 #include <functional>
 #include <memory>
+#include <initializer_list>
 #include <tuple>
 #include <type_traits>
 #include <utility>
@@ -110,23 +113,31 @@ public:
         : tree(std::move(other.tree), alloc) {}
     
     __GBLIBCPP_CONSTEXPR
+    map(std::initializer_list<value_type> init,
+        const Compare& comp = Compare(),
+        const Allocator& alloc = Allocator())
+        : map(comp, alloc)
+    { insert(init.begin(), init.end()); }
+
+    __GBLIBCPP_CONSTEXPR
+    map(std::initializer_list<value_type> init,
+        const Allocator& alloc)
+        : map(init, Compare(), alloc) {}
+    
+    __GBLIBCPP_CONSTEXPR
     ~map() { clear(); }
     
     __GBLIBCPP_CONSTEXPR
     map& operator=(const map& other) = default;
     __GBLIBCPP_CONSTEXPR
     map& operator=(map&& other) = default;
-
-    // TODO: std::initializer_list
-    // set(std::initializer_list<Key> init,
-    //     const Compare& comp = Compare(),
-    //     const Allocator& alloc = Allocator());
-    //
-    // set(std::initializer_list<Key> init,
-    //     const Allocator& alloc = Allocator())
-    //     : set(init, Compare(), alloc) {}
-    //
-    // set& operator=(std::initializer_list<Key> ilist);
+    __GBLIBCPP_CONSTEXPR
+    map& operator=(std::initializer_list<value_type> ilist)
+    {
+        clear();
+        insert(ilist.begin(), ilist.end());
+        return *this;
+    }
 
     __GBLIBCPP_CONSTEXPR
     iterator find(const Key& key) { return tree.find(key); }
@@ -265,6 +276,34 @@ template <typename Key, typename T, typename Compare, typename Allocator>
 void swap(std::map<Key, T, Compare, Allocator>& lhs,
     std::map<Key, T, Compare, Allocator>& rhs)
 { lhs.swap(rhs); }
+
+template <typename Key, typename T,
+    typename Compare, typename Allocator, typename Pred>
+typename std::map<Key, T, Compare, Allocator>::size_type
+erase_if(std::map<Key, T, Compare, Allocator>& c, Pred pred)
+{
+    auto iter = c.begin();
+    typename std::map<Key, T, Compare, Allocator>::size_type count = 0;
+    while (iter != c.end()) {
+        if (pred(*iter)) {
+            iter = c.erase(iter);
+            ++count;
+        } else
+            ++iter;
+    }
+    return count;
+}
+
+template <typename Key, typename T,
+    typename Compare = std::less<Key>,
+    typename Allocator = std::allocator<std::pair<const Key, T>>>
+map(std::initializer_list<std::pair<Key, T>>,
+    Compare = Compare(), Allocator = Allocator())
+    -> map<Key, T, Compare, Allocator>;
+
+template <typename Key, typename T, typename Allocator>
+map(std::initializer_list<std::pair<Key, T>>, Allocator)
+    -> map<Key, T, std::less<Key>, Allocator>;
 
 } // namespace std
 

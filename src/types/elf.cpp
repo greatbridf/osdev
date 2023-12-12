@@ -1,3 +1,5 @@
+#include <vector>
+
 #include <assert.h>
 #include <kernel/errno.h>
 #include <kernel/mem.h>
@@ -8,7 +10,6 @@
 #include <string.h>
 #include <types/elf.hpp>
 #include <types/string.hpp>
-#include <types/vector.hpp>
 
 #define align16_down(sp) (sp = ((char*)((uint32_t)(sp)&0xfffffff0)))
 
@@ -50,7 +51,7 @@ int types::elf::elf32_load(types::elf::elf32_load_data* d)
 
     size_t phents_size = hdr.phentsize * hdr.phnum;
     size_t shents_size = hdr.shentsize * hdr.shnum;
-    vector<types::elf::elf32_program_header_entry> phents(hdr.phnum);
+    std::vector<types::elf::elf32_program_header_entry> phents(hdr.phnum);
     n_read = fs::vfs_read(
         ent_exec->ind,
         (char*)phents.data(),
@@ -63,7 +64,7 @@ int types::elf::elf32_load(types::elf::elf32_load_data* d)
         return GB_FAILED;
     }
 
-    vector<types::elf::elf32_section_header_entry> shents(hdr.shnum);
+    std::vector<types::elf::elf32_section_header_entry> shents(hdr.shnum);
     n_read = fs::vfs_read(
         ent_exec->ind,
         (char*)shents.data(),
@@ -77,7 +78,7 @@ int types::elf::elf32_load(types::elf::elf32_load_data* d)
     }
 
     // copy argv and envp
-    vector<string<>> argv, envp;
+    std::vector<string<>> argv, envp;
     for (const char* const* p = d->argv; *p; ++p)
         argv.emplace_back(*p);
     for (const char* const* p = d->envp; *p; ++p)
@@ -146,7 +147,7 @@ int types::elf::elf32_load(types::elf::elf32_load_data* d)
     auto* sp = (char**)&d->sp;
 
     // fill information block area
-    vector<char*> args, envs;
+    std::vector<char*> args, envs;
     for (const auto& env : envp) {
         _user_push(sp, env.c_str());
         envs.push_back(*sp);

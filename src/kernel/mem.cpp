@@ -281,9 +281,10 @@ int mm::append_page(page& pg, uint32_t attr, bool priv)
     }
     ++*pg.ref_count;
 
-    auto iter = this->pgs->emplace_back(pg);
-    iter->pg_pteidx = (pt_pg << 12) + pti;
-    iter->attr = attr;
+    this->pgs->emplace_back(pg);
+    auto& emplaced = this->pgs->back();
+    emplaced.pg_pteidx = (pt_pg << 12) + pti;
+    emplaced.attr = attr;
 
     return GB_OK;
 }

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <list>
+#include <vector>
 #include <bit>
 #include <cstddef>
 #include <utility>
@@ -13,7 +14,6 @@
 #include <types/size.h>
 #include <types/status.h>
 #include <types/types.h>
-#include <types/vector.hpp>
 
 #define invalidate_tlb(addr) asm("invlpg (%0)" \
                                  :             \
@@ -50,7 +50,8 @@ int mmap(
     int write,
     int priv);
 
-using page_arr = types::vector<page, types::kernel_ident_allocator>;
+using page_arr = std::vector<page,
+    types::allocator_adapter<page, types::kernel_ident_allocator>>;
 
 // forward declaration
 namespace kernel {

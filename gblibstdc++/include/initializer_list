@@ -1,0 +1,122 @@
+#ifndef __GBLIBCPP_INITIALIZER_LIST__
+#define __GBLIBCPP_INITIALIZER_LIST__
+
+#include <cstddef>
+
+namespace std {
+
+#if defined(__GNUC__)
+
+template <typename T>
+class initializer_list {
+public:
+    using value_type = T;
+    using reference = const T&;
+    using const_reference = const T&;
+    using size_type = std::size_t;
+    using iterator = const T*;
+    using const_iterator = const T*;
+
+private:
+    const T* __begin;
+    std::size_t __size;
+
+public:
+    constexpr initializer_list() noexcept
+        : __begin { }, __size { } { };
+
+    constexpr const T* begin() const noexcept
+    { return __begin; }
+    constexpr const T* end() const noexcept
+    { return __begin + __size; }
+    constexpr size_type size() const noexcept
+    { return __size; }
+
+};
+
+#elif defined(__clang__)
+
+template <typename T>
+class initializer_list {
+public:
+    using value_type = T;
+    using reference = const T&;
+    using const_reference = const T&;
+    using size_type = std::size_t;
+    using iterator = const T*;
+    using const_iterator = const T*;
+
+private:
+    const T* __begin;
+    const T* __end;
+
+public:
+    constexpr initializer_list() noexcept
+        : __begin { }, __end { } { };
+
+    constexpr const T* begin() const noexcept
+    { return __begin; }
+    constexpr const T* end() const noexcept
+    { return __end; }
+    constexpr size_type size() const noexcept
+    { return static_cast<size_type>(__end - __begin); }
+
+};
+
+#elif defined(_MSC_VER)
+
+template <typename T>
+class initializer_list {
+public:
+    using value_type = T;
+    using reference = const T&;
+    using const_reference = const T&;
+    using size_type = std::size_t;
+    using iterator = const T*;
+    using const_iterator = const T*;
+
+private:
+    const T* __begin;
+    const T* __end;
+
+public:
+    constexpr initializer_list() noexcept
+        : __begin { }, __end { } { };
+
+    constexpr const T* begin() const noexcept
+    { return __begin; }
+    constexpr const T* end() const noexcept
+    { return __end; }
+    constexpr size_type size() const noexcept
+    { return static_cast<size_type>(__end - __begin); }
+
+};
+
+#else
+
+template <typename T>
+class initializer_list;
+
+#endif
+
+template <typename T>
+constexpr const T* begin(initializer_list<T> il) noexcept
+{ return il.begin(); }
+
+template <typename T>
+constexpr const T* end(initializer_list<T> il) noexcept
+{ return il.end(); }
+
+template <typename T>
+[[nodiscard]] constexpr bool empty(initializer_list<T> il) noexcept
+{ return il.size() == 0; }
+
+template <typename T>
+constexpr const T* data(initializer_list<T> il) noexcept
+{ return il.begin(); }
+
+// TODO: std::rbegin() and std::rend() for std::initializer_list
+
+} // namespace std
+
+#endif

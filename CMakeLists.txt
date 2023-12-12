@@ -86,7 +86,6 @@ set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
                         include/types/cplusplus.hpp
                         include/types/lock.hpp
                         include/types/string.hpp
-                        include/types/vector.hpp
                         include/kernel/log.hpp
                         )
 

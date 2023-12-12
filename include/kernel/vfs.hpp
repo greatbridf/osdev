@@ -2,6 +2,7 @@
 
 #include <map>
 #include <list>
+#include <vector>
 #include <functional>
 
 #include <assert.h>
@@ -13,7 +14,6 @@
 #include <types/hash_map.hpp>
 #include <types/lock.hpp>
 #include <types/types.h>
-#include <types/vector.hpp>
 
 #define INODE_FILE (1 << 0)
 #define INODE_DIR (1 << 1)

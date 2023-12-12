@@ -1,16 +1,20 @@
 #pragma once
 
+#include <vector>
+
 #include <string.h>
 #include <types/allocator.hpp>
 #include <types/types.h>
-#include <types/vector.hpp>
 
 namespace types {
-template <template <typename _value_type> class Allocator = kernel_allocator>
-class string : public types::vector<char, Allocator> {
+template <typename Allocator =
+    types::allocator_adapter<char, types::kernel_allocator>>
+class string : public std::vector<char, Allocator> {
 public:
-    using inner_vector_type = types::vector<char, Allocator>;
+    using inner_vector_type = std::vector<char, Allocator>;
     using size_type = typename inner_vector_type::size_type;
+    using iterator = typename inner_vector_type::iterator;
+    using const_iterator = typename inner_vector_type::const_iterator;
 
     static inline constexpr size_type npos = (-1U);
 
@@ -42,15 +46,9 @@ public:
     {
         return this->append(str.data());
     }
-    constexpr string& append(string&& str)
-    {
-        return this->append(str.data());
-    }
     constexpr string& operator+=(const char c)
     {
-        this->pop_back();
-        this->push_back(c);
-        this->push_back(0x00);
+        this->insert(this->end(), c);
         return *this;
     }
     constexpr string& operator+=(const char* str)
@@ -60,10 +58,6 @@ public:
     constexpr string& operator+=(const string& str)
     {
         return this->append(str);
-    }
-    constexpr string& operator+=(string&& str)
-    {
-        return this->append(move(str));
     }
     constexpr bool operator==(const string& rhs) const
     {
@@ -77,7 +71,7 @@ public:
     {
         return this->data();
     }
-    constexpr void clear(void)
+    constexpr void clear()
     {
         inner_vector_type::clear();
         this->push_back(0x00);
@@ -90,20 +84,11 @@ public:
         ref = 0x00;
         return c;
     }
-    constexpr typename inner_vector_type::iterator_type back(void)
-    {
-        assert(!this->empty());
-        return --inner_vector_type::back();
-    }
-    constexpr typename inner_vector_type::const_iterator_type back(void) const
-    {
-        assert(!this->empty());
-        return --inner_vector_type::back();
-    }
-    constexpr typename inner_vector_type::const_iterator_type cback(void) const
-    {
-        assert(!this->empty());
-        return --inner_vector_type::cback();
-    }
+    constexpr iterator end() noexcept
+    { return --inner_vector_type::end(); }
+    constexpr const_iterator end() const noexcept
+    { return --inner_vector_type::cend(); }
+    constexpr const_iterator cend() const noexcept
+    { return --inner_vector_type::cend(); }
 };
 } // namespace types

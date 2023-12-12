@@ -1,4 +1,5 @@
 #include <map>
+#include <vector>
 #include <bit>
 #include <utility>
 
@@ -13,12 +14,10 @@
 #include <types/allocator.hpp>
 #include <types/status.h>
 #include <types/string.hpp>
-#include <types/vector.hpp>
 
 using types::allocator_traits;
 using types::kernel_allocator;
 using types::string;
-using types::vector;
 
 struct tmpfs_file_entry {
     size_t ino;
@@ -208,8 +207,8 @@ uint32_t fs::vfs::inode_getnode(fs::inode*)
 class tmpfs : public virtual fs::vfs {
 private:
     using fe_t = tmpfs_file_entry;
-    using vfe_t = vector<fe_t>;
-    using fdata_t = vector<char>;
+    using vfe_t = std::vector<fe_t>;
+    using fdata_t = std::vector<char>;
 
 private:
     std::map<fs::ino_t, void*> inode_data;
@@ -262,11 +261,12 @@ protected:
     void mklink(fs::inode* dir, fs::inode* inode, const char* filename)
     {
         auto* fes = as_vfe(_getdata(dir->ino));
-        auto iter = fes->emplace_back(fe_t {
+        fes->emplace_back(fe_t {
             .ino = inode->ino,
             .filename = {} });
-        strncpy(iter->filename, filename, sizeof(iter->filename));
-        iter->filename[sizeof(iter->filename) - 1] = 0;
+        auto& emplaced = fes->back();
+        strncpy(emplaced.filename, filename, sizeof(emplaced.filename));
+        emplaced.filename[sizeof(emplaced.filename) - 1] = 0;
         dir->size += sizeof(fe_t);
     }
 

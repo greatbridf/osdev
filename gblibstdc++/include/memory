@@ -235,6 +235,17 @@ using allocator_prop_swap_t =
     typename allocator_prop_swap<Alloc>::type;
 
 template <typename Alloc, typename = void>
+struct is_always_equal
+{ using type = std::false_type; };
+template <typename Alloc>
+struct is_always_equal<Alloc,
+    std::void_t<typename Alloc::is_always_equal>>
+{ using type = typename Alloc::is_always_equal; };
+template <typename Alloc>
+using is_always_equal_t =
+    typename is_always_equal<Alloc>::type;
+
+template <typename Alloc, typename = void>
 struct allocator_select_on_copy {
     static constexpr Alloc get(const Alloc& alloc)
     { return alloc; }
@@ -326,6 +337,8 @@ struct allocator_traits {
         __helpers::allocator_prop_move_t<Allocator>;
     using propagate_on_container_swap =
         __helpers::allocator_prop_swap_t<Allocator>;
+    using is_always_equal =
+        __helpers::is_always_equal_t<Allocator>;
 
     template <typename T>
     using rebind_alloc =

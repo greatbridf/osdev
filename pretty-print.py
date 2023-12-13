@@ -34,6 +34,8 @@ class vectorPrinter:
         return 'array'
 
     def children(self):
+        if self.val['m_size'] == 0:
+            return [ ('<vector of size 0>', '') ]
         return self._iterator(self.val['m_data'], self.val['m_data'] + self.val['m_size'], 0)
 
 def _leftmost(node):

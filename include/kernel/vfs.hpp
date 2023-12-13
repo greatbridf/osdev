@@ -124,8 +124,7 @@ public:
         } flags;
         name_type name;
 
-        explicit dentry(dentry* parent, inode* ind, const name_type& name);
-        explicit dentry(dentry* parent, inode* ind, name_type&& name);
+        explicit dentry(dentry* parent, inode* ind, name_type name);
         dentry(const dentry& val) = delete;
         constexpr dentry(dentry&& val)
             : children(std::exchange(val.children, nullptr))

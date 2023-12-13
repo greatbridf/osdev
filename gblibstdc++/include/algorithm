@@ -1,0 +1,202 @@
+#ifndef __GBLIBCPP_ALGORITHM__
+#define __GBLIBCPP_ALGORITHM__
+
+#include <functional>
+#include <utility>
+#include <initializer_list>
+#include <cstddef>
+
+namespace std {
+
+template <typename RandomIter, typename Compare>
+constexpr void make_heap(RandomIter first, RandomIter last, Compare comp)
+{
+    auto len = last - first;
+    if (len < 2)
+        return;
+
+    auto idx = len / 2 - 1;
+    for (;;) {
+        auto& val = first[idx];
+        auto left = idx * 2 + 1;
+        auto right = left + 1;
+
+        if (right < len) {
+            auto& left_val = first[left];
+            auto& right_val = first[right];
+
+            if (comp(left_val, right_val)) {
+                if (comp(val, right_val)) {
+                    std::swap(val, right_val);
+                    idx = right;
+                    continue;
+                }
+            } else {
+                if (comp(val, left_val)) {
+                    std::swap(val, left_val);
+                    idx = left;
+                    continue;
+                }
+            }
+        } else if (left < len) {
+            auto& left_val = first[left];
+
+            if (comp(val, left_val)) {
+                std::swap(val, left_val);
+                idx = left;
+                continue;
+            }
+        }
+
+        if (idx == 0)
+            break;
+        --idx;
+    }
+}
+template <typename RandomIter>
+constexpr void make_heap(RandomIter first, RandomIter last)
+{
+    make_heap(first, last, std::less<typename std::decay_t<decltype(*first)>>());
+}
+
+template <typename RandomIter, typename Compare>
+constexpr void push_heap(RandomIter first, RandomIter last, Compare comp)
+{
+    auto len = last - first;
+    if (len < 2)
+        return;
+
+    auto idx = len - 1;
+    for (;;) {
+        auto parent = (idx - 1) / 2;
+        if (parent == idx)
+            break;
+
+        auto& val = first[idx];
+        auto& parent_val = first[parent];
+
+        if (comp(parent_val, val)) {
+            std::swap(val, parent_val);
+            idx = parent;
+            continue;
+        }
+
+        break;
+    }
+}
+template <typename RandomIter>
+constexpr void push_heap(RandomIter first, RandomIter last)
+{
+    push_heap(first, last, std::less<typename std::decay_t<decltype(*first)>>());
+}
+
+template <typename RandomIter, typename Compare>
+constexpr void pop_heap(RandomIter first, RandomIter last, Compare comp)
+{
+    auto len = last - first;
+    if (len < 2)
+        return;
+
+    std::swap(first[0], first[len - 1]);
+
+    auto idx = 0;
+    for (;;) {
+        auto& val = first[idx];
+        auto left = idx * 2 + 1;
+        auto right = left + 1;
+
+        if (right < len - 1) {
+            auto& left_val = first[left];
+            auto& right_val = first[right];
+
+            if (comp(left_val, right_val)) {
+                if (comp(val, right_val)) {
+                    std::swap(val, right_val);
+                    idx = right;
+                    continue;
+                }
+            } else {
+                if (comp(val, left_val)) {
+                    std::swap(val, left_val);
+                    idx = left;
+                    continue;
+                }
+            }
+        } else if (left < len - 1) {
+            auto& left_val = first[left];
+
+            if (comp(val, left_val)) {
+                std::swap(val, left_val);
+                idx = left;
+                continue;
+            }
+        }
+
+        if (idx == 0)
+            break;
+        --idx;
+    }
+}
+template <typename RandomIter>
+constexpr void pop_heap(RandomIter first, RandomIter last)
+{
+    pop_heap(first, last, std::less<typename std::decay_t<decltype(*first)>>());
+}
+
+template <typename RandomIter, typename Compare>
+constexpr void sort(RandomIter first, RandomIter last, Compare comp)
+{
+    auto len = last - first;
+    std::make_heap(first, last, comp);
+
+    for (auto i = len - 1; i > 0; --i) {
+        std::swap(first[0], first[i]);
+
+        auto idx = 0;
+        for (;;) {
+            auto& val = first[idx];
+            auto left = idx * 2 + 1;
+            auto right = left + 1;
+
+            if (right < i) {
+                auto& left_val = first[left];
+                auto& right_val = first[right];
+
+                if (comp(left_val, right_val)) {
+                    if (comp(val, right_val)) {
+                        std::swap(val, right_val);
+                        idx = right;
+                        continue;
+                    }
+                } else {
+                    if (comp(val, left_val)) {
+                        std::swap(val, left_val);
+                        idx = left;
+                        continue;
+                    }
+                }
+            } else if (left < i) {
+                auto& left_val = first[left];
+
+                if (comp(val, left_val)) {
+                    std::swap(val, left_val);
+                    idx = left;
+                    continue;
+                }
+            }
+
+            if (idx == 0)
+                break;
+            --idx;
+        }
+    }
+}
+template <typename RandomIter>
+constexpr void sort(RandomIter first, RandomIter last)
+{
+    sort(first, last, std::less<typename std::decay_t<decltype(*first)>>());
+}
+
+} // namespace std
+
+#endif

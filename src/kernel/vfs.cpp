@@ -24,22 +24,8 @@ struct tmpfs_file_entry {
     char filename[128];
 };
 
-fs::vfs::dentry::dentry(dentry* _parent, inode* _ind, const name_type& _name)
-    : parent(_parent)
-    , ind(_ind)
-    , flags { 0 }
-    , name(_name)
-{
-    if (!_ind || _ind->flags.in.directory) {
-        children = types::pnew<allocator_type>(children);
-        idx_children = types::pnew<allocator_type>(idx_children);
-    }
-}
-fs::vfs::dentry::dentry(dentry* _parent, inode* _ind, name_type&& _name)
-    : parent(_parent)
-    , ind(_ind)
-    , flags { 0 }
-    , name(std::move(_name))
+fs::vfs::dentry::dentry(dentry* _parent, inode* _ind, name_type _name)
+    : parent(_parent) , ind(_ind) , flags { } , name(_name)
 {
     if (!_ind || _ind->flags.in.directory) {
         children = types::pnew<allocator_type>(children);

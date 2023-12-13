@@ -56,6 +56,18 @@ public:
         { --m_ptr; return *this; }
         constexpr _iterator operator--(int) noexcept
         { _iterator ret(m_ptr); (void)this->operator--(); return ret; }
+        constexpr _iterator& operator+=(difference_type n) noexcept
+        { m_ptr += n; return *this; }
+        constexpr _iterator& operator-=(difference_type n) noexcept
+        { m_ptr -= n; return *this; }
+        constexpr _iterator operator+(difference_type n) const noexcept
+        { return _iterator { m_ptr + n }; }
+        constexpr _iterator operator-(difference_type n) const noexcept
+        { return _iterator { m_ptr - n }; }
+        constexpr difference_type operator-(const _iterator& other) const noexcept
+        { return m_ptr - other.m_ptr; }
+        constexpr reference operator[](difference_type n) const noexcept
+        { return m_ptr[n]; }
         constexpr operator bool() { return m_ptr; }
         constexpr operator _iterator<true>() { return _iterator<true> { m_ptr }; }
         constexpr operator _iterator<false>() { return _iterator<false> { m_ptr }; }
@@ -166,7 +178,7 @@ public:
         shrink_to_fit();
     }
 
-    vector& operator=(const vector& other)
+    constexpr vector& operator=(const vector& other)
     {
         clear();
 
@@ -181,7 +193,7 @@ public:
         return *this;
     }
 
-    vector& operator=(vector&& other)
+    constexpr vector& operator=(vector&& other)
     {
         clear();
 
@@ -206,7 +218,7 @@ public:
         return *this;
     }
 
-    vector& operator=(std::initializer_list<T> init)
+    constexpr vector& operator=(std::initializer_list<T> init)
     {
         assign(init.begin(), init.end());
         return *this;

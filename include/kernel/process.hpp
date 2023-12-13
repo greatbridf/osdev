@@ -2,6 +2,7 @@
 
 #include <map>
 #include <list>
+#include <queue>
 #include <set>
 #include <tuple>
 #include <utility>
@@ -98,6 +99,8 @@ public:
 private:
     inline static container_type* files;
     array_type arr;
+    std::priority_queue<int, std::vector<int>, std::greater<int>> _fds;
+    int _greatest_fd;
 
 public:
     inline static void init_global_file_container(void)
@@ -126,16 +129,13 @@ private:
             --iter->ref;
     }
 
-    constexpr int _next_fd(void) const
+    constexpr int next_fd()
     {
-        int fd = 0;
-
-        for (auto [ item_fd, iter_file ] : arr) {
-            if (item_fd == fd)
-                ++fd;
-        }
-
-        return fd;
+        if (_fds.empty())
+            return _greatest_fd++;
+        int retval = _fds.top();
+        _fds.pop();
+        return retval;
     }
 
 public:
@@ -147,7 +147,7 @@ public:
 
     constexpr int dup(int old_fd)
     {
-        return dup2(old_fd, _next_fd());
+        return dup2(old_fd, next_fd());
     }
 
     // TODO: the third parameter should be int flags
@@ -170,6 +170,8 @@ public:
 
     constexpr void dup_all(const filearr& orig)
     {
+        this->_fds = orig._fds;
+        this->_greatest_fd = orig._greatest_fd;
         for (auto [ fd, iter_file ] : orig.arr) {
             this->arr.emplace(fd, iter_file);
             ++iter_file->ref;
@@ -202,7 +204,7 @@ public:
         });
 
         bool inserted = false;
-        int fd = _next_fd();
+        int fd = next_fd();
         std::tie(std::ignore, inserted) = arr.emplace(fd, iter);
         assert(inserted);
 
@@ -220,7 +222,7 @@ public:
                 .write = 1,
             },
         });
-        fd = _next_fd();
+        fd = next_fd();
         std::tie(std::ignore, inserted) = arr.emplace(fd, iter);
         assert(inserted);
 
@@ -258,7 +260,7 @@ public:
             },
         });
 
-        int fd = _next_fd();
+        int fd = next_fd();
         auto [ _, inserted ] = arr.emplace(fd, iter);
         assert(inserted);
         return fd;
@@ -271,13 +273,16 @@ public:
             return;
 
         _close(iter->second);
+        _fds.push(fd);
         arr.erase(iter);
     }
 
     constexpr void close_all(void)
     {
-        for (auto&& [ fd, file ] : arr)
+        for (auto&& [ fd, file ] : arr) {
             _close(file);
+            _fds.push(fd);
+        }
         arr.clear();
     }
 

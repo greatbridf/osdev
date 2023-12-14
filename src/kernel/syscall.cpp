@@ -214,17 +214,24 @@ int NORETURN _syscall_exit(interrupt_stack* data)
         assert(false);
 
     // terminating a whole process:
-    procs->kill(current_process->pid, exit_code);
+    procs->kill(current_process->pid, exit_code & 0xff);
 
     // switch to new process and continue
     schedule_noreturn();
 }
 
-// @param address of exit code: int*
+// @param pid: pid of the process to wait
+// @param status: the exit code of the exited process
+// @param options: options for waitpid
 // @return pid of the exited process
-int _syscall_wait(interrupt_stack* data)
+int _syscall_waitpid(interrupt_stack* data)
 {
-    SYSCALL_ARG1(int*, arg1);
+    SYSCALL_ARG1(pid_t, pid_to_wait);
+    SYSCALL_ARG2(int*, arg1);
+    SYSCALL_ARG3(int, options);
+
+    if (pid_to_wait != -1 || options != 0)
+        return -EINVAL;
 
     auto& cv = current_process->cv_wait;
     auto& mtx = cv.mtx();
@@ -428,6 +435,12 @@ int _syscall_ioctl(interrupt_stack* data)
         ctrl_tty->set_pgrp(*pgid);
         break;
     }
+    case TIOCGWINSZ: {
+        SYSCALL_ARG3(winsize*, ws);
+        ws->ws_col = 80;
+        ws->ws_row = 10;
+        break;
+    }
     default:
         return -EINVAL;
     }
@@ -451,6 +464,63 @@ int _syscall_set_thread_area(interrupt_stack* data)
     return kernel::user::set_thread_area(ptr);
 }
 
+int _syscall_set_tid_address(interrupt_stack* data)
+{
+    SYSCALL_ARG1(int* __user, tidptr);
+    current_thread->set_child_tid = tidptr;
+    return current_thread->tid();
+}
+
+// TODO: this operation SHOULD be atomic
+ssize_t _syscall_writev(interrupt_stack* data)
+{
+    SYSCALL_ARG1(int, fd);
+    SYSCALL_ARG2(const iovec*, iov);
+    SYSCALL_ARG3(int, iovcnt);
+
+    auto* file = current_process->files[fd];
+
+    if (!file || !file->flags.write)
+        return -EBADF;
+
+    switch (file->type) {
+    case fs::file::types::ind: {
+        if (file->ptr.ind->flags.in.directory)
+            return -EBADF;
+
+        ssize_t n_wrote = 0;
+        for (int i = 0; i < iovcnt; ++i) {
+            int ret = fs::vfs_write(file->ptr.ind,
+                (const char*)iov[i].iov_base,
+                file->cursor, iov[i].iov_len);
+            if (ret < 0)
+                return ret;
+            n_wrote += ret;
+        }
+        file->cursor += n_wrote;
+        return n_wrote;
+    }
+    case fs::file::types::pipe: {
+        ssize_t tot = 0;
+        for (int i = 0; i < iovcnt; ++i) {
+            int retval = file->ptr.pp->write(
+                (const char*)iov->iov_base, iovcnt);
+            if (retval < 0)
+                return retval;
+            tot += retval;
+        }
+        return tot;
+    }
+
+    case fs::file::types::socket:
+        // TODO
+        return -EINVAL;
+    default:
+        assert(false);
+        for ( ; ; ) ;
+    }
+}
+
 extern "C" void syscall_entry(interrupt_stack* data)
 {
     int syscall_no = SYSCALL_NO;
@@ -469,26 +539,29 @@ void init_syscall(void)
 {
     memset(syscall_handlers, 0x00, sizeof(syscall_handlers));
 
-    syscall_handlers[0] = _syscall_read;
-    syscall_handlers[1] = _syscall_write;
-    syscall_handlers[2] = _syscall_open;
-    syscall_handlers[3] = _syscall_close;
-    syscall_handlers[16] = _syscall_ioctl;
-    syscall_handlers[22] = _syscall_pipe;
-    syscall_handlers[32] = _syscall_dup;
-    syscall_handlers[33] = _syscall_dup2;
-    syscall_handlers[35] = _syscall_sleep;
-    syscall_handlers[39] = _syscall_getpid;
-    syscall_handlers[57] = _syscall_fork;
-    syscall_handlers[59] = _syscall_execve;
-    syscall_handlers[60] = _syscall_exit;
-    syscall_handlers[61] = _syscall_wait;
-    syscall_handlers[78] = _syscall_getdents;
-    syscall_handlers[79] = _syscall_getcwd;
-    syscall_handlers[80] = _syscall_chdir;
-    syscall_handlers[109] = _syscall_setpgid;
-    syscall_handlers[110] = _syscall_getppid;
-    syscall_handlers[112] = _syscall_setsid;
-    syscall_handlers[124] = _syscall_getsid;
-    syscall_handlers[243] = _syscall_set_thread_area;
+    syscall_handlers[0x01] = _syscall_exit;
+    syscall_handlers[0x02] = _syscall_fork;
+    syscall_handlers[0x03] = _syscall_read;
+    syscall_handlers[0x04] = _syscall_write;
+    syscall_handlers[0x05] = _syscall_open;
+    syscall_handlers[0x06] = _syscall_close;
+    syscall_handlers[0x07] = _syscall_waitpid;
+    syscall_handlers[0x0b] = _syscall_execve;
+    syscall_handlers[0x0c] = _syscall_chdir;
+    syscall_handlers[0x14] = _syscall_getpid;
+    syscall_handlers[0x29] = _syscall_dup;
+    syscall_handlers[0x2a] = _syscall_pipe;
+    syscall_handlers[0x36] = _syscall_ioctl;
+    syscall_handlers[0x39] = _syscall_setpgid;
+    syscall_handlers[0x3f] = _syscall_dup2;
+    syscall_handlers[0x40] = _syscall_getppid;
+    syscall_handlers[0x42] = _syscall_setsid;
+    syscall_handlers[0x84] = _syscall_getdents;
+    syscall_handlers[0x92] = _syscall_writev;
+    syscall_handlers[0x93] = _syscall_getsid;
+    syscall_handlers[0xb7] = _syscall_getcwd;
+    syscall_handlers[0xf3] = _syscall_set_thread_area;
+    syscall_handlers[0xfc] = _syscall_exit; // we implement exit_group as exit for now
+    syscall_handlers[0x102] = _syscall_set_tid_address;
+    // syscall_handlers[35] = _syscall_sleep;
 }

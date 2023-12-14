@@ -22,6 +22,6 @@ _start:
 
     call main
 
-    movl %eax, %edi  # code
-    movl $60, %eax # SYS_exit
+    movl %eax, %ebx  # code
+    movl $0xfc, %eax # SYS_exit_group
     int $0x80        # syscall

@@ -50,10 +50,10 @@ int execve(const char* pathname, char* const argv[], char* const envp[])
     return syscall3(SYS_execve, (uint32_t)pathname, (uint32_t)argv, (uint32_t)envp);
 }
 
-unsigned int sleep(unsigned int seconds)
-{
-    return syscall1(SYS_sleep, seconds);
-}
+// unsigned int sleep(unsigned int seconds)
+// {
+//     return syscall1(SYS_sleep, seconds);
+// }
 
 int chdir(const char* path)
 {

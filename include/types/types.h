@@ -4,6 +4,8 @@
 #include "status.h"
 #include "stdint.h"
 
+#define __user
+
 #ifdef __GNUC__
 #define NORETURN __attribute__((noreturn))
 #else

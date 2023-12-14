@@ -56,6 +56,8 @@ struct thread_attr {
 
 namespace kernel::tasks {
 
+using tid_t = uint32_t;
+
 struct thread {
 private:
     void alloc_kstack(void);
@@ -66,6 +68,9 @@ public:
     uint32_t pkstack;
     pid_t owner;
     thread_attr attr;
+
+    int* __user set_child_tid {};
+    int* __user clear_child_tid {};
 
     explicit inline thread(pid_t owner)
         : owner { owner }
@@ -82,6 +87,8 @@ public:
 
     constexpr thread(thread&& val) = default;
     inline ~thread() { free_kstack(pkstack); }
+
+    constexpr tid_t tid() const { return pkstack; }
 
     constexpr bool operator==(const thread& rhs) const
     { return pkstack == rhs.pkstack; }

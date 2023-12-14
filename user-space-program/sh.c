@@ -234,6 +234,7 @@ main(void)
     int code;
     wait(&code);
     tcsetpgrp(STDOUT_FILENO, getpid());
+    printf("[status: %d] ", code);
   }
   _exit(0);
 }

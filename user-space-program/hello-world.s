@@ -7,11 +7,11 @@ main:
 	movl $0xcbcbcbcb, %eax
 	movl $0xacacacac, %edx
 
-	movl $1, %eax
-	movl $1, %edi
-	movl $_str, %esi
-	movl $_str_size, %ecx
-	movl (%ecx), %edx
+	movl $0x04, %eax
+	movl $1, %ebx
+	movl $_str, %ecx
+	movl $_str_size, %edx
+	movl (%edx), %edx
 	int $0x80
 
 	xorl %eax, %eax

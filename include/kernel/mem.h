@@ -127,7 +127,7 @@ typedef struct segment_descriptor_struct {
 } segment_descriptor;
 
 // in mem.cpp
-extern segment_descriptor gdt[6];
+extern segment_descriptor gdt[7];
 
 void create_segment_descriptor(
     segment_descriptor* sd,

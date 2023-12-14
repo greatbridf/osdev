@@ -43,40 +43,40 @@ static inline uint32_t syscall0(uint32_t no)
 static inline uint32_t syscall1(uint32_t no, uint32_t arg)
 {
     asm volatile(
-        "movl %1, %%edi\n"
+        "movl %1, %%ebx\n"
         "movl %2, %%eax\n"
         "int $0x80\n"
         "movl %%eax, %0"
         : "=g"(no)
         : "g"(arg), "g"(no)
-        : "eax", "edi");
+        : "eax", "ebx");
     return no;
 }
 static inline uint32_t syscall2(uint32_t no, uint32_t arg1, uint32_t arg2)
 {
     asm volatile(
-        "movl %1, %%edi\n"
-        "movl %2, %%esi\n"
+        "movl %1, %%ebx\n"
+        "movl %2, %%ecx\n"
         "movl %3, %%eax\n"
         "int $0x80\n"
         "movl %%eax, %0"
         : "=g"(no)
         : "g"(arg1), "g"(arg2), "g"(no)
-        : "eax", "edi", "esi");
+        : "eax", "ebx", "ecx");
     return no;
 }
 static inline uint32_t syscall3(uint32_t no, uint32_t arg1, uint32_t arg2, uint32_t arg3)
 {
     asm volatile(
-        "movl %1, %%edi\n"
-        "movl %2, %%esi\n"
+        "movl %1, %%ebx\n"
+        "movl %2, %%ecx\n"
         "movl %3, %%edx\n"
         "movl %4, %%eax\n"
         "int $0x80\n"
         "movl %%eax, %0"
         : "=g"(no)
         : "g"(arg1), "g"(arg2), "g"(arg3), "g"(no)
-        : "eax", "edx", "edi", "esi");
+        : "eax", "ebx", "ecx", "edx");
     return no;
 }
 

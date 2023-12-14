@@ -29,7 +29,7 @@ static types::bitmap mem_bitmap(
     1024 * 1024);
 
 // global
-segment_descriptor gdt[6];
+segment_descriptor gdt[7];
 
 uint8_t e820_mem_map[1024];
 uint32_t e820_mem_map_count;

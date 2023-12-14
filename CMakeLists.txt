@@ -50,6 +50,7 @@ set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
                         src/kernel/hw/serial.cpp
                         src/kernel/hw/timer.c
                         src/kernel/event/event.cpp
+                        src/kernel/user/thread_local.cc
                         src/kernel/signal.cpp
                         src/types/elf.cpp
                         src/types/libstdcpp.cpp
@@ -75,6 +76,7 @@ set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
                         include/kernel/hw/timer.h
                         include/kernel/input/keycodes.h
                         include/kernel/input/input_event.h
+                        include/kernel/user/thread_local.hpp
                         include/types/bitmap.hpp
                         include/types/buffer.hpp
                         include/types/elf.hpp

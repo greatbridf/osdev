@@ -45,8 +45,9 @@ static inline void load_new_gdt(void)
     create_segment_descriptor(gdt + 3, 0, ~0, 0b1100, SD_TYPE_CODE_USER);
     create_segment_descriptor(gdt + 4, 0, ~0, 0b1100, SD_TYPE_DATA_USER);
     create_segment_descriptor(gdt + 5, (uint32_t)&tss, sizeof(tss), 0b0000, SD_TYPE_TSS);
+    create_segment_descriptor(gdt + 6, 0, 0, 0b1100, SD_TYPE_DATA_USER);
 
-    asm_load_gdt((6 * 8 - 1) << 16, (pptr_t)gdt);
+    asm_load_gdt((7 * 8 - 1) << 16, (pptr_t)gdt);
     asm_load_tr((6 - 1) * 8);
 
     asm_cli();

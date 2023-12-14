@@ -2,6 +2,7 @@
 #include <asm/sys.h>
 #include <assert.h>
 #include <bits/ioctl.h>
+#include <kernel/user/thread_local.hpp>
 #include <kernel/errno.h>
 #include <kernel/interrupt.h>
 #include <kernel/log.hpp>
@@ -19,7 +20,17 @@
 #include <types/lock.hpp>
 #include <types/status.h>
 
-#define SYSCALL_HANDLERS_SIZE (128)
+#define SYSCALL_NO ((data)->s_regs.eax)
+#define SYSCALL_RETVAL ((data)->s_regs.eax)
+
+#define SYSCALL_ARG1(type, name) type name = (type)((data)->s_regs.ebx)
+#define SYSCALL_ARG2(type, name) type name = (type)((data)->s_regs.ecx)
+#define SYSCALL_ARG3(type, name) type name = (type)((data)->s_regs.edx)
+#define SYSCALL_ARG4(type, name) type name = (type)((data)->s_regs.esi)
+#define SYSCALL_ARG5(type, name) type name = (type)((data)->s_regs.edi)
+#define SYSCALL_ARG6(type, name) type name = (type)((data)->s_regs.ebp)
+
+#define SYSCALL_HANDLERS_SIZE (385)
 syscall_handler syscall_handlers[SYSCALL_HANDLERS_SIZE];
 
 extern "C" void _syscall_stub_fork_return(void);
@@ -69,9 +80,9 @@ int _syscall_fork(interrupt_stack* data)
 
 int _syscall_write(interrupt_stack* data)
 {
-    int fd = data->s_regs.edi;
-    const char* buf = reinterpret_cast<const char*>(data->s_regs.esi);
-    size_t n = data->s_regs.edx;
+    SYSCALL_ARG1(int, fd);
+    SYSCALL_ARG2(const char*, buf);
+    SYSCALL_ARG3(size_t, n);
 
     auto* file = current_process->files[fd];
 
@@ -102,9 +113,9 @@ int _syscall_write(interrupt_stack* data)
 
 int _syscall_read(interrupt_stack* data)
 {
-    int fd = data->s_regs.edi;
-    char* buf = reinterpret_cast<char*>(data->s_regs.esi);
-    size_t n = data->s_regs.edx;
+    SYSCALL_ARG1(int, fd);
+    SYSCALL_ARG2(char*, buf);
+    SYSCALL_ARG3(size_t, n);
 
     auto* file = current_process->files[fd];
 
@@ -146,7 +157,8 @@ int _syscall_sleep(interrupt_stack*)
 
 int _syscall_chdir(interrupt_stack* data)
 {
-    const char* path = reinterpret_cast<const char*>(data->s_regs.edi);
+    SYSCALL_ARG1(const char*, path);
+
     auto* dir = fs::vfs_open(*current_process->root,
         current_process->pwd.c_str(), path);
     if (!dir)
@@ -167,9 +179,9 @@ int _syscall_chdir(interrupt_stack* data)
 // @param envp: environment variables end with nullptr
 int _syscall_execve(interrupt_stack* data)
 {
-    const char* exec = reinterpret_cast<const char*>(data->s_regs.edi);
-    char* const* argv = reinterpret_cast<char* const*>(data->s_regs.esi);
-    char* const* envp = reinterpret_cast<char* const*>(data->s_regs.edx);
+    SYSCALL_ARG1(const char*, exec);
+    SYSCALL_ARG2(char* const*, argv);
+    SYSCALL_ARG3(char* const*, envp);
 
     types::elf::elf32_load_data d;
     d.argv = argv;
@@ -195,7 +207,7 @@ int _syscall_execve(interrupt_stack* data)
 // @param exit_code
 int NORETURN _syscall_exit(interrupt_stack* data)
 {
-    uint32_t exit_code = data->s_regs.edi;
+    SYSCALL_ARG1(int, exit_code);
 
     // TODO: terminating a thread only
     if (current_process->thds.size() != 1)
@@ -212,7 +224,7 @@ int NORETURN _syscall_exit(interrupt_stack* data)
 // @return pid of the exited process
 int _syscall_wait(interrupt_stack* data)
 {
-    auto* arg1 = reinterpret_cast<int*>(data->s_regs.edi);
+    SYSCALL_ARG1(int*, arg1);
 
     auto& cv = current_process->cv_wait;
     auto& mtx = cv.mtx();
@@ -245,9 +257,9 @@ int _syscall_wait(interrupt_stack* data)
 
 int _syscall_getdents(interrupt_stack* data)
 {
-    int fd = data->s_regs.edi;
-    auto* buf = (char*)(data->s_regs.esi);
-    size_t cnt = data->s_regs.edx;
+    SYSCALL_ARG1(int, fd);
+    SYSCALL_ARG2(char*, buf);
+    SYSCALL_ARG3(size_t, cnt);
 
     auto* dir = current_process->files[fd];
     if (dir->type != fs::file::types::ind || !dir->ptr.ind->flags.in.directory)
@@ -286,16 +298,17 @@ int _syscall_getdents(interrupt_stack* data)
 
 int _syscall_open(interrupt_stack* data)
 {
-    auto* path = (const char*)data->s_regs.edi;
-    uint32_t flags = data->s_regs.esi;
+    SYSCALL_ARG1(const char*, path);
+    SYSCALL_ARG2(uint32_t, flags);
+
     return current_process->files.open(
         *current_process, path, flags);
 }
 
 int _syscall_getcwd(interrupt_stack* data)
 {
-    char* buf = reinterpret_cast<char*>(data->s_regs.edi);
-    size_t bufsize = reinterpret_cast<size_t>(data->s_regs.esi);
+    SYSCALL_ARG1(char*, buf);
+    SYSCALL_ARG2(size_t, bufsize);
 
     // TODO: use copy_to_user
     strncpy(buf, current_process->pwd.c_str(), bufsize);
@@ -321,7 +334,7 @@ int _syscall_setsid(interrupt_stack*)
 
 int _syscall_getsid(interrupt_stack* data)
 {
-    pid_t pid = data->s_regs.edi;
+    SYSCALL_ARG1(pid_t, pid);
 
     if (!procs->try_find(pid))
         return -ESRCH;
@@ -334,34 +347,34 @@ int _syscall_getsid(interrupt_stack* data)
 
 int _syscall_close(interrupt_stack* data)
 {
-    int fd = data->s_regs.edi;
+    SYSCALL_ARG1(int, fd);
     current_process->files.close(fd);
     return 0;
 }
 
 int _syscall_dup(interrupt_stack* data)
 {
-    int old_fd = data->s_regs.edi;
+    SYSCALL_ARG1(int, old_fd);
     return current_process->files.dup(old_fd);
 }
 
 int _syscall_dup2(interrupt_stack* data)
 {
-    int old_fd = data->s_regs.edi;
-    int new_fd = data->s_regs.esi;
+    SYSCALL_ARG1(int, old_fd);
+    SYSCALL_ARG2(int, new_fd);
     return current_process->files.dup2(old_fd, new_fd);
 }
 
 int _syscall_pipe(interrupt_stack* data)
 {
-    auto& pipefd = *(int(*)[2])data->s_regs.edi;
+    SYSCALL_ARG1(int*, pipefd);
     return current_process->files.pipe(pipefd);
 }
 
 int _syscall_setpgid(interrupt_stack* data)
 {
-    pid_t pid = data->s_regs.edi;
-    pid_t pgid = data->s_regs.esi;
+    SYSCALL_ARG1(pid_t, pid);
+    SYSCALL_ARG2(pid_t, pgid);
 
     if (pgid < 0)
         return -EINVAL;
@@ -387,8 +400,8 @@ int _syscall_setpgid(interrupt_stack* data)
 
 int _syscall_ioctl(interrupt_stack* data)
 {
-    int fd = data->s_regs.edi;
-    unsigned long request = data->s_regs.esi;
+    SYSCALL_ARG1(int, fd);
+    SYSCALL_ARG2(unsigned long, request);
 
     // TODO: check fd type and get tty* from fd
     //
@@ -402,7 +415,7 @@ int _syscall_ioctl(interrupt_stack* data)
 
     switch (request) {
     case TIOCGPGRP: {
-        auto* pgid = (pid_t*)data->s_regs.edx;
+        SYSCALL_ARG3(pid_t*, pgid);
         tty* ctrl_tty = current_process->control_tty;
         // TODO: copy_to_user
         *pgid = ctrl_tty->get_pgrp();
@@ -410,9 +423,9 @@ int _syscall_ioctl(interrupt_stack* data)
     }
     case TIOCSPGRP: {
         // TODO: copy_from_user
-        pid_t pgid = *(const pid_t*)data->s_regs.edx;
+        SYSCALL_ARG3(const pid_t*, pgid);
         tty* ctrl_tty = current_process->control_tty;
-        ctrl_tty->set_pgrp(pgid);
+        ctrl_tty->set_pgrp(*pgid);
         break;
     }
     default:
@@ -432,15 +445,21 @@ int _syscall_getppid(interrupt_stack*)
     return current_process->ppid;
 }
 
+int _syscall_set_thread_area(interrupt_stack* data)
+{
+    SYSCALL_ARG1(kernel::user::user_desc*, ptr);
+    return kernel::user::set_thread_area(ptr);
+}
+
 extern "C" void syscall_entry(interrupt_stack* data)
 {
-    int syscall_no = data->s_regs.eax;
+    int syscall_no = SYSCALL_NO;
     if (syscall_no >= SYSCALL_HANDLERS_SIZE)
         kill_current(-1);
 
     int ret = syscall_handlers[syscall_no](data);
 
-    data->s_regs.eax = ret;
+    SYSCALL_RETVAL = ret;
 
     check_signal();
 }
@@ -471,4 +490,5 @@ void init_syscall(void)
     syscall_handlers[110] = _syscall_getppid;
     syscall_handlers[112] = _syscall_setsid;
     syscall_handlers[124] = _syscall_getsid;
+    syscall_handlers[243] = _syscall_set_thread_area;
 }

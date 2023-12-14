@@ -91,12 +91,46 @@ void kernel::tasks::thread::free_kstack(uint32_t p)
     pkstack_bmp->clear(p);
 }
 
+// TODO: file opening permissions check
+int filearr::open(const process &current, const char *filename, uint32_t flags)
+{
+    auto* dentry = fs::vfs_open(*current.root, current.pwd.c_str(), filename);
+
+    if (!dentry) {
+        errno = ENOTFOUND;
+        return -1;
+    }
+
+    // check whether dentry is a file if O_DIRECTORY is set
+    if ((flags & O_DIRECTORY) && !dentry->ind->flags.in.directory) {
+        errno = ENOTDIR;
+        return -1;
+    }
+
+    auto iter = files->emplace(files->cend(), fs::file {
+        fs::file::types::ind,
+        { .ind = dentry->ind },
+        dentry->parent,
+        0,
+        1,
+        {
+            .read = !!(flags & (O_RDONLY | O_RDWR)),
+            .write = !!(flags & (O_WRONLY | O_RDWR)),
+        },
+    });
+
+    int fd = next_fd();
+    auto [ _, inserted ] = arr.emplace(fd, iter);
+    assert(inserted);
+    return fd;
+}
+
 process::process(const process& parent, pid_t pid)
     : mms { *kernel_mms }
     , attr { parent.attr } , pwd { parent.pwd }
     , signals { parent.signals } , pid { pid }
     , ppid { parent.pid } , pgid { parent.pgid } , sid { parent.sid }
-    , control_tty { parent.control_tty } , children {}
+    , control_tty { parent.control_tty }, root { parent.root }
 {
     for (auto& area : parent.mms) {
         if (area.is_kernel_space() || area.attr.in.system)
@@ -109,13 +143,8 @@ process::process(const process& parent, pid_t pid)
 }
 
 process::process(pid_t pid, pid_t ppid)
-    : mms(*kernel_mms)
-    , attr { .system = true }
-    , pwd { "/" }
-    , pid { pid }
-    , ppid { ppid }
-    , pgid {} , sid {} , control_tty {}
-    , children {} { }
+    : mms(*kernel_mms) , attr { .system = true }
+    , pwd { "/" } , pid { pid } , ppid { ppid } { }
 
 void proclist::kill(pid_t pid, int exit_code)
 {
@@ -245,10 +274,10 @@ void NORETURN _kernel_init(void)
     hw::init_ata();
 
     // TODO: parse kernel parameters
-    auto* drive = fs::vfs_open("/dev/hda1");
+    auto* drive = fs::vfs_open(*fs::fs_root, nullptr, "/dev/hda1");
     assert(drive);
     auto* _new_fs = fs::register_fs(new fs::fat::fat32(drive->ind));
-    auto* mnt = fs::vfs_open("/mnt");
+    auto* mnt = fs::vfs_open(*fs::fs_root, nullptr, "/mnt");
     assert(mnt);
     int ret = fs::fs_root->ind->fs->mount(mnt, _new_fs);
     assert(ret == GB_OK);
@@ -260,10 +289,15 @@ void NORETURN _kernel_init(void)
     const char* envp[] = { nullptr };
 
     types::elf::elf32_load_data d;
-    d.exec = "/mnt/init";
     d.argv = argv;
     d.envp = envp;
     d.system = false;
+
+    d.exec_dent = fs::vfs_open(*fs::fs_root, nullptr, "/mnt/init");
+    if (!d.exec_dent) {
+        console->print("kernel panic: init not found!\n");
+        freeze();
+    }
 
     ret = types::elf::elf32_load(&d);
     assert(ret == GB_OK);
@@ -330,9 +364,9 @@ void NORETURN init_scheduler(void)
     assert(inserted);
     auto& thd = *iter_thd;
 
-    init.files.open("/dev/console", O_RDONLY);
-    init.files.open("/dev/console", O_WRONLY);
-    init.files.open("/dev/console", O_WRONLY);
+    init.files.open(init, "/dev/console", O_RDONLY);
+    init.files.open(init, "/dev/console", O_WRONLY);
+    init.files.open(init, "/dev/console", O_WRONLY);
 
     // we need interrupts enabled for cow mapping so now we disable it
     // in case timer interrupt mess things up

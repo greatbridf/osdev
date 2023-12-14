@@ -232,39 +232,7 @@ public:
         return 0;
     }
 
-    // TODO: file opening permissions check
-    int open(const char* filename, uint32_t flags)
-    {
-        auto* dentry = fs::vfs_open(filename);
-
-        if (!dentry) {
-            errno = ENOTFOUND;
-            return -1;
-        }
-
-        // check whether dentry is a file if O_DIRECTORY is set
-        if ((flags & O_DIRECTORY) && !dentry->ind->flags.in.directory) {
-            errno = ENOTDIR;
-            return -1;
-        }
-
-        auto iter = files->emplace(files->cend(), fs::file {
-            fs::file::types::ind,
-            { .ind = dentry->ind },
-            dentry->parent,
-            0,
-            1,
-            {
-                .read = !!(flags & (O_RDONLY | O_RDWR)),
-                .write = !!(flags & (O_WRONLY | O_RDWR)),
-            },
-        });
-
-        int fd = next_fd();
-        auto [ _, inserted ] = arr.emplace(fd, iter);
-        assert(inserted);
-        return fd;
-    }
+    int open(const process& current, const char* filename, uint32_t flags);
 
     constexpr void close(int fd)
     {
@@ -304,17 +272,18 @@ public:
     std::set<kernel::tasks::thread> thds;
     kernel::cond_var cv_wait;
     std::list<wait_obj> waitlist;
-    process_attr attr;
+    process_attr attr {};
     filearr files;
     types::string<> pwd;
     kernel::signal_list signals;
 
-    pid_t pid;
-    pid_t ppid;
-    pid_t pgid;
-    pid_t sid;
+    pid_t pid {};
+    pid_t ppid {};
+    pid_t pgid {};
+    pid_t sid {};
 
-    tty* control_tty;
+    tty* control_tty {};
+    fs::vfs::dentry* root { fs::fs_root };
     std::set<pid_t> children;
 
 public:

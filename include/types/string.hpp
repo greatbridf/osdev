@@ -63,6 +63,11 @@ public:
     {
         return strcmp(c_str(), rhs.c_str()) == 0;
     }
+    constexpr string& assign(const char* str, size_type n = npos)
+    {
+        this->clear();
+        return this->append(str, n);
+    }
     constexpr string substr(size_type pos, size_type n = npos)
     {
         return string(this->m_arr + pos, n);

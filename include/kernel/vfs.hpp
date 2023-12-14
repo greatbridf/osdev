@@ -162,6 +162,9 @@ public:
 
         dentry* replace(dentry* val);
 
+        // out_dst SHOULD be empty
+        void path(const dentry& root, name_type& out_dst) const;
+
         void invalidate(void);
     };
 
@@ -292,11 +295,15 @@ int vfs_mkfile(fs::vfs::dentry* dir, const char* filename);
 int vfs_mknode(fs::vfs::dentry* dir, const char* filename, node_t sn);
 int vfs_rmfile(fs::vfs::dentry* dir, const char* filename);
 int vfs_mkdir(fs::vfs::dentry* dir, const char* dirname);
-int vfs_stat(const char* filename, stat* stat);
 int vfs_stat(fs::vfs::dentry* ent, stat* stat);
 
+// @param: pwd: current working directory
+//              if nullptr, use root directory
+//              if present, must be a valid absolute path
+//
 // @return pointer to the dentry if found, nullptr if not
-fs::vfs::dentry* vfs_open(const char* path);
+fs::vfs::dentry* vfs_open(fs::vfs::dentry& root,
+    const char* pwd, const char* path);
 
 } // namespace fs
 

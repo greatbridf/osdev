@@ -125,10 +125,12 @@ const char* find_file_name(const char* path)
 {
     const char* last = path + strlen(path);
     for (; last != path; --last) {
-        if (*last == '/')
+        if (*last == '/') {
+            ++last;
             break;
+        }
     }
-    return last + 1;
+    return last;
 }
 
 int parse_applet(const char* name)

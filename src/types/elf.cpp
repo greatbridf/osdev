@@ -30,7 +30,7 @@ inline void _user_push(char** sp, const char* str)
 
 int types::elf::elf32_load(types::elf::elf32_load_data* d)
 {
-    auto* ent_exec = fs::vfs_open(d->exec);
+    auto* ent_exec = d->exec_dent;
     if (!ent_exec) {
         d->errcode = ENOENT;
         return GB_FAILED;
@@ -88,9 +88,10 @@ int types::elf::elf32_load(types::elf::elf32_load_data* d)
     // so we can't just simply return to it on error.
     current_process->mms.clear_user();
 
+    // TODO: remove this
     fs::inode* null_ind = nullptr;
     {
-        auto* dent = fs::vfs_open("/dev/null");
+        auto* dent = fs::vfs_open(*fs::fs_root, nullptr, "/dev/null");
         if (!dent)
             kill_current(-1);
         null_ind = dent->ind;

@@ -54,7 +54,14 @@ fs::vfs::dentry* fs::vfs::dentry::find(const name_type& name)
     if (!ind->flags.in.directory)
         return nullptr;
 
-    if (ind->flags.in.directory && !flags.in.present)
+    if (name[0] == '.') {
+        if (!name[1])
+            return this;
+        if (name[1] == '.' && !name[2])
+            return parent ? parent : this;
+    }
+
+    if (!flags.in.present)
         ind->fs->load_dentry(this);
 
     auto iter = idx_children->find(name);
@@ -80,9 +87,34 @@ void fs::vfs::dentry::invalidate(void)
     flags.in.present = 0;
 }
 fs::vfs::vfs(void)
-    : _root(nullptr, nullptr, "/")
+    : _root(nullptr, nullptr, "")
 {
 }
+
+void fs::vfs::dentry::path(
+    const dentry& root, name_type &out_dst) const
+{
+    const dentry* dents[32];
+    int cnt = 0;
+
+    const dentry* cur = this;
+    while (cur != &root) {
+        assert(cnt < 32);
+        dents[cnt++] = cur;
+        cur = cur->parent;
+    }
+
+    if (cnt == 0) {
+        out_dst += '/';
+        return;
+    }
+
+    for (int i = cnt - 1; i >= 0; --i) {
+        out_dst += '/';
+        out_dst += dents[i]->name;
+    }
+}
+
 fs::inode* fs::vfs::cache_inode(inode_flags flags, uint32_t perm, size_t size, ino_t ino)
 {
     auto [ iter, inserted ] =
@@ -457,57 +489,56 @@ int fs::vfs_mkdir(fs::vfs::dentry* dir, const char* dirname)
     return dir->ind->fs->inode_mkdir(dir, dirname);
 }
 
-fs::vfs::dentry* fs::vfs_open(const char* path)
+fs::vfs::dentry* fs::vfs_open(
+    fs::vfs::dentry& root,
+    const char* pwd, const char* path)
 {
-    if (path[0] == '/' && path[1] == 0x00) {
-        return fs::fs_root;
-    }
+    fs::vfs::dentry* cur = nullptr;
+    if (!*path)
+        return nullptr;
 
-    auto* cur = fs::fs_root;
-    size_t n = 0;
-    switch (*(path++)) {
     // absolute path
-    case '/':
-        while (true) {
-            if (path[n] == 0x00) {
-                cur = cur->find(string(path, n));
+    if (*path == '/' || !pwd)
+        cur = &root;
+    else
+        cur = vfs_open(root, nullptr, pwd);
+
+    size_t n = 0;
+    string curpath;
+    while (true) {
+        switch (path[n]) {
+        case '\0':
+            if (n != 0) {
+                curpath.clear();
+                curpath.append(path, n);
+                cur = cur->find(curpath);
+            }
+            return cur;
+
+        case '/':
+            if (n == 0) {
+                ++path;
+                continue;
+            }
+
+            curpath.clear();
+            curpath.append(path, n);
+            cur = cur->find(curpath);
+
+            if (!cur)
                 return cur;
-            }
-            if (path[n] == '/') {
-                cur = cur->find(string(path, n));
 
-                if (!cur)
-                    return cur;
+            path += (n + 1);
+            n = 0;
+            break;
 
-                if (path[n + 1] == 0x00) {
-                    return cur;
-                } else {
-                    path += (n + 1);
-                    n = 0;
-                    continue;
-                }
-            }
+        default:
             ++n;
+            break;
         }
-        break;
-    // empty string
-    case 0x00:
-        return nullptr;
-        break;
-    // relative path
-    default:
-        return nullptr;
-        break;
     }
-    return nullptr;
 }
-int fs::vfs_stat(const char* filename, stat* stat)
-{
-    auto ent = vfs_open(filename);
-    if (!ent)
-        return GB_FAILED;
-    return vfs_stat(ent, stat);
-}
+
 int fs::vfs_stat(fs::vfs::dentry* ent, stat* stat)
 {
     return ent->ind->fs->inode_stat(ent, stat);
@@ -672,23 +703,14 @@ void init_vfs(void)
     vfs_mkdir(fs_root, "mnt");
     vfs_mkfile(fs_root, "init");
 
-    auto* init = vfs_open("/init");
+    auto* init = vfs_open(*fs_root, nullptr, "/init");
     assert(init);
     const char* str = "#/bin/sh\nexec /bin/sh\n";
     vfs_write(init->ind, str, 0, strlen(str));
 
-    auto* dev = vfs_open("/dev");
+    auto* dev = vfs_open(*fs_root, nullptr, "/dev");
     assert(dev);
     vfs_mknode(dev, "null", { .in { .major = 0, .minor = 0 } });
     vfs_mknode(dev, "console", { .in { .major = 1, .minor = 0 } });
     vfs_mknode(dev, "hda", { .in { .major = 2, .minor = 0 } });
-
-    stat _stat {};
-
-    vfs_stat("/init", &_stat);
-    vfs_stat("/", &_stat);
-    vfs_stat("/dev", &_stat);
-    vfs_stat("/dev/null", &_stat);
-    vfs_stat("/dev/console", &_stat);
-    vfs_stat("/dev/hda", &_stat);
 }

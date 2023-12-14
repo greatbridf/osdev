@@ -147,14 +147,16 @@ int _syscall_sleep(interrupt_stack*)
 int _syscall_chdir(interrupt_stack* data)
 {
     const char* path = reinterpret_cast<const char*>(data->s_regs.edi);
-    auto* dir = fs::vfs_open(path);
+    auto* dir = fs::vfs_open(*current_process->root,
+        current_process->pwd.c_str(), path);
     if (!dir)
         return -ENOENT;
 
     if (!dir->ind->flags.in.directory)
         return -ENOTDIR;
 
-    current_process->pwd = path;
+    current_process->pwd.clear();
+    dir->path(*current_process->root, current_process->pwd);
 
     return 0;
 }
@@ -172,8 +174,13 @@ int _syscall_execve(interrupt_stack* data)
     types::elf::elf32_load_data d;
     d.argv = argv;
     d.envp = envp;
-    d.exec = exec;
     d.system = false;
+
+    d.exec_dent = fs::vfs_open(*current_process->root,
+        current_process->pwd.c_str(), exec);
+    
+    if (!d.exec_dent)
+        return -ENOENT;
 
     int ret = types::elf::elf32_load(&d);
     if (ret != GB_OK)
@@ -281,7 +288,8 @@ int _syscall_open(interrupt_stack* data)
 {
     auto* path = (const char*)data->s_regs.edi;
     uint32_t flags = data->s_regs.esi;
-    return current_process->files.open(path, flags);
+    return current_process->files.open(
+        *current_process, path, flags);
 }
 
 int _syscall_getcwd(interrupt_stack* data)

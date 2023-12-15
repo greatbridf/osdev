@@ -10,7 +10,7 @@ void init_pit(void);
 
 void inc_tick(void);
 
-time_t current_ticks(void);
+size_t current_ticks(void);
 
 #ifdef __cplusplus
 }

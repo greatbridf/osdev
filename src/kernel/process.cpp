@@ -246,7 +246,8 @@ void NORETURN _kernel_init(void)
     assert(proc.pid == 2);
 
     // create thread
-    auto [ iter_thd, inserted] = proc.thds.emplace(proc.pid);
+    auto [ iter_thd, inserted] =
+        proc.thds.emplace("[kernel thread daemon]", proc.pid);
     assert(inserted);
     auto& thd = *iter_thd;
 
@@ -360,7 +361,7 @@ void NORETURN init_scheduler(void)
     auto& init = procs->emplace(0);
     assert(init.pid == 1);
 
-    auto [ iter_thd, inserted ] = init.thds.emplace(init.pid);
+    auto [ iter_thd, inserted ] = init.thds.emplace("[kernel init]", init.pid);
     assert(inserted);
     auto& thd = *iter_thd;
 

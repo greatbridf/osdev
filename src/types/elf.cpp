@@ -179,5 +179,8 @@ int types::elf::elf32_load(types::elf::elf32_load_data* d)
     // push argc
     _user_push(sp, args.size());
 
+    // rename current thread
+    current_thread->name = ent_exec->name;
+
     return GB_OK;
 }

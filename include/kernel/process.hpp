@@ -72,15 +72,18 @@ public:
     int* __user set_child_tid {};
     int* __user clear_child_tid {};
 
-    explicit inline thread(pid_t owner)
+    types::string<> name {};
+
+    explicit inline thread(types::string<> name, pid_t owner)
         : owner { owner }
         , attr { .system = 1, .ready = 1, .wait = 0, }
+        , name { name }
     {
         alloc_kstack();
     }
 
     inline thread(const thread& val, pid_t owner)
-        : owner { owner } , attr { val.attr }
+        : owner { owner }, attr { val.attr }, name { val.name }
     {
         alloc_kstack();
     }

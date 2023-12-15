@@ -2,6 +2,8 @@
 #include <asm/sys.h>
 #include <assert.h>
 #include <bits/ioctl.h>
+#include <sys/prctl.h>
+#include <time.h>
 #include <kernel/user/thread_local.hpp>
 #include <kernel/errno.h>
 #include <kernel/interrupt.h>
@@ -12,6 +14,7 @@
 #include <kernel/syscall.hpp>
 #include <kernel/tty.hpp>
 #include <kernel/vfs.hpp>
+#include <kernel/hw/timer.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -30,7 +33,7 @@
 #define SYSCALL_ARG5(type, name) type name = (type)((data)->s_regs.edi)
 #define SYSCALL_ARG6(type, name) type name = (type)((data)->s_regs.ebp)
 
-#define SYSCALL_HANDLERS_SIZE (385)
+#define SYSCALL_HANDLERS_SIZE (404)
 syscall_handler syscall_handlers[SYSCALL_HANDLERS_SIZE];
 
 extern "C" void _syscall_stub_fork_return(void);
@@ -521,11 +524,63 @@ ssize_t _syscall_writev(interrupt_stack* data)
     }
 }
 
+int _syscall_prctl(interrupt_stack* data)
+{
+    SYSCALL_ARG1(int, option);
+
+    switch (option) {
+    case PR_SET_NAME: {
+        // TODO: copy_from_user or check privilege
+        SYSCALL_ARG2(const char* __user, name);
+        current_thread->name.assign(name, 15);
+        break;
+    }
+    case PR_GET_NAME: {
+        SYSCALL_ARG2(char* __user, name);
+        // TODO: copy_to_user
+        strncpy(name, current_thread->name.c_str(), 16);
+        name[15] = 0;
+        break;
+    }
+    default:
+        return -EINVAL;
+    }
+
+    return 0;
+}
+
+int _syscall_clock_gettime64(interrupt_stack* data)
+{
+    SYSCALL_ARG1(clockid_t, clk_id);
+    SYSCALL_ARG2(timespec* __user, tp);
+
+    // TODO: check privilege of tp
+    if (clk_id != CLOCK_REALTIME || !tp)
+        return -EINVAL;
+
+    tp->tv_sec = 10 + current_ticks();
+    tp->tv_nsec = 0;
+
+    return 0;
+}
+
+int _syscall_getuid(interrupt_stack*)
+{
+    return 0; // all user is root for now
+}
+
 extern "C" void syscall_entry(interrupt_stack* data)
 {
     int syscall_no = SYSCALL_NO;
-    if (syscall_no >= SYSCALL_HANDLERS_SIZE)
+
+    if (syscall_no >= SYSCALL_HANDLERS_SIZE
+        || !syscall_handlers[syscall_no]) {
+        char buf[64];
+        snprintf(buf, 64,
+            "[kernel] syscall %x not implemented\n", syscall_no);
+        console->print(buf);
         kill_current(-1);
+    }
 
     int ret = syscall_handlers[syscall_no](data);
 
@@ -559,9 +614,12 @@ void init_syscall(void)
     syscall_handlers[0x84] = _syscall_getdents;
     syscall_handlers[0x92] = _syscall_writev;
     syscall_handlers[0x93] = _syscall_getsid;
+    syscall_handlers[0xac] = _syscall_prctl;
     syscall_handlers[0xb7] = _syscall_getcwd;
+    syscall_handlers[0xc7] = _syscall_getuid;
     syscall_handlers[0xf3] = _syscall_set_thread_area;
     syscall_handlers[0xfc] = _syscall_exit; // we implement exit_group as exit for now
     syscall_handlers[0x102] = _syscall_set_tid_address;
+    syscall_handlers[0x193] = _syscall_clock_gettime64;
     // syscall_handlers[35] = _syscall_sleep;
 }

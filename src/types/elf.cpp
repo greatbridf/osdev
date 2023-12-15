@@ -97,6 +97,8 @@ int types::elf::elf32_load(types::elf::elf32_load_data* d)
         null_ind = dent->ind;
     }
 
+    uint32_t data_segment_end = 0;
+
     for (const auto& phent : phents) {
         if (phent.type != types::elf::elf32_program_header_entry::PT_LOAD)
             continue;
@@ -129,7 +131,12 @@ int types::elf::elf32_load(types::elf::elf32_load_data* d)
             if (ret != GB_OK)
                 kill_current(-1);
         }
+
+        if (vaddr + vlen > data_segment_end)
+            data_segment_end = vaddr + vlen;
     }
+
+    current_process->mms.register_brk((char*)data_segment_end + 0x10000);
 
     for (const auto& shent : shents) {
         if (shent.sh_type == elf32_section_header_entry::SHT_NOBITS)

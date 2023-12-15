@@ -569,6 +569,13 @@ int _syscall_getuid(interrupt_stack*)
     return 0; // all user is root for now
 }
 
+int _syscall_brk(interrupt_stack* data)
+{
+    SYSCALL_ARG1(void*, addr);
+
+    return (int)current_process->mms.set_brk(addr);
+}
+
 extern "C" void syscall_entry(interrupt_stack* data)
 {
     int syscall_no = SYSCALL_NO;
@@ -606,6 +613,7 @@ void init_syscall(void)
     syscall_handlers[0x14] = _syscall_getpid;
     syscall_handlers[0x29] = _syscall_dup;
     syscall_handlers[0x2a] = _syscall_pipe;
+    syscall_handlers[0x2d] = _syscall_brk;
     syscall_handlers[0x36] = _syscall_ioctl;
     syscall_handlers[0x39] = _syscall_setpgid;
     syscall_handlers[0x3f] = _syscall_dup2;

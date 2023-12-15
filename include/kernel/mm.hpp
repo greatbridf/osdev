@@ -195,6 +195,7 @@ public:
 private:
     list_type m_areas;
     page_t m_pd;
+    mm* m_brk {};
 
 public:
     // for system initialization only
@@ -212,6 +213,9 @@ public:
 
     ~mm_list();
     void switch_pd() const;
+
+    int register_brk(void* addr);
+    void* set_brk(void* addr);
 
     constexpr mm& addarea(void* start, bool w, bool system)
     {
@@ -242,6 +246,7 @@ public:
             this->unmap(iter);
             iter = m_areas.erase(iter);
         }
+        m_brk = nullptr;
     }
 
     inline void unmap(iterator area)
@@ -267,6 +272,11 @@ public:
         types::pdelete<types::kernel_ident_allocator>(area->pgs);
     }
 
+    constexpr iterator iterfind(void* lp)
+    { return m_areas.find(lp); }
+    constexpr const_iterator iterfind(void* lp) const
+    { return m_areas.find(lp); }
+
     constexpr mm* find(void* lp)
     {
         auto iter = m_areas.find(lp);
@@ -291,6 +301,12 @@ public:
                 return false;
         }
         return true;
+    }
+
+    constexpr bool is_avail(void* addr) const
+    {
+        auto iter = m_areas.find(addr);
+        return iter == m_areas.end();
     }
 };
 

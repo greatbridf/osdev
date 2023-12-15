@@ -215,6 +215,7 @@ mm_list::mm_list()
 mm_list::mm_list(const mm_list& other)
     : mm_list()
 {
+    m_brk = other.m_brk;
     for (auto& src : other.m_areas) {
         if (src.is_kernel_space() || src.attr.system)
             continue;
@@ -251,6 +252,33 @@ mm_list::~mm_list()
 void mm_list::switch_pd() const
 {
     asm_switch_pd(m_pd);
+}
+
+int mm_list::register_brk(void* addr)
+{
+    if (!is_avail(addr))
+        return GB_FAILED;
+    m_brk = &addarea(addr, true, false);
+    return GB_OK;
+}
+
+void* mm_list::set_brk(void* addr)
+{
+    assert(m_brk);
+    void* curbrk = m_brk->end();
+
+    if (addr <= curbrk || !is_avail(curbrk, vptrdiff(addr, curbrk)))
+        return curbrk;
+
+    kernel::paccess pa(m_pd);
+    pd_t pd = (pd_t)pa.ptr();
+
+    while (curbrk < addr) {
+        m_brk->append_page(pd, empty_page, PAGE_COW, false);
+        curbrk = (char*)curbrk + PAGE_SIZE;
+    }
+
+    return curbrk;
 }
 
 mm& mm_list::add_empty_area(void *start, std::size_t page_count,

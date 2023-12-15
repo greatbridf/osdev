@@ -74,10 +74,10 @@ public:
         : set(first, last, Compare(), alloc) {}
 
     __GBLIBCPP_CONSTEXPR
-    set(const set& other) : tree(other) {}
+    set(const set& other) : tree(other.tree) {}
     __GBLIBCPP_CONSTEXPR
     set(const set& other, const Allocator& alloc)
-        : tree(other, alloc) { }
+        : tree(other.tree, alloc) { }
 
     __GBLIBCPP_CONSTEXPR
     set(set&& other) : tree(std::move(other.tree)) {}
@@ -116,6 +116,12 @@ public:
     iterator find(const Key& key) { return tree.find(key); }
     __GBLIBCPP_CONSTEXPR
     const_iterator find(const Key& key) const { return tree.find(key); }
+    template <typename K>
+    __GBLIBCPP_CONSTEXPR
+    iterator find(const K& key) { return tree.find(key); }
+    template <typename K>
+    __GBLIBCPP_CONSTEXPR
+    const_iterator find(const K& key) const { return tree.find(key); }
 
     __GBLIBCPP_CONSTEXPR
     std::pair<iterator, bool> insert(const value_type& value)

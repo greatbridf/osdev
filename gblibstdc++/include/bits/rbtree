@@ -399,6 +399,9 @@ public:
         rt->parent = nrt;
 
         rt->right = nrt->left;
+        if (rt->right)
+            rt->right->parent = rt;
+
         nrt->left = rt;
     }
 
@@ -419,6 +422,8 @@ public:
         rt->parent = nrt;
 
         rt->left = nrt->right;
+        if (rt->left)
+            rt->left->parent = rt;
         nrt->right = rt;
     }
 

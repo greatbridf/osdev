@@ -198,24 +198,77 @@ static inline void init_mem_layout(void)
     }
 }
 
-using kernel::mm_list;
-mm_list::mm_list(const mm_list& v)
-    : m_areas(v.m_areas)
+using kernel::memory::mm_list;
+using kernel::memory::mm;
+
+mm_list::mm_list()
+    : m_areas(s_kernel_mms->m_areas)
 {
     m_pd = __alloc_raw_page();
-    kernel::paccess pdst(m_pd), psrc(v.m_pd);
+    kernel::paccess pdst(m_pd), psrc(s_kernel_mms->m_pd);
     auto* dst = pdst.ptr();
     auto* src = psrc.ptr();
     assert(dst && src);
     memcpy(dst, src, PAGE_SIZE);
 }
 
-inline void map_raw_page_to_pte(
-    pte_t* pte,
-    page_t page,
-    bool present,
-    bool write,
-    bool priv)
+mm_list::mm_list(const mm_list& other)
+    : mm_list()
+{
+    for (auto& src : other.m_areas) {
+        if (src.is_kernel_space() || src.attr.system)
+            continue;
+
+        auto& area = this->addarea(
+            src.start, src.attr.write, src.attr.system);
+
+        if (src.attr.mapped) {
+            area.attr.mapped = 1;
+            area.mapped_file = src.mapped_file;
+            area.file_offset = src.file_offset;
+        }
+
+        paccess pa(m_pd);
+        pd_t pd = (pd_t)pa.ptr();
+
+        for (const auto& pg : *src.pgs) {
+            area.append_page(pd, pg,
+                    PAGE_COW | (pg.attr & PAGE_MMAP),
+                    src.attr.system);
+        }
+    }
+}
+
+mm_list::~mm_list()
+{
+    if (!m_pd)
+        return;
+
+    clear_user();
+    dealloc_pd(m_pd);
+}
+
+void mm_list::switch_pd() const
+{
+    asm_switch_pd(m_pd);
+}
+
+mm& mm_list::add_empty_area(void *start, std::size_t page_count,
+    uint32_t page_attr, bool w, bool system)
+{
+    auto& area = addarea(start, w, system);
+    kernel::paccess pa(m_pd);
+    pd_t pd = (pd_t)pa.ptr();
+
+    while (page_count--)
+        area.append_page(pd, empty_page, page_attr, system);
+
+    return area;
+}
+
+constexpr void map_raw_page_to_pte(
+    pte_t* pte, page_t page,
+    bool present, bool write, bool priv)
 {
     // set P bit
     pte->v = 0;
@@ -225,18 +278,17 @@ inline void map_raw_page_to_pte(
     pte->in.page = page;
 }
 
-int mm::append_page(page& pg, uint32_t attr, bool priv)
+void mm::append_page(pd_t pd, const page& pg, uint32_t attr, bool priv)
 {
-    void* addr = this->end();
-    kernel::paccess pa(this->owner->m_pd);
-    auto pd = (pd_t)pa.ptr();
     assert(pd);
+
+    void* addr = this->end();
     pde_t* pde = *pd + v_to_pdi(addr);
 
     page_t pt_pg = 0;
     pte_t* pte = nullptr;
     // page table not exist
-    if (unlikely(!pde->in.p)) {
+    if (!pde->in.p) [[unlikely]] {
         // allocate a page for the page table
         pt_pg = __alloc_raw_page();
         pde->in.p = 1;
@@ -285,8 +337,6 @@ int mm::append_page(page& pg, uint32_t attr, bool priv)
     auto& emplaced = this->pgs->back();
     emplaced.pg_pteidx = (pt_pg << 12) + pti;
     emplaced.attr = attr;
-
-    return GB_OK;
 }
 
 int mmap(
@@ -316,12 +366,11 @@ int mmap(
         return GB_FAILED;
     }
 
-    auto& mm = mms.addarea(hint, write, priv);
+    auto& mm = mms.add_empty_area(hint, n_pgs, PAGE_MMAP | PAGE_COW, write, priv);
+
+    mm.attr.mapped = 1;
     mm.mapped_file = file;
     mm.file_offset = offset;
-
-    for (size_t i = 0; i < n_pgs; ++i)
-        mm.append_page(empty_page, PAGE_MMAP | PAGE_COW, priv);
 
     return GB_OK;
 }
@@ -332,8 +381,9 @@ void init_mem(void)
     init_mem_layout();
 
     // TODO: replace early kernel pd
-    kernel_mms = types::pnew<types::kernel_ident_allocator>(kernel_mms, EARLY_KERNEL_PD_PAGE);
-    auto& heap_mm = kernel_mms->addarea(KERNEL_HEAP_START, true, true);
+    auto* __kernel_mms = types::_new<types::kernel_ident_allocator,
+            kernel::memory::mm_list>(EARLY_KERNEL_PD_PAGE);
+    kernel::memory::mm_list::s_kernel_mms = __kernel_mms;
 
     // create empty_page struct
     empty_page.attr = 0;
@@ -342,8 +392,8 @@ void init_mem(void)
     empty_page.pg_pteidx = 0x00002000;
 
     // 0xd0000000 to 0xd4000000 or 3.5GiB, size 64MiB
-    while (heap_mm.pgs->size() < 64 * 1024 * 1024 / PAGE_SIZE)
-        heap_mm.append_page(empty_page, PAGE_COW, true);
+    __kernel_mms->add_empty_area(KERNEL_HEAP_START,
+        64 * 1024 * 1024 / PAGE_SIZE, PAGE_COW, true, true);
 
     types::__allocator::init_kernel_heap(KERNEL_HEAP_START,
         vptrdiff(KERNEL_HEAP_LIMIT, KERNEL_HEAP_START));

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <list>
+#include <set>
 #include <vector>
 #include <bit>
 #include <cstddef>
@@ -33,7 +33,7 @@ struct page {
     // 0 :11 : pte_index
     // 12:31 : pt_page
     uint32_t pg_pteidx;
-    uint32_t attr;
+    mutable uint32_t attr;
 };
 
 // private memory mapping
@@ -49,14 +49,6 @@ int mmap(
     size_t offset,
     int write,
     int priv);
-
-using page_arr = std::vector<page,
-    types::allocator_adapter<page, types::kernel_ident_allocator>>;
-
-// forward declaration
-namespace kernel {
-class mm_list;
-} // namespace kernel
 
 template <uint32_t base, uint32_t expo>
 constexpr uint32_t pow()
@@ -116,44 +108,6 @@ void free_page(page* pg);
 page_t __alloc_raw_page(void);
 void __free_raw_page(page_t pg);
 
-struct mm {
-public:
-    void* start;
-    union {
-        uint32_t v;
-        struct {
-            uint32_t read : 1;
-            uint32_t write : 1;
-            uint32_t system : 1;
-        } in;
-    } attr;
-    kernel::mm_list* owner;
-    page_arr* pgs = nullptr;
-    fs::inode* mapped_file = nullptr;
-    size_t file_offset = 0;
-
-public:
-    constexpr void* end(void) const
-    {
-        return (char*)this->start + this->pgs->size() * PAGE_SIZE;
-    }
-
-    constexpr bool is_kernel_space(void) const
-    {
-        return this->start >= std::bit_cast<void*>(0xc0000000);
-    }
-
-    constexpr bool is_avail(void* start, void* end) const
-    {
-        void* m_start = this->start;
-        void* m_end = this->end();
-
-        return (start >= m_end || end <= m_start);
-    }
-
-    int append_page(page& pg, uint32_t attr, bool priv);
-};
-
 namespace kernel {
 
 void* pmap(page_t pg);
@@ -184,120 +138,113 @@ public:
     }
 };
 
-class mm_list {
+namespace memory {
+
+struct mm {
 public:
-    using list_type = std::list<mm,
+    using pages_vector = std::vector<page,
+        types::allocator_adapter<page, types::kernel_ident_allocator>>;
+
+public:
+    void* start {};
+    struct mm_attr {
+        uint32_t write : 1;
+        uint32_t system : 1;
+        uint32_t mapped : 1;
+    } attr {};
+    pages_vector* pgs {};
+    fs::inode* mapped_file {};
+    size_t file_offset {};
+
+public:
+    constexpr void* end() const noexcept
+    { return vptradd(start, pgs->size() * PAGE_SIZE); }
+    constexpr bool is_kernel_space() const noexcept
+    { return start >= std::bit_cast<void*>(0xc0000000); }
+    constexpr bool is_avail(void* ostart, void* oend) const noexcept
+    {
+        void* m_start = start;
+        void* m_end = end();
+
+        return (ostart >= m_end || oend <= m_start);
+    }
+
+    void append_page(pd_t pd, const page& pg, uint32_t attr, bool priv);
+};
+
+class mm_list {
+private:
+    struct comparator {
+        constexpr bool operator()(const mm& lhs, const mm& rhs) const noexcept
+        { return lhs.start < rhs.start; }
+        constexpr bool operator()(const mm& lhs, void* rhs) const noexcept
+        { return lhs.end() <= rhs; }
+        constexpr bool operator()(void* lhs, const mm& rhs) const noexcept
+        { return lhs < rhs.start; }
+    };
+
+public:
+    using list_type = std::set<mm, comparator,
         types::allocator_adapter<mm, types::kernel_ident_allocator>>;
-    using iterator_type = list_type::iterator;
-    using const_iterator_type = list_type::const_iterator;
+    using iterator = list_type::iterator;
+    using const_iterator = list_type::const_iterator;
+
+public:
+    static inline mm_list* s_kernel_mms;
 
 private:
     list_type m_areas;
-
-public:
     page_t m_pd;
 
 public:
+    // for system initialization only
     explicit constexpr mm_list(page_t pd)
-        : m_pd(pd)
-    {
-    }
-    mm_list(const mm_list& v);
+        : m_pd(pd) { }
+
+    // default constructor copies kernel_mms
+    explicit mm_list();
+    // copies kernel_mms and mirrors user space
+    explicit mm_list(const mm_list& other);
+
     constexpr mm_list(mm_list&& v)
         : m_areas(std::move(v.m_areas))
-        , m_pd(v.m_pd)
-    {
-        v.m_pd = 0;
-        for (auto& area : m_areas)
-            area.owner = this;
-    }
-    ~mm_list()
-    {
-        if (!m_pd)
-            return;
+        , m_pd(std::exchange(v.m_pd, 0)) { }
 
-        this->clear_user();
-        dealloc_pd(m_pd);
-    }
-
-    constexpr iterator_type begin(void)
-    {
-        return m_areas.begin();
-    }
-    constexpr iterator_type end(void)
-    {
-        return m_areas.end();
-    }
-    constexpr const_iterator_type begin(void) const
-    {
-        return m_areas.begin();
-    }
-    constexpr const_iterator_type end(void) const
-    {
-        return m_areas.end();
-    }
-    constexpr const_iterator_type cbegin(void) const
-    {
-        return m_areas.cbegin();
-    }
-    constexpr const_iterator_type cend(void) const
-    {
-        return m_areas.cend();
-    }
+    ~mm_list();
+    void switch_pd() const;
 
     constexpr mm& addarea(void* start, bool w, bool system)
     {
-        return m_areas.emplace_back(mm {
+        auto [ iter, inserted ] = m_areas.emplace(mm {
             .start = start,
             .attr {
-                .in {
-                    .read = 1,
-                    .write = w,
-                    .system = system,
-                },
+                .write = w,
+                .system = system,
+                .mapped = 0,
             },
-            .owner = this,
-            .pgs = types::_new<types::kernel_ident_allocator, page_arr>(),
+            .pgs = types::_new<types::kernel_ident_allocator, mm::pages_vector>(),
         });
+        assert(inserted);
+        return *iter;
     }
+
+    mm& add_empty_area(void* start, std::size_t page_count,
+        uint32_t page_attr, bool w, bool system);
 
     constexpr void clear_user()
     {
-        for (auto iter = this->begin(); iter != this->end();) {
+        for (auto iter = m_areas.begin(); iter != m_areas.end(); ) {
             if (iter->is_kernel_space()) {
                 ++iter;
                 continue;
             }
 
             this->unmap(iter);
-
             iter = m_areas.erase(iter);
         }
     }
 
-    constexpr int mirror_area(mm& src)
-    {
-        auto& area = this->addarea(
-            src.start, src.attr.in.write, src.attr.in.system);
-
-        if (src.mapped_file) {
-            area.mapped_file = src.mapped_file;
-            area.file_offset = src.file_offset;
-        }
-
-        for (auto& pg : *src.pgs) {
-            if (area.append_page(pg,
-                    PAGE_COW | (pg.attr & PAGE_MMAP),
-                    src.attr.in.system)
-                != GB_OK) {
-                return GB_FAILED;
-            }
-        }
-
-        return GB_OK;
-    }
-
-    inline void unmap(iterator_type area)
+    inline void unmap(iterator area)
     {
         int i = 0;
 
@@ -318,36 +265,40 @@ public:
             invalidate_tlb((uint32_t)area->start + (i++) * PAGE_SIZE);
         }
         types::pdelete<types::kernel_ident_allocator>(area->pgs);
-        area->attr.v = 0;
-        area->start = 0;
     }
 
-    constexpr iterator_type find(void* lp)
+    constexpr mm* find(void* lp)
     {
-        for (auto iter = this->begin(); iter != this->end(); ++iter)
-            if (lp >= iter->start && lp < iter->end())
-                return iter;
-
-        return this->end();
+        auto iter = m_areas.find(lp);
+        if (iter == m_areas.end())
+            return nullptr;
+        return &*iter;
+    }
+    constexpr const mm* find(void* lp) const
+    {
+        auto iter = m_areas.find(lp);
+        if (iter == m_areas.end())
+            return nullptr;
+        return &*iter;
     }
 
-    constexpr bool is_avail(void* start, size_t len)
+    constexpr bool is_avail(void* start, size_t len) const noexcept
     {
         start = align_down<12>(start);
         len = vptrdiff(align_up<12>(vptradd(start, len)), start);
-        for (const auto& area : *this) {
-            if (!area.is_avail(start, (char*)start + len))
+        for (const auto& area : m_areas) {
+            if (!area.is_avail(start, vptradd(start, len)))
                 return false;
         }
-
         return true;
     }
 };
 
+} // namespace memory
+
 } // namespace kernel
 
 // global variables
-inline kernel::mm_list* kernel_mms;
 inline page empty_page;
 // --------------------------------
 

@@ -126,24 +126,16 @@ int filearr::open(const process &current, const char *filename, uint32_t flags)
 }
 
 process::process(const process& parent, pid_t pid)
-    : mms { *kernel_mms }
-    , attr { parent.attr } , pwd { parent.pwd }
+    : mms { parent.mms }, attr { parent.attr } , pwd { parent.pwd }
     , signals { parent.signals } , pid { pid }
     , ppid { parent.pid } , pgid { parent.pgid } , sid { parent.sid }
     , control_tty { parent.control_tty }, root { parent.root }
 {
-    for (auto& area : parent.mms) {
-        if (area.is_kernel_space() || area.attr.in.system)
-            continue;
-
-        mms.mirror_area(area);
-    }
-
     this->files.dup_all(parent.files);
 }
 
 process::process(pid_t pid, pid_t ppid)
-    : mms(*kernel_mms) , attr { .system = true }
+    : attr { .system = true }
     , pwd { "/" } , pid { pid } , ppid { ppid } { }
 
 void proclist::kill(pid_t pid, int exit_code)
@@ -380,7 +372,7 @@ void NORETURN init_scheduler(void)
     tss.ss0 = KERNEL_DATA_SEGMENT;
     tss.esp0 = current_thread->pkstack;
 
-    asm_switch_pd(current_process->mms.m_pd);
+    current_process->mms.switch_pd();
 
     asm volatile(
         "movl %0, %%esp\n"
@@ -423,7 +415,7 @@ bool schedule()
 
     proc = &procs->find(thd->owner);
     if (current_process != proc) {
-        asm_switch_pd(proc->mms.m_pd);
+        proc->mms.switch_pd();
         current_process = proc;
     }
 

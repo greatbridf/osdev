@@ -278,7 +278,7 @@ public:
     };
 
 public:
-    mutable kernel::mm_list mms;
+    kernel::memory::mm_list mms {};
     std::set<kernel::tasks::thread> thds;
     kernel::cond_var cv_wait;
     std::list<wait_obj> waitlist;

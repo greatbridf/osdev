@@ -164,14 +164,14 @@ static inline void NORETURN _int14_kill_user(void)
 // page fault
 extern "C" void int14_handler(int14_data* d)
 {
-    kernel::mm_list* mms = nullptr;
-    if (current_process)
+    kernel::memory::mm_list* mms = nullptr;
+    if (current_process) [[likely]]
         mms = &current_process->mms;
     else
-        mms = kernel_mms;
+        mms = kernel::memory::mm_list::s_kernel_mms;
 
-    auto mm_area = mms->find(d->l_addr);
-    if (unlikely(mm_area == mms->end())) {
+    auto* mm_area = mms->find(d->l_addr);
+    if (!mm_area) [[unlikely]] {
         if (d->error_code.user) {
             // user access of address that does not exist
             _int14_kill_user();
@@ -179,10 +179,10 @@ extern "C" void int14_handler(int14_data* d)
             _int14_panic(d->v_eip, d->l_addr, d->error_code);
         }
     }
-    if (unlikely(d->error_code.user && mm_area->attr.in.system))
+    if (d->error_code.user && mm_area->attr.system)
         _int14_kill_user();
 
-    page* page = &mm_area->pgs->at(vptrdiff(d->l_addr, mm_area->start) / PAGE_SIZE);
+    page* page = &(*mm_area->pgs)[vptrdiff(d->l_addr, mm_area->start) / PAGE_SIZE];
     kernel::paccess pa(page->pg_pteidx >> 12);
     auto pt = (pt_t)pa.ptr();
     assert(pt);
@@ -197,7 +197,7 @@ extern "C" void int14_handler(int14_data* d)
             page->attr &= ~PAGE_COW;
             pte->in.p = 1;
             pte->in.a = 0;
-            pte->in.rw = mm_area->attr.in.write;
+            pte->in.rw = mm_area->attr.write;
             return;
         }
         // duplicate the page
@@ -212,7 +212,7 @@ extern "C" void int14_handler(int14_data* d)
         }
 
         pte->in.page = new_page;
-        pte->in.rw = mm_area->attr.in.write;
+        pte->in.rw = mm_area->attr.write;
         pte->in.a = 0;
 
         --*page->ref_count;

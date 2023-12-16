@@ -281,6 +281,76 @@ void* mm_list::set_brk(void* addr)
     return curbrk;
 }
 
+void* mm_list::find_avail(void* hint, size_t len, bool priv) const
+{
+    void* addr = hint;
+    if (!addr) {
+        // default value of mmapp'ed area
+        if (!priv)
+            addr = (void*)0x40000000;
+        else
+            addr = (void*)0xe0000000;
+    }
+
+    while (!is_avail(addr, len)) {
+        auto iter = m_areas.lower_bound(addr);
+        if (iter == m_areas.end())
+            return nullptr;
+
+        addr = iter->end();
+    }
+
+    if (!priv && addr >= (void*)0xc0000000)
+        return nullptr;
+
+    return addr;
+}
+
+// TODO: write dirty pages to file
+int mm_list::unmap(void* start, size_t len, bool system)
+{
+    ptr_t addr = (ptr_t)start;
+    void* end = vptradd(start, align_up<12>(len));
+
+    // standard says that addr and len MUST be
+    // page-aligned or the call is invalid
+    if (addr % PAGE_SIZE != 0)
+        return -EINVAL;
+
+    // if doing user mode unmapping, check area privilege
+    if (!system) {
+        if (addr >= 0xc0000000 || end > (void*)0xc0000000)
+            return -EINVAL;
+    }
+
+    auto iter = m_areas.lower_bound(start);
+
+    for ( ; iter != m_areas.end() && *iter < end; ) {
+        if (!(start < *iter) && start != iter->start) {
+            mm newmm = iter->split(start);
+            unmap(newmm);
+            ++iter;
+            continue;
+        }
+        else if (!(*iter < end)) {
+            mm newmm = iter->split(end);
+            unmap(*iter);
+            m_areas.erase(iter);
+
+            bool inserted;
+            std::tie(std::ignore, inserted) = m_areas.emplace(std::move(newmm));
+            assert(inserted);
+            break;
+        }
+        else {
+            unmap(*iter);
+            iter = m_areas.erase(iter);
+        }
+    }
+
+    return GB_OK;
+}
+
 mm& mm_list::add_empty_area(void *start, std::size_t page_count,
     uint32_t page_attr, bool w, bool system)
 {
@@ -365,6 +435,31 @@ void mm::append_page(pd_t pd, const page& pg, uint32_t attr, bool priv)
     auto& emplaced = this->pgs->back();
     emplaced.pg_pteidx = (pt_pg << 12) + pti;
     emplaced.attr = attr;
+}
+
+mm mm::split(void *addr)
+{
+    assert(addr > start && addr < end());
+    assert((ptr_t)addr % PAGE_SIZE == 0);
+
+    size_t this_count = vptrdiff(addr, start) / PAGE_SIZE;
+    size_t new_count = pgs->size() - this_count;
+
+    mm newmm {
+        .start = addr,
+        .attr { attr },
+        .pgs = types::_new<types::kernel_ident_allocator, mm::pages_vector>(
+        ),
+        .mapped_file = mapped_file,
+        .file_offset = file_offset,
+    };
+
+    for (size_t i = 0; i < new_count; ++i) {
+        newmm.pgs->emplace_back(pgs->back());
+        pgs->pop_back();
+    }
+
+    return newmm;
 }
 
 int mmap(

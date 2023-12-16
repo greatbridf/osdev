@@ -3,6 +3,7 @@
 #include <assert.h>
 #include <bits/ioctl.h>
 #include <sys/prctl.h>
+#include <sys/mman.h>
 #include <time.h>
 #include <kernel/user/thread_local.hpp>
 #include <kernel/errno.h>
@@ -576,6 +577,71 @@ int _syscall_brk(interrupt_stack* data)
     return (int)current_process->mms.set_brk(addr);
 }
 
+int _syscall_mmap_pgoff(interrupt_stack* data)
+{
+    SYSCALL_ARG1(void*, addr);
+    SYSCALL_ARG2(size_t, len);
+    SYSCALL_ARG3(int, prot);
+    SYSCALL_ARG4(int, flags);
+    SYSCALL_ARG5(int, fd);
+    SYSCALL_ARG6(off_t, pgoffset);
+
+    if ((ptr_t)addr % PAGE_SIZE != 0)
+        return -EINVAL;
+    if (len == 0)
+        return -EINVAL;
+
+    len = align_up<12>(len);
+
+    // TODO: shared mappings
+    if (flags & MAP_SHARED)
+        return -ENOMEM;
+
+    if (flags & MAP_ANONYMOUS) {
+        if (fd != -1)
+            return -EINVAL;
+        if (pgoffset != 0)
+            return -EINVAL;
+
+        if (!(flags & MAP_PRIVATE))
+            return -EINVAL;
+
+        auto& mms = current_process->mms;
+
+        // do unmapping, equal to munmap, MAP_FIXED set
+        if (prot == PROT_NONE) {
+            auto ret = mms.unmap(addr, len, false);
+            if (ret != GB_OK)
+                return ret;
+        }
+        else {
+            // TODO: add NULL check in mm_list
+            if (!addr || !mms.is_avail(addr, len)) {
+                if (flags & MAP_FIXED)
+                    return -ENOMEM;
+                addr = mms.find_avail(addr, len, false);
+            }
+
+            // TODO: append pages to the end of area if possible
+            mms.add_empty_area(addr, len / PAGE_SIZE,
+                PAGE_COW, prot & PROT_WRITE, false);
+        }
+    }
+
+    return (int)addr;
+}
+
+int _syscall_munmap(interrupt_stack* data)
+{
+    SYSCALL_ARG1(void*, addr);
+    SYSCALL_ARG2(size_t, len);
+
+    if ((ptr_t)addr % PAGE_SIZE != 0)
+        return -EINVAL;
+
+    return current_process->mms.unmap(addr, len, false);
+}
+
 extern "C" void syscall_entry(interrupt_stack* data)
 {
     int syscall_no = SYSCALL_NO;
@@ -619,11 +685,13 @@ void init_syscall(void)
     syscall_handlers[0x3f] = _syscall_dup2;
     syscall_handlers[0x40] = _syscall_getppid;
     syscall_handlers[0x42] = _syscall_setsid;
+    syscall_handlers[0x5b] = _syscall_munmap;
     syscall_handlers[0x84] = _syscall_getdents;
     syscall_handlers[0x92] = _syscall_writev;
     syscall_handlers[0x93] = _syscall_getsid;
     syscall_handlers[0xac] = _syscall_prctl;
     syscall_handlers[0xb7] = _syscall_getcwd;
+    syscall_handlers[0xc0] = _syscall_mmap_pgoff;
     syscall_handlers[0xc7] = _syscall_getuid;
     syscall_handlers[0xf3] = _syscall_set_thread_area;
     syscall_handlers[0xfc] = _syscall_exit; // we implement exit_group as exit for now

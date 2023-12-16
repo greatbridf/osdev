@@ -160,7 +160,7 @@ public:
     constexpr void* end() const noexcept
     { return vptradd(start, pgs->size() * PAGE_SIZE); }
     constexpr bool is_kernel_space() const noexcept
-    { return start >= std::bit_cast<void*>(0xc0000000); }
+    { return attr.system; }
     constexpr bool is_avail(void* ostart, void* oend) const noexcept
     {
         void* m_start = start;
@@ -170,17 +170,32 @@ public:
     }
 
     void append_page(pd_t pd, const page& pg, uint32_t attr, bool priv);
+
+    /**
+     * @brief Splits the memory block at the specified address.
+     * 
+     * @param addr The address at which the memory block will be split.
+     * @return The new memory block created after splitting.
+     */
+    mm split(void* addr);
+
+    constexpr bool operator<(const mm& rhs) const noexcept
+    { return end() <= rhs.start; }
+    constexpr bool operator<(void* rhs) const noexcept
+    { return end() <= rhs; }
+    friend constexpr bool operator<(void* lhs, const mm& rhs) noexcept
+    { return lhs < rhs.start; }
 };
 
 class mm_list {
 private:
     struct comparator {
         constexpr bool operator()(const mm& lhs, const mm& rhs) const noexcept
-        { return lhs.start < rhs.start; }
+        { return lhs < rhs; }
         constexpr bool operator()(const mm& lhs, void* rhs) const noexcept
-        { return lhs.end() <= rhs; }
+        { return lhs < rhs; }
         constexpr bool operator()(void* lhs, const mm& rhs) const noexcept
-        { return lhs < rhs.start; }
+        { return lhs < rhs; }
     };
 
 public:
@@ -217,6 +232,10 @@ public:
     int register_brk(void* addr);
     void* set_brk(void* addr);
 
+    void* find_avail(void* hint, size_t len, bool priv) const;
+
+    int unmap(void* start, size_t len, bool priv);
+
     constexpr mm& addarea(void* start, bool w, bool system)
     {
         auto [ iter, inserted ] = m_areas.emplace(mm {
@@ -243,13 +262,13 @@ public:
                 continue;
             }
 
-            this->unmap(iter);
+            this->unmap(*iter);
             iter = m_areas.erase(iter);
         }
         m_brk = nullptr;
     }
 
-    inline void unmap(iterator area)
+    inline void unmap(mm& area)
     {
         int i = 0;
 
@@ -258,7 +277,7 @@ public:
         // should be faster. otherwise, we use movl cr3
         // bool should_invlpg = (area->pgs->size() > 4);
 
-        for (auto& pg : *area->pgs) {
+        for (auto& pg : *area.pgs) {
             kernel::paccess pa(pg.pg_pteidx >> 12);
             auto pt = (pt_t)pa.ptr();
             assert(pt);
@@ -267,15 +286,10 @@ public:
 
             free_page(&pg);
 
-            invalidate_tlb((uint32_t)area->start + (i++) * PAGE_SIZE);
+            invalidate_tlb((uint32_t)area.start + (i++) * PAGE_SIZE);
         }
-        types::pdelete<types::kernel_ident_allocator>(area->pgs);
+        types::pdelete<types::kernel_ident_allocator>(area.pgs);
     }
-
-    constexpr iterator iterfind(void* lp)
-    { return m_areas.find(lp); }
-    constexpr const_iterator iterfind(void* lp) const
-    { return m_areas.find(lp); }
 
     constexpr mm* find(void* lp)
     {

@@ -4,6 +4,7 @@
 #include <bits/ioctl.h>
 #include <sys/prctl.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
 #include <time.h>
 #include <kernel/user/thread_local.hpp>
 #include <kernel/errno.h>
@@ -95,7 +96,7 @@ int _syscall_write(interrupt_stack* data)
 
     switch (file->type) {
     case fs::file::types::ind: {
-        if (file->ptr.ind->flags.in.directory)
+        if (S_ISDIR(file->ptr.ind->mode))
             return -EBADF;
 
         int n_wrote = fs::vfs_write(file->ptr.ind, buf, file->cursor, n);
@@ -128,7 +129,7 @@ int _syscall_read(interrupt_stack* data)
 
     switch (file->type) {
     case fs::file::types::ind: {
-        if (file->ptr.ind->flags.in.directory)
+        if (S_ISDIR(file->ptr.ind->mode))
             return -EBADF;
 
         // TODO: copy to user function !IMPORTANT
@@ -168,7 +169,7 @@ int _syscall_chdir(interrupt_stack* data)
     if (!dir)
         return -ENOENT;
 
-    if (!dir->ind->flags.in.directory)
+    if (!S_ISDIR(dir->ind->mode))
         return -ENOTDIR;
 
     current_process->pwd.clear();
@@ -273,7 +274,7 @@ int _syscall_getdents(interrupt_stack* data)
     SYSCALL_ARG3(size_t, cnt);
 
     auto* dir = current_process->files[fd];
-    if (dir->type != fs::file::types::ind || !dir->ptr.ind->flags.in.directory)
+    if (dir->type != fs::file::types::ind || !S_ISDIR(dir->ptr.ind->mode))
         return -ENOTDIR;
 
     size_t orig_cnt = cnt;
@@ -378,7 +379,7 @@ int _syscall_dup2(interrupt_stack* data)
 
 int _syscall_pipe(interrupt_stack* data)
 {
-    SYSCALL_ARG1(int*, pipefd);
+    SYSCALL_ARG1(int* __user, pipefd);
     return current_process->files.pipe(pipefd);
 }
 
@@ -464,7 +465,7 @@ int _syscall_getppid(interrupt_stack*)
 
 int _syscall_set_thread_area(interrupt_stack* data)
 {
-    SYSCALL_ARG1(kernel::user::user_desc*, ptr);
+    SYSCALL_ARG1(kernel::user::user_desc* __user, ptr);
     return kernel::user::set_thread_area(ptr);
 }
 
@@ -479,7 +480,7 @@ int _syscall_set_tid_address(interrupt_stack* data)
 ssize_t _syscall_writev(interrupt_stack* data)
 {
     SYSCALL_ARG1(int, fd);
-    SYSCALL_ARG2(const iovec*, iov);
+    SYSCALL_ARG2(const iovec* __user, iov);
     SYSCALL_ARG3(int, iovcnt);
 
     auto* file = current_process->files[fd];
@@ -489,7 +490,7 @@ ssize_t _syscall_writev(interrupt_stack* data)
 
     switch (file->type) {
     case fs::file::types::ind: {
-        if (file->ptr.ind->flags.in.directory)
+        if (S_ISDIR(file->ptr.ind->mode))
             return -EBADF;
 
         ssize_t n_wrote = 0;
@@ -642,6 +643,69 @@ int _syscall_munmap(interrupt_stack* data)
     return current_process->mms.unmap(addr, len, false);
 }
 
+[[noreturn]] static void not_implemented()
+{
+    console->print("\n[kernel] this function is not implemented\n");
+    kill_current(-1);
+}
+
+int _syscall_sendfile64(interrupt_stack*)
+{
+    not_implemented();
+
+    // SYSCALL_ARG1(int, out_fd);
+    // SYSCALL_ARG2(int, in_fd);
+    // SYSCALL_ARG3(off_t*, offset);
+    // SYSCALL_ARG4(size_t, count);
+
+    // auto* out_file = current_process->files[out_fd];
+    // auto* in_file = current_process->files[in_fd];
+
+    // if (!out_file || !in_file)
+    //     return -EBADF;
+
+    // if (out_file->type != fs::file::types::ind
+    //     || in_file->type != fs::file::types::ind)
+    //     return -EINVAL;
+
+    // if (!out_file->flags.write || !in_file->flags.read)
+    //     return -EBADF;
+
+    // if (out_file->ptr.ind->flags.in.directory
+    //     || in_file->ptr.ind->flags.in.directory)
+    //     return -EBADF;
+
+    // if (offset)
+    //     return -EINVAL;
+}
+
+int _syscall_statx(interrupt_stack* data)
+{
+    SYSCALL_ARG1(int, dirfd);
+    SYSCALL_ARG2(const char* __user, path);
+    SYSCALL_ARG3(int, flags);
+    SYSCALL_ARG4(unsigned int, mask);
+    SYSCALL_ARG5(statx* __user, statxbuf);
+
+    // AT_STATX_SYNC_TYPE is the default value
+    if (flags != 0 && !(flags & AT_STATX_SYNC_TYPE))
+        not_implemented();
+
+    if (dirfd != AT_FDCWD)
+        not_implemented();
+
+    auto* dent = fs::vfs_open(*current_process->root,
+        current_process->pwd.c_str(), path);
+
+    if (!dent)
+        return -ENOENT;
+
+    // TODO: copy to user
+    auto ret = fs::vfs_stat(dent, statxbuf, mask);
+
+    return ret;
+}
+
 extern "C" void syscall_entry(interrupt_stack* data)
 {
     int syscall_no = SYSCALL_NO;
@@ -693,9 +757,11 @@ void init_syscall(void)
     syscall_handlers[0xb7] = _syscall_getcwd;
     syscall_handlers[0xc0] = _syscall_mmap_pgoff;
     syscall_handlers[0xc7] = _syscall_getuid;
+    syscall_handlers[0xef] = _syscall_sendfile64;
     syscall_handlers[0xf3] = _syscall_set_thread_area;
     syscall_handlers[0xfc] = _syscall_exit; // we implement exit_group as exit for now
     syscall_handlers[0x102] = _syscall_set_tid_address;
+    syscall_handlers[0x17f] = _syscall_statx;
     syscall_handlers[0x193] = _syscall_clock_gettime64;
     // syscall_handlers[35] = _syscall_sleep;
 }

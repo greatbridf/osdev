@@ -11,6 +11,10 @@
 #define O_APPEND (1 << 5)
 #define O_TRUNC (1 << 6)
 
+#define AT_FDCWD (-100)
+
+#define AT_STATX_SYNC_TYPE 0x6000
+
 #ifdef __cplusplus
 extern "C" {
 #endif

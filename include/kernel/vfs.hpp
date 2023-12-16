@@ -5,6 +5,9 @@
 #include <vector>
 #include <functional>
 
+#include <sys/stat.h>
+#include <bits/alltypes.h>
+
 #include <assert.h>
 #include <kernel/event/evtqueue.hpp>
 #include <stdint.h>
@@ -40,22 +43,14 @@ using blkcnt_t = size_t;
 
 class vfs;
 
-union inode_flags {
-    uint32_t v;
-    struct {
-        uint32_t file : 1;
-        uint32_t directory : 1;
-        uint32_t mount_point : 1;
-        uint32_t special_node : 1;
-    } in;
-};
-
 struct inode {
-    inode_flags flags;
-    uint32_t perm;
     ino_t ino;
     vfs* fs;
     size_t size;
+
+    mode_t mode;
+    uid_t uid;
+    gid_t gid;
 };
 
 #define SN_INVALID (0xffffffff)
@@ -81,14 +76,6 @@ struct special_node {
     special_node_ops ops;
     uint32_t data1;
     uint32_t data2;
-};
-
-struct stat {
-    ino_t st_ino;
-    node_t st_rdev;
-    size_t st_size;
-    blksize_t st_blksize;
-    blkcnt_t st_blocks;
 };
 
 struct PACKED user_dirent {
@@ -183,7 +170,7 @@ protected:
     dentry _root;
 
 protected:
-    inode* cache_inode(inode_flags flags, uint32_t perm, size_t size, ino_t ino);
+    inode* cache_inode(size_t size, ino_t ino, mode_t mode, uid_t uid, gid_t gid);
     inode* get_inode(ino_t ino);
     void register_root_node(inode* root);
 
@@ -209,7 +196,7 @@ public:
     virtual int inode_mknode(dentry* dir, const char* filename, union node_t sn);
     virtual int inode_rmfile(dentry* dir, const char* filename);
     virtual int inode_mkdir(dentry* dir, const char* dirname);
-    virtual int inode_stat(dentry* dir, stat* stat);
+    virtual int inode_stat(dentry* dent, statx* buf, unsigned int mask);
     virtual uint32_t inode_getnode(inode* file);
 
     // parameter 'length' in callback:
@@ -295,7 +282,7 @@ int vfs_mkfile(fs::vfs::dentry* dir, const char* filename);
 int vfs_mknode(fs::vfs::dentry* dir, const char* filename, node_t sn);
 int vfs_rmfile(fs::vfs::dentry* dir, const char* filename);
 int vfs_mkdir(fs::vfs::dentry* dir, const char* dirname);
-int vfs_stat(fs::vfs::dentry* ent, stat* stat);
+int vfs_stat(fs::vfs::dentry* dent, statx* stat, unsigned int mask);
 
 // @param: pwd: current working directory
 //              if nullptr, use root directory

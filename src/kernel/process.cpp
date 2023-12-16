@@ -102,7 +102,7 @@ int filearr::open(const process &current, const char *filename, uint32_t flags)
     }
 
     // check whether dentry is a file if O_DIRECTORY is set
-    if ((flags & O_DIRECTORY) && !dentry->ind->flags.in.directory) {
+    if ((flags & O_DIRECTORY) && !S_ISDIR(dentry->ind->mode)) {
         errno = ENOTDIR;
         return -1;
     }

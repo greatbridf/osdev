@@ -3,6 +3,8 @@
 #include <bit>
 #include <utility>
 
+#include <bits/alltypes.h>
+
 #include <assert.h>
 #include <kernel/errno.h>
 #include <kernel/mem.h>
@@ -27,7 +29,7 @@ struct tmpfs_file_entry {
 fs::vfs::dentry::dentry(dentry* _parent, inode* _ind, name_type _name)
     : parent(_parent) , ind(_ind) , flags { } , name(_name)
 {
-    if (!_ind || _ind->flags.in.directory) {
+    if (!_ind || S_ISDIR(ind->mode)) {
         children = types::pnew<allocator_type>(children);
         idx_children = types::pnew<allocator_type>(idx_children);
     }
@@ -51,7 +53,7 @@ fs::vfs::dentry* fs::vfs::dentry::append(inode* ind, name_type&& name, bool set_
 }
 fs::vfs::dentry* fs::vfs::dentry::find(const name_type& name)
 {
-    if (!ind->flags.in.directory)
+    if (!S_ISDIR(ind->mode))
         return nullptr;
 
     if (name[0] == '.') {
@@ -115,10 +117,11 @@ void fs::vfs::dentry::path(
     }
 }
 
-fs::inode* fs::vfs::cache_inode(inode_flags flags, uint32_t perm, size_t size, ino_t ino)
+fs::inode* fs::vfs::cache_inode(size_t size, ino_t ino,
+    mode_t mode, uid_t uid, gid_t gid)
 {
     auto [ iter, inserted ] =
-        _inodes.try_emplace(ino, inode { flags, perm, ino, this, size });
+        _inodes.try_emplace(ino, inode { ino, this, size, mode, uid, gid });
     return &iter->second;
 }
 fs::inode* fs::vfs::get_inode(ino_t ino)
@@ -139,7 +142,7 @@ int fs::vfs::load_dentry(dentry* ent)
 {
     auto* ind = ent->ind;
 
-    if (!ind->flags.in.directory) {
+    if (!S_ISDIR(ind->mode)) {
         errno = ENOTDIR;
         return GB_FAILED;
     }
@@ -164,7 +167,7 @@ int fs::vfs::load_dentry(dentry* ent)
 }
 int fs::vfs::mount(dentry* mnt, vfs* new_fs)
 {
-    if (!mnt->ind->flags.in.directory) {
+    if (!S_ISDIR(mnt->ind->mode)) {
         errno = ENOTDIR;
         return GB_FAILED;
     }
@@ -176,8 +179,6 @@ int fs::vfs::mount(dentry* mnt, vfs* new_fs)
 
     auto* orig_ent = mnt->replace(new_ent);
     _mount_recover_list.emplace(new_ent, orig_ent);
-
-    new_ent->ind->flags.in.mount_point = 1;
 
     return GB_OK;
 }
@@ -211,7 +212,7 @@ int fs::vfs::inode_mkdir(dentry*, const char*)
     assert(false);
     return GB_FAILED;
 }
-int fs::vfs::inode_stat(dentry*, stat*)
+int fs::vfs::inode_stat(dentry*, statx*, unsigned int)
 {
     assert(false);
     return GB_FAILED;
@@ -290,7 +291,7 @@ protected:
 
     virtual int inode_readdir(fs::inode* dir, size_t offset, const fs::vfs::filldir_func& filldir) override
     {
-        if (!dir->flags.in.directory) {
+        if (!S_ISDIR(dir->mode)) {
             return -1;
         }
 
@@ -303,13 +304,8 @@ protected:
             const auto& entry = entries[off];
             auto* ind = get_inode(entry.ino);
 
-            auto type = DT_REG;
-            if (ind->flags.in.directory)
-                type = DT_DIR;
-            if (ind->flags.in.special_node)
-                type = DT_BLK;
-
-            auto ret = filldir(entry.filename, 0, entry.ino, type);
+            // inode mode filetype is compatible with user dentry filetype
+            auto ret = filldir(entry.filename, 0, entry.ino, ind->mode & S_IFMT);
             if (ret != GB_OK)
                 break;
         }
@@ -321,7 +317,7 @@ public:
     explicit tmpfs(void)
         : _next_ino(1)
     {
-        auto& in = *cache_inode({ INODE_DIR | INODE_MNT }, 0777, 0, _savedata(mk_fe_vector()));
+        auto& in = *cache_inode(0, _savedata(mk_fe_vector()), S_IFDIR | 0777, 0, 0);
 
         mklink(&in, &in, ".");
         mklink(&in, &in, "..");
@@ -331,7 +327,7 @@ public:
 
     virtual int inode_mkfile(dentry* dir, const char* filename) override
     {
-        auto& file = *cache_inode({ .v = INODE_FILE }, 0777, 0, _savedata(mk_data_vector()));
+        auto& file = *cache_inode(0, _savedata(mk_data_vector()), S_IFREG | 0777, 0, 0);
         mklink(dir->ind, &file, filename);
         dir->append(get_inode(file.ino), filename, true);
         return GB_OK;
@@ -339,7 +335,7 @@ public:
 
     virtual int inode_mknode(dentry* dir, const char* filename, fs::node_t sn) override
     {
-        auto& node = *cache_inode({ .v = INODE_NODE }, 0777, 0, _savedata(sn.v));
+        auto& node = *cache_inode(0, _savedata(sn.v), S_IFBLK | 0777, 0, 0);
         mklink(dir->ind, &node, filename);
         dir->append(get_inode(node.ino), filename, true);
         return GB_OK;
@@ -347,7 +343,7 @@ public:
 
     virtual int inode_mkdir(dentry* dir, const char* dirname) override
     {
-        auto new_dir = cache_inode({ .v = INODE_DIR }, 0777, 0, _savedata(mk_fe_vector()));
+        auto new_dir = cache_inode(0, _savedata(mk_fe_vector()), S_IFDIR | 0777, 0, 0);
         mklink(new_dir, new_dir, ".");
 
         mklink(dir->ind, new_dir, dirname);
@@ -359,7 +355,7 @@ public:
 
     virtual size_t inode_read(fs::inode* file, char* buf, size_t buf_size, size_t offset, size_t n) override
     {
-        if (file->flags.in.file != 1)
+        if (!S_ISREG(file->mode))
             return 0;
 
         auto* data = as_fdata(_getdata(file->ino));
@@ -379,7 +375,7 @@ public:
 
     virtual size_t inode_write(fs::inode* file, const char* buf, size_t offset, size_t n) override
     {
-        if (file->flags.in.file != 1)
+        if (!S_ISREG(file->mode))
             return 0;
 
         auto* data = as_fdata(_getdata(file->ino));
@@ -392,26 +388,51 @@ public:
         return n;
     }
 
-    virtual int inode_stat(dentry* dir, fs::stat* stat) override
+    virtual int inode_stat(dentry* dent, statx* st, unsigned int mask) override
     {
-        auto* file_inode = dir->ind;
+        auto* ind = dent->ind;
+        const mode_t mode = ind->mode;
 
-        stat->st_ino = file_inode->ino;
-        stat->st_size = file_inode->size;
-        if (file_inode->flags.in.file) {
-            stat->st_rdev.v = 0;
-            stat->st_blksize = 1;
-            stat->st_blocks = file_inode->size;
+        if (mask & STATX_SIZE) {
+            st->stx_size = ind->size;
+            st->stx_mask |= STATX_SIZE;
         }
-        if (file_inode->flags.in.directory) {
-            stat->st_rdev.v = 0;
-            stat->st_blksize = sizeof(fe_t);
-            stat->st_blocks = file_inode->size;
+
+        st->stx_mode = 0;
+        if (mask & STATX_MODE) {
+            st->stx_mode |= ind->mode & ~S_IFMT;
+            st->stx_mask |= STATX_MODE;
         }
-        if (file_inode->flags.in.special_node) {
-            stat->st_rdev.v = as_val(_getdata(file_inode->ino));
-            stat->st_blksize = 0;
-            stat->st_blocks = 0;
+
+        if (mask & STATX_TYPE) {
+            st->stx_mode |= ind->mode & S_IFMT;
+            if (S_ISBLK(mode)) {
+                fs::node_t nd { (uint32_t)as_val(_getdata(ind->ino)) };
+                st->stx_rdev_major = nd.in.major;
+                st->stx_rdev_minor = nd.in.minor;
+            }
+            st->stx_mask |= STATX_TYPE;
+        }
+
+        if (mask & STATX_INO) {
+            st->stx_ino = ind->ino;
+            st->stx_mask |= STATX_INO;
+        }
+        
+        if (mask & STATX_BLOCKS) {
+            st->stx_blocks = align_up<9>(ind->size) / 512;
+            st->stx_blksize = 4096;
+            st->stx_mask |= STATX_BLOCKS;
+        }
+
+        if (mask & STATX_UID) {
+            st->stx_uid = ind->uid;
+            st->stx_mask |= STATX_UID;
+        }
+
+        if (mask & STATX_GID) {
+            st->stx_gid = ind->gid;
+            st->stx_mask |= STATX_GID;
         }
 
         return GB_OK;
@@ -428,7 +449,7 @@ static fs::special_node sns[8][8];
 
 size_t fs::vfs_read(fs::inode* file, char* buf, size_t buf_size, size_t offset, size_t n)
 {
-    if (file->flags.in.special_node) {
+    if (S_ISBLK(file->mode)) {
         uint32_t ret = file->fs->inode_getnode(file);
         if (ret == SN_INVALID) {
             errno = EINVAL;
@@ -451,7 +472,7 @@ size_t fs::vfs_read(fs::inode* file, char* buf, size_t buf_size, size_t offset, 
 }
 size_t fs::vfs_write(fs::inode* file, const char* buf, size_t offset, size_t n)
 {
-    if (file->flags.in.special_node) {
+    if (S_ISBLK(file->mode)) {
         uint32_t ret = file->fs->inode_getnode(file);
         if (ret == SN_INVALID) {
             errno = EINVAL;
@@ -539,9 +560,9 @@ fs::vfs::dentry* fs::vfs_open(
     }
 }
 
-int fs::vfs_stat(fs::vfs::dentry* ent, stat* stat)
+int fs::vfs_stat(fs::vfs::dentry* ent, statx* stat, unsigned int mask)
 {
-    return ent->ind->fs->inode_stat(ent, stat);
+    return ent->ind->fs->inode_stat(ent, stat, mask);
 }
 
 static std::list<fs::vfs*>* fs_es;

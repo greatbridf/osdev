@@ -86,13 +86,12 @@ int fat32::inode_readdir(fs::inode* dir, size_t offset, const fs::vfs::filldir_f
             fs::ino_t ino = _rearrange(d);
             auto* ind = get_inode(ino);
             if (!ind) {
-                ind = cache_inode({ .in {
-                                      .file = !d->attributes.subdir,
-                                      .directory = d->attributes.subdir,
-                                      .mount_point = 0,
-                                      .special_node = 0,
-                                  } },
-                    0777, d->size, ino);
+                mode_t mode = 0777;
+                if (d->attributes.subdir)
+                    mode |= S_IFDIR;
+                else
+                    mode |= S_IFREG;
+                ind = cache_inode(d->size, ino, mode, 0, 0);
             }
 
             types::string<> fname;
@@ -114,8 +113,7 @@ int fat32::inode_readdir(fs::inode* dir, size_t offset, const fs::vfs::filldir_f
                 else
                     fname += toupper(d->extension[i]);
             }
-            auto ret = filldir(fname.c_str(), 0, ind->ino,
-                (ind->flags.in.directory || ind->flags.in.mount_point) ? DT_DIR : DT_REG);
+            auto ret = filldir(fname.c_str(), 0, ind->ino, ind->mode & S_IFMT);
 
             if (ret != GB_OK) {
                 release_cluster(next);
@@ -175,10 +173,8 @@ fat32::fat32(inode* _device)
     while ((next = fat[next]) < EOC)
         ++_root_dir_clusters;
     auto* n = cache_inode(
-        { INODE_MNT | INODE_DIR },
-        0777,
         _root_dir_clusters * sectors_per_cluster * SECTOR_SIZE,
-        root_dir);
+        root_dir, S_IFDIR | 0777, 0, 0);
     register_root_node(n);
 }
 
@@ -238,12 +234,47 @@ size_t fat32::inode_read(inode* file, char* buf, size_t buf_size, size_t offset,
     return orig_n - n;
 }
 
-int fat32::inode_stat(dentry* ent, stat* st)
+int fat32::inode_stat(dentry* ent, statx* st, unsigned int mask)
 {
-    st->st_size = ent->ind->size;
-    st->st_blksize = 4096;
-    st->st_blocks = (ent->ind->size + 4095) / 4096;
-    st->st_ino = ent->ind->ino;
+    st->stx_mask = 0;
+    if (mask & STATX_SIZE) {
+        st->stx_size = ent->ind->size;
+        st->stx_mask |= STATX_SIZE;
+    }
+    
+    if (mask & STATX_BLOCKS) {
+        st->stx_blocks = align_up<12>(ent->ind->size) / 512;
+        st->stx_blksize = 4096;
+        st->stx_mask |= STATX_BLOCKS;
+    }
+
+    st->stx_mode = 0;
+    if (mask & STATX_MODE) {
+        st->stx_mode |= ent->ind->mode & ~S_IFMT;
+        st->stx_mask |= STATX_MODE;
+    }
+
+    if (mask & STATX_TYPE) {
+        st->stx_mode |= ent->ind->mode & S_IFMT;
+        st->stx_mask |= STATX_TYPE;
+    }
+
+    if (mask & STATX_INO) {
+        st->stx_ino = ent->ind->ino;
+        st->stx_mask |= STATX_INO;
+    }
+
+    if (mask & STATX_UID) {
+        st->stx_uid = ent->ind->uid;
+        st->stx_mask |= STATX_UID;
+    }
+
+    if (mask & STATX_GID) {
+        st->stx_gid = ent->ind->gid;
+        st->stx_mask |= STATX_GID;
+    }
+
     return GB_OK;
 }
+
 } // namespace fs::fat

@@ -190,12 +190,28 @@ public:
     __GBLIBCPP_CONSTEXPR
     const_iterator upper_bound(const Key& key) const
     { return tree.upper_bound(key); }
+    template <typename K>
+    __GBLIBCPP_CONSTEXPR
+    iterator upper_bound(const K& key)
+    { return tree.upper_bound(key); }
+    template <typename K>
+    __GBLIBCPP_CONSTEXPR
+    const_iterator upper_bound(const K& key) const
+    { return tree.upper_bound(key); }
 
     __GBLIBCPP_CONSTEXPR
     iterator lower_bound(const Key& key)
     { return tree.lower_bound(key); }
     __GBLIBCPP_CONSTEXPR
     const_iterator lower_bound(const Key& key) const
+    { return tree.lower_bound(key); }
+    template <typename K>
+    __GBLIBCPP_CONSTEXPR
+    iterator lower_bound(const K& key)
+    { return tree.lower_bound(key); }
+    template <typename K>
+    __GBLIBCPP_CONSTEXPR
+    const_iterator lower_bound(const K& key) const
     { return tree.lower_bound(key); }
 };
 

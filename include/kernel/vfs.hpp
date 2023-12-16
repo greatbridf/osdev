@@ -38,6 +38,7 @@
 
 namespace fs {
 using ino_t = size_t;
+using ino64_t = uint64_t;
 using blksize_t = size_t;
 using blkcnt_t = size_t;
 
@@ -84,6 +85,14 @@ struct PACKED user_dirent {
     uint16_t d_reclen; // length of this struct user_dirent
     char d_name[1]; // file name with a padding zero
     // uint8_t d_type; // file type, with offset of (d_reclen - 1)
+};
+
+struct user_dirent64 {
+    ino64_t d_ino; // inode number
+    uint64_t d_off; // implementation-defined field, ignored
+    uint16_t d_reclen; // length of this struct user_dirent
+    uint8_t d_type; // file type, with offset of (d_reclen - 1)
+    char d_name[1]; // file name with a padding zero
 };
 
 class vfs {

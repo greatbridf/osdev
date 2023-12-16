@@ -20,8 +20,13 @@
 #define FD_CLOEXEC 1
 
 #define AT_FDCWD (-100)
-
-#define AT_STATX_SYNC_TYPE 0x6000
+#define AT_SYMLINK_NOFOLLOW   0x100
+#define AT_REMOVEDIR          0x200
+#define AT_SYMLINK_FOLLOW     0x400
+#define AT_STATX_SYNC_AS_STAT 0x0000
+#define AT_STATX_SYNC_TYPE    0x6000
+#define AT_STATX_SYNC_FORCE   0x8000
+#define AT_STATX_DONT_SYNC    0x2000
 
 #ifdef __cplusplus
 extern "C" {

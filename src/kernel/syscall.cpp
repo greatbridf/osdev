@@ -272,10 +272,13 @@ int _syscall_waitpid(interrupt_stack* data)
 int _syscall_getdents(interrupt_stack* data)
 {
     SYSCALL_ARG1(int, fd);
-    SYSCALL_ARG2(char*, buf);
+    SYSCALL_ARG2(char* __user, buf);
     SYSCALL_ARG3(size_t, cnt);
 
     auto* dir = current_process->files[fd];
+    if (!dir)
+        return -EBADF;
+
     if (dir->type != fs::file::types::ind || !S_ISDIR(dir->ptr.ind->mode))
         return -ENOTDIR;
 
@@ -689,8 +692,8 @@ int _syscall_statx(interrupt_stack* data)
     SYSCALL_ARG4(unsigned int, mask);
     SYSCALL_ARG5(statx* __user, statxbuf);
 
-    // AT_STATX_SYNC_TYPE is the default value
-    if (flags != 0 && !(flags & AT_STATX_SYNC_TYPE))
+    // AT_STATX_SYNC_AS_STAT is the default value
+    if (flags != AT_STATX_SYNC_AS_STAT && !(flags & AT_SYMLINK_NOFOLLOW))
         not_implemented();
 
     if (dirfd != AT_FDCWD)
@@ -726,6 +729,49 @@ int _syscall_fcntl64(interrupt_stack* data)
         not_implemented();
         return -EINVAL;
     }
+}
+
+int _syscall_getdents64(interrupt_stack* data)
+{
+    SYSCALL_ARG1(int, fd);
+    SYSCALL_ARG2(char* __user, buf);
+    SYSCALL_ARG3(size_t, cnt);
+
+    auto* dir = current_process->files[fd];
+    if (!dir)
+        return -EBADF;
+
+    if (dir->type != fs::file::types::ind || !S_ISDIR(dir->ptr.ind->mode))
+        return -ENOTDIR;
+
+    size_t orig_cnt = cnt;
+    int nread = dir->ptr.ind->fs->inode_readdir(dir->ptr.ind, dir->cursor,
+        [&buf, &cnt](const char* fn, size_t len, fs::ino_t ino, uint8_t type) -> int {
+            if (!len)
+                len = strlen(fn);
+
+            size_t reclen = sizeof(fs::user_dirent64) + len;
+            if (cnt < reclen)
+                return GB_FAILED;
+
+            auto* dirp = (fs::user_dirent64*)buf;
+            dirp->d_ino = ino;
+            dirp->d_off = 114514;
+            dirp->d_reclen = reclen;
+            dirp->d_type = type;
+            // TODO: use copy_to_user
+            memcpy(dirp->d_name, fn, len);
+            buf[reclen - 1] = 0;
+
+            buf += reclen;
+            cnt -= reclen;
+            return GB_OK;
+        });
+
+    if (nread > 0)
+        dir->cursor += nread;
+
+    return orig_cnt - cnt;
 }
 
 extern "C" void syscall_entry(interrupt_stack* data)
@@ -779,6 +825,7 @@ void init_syscall(void)
     syscall_handlers[0xb7] = _syscall_getcwd;
     syscall_handlers[0xc0] = _syscall_mmap_pgoff;
     syscall_handlers[0xc7] = _syscall_getuid;
+    syscall_handlers[0xdc] = _syscall_getdents64;
     syscall_handlers[0xdd] = _syscall_fcntl64;
     syscall_handlers[0xef] = _syscall_sendfile64;
     syscall_handlers[0xf3] = _syscall_set_thread_area;

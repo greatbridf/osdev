@@ -451,7 +451,7 @@ mm mm::split(void *addr)
         .pgs = types::_new<types::kernel_ident_allocator, mm::pages_vector>(
         ),
         .mapped_file = mapped_file,
-        .file_offset = file_offset,
+        .file_offset = attr.mapped ? file_offset + this_count * PAGE_SIZE : 0,
     };
 
     for (size_t i = 0; i < new_count; ++i) {

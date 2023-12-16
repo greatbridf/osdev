@@ -3,13 +3,21 @@
 
 #include <stdint.h>
 
-#define O_CREAT (1 << 0)
-#define O_RDONLY (1 << 1)
-#define O_WRONLY (1 << 2)
-#define O_RDWR (1 << 3)
-#define O_DIRECTORY (1 << 4)
-#define O_APPEND (1 << 5)
-#define O_TRUNC (1 << 6)
+#define O_RDONLY          00
+#define O_WRONLY          01
+#define O_RDWR            02
+#define O_CREAT         0100
+#define O_TRUNC        01000
+#define O_APPEND       02000
+#define O_DIRECTORY  0200000
+#define O_CLOEXEC   02000000
+
+#define F_DUPFD 0
+#define F_GETFD 1
+#define F_SETFD 2
+// TODO: more flags
+
+#define FD_CLOEXEC 1
 
 #define AT_FDCWD (-100)
 

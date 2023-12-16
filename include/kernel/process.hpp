@@ -210,6 +210,7 @@ public:
             {
                 .read = 1,
                 .write = 0,
+                .close_on_exec = 0,
             },
         });
 
@@ -230,6 +231,7 @@ public:
             {
                 .read = 0,
                 .write = 1,
+                .close_on_exec = 0,
             },
         });
         fd = next_fd();
@@ -253,6 +255,14 @@ public:
         _close(iter->second);
         _fds.push(fd);
         arr.erase(iter);
+    }
+
+    constexpr void onexec()
+    {
+        for (auto [ fd, file ] : arr) {
+            if (file->flags.close_on_exec)
+                close(fd);
+        }
     }
 
     constexpr void close_all(void)

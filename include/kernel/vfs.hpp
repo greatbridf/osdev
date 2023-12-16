@@ -251,18 +251,19 @@ struct file {
         ind,
         pipe,
         socket,
-    } type;
+    } type {};
     union {
         inode* ind;
         pipe* pp;
-    } ptr;
-    vfs::dentry* parent;
-    size_t cursor;
-    size_t ref;
+    } ptr {};
+    vfs::dentry* parent {};
+    size_t cursor {};
+    size_t ref {};
     struct file_flags {
         uint32_t read : 1;
         uint32_t write : 1;
-    } flags;
+        uint32_t close_on_exec : 1;
+    } flags {};
 };
 
 inline fs::vfs::dentry* fs_root;

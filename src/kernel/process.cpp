@@ -114,8 +114,9 @@ int filearr::open(const process &current, const char *filename, uint32_t flags)
         0,
         1,
         {
-            .read = !!(flags & (O_RDONLY | O_RDWR)),
+            .read = !(flags & O_WRONLY),
             .write = !!(flags & (O_WRONLY | O_RDWR)),
+            .close_on_exec = !!(flags & O_CLOEXEC),
         },
     });
 

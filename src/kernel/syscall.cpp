@@ -199,6 +199,8 @@ int _syscall_execve(interrupt_stack* data)
     if (!d.exec_dent)
         return -ENOENT;
 
+    current_process->files.onexec();
+
     int ret = types::elf::elf32_load(&d);
     if (ret != GB_OK)
         return -d.errcode;
@@ -706,6 +708,26 @@ int _syscall_statx(interrupt_stack* data)
     return ret;
 }
 
+int _syscall_fcntl64(interrupt_stack* data)
+{
+    SYSCALL_ARG1(int, fd);
+    SYSCALL_ARG2(int, cmd);
+    SYSCALL_ARG3(unsigned long, arg);
+
+    auto* file = current_process->files[fd];
+    if (!file)
+        return -EBADF;
+
+    switch (cmd) {
+    case F_SETFD:
+        file->flags.close_on_exec = !!(arg & FD_CLOEXEC);
+        return 0;
+    default:
+        not_implemented();
+        return -EINVAL;
+    }
+}
+
 extern "C" void syscall_entry(interrupt_stack* data)
 {
     int syscall_no = SYSCALL_NO;
@@ -757,6 +779,7 @@ void init_syscall(void)
     syscall_handlers[0xb7] = _syscall_getcwd;
     syscall_handlers[0xc0] = _syscall_mmap_pgoff;
     syscall_handlers[0xc7] = _syscall_getuid;
+    syscall_handlers[0xdd] = _syscall_fcntl64;
     syscall_handlers[0xef] = _syscall_sendfile64;
     syscall_handlers[0xf3] = _syscall_set_thread_area;
     syscall_handlers[0xfc] = _syscall_exit; // we implement exit_group as exit for now

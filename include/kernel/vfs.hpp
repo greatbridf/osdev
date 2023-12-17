@@ -6,6 +6,7 @@
 #include <functional>
 
 #include <sys/stat.h>
+#include <kernel/errno.h>
 #include <bits/alltypes.h>
 
 #include <assert.h>
@@ -257,23 +258,53 @@ public:
 };
 
 struct file {
-    enum class types {
-        ind,
-        pipe,
-        socket,
-    } type {};
-    union {
-        inode* ind;
-        pipe* pp;
-    } ptr {};
+    mode_t mode; // stores the file type in the same format as inode::mode
     vfs::dentry* parent {};
-    size_t cursor {};
-    size_t ref {};
     struct file_flags {
         uint32_t read : 1;
         uint32_t write : 1;
         uint32_t close_on_exec : 1;
     } flags {};
+
+    file(mode_t mode, vfs::dentry* parent, file_flags flags)
+        : mode(mode) , parent(parent), flags(flags) { }
+
+    virtual ~file() = default;
+
+    virtual ssize_t read(char* __user buf, size_t n) = 0;
+    virtual ssize_t write(const char* __user buf, size_t n) = 0;
+    virtual void close() = 0;
+
+    // regular files should override this method
+    virtual int getdents(char* __user buf, size_t cnt)
+    { return (void)buf, (void)cnt, -ENOTDIR; }
+    virtual int getdents64(char* __user buf, size_t cnt)
+    { return (void)buf, (void)cnt, -ENOTDIR; }
+};
+
+struct regular_file : public virtual file {
+    virtual ~regular_file() = default;
+    std::size_t cursor { };
+    inode* ind { };
+
+    regular_file(vfs::dentry* parent, file_flags flags, size_t cursor, inode* ind);
+
+    virtual ssize_t read(char* __user buf, size_t n) override;
+    virtual ssize_t write(const char* __user buf, size_t n) override;
+    virtual void close() override;
+    virtual int getdents(char* __user buf, size_t cnt) override;
+    virtual int getdents64(char* __user buf, size_t cnt) override;
+};
+
+struct fifo_file : public virtual file {
+    virtual ~fifo_file() = default;
+    std::shared_ptr<pipe> ppipe;
+
+    fifo_file(vfs::dentry* parent, file_flags flags, std::shared_ptr<fs::pipe> ppipe);
+
+    virtual ssize_t read(char* __user buf, size_t n) override;
+    virtual ssize_t write(const char* __user buf, size_t n) override;
+    virtual void close() override;
 };
 
 inline fs::vfs::dentry* fs_root;

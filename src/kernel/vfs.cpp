@@ -418,6 +418,146 @@ public:
     }
 };
 
+fs::regular_file::regular_file(vfs::dentry* parent,
+    file_flags flags, size_t cursor, inode* ind)
+    : file(S_IFREG, parent, flags), cursor(cursor), ind(ind) { }
+
+ssize_t fs::regular_file::read(char* __user buf, size_t n)
+{
+    if (!flags.read)
+        return -EBADF;
+
+    if (S_ISDIR(ind->mode))
+        return -EISDIR;
+
+    // TODO: copy to user function !IMPORTANT
+    ssize_t n_wrote = fs::vfs_read(ind, buf, n, cursor, n);
+    if (n_wrote >= 0)
+        cursor += n_wrote;
+
+    return n_wrote;
+}
+
+ssize_t fs::regular_file::write(const char* __user buf, size_t n)
+{
+    if (!flags.write)
+        return -EBADF;
+
+    if (S_ISDIR(ind->mode))
+        return -EISDIR;
+
+    // TODO: check privilege of user ptr
+    ssize_t n_wrote = fs::vfs_write(ind, buf, cursor, n);
+    if (n_wrote >= 0)
+        cursor += n_wrote;
+
+    return n_wrote;
+}
+
+void fs::regular_file::close(void) { } // TODO: mark inode as free
+
+int fs::regular_file::getdents(char* __user buf, size_t cnt)
+{
+    if (!S_ISDIR(ind->mode))
+        return -ENOTDIR;
+
+    size_t orig_cnt = cnt;
+    int nread = ind->fs->inode_readdir(ind, cursor,
+        [&buf, &cnt](const char* fn, size_t len, fs::ino_t ino, uint8_t type) {
+            if (!len)
+                len = strlen(fn);
+
+            size_t reclen = sizeof(fs::user_dirent) + 1 + len;
+            if (cnt < reclen)
+                return GB_FAILED;
+
+            auto* dirp = (fs::user_dirent*)buf;
+            dirp->d_ino = ino;
+            dirp->d_reclen = reclen;
+            // TODO: show offset
+            // dirp->d_off = 0;
+            // TODO: use copy_to_user
+            memcpy(dirp->d_name, fn, len);
+            buf[reclen - 2] = 0;
+            buf[reclen - 1] = type;
+
+            buf += reclen;
+            cnt -= reclen;
+            return GB_OK;
+        });
+
+    if (nread > 0)
+        cursor += nread;
+
+    return orig_cnt - cnt;
+}
+
+int fs::regular_file::getdents64(char* __user buf, size_t cnt)
+{
+    if (!S_ISDIR(ind->mode))
+        return -ENOTDIR;
+
+    size_t orig_cnt = cnt;
+    int nread = ind->fs->inode_readdir(ind, cursor,
+        [&buf, &cnt](const char* fn, size_t len, fs::ino_t ino, uint8_t type) {
+            if (!len)
+                len = strlen(fn);
+
+            size_t reclen = sizeof(fs::user_dirent64) + len;
+            if (cnt < reclen)
+                return GB_FAILED;
+
+            auto* dirp = (fs::user_dirent64*)buf;
+            dirp->d_ino = ino;
+            dirp->d_off = 114514;
+            dirp->d_reclen = reclen;
+            dirp->d_type = type;
+            // TODO: use copy_to_user
+            memcpy(dirp->d_name, fn, len);
+            buf[reclen - 1] = 0;
+
+            buf += reclen;
+            cnt -= reclen;
+            return GB_OK;
+        });
+
+    if (nread > 0)
+        cursor += nread;
+
+    return orig_cnt - cnt;
+}
+
+fs::fifo_file::fifo_file(vfs::dentry* parent, file_flags flags,
+    std::shared_ptr<fs::pipe> ppipe)
+    : file(S_IFIFO, parent, flags), ppipe(ppipe) { }
+
+ssize_t fs::fifo_file::read(char* __user buf, size_t n)
+{
+    if (!flags.read)
+        return -EBADF;
+
+    return ppipe->read(buf, n);
+}
+
+ssize_t fs::fifo_file::write(const char* __user buf, size_t n)
+{
+    if (!flags.write)
+        return -EBADF;
+
+    return ppipe->write(buf, n);
+}
+
+void fs::fifo_file::close(void)
+{
+    assert(flags.read ^ flags.write);
+    if (flags.read)
+        ppipe->close_read();
+    else
+        ppipe->close_write();
+
+    ppipe.reset();
+}
+
 // 8 * 8 for now
 static fs::special_node sns[8][8];
 

@@ -2,6 +2,7 @@
 
 #include <map>
 #include <list>
+#include <memory>
 #include <queue>
 #include <set>
 #include <tuple>
@@ -104,42 +105,14 @@ public:
 
 class filearr {
 public:
-    using container_type = std::list<fs::file>;
-    using array_type = std::map<int, container_type::iterator>;
+    using array_type = std::map<int, std::shared_ptr<fs::file>>;
 
 private:
-    inline static container_type* files;
     array_type arr;
     std::priority_queue<int, std::vector<int>, std::greater<int>> _fds;
     int _greatest_fd;
 
-public:
-    inline static void init_global_file_container(void)
-    {
-        files = new container_type;
-    }
-
 private:
-    // iter should not be nullptr
-    constexpr void _close(container_type::iterator iter)
-    {
-        if (iter->ref == 1) {
-            if (iter->type == fs::file::types::pipe) {
-                assert(iter->flags.read | iter->flags.write);
-                if (iter->flags.read)
-                    iter->ptr.pp->close_read();
-                else
-                    iter->ptr.pp->close_write();
-
-                if (iter->ptr.pp->is_free())
-                    delete iter->ptr.pp;
-            }
-
-            files->erase(iter);
-        } else
-            --iter->ref;
-    }
-
     constexpr int next_fd()
     {
         if (_fds.empty())
@@ -172,10 +145,7 @@ public:
         if (!iter)
             return -EBADF;
 
-        auto [ _, iter_file ] = *iter;
-
-        this->arr.emplace(new_fd, iter_file);
-        ++iter_file->ref;
+        this->arr.emplace(new_fd, iter->second);
         return new_fd;
     }
 
@@ -183,10 +153,8 @@ public:
     {
         this->_fds = orig._fds;
         this->_greatest_fd = orig._greatest_fd;
-        for (auto [ fd, iter_file ] : orig.arr) {
-            this->arr.emplace(fd, iter_file);
-            ++iter_file->ref;
-        }
+        for (auto [ fd, fp ] : orig.arr)
+            this->arr.emplace(fd, fp);
     }
 
     constexpr fs::file* operator[](int i) const
@@ -194,49 +162,37 @@ public:
         auto iter = arr.find(i);
         if (!iter)
             return nullptr;
-        return &iter->second;
+        return iter->second.get();
     }
 
     int pipe(int pipefd[2])
     {
-        // TODO: set read/write flags
-        auto* pipe = new fs::pipe;
-
-        auto iter = files->emplace(files->cend(), fs::file {
-            fs::file::types::pipe,
-            { .pp = pipe },
-            nullptr,
-            0,
-            1,
-            {
-                .read = 1,
-                .write = 0,
-                .close_on_exec = 0,
-            },
-        });
+        std::shared_ptr<fs::pipe> ppipe { new fs::pipe };
 
         bool inserted = false;
         int fd = next_fd();
-        std::tie(std::ignore, inserted) = arr.emplace(fd, iter);
+        std::tie(std::ignore, inserted) = arr.emplace(fd,
+            std::shared_ptr<fs::file> {
+                new fs::fifo_file(nullptr, {
+                    .read = 1,
+                    .write = 0,
+                    .close_on_exec = 0,
+                }, ppipe),
+        });
         assert(inserted);
 
         // TODO: use copy_to_user()
         pipefd[0] = fd;
 
-        iter = files->emplace(files->cend(), fs::file {
-            fs::file::types::pipe,
-            { .pp = pipe },
-            nullptr,
-            0,
-            1,
-            {
-                .read = 0,
-                .write = 1,
-                .close_on_exec = 0,
-            },
-        });
         fd = next_fd();
-        std::tie(std::ignore, inserted) = arr.emplace(fd, iter);
+        std::tie(std::ignore, inserted) = arr.emplace(fd,
+            std::shared_ptr<fs::file> {
+                new fs::fifo_file(nullptr, {
+                    .read = 0,
+                    .write = 1,
+                    .close_on_exec = 0,
+                }, ppipe),
+        });
         assert(inserted);
 
         // TODO: use copy_to_user()
@@ -253,23 +209,23 @@ public:
         if (!iter)
             return;
 
-        _close(iter->second);
+        iter->second->close();
         _fds.push(fd);
         arr.erase(iter);
     }
 
     constexpr void onexec()
     {
-        for (auto [ fd, file ] : arr) {
-            if (file->flags.close_on_exec)
+        for (auto&& [ fd, fp ] : arr) {
+            if (fp->flags.close_on_exec)
                 close(fd);
         }
     }
 
     constexpr void close_all(void)
     {
-        for (auto&& [ fd, file ] : arr) {
-            _close(file);
+        for (auto&& [ fd, fp ] : arr) {
+            fp->close();
             _fds.push(fd);
         }
         arr.clear();

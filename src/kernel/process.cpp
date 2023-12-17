@@ -1,3 +1,4 @@
+#include <memory>
 #include <utility>
 
 #include <bits/alltypes.h>
@@ -137,21 +138,15 @@ int filearr::open(const process &current,
             return -EISDIR;
     }
 
-    auto iter = files->emplace(files->cend(), fs::file {
-        fs::file::types::ind,
-        { .ind = dentry->ind },
-        dentry->parent,
-        0,
-        1,
-        {
+    int fd = next_fd();
+    auto [ _, inserted ] = arr.emplace(fd, std::shared_ptr<fs::file> {
+        new fs::regular_file(dentry->parent, {
             .read = !(flags & O_WRONLY),
             .write = !!(flags & (O_WRONLY | O_RDWR)),
             .close_on_exec = !!(flags & O_CLOEXEC),
-        },
+            }, 0, dentry->ind
+        )
     });
-
-    int fd = next_fd();
-    auto [ _, inserted ] = arr.emplace(fd, iter);
     assert(inserted);
     return fd;
 }
@@ -377,8 +372,6 @@ void NORETURN init_scheduler(void)
 
     procs = new proclist;
     readythds = new readyqueue;
-
-    filearr::init_global_file_container();
 
     // init process has no parent
     auto& init = procs->emplace(0);

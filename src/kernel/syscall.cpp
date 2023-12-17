@@ -87,68 +87,27 @@ int _syscall_fork(interrupt_stack* data)
 int _syscall_write(interrupt_stack* data)
 {
     SYSCALL_ARG1(int, fd);
-    SYSCALL_ARG2(const char*, buf);
+    SYSCALL_ARG2(const char* __user, buf);
     SYSCALL_ARG3(size_t, n);
 
     auto* file = current_process->files[fd];
-
-    if (!file || !file->flags.write)
+    if (!file)
         return -EBADF;
 
-    switch (file->type) {
-    case fs::file::types::ind: {
-        if (S_ISDIR(file->ptr.ind->mode))
-            return -EBADF;
-
-        int n_wrote = fs::vfs_write(file->ptr.ind, buf, file->cursor, n);
-        if (n_wrote >= 0)
-            file->cursor += n_wrote;
-        return n_wrote;
-    }
-    case fs::file::types::pipe:
-        return file->ptr.pp->write(buf, n);
-
-    case fs::file::types::socket:
-        // TODO
-        return -EINVAL;
-    default:
-        assert(false);
-        for ( ; ; ) ;
-    }
+    return file->write(buf, n);
 }
 
 int _syscall_read(interrupt_stack* data)
 {
     SYSCALL_ARG1(int, fd);
-    SYSCALL_ARG2(char*, buf);
+    SYSCALL_ARG2(char* __user, buf);
     SYSCALL_ARG3(size_t, n);
 
     auto* file = current_process->files[fd];
-
-    if (!file || !file->flags.read)
+    if (!file)
         return -EBADF;
 
-    switch (file->type) {
-    case fs::file::types::ind: {
-        if (S_ISDIR(file->ptr.ind->mode))
-            return -EBADF;
-
-        // TODO: copy to user function !IMPORTANT
-        int n_wrote = fs::vfs_read(file->ptr.ind, buf, n, file->cursor, n);
-        if (n_wrote >= 0)
-            file->cursor += n_wrote;
-        return n_wrote;
-    }
-    case fs::file::types::pipe:
-        return file->ptr.pp->read(buf, n);
-
-    case fs::file::types::socket:
-        // TODO
-        return -EINVAL;
-    default:
-        assert(false);
-        for ( ; ; ) ;
-    }
+    return file->read(buf, n);
 }
 
 // TODO: sleep seconds
@@ -280,38 +239,7 @@ int _syscall_getdents(interrupt_stack* data)
     if (!dir)
         return -EBADF;
 
-    if (dir->type != fs::file::types::ind || !S_ISDIR(dir->ptr.ind->mode))
-        return -ENOTDIR;
-
-    size_t orig_cnt = cnt;
-    int nread = dir->ptr.ind->fs->inode_readdir(dir->ptr.ind, dir->cursor,
-        [&buf, &cnt](const char* fn, size_t len, fs::ino_t ino, uint8_t type) -> int {
-            if (!len)
-                len = strlen(fn);
-
-            size_t reclen = sizeof(fs::user_dirent) + 1 + len;
-            if (cnt < reclen)
-                return GB_FAILED;
-
-            auto* dirp = (fs::user_dirent*)buf;
-            dirp->d_ino = ino;
-            dirp->d_reclen = reclen;
-            // TODO: show offset
-            // dirp->d_off = 0;
-            // TODO: use copy_to_user
-            memcpy(dirp->d_name, fn, len);
-            buf[reclen - 2] = 0;
-            buf[reclen - 1] = type;
-
-            buf += reclen;
-            cnt -= reclen;
-            return GB_OK;
-        });
-
-    if (nread > 0)
-        dir->cursor += nread;
-
-    return orig_cnt - cnt;
+    return dir->getdents(buf, cnt);
 }
 
 int _syscall_open(interrupt_stack* data)
@@ -430,7 +358,7 @@ int _syscall_ioctl(interrupt_stack* data)
     //       not. and we suppose that stdin will be
     //       either a tty or a pipe.
     auto* file = current_process->files[fd];
-    if (!file || file->type != fs::file::types::ind)
+    if (!file || !S_ISCHR(file->mode))
         return -ENOTTY;
 
     switch (request) {
@@ -493,45 +421,20 @@ ssize_t _syscall_writev(interrupt_stack* data)
 
     auto* file = current_process->files[fd];
 
-    if (!file || !file->flags.write)
+    if (!file)
         return -EBADF;
 
-    switch (file->type) {
-    case fs::file::types::ind: {
-        if (S_ISDIR(file->ptr.ind->mode))
-            return -EBADF;
+    ssize_t totn = 0;
+    for (int i = 0; i < iovcnt; ++i) {
+        ssize_t ret = file->write(
+            (const char*)iov[i].iov_base, iov[i].iov_len);
 
-        ssize_t n_wrote = 0;
-        for (int i = 0; i < iovcnt; ++i) {
-            int ret = fs::vfs_write(file->ptr.ind,
-                (const char*)iov[i].iov_base,
-                file->cursor, iov[i].iov_len);
-            if (ret < 0)
-                return ret;
-            n_wrote += ret;
-        }
-        file->cursor += n_wrote;
-        return n_wrote;
-    }
-    case fs::file::types::pipe: {
-        ssize_t tot = 0;
-        for (int i = 0; i < iovcnt; ++i) {
-            int retval = file->ptr.pp->write(
-                (const char*)iov->iov_base, iovcnt);
-            if (retval < 0)
-                return retval;
-            tot += retval;
-        }
-        return tot;
+        if (ret < 0)
+            return ret;
+        totn += ret;
     }
 
-    case fs::file::types::socket:
-        // TODO
-        return -EINVAL;
-    default:
-        assert(false);
-        for ( ; ; ) ;
-    }
+    return totn;
 }
 
 int _syscall_prctl(interrupt_stack* data)
@@ -744,37 +647,7 @@ int _syscall_getdents64(interrupt_stack* data)
     if (!dir)
         return -EBADF;
 
-    if (dir->type != fs::file::types::ind || !S_ISDIR(dir->ptr.ind->mode))
-        return -ENOTDIR;
-
-    size_t orig_cnt = cnt;
-    int nread = dir->ptr.ind->fs->inode_readdir(dir->ptr.ind, dir->cursor,
-        [&buf, &cnt](const char* fn, size_t len, fs::ino_t ino, uint8_t type) -> int {
-            if (!len)
-                len = strlen(fn);
-
-            size_t reclen = sizeof(fs::user_dirent64) + len;
-            if (cnt < reclen)
-                return GB_FAILED;
-
-            auto* dirp = (fs::user_dirent64*)buf;
-            dirp->d_ino = ino;
-            dirp->d_off = 114514;
-            dirp->d_reclen = reclen;
-            dirp->d_type = type;
-            // TODO: use copy_to_user
-            memcpy(dirp->d_name, fn, len);
-            buf[reclen - 1] = 0;
-
-            buf += reclen;
-            cnt -= reclen;
-            return GB_OK;
-        });
-
-    if (nread > 0)
-        dir->cursor += nread;
-
-    return orig_cnt - cnt;
+    return dir->getdents64(buf, cnt);
 }
 
 extern "C" void syscall_entry(interrupt_stack* data)

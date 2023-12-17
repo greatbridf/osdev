@@ -202,7 +202,7 @@ public:
 
     virtual size_t inode_read(inode* file, char* buf, size_t buf_size, size_t offset, size_t n);
     virtual size_t inode_write(inode* file, const char* buf, size_t offset, size_t n);
-    virtual int inode_mkfile(dentry* dir, const char* filename);
+    virtual int inode_mkfile(dentry* dir, const char* filename, mode_t mode);
     virtual int inode_mknode(dentry* dir, const char* filename, union node_t sn);
     virtual int inode_rmfile(dentry* dir, const char* filename);
     virtual int inode_mkdir(dentry* dir, const char* dirname);
@@ -289,7 +289,7 @@ vfs* register_fs(vfs* fs);
 
 size_t vfs_read(inode* file, char* buf, size_t buf_size, size_t offset, size_t n);
 size_t vfs_write(inode* file, const char* buf, size_t offset, size_t n);
-int vfs_mkfile(fs::vfs::dentry* dir, const char* filename);
+int vfs_mkfile(fs::vfs::dentry* dir, const char* filename, mode_t mode);
 int vfs_mknode(fs::vfs::dentry* dir, const char* filename, node_t sn);
 int vfs_rmfile(fs::vfs::dentry* dir, const char* filename);
 int vfs_mkdir(fs::vfs::dentry* dir, const char* dirname);

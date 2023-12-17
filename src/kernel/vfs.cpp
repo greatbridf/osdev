@@ -177,40 +177,19 @@ int fs::vfs::mount(dentry* mnt, vfs* new_fs)
     return GB_OK;
 }
 size_t fs::vfs::inode_read(inode*, char*, size_t, size_t, size_t)
-{
-    assert(false);
-    return 0xffffffff;
-}
+{ return -EINVAL; }
 size_t fs::vfs::inode_write(inode*, const char*, size_t, size_t)
-{
-    assert(false);
-    return 0xffffffff;
-}
-int fs::vfs::inode_mkfile(dentry*, const char*)
-{
-    assert(false);
-    return GB_FAILED;
-}
+{ return -EINVAL; }
+int fs::vfs::inode_mkfile(dentry*, const char*, mode_t)
+{ return -EINVAL; }
 int fs::vfs::inode_mknode(dentry*, const char*, node_t)
-{
-    assert(false);
-    return GB_FAILED;
-}
+{ return -EINVAL; }
 int fs::vfs::inode_rmfile(dentry*, const char*)
-{
-    assert(false);
-    return GB_FAILED;
-}
+{ return -EINVAL; }
 int fs::vfs::inode_mkdir(dentry*, const char*)
-{
-    assert(false);
-    return GB_FAILED;
-}
+{ return -EINVAL; }
 int fs::vfs::inode_stat(dentry*, statx*, unsigned int)
-{
-    assert(false);
-    return GB_FAILED;
-}
+{ return -EINVAL; }
 uint32_t fs::vfs::inode_getnode(fs::inode*)
 {
     assert(false);
@@ -319,9 +298,9 @@ public:
         register_root_node(&in);
     }
 
-    virtual int inode_mkfile(dentry* dir, const char* filename) override
+    virtual int inode_mkfile(dentry* dir, const char* filename, mode_t mode) override
     {
-        auto& file = *cache_inode(0, _savedata(mk_data_vector()), S_IFREG | 0777, 0, 0);
+        auto& file = *cache_inode(0, _savedata(mk_data_vector()), S_IFREG | mode, 0, 0);
         mklink(dir->ind, &file, filename);
         dir->append(get_inode(file.ino), filename, true);
         return GB_OK;
@@ -487,9 +466,9 @@ size_t fs::vfs_write(fs::inode* file, const char* buf, size_t offset, size_t n)
         return file->fs->inode_write(file, buf, offset, n);
     }
 }
-int fs::vfs_mkfile(fs::vfs::dentry* dir, const char* filename)
+int fs::vfs_mkfile(fs::vfs::dentry* dir, const char* filename, mode_t mode)
 {
-    return dir->ind->fs->inode_mkfile(dir, filename);
+    return dir->ind->fs->inode_mkfile(dir, filename, mode);
 }
 int fs::vfs_mknode(fs::vfs::dentry* dir, const char* filename, fs::node_t sn)
 {
@@ -681,7 +660,7 @@ void init_vfs(void)
     vfs_mkdir(fs_root, "dev");
     vfs_mkdir(fs_root, "root");
     vfs_mkdir(fs_root, "mnt");
-    vfs_mkfile(fs_root, "init");
+    vfs_mkfile(fs_root, "init", 0755);
 
     auto* init = vfs_open(*fs_root, "/init");
     assert(init);

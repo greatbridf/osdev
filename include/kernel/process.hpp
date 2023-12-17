@@ -245,7 +245,7 @@ public:
         return 0;
     }
 
-    int open(const process& current, const types::path& filepath, uint32_t flags);
+    int open(const process& current, const types::path& filepath, int flags, mode_t mode);
 
     constexpr void close(int fd)
     {

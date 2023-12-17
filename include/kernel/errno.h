@@ -15,19 +15,22 @@ extern uint32_t* _get_errno(void);
 }
 #endif
 
-#define ENOMEM (1 << 0)
-#define EEXIST (1 << 1)
-#define ENOENT (1 << 2)
-#define EINVAL (1 << 3)
-#define EISDIR (1 << 4)
-#define ENOTDIR (1 << 5)
-#define ENOTFOUND (1 << 6)
-#define ECHILD (1 << 7)
-#define EBADF (1 << 8)
-#define EPERM (1 << 9)
-#define ESRCH (1 << 10)
-#define EINTR (1 << 11)
-#define EPIPE (1 << 12)
-#define ENOTTY (1 << 13)
+#define EPERM 1
+#define ENOENT 2
+#define ESRCH 3
+#define EINTR 4
+#define EBADF 9
+#define ECHILD 10
+#define ENOMEM 12
+#define EACCES 13
+#define EEXIST 17
+#define ENOTDIR 20
+#define EISDIR 21
+#define EINVAL 22
+#define ENOTTY 25
+#define EPIPE 32
+
+// non-standard errors
+#define ENOTFOUND 200
 
 #endif

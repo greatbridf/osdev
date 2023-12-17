@@ -1,5 +1,7 @@
 #include <utility>
 
+#include <bits/alltypes.h>
+
 #include <asm/port_io.h>
 #include <asm/sys.h>
 #include <assert.h>
@@ -92,19 +94,47 @@ void kernel::tasks::thread::free_kstack(uint32_t p)
 }
 
 // TODO: file opening permissions check
-int filearr::open(const process &current, const types::path& filepath, uint32_t flags)
+int filearr::open(const process &current,
+    const types::path& filepath, int flags, mode_t mode)
 {
     auto* dentry = fs::vfs_open(*current.root, filepath);
 
-    if (!dentry) {
-        errno = ENOTFOUND;
-        return -1;
+    if (flags & O_CREAT) {
+        if (!dentry) {
+            // create file
+            auto filename = filepath.last_name();
+            auto parent_path = filepath;
+            parent_path.remove_last();
+
+            auto* parent = fs::vfs_open(*current.root, parent_path);
+            if (!parent)
+                return -EINVAL;
+            int ret = fs::vfs_mkfile(parent, filename.c_str(), mode);
+            if (ret != GB_OK)
+                return ret;
+            dentry = fs::vfs_open(*current.root, filepath);
+            assert(dentry);
+        } else {
+            // file already exists
+            if (flags & O_EXCL)
+                return -EEXIST;
+
+            if (flags & O_TRUNC) {
+                // TODO: truncate file
+            }
+        }
+    } else {
+        if (!dentry)
+            return -ENOENT;
     }
 
     // check whether dentry is a file if O_DIRECTORY is set
-    if ((flags & O_DIRECTORY) && !S_ISDIR(dentry->ind->mode)) {
-        errno = ENOTDIR;
-        return -1;
+    if (flags & O_DIRECTORY) {
+        if (!S_ISDIR(dentry->ind->mode))
+            return -ENOTDIR;
+    } else {
+        if (S_ISDIR(dentry->ind->mode) && (flags & (O_WRONLY | O_RDWR)))
+            return -EISDIR;
     }
 
     auto iter = files->emplace(files->cend(), fs::file {
@@ -358,9 +388,9 @@ void NORETURN init_scheduler(void)
     assert(inserted);
     auto& thd = *iter_thd;
 
-    init.files.open(init, "/dev/console", O_RDONLY);
-    init.files.open(init, "/dev/console", O_WRONLY);
-    init.files.open(init, "/dev/console", O_WRONLY);
+    init.files.open(init, "/dev/console", O_RDONLY, 0);
+    init.files.open(init, "/dev/console", O_WRONLY, 0);
+    init.files.open(init, "/dev/console", O_WRONLY, 0);
 
     // we need interrupts enabled for cow mapping so now we disable it
     // in case timer interrupt mess things up

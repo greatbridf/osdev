@@ -316,11 +316,12 @@ int _syscall_getdents(interrupt_stack* data)
 
 int _syscall_open(interrupt_stack* data)
 {
-    SYSCALL_ARG1(const char*, path);
-    SYSCALL_ARG2(uint32_t, flags);
+    SYSCALL_ARG1(const char* __user, path);
+    SYSCALL_ARG2(int, flags);
+    SYSCALL_ARG3(mode_t, mode);
 
     return current_process->files.open(*current_process,
-        types::make_path(path, current_process->pwd), flags);
+        types::make_path(path, current_process->pwd), flags, mode);
 }
 
 int _syscall_getcwd(interrupt_stack* data)

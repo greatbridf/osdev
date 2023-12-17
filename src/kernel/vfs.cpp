@@ -353,10 +353,11 @@ public:
 
         auto* data = as_fdata(_getdata(file->ino));
 
-        for (size_t i = data->size(); i < offset + n; ++i) {
-            data->push_back(0);
-        }
+        if (data->size() < offset + n)
+            data->resize(offset+n);
         memcpy(data->data() + offset, buf, n);
+
+        file->size = data->size();
 
         return n;
     }

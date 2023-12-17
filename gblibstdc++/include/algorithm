@@ -197,6 +197,18 @@ constexpr void sort(RandomIter first, RandomIter last)
     sort(first, last, std::less<typename std::decay_t<decltype(*first)>>());
 }
 
+template <typename T>
+constexpr const T& min(const T& a, const T& b)
+{
+    return a < b ? a : b;
+}
+
+template <typename T>
+constexpr const T& max(const T& a, const T& b)
+{
+    return a > b ? a : b;
+}
+
 } // namespace std
 
 #endif

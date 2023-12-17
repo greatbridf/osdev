@@ -92,9 +92,9 @@ void kernel::tasks::thread::free_kstack(uint32_t p)
 }
 
 // TODO: file opening permissions check
-int filearr::open(const process &current, const char *filename, uint32_t flags)
+int filearr::open(const process &current, const types::path& filepath, uint32_t flags)
 {
-    auto* dentry = fs::vfs_open(*current.root, current.pwd.c_str(), filename);
+    auto* dentry = fs::vfs_open(*current.root, filepath);
 
     if (!dentry) {
         errno = ENOTFOUND;
@@ -268,10 +268,10 @@ void NORETURN _kernel_init(void)
     hw::init_ata();
 
     // TODO: parse kernel parameters
-    auto* drive = fs::vfs_open(*fs::fs_root, nullptr, "/dev/hda1");
+    auto* drive = fs::vfs_open(*fs::fs_root, "/dev/hda1");
     assert(drive);
     auto* _new_fs = fs::register_fs(new fs::fat::fat32(drive->ind));
-    auto* mnt = fs::vfs_open(*fs::fs_root, nullptr, "/mnt");
+    auto* mnt = fs::vfs_open(*fs::fs_root, "/mnt");
     assert(mnt);
     int ret = fs::fs_root->ind->fs->mount(mnt, _new_fs);
     assert(ret == GB_OK);
@@ -287,7 +287,7 @@ void NORETURN _kernel_init(void)
     d.envp = envp;
     d.system = false;
 
-    d.exec_dent = fs::vfs_open(*fs::fs_root, nullptr, "/mnt/init");
+    d.exec_dent = fs::vfs_open(*fs::fs_root, "/mnt/init");
     if (!d.exec_dent) {
         console->print("kernel panic: init not found!\n");
         freeze();

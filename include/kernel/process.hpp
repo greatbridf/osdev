@@ -21,6 +21,7 @@
 #include <types/allocator.hpp>
 #include <types/cplusplus.hpp>
 #include <types/hash_map.hpp>
+#include <types/path.hpp>
 #include <types/status.h>
 #include <types/string.hpp>
 #include <types/types.h>
@@ -244,7 +245,7 @@ public:
         return 0;
     }
 
-    int open(const process& current, const char* filename, uint32_t flags);
+    int open(const process& current, const types::path& filepath, uint32_t flags);
 
     constexpr void close(int fd)
     {
@@ -294,7 +295,7 @@ public:
     std::list<wait_obj> waitlist;
     process_attr attr {};
     filearr files;
-    types::string<> pwd;
+    types::path pwd;
     kernel::signal_list signals;
 
     pid_t pid {};

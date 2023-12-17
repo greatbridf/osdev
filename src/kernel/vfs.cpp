@@ -15,11 +15,11 @@
 #include <stdio.h>
 #include <types/allocator.hpp>
 #include <types/status.h>
+#include <types/path.hpp>
 #include <types/string.hpp>
 
 using types::allocator_traits;
 using types::kernel_allocator;
-using types::string;
 
 struct tmpfs_file_entry {
     size_t ino;
@@ -94,7 +94,7 @@ fs::vfs::vfs(void)
 }
 
 void fs::vfs::dentry::path(
-    const dentry& root, name_type &out_dst) const
+    const dentry& root, types::path &out_dst) const
 {
     const dentry* dents[32];
     int cnt = 0;
@@ -106,15 +106,9 @@ void fs::vfs::dentry::path(
         cur = cur->parent;
     }
 
-    if (cnt == 0) {
-        out_dst += '/';
-        return;
-    }
-
-    for (int i = cnt - 1; i >= 0; --i) {
-        out_dst += '/';
-        out_dst += dents[i]->name;
-    }
+    out_dst.append("/");
+    for (int i = cnt - 1; i >= 0; --i)
+        out_dst.append(dents[i]->name.c_str());
 }
 
 fs::inode* fs::vfs::cache_inode(size_t size, ino_t ino,
@@ -510,54 +504,19 @@ int fs::vfs_mkdir(fs::vfs::dentry* dir, const char* dirname)
     return dir->ind->fs->inode_mkdir(dir, dirname);
 }
 
-fs::vfs::dentry* fs::vfs_open(
-    fs::vfs::dentry& root,
-    const char* pwd, const char* path)
+fs::vfs::dentry* fs::vfs_open(fs::vfs::dentry& root, const types::path& path)
 {
-    fs::vfs::dentry* cur = nullptr;
-    if (!*path)
-        return nullptr;
+    fs::vfs::dentry* cur = &root;
 
-    // absolute path
-    if (*path == '/' || !pwd)
-        cur = &root;
-    else
-        cur = vfs_open(root, nullptr, pwd);
-
-    size_t n = 0;
-    string curpath;
-    while (true) {
-        switch (path[n]) {
-        case '\0':
-            if (n != 0) {
-                curpath.clear();
-                curpath.append(path, n);
-                cur = cur->find(curpath);
-            }
-            return cur;
-
-        case '/':
-            if (n == 0) {
-                ++path;
-                continue;
-            }
-
-            curpath.clear();
-            curpath.append(path, n);
-            cur = cur->find(curpath);
-
-            if (!cur)
-                return cur;
-
-            path += (n + 1);
-            n = 0;
-            break;
-
-        default:
-            ++n;
-            break;
-        }
+    for (const auto& item : path) {
+        if (item.empty())
+            continue;
+        cur = cur->find(item);
+        if (!cur)
+            return nullptr;
     }
+
+    return cur;
 }
 
 int fs::vfs_stat(fs::vfs::dentry* ent, statx* stat, unsigned int mask)
@@ -724,12 +683,12 @@ void init_vfs(void)
     vfs_mkdir(fs_root, "mnt");
     vfs_mkfile(fs_root, "init");
 
-    auto* init = vfs_open(*fs_root, nullptr, "/init");
+    auto* init = vfs_open(*fs_root, "/init");
     assert(init);
     const char* str = "#/bin/sh\nexec /bin/sh\n";
     vfs_write(init->ind, str, 0, strlen(str));
 
-    auto* dev = vfs_open(*fs_root, nullptr, "/dev");
+    auto* dev = vfs_open(*fs_root, "/dev");
     assert(dev);
     vfs_mknode(dev, "null", { .in { .major = 0, .minor = 0 } });
     vfs_mknode(dev, "console", { .in { .major = 1, .minor = 0 } });

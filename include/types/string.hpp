@@ -7,20 +7,20 @@
 #include <types/types.h>
 
 namespace types {
-template <typename Allocator =
-    types::allocator_adapter<char, types::kernel_allocator>>
+
+template <typename Allocator = std::allocator<char>>
 class string : public std::vector<char, Allocator> {
 public:
-    using inner_vector_type = std::vector<char, Allocator>;
-    using size_type = typename inner_vector_type::size_type;
-    using iterator = typename inner_vector_type::iterator;
-    using const_iterator = typename inner_vector_type::const_iterator;
+    using _vector = std::vector<char, Allocator>;
+    using size_type = typename _vector::size_type;
+    using iterator = typename _vector::iterator;
+    using const_iterator = typename _vector::const_iterator;
 
-    static inline constexpr size_type npos = (-1U);
+    static constexpr size_type npos = -1U;
 
 public:
     constexpr string()
-        : inner_vector_type()
+        : _vector()
     {
         this->reserve(8);
         this->push_back(0x00);
@@ -32,14 +32,9 @@ public:
     }
     constexpr string& append(const char* str, size_type n = npos)
     {
-        this->pop_back();
-
-        while (n-- && *str != 0x00) {
-            this->push_back(*str);
-            ++str;
-        }
-
-        this->push_back(0x00);
+        size_type len = strlen(str);
+        const char* last = str + (len < n ? len : n);
+        this->insert(end(), str, last);
         return *this;
     }
     constexpr string& append(const string& str)
@@ -78,22 +73,29 @@ public:
     }
     constexpr void clear()
     {
-        inner_vector_type::clear();
+        _vector::clear();
         this->push_back(0x00);
     }
     constexpr char pop(void)
     {
         this->pop_back();
-        auto& ref = inner_vector_type::back();
+        auto& ref = _vector::back();
         char c = ref;
         ref = 0x00;
         return c;
     }
     constexpr iterator end() noexcept
-    { return --inner_vector_type::end(); }
+    { return --_vector::end(); }
     constexpr const_iterator end() const noexcept
-    { return --inner_vector_type::cend(); }
+    { return --_vector::cend(); }
     constexpr const_iterator cend() const noexcept
-    { return --inner_vector_type::cend(); }
+    { return --_vector::cend(); }
+    constexpr char back() const noexcept
+    { return *--cend(); }
+    constexpr size_type size() const noexcept
+    { return _vector::size() - 1; }
+    constexpr bool empty() const noexcept
+    { return _vector::size() == 1; }
 };
+
 } // namespace types

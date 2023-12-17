@@ -15,6 +15,7 @@
 #include <types/buffer.hpp>
 #include <types/cplusplus.hpp>
 #include <types/hash_map.hpp>
+#include <types/path.hpp>
 #include <types/lock.hpp>
 #include <types/types.h>
 
@@ -159,7 +160,7 @@ public:
         dentry* replace(dentry* val);
 
         // out_dst SHOULD be empty
-        void path(const dentry& root, name_type& out_dst) const;
+        void path(const dentry& root, types::path& out_dst) const;
 
         void invalidate(void);
     };
@@ -294,13 +295,15 @@ int vfs_rmfile(fs::vfs::dentry* dir, const char* filename);
 int vfs_mkdir(fs::vfs::dentry* dir, const char* dirname);
 int vfs_stat(fs::vfs::dentry* dent, statx* stat, unsigned int mask);
 
-// @param: pwd: current working directory
-//              if nullptr, use root directory
-//              if present, must be a valid absolute path
-//
-// @return pointer to the dentry if found, nullptr if not
-fs::vfs::dentry* vfs_open(fs::vfs::dentry& root,
-    const char* pwd, const char* path);
+/**
+ * @brief Opens a file or directory specified by the given path.
+ * 
+ * @param root The root directory of the file system.
+ * @param path The absolute path to the file or directory to be opened.
+ * @return A pointer to the opened file or directory entry if found.
+ *         Otherwise, nullptr is returned.
+ */
+fs::vfs::dentry* vfs_open(fs::vfs::dentry& root, const types::path& path);
 
 } // namespace fs
 

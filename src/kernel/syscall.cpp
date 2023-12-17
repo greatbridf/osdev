@@ -22,6 +22,7 @@
 #include <string.h>
 #include <types/allocator.hpp>
 #include <types/elf.hpp>
+#include <types/path.hpp>
 #include <types/lock.hpp>
 #include <types/status.h>
 
@@ -165,7 +166,7 @@ int _syscall_chdir(interrupt_stack* data)
     SYSCALL_ARG1(const char*, path);
 
     auto* dir = fs::vfs_open(*current_process->root,
-        current_process->pwd.c_str(), path);
+        types::make_path(path, current_process->pwd));
     if (!dir)
         return -ENOENT;
 
@@ -194,7 +195,7 @@ int _syscall_execve(interrupt_stack* data)
     d.system = false;
 
     d.exec_dent = fs::vfs_open(*current_process->root,
-        current_process->pwd.c_str(), exec);
+        types::make_path(exec, current_process->pwd));
     
     if (!d.exec_dent)
         return -ENOENT;
@@ -318,8 +319,8 @@ int _syscall_open(interrupt_stack* data)
     SYSCALL_ARG1(const char*, path);
     SYSCALL_ARG2(uint32_t, flags);
 
-    return current_process->files.open(
-        *current_process, path, flags);
+    return current_process->files.open(*current_process,
+        types::make_path(path, current_process->pwd), flags);
 }
 
 int _syscall_getcwd(interrupt_stack* data)
@@ -328,7 +329,8 @@ int _syscall_getcwd(interrupt_stack* data)
     SYSCALL_ARG2(size_t, bufsize);
 
     // TODO: use copy_to_user
-    strncpy(buf, current_process->pwd.c_str(), bufsize);
+    auto path = current_process->pwd.full_path();
+    strncpy(buf, path.c_str(), bufsize);
     buf[bufsize - 1] = 0;
 
     return (uint32_t)buf;
@@ -700,7 +702,7 @@ int _syscall_statx(interrupt_stack* data)
         not_implemented();
 
     auto* dent = fs::vfs_open(*current_process->root,
-        current_process->pwd.c_str(), path);
+        types::make_path(path, current_process->pwd));
 
     if (!dent)
         return -ENOENT;

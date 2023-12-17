@@ -91,7 +91,7 @@ int types::elf::elf32_load(types::elf::elf32_load_data* d)
     // TODO: remove this
     fs::inode* null_ind = nullptr;
     {
-        auto* dent = fs::vfs_open(*fs::fs_root, nullptr, "/dev/null");
+        auto* dent = fs::vfs_open(*fs::fs_root, "/dev/null");
         if (!dent)
             kill_current(-1);
         null_ind = dent->ind;

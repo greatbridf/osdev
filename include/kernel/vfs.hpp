@@ -6,6 +6,7 @@
 #include <functional>
 
 #include <sys/stat.h>
+#include <sys/types.h>
 #include <kernel/errno.h>
 #include <bits/alltypes.h>
 
@@ -39,8 +40,6 @@
 #define DT_MAX (S_DT_MASK + 1) /* 16 */
 
 namespace fs {
-using ino_t = size_t;
-using ino64_t = uint64_t;
 using blksize_t = size_t;
 using blkcnt_t = size_t;
 

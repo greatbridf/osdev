@@ -83,7 +83,7 @@ int fat32::inode_readdir(fs::inode* dir, size_t offset, const fs::vfs::filldir_f
                 continue;
             }
 
-            fs::ino_t ino = _rearrange(d);
+            ino_t ino = _rearrange(d);
             auto* ind = get_inode(ino);
             if (!ind) {
                 mode_t mode = 0777;

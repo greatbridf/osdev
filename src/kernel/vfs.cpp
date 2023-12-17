@@ -203,11 +203,11 @@ private:
     using fdata_t = std::vector<char>;
 
 private:
-    std::map<fs::ino_t, void*> inode_data;
-    fs::ino_t _next_ino;
+    std::map<ino_t, void*> inode_data;
+    ino_t _next_ino;
 
 private:
-    fs::ino_t _assign_ino(void)
+    ino_t _assign_ino(void)
     {
         return _next_ino++;
     }
@@ -224,17 +224,17 @@ private:
     {
         return std::bit_cast<ptr_t>(data);
     }
-    inline void* _getdata(fs::ino_t ino) const
+    inline void* _getdata(ino_t ino) const
     {
         return inode_data.find(ino)->second;
     }
-    inline fs::ino_t _savedata(void* data)
+    inline ino_t _savedata(void* data)
     {
-        fs::ino_t ino = _assign_ino();
+        ino_t ino = _assign_ino();
         inode_data.insert(std::make_pair(ino, data));
         return ino;
     }
-    inline fs::ino_t _savedata(ptr_t data)
+    inline ino_t _savedata(ptr_t data)
     {
         return _savedata((void*)data);
     }
@@ -463,7 +463,7 @@ int fs::regular_file::getdents(char* __user buf, size_t cnt)
 
     size_t orig_cnt = cnt;
     int nread = ind->fs->inode_readdir(ind, cursor,
-        [&buf, &cnt](const char* fn, size_t len, fs::ino_t ino, uint8_t type) {
+        [&buf, &cnt](const char* fn, size_t len, ino_t ino, uint8_t type) {
             if (!len)
                 len = strlen(fn);
 
@@ -499,7 +499,7 @@ int fs::regular_file::getdents64(char* __user buf, size_t cnt)
 
     size_t orig_cnt = cnt;
     int nread = ind->fs->inode_readdir(ind, cursor,
-        [&buf, &cnt](const char* fn, size_t len, fs::ino_t ino, uint8_t type) {
+        [&buf, &cnt](const char* fn, size_t len, ino_t ino, uint8_t type) {
             if (!len)
                 len = strlen(fn);
 

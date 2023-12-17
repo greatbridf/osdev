@@ -560,34 +560,42 @@ int _syscall_munmap(interrupt_stack* data)
     kill_current(-1);
 }
 
-int _syscall_sendfile64(interrupt_stack*)
+int _syscall_sendfile64(interrupt_stack* data)
 {
-    not_implemented();
+    SYSCALL_ARG1(int, out_fd);
+    SYSCALL_ARG2(int, in_fd);
+    SYSCALL_ARG3(off64_t*, offset);
+    SYSCALL_ARG4(size_t, count);
 
-    // SYSCALL_ARG1(int, out_fd);
-    // SYSCALL_ARG2(int, in_fd);
-    // SYSCALL_ARG3(off_t*, offset);
-    // SYSCALL_ARG4(size_t, count);
+    auto* out_file = current_process->files[out_fd];
+    auto* in_file = current_process->files[in_fd];
 
-    // auto* out_file = current_process->files[out_fd];
-    // auto* in_file = current_process->files[in_fd];
+    if (!out_file || !in_file)
+        return -EBADF;
 
-    // if (!out_file || !in_file)
-    //     return -EBADF;
+    // TODO: check whether in_fd supports mmapping (for example,
+    //       whether it is a char device) if not, return -EINVAL
 
-    // if (out_file->type != fs::file::types::ind
-    //     || in_file->type != fs::file::types::ind)
-    //     return -EINVAL;
+    if (offset)
+        not_implemented();
 
-    // if (!out_file->flags.write || !in_file->flags.read)
-    //     return -EBADF;
+    constexpr size_t bufsize = 512;
+    std::vector<char> buf(bufsize);
+    size_t totn = 0;
+    while (totn < count) {
+        size_t n = std::min(count - totn, bufsize);
+        ssize_t ret = in_file->read(buf.data(), n);
+        if (ret < 0)
+            return ret;
+        if (ret == 0)
+            break;
+        ret = out_file->write(buf.data(), ret);
+        if (ret < 0)
+            return ret;
+        totn += ret;
+    }
 
-    // if (out_file->ptr.ind->flags.in.directory
-    //     || in_file->ptr.ind->flags.in.directory)
-    //     return -EBADF;
-
-    // if (offset)
-    //     return -EINVAL;
+    return totn;
 }
 
 int _syscall_statx(interrupt_stack* data)

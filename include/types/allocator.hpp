@@ -2,7 +2,7 @@
 #include <new>
 #include <utility>
 #include <type_traits>
-#include <assert.h>
+#include <bit>
 #include <stdint.h>
 #include <types/cplusplus.hpp>
 #include <types/types.h>
@@ -26,7 +26,7 @@ namespace __allocator {
             size_t size;
             struct mem_blk_flags flags;
             // the first byte of the memory space
-            // the minimal allocated space is 4 bytes
+            // the minimal allocated space is 8 bytes
             byte data[];
         };
 
@@ -35,60 +35,67 @@ namespace __allocator {
         byte* p_break;
         byte* p_limit;
 
-        brk_memory_allocator(void) = delete;
+        brk_memory_allocator() = delete;
         brk_memory_allocator(const brk_memory_allocator&) = delete;
         brk_memory_allocator(brk_memory_allocator&&) = delete;
 
-        constexpr int brk(byte* addr)
+        constexpr byte* brk(byte* addr)
         {
             if (unlikely(addr >= p_limit))
-                return GB_FAILED;
-            p_break = addr;
-            return GB_OK;
-        }
-
-        // sets errno
-        inline byte* sbrk(size_type increment)
-        {
-            if (unlikely(brk(p_break + increment) != GB_OK))
                 return nullptr;
-            else
-                return p_break;
+            return p_break = addr;
         }
 
-        inline mem_blk* _find_next_mem_blk(mem_blk* blk, size_type blk_size)
+        constexpr byte* sbrk(size_type increment)
+        { return brk(p_break + increment); }
+
+        constexpr mem_blk* _next(mem_blk* blk, size_type blk_size)
         {
-            byte* p = (byte*)blk;
+            auto* p = std::bit_cast<byte*>(blk);
             p += sizeof(mem_blk);
             p += blk_size;
-            return (mem_blk*)p;
+            return std::bit_cast<mem_blk*>(p);
         }
 
-        // sets errno
-        // @param start_pos position where to start finding
-        // @param size the size of the block we're looking for
-        // @return found block if suitable block exists, if not, the last block
-        inline mem_blk* find_blk(mem_blk* start_pos, size_type size)
+        // blk MUST be free
+        constexpr void unite_afterwards(mem_blk* blk)
         {
-            while (1) {
-                if (start_pos->flags.is_free && start_pos->size >= size) {
-                    return start_pos;
-                } else {
-                    if (unlikely(!start_pos->flags.has_next))
-                        return start_pos;
-
-                    start_pos = _find_next_mem_blk(start_pos, start_pos->size);
-                }
+            while (blk->flags.has_next) {
+                auto* blk_next = _next(blk, blk->size);
+                if (!blk_next->flags.is_free)
+                    break;
+                blk->size += sizeof(mem_blk) + blk_next->size;
+                blk->flags.has_next = blk_next->flags.has_next;
             }
         }
 
-        inline mem_blk* allocate_new_block(mem_blk* blk_before, size_type size)
+        // @param start_pos position where to start finding
+        // @param size the size of the block we're looking for
+        // @return found block if suitable block exists, if not, the last block
+        constexpr mem_blk* find_blk(mem_blk* start_pos, size_type size)
+        {
+            while (true) {
+                if (start_pos->flags.is_free) {
+                    unite_afterwards(start_pos);
+
+                    if (start_pos->size >= size)
+                        break;
+                }
+
+                if (!start_pos->flags.has_next)
+                    break;
+                start_pos = _next(start_pos, start_pos->size);
+            }
+            return start_pos;
+        }
+
+        constexpr mem_blk* allocate_new_block(mem_blk* blk_before, size_type size)
         {
             auto ret = sbrk(sizeof(mem_blk) + size);
             if (!ret)
                 return nullptr;
 
-            mem_blk* blk = _find_next_mem_blk(blk_before, blk_before->size);
+            mem_blk* blk = _next(blk_before, blk_before->size);
 
             blk_before->flags.has_next = 1;
 
@@ -99,14 +106,15 @@ namespace __allocator {
             return blk;
         }
 
-        inline void split_block(mem_blk* blk, size_type this_size)
+        constexpr void split_block(mem_blk* blk, size_type this_size)
         {
             // block is too small to get split
-            if (blk->size < sizeof(mem_blk) + this_size) {
+            // that is, the block to be split should have enough room
+            // for "this_size" bytes and also could contain a new block
+            if (blk->size < this_size + sizeof(mem_blk) + 8)
                 return;
-            }
 
-            mem_blk* blk_next = _find_next_mem_blk(blk, this_size);
+            mem_blk* blk_next = _next(blk, this_size);
 
             blk_next->size = blk->size
                 - this_size
@@ -120,26 +128,23 @@ namespace __allocator {
         }
 
     public:
-        inline brk_memory_allocator(byte* start, size_type limit)
+        constexpr brk_memory_allocator(byte* start, size_type limit)
             : p_start(start)
-            , p_limit(p_start + limit)
+            , p_limit(start + limit)
         {
             brk(p_start);
-            mem_blk* p_blk = (mem_blk*)sbrk(0);
+            auto* p_blk = std::bit_cast<mem_blk*>(sbrk(0));
             p_blk->size = 8;
             p_blk->flags.has_next = 0;
             p_blk->flags.is_free = 1;
         }
 
-        // sets errno
-        inline void* alloc(size_type size)
+        constexpr void* alloc(size_type size)
         {
-            struct mem_blk* block_allocated;
+            // align to 8 bytes boundary
+            size = (size + 7) & ~7;
 
-            if (size < 8)
-                size = 8;
-
-            block_allocated = find_blk((mem_blk*)p_start, size);
+            auto* block_allocated = find_blk(std::bit_cast<mem_blk*>(p_start), size);
             if (!block_allocated->flags.has_next
                 && (!block_allocated->flags.is_free || block_allocated->size < size)) {
                 // 'block_allocated' in the argument list is the pointer
@@ -152,14 +157,25 @@ namespace __allocator {
             }
 
             block_allocated->flags.is_free = 0;
+
+            auto* blkpos = std::bit_cast<byte*>(block_allocated);
+            if (blkpos > p_start)
+                p_start = blkpos;
             return block_allocated->data;
         }
 
-        inline void free(void* ptr)
+        constexpr void free(void* ptr)
         {
-            mem_blk* blk = (mem_blk*)((byte*)ptr - (sizeof(mem_blk_flags) + sizeof(size_t)));
+            auto* blk = std::bit_cast<mem_blk*>(
+                std::bit_cast<byte*>(ptr) - sizeof(mem_blk));
+
             blk->flags.is_free = 1;
-            // TODO: fusion free blocks nearby
+
+            if (std::bit_cast<byte*>(blk) < p_start)
+                p_start = std::bit_cast<byte*>(blk);
+
+            // unite free blocks nearby
+            unite_afterwards(blk);
         }
     };
 }; // namespace __allocator

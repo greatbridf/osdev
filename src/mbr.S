@@ -25,6 +25,15 @@ mbr_start:
     addl $(8 * 16), read_data_lba
     call read_data
 
+# read the 128k more
+    addw $(0x100 * 16), read_data_segment
+    addl $(8 * 16), read_data_lba
+    call read_data
+
+    addw $(0x100 * 16), read_data_segment
+    addl $(8 * 16), read_data_lba
+    call read_data
+
 # loader start
     jmp 0x8000
 

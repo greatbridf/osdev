@@ -113,7 +113,7 @@ SECTIONS
     } > MEM
 
     .sentry :
-        AT(0x30000)
+        AT(0x50000)
     { LONG(0x01145140); } > MEM
 
     .eh_frame :

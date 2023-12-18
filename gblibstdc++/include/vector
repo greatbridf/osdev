@@ -93,9 +93,13 @@ private:
     // assert(n >= m_size)
     constexpr void _reallocate_safe(size_type n)
     {
-        auto* newptr = alloc_traits::allocate(m_alloc, n);
+        T* newptr = nullptr;
+        if (n)
+            newptr = alloc_traits::allocate(m_alloc, n);
+
         for (size_t i = 0; i < m_size; ++i) {
-            alloc_traits::construct(m_alloc, newptr + i, std::move(m_data[i]));
+            if (n)
+                alloc_traits::construct(m_alloc, newptr + i, std::move(m_data[i]));
             alloc_traits::destroy(m_alloc, m_data + i);
         }
 
@@ -364,7 +368,7 @@ public:
             reserve(n);
 
         if (m_size + n > m_capacity)
-            reserve(m_capacity * 2);
+            reserve(m_size + n);
         for (size_type i = m_size + n - 1; i >= idx + n; --i)
             alloc_traits::construct(m_alloc, m_data + i, std::move(m_data[i-n]));
         for (size_type i = idx; i < idx + n; ++i)
@@ -392,7 +396,7 @@ public:
             reserve(n);
 
         if (m_size + n > m_capacity)
-            reserve(m_capacity * 2);
+            reserve(m_size + n);
         for (size_type i = m_size + n - 1; i >= idx + n; --i)
             alloc_traits::construct(m_alloc, m_data + i, std::move(m_data[i-n]));
         for (size_type i = idx; i < idx + n; ++i)

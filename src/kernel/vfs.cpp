@@ -563,6 +563,11 @@ static fs::special_node sns[8][8];
 
 size_t fs::vfs_read(fs::inode* file, char* buf, size_t buf_size, size_t offset, size_t n)
 {
+    if (S_ISDIR(file->mode)) {
+        errno = EISDIR;
+        return -1U;
+    }
+
     if (S_ISBLK(file->mode)) {
         uint32_t ret = file->fs->inode_getnode(file);
         if (ret == SN_INVALID) {
@@ -586,6 +591,11 @@ size_t fs::vfs_read(fs::inode* file, char* buf, size_t buf_size, size_t offset, 
 }
 size_t fs::vfs_write(fs::inode* file, const char* buf, size_t offset, size_t n)
 {
+    if (S_ISDIR(file->mode)) {
+        errno = EISDIR;
+        return -1U;
+    }
+
     if (S_ISBLK(file->mode)) {
         uint32_t ret = file->fs->inode_getnode(file);
         if (ret == SN_INVALID) {

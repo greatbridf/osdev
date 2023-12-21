@@ -62,6 +62,7 @@ set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
                         include/kernel/errno.h
                         include/kernel/tty.hpp
                         include/kernel/interrupt.h
+                        include/kernel/irq.hpp
                         include/kernel/process.hpp
                         include/kernel/syscall.hpp
                         include/kernel/mem.h

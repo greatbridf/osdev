@@ -2,6 +2,8 @@
 
 #include <types/types.h>
 
+// TODO: this whole thing needs rewriting
+
 int32_t keyboard_has_data(void);
 
 void process_keyboard_data(void);

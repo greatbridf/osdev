@@ -1,4 +1,5 @@
-#define _INTERRUPT_C_
+#include <list>
+#include <vector>
 
 #include <asm/port_io.h>
 #include <assert.h>
@@ -6,6 +7,7 @@
 #include <kernel/hw/serial.h>
 #include <kernel/hw/timer.h>
 #include <kernel/interrupt.h>
+#include <kernel/irq.hpp>
 #include <kernel/log.hpp>
 #include <kernel/mem.h>
 #include <kernel/mm.hpp>
@@ -16,6 +18,49 @@
 #include <stdio.h>
 #include <types/size.h>
 #include <types/types.h>
+
+struct IDT_entry {
+    uint16_t offset_low;
+    uint16_t selector;
+    uint8_t zero;
+    uint8_t type_attr;
+    uint16_t offset_high;
+};
+
+// interrupt stubs
+extern "C" void irq0(); extern "C" void irq1(); extern "C" void irq2();
+extern "C" void irq3(); extern "C" void irq4(); extern "C" void irq5();
+extern "C" void irq6(); extern "C" void irq7(); extern "C" void irq8();
+extern "C" void irq9(); extern "C" void irq10(); extern "C" void irq11();
+extern "C" void irq12(); extern "C" void irq13(); extern "C" void irq14();
+extern "C" void irq15(); extern "C" void int6(); extern "C" void int8();
+extern "C" void int13(); extern "C" void int14();
+extern "C" void syscall_stub();
+
+#define SET_UP_IRQ(N, SELECTOR)                   \
+    ptr_t addr_irq##N = (ptr_t)irq##N;            \
+    set_idt_entry(IDT, 0x20 + (N), (addr_irq##N), \
+        (SELECTOR), KERNEL_INTERRUPT_GATE_TYPE);
+
+#define SET_IDT_ENTRY_FN(N, FUNC_NAME, SELECTOR, TYPE) \
+    ptr_t addr_##FUNC_NAME = (ptr_t)FUNC_NAME;         \
+    set_idt_entry(IDT, (N), (addr_##FUNC_NAME), (SELECTOR), (TYPE));
+
+SECTION(".text.kinit")
+static void set_idt_entry(IDT_entry (&idt)[256], int n,
+    uintptr_t offset, uint16_t selector, uint8_t type)
+{
+    idt[n].offset_low = offset & 0xffff;
+    idt[n].selector = selector;
+    idt[n].zero = 0;
+    idt[n].type_attr = type;
+    idt[n].offset_high = (offset >> 16) & 0xffff;
+}
+
+// idt_descriptor: uint16_t[3]
+// [0] bit 0 :15 => limit
+// [1] bit 16:47 => address
+extern "C" void asm_load_idt(uint16_t idt_descriptor[3], int sti);
 
 static struct IDT_entry IDT[256];
 
@@ -60,10 +105,26 @@ void init_idt()
     asm_load_idt(idt_descriptor, 0);
 }
 
+using kernel::irq::irq_handler_t;
+static std::vector<std::list<irq_handler_t>> s_irq_handlers;
+
+void kernel::irq::register_handler(int irqno, irq_handler_t handler)
+{
+    s_irq_handlers[irqno].emplace_back(std::move(handler));
+}
+
 SECTION(".text.kinit")
 void init_pic(void)
 {
     asm_cli();
+
+    s_irq_handlers.resize(16);
+
+    // TODO: move this to timer driver
+    kernel::irq::register_handler(0, []() {
+        inc_tick();
+        schedule();
+    });
 
     asm_outb(PORT_PIC1_COMMAND, 0x11); // edge trigger mode
     asm_outb(PORT_PIC1_DATA, 0x20); // start from int 0x20
@@ -247,102 +308,12 @@ extern "C" void int14_handler(int14_data* d)
     }
 }
 
-void after_irq(void)
+extern "C" void irq_handler(int irqno)
 {
-    check_signal();
-}
+    asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
+    if (irqno >= 8)
+        asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
 
-extern "C" void irq0_handler(interrupt_stack*)
-{
-    inc_tick();
-    asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
-    schedule();
-    after_irq();
-}
-// keyboard interrupt
-extern "C" void irq1_handler(void)
-{
-    asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
-    handle_keyboard_interrupt();
-    after_irq();
-}
-extern "C" void irq2_handler(void)
-{
-    asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
-    after_irq();
-}
-extern "C" void irq3_handler(void)
-{
-    asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
-    after_irq();
-}
-extern "C" void irq4_handler(void)
-{
-    // TODO: register interrupt handler in serial port driver
-    serial_receive_data_interrupt();
-    asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
-    after_irq();
-}
-extern "C" void irq5_handler(void)
-{
-    asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
-    after_irq();
-}
-extern "C" void irq6_handler(void)
-{
-    asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
-    after_irq();
-}
-extern "C" void irq7_handler(void)
-{
-    asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
-    after_irq();
-}
-extern "C" void irq8_handler(void)
-{
-    asm_outb(PORT_PIC2_COMMAND, PIC_EOI);
-    asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
-    after_irq();
-}
-extern "C" void irq9_handler(void)
-{
-    asm_outb(PORT_PIC2_COMMAND, PIC_EOI);
-    asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
-    after_irq();
-}
-extern "C" void irq10_handler(void)
-{
-    asm_outb(PORT_PIC2_COMMAND, PIC_EOI);
-    asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
-    after_irq();
-}
-extern "C" void irq11_handler(void)
-{
-    asm_outb(PORT_PIC2_COMMAND, PIC_EOI);
-    asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
-    after_irq();
-}
-extern "C" void irq12_handler(void)
-{
-    asm_outb(PORT_PIC2_COMMAND, PIC_EOI);
-    asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
-    after_irq();
-}
-extern "C" void irq13_handler(void)
-{
-    asm_outb(PORT_PIC2_COMMAND, PIC_EOI);
-    asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
-    after_irq();
-}
-extern "C" void irq14_handler(void)
-{
-    asm_outb(PORT_PIC2_COMMAND, PIC_EOI);
-    asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
-    after_irq();
-}
-extern "C" void irq15_handler(void)
-{
-    asm_outb(PORT_PIC2_COMMAND, PIC_EOI);
-    asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
-    after_irq();
+    for (const auto& handler : s_irq_handlers[irqno])
+        handler();
 }

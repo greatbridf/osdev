@@ -1,8 +1,17 @@
 #include <asm/port_io.h>
 #include <kernel/hw/serial.h>
+#include <kernel/irq.hpp>
 #include <kernel/tty.hpp>
 #include <stdio.h>
 #include <types/status.h>
+
+static void serial_receive_data_interrupt(void)
+{
+    while (is_serial_has_data(PORT_SERIAL0)) {
+        uint8_t data = serial_read_data(PORT_SERIAL0);
+        console->recvchar(data);
+    }
+}
 
 SECTION(".text.kinit")
 int32_t init_serial_port(port_id_t port)
@@ -31,6 +40,9 @@ int32_t init_serial_port(port_id_t port)
     asm_outb(port + 4, 0x0F);
 
     asm_outb(port + 1, 0x01); // Enable interrupts #0: Received Data Available
+
+    kernel::irq::register_handler(4, serial_receive_data_interrupt);
+
     return GB_OK;
 }
 
@@ -56,12 +68,4 @@ void serial_send_data(port_id_t port, uint8_t data)
     while (is_serial_ready_for_transmition(port) == 0)
         ;
     return asm_outb(port, data);
-}
-
-void serial_receive_data_interrupt(void)
-{
-    while (is_serial_has_data(PORT_SERIAL0)) {
-        uint8_t data = serial_read_data(PORT_SERIAL0);
-        console->recvchar(data);
-    }
 }

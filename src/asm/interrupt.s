@@ -69,129 +69,111 @@ int14:
     iret
 
 .globl irq0
-.type  irq0 @function
 irq0:
     pushal
-
-    # stack alignment and push *data
-    movl %esp, %eax
-    subl $0x4, %esp
-    andl $0xfffffff0, %esp
-    movl %eax, (%esp)
-
-    call irq0_handler
-
-    # restore stack
-    popl %esp
-
-    popal
-    iret
-
+    mov $0, %eax
+    jmp irqstub
 .globl irq1
-.type  irq1 @function
 irq1:
     pushal
-    call irq1_handler
-    popal
-    iret
-
+    mov $1, %eax
+    jmp irqstub
 .globl irq2
-.type  irq2 @function
 irq2:
     pushal
-    call irq2_handler
-    popal
-    iret
+    mov $2, %eax
+    jmp irqstub
 .globl irq3
-.type  irq3 @function
 irq3:
     pushal
-    call irq3_handler
-    popal
-    iret
+    mov $3, %eax
+    jmp irqstub
 .globl irq4
-.type  irq4 @function
 irq4:
     pushal
-    call irq4_handler
-    popal
-    iret
+    mov $4, %eax
+    jmp irqstub
 .globl irq5
-.type  irq5 @function
 irq5:
     pushal
-    call irq5_handler
-    popal
-    iret
+    mov $5, %eax
+    jmp irqstub
 .globl irq6
-.type  irq6 @function
 irq6:
     pushal
-    call irq6_handler
-    popal
-    iret
+    mov $6, %eax
+    jmp irqstub
 .globl irq7
-.type  irq7 @function
 irq7:
     pushal
-    call irq7_handler
-    popal
-    iret
+    mov $7, %eax
+    jmp irqstub
 .globl irq8
-.type  irq8 @function
 irq8:
     pushal
-    call irq8_handler
-    popal
-    iret
+    mov $8, %eax
+    jmp irqstub
 .globl irq9
-.type  irq9 @function
 irq9:
     pushal
-    call irq9_handler
-    popal
-    iret
+    mov $9, %eax
+    jmp irqstub
 .globl irq10
-.type  irq10 @function
 irq10:
     pushal
-    call irq10_handler
-    popal
-    iret
+    mov $10, %eax
+    jmp irqstub
 .globl irq11
-.type  irq11 @function
 irq11:
     pushal
-    call irq11_handler
-    popal
-    iret
+    mov $11, %eax
+    jmp irqstub
 .globl irq12
-.type  irq12 @function
 irq12:
     pushal
-    call irq12_handler
-    popal
-    iret
+    mov $12, %eax
+    jmp irqstub
 .globl irq13
-.type  irq13 @function
 irq13:
     pushal
-    call irq13_handler
-    popal
-    iret
+    mov $13, %eax
+    jmp irqstub
 .globl irq14
-.type  irq14 @function
 irq14:
     pushal
-    call irq14_handler
-    popal
-    iret
+    mov $14, %eax
+    jmp irqstub
 .globl irq15
-.type  irq15 @function
 irq15:
     pushal
-    call irq15_handler
+    mov $15, %eax
+    jmp irqstub
+
+.globl irqstub
+irqstub:
+    # save current esp
+    mov %esp, %ebx
+
+    # align stack to 16byte boundary
+    and $0xfffffff0, %esp
+
+    # save mmx registers
+    subl $512, %esp
+    fxsave (%esp)
+
+    # push irq number
+    sub $16, %esp
+    mov %eax, (%esp)
+
+    call irq_handler
+
+    # restore mmx registers
+    fxrstor 16(%esp)
+
+    # restore stack and general purpose registers
+    mov %ebx, %esp
     popal
+
     iret
 
 .globl syscall_stub

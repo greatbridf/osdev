@@ -101,13 +101,13 @@ extern "C" SECTION(".text.kinit") void NORETURN kernel_init(void)
         (*ctor)();
     }
 
-    int ret = init_serial_port(PORT_SERIAL0);
-    assert(ret == GB_OK);
-
     init_idt();
     init_mem();
     init_pic();
     init_pit();
+
+    int ret = init_serial_port(PORT_SERIAL0);
+    assert(ret == GB_OK);
 
     ret = init_console("ttyS0");
     assert(ret == GB_OK);

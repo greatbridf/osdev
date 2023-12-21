@@ -451,6 +451,8 @@ bool schedule()
     asm_ctx_switch(&curr_thd->esp, thd->esp);
 
 _end:
+
+    check_signal();
     return current_process->signals.empty();
 }
 

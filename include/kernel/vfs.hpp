@@ -55,29 +55,37 @@ struct inode {
     gid_t gid;
 };
 
-#define SN_INVALID (0xffffffff)
-union node_t {
-    uint32_t v;
-    struct {
-        uint32_t major : 16;
-        uint32_t minor : 16;
-    } in;
+using node_t = uint32_t;
+
+#define NODE_MAJOR(node) ((node) >> 16)
+#define NODE_MINOR(node) ((node) & 0xffff)
+constexpr node_t NODE_INVALID = -1U;
+
+constexpr node_t make_node(uint32_t major, uint32_t minor)
+{
+    return (major << 16) | (minor & 0xffff);
+}
+
+// buf, buf_size, offset, cnt
+using blkdev_read = std::function<ssize_t(char*, std::size_t, std::size_t, std::size_t)>;
+
+// buf, offset, cnt
+using blkdev_write = std::function<ssize_t(const char*, std::size_t, std::size_t)>;
+
+struct blkdev_ops {
+    blkdev_read read;
+    blkdev_write write;
 };
 
-struct special_node;
+// buf, buf_size, cnt
+using chrdev_read = std::function<ssize_t(char*, std::size_t, std::size_t)>;
 
-typedef size_t (*special_node_read)(special_node* sn, char* buf, size_t buf_size, size_t offset, size_t n);
-typedef size_t (*special_node_write)(special_node* sn, const char* buf, size_t offset, size_t n);
+// buf, cnt
+using chrdev_write = std::function<ssize_t(const char*, std::size_t)>;
 
-struct special_node_ops {
-    special_node_read read;
-    special_node_write write;
-};
-
-struct special_node {
-    special_node_ops ops;
-    uint32_t data1;
-    uint32_t data2;
+struct chrdev_ops {
+    chrdev_read read;
+    chrdev_write write;
 };
 
 struct PACKED user_dirent {
@@ -203,7 +211,7 @@ public:
     virtual size_t inode_read(inode* file, char* buf, size_t buf_size, size_t offset, size_t n);
     virtual size_t inode_write(inode* file, const char* buf, size_t offset, size_t n);
     virtual int inode_mkfile(dentry* dir, const char* filename, mode_t mode);
-    virtual int inode_mknode(dentry* dir, const char* filename, union node_t sn);
+    virtual int inode_mknode(dentry* dir, const char* filename, mode_t mode, node_t sn);
     virtual int inode_rmfile(dentry* dir, const char* filename);
     virtual int inode_mkdir(dentry* dir, const char* dirname);
     virtual int inode_stat(dentry* dent, statx* buf, unsigned int mask);
@@ -308,19 +316,23 @@ struct fifo_file : public virtual file {
 
 inline fs::vfs::dentry* fs_root;
 
-void register_special_block(uint16_t major,
-    uint16_t minor,
-    special_node_read read,
-    special_node_write write,
-    uint32_t data1,
-    uint32_t data2);
+int register_block_device(node_t node, blkdev_ops ops);
+int register_char_device(node_t node, chrdev_ops ops);
+
+void partprobe();
+
+ssize_t block_device_read(node_t node, char* buf, size_t buf_size, size_t offset, size_t n);
+ssize_t block_device_write(node_t node, const char* buf, size_t offset, size_t n);
+
+ssize_t char_device_read(node_t node, char* buf, size_t buf_size, size_t n);
+ssize_t char_device_write(node_t node, const char* buf, size_t n);
 
 vfs* register_fs(vfs* fs);
 
 size_t vfs_read(inode* file, char* buf, size_t buf_size, size_t offset, size_t n);
 size_t vfs_write(inode* file, const char* buf, size_t offset, size_t n);
 int vfs_mkfile(fs::vfs::dentry* dir, const char* filename, mode_t mode);
-int vfs_mknode(fs::vfs::dentry* dir, const char* filename, node_t sn);
+int vfs_mknode(fs::vfs::dentry* dir, const char* filename, mode_t mode, node_t sn);
 int vfs_rmfile(fs::vfs::dentry* dir, const char* filename);
 int vfs_mkdir(fs::vfs::dentry* dir, const char* dirname);
 int vfs_stat(fs::vfs::dentry* dent, statx* stat, unsigned int mask);

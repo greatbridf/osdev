@@ -1,3 +1,4 @@
+#include <cstddef>
 #include <map>
 #include <vector>
 #include <bit>
@@ -7,6 +8,7 @@
 
 #include <assert.h>
 #include <kernel/errno.h>
+#include <kernel/log.hpp>
 #include <kernel/mem.h>
 #include <kernel/process.hpp>
 #include <kernel/tty.hpp>
@@ -182,7 +184,7 @@ size_t fs::vfs::inode_write(inode*, const char*, size_t, size_t)
 { return -EINVAL; }
 int fs::vfs::inode_mkfile(dentry*, const char*, mode_t)
 { return -EINVAL; }
-int fs::vfs::inode_mknode(dentry*, const char*, node_t)
+int fs::vfs::inode_mknode(dentry*, const char*, mode_t, node_t)
 { return -EINVAL; }
 int fs::vfs::inode_rmfile(dentry*, const char*)
 { return -EINVAL; }
@@ -306,9 +308,12 @@ public:
         return GB_OK;
     }
 
-    virtual int inode_mknode(dentry* dir, const char* filename, fs::node_t sn) override
+    virtual int inode_mknode(dentry* dir, const char* filename, mode_t mode, fs::node_t sn) override
     {
-        auto& node = *cache_inode(0, _savedata(sn.v), S_IFBLK | 0777, 0, 0);
+        if (!S_ISBLK(mode) && !S_ISCHR(mode))
+            return -EINVAL;
+
+        auto& node = *cache_inode(0, _savedata(sn), mode, 0, 0);
         mklink(dir->ind, &node, filename);
         dir->append(get_inode(node.ino), filename, true);
         return GB_OK;
@@ -380,10 +385,10 @@ public:
 
         if (mask & STATX_TYPE) {
             st->stx_mode |= ind->mode & S_IFMT;
-            if (S_ISBLK(mode)) {
-                fs::node_t nd { (uint32_t)as_val(_getdata(ind->ino)) };
-                st->stx_rdev_major = nd.in.major;
-                st->stx_rdev_minor = nd.in.minor;
+            if (S_ISBLK(mode) || S_ISCHR(mode)) {
+                auto nd = (fs::node_t)as_val(_getdata(ind->ino));
+                st->stx_rdev_major = NODE_MAJOR(nd);
+                st->stx_rdev_minor = NODE_MINOR(nd);
             }
             st->stx_mask |= STATX_TYPE;
         }
@@ -558,8 +563,8 @@ void fs::fifo_file::close(void)
     ppipe.reset();
 }
 
-// 8 * 8 for now
-static fs::special_node sns[8][8];
+static std::map<fs::node_t, fs::blkdev_ops> blkdevs;
+static std::map<fs::node_t, fs::chrdev_ops> chrdevs;
 
 size_t fs::vfs_read(fs::inode* file, char* buf, size_t buf_size, size_t offset, size_t n)
 {
@@ -568,26 +573,28 @@ size_t fs::vfs_read(fs::inode* file, char* buf, size_t buf_size, size_t offset, 
         return -1U;
     }
 
-    if (S_ISBLK(file->mode)) {
-        uint32_t ret = file->fs->inode_getnode(file);
-        if (ret == SN_INVALID) {
-            errno = EINVAL;
-            return 0xffffffff;
-        }
-        fs::node_t sn {
-            .v = ret
-        };
-        auto* ptr = &sns[sn.in.major][sn.in.minor];
-        auto* ops = &ptr->ops;
-        if (ops && ops->read)
-            return ops->read(ptr, buf, buf_size, offset, n);
-        else {
-            errno = EINVAL;
-            return 0xffffffff;
-        }
-    } else {
+    if (S_ISREG(file->mode))
         return file->fs->inode_read(file, buf, buf_size, offset, n);
+
+    if (S_ISBLK(file->mode) || S_ISCHR(file->mode)) {
+        node_t sn = file->fs->inode_getnode(file);
+
+        ssize_t ret;
+        if (S_ISBLK(file->mode))
+            ret = block_device_read(sn, buf, buf_size, offset, n);
+        else
+            ret = char_device_read(sn, buf, buf_size, n);
+
+        if (ret < 0) {
+            errno = -ret;
+            return -1U;
+        }
+
+        return ret;
     }
+
+    errno = EINVAL;
+    return -1U;
 }
 size_t fs::vfs_write(fs::inode* file, const char* buf, size_t offset, size_t n)
 {
@@ -596,34 +603,36 @@ size_t fs::vfs_write(fs::inode* file, const char* buf, size_t offset, size_t n)
         return -1U;
     }
 
-    if (S_ISBLK(file->mode)) {
-        uint32_t ret = file->fs->inode_getnode(file);
-        if (ret == SN_INVALID) {
-            errno = EINVAL;
-            return 0xffffffff;
-        }
-        fs::node_t sn {
-            .v = ret
-        };
-        auto* ptr = &sns[sn.in.major][sn.in.minor];
-        auto* ops = &ptr->ops;
-        if (ops && ops->write)
-            return ops->write(ptr, buf, offset, n);
-        else {
-            errno = EINVAL;
-            return 0xffffffff;
-        }
-    } else {
+    if (S_ISREG(file->mode))
         return file->fs->inode_write(file, buf, offset, n);
+
+    if (S_ISBLK(file->mode) || S_ISCHR(file->mode)) {
+        node_t sn = file->fs->inode_getnode(file);
+
+        ssize_t ret;
+        if (S_ISBLK(file->mode))
+            ret = block_device_write(sn, buf, offset, n);
+        else
+            ret = char_device_write(sn, buf, n);
+
+        if (ret < 0) {
+            errno = -ret;
+            return -1U;
+        }
+
+        return ret;
     }
+
+    errno = EINVAL;
+    return -1U;
 }
 int fs::vfs_mkfile(fs::vfs::dentry* dir, const char* filename, mode_t mode)
 {
     return dir->ind->fs->inode_mkfile(dir, filename, mode);
 }
-int fs::vfs_mknode(fs::vfs::dentry* dir, const char* filename, fs::node_t sn)
+int fs::vfs_mknode(fs::vfs::dentry* dir, const char* filename, mode_t mode, fs::node_t sn)
 {
-    return dir->ind->fs->inode_mknode(dir, filename, sn);
+    return dir->ind->fs->inode_mknode(dir, filename, mode, sn);
 }
 int fs::vfs_rmfile(fs::vfs::dentry* dir, const char* filename)
 {
@@ -656,19 +665,163 @@ int fs::vfs_stat(fs::vfs::dentry* ent, statx* stat, unsigned int mask)
 
 static std::list<fs::vfs*>* fs_es;
 
-void fs::register_special_block(
-    uint16_t major,
-    uint16_t minor,
-    fs::special_node_read read,
-    fs::special_node_write write,
-    uint32_t data1,
-    uint32_t data2)
+int fs::register_block_device(fs::node_t node, fs::blkdev_ops ops)
 {
-    fs::special_node& sn = sns[major][minor];
-    sn.ops.read = read;
-    sn.ops.write = write;
-    sn.data1 = data1;
-    sn.data2 = data2;
+    auto iter = blkdevs.find(node);
+    if (iter)
+        return -EEXIST;
+
+    std::tie(iter, std::ignore) = blkdevs.emplace(node, std::move(ops));
+    return 0;
+}
+
+int fs::register_char_device(fs::node_t node, fs::chrdev_ops ops)
+{
+    auto iter = chrdevs.find(node);
+    if (iter)
+        return -EEXIST;
+
+    std::tie(iter, std::ignore) = chrdevs.emplace(node, std::move(ops));
+    return 0;
+}
+
+// MBR partition table, used by partprobe()
+
+struct PACKED mbr_part_entry {
+    uint8_t attr;
+    uint8_t chs_start[3];
+    uint8_t type;
+    uint8_t chs_end[3];
+    uint32_t lba_start;
+    uint32_t cnt;
+};
+
+struct PACKED mbr {
+    uint8_t code[440];
+    uint32_t signature;
+    uint16_t reserved;
+    mbr_part_entry parts[4];
+    uint16_t magic;
+};
+
+static inline void mbr_part_probe(fs::node_t node, char ch)
+{
+    mbr buf_mbr;
+    // TODO: devtmpfs
+    auto* dev = fs::vfs_open(*fs::fs_root, "/dev");
+    if (!dev)
+        return;
+
+    char label[] = "sda1";
+    label[2] = ch;
+    auto ret = fs::block_device_read(node, (char*)&buf_mbr, sizeof(mbr), 0, 512);
+    if (ret < 0) {
+        kmsg("[kernel] cannot read device for part probing.\n");
+        return;
+    }
+
+    int n = 1;
+    for (const auto& part : buf_mbr.parts) {
+        if (n >= 8)
+            break;
+
+        if (!part.type)
+            continue;
+
+        std::size_t part_offset = part.lba_start * 512;
+
+        // TODO: add partition offset limit
+        fs::register_block_device(node + n, {
+            [=](char* buf, size_t buf_size, size_t offset, size_t n) -> ssize_t {
+                offset += part_offset;
+                return fs::block_device_read(node, buf, buf_size, offset, n);
+            },
+            [=](const char* buf, size_t offset, size_t n) -> ssize_t {
+                offset += part_offset;
+                return fs::block_device_write(node, buf, offset, n);
+            }
+        });
+
+        ret = fs::vfs_mknode(dev, label, 0660 | S_IFBLK, node + n);
+        ++n, ++label[3];
+    }
+}
+
+void fs::partprobe()
+{
+    auto* dev = fs::vfs_open(*fs::fs_root, "/dev");
+    if (!dev)
+        return;
+
+    char ch = 'a';
+    char name[] = "sd*";
+    types::string<> path = "/dev/sd*";
+    for (const auto& device : blkdevs) {
+        // only the devices whose minor number is a multiple of 8
+        // are considered as a disk instead of partitions
+        if (NODE_MINOR(device.first) % 8 != 0)
+            continue;
+
+        path.pop();
+        path += ch;
+        name[2] = ch;
+
+        auto* blkfile = fs::vfs_open(*fs::fs_root, path.c_str());
+        if (!blkfile)
+            vfs_mknode(dev, name, 0660 | S_IFBLK, device.first);
+
+        mbr_part_probe(device.first, ch);
+
+        ++ch;
+    }
+}
+
+ssize_t fs::block_device_read(fs::node_t node, char* buf, size_t buf_size, size_t offset, size_t n)
+{
+    if (node == fs::NODE_INVALID)
+        return -EINVAL;
+
+    auto iter = blkdevs.find(node);
+    if (!iter || !iter->second.read)
+        return -EINVAL;
+
+    return iter->second.read(buf, buf_size, offset, n);
+}
+
+ssize_t fs::block_device_write(fs::node_t node, const char* buf, size_t offset, size_t n)
+{
+    if (node == fs::NODE_INVALID)
+        return -EINVAL;
+
+    auto iter = blkdevs.find(node);
+    if (!iter || !iter->second.write)
+        return -EINVAL;
+
+    return iter->second.write(buf, offset, n);
+}
+
+ssize_t fs::char_device_read(fs::node_t node, char* buf, size_t buf_size, size_t n)
+{
+    if (node == fs::NODE_INVALID)
+        return -EINVAL;
+
+    auto iter = chrdevs.find(node);
+    if (!iter || !iter->second.read)
+        return -EINVAL;
+
+    return iter->second.read(buf, buf_size, n);
+}
+
+ssize_t fs::char_device_write(fs::node_t node, const char* buf, size_t n)
+{
+    if (node == fs::NODE_INVALID)
+        return -EINVAL;
+
+    auto iter = chrdevs.find(node);
+    if (!iter || !iter->second.read)
+        return -EINVAL;
+
+    return iter->second.write(buf, n);
 }
 
 fs::vfs* fs::register_fs(vfs* fs)
@@ -677,22 +830,22 @@ fs::vfs* fs::register_fs(vfs* fs)
     return fs;
 }
 
-size_t b_null_read(fs::special_node*, char* buf, size_t buf_size, size_t, size_t n)
+ssize_t b_null_read(char* buf, size_t buf_size, size_t n)
 {
     if (n >= buf_size)
         n = buf_size;
     memset(buf, 0x00, n);
     return n;
 }
-size_t b_null_write(fs::special_node*, const char*, size_t, size_t n)
+ssize_t b_null_write(const char*, size_t n)
 {
     return n;
 }
-static size_t console_read(fs::special_node*, char* buf, size_t buf_size, size_t, size_t n)
+static ssize_t console_read(char* buf, size_t buf_size, size_t n)
 {
     return console->read(buf, buf_size, n);
 }
-static size_t console_write(fs::special_node*, const char* buf, size_t, size_t n)
+static ssize_t console_write(const char* buf, size_t n)
 {
     size_t orig_n = n;
     while (n--)
@@ -797,10 +950,10 @@ void init_vfs(void)
 {
     using namespace fs;
     // null
-    register_special_block(0, 0, b_null_read, b_null_write, 0, 0);
+    register_char_device(make_node(1, 0), { b_null_read, b_null_write });
     // console (supports serial console only for now)
     // TODO: add interface to bind console device to other devices
-    register_special_block(1, 0, console_read, console_write, 0, 0);
+    register_char_device(make_node(2, 0), { console_read, console_write });
 
     fs_es = types::pnew<types::kernel_ident_allocator>(fs_es);
 
@@ -820,7 +973,6 @@ void init_vfs(void)
 
     auto* dev = vfs_open(*fs_root, "/dev");
     assert(dev);
-    vfs_mknode(dev, "null", { .in { .major = 0, .minor = 0 } });
-    vfs_mknode(dev, "console", { .in { .major = 1, .minor = 0 } });
-    vfs_mknode(dev, "hda", { .in { .major = 2, .minor = 0 } });
+    vfs_mknode(dev, "null", 0666 | S_IFCHR, make_node(1, 0));
+    vfs_mknode(dev, "console", 0666 | S_IFCHR, make_node(2, 0));
 }

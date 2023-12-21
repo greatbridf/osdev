@@ -43,10 +43,12 @@ set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
                         src/kernel/tty.cpp
                         src/kernel/syscall.cpp
                         src/kernel/mem.cpp
+                        src/kernel/module.cc
                         src/kernel/vfs.cpp
                         src/kernel/vga.cpp
-                        src/kernel/hw/ata.cpp
+                        src/kernel/hw/ahci.cc
                         src/kernel/hw/keyboard.cpp
+                        src/kernel/hw/pci.cc
                         src/kernel/hw/serial.cpp
                         src/kernel/hw/timer.c
                         src/kernel/event/event.cpp
@@ -67,11 +69,12 @@ set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
                         include/kernel/syscall.hpp
                         include/kernel/mem.h
                         include/kernel/mm.hpp
+                        include/kernel/module.hpp
                         include/kernel/vfs.hpp
                         include/kernel/vga.hpp
                         include/kernel/signal.hpp
-                        include/kernel/hw/ata.hpp
                         include/kernel/hw/keyboard.h
+                        include/kernel/hw/pci.hpp
                         include/kernel/hw/port.hpp
                         include/kernel/hw/serial.h
                         include/kernel/hw/timer.h

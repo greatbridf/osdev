@@ -3,6 +3,7 @@
 #include <assert.h>
 #include <kernel/event/event.h>
 #include <kernel/hw/keyboard.h>
+#include <kernel/hw/pci.hpp>
 #include <kernel/hw/serial.h>
 #include <kernel/hw/timer.h>
 #include <kernel/interrupt.h>
@@ -112,6 +113,7 @@ extern "C" SECTION(".text.kinit") void NORETURN kernel_init(void)
     ret = init_console("ttyS0");
     assert(ret == GB_OK);
 
+    kernel::kinit::init_pci();
     init_vfs();
     init_syscall();
 

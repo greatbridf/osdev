@@ -10,9 +10,9 @@ void init_pit(void)
     asm_outb(PORT_PIT_CONTROL, 0x34);
 
     // send interval number
-    // 0x2e9c = 11932 = 100Hz
-    asm_outb(PORT_PIT_COUNT, 0x9c);
-    asm_outb(PORT_PIT_COUNT, 0x2e);
+    // 0x04a9 = 1193 = 1000Hz
+    asm_outb(PORT_PIT_COUNT, 0xa9);
+    asm_outb(PORT_PIT_COUNT, 0x04);
 }
 
 void inc_tick(void)

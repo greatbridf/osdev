@@ -19,6 +19,7 @@ extern uint32_t* _get_errno(void);
 #define ENOENT 2
 #define ESRCH 3
 #define EINTR 4
+#define EIO 5
 #define EBADF 9
 #define ECHILD 10
 #define ENOMEM 12

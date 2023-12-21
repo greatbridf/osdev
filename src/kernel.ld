@@ -76,6 +76,13 @@ SECTIONS
         *(.rodata)
         *(.rodata*)
 
+        kmod_loaders_start = .;
+
+        *(.kmods)
+
+        __kmod_loaders_end = .;
+        LONG(0);
+
         . = ALIGN(16);
 
         bss_addr = .;

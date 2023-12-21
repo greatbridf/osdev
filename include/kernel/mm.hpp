@@ -110,7 +110,7 @@ void __free_raw_page(page_t pg);
 
 namespace kernel {
 
-void* pmap(page_t pg);
+void* pmap(page_t pg, bool cached = true);
 void pfree(page_t pg);
 
 class paccess : public types::non_copyable {
@@ -123,10 +123,10 @@ public:
     paccess(paccess&&) = delete;
     paccess& operator=(paccess&&) = delete;
 
-    constexpr explicit paccess(page_t pg)
+    constexpr explicit paccess(page_t pg, bool cached = true)
         : m_pg(pg)
     {
-        m_ptr = pmap(pg);
+        m_ptr = pmap(pg, cached);
     }
     constexpr void* ptr(void) const
     {

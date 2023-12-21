@@ -7,11 +7,11 @@
 #include <asm/sys.h>
 #include <assert.h>
 #include <fs/fat.hpp>
-#include <kernel/hw/ata.hpp>
 #include <kernel/interrupt.h>
 #include <kernel/log.hpp>
 #include <kernel/mem.h>
 #include <kernel/mm.hpp>
+#include <kernel/module.hpp>
 #include <kernel/process.hpp>
 #include <kernel/signal.hpp>
 #include <kernel/vfs.hpp>
@@ -257,7 +257,27 @@ void kernel_threadd_main(void)
     }
 }
 
-void NORETURN _kernel_init(void)
+static void release_kinit()
+{
+    extern char __stage1_start[];
+    extern char __kinit_end[];
+
+    kernel::paccess pa(EARLY_KERNEL_PD_PAGE);
+    auto pd = (pd_t)pa.ptr();
+    assert(pd);
+    (*pd)[0].v = 0;
+
+    // free pt#0
+    __free_raw_page(0x00002);
+
+    // free .stage1 and .kinit
+    for (uint32_t i = ((uint32_t)__stage1_start >> 12);
+            i < ((uint32_t)__kinit_end >> 12); ++i) {
+        __free_raw_page(i);
+    }
+}
+
+static void create_kthreadd_process()
 {
     // pid 2 is kernel thread daemon
     auto& proc = procs->emplace(1);
@@ -285,15 +305,38 @@ void NORETURN _kernel_init(void)
     push_stack(esp, 0x200);
 
     readythds->push(&thd);
+}
 
-    // ------------------------------------------
+void NORETURN _kernel_init(void)
+{
+    create_kthreadd_process();
+
+    release_kinit();
 
     asm_sti();
 
-    hw::init_ata();
+    // ------------------------------------------
+    // interrupt enabled
+    // ------------------------------------------
+
+    // load kmods
+    for (auto loader = kernel::module::kmod_loaders_start; *loader; ++loader) {
+        auto* mod = (*loader)();
+        if (!mod)
+            continue;
+
+        auto ret = insmod(mod);
+        if (ret == kernel::module::MODULE_SUCCESS)
+            continue;
+
+        char buf[256];
+        snprintf(buf, sizeof(buf),
+            "[kernel] An error occured while loading \"%s\"\n", mod->name);
+        kmsg(buf);
+    }
 
     // TODO: parse kernel parameters
-    auto* drive = fs::vfs_open(*fs::fs_root, "/dev/hda1");
+    auto* drive = fs::vfs_open(*fs::fs_root, "/dev/sda1");
     assert(drive);
     auto* _new_fs = fs::register_fs(new fs::fat::fat32(drive->ind));
     auto* mnt = fs::vfs_open(*fs::fs_root, "/mnt");
@@ -349,27 +392,9 @@ void k_new_thread(void (*func)(void*), void* data)
     kthreadd_new_thd_data = data;
 }
 
+SECTION(".text.kinit")
 void NORETURN init_scheduler(void)
 {
-    {
-        extern char __stage1_start[];
-        extern char __kinit_end[];
-
-        kernel::paccess pa(EARLY_KERNEL_PD_PAGE);
-        auto pd = (pd_t)pa.ptr();
-        assert(pd);
-        (*pd)[0].v = 0;
-
-        // free pt#0
-        __free_raw_page(0x00002);
-
-        // free .stage1 and .kinit
-        for (uint32_t i = ((uint32_t)__stage1_start >> 12);
-             i < ((uint32_t)__kinit_end >> 12); ++i) {
-            __free_raw_page(i);
-        }
-    }
-
     procs = new proclist;
     readythds = new readyqueue;
 
@@ -384,10 +409,6 @@ void NORETURN init_scheduler(void)
     init.files.open(init, "/dev/console", O_RDONLY, 0);
     init.files.open(init, "/dev/console", O_WRONLY, 0);
     init.files.open(init, "/dev/console", O_WRONLY, 0);
-
-    // we need interrupts enabled for cow mapping so now we disable it
-    // in case timer interrupt mess things up
-    asm_cli();
 
     current_process = &init;
     current_thread = &thd;

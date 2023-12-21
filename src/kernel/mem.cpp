@@ -472,7 +472,7 @@ int mmap(
 {
     auto& mms = current_process->mms;
 
-    if (!S_ISREG(file->mode) && !S_ISBLK(file->mode)) [[unlikely]] {
+    if (!file && !S_ISREG(file->mode) && !S_ISBLK(file->mode)) [[unlikely]] {
         errno = EINVAL;
         return GB_FAILED;
     }
@@ -489,11 +489,19 @@ int mmap(
         return GB_FAILED;
     }
 
-    auto& mm = mms.add_empty_area(hint, n_pgs, PAGE_MMAP | PAGE_COW, write, priv);
+    if (file) {
+        auto& mm = mms.add_empty_area(hint, n_pgs, PAGE_MMAP | PAGE_COW, write, priv);
 
-    mm.attr.mapped = 1;
-    mm.mapped_file = file;
-    mm.file_offset = offset;
+        mm.attr.mapped = 1;
+        mm.mapped_file = file;
+        mm.file_offset = offset;
+    }
+    else {
+        // private mapping of zero-filled pages
+        auto& mm = mms.add_empty_area(hint, n_pgs, PAGE_COW, write, priv);
+
+        mm.attr.mapped = 0;
+    }
 
     return GB_OK;
 }
@@ -553,7 +561,7 @@ static types::bitmap freebm(
     [](unsigned char*, std::size_t){}, _freebm, 0x400);
 } // namespace __physmapper
 
-void* kernel::pmap(page_t pg)
+void* kernel::pmap(page_t pg, bool cached)
 {
     auto* const pmap_pt = std::bit_cast<pte_t*>(0xff001000);
     auto* const mapped_start = std::bit_cast<void*>(0xff000000);
@@ -568,7 +576,10 @@ void* kernel::pmap(page_t pg)
     for (int i = 2; i < 0x400; ++i) {
         if (__physmapper::freebm.test(i) == 0) {
             auto* pte = pmap_pt + i;
-            pte->v = 0x3;
+            if (cached)
+                pte->v = 0x3;
+            else
+                pte->v = 0x13;
             pte->in.page = pg;
 
             void* ptr = vptradd(mapped_start, 0x1000 * i);

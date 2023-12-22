@@ -153,8 +153,8 @@ int filearr::open(const process &current,
 
 process::process(const process& parent, pid_t pid)
     : mms { parent.mms }, attr { parent.attr } , pwd { parent.pwd }
-    , signals { parent.signals } , umask { parent.umask }, pid { pid }
-    , ppid { parent.pid } , pgid { parent.pgid } , sid { parent.sid }
+    , umask { parent.umask }, pid { pid } , ppid { parent.pid }
+    , pgid { parent.pgid } , sid { parent.sid }
     , control_tty { parent.control_tty }, root { parent.root }
 {
     this->files.dup_all(parent.files);
@@ -163,6 +163,16 @@ process::process(const process& parent, pid_t pid)
 process::process(pid_t pid, pid_t ppid)
     : attr { .system = true }
     , pwd { "/" } , pid { pid } , ppid { ppid } { }
+
+void process::send_signal(kernel::signal_list::signo_type signal)
+{
+    for (auto& thd : thds) {
+        if (thd.signals.is_masked(signal))
+            continue;
+        thd.signals.set(signal);
+        break;
+    }
+}
 
 void proclist::kill(pid_t pid, int exit_code)
 {
@@ -173,6 +183,13 @@ void proclist::kill(pid_t pid, int exit_code)
         thd.attr.ready = 0;
         readythds->remove_all(&thd);
     }
+
+    // if current process is connected to a tty
+    // clear its read buffer
+    // TODO: make tty line discipline handle this
+    tty* ctrl_tty = current_process->control_tty;
+    if (ctrl_tty)
+        ctrl_tty->clear_read_buf();
 
     // write back mmap'ped files and close them
     proc.files.close_all();
@@ -395,6 +412,8 @@ void k_new_thread(void (*func)(void*), void* data)
 SECTION(".text.kinit")
 void NORETURN init_scheduler(void)
 {
+    asm_cli();
+
     procs = new proclist;
     readythds = new readyqueue;
 
@@ -473,8 +492,7 @@ bool schedule()
 
 _end:
 
-    check_signal();
-    return current_process->signals.empty();
+    return current_thread->signals.handle() == 0;
 }
 
 void NORETURN schedule_noreturn(void)
@@ -491,28 +509,9 @@ void NORETURN freeze(void)
         ;
 }
 
-void NORETURN kill_current(int exit_code)
+void NORETURN kill_current(int signo)
 {
-    procs->kill(current_process->pid, exit_code);
+    procs->kill(current_process->pid,
+        (signo + 128) << 8 | (signo & 0xff));
     schedule_noreturn();
-}
-
-void check_signal()
-{
-    switch (current_process->signals.pop()) {
-    case kernel::SIGINT:
-    case kernel::SIGQUIT:
-    case kernel::SIGSTOP: {
-        tty* ctrl_tty = current_process->control_tty;
-        if (ctrl_tty)
-            ctrl_tty->clear_read_buf();
-        kill_current(-1);
-        break;
-    }
-    case kernel::SIGPIPE:
-        kill_current(-1);
-        break;
-    case 0:
-        break;
-    }
 }

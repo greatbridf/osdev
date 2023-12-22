@@ -176,6 +176,8 @@ int _syscall_execve(interrupt_stack* data)
     data->v_eip = d.eip;
     data->esp = (uint32_t)d.sp;
 
+    current_thread->signals.on_exec();
+
     return 0;
 }
 
@@ -567,7 +569,7 @@ int _syscall_munmap(interrupt_stack* data)
 [[noreturn]] static void not_implemented()
 {
     console->print("\n[kernel] this function is not implemented\n");
-    kill_current(-1);
+    kill_current(SIGSYS);
 }
 
 int _syscall_sendfile64(interrupt_stack* data)
@@ -744,6 +746,50 @@ int _syscall_kill(interrupt_stack* data)
     return 0;
 }
 
+int _syscall_rt_sigprocmask(interrupt_stack* data)
+{
+    SYSCALL_ARG1(int, how);
+    SYSCALL_ARG2(const sigset_t* __user, set);
+    SYSCALL_ARG3(sigset_t* __user, oldset);
+    SYSCALL_ARG4(size_t, sigsetsize);
+
+    if (sigsetsize != sizeof(sigset_t))
+        return -EINVAL;
+
+    sigset_t sigs;
+    current_thread->signals.get_mask(&sigs);
+
+    // TODO: use copy_to_user
+    if (oldset)
+        memcpy(oldset, &sigs, sizeof(sigset_t));
+
+    // TODO: use copy_from_user
+    switch (how) {
+    case SIG_BLOCK:
+        if (!set)
+            break;
+
+        for (size_t i = 0; i < sizeof(sigset_t); ++i)
+            sigs.__sig[i] |= set->__sig[i];
+        current_thread->signals.set_mask(&sigs);
+        break;
+    case SIG_UNBLOCK:
+        if (!set)
+            break;
+
+        for (size_t i = 0; i < sizeof(sigset_t); ++i)
+            sigs.__sig[i] &= ~set->__sig[i];
+        current_thread->signals.set_mask(&sigs);
+        break;
+    case SIG_SETMASK:
+        if (set)
+            current_thread->signals.set_mask(set);
+        break;
+    }
+
+    return 0;
+}
+
 extern "C" void syscall_entry(interrupt_stack* data)
 {
     int syscall_no = SYSCALL_NO;
@@ -754,14 +800,14 @@ extern "C" void syscall_entry(interrupt_stack* data)
         snprintf(buf, 64,
             "[kernel] syscall %x not implemented\n", syscall_no);
         console->print(buf);
-        kill_current(-1);
+        not_implemented();
     }
 
     int ret = syscall_handlers[syscall_no](data);
 
     SYSCALL_RETVAL = ret;
 
-    check_signal();
+    current_thread->signals.handle();
 }
 
 SECTION(".text.kinit")
@@ -795,6 +841,7 @@ void init_syscall(void)
     syscall_handlers[0x92] = _syscall_writev;
     syscall_handlers[0x93] = _syscall_getsid;
     syscall_handlers[0xac] = _syscall_prctl;
+    syscall_handlers[0xaf] = _syscall_rt_sigprocmask;
     syscall_handlers[0xb7] = _syscall_getcwd;
     syscall_handlers[0xc0] = _syscall_mmap_pgoff;
     syscall_handlers[0xc7] = _syscall_getuid;

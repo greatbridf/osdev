@@ -70,6 +70,7 @@ public:
     uint32_t pkstack;
     pid_t owner;
     thread_attr attr;
+    signal_list signals;
 
     int* __user set_child_tid {};
     int* __user clear_child_tid {};
@@ -253,7 +254,6 @@ public:
     process_attr attr {};
     filearr files;
     types::path pwd;
-    kernel::signal_list signals;
     mode_t umask { 0022 };
 
     pid_t pid {};
@@ -277,6 +277,8 @@ public:
     { return attr.system; }
     constexpr bool is_zombie(void) const
     { return attr.zombie; }
+
+    void send_signal(kernel::signal_list::signo_type signal);
 };
 
 class proclist final {
@@ -361,16 +363,18 @@ public:
     }
 
     // the process MUST exist, or the behavior is undefined
-    void send_signal(pid_t pid, kernel::sig_t signal)
+    void send_signal(pid_t pid, kernel::signal_list::signo_type signal)
     {
-        auto& proc = this->find(pid);
-        proc.signals.set(signal);
+        auto& proc = find(pid);
+        proc.send_signal(signal);
     }
-    void send_signal_grp(pid_t pgid, kernel::sig_t signal)
+    void send_signal_grp(pid_t pgid, kernel::signal_list::signo_type signal)
     {
+        // TODO: find processes that are in the same session quickly
         for (auto& [ pid, proc ] : m_procs) {
-            if (proc.pgid == pgid)
-                proc.signals.set(signal);
+            if (proc.pgid != pgid)
+                continue;
+            proc.send_signal(signal);
         }
     }
 
@@ -436,6 +440,6 @@ constexpr uint32_t push_stack(uint32_t** stack, uint32_t val)
 void k_new_thread(void (*func)(void*), void* data);
 
 void NORETURN freeze(void);
-void NORETURN kill_current(int exit_code);
+void NORETURN kill_current(int signo);
 
 void check_signal(void);

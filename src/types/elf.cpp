@@ -99,23 +99,25 @@ int types::elf::elf32_load(types::elf::elf32_load_data* d)
         auto flen = align_up<12>(phent.vaddr + phent.filesz) - vaddr;
         auto fileoff = align_down<12>(phent.offset);
 
-        auto ret = mmap(
-            (char*)vaddr,
-            phent.filesz + (phent.vaddr & 0xfff),
-            ent_exec->ind,
-            fileoff,
-            1,
-            d->system);
+        if (flen) {
+            auto ret = mmap(
+                (char*)vaddr,
+                phent.filesz + (phent.vaddr & 0xfff),
+                ent_exec->ind,
+                fileoff,
+                1,
+                d->system);
 
-        if (ret != GB_OK)
-            kill_current(-1);
+            if (ret != GB_OK)
+                kill_current(SIGSEGV);
+        }
 
         if (vlen > flen) {
-            ret = mmap((char*)vaddr + flen, vlen - flen,
+            auto ret = mmap((char*)vaddr + flen, vlen - flen,
                 nullptr, 0, true, d->system);
 
             if (ret != GB_OK)
-                kill_current(-1);
+                kill_current(SIGSEGV);
         }
 
         if (vaddr + vlen > data_segment_end)

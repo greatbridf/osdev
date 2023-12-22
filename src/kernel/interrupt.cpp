@@ -170,7 +170,7 @@ extern "C" void int6_handler(
         "[kernel] int6 data: cs: %x, eflags: %x\n", cs, eflags);
     kmsg(buf);
     if (!current_process->attr.system)
-        kill_current(-1);
+        kill_current(SIGSEGV);
     else
         die(s_regs, eip);
 }
@@ -189,7 +189,7 @@ extern "C" void int13_handler(
         error_code, cs, eflags);
     kmsg(buf);
     if (!current_process->attr.system)
-        kill_current(-1);
+        kill_current(SIGILL);
     else
         die(s_regs, eip);
 }
@@ -219,7 +219,7 @@ static inline void NORETURN _int14_kill_user(void)
     char buf[256] {};
     snprintf(buf, 256, "Segmentation Fault (pid%d killed)\n", current_process->pid);
     kmsg(buf);
-    kill_current(-1);
+    kill_current(SIGSEGV);
 }
 
 // page fault

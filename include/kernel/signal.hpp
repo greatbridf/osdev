@@ -2,84 +2,46 @@
 
 #include <list>
 
+#include <signal.h>
 #include <stdint.h>
+#include <types/types.h>
+
 #include <types/cplusplus.hpp>
 
 namespace kernel {
 
-using sig_t = uint32_t;
-
-constexpr sig_t SIGINT = 2;
-constexpr sig_t SIGQUIT = 3;
-constexpr sig_t SIGSTOP = 13;
-constexpr sig_t SIGPIPE = 19;
-
 class signal_list {
 public:
-    using list_type = std::list<sig_t>;
+    using signo_type = uint32_t;
+    using list_type = std::list<signo_type>;
 
 private:
     list_type m_list;
-    sig_t m_mask;
+    signo_type m_mask;
+    sig_t m_handlers[32];
 
 public:
-    static constexpr bool check_valid(sig_t sig)
+    static constexpr bool check_valid(signo_type sig)
     {
-        switch (sig) {
-        case SIGINT:
-        case SIGQUIT:
-        case SIGSTOP:
-        case SIGPIPE:
-            return true;
-        default:
-            return false;
-        }
+        return sig > 0 && sig < 32;
     }
 
 public:
-    constexpr signal_list(void)
-        : m_mask(0)
-    {
-    }
-    constexpr signal_list(const signal_list& val)
-        : m_list(val.m_list)
-        , m_mask(val.m_mask)
-    {
-    }
+    signal_list();
+    constexpr signal_list(const signal_list& val) = default;
+    constexpr signal_list(signal_list&& val) = default;
 
-    constexpr signal_list(signal_list&& val)
-        : m_list(std::move(val.m_list))
-        , m_mask(val.m_mask)
-    {
-    }
+    void on_exec();
 
-    constexpr bool empty(void) const
-    {
-        return this->m_list.empty();
-    }
+    void get_mask(sigset_t* __user mask) const;
+    void set_mask(const sigset_t* __user mask);
 
-    constexpr void set(sig_t signal)
-    {
-        if (this->m_mask && signal)
-            return;
+    constexpr bool is_masked(signo_type signal) const { return m_mask & (1 << signal); }
+    constexpr bool empty(void) const { return m_list.empty(); }
 
-        this->m_list.push_back(signal);
-        this->m_mask |= signal;
-    }
-
-    constexpr sig_t pop(void)
-    {
-        if (this->empty())
-            return 0;
-
-        auto iter = this->m_list.begin();
-        sig_t signal = *iter;
-        this->m_list.erase(iter);
-
-        this->m_mask &= ~signal;
-
-        return signal;
-    }
+    void set(signo_type signal);
+    signo_type handle();
+    void after_signal(signo_type signal);
 };
 
 } // namespace kernel

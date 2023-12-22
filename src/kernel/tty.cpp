@@ -118,7 +118,7 @@ void serial_tty::recvchar(char c)
         break;
     // ^C: SIGINT
     case 0x03:
-        procs->send_signal_grp(fg_pgroup, kernel::SIGINT);
+        procs->send_signal_grp(fg_pgroup, SIGINT);
         this->m_cv.notify();
         break;
     // ^D: EOF
@@ -127,7 +127,7 @@ void serial_tty::recvchar(char c)
         break;
     // ^Z: SIGSTOP
     case 0x1a:
-        procs->send_signal_grp(fg_pgroup, kernel::SIGSTOP);
+        procs->send_signal_grp(fg_pgroup, SIGSTOP);
         this->m_cv.notify();
         break;
     // ^[: ESCAPE
@@ -140,7 +140,7 @@ void serial_tty::recvchar(char c)
         break;
     // ^\: SIGQUIT
     case 0x1c:
-        procs->send_signal_grp(fg_pgroup, kernel::SIGQUIT);
+        procs->send_signal_grp(fg_pgroup, SIGQUIT);
         this->m_cv.notify();
         break;
     default:

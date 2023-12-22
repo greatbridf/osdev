@@ -472,7 +472,7 @@ int mmap(
 {
     auto& mms = current_process->mms;
 
-    if (!file && !S_ISREG(file->mode) && !S_ISBLK(file->mode)) [[unlikely]] {
+    if (file && !S_ISREG(file->mode) && !S_ISBLK(file->mode)) [[unlikely]] {
         errno = EINVAL;
         return GB_FAILED;
     }

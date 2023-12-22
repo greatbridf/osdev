@@ -88,15 +88,6 @@ int types::elf::elf32_load(types::elf::elf32_load_data* d)
     // so we can't just simply return to it on error.
     current_process->mms.clear_user();
 
-    // TODO: remove this
-    fs::inode* null_ind = nullptr;
-    {
-        auto* dent = fs::vfs_open(*fs::fs_root, "/dev/null");
-        if (!dent)
-            kill_current(-1);
-        null_ind = dent->ind;
-    }
-
     uint32_t data_segment_end = 0;
 
     for (const auto& phent : phents) {
@@ -120,13 +111,8 @@ int types::elf::elf32_load(types::elf::elf32_load_data* d)
             kill_current(-1);
 
         if (vlen > flen) {
-            ret = mmap(
-                (char*)vaddr + flen,
-                vlen - flen,
-                null_ind,
-                0,
-                1,
-                d->system);
+            ret = mmap((char*)vaddr + flen, vlen - flen,
+                nullptr, 0, true, d->system);
 
             if (ret != GB_OK)
                 kill_current(-1);
@@ -145,8 +131,7 @@ int types::elf::elf32_load(types::elf::elf32_load_data* d)
 
     // map stack area
     auto ret = mmap((void*)types::elf::ELF_STACK_TOP,
-        types::elf::ELF_STACK_SIZE,
-        null_ind, 0, 1, 0);
+        types::elf::ELF_STACK_SIZE, nullptr, 0, true, false);
     assert(ret == GB_OK);
 
     d->eip = (void*)hdr.entry;

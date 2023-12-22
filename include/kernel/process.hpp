@@ -209,25 +209,26 @@ public:
         if (!iter)
             return;
 
-        iter->second->close();
         _fds.push(fd);
         arr.erase(iter);
     }
 
     constexpr void onexec()
     {
-        for (auto&& [ fd, fp ] : arr) {
-            if (fp->flags.close_on_exec)
-                close(fd);
+        for (auto iter = arr.begin(); iter != arr.end(); ) {
+            if (!iter->second->flags.close_on_exec) {
+                ++iter;
+                continue;
+            }
+            _fds.push(iter->first);
+            iter = arr.erase(iter);
         }
     }
 
     constexpr void close_all(void)
     {
-        for (auto&& [ fd, fp ] : arr) {
-            fp->close();
-            _fds.push(fd);
-        }
+        for (const auto& item : arr)
+            _fds.push(item.first);
         arr.clear();
     }
 

@@ -280,7 +280,6 @@ struct file {
 
     virtual ssize_t read(char* __user buf, size_t n) = 0;
     virtual ssize_t write(const char* __user buf, size_t n) = 0;
-    virtual void close() = 0;
 
     // regular files should override this method
     virtual int getdents(char* __user buf, size_t cnt)
@@ -298,20 +297,18 @@ struct regular_file : public virtual file {
 
     virtual ssize_t read(char* __user buf, size_t n) override;
     virtual ssize_t write(const char* __user buf, size_t n) override;
-    virtual void close() override;
     virtual int getdents(char* __user buf, size_t cnt) override;
     virtual int getdents64(char* __user buf, size_t cnt) override;
 };
 
 struct fifo_file : public virtual file {
-    virtual ~fifo_file() = default;
+    virtual ~fifo_file() override;
     std::shared_ptr<pipe> ppipe;
 
     fifo_file(vfs::dentry* parent, file_flags flags, std::shared_ptr<fs::pipe> ppipe);
 
     virtual ssize_t read(char* __user buf, size_t n) override;
     virtual ssize_t write(const char* __user buf, size_t n) override;
-    virtual void close() override;
 };
 
 inline fs::vfs::dentry* fs_root;

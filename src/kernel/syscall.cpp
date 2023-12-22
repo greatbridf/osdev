@@ -583,8 +583,9 @@ int _syscall_sendfile64(interrupt_stack* data)
     if (!out_file || !in_file)
         return -EBADF;
 
-    // TODO: check whether in_fd supports mmapping (for example,
-    //       whether it is a char device) if not, return -EINVAL
+    // TODO: check whether in_fd supports mmapping
+    if (!S_ISREG(in_file->mode) && !S_ISBLK(in_file->mode))
+        return -EINVAL;
 
     if (offset)
         not_implemented();

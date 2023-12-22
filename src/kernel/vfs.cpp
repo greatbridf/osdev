@@ -425,7 +425,7 @@ public:
 
 fs::regular_file::regular_file(vfs::dentry* parent,
     file_flags flags, size_t cursor, inode* ind)
-    : file(S_IFREG, parent, flags), cursor(cursor), ind(ind) { }
+    : file(ind->mode, parent, flags), cursor(cursor), ind(ind) { }
 
 ssize_t fs::regular_file::read(char* __user buf, size_t n)
 {
@@ -458,8 +458,6 @@ ssize_t fs::regular_file::write(const char* __user buf, size_t n)
 
     return n_wrote;
 }
-
-void fs::regular_file::close(void) { } // TODO: mark inode as free
 
 int fs::regular_file::getdents(char* __user buf, size_t cnt)
 {
@@ -552,15 +550,13 @@ ssize_t fs::fifo_file::write(const char* __user buf, size_t n)
     return ppipe->write(buf, n);
 }
 
-void fs::fifo_file::close(void)
+fs::fifo_file::~fifo_file()
 {
     assert(flags.read ^ flags.write);
     if (flags.read)
         ppipe->close_read();
     else
         ppipe->close_write();
-
-    ppipe.reset();
 }
 
 static std::map<dev_t, fs::blkdev_ops> blkdevs;

@@ -86,7 +86,7 @@ runcmd(struct cmd *cmd)
   case REDIR:
     rcmd = (struct redircmd*)cmd;
     close(rcmd->fd);
-    if(open(rcmd->file, rcmd->mode) < 0){
+    if(open(rcmd->file, rcmd->mode, 0666) < 0){
       printf("open %s failed\n", rcmd->file);
       _exit(-1);
     }
@@ -396,13 +396,13 @@ parseredirs(struct cmd *cmd, char **ps, char *es)
       panic("missing file for redirection");
     switch(tok){
     case '<':
-      cmd = redircmd(cmd, q, eq, 0, 0);
+      cmd = redircmd(cmd, q, eq, O_RDONLY, 0);
       break;
     case '>':
-      cmd = redircmd(cmd, q, eq, 0, 1);
+      cmd = redircmd(cmd, q, eq, O_WRONLY | O_CREAT | O_TRUNC, 1);
       break;
     case '+':  // >>
-      cmd = redircmd(cmd, q, eq, 0, 1);
+      cmd = redircmd(cmd, q, eq, O_WRONLY | O_CREAT | O_APPEND, 1);
       break;
     }
   }

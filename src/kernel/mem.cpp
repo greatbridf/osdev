@@ -3,7 +3,7 @@
 #include <asm/port_io.h>
 #include <asm/sys.h>
 #include <assert.h>
-#include <kernel/errno.h>
+#include <errno.h>
 #include <kernel/mem.h>
 #include <kernel/mm.hpp>
 #include <kernel/process.hpp>
@@ -405,6 +405,7 @@ void mm::append_page(pd_t pd, const page& pg, uint32_t attr, bool priv)
         assert(pt);
         pte = *pt;
     }
+    memory_fence;
 
     // map the page in the page table
     int pti = v_to_pti(addr);
@@ -417,6 +418,7 @@ void mm::append_page(pd_t pd, const page& pg, uint32_t attr, bool priv)
         false,
         priv);
 
+    memory_fence;
     kernel::pfree(pt_pg);
 
     if (unlikely((attr & PAGE_COW) && !(pg.attr & PAGE_COW))) {
@@ -429,7 +431,10 @@ void mm::append_page(pd_t pd, const page& pg, uint32_t attr, bool priv)
         pg_pte->in.a = 0;
         invalidate_tlb(addr);
     }
+
+    memory_fence;
     ++*pg.ref_count;
+    memory_fence;
 
     this->pgs->emplace_back(pg);
     auto& emplaced = this->pgs->back();

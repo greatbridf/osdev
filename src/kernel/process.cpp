@@ -153,7 +153,7 @@ int filearr::open(const process &current,
 
 process::process(const process& parent, pid_t pid)
     : mms { parent.mms }, attr { parent.attr } , pwd { parent.pwd }
-    , signals { parent.signals } , pid { pid }
+    , signals { parent.signals } , umask { parent.umask }, pid { pid }
     , ppid { parent.pid } , pgid { parent.pgid } , sid { parent.sid }
     , control_tty { parent.control_tty }, root { parent.root }
 {
@@ -348,7 +348,7 @@ void NORETURN _kernel_init(void)
     current_thread->attr.system = 0;
 
     const char* argv[] = { "/mnt/init", "/mnt/sh", nullptr };
-    const char* envp[] = { nullptr };
+    const char* envp[] = { "LANG=C", "HOME=/", nullptr };
 
     types::elf::elf32_load_data d;
     d.argv = argv;
@@ -502,8 +502,14 @@ void check_signal()
     switch (current_process->signals.pop()) {
     case kernel::SIGINT:
     case kernel::SIGQUIT:
+    case kernel::SIGSTOP: {
+        tty* ctrl_tty = current_process->control_tty;
+        if (ctrl_tty)
+            ctrl_tty->clear_read_buf();
+        kill_current(-1);
+        break;
+    }
     case kernel::SIGPIPE:
-    case kernel::SIGSTOP:
         kill_current(-1);
         break;
     case 0:

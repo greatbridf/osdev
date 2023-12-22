@@ -44,15 +44,16 @@ int14:
     # save current esp (also pointer to struct int14_data)
     mov %esp, %ebx
 
+    # allocate space for mmx registers and argument
+    subl $0x210, %esp
+
     # align stack to 16byte boundary
     and $0xfffffff0, %esp
 
     # save mmx registers
-    subl $512, %esp
-    fxsave (%esp)
+    fxsave 16(%esp)
 
-    # push *data
-    sub $16, %esp
+    # push (interrupt_stack*)data
     mov %ebx, (%esp)
 
     call int14_handler

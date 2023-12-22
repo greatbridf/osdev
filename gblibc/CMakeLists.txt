@@ -5,13 +5,25 @@ add_library(gblibc STATIC
     src/stdio.c
     src/arithmetic.c
     src/string.c
-    src/crt0.s
     src/fcntl.c
     src/unistd.c
     src/wait.c
     src/assert.c
     src/dirent.c
     src/ctype.c
+    src/stdlib.c
+    src/errno.c
+    src/init.c
+    src/internal.c
+    src/alloca.c
+    src/stat.c
+    src/time.c
+    src/signal.c
+    src/platform-independent.s
+)
+
+add_library(crt0 OBJECT
+    src/crt0.s
 )
 
 file(GLOB_RECURSE GBLIBC_PUBLIC_HEADERS ${CMAKE_CURRENT_SOURCE_DIR}/include)

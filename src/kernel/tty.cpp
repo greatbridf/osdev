@@ -150,3 +150,8 @@ void serial_tty::recvchar(char c)
         break;
     }
 }
+
+void tty::clear_read_buf(void)
+{
+    this->buf.clear();
+}

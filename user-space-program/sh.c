@@ -5,61 +5,7 @@
 #include <string.h>
 #include <fcntl.h>
 #include <unistd.h>
-
-int printf(const char* fmt, ...)
-{
-    va_list args;
-    va_start(args, fmt);
-
-    char buf[256] = {};
-    int len = vsnprintf(buf, sizeof(buf), fmt, args);
-
-    len = write(STDOUT_FILENO, buf, len);
-
-    va_end(args);
-
-    return len;
-}
-
-char* strchr(const char* str, int c)
-{
-    const char* p = str;
-    while (*p) {
-        if (*p == c)
-            return (char*)p;
-        ++p;
-    }
-    return NULL;
-}
-
-char* gets(char* buf, int bufsize)
-{
-    int n = read(STDIN_FILENO, buf, bufsize);
-    if (n > 0) {
-      if (buf[n-1] == '\n')
-        buf[n-1] = 0;
-      else
-        buf[n] = 0;
-      return buf;
-    }
-    return NULL;
-}
-
-int puts(const char* str)
-{
-    int len = strlen(str);
-    write(STDOUT_FILENO, str, len);
-    return len + 1;
-}
-
-void* malloc(size_t n)
-{
-    static char mems[1024];
-    static int pos;
-    int orig_pos = pos;
-    pos += n;
-    return mems + orig_pos;
-}
+#include <stdlib.h>
 
 // Parsed command representation
 #define EXEC  1
@@ -133,8 +79,7 @@ runcmd(struct cmd *cmd)
     ecmd = (struct execcmd*)cmd;
     if(ecmd->argv[0] == 0)
       _exit(-1);
-    char* const envp[1] = { NULL };
-    execve(ecmd->argv[0], ecmd->argv, envp);
+    execve(ecmd->argv[0], ecmd->argv, environ);
     printf("exec %s failed\n", ecmd->argv[0]);
     break;
 
@@ -192,9 +137,9 @@ runcmd(struct cmd *cmd)
 int
 getcmd(char *buf, int nbuf)
 {
-  printf("$ ");
+  printf("[root@localhost] #\n");
   memset(buf, 0, nbuf);
-  gets(buf, nbuf);
+  gets(buf);
   if(buf[0] == 0) // EOF
     return -1;
   return 0;

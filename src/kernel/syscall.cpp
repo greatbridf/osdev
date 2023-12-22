@@ -1,30 +1,38 @@
 #include <asm/port_io.h>
 #include <asm/sys.h>
+
 #include <assert.h>
+#include <errno.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+#include <time.h>
+#include <bits/alltypes.h>
 #include <bits/ioctl.h>
+#include <sys/types.h>
 #include <sys/prctl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
-#include <time.h>
+
 #include <kernel/user/thread_local.hpp>
-#include <kernel/errno.h>
 #include <kernel/interrupt.h>
 #include <kernel/log.hpp>
 #include <kernel/mem.h>
 #include <kernel/mm.hpp>
 #include <kernel/process.hpp>
+#include <kernel/signal.hpp>
 #include <kernel/syscall.hpp>
 #include <kernel/tty.hpp>
 #include <kernel/vfs.hpp>
 #include <kernel/hw/timer.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <string.h>
+
 #include <types/allocator.hpp>
 #include <types/elf.hpp>
 #include <types/path.hpp>
 #include <types/lock.hpp>
 #include <types/status.h>
+#include <types/string.hpp>
+#include <types/types.h>
 
 #define SYSCALL_NO ((data)->s_regs.eax)
 #define SYSCALL_RETVAL ((data)->s_regs.eax)
@@ -247,6 +255,8 @@ int _syscall_open(interrupt_stack* data)
     SYSCALL_ARG1(const char* __user, path);
     SYSCALL_ARG2(int, flags);
     SYSCALL_ARG3(mode_t, mode);
+
+    mode &= ~current_process->umask;
 
     return current_process->files.open(*current_process,
         types::make_path(path, current_process->pwd), flags, mode);
@@ -658,6 +668,81 @@ int _syscall_getdents64(interrupt_stack* data)
     return dir->getdents64(buf, cnt);
 }
 
+/* TODO: implement vfs_stat(stat*)
+int _syscall_stat(interrupt_stack* data)
+{
+    SYSCALL_ARG1(const char* __user, pathname);
+    SYSCALL_ARG2(struct stat* __user, buf);
+
+    auto* dent = fs::vfs_open(*current_process->root,
+        types::make_path(pathname, current_process->pwd));
+
+    if (!dent)
+        return -ENOENT;
+
+    return fs::vfs_stat(dent, buf);
+}
+*/
+
+/* TODO: implement vfs_stat(stat*)
+int _syscall_fstat(interrupt_stack* data)
+{
+    SYSCALL_ARG1(int, fd);
+    SYSCALL_ARG2(struct stat* __user, buf);
+
+    auto* file = current_process->files[fd];
+    if (!file)
+        return -EBADF;
+
+    return fs::vfs_stat(file, buf);
+}
+*/
+
+int _syscall_gettimeofday(interrupt_stack* data)
+{
+    SYSCALL_ARG1(timeval* __user, tv);
+    SYSCALL_ARG2(void* __user, tz);
+    // TODO: return time of the day, not time from this boot
+
+    if (unlikely(tz))
+        return -EINVAL;
+
+    if (likely(tv)) {
+        // TODO: use copy_to_user
+        tv->tv_sec = current_ticks() / 100;
+        tv->tv_usec = current_ticks() * 10 * 1000;
+    }
+
+    return 0;
+}
+
+int _syscall_umask(interrupt_stack* data)
+{
+    SYSCALL_ARG1(mode_t, mask);
+
+    mode_t old = current_process->umask;
+    current_process->umask = mask;
+
+    return old;
+}
+
+int _syscall_kill(interrupt_stack* data)
+{
+    SYSCALL_ARG1(pid_t, pid);
+    SYSCALL_ARG2(int, sig);
+
+    if (!procs->try_find(pid))
+        return -ESRCH;
+
+    if (!kernel::signal_list::check_valid(sig))
+        return -EINVAL;
+
+    // TODO: check permission
+    procs->send_signal(pid, sig);
+
+    return 0;
+}
+
 extern "C" void syscall_entry(interrupt_stack* data)
 {
     int syscall_no = SYSCALL_NO;
@@ -693,14 +778,17 @@ void init_syscall(void)
     syscall_handlers[0x0b] = _syscall_execve;
     syscall_handlers[0x0c] = _syscall_chdir;
     syscall_handlers[0x14] = _syscall_getpid;
+    syscall_handlers[0x25] = _syscall_kill;
     syscall_handlers[0x29] = _syscall_dup;
     syscall_handlers[0x2a] = _syscall_pipe;
     syscall_handlers[0x2d] = _syscall_brk;
     syscall_handlers[0x36] = _syscall_ioctl;
     syscall_handlers[0x39] = _syscall_setpgid;
+    syscall_handlers[0x3c] = _syscall_umask;
     syscall_handlers[0x3f] = _syscall_dup2;
     syscall_handlers[0x40] = _syscall_getppid;
     syscall_handlers[0x42] = _syscall_setsid;
+    syscall_handlers[0x4e] = _syscall_gettimeofday;
     syscall_handlers[0x5b] = _syscall_munmap;
     syscall_handlers[0x84] = _syscall_getdents;
     syscall_handlers[0x92] = _syscall_writev;

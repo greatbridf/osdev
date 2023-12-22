@@ -234,7 +234,7 @@ size_t fat32::inode_read(inode* file, char* buf, size_t buf_size, size_t offset,
     return orig_n - n;
 }
 
-int fat32::inode_stat(dentry* ent, statx* st, unsigned int mask)
+int fat32::inode_statx(dentry* ent, statx* st, unsigned int mask)
 {
     st->stx_mask = 0;
     if (mask & STATX_SIZE) {
@@ -274,6 +274,21 @@ int fat32::inode_stat(dentry* ent, statx* st, unsigned int mask)
         st->stx_mask |= STATX_GID;
     }
 
+    return GB_OK;
+}
+
+int fat32::inode_stat(dentry* dent, struct stat* st)
+{
+    auto* ind = dent->ind;
+
+    memset(st, 0x00, sizeof(struct stat));
+    st->st_mode = ind->mode;
+    st->st_dev = device->fs->inode_devid(device);
+    st->st_nlink = S_ISDIR(ind->mode) ? 2 : 1;
+    st->st_size = ind->size;
+    st->st_blksize = 4096;
+    st->st_blocks = (ind->size + 511) / 512;
+    st->st_ino = ind->ino;
     return GB_OK;
 }
 

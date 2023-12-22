@@ -1,7 +1,7 @@
 #include <vector>
 
 #include <assert.h>
-#include <kernel/errno.h>
+#include <errno.h>
 #include <kernel/mem.h>
 #include <kernel/process.hpp>
 #include <kernel/vfs.hpp>

@@ -1,10 +1,12 @@
-#include <kernel/hw/pci.hpp>
-#include <kernel/hw/port.hpp>
-#include <kernel/errno.h>
-
 #include <map>
 
+#include <kernel/hw/pci.hpp>
+#include <kernel/hw/port.hpp>
+
+#include <types/types.h>
+
 #include <assert.h>
+#include <errno.h>
 #include <stdint.h>
 
 using kernel::hw::p32;

@@ -8,8 +8,8 @@
 #include <tuple>
 #include <utility>
 
+#include <errno.h>
 #include <fcntl.h>
-#include <kernel/errno.h>
 #include <kernel/event/evtqueue.hpp>
 #include <kernel/interrupt.h>
 #include <kernel/mm.hpp>
@@ -253,6 +253,7 @@ public:
     filearr files;
     types::path pwd;
     kernel::signal_list signals;
+    mode_t umask { 0022 };
 
     pid_t pid {};
     pid_t ppid {};

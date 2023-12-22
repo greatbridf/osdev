@@ -167,7 +167,8 @@ public:
     ~fat32();
 
     virtual size_t inode_read(inode* file, char* buf, size_t buf_size, size_t offset, size_t n) override;
-    virtual int inode_stat(dentry* ent, statx* st, unsigned int mask) override;
+    virtual int inode_statx(dentry* ent, statx* st, unsigned int mask) override;
+    virtual int inode_stat(dentry* ent, struct stat* st) override;
     virtual int inode_readdir(fs::inode* dir, size_t offset, const fs::vfs::filldir_func& callback) override;
 };
 

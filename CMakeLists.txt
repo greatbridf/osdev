@@ -37,7 +37,6 @@ set(BOOTLOADER_SOURCES src/boot.s
 
 set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
                         src/kinit.cpp
-                        src/kernel/errno.c
                         src/kernel/interrupt.cpp
                         src/kernel/process.cpp
                         src/kernel/tty.cpp
@@ -61,7 +60,6 @@ set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
                         include/fs/fat.hpp
                         include/kernel/event/event.h
                         include/kernel/event/evtqueue.hpp
-                        include/kernel/errno.h
                         include/kernel/tty.hpp
                         include/kernel/interrupt.h
                         include/kernel/irq.hpp

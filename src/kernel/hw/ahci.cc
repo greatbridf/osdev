@@ -1,18 +1,18 @@
-#include "kernel/vfs.hpp"
 #include <vector>
 #include <cstddef>
 #include <algorithm>
 
+#include <kernel/vfs.hpp>
 #include <kernel/log.hpp>
 #include <kernel/mm.hpp>
 #include <kernel/module.hpp>
 #include <kernel/hw/pci.hpp>
 #include <kernel/irq.hpp>
-#include <kernel/errno.h>
 
 #include <types/size.h>
 
 #include <stdint.h>
+#include <errno.h>
 
 #define SPIN(cond, spin) \
     (spin) = 0; \
@@ -484,7 +484,7 @@ public:
 
             this->ports[n] = port;
 
-            fs::register_block_device(fs::make_node(8, n * 8), {
+            fs::register_block_device(fs::make_device(8, n * 8), {
                 [port](char* buf, std::size_t buf_size, std::size_t offset, std::size_t cnt) {
                     return port->read(buf, buf_size, offset, cnt);
                 }, nullptr

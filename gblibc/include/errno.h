@@ -1,19 +1,14 @@
-#ifndef __GBOS_ERRNO_H
-#define __GBOS_ERRNO_H
-
-#include <types/types.h>
+#ifndef __GBLIBC_ERRNO_H_
+#define __GBLIBC_ERRNO_H_
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-extern uint32_t* _get_errno(void);
+extern int* __errno_location(void);
 
-#define errno (*_get_errno())
-
-#ifdef __cplusplus
-}
-#endif
+#undef errno
+#define errno (*__errno_location())
 
 #define EPERM 1
 #define ENOENT 2
@@ -31,7 +26,8 @@ extern uint32_t* _get_errno(void);
 #define ENOTTY 25
 #define EPIPE 32
 
-// non-standard errors
-#define ENOTFOUND 200
+#ifdef __cplusplus
+}
+#endif
 
 #endif

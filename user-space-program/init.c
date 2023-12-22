@@ -1,4 +1,6 @@
+#include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <fcntl.h>
@@ -35,7 +37,6 @@ _run_sh:;
         }
 
         char* shell_argv[128] = {};
-        char* envp[1] = { NULL };
 
         if (argc < 2)
             shell_argv[0] = "/bin/sh";
@@ -45,18 +46,19 @@ _run_sh:;
         for (int i = 2; i < argc; ++i)
             shell_argv[i - 1] = argv[i];
         
-        execve(shell_argv[0], shell_argv, envp);
+        execve(shell_argv[0], shell_argv, environ);
 
         print("[init] unable to run sh, exiting...\n");
         return -1;
     }
 
     int ret, pid;
-    char buf[512] = {};
     for (;;) {
         pid = wait(&ret);
-        snprintf(buf, sizeof(buf), "[init] pid%d has exited with code %d\n", pid, ret);
+        char* buf = NULL;
+        assert(asprintf(&buf, "[init] pid%d has exited with code %d\n", pid, ret) >= 0);
         print(buf);
+        free(buf);
         // sh
         if (pid == sh_pid)
             goto _run_sh;

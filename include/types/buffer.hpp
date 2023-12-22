@@ -144,6 +144,12 @@ public:
     {
         return end - start + 1 - count;
     }
+
+    constexpr void clear(void)
+    {
+        count = 0;
+        head = base;
+    }
 };
 
 } // namespace types

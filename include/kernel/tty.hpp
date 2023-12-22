@@ -18,6 +18,8 @@ public:
     void print(const char* str);
     size_t read(char* buf, size_t buf_size, size_t n);
 
+    void clear_read_buf(void);
+
     constexpr void set_pgrp(pid_t pgid)
     {
         fg_pgroup = pgid;

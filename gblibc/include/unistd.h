@@ -44,6 +44,13 @@ pid_t getsid(pid_t pid);
 pid_t tcgetpgrp(int fd);
 int tcsetpgrp(int fd, pid_t pgrp);
 
+int brk(void* addr);
+void* sbrk(ssize_t increment);
+
+int isatty(int fd);
+
+extern char** environ;
+
 #ifdef __cplusplus
 }
 #endif

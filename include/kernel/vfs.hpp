@@ -7,12 +7,13 @@
 
 #include <sys/stat.h>
 #include <sys/types.h>
-#include <kernel/errno.h>
+#include <errno.h>
 #include <bits/alltypes.h>
 
 #include <assert.h>
 #include <kernel/event/evtqueue.hpp>
 #include <stdint.h>
+#include <sys/types.h>
 #include <types/allocator.hpp>
 #include <types/buffer.hpp>
 #include <types/cplusplus.hpp>
@@ -55,13 +56,11 @@ struct inode {
     gid_t gid;
 };
 
-using node_t = uint32_t;
-
 #define NODE_MAJOR(node) ((node) >> 16)
 #define NODE_MINOR(node) ((node) & 0xffff)
-constexpr node_t NODE_INVALID = -1U;
+constexpr dev_t NODE_INVALID = -1U;
 
-constexpr node_t make_node(uint32_t major, uint32_t minor)
+constexpr dev_t make_device(uint32_t major, uint32_t minor)
 {
     return (major << 16) | (minor & 0xffff);
 }
@@ -211,11 +210,12 @@ public:
     virtual size_t inode_read(inode* file, char* buf, size_t buf_size, size_t offset, size_t n);
     virtual size_t inode_write(inode* file, const char* buf, size_t offset, size_t n);
     virtual int inode_mkfile(dentry* dir, const char* filename, mode_t mode);
-    virtual int inode_mknode(dentry* dir, const char* filename, mode_t mode, node_t sn);
+    virtual int inode_mknode(dentry* dir, const char* filename, mode_t mode, dev_t sn);
     virtual int inode_rmfile(dentry* dir, const char* filename);
     virtual int inode_mkdir(dentry* dir, const char* dirname);
-    virtual int inode_stat(dentry* dent, statx* buf, unsigned int mask);
-    virtual uint32_t inode_getnode(inode* file);
+    virtual int inode_statx(dentry* dent, statx* buf, unsigned int mask);
+    virtual int inode_stat(dentry* dent, struct stat* stat);
+    virtual dev_t inode_devid(inode* file);
 
     // parameter 'length' in callback:
     // if 0, 'name' should be null terminated
@@ -316,23 +316,23 @@ struct fifo_file : public virtual file {
 
 inline fs::vfs::dentry* fs_root;
 
-int register_block_device(node_t node, blkdev_ops ops);
-int register_char_device(node_t node, chrdev_ops ops);
+int register_block_device(dev_t node, blkdev_ops ops);
+int register_char_device(dev_t node, chrdev_ops ops);
 
 void partprobe();
 
-ssize_t block_device_read(node_t node, char* buf, size_t buf_size, size_t offset, size_t n);
-ssize_t block_device_write(node_t node, const char* buf, size_t offset, size_t n);
+ssize_t block_device_read(dev_t node, char* buf, size_t buf_size, size_t offset, size_t n);
+ssize_t block_device_write(dev_t node, const char* buf, size_t offset, size_t n);
 
-ssize_t char_device_read(node_t node, char* buf, size_t buf_size, size_t n);
-ssize_t char_device_write(node_t node, const char* buf, size_t n);
+ssize_t char_device_read(dev_t node, char* buf, size_t buf_size, size_t n);
+ssize_t char_device_write(dev_t node, const char* buf, size_t n);
 
 vfs* register_fs(vfs* fs);
 
 size_t vfs_read(inode* file, char* buf, size_t buf_size, size_t offset, size_t n);
 size_t vfs_write(inode* file, const char* buf, size_t offset, size_t n);
 int vfs_mkfile(fs::vfs::dentry* dir, const char* filename, mode_t mode);
-int vfs_mknode(fs::vfs::dentry* dir, const char* filename, mode_t mode, node_t sn);
+int vfs_mknode(fs::vfs::dentry* dir, const char* filename, mode_t mode, dev_t sn);
 int vfs_rmfile(fs::vfs::dentry* dir, const char* filename);
 int vfs_mkdir(fs::vfs::dentry* dir, const char* dirname);
 int vfs_stat(fs::vfs::dentry* dent, statx* stat, unsigned int mask);

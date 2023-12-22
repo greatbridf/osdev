@@ -91,8 +91,6 @@ SECTIONS
         LONG(__bss_end - __bss_start);
         kernel_size = .;
         LONG(__data_end - __kinit_start);
-        __stack_chk_guard = .;
-        LONG(0x19198101);
 
         . = ALIGN(0x1000);
         __rodata_end = .;

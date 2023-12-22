@@ -1,20 +1,21 @@
 #include <cstddef>
 #include <map>
+#include <sys/types.h>
 #include <vector>
 #include <bit>
 #include <utility>
 
 #include <bits/alltypes.h>
-
 #include <assert.h>
-#include <kernel/errno.h>
+#include <errno.h>
+#include <stdint.h>
+#include <stdio.h>
+
 #include <kernel/log.hpp>
 #include <kernel/mem.h>
 #include <kernel/process.hpp>
 #include <kernel/tty.hpp>
 #include <kernel/vfs.hpp>
-#include <stdint.h>
-#include <stdio.h>
 #include <types/allocator.hpp>
 #include <types/status.h>
 #include <types/path.hpp>
@@ -70,7 +71,7 @@ fs::vfs::dentry* fs::vfs::dentry::find(const name_type& name)
 
     auto iter = idx_children->find(name);
     if (!iter) {
-        errno = ENOTFOUND;
+        errno = ENOENT;
         return nullptr;
     }
 
@@ -184,19 +185,18 @@ size_t fs::vfs::inode_write(inode*, const char*, size_t, size_t)
 { return -EINVAL; }
 int fs::vfs::inode_mkfile(dentry*, const char*, mode_t)
 { return -EINVAL; }
-int fs::vfs::inode_mknode(dentry*, const char*, mode_t, node_t)
+int fs::vfs::inode_mknode(dentry*, const char*, mode_t, dev_t)
 { return -EINVAL; }
 int fs::vfs::inode_rmfile(dentry*, const char*)
 { return -EINVAL; }
 int fs::vfs::inode_mkdir(dentry*, const char*)
 { return -EINVAL; }
-int fs::vfs::inode_stat(dentry*, statx*, unsigned int)
+int fs::vfs::inode_statx(dentry*, statx*, unsigned int)
 { return -EINVAL; }
-uint32_t fs::vfs::inode_getnode(fs::inode*)
-{
-    assert(false);
-    return 0xffffffff;
-}
+int fs::vfs::inode_stat(dentry*, struct stat*)
+{ return -EINVAL; }
+dev_t fs::vfs::inode_devid(fs::inode*)
+{ return -EINVAL; }
 
 class tmpfs : public virtual fs::vfs {
 private:
@@ -308,12 +308,12 @@ public:
         return GB_OK;
     }
 
-    virtual int inode_mknode(dentry* dir, const char* filename, mode_t mode, fs::node_t sn) override
+    virtual int inode_mknode(dentry* dir, const char* filename, mode_t mode, dev_t dev) override
     {
         if (!S_ISBLK(mode) && !S_ISCHR(mode))
             return -EINVAL;
 
-        auto& node = *cache_inode(0, _savedata(sn), mode, 0, 0);
+        auto& node = *cache_inode(0, _savedata(dev), mode, 0, 0);
         mklink(dir->ind, &node, filename);
         dir->append(get_inode(node.ino), filename, true);
         return GB_OK;
@@ -367,7 +367,7 @@ public:
         return n;
     }
 
-    virtual int inode_stat(dentry* dent, statx* st, unsigned int mask) override
+    virtual int inode_statx(dentry* dent, statx* st, unsigned int mask) override
     {
         auto* ind = dent->ind;
         const mode_t mode = ind->mode;
@@ -386,7 +386,7 @@ public:
         if (mask & STATX_TYPE) {
             st->stx_mode |= ind->mode & S_IFMT;
             if (S_ISBLK(mode) || S_ISCHR(mode)) {
-                auto nd = (fs::node_t)as_val(_getdata(ind->ino));
+                auto nd = (dev_t)as_val(_getdata(ind->ino));
                 st->stx_rdev_major = NODE_MAJOR(nd);
                 st->stx_rdev_minor = NODE_MINOR(nd);
             }
@@ -417,7 +417,7 @@ public:
         return GB_OK;
     }
 
-    virtual uint32_t inode_getnode(fs::inode* file) override
+    virtual dev_t inode_devid(fs::inode* file) override
     {
         return as_val(_getdata(file->ino));
     }
@@ -563,8 +563,8 @@ void fs::fifo_file::close(void)
     ppipe.reset();
 }
 
-static std::map<fs::node_t, fs::blkdev_ops> blkdevs;
-static std::map<fs::node_t, fs::chrdev_ops> chrdevs;
+static std::map<dev_t, fs::blkdev_ops> blkdevs;
+static std::map<dev_t, fs::chrdev_ops> chrdevs;
 
 size_t fs::vfs_read(fs::inode* file, char* buf, size_t buf_size, size_t offset, size_t n)
 {
@@ -577,13 +577,13 @@ size_t fs::vfs_read(fs::inode* file, char* buf, size_t buf_size, size_t offset, 
         return file->fs->inode_read(file, buf, buf_size, offset, n);
 
     if (S_ISBLK(file->mode) || S_ISCHR(file->mode)) {
-        node_t sn = file->fs->inode_getnode(file);
+        dev_t dev = file->fs->inode_devid(file);
 
         ssize_t ret;
         if (S_ISBLK(file->mode))
-            ret = block_device_read(sn, buf, buf_size, offset, n);
+            ret = block_device_read(dev, buf, buf_size, offset, n);
         else
-            ret = char_device_read(sn, buf, buf_size, n);
+            ret = char_device_read(dev, buf, buf_size, n);
 
         if (ret < 0) {
             errno = -ret;
@@ -607,13 +607,13 @@ size_t fs::vfs_write(fs::inode* file, const char* buf, size_t offset, size_t n)
         return file->fs->inode_write(file, buf, offset, n);
 
     if (S_ISBLK(file->mode) || S_ISCHR(file->mode)) {
-        node_t sn = file->fs->inode_getnode(file);
+        dev_t dev = file->fs->inode_devid(file);
 
         ssize_t ret;
         if (S_ISBLK(file->mode))
-            ret = block_device_write(sn, buf, offset, n);
+            ret = block_device_write(dev, buf, offset, n);
         else
-            ret = char_device_write(sn, buf, n);
+            ret = char_device_write(dev, buf, n);
 
         if (ret < 0) {
             errno = -ret;
@@ -630,9 +630,9 @@ int fs::vfs_mkfile(fs::vfs::dentry* dir, const char* filename, mode_t mode)
 {
     return dir->ind->fs->inode_mkfile(dir, filename, mode);
 }
-int fs::vfs_mknode(fs::vfs::dentry* dir, const char* filename, mode_t mode, fs::node_t sn)
+int fs::vfs_mknode(fs::vfs::dentry* dir, const char* filename, mode_t mode, dev_t dev)
 {
-    return dir->ind->fs->inode_mknode(dir, filename, mode, sn);
+    return dir->ind->fs->inode_mknode(dir, filename, mode, dev);
 }
 int fs::vfs_rmfile(fs::vfs::dentry* dir, const char* filename)
 {
@@ -660,12 +660,12 @@ fs::vfs::dentry* fs::vfs_open(fs::vfs::dentry& root, const types::path& path)
 
 int fs::vfs_stat(fs::vfs::dentry* ent, statx* stat, unsigned int mask)
 {
-    return ent->ind->fs->inode_stat(ent, stat, mask);
+    return ent->ind->fs->inode_statx(ent, stat, mask);
 }
 
 static std::list<fs::vfs*>* fs_es;
 
-int fs::register_block_device(fs::node_t node, fs::blkdev_ops ops)
+int fs::register_block_device(dev_t node, fs::blkdev_ops ops)
 {
     auto iter = blkdevs.find(node);
     if (iter)
@@ -675,7 +675,7 @@ int fs::register_block_device(fs::node_t node, fs::blkdev_ops ops)
     return 0;
 }
 
-int fs::register_char_device(fs::node_t node, fs::chrdev_ops ops)
+int fs::register_char_device(dev_t node, fs::chrdev_ops ops)
 {
     auto iter = chrdevs.find(node);
     if (iter)
@@ -704,7 +704,7 @@ struct PACKED mbr {
     uint16_t magic;
 };
 
-static inline void mbr_part_probe(fs::node_t node, char ch)
+static inline void mbr_part_probe(dev_t node, char ch)
 {
     mbr buf_mbr;
     // TODO: devtmpfs
@@ -776,7 +776,7 @@ void fs::partprobe()
     }
 }
 
-ssize_t fs::block_device_read(fs::node_t node, char* buf, size_t buf_size, size_t offset, size_t n)
+ssize_t fs::block_device_read(dev_t node, char* buf, size_t buf_size, size_t offset, size_t n)
 {
     if (node == fs::NODE_INVALID)
         return -EINVAL;
@@ -788,7 +788,7 @@ ssize_t fs::block_device_read(fs::node_t node, char* buf, size_t buf_size, size_
     return iter->second.read(buf, buf_size, offset, n);
 }
 
-ssize_t fs::block_device_write(fs::node_t node, const char* buf, size_t offset, size_t n)
+ssize_t fs::block_device_write(dev_t node, const char* buf, size_t offset, size_t n)
 {
     if (node == fs::NODE_INVALID)
         return -EINVAL;
@@ -800,7 +800,7 @@ ssize_t fs::block_device_write(fs::node_t node, const char* buf, size_t offset, 
     return iter->second.write(buf, offset, n);
 }
 
-ssize_t fs::char_device_read(fs::node_t node, char* buf, size_t buf_size, size_t n)
+ssize_t fs::char_device_read(dev_t node, char* buf, size_t buf_size, size_t n)
 {
     if (node == fs::NODE_INVALID)
         return -EINVAL;
@@ -812,7 +812,7 @@ ssize_t fs::char_device_read(fs::node_t node, char* buf, size_t buf_size, size_t
     return iter->second.read(buf, buf_size, n);
 }
 
-ssize_t fs::char_device_write(fs::node_t node, const char* buf, size_t n)
+ssize_t fs::char_device_write(dev_t node, const char* buf, size_t n)
 {
     if (node == fs::NODE_INVALID)
         return -EINVAL;
@@ -950,10 +950,10 @@ void init_vfs(void)
 {
     using namespace fs;
     // null
-    register_char_device(make_node(1, 0), { b_null_read, b_null_write });
+    register_char_device(make_device(1, 0), { b_null_read, b_null_write });
     // console (supports serial console only for now)
     // TODO: add interface to bind console device to other devices
-    register_char_device(make_node(2, 0), { console_read, console_write });
+    register_char_device(make_device(2, 0), { console_read, console_write });
 
     fs_es = types::pnew<types::kernel_ident_allocator>(fs_es);
 
@@ -973,6 +973,6 @@ void init_vfs(void)
 
     auto* dev = vfs_open(*fs_root, "/dev");
     assert(dev);
-    vfs_mknode(dev, "null", 0666 | S_IFCHR, make_node(1, 0));
-    vfs_mknode(dev, "console", 0666 | S_IFCHR, make_node(2, 0));
+    vfs_mknode(dev, "null", 0666 | S_IFCHR, make_device(1, 0));
+    vfs_mknode(dev, "console", 0666 | S_IFCHR, make_device(2, 0));
 }

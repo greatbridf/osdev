@@ -3,7 +3,10 @@ QEMU_BIN=##PLACEHOLDER_1##
 GDB_BIN=##PLACEHOLDER_2##
 QEMU_ACCELERATION_FLAG=##PLACEHOLDER_3##
 QEMU_DEBUG_FLAG=#-d cpu_reset,int
-QEMU_ARGS=-cpu SandyBridge,check -drive file=build/boot.img,format=raw -no-reboot -no-shutdown $(QEMU_ACCELERATION_FLAG) $(QEMU_DEBUG_FLAG)
+QEMU_ARGS=-machine q35 -drive id=disk,file=build/boot.img,format=raw,if=none \
+	-device ahci,id=ahci -device ide-hd,drive=disk,bus=ahci.0 \
+	-no-reboot -no-shutdown $(QEMU_ACCELERATION_FLAG) $(QEMU_DEBUG_FLAG)
+	
 CROSS_COMPILE=##PLACEHOLDER_4##
 .PHONY: run
 run: build

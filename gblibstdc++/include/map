@@ -101,10 +101,10 @@ public:
         : map(first, last, Compare(), alloc) {}
 
     __GBLIBCPP_CONSTEXPR
-    map(const map& other) : tree(other) {}
+    map(const map& other) : tree(other.tree) {}
     __GBLIBCPP_CONSTEXPR
     map(const map& other, const Allocator& alloc)
-        : tree(other, alloc) { }
+        : tree(other.tree, alloc) { }
 
     __GBLIBCPP_CONSTEXPR
     map(map&& other) : tree(std::move(other.tree)) {}

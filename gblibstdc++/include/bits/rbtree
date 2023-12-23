@@ -316,11 +316,11 @@ public:
 
         newnd->left = copy(nd->left);
         if (newnd->left)
-            newnd->left->parent = newnd->left;
+            newnd->left->parent = newnd;
 
         newnd->right = copy(nd->right);
         if (newnd->right)
-            newnd->right->parent = newnd->right;
+            newnd->right->parent = newnd;
 
         return newnd;
     }

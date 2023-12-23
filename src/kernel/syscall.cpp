@@ -214,7 +214,7 @@ int _syscall_waitpid(interrupt_stack* data)
     SYSCALL_ARG2(int*, arg1);
     SYSCALL_ARG3(int, options);
 
-    if (pid_to_wait != -1 || options != 0)
+    if (pid_to_wait != -1)
         return -EINVAL;
 
     auto& cv = current_process->cv_wait;
@@ -222,6 +222,9 @@ int _syscall_waitpid(interrupt_stack* data)
     types::lock_guard lck(mtx);
 
     auto& waitlist = current_process->waitlist;
+
+    // TODO: check if it is waiting for stopped process
+    (void)options;
 
     while (waitlist.empty()) {
         if (current_process->children.empty())
@@ -247,6 +250,17 @@ int _syscall_waitpid(interrupt_stack* data)
     waitlist.erase(iter);
 
     return pid;
+}
+
+int _syscall_wait4(interrupt_stack* data)
+{
+    SYSCALL_ARG4(void* __user, rusage);
+
+    // TODO: getrusage
+    if (rusage)
+        return -EINVAL;
+
+    return _syscall_waitpid(data);
 }
 
 int _syscall_getdents(interrupt_stack* data)
@@ -862,6 +876,13 @@ pid_t _syscall_getpgid(interrupt_stack* data)
     return procs->find(pid).pgid;
 }
 
+int _syscall_gettid(interrupt_stack* data)
+{
+    // TODO: real tid
+    (void)data;
+    return current_process->pid;
+}
+
 extern "C" void syscall_entry(interrupt_stack* data)
 {
     int syscall_no = SYSCALL_NO;
@@ -910,6 +931,7 @@ void init_syscall(void)
     syscall_handlers[0x42] = _syscall_setsid;
     syscall_handlers[0x4e] = _syscall_gettimeofday;
     syscall_handlers[0x5b] = _syscall_munmap;
+    syscall_handlers[0x72] = _syscall_wait4;
     syscall_handlers[0x7a] = _syscall_newuname;
     syscall_handlers[0x84] = _syscall_getpgid;
     syscall_handlers[0x8d] = _syscall_getdents;
@@ -924,6 +946,7 @@ void init_syscall(void)
     syscall_handlers[0xc9] = _syscall_geteuid;
     syscall_handlers[0xdc] = _syscall_getdents64;
     syscall_handlers[0xdd] = _syscall_fcntl64;
+    syscall_handlers[0xe0] = _syscall_gettid;
     syscall_handlers[0xef] = _syscall_sendfile64;
     syscall_handlers[0xf3] = _syscall_set_thread_area;
     syscall_handlers[0xfc] = _syscall_exit; // we implement exit_group as exit for now

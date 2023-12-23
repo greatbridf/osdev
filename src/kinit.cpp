@@ -1,6 +1,14 @@
 #include <asm/port_io.h>
 #include <asm/sys.h>
+
 #include <assert.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <sys/utsname.h>
+
+#include <types/status.h>
+#include <types/types.h>
+
 #include <kernel/event/event.h>
 #include <kernel/hw/keyboard.h>
 #include <kernel/hw/pci.hpp>
@@ -13,11 +21,8 @@
 #include <kernel/syscall.hpp>
 #include <kernel/task.h>
 #include <kernel/tty.hpp>
+#include <kernel/utsname.hpp>
 #include <kernel/vga.hpp>
-#include <stdint.h>
-#include <stdio.h>
-#include <types/status.h>
-#include <types/types.h>
 
 typedef void (*constructor)(void);
 extern constructor const SECTION(".rodata.kinit") start_ctors;
@@ -84,6 +89,22 @@ static inline int init_console(const char* name)
 
 extern void init_vfs();
 
+namespace kernel::kinit {
+
+SECTION(".text.kinit")
+static void init_uname()
+{
+    kernel::sys_utsname = new new_utsname;
+    strcpy(kernel::sys_utsname->sysname, "Linux"); // linux compatible
+    strcpy(kernel::sys_utsname->nodename, "(none)");
+    strcpy(kernel::sys_utsname->release, "1.0.0");
+    strcpy(kernel::sys_utsname->version, "1.0.0");
+    strcpy(kernel::sys_utsname->machine, "x86");
+    strcpy(kernel::sys_utsname->domainname, "(none)");
+}
+
+} // namespace kernel::kinit
+
 extern "C" SECTION(".text.kinit") void NORETURN kernel_init(void)
 {
     asm_enable_sse();
@@ -106,6 +127,8 @@ extern "C" SECTION(".text.kinit") void NORETURN kernel_init(void)
     init_mem();
     init_pic();
     init_pit();
+
+    kernel::kinit::init_uname();
 
     int ret = init_serial_port(PORT_SERIAL0);
     assert(ret == GB_OK);

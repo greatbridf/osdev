@@ -41,15 +41,18 @@ extern "C" {
 #define SIGPWR    30
 #define SIGSYS    31
 #define SIGUNUSED SIGSYS
+#define SIGRTMIN  32
+#define SIGRTMAX  64
 
 #define SIG_BLOCK 0
 #define SIG_UNBLOCK 1
 #define SIG_SETMASK 2
 
-typedef void (*sig_t)(int);
-typedef struct sigset_t {
-    unsigned char __sig[8];
-} sigset_t;
+#define SIG_DFL ((sighandler_t)0)
+#define SIG_IGN ((sighandler_t)1)
+
+typedef void (*sighandler_t)(int);
+typedef void (*sigrestorer_t)(void);
 
 int kill(pid_t pid, int sig);
 int raise(int sig);

@@ -69,7 +69,6 @@ void kernel::cond_var::notify(void)
 
     auto* thd = *iter;
     thd->wakeup();
-    readythds->push(thd);
 
     m_subscribers.erase(iter);
 }
@@ -78,10 +77,8 @@ void kernel::cond_var::notify_all(void)
 {
     types::lock_guard lck(m_mtx);
 
-    for (auto& thd : m_subscribers) {
+    for (auto& thd : m_subscribers)
         thd->wakeup();
-        readythds->push(thd);
-    }
 
     m_subscribers.clear();
 }

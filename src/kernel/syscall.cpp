@@ -13,6 +13,7 @@
 #include <sys/prctl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <sys/utsname.h>
 
 #include <kernel/user/thread_local.hpp>
 #include <kernel/interrupt.h>
@@ -23,6 +24,7 @@
 #include <kernel/signal.hpp>
 #include <kernel/syscall.hpp>
 #include <kernel/tty.hpp>
+#include <kernel/utsname.hpp>
 #include <kernel/vfs.hpp>
 #include <kernel/hw/timer.h>
 
@@ -46,6 +48,12 @@
 
 #define SYSCALL_HANDLERS_SIZE (404)
 syscall_handler syscall_handlers[SYSCALL_HANDLERS_SIZE];
+
+static void not_implemented()
+{
+    console->print("\n[kernel] this function is not implemented\n");
+    current_thread->send_signal(SIGSYS);
+}
 
 extern "C" void _syscall_stub_fork_return(void);
 int _syscall_fork(interrupt_stack* data)
@@ -397,6 +405,7 @@ int _syscall_ioctl(interrupt_stack* data)
         break;
     }
     default:
+        not_implemented();
         return -EINVAL;
     }
 
@@ -493,7 +502,12 @@ int _syscall_clock_gettime64(interrupt_stack* data)
 
 int _syscall_getuid(interrupt_stack*)
 {
-    return 0; // all user is root for now
+    return 0; // all user are root for now
+}
+
+int _syscall_geteuid(interrupt_stack*)
+{
+    return 0; // all user are root for now
 }
 
 int _syscall_brk(interrupt_stack* data)
@@ -568,12 +582,6 @@ int _syscall_munmap(interrupt_stack* data)
     return current_process->mms.unmap(addr, len, false);
 }
 
-[[noreturn]] static void not_implemented()
-{
-    console->print("\n[kernel] this function is not implemented\n");
-    kill_current(SIGSYS);
-}
-
 int _syscall_sendfile64(interrupt_stack* data)
 {
     SYSCALL_ARG1(int, out_fd);
@@ -591,8 +599,10 @@ int _syscall_sendfile64(interrupt_stack* data)
     if (!S_ISREG(in_file->mode) && !S_ISBLK(in_file->mode))
         return -EINVAL;
 
-    if (offset)
+    if (offset) {
         not_implemented();
+        return -EINVAL;
+    }
 
     constexpr size_t bufsize = 512;
     std::vector<char> buf(bufsize);
@@ -622,11 +632,15 @@ int _syscall_statx(interrupt_stack* data)
     SYSCALL_ARG5(statx* __user, statxbuf);
 
     // AT_STATX_SYNC_AS_STAT is the default value
-    if (flags != AT_STATX_SYNC_AS_STAT && !(flags & AT_SYMLINK_NOFOLLOW))
+    if (flags != AT_STATX_SYNC_AS_STAT && !(flags & AT_SYMLINK_NOFOLLOW)) {
         not_implemented();
+        return -EINVAL;
+    }
 
-    if (dirfd != AT_FDCWD)
+    if (dirfd != AT_FDCWD) {
         not_implemented();
+        return -EINVAL;
+    }
 
     auto* dent = fs::vfs_open(*current_process->root,
         types::make_path(path, current_process->pwd));
@@ -652,8 +666,13 @@ int _syscall_fcntl64(interrupt_stack* data)
 
     switch (cmd) {
     case F_SETFD:
-        file->flags.close_on_exec = !!(arg & FD_CLOEXEC);
-        return 0;
+        return current_process->files.set_flags(
+            fd, (arg & FD_CLOEXEC) ? O_CLOEXEC : 0);
+    case F_DUPFD:
+    case F_DUPFD_CLOEXEC: {
+        int flag = (cmd & F_DUPFD_CLOEXEC) ? O_CLOEXEC : 0;
+        return current_process->files.dupfd(fd, arg, flag);
+    }
     default:
         not_implemented();
         return -EINVAL;
@@ -753,46 +772,94 @@ int _syscall_kill(interrupt_stack* data)
 
 int _syscall_rt_sigprocmask(interrupt_stack* data)
 {
+    using kernel::sigmask_type;
+
     SYSCALL_ARG1(int, how);
-    SYSCALL_ARG2(const sigset_t* __user, set);
-    SYSCALL_ARG3(sigset_t* __user, oldset);
+    SYSCALL_ARG2(const sigmask_type* __user, set);
+    SYSCALL_ARG3(sigmask_type* __user, oldset);
     SYSCALL_ARG4(size_t, sigsetsize);
 
-    if (sigsetsize != sizeof(sigset_t))
+    if (sigsetsize != sizeof(sigmask_type))
         return -EINVAL;
 
-    sigset_t sigs;
-    current_thread->signals.get_mask(&sigs);
+    sigmask_type sigs = current_thread->signals.get_mask();
 
     // TODO: use copy_to_user
     if (oldset)
-        memcpy(oldset, &sigs, sizeof(sigset_t));
+        memcpy(oldset, &sigs, sizeof(sigmask_type));
+
+    if (!set)
+        return 0;
 
     // TODO: use copy_from_user
     switch (how) {
     case SIG_BLOCK:
-        if (!set)
-            break;
-
-        for (size_t i = 0; i < sizeof(sigset_t); ++i)
-            sigs.__sig[i] |= set->__sig[i];
-        current_thread->signals.set_mask(&sigs);
+        current_thread->signals.mask(*set);
         break;
     case SIG_UNBLOCK:
-        if (!set)
-            break;
-
-        for (size_t i = 0; i < sizeof(sigset_t); ++i)
-            sigs.__sig[i] &= ~set->__sig[i];
-        current_thread->signals.set_mask(&sigs);
+        current_thread->signals.set_mask(*set);
         break;
     case SIG_SETMASK:
-        if (set)
-            current_thread->signals.set_mask(set);
+        current_thread->signals.set_mask(*set);
         break;
     }
 
     return 0;
+}
+
+int _syscall_rt_sigaction(interrupt_stack* data)
+{
+    using kernel::sigaction;
+    using kernel::sigmask_type;
+    SYSCALL_ARG1(int, signum);
+    SYSCALL_ARG2(const sigaction* __user, act);
+    SYSCALL_ARG3(sigaction* __user, oldact);
+    SYSCALL_ARG4(size_t, sigsetsize);
+
+    if (sigsetsize != sizeof(sigmask_type))
+        return -EINVAL;
+
+    if (!kernel::signal_list::check_valid(signum)
+        || signum == SIGKILL || signum == SIGSTOP)
+        return -EINVAL;
+
+    // TODO: use copy_to_user
+    if (oldact)
+        current_thread->signals.get_handler(signum, *oldact);
+
+    if (!act)
+        return 0;
+
+    // TODO: use copy_from_user
+    current_thread->signals.set_handler(signum, *act);
+
+    return 0;
+}
+
+int _syscall_newuname(interrupt_stack* data)
+{
+    SYSCALL_ARG1(new_utsname* __user, buf);
+
+    if (!buf)
+        return -EFAULT;
+
+    // TODO: use copy_to_user
+    memcpy(buf, kernel::sys_utsname, sizeof(new_utsname));
+
+    return 0;
+}
+
+pid_t _syscall_getpgid(interrupt_stack* data)
+{
+    SYSCALL_ARG1(pid_t, pid);
+
+    if (pid == 0)
+        return current_process->pgid;
+
+    if (!procs->try_find(pid))
+        return -ESRCH;
+
+    return procs->find(pid).pgid;
 }
 
 extern "C" void syscall_entry(interrupt_stack* data)
@@ -806,6 +873,7 @@ extern "C" void syscall_entry(interrupt_stack* data)
             "[kernel] syscall %x not implemented\n", syscall_no);
         console->print(buf);
         not_implemented();
+        return;
     }
 
     int ret = syscall_handlers[syscall_no](data);
@@ -842,14 +910,18 @@ void init_syscall(void)
     syscall_handlers[0x42] = _syscall_setsid;
     syscall_handlers[0x4e] = _syscall_gettimeofday;
     syscall_handlers[0x5b] = _syscall_munmap;
-    syscall_handlers[0x84] = _syscall_getdents;
+    syscall_handlers[0x7a] = _syscall_newuname;
+    syscall_handlers[0x84] = _syscall_getpgid;
+    syscall_handlers[0x8d] = _syscall_getdents;
     syscall_handlers[0x92] = _syscall_writev;
     syscall_handlers[0x93] = _syscall_getsid;
     syscall_handlers[0xac] = _syscall_prctl;
+    syscall_handlers[0xae] = _syscall_rt_sigaction;
     syscall_handlers[0xaf] = _syscall_rt_sigprocmask;
     syscall_handlers[0xb7] = _syscall_getcwd;
     syscall_handlers[0xc0] = _syscall_mmap_pgoff;
     syscall_handlers[0xc7] = _syscall_getuid;
+    syscall_handlers[0xc9] = _syscall_geteuid;
     syscall_handlers[0xdc] = _syscall_getdents64;
     syscall_handlers[0xdd] = _syscall_fcntl64;
     syscall_handlers[0xef] = _syscall_sendfile64;

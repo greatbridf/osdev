@@ -270,7 +270,6 @@ struct file {
     struct file_flags {
         uint32_t read : 1;
         uint32_t write : 1;
-        uint32_t close_on_exec : 1;
     } flags {};
 
     file(mode_t mode, vfs::dentry* parent, file_flags flags)

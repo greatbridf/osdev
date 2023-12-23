@@ -92,10 +92,11 @@ public:
 
     constexpr void sleep()
     { attr.ready = 0; }
-    constexpr void wakeup()
-    { attr.ready = 1; }
+    void wakeup();
     constexpr bool is_ready() const
     { return attr.ready; }
+
+    void send_signal(kernel::signal_list::signo_type signal);
 
     constexpr thread(thread&& val) = default;
     inline ~thread() { free_kstack(pkstack); }
@@ -111,65 +112,46 @@ public:
 }
 
 class filearr {
-public:
-    using array_type = std::map<int, std::shared_ptr<fs::file>>;
+private:
+    // TODO: change this
+    struct fditem {
+        int flags;
+        std::shared_ptr<fs::file> file;
+    };
+
+    std::map<int, fditem> arr;
+    int min_avail { };
 
 private:
-    array_type arr;
-    std::priority_queue<int, std::vector<int>, std::greater<int>> _fds;
-    int _greatest_fd;
-
-private:
-    constexpr int next_fd()
-    {
-        if (_fds.empty())
-            return _greatest_fd++;
-        int retval = _fds.top();
-        _fds.pop();
-        return retval;
-    }
+    int allocate_fd(int from);
+    void release_fd(int fd);
+    inline int next_fd() { return allocate_fd(min_avail); }
 
 public:
-    constexpr filearr(const filearr&) = delete;
-    constexpr filearr& operator=(const filearr&) = delete;
-    constexpr filearr& operator=(filearr&&) = delete;
-    constexpr filearr(void) = default;
+    constexpr filearr() = default;
+    constexpr filearr(const filearr& val) = default;
     constexpr filearr(filearr&& val) = default;
 
-    constexpr int dup(int old_fd)
-    {
-        return dup2(old_fd, next_fd());
-    }
+    constexpr filearr& operator=(const filearr&) = delete;
+    constexpr filearr& operator=(filearr&&) = delete;
 
     // TODO: the third parameter should be int flags
     //       determining whether the fd should be closed
     //       after exec() (FD_CLOEXEC)
-    constexpr int dup2(int old_fd, int new_fd)
-    {
-        close(new_fd);
+    int dup2(int old_fd, int new_fd);
+    int dup(int old_fd);
 
-        auto iter = arr.find(old_fd);
-        if (!iter)
-            return -EBADF;
+    int dupfd(int fd, int minfd, int flags);
 
-        this->arr.emplace(new_fd, iter->second);
-        return new_fd;
-    }
-
-    constexpr void dup_all(const filearr& orig)
-    {
-        this->_fds = orig._fds;
-        this->_greatest_fd = orig._greatest_fd;
-        for (auto [ fd, fp ] : orig.arr)
-            this->arr.emplace(fd, fp);
-    }
+    int set_flags(int fd, int flags);
+    int clear_flags(int fd, int flags);
 
     constexpr fs::file* operator[](int i) const
     {
         auto iter = arr.find(i);
         if (!iter)
             return nullptr;
-        return iter->second.get();
+        return iter->second.file.get();
     }
 
     int pipe(int pipefd[2])
@@ -178,28 +160,26 @@ public:
 
         bool inserted = false;
         int fd = next_fd();
-        std::tie(std::ignore, inserted) = arr.emplace(fd,
-            std::shared_ptr<fs::file> {
+        std::tie(std::ignore, inserted) = arr.emplace(fd, fditem {
+            0, std::shared_ptr<fs::file> {
                 new fs::fifo_file(nullptr, {
                     .read = 1,
                     .write = 0,
-                    .close_on_exec = 0,
                 }, ppipe),
-        });
+        } } );
         assert(inserted);
 
         // TODO: use copy_to_user()
         pipefd[0] = fd;
 
         fd = next_fd();
-        std::tie(std::ignore, inserted) = arr.emplace(fd,
-            std::shared_ptr<fs::file> {
+        std::tie(std::ignore, inserted) = arr.emplace(fd, fditem {
+            0, std::shared_ptr<fs::file> {
                 new fs::fifo_file(nullptr, {
                     .read = 0,
                     .write = 1,
-                    .close_on_exec = 0,
                 }, ppipe),
-        });
+        } } );
         assert(inserted);
 
         // TODO: use copy_to_user()
@@ -216,18 +196,18 @@ public:
         if (!iter)
             return;
 
-        _fds.push(fd);
+        release_fd(fd);
         arr.erase(iter);
     }
 
     constexpr void onexec()
     {
         for (auto iter = arr.begin(); iter != arr.end(); ) {
-            if (!iter->second->flags.close_on_exec) {
+            if (!(iter->second.flags & O_CLOEXEC)) {
                 ++iter;
                 continue;
             }
-            _fds.push(iter->first);
+            release_fd(iter->first);
             iter = arr.erase(iter);
         }
     }
@@ -235,7 +215,7 @@ public:
     constexpr void close_all(void)
     {
         for (const auto& item : arr)
-            _fds.push(item.first);
+            release_fd(item.first);
         arr.clear();
     }
 

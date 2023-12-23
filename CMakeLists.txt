@@ -68,6 +68,7 @@ set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
                         include/kernel/mem.h
                         include/kernel/mm.hpp
                         include/kernel/module.hpp
+                        include/kernel/utsname.hpp
                         include/kernel/vfs.hpp
                         include/kernel/vga.hpp
                         include/kernel/signal.hpp

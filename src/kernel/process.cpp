@@ -94,6 +94,85 @@ void kernel::tasks::thread::free_kstack(uint32_t p)
     pkstack_bmp->clear(p);
 }
 
+int filearr::allocate_fd(int from)
+{
+    if (from < min_avail)
+        from = min_avail;
+
+    if (from == min_avail) {
+        int nextfd = min_avail + 1;
+        auto iter = arr.find(nextfd);
+        while (iter != arr.end() && nextfd == iter->first)
+            ++nextfd, ++iter;
+
+        int retval = min_avail;
+        min_avail = nextfd;
+        return retval;
+    }
+
+    int fd = from;
+    auto iter = arr.find(fd);
+    while (iter != arr.end() && fd == iter->first)
+        ++fd, ++iter;
+
+    return fd;
+}
+
+void filearr::release_fd(int fd)
+{
+    if (fd < min_avail)
+        min_avail = fd;
+}
+
+int filearr::dup(int old_fd)
+{
+    return dup2(old_fd, next_fd());
+}
+
+int filearr::dup2(int old_fd, int new_fd)
+{
+    close(new_fd);
+
+    auto iter = arr.find(old_fd);
+    if (!iter)
+        return -EBADF;
+
+    this->arr.emplace(new_fd, iter->second);
+    return new_fd;
+}
+
+int filearr::dupfd(int fd, int minfd, int flags)
+{
+    auto iter = arr.find(fd);
+    if (!iter)
+        return -EBADF;
+
+    int new_fd = allocate_fd(minfd);
+    auto [ newiter, inserted ] = arr.emplace(new_fd, iter->second);
+    assert(inserted);
+
+    newiter->second.flags = flags;
+    return new_fd;
+}
+
+int filearr::set_flags(int fd, int flags)
+{
+    auto iter = arr.find(fd);
+    if (!iter)
+        return -EBADF;
+    iter->second.flags |= flags;
+    return 0;
+}
+
+int filearr::clear_flags(int fd, int flags)
+{
+    auto iter = arr.find(fd);
+    if (!iter)
+        return -EBADF;
+    iter->second.flags &= ~flags;
+    return 0;
+}
+
 // TODO: file opening permissions check
 int filearr::open(const process &current,
     const types::path& filepath, int flags, mode_t mode)
@@ -139,41 +218,47 @@ int filearr::open(const process &current,
     }
 
     int fd = next_fd();
-    auto [ _, inserted ] = arr.emplace(fd, std::shared_ptr<fs::file> {
-        new fs::regular_file(dentry->parent, {
-            .read = !(flags & O_WRONLY),
-            .write = !!(flags & (O_WRONLY | O_RDWR)),
-            .close_on_exec = !!(flags & O_CLOEXEC),
-            }, 0, dentry->ind
-        )
-    });
+    auto [ _, inserted ] = arr.emplace(fd, fditem {
+        flags, std::shared_ptr<fs::file> {
+            new fs::regular_file(dentry->parent, {
+                .read = !(flags & O_WRONLY),
+                .write = !!(flags & (O_WRONLY | O_RDWR)),
+            }, 0, dentry->ind),
+    } } );
     assert(inserted);
     return fd;
 }
 
 process::process(const process& parent, pid_t pid)
-    : mms { parent.mms }, attr { parent.attr } , pwd { parent.pwd }
-    , umask { parent.umask }, pid { pid } , ppid { parent.pid }
-    , pgid { parent.pgid } , sid { parent.sid }
-    , control_tty { parent.control_tty }, root { parent.root }
-{
-    this->files.dup_all(parent.files);
-}
+    : mms { parent.mms }, attr { parent.attr } , files { parent.files }
+    , pwd { parent.pwd }, umask { parent.umask }, pid { pid }
+    , ppid { parent.pid }, pgid { parent.pgid } , sid { parent.sid }
+    , control_tty { parent.control_tty }, root { parent.root } { }
 
 process::process(pid_t pid, pid_t ppid)
     : attr { .system = true }
     , pwd { "/" } , pid { pid } , ppid { ppid } { }
 
-void process::send_signal(kernel::signal_list::signo_type signal)
+using kernel::tasks::thread;
+using signo_type = kernel::signal_list::signo_type;
+
+void process::send_signal(signo_type signal)
 {
-    for (auto& thd : thds) {
-        if (thd.signals.is_masked(signal))
-            continue;
-        thd.signals.set(signal);
-        thd.wakeup();
-        readythds->push(&thd);
-        break;
-    }
+    for (auto& thd : thds)
+        thd.send_signal(signal);
+}
+
+void thread::wakeup()
+{
+    attr.ready = 1;
+    readythds->push(this);
+}
+
+void thread::send_signal(signo_type signal)
+{
+    if (signal == SIGCONT)
+        this->wakeup();
+    signals.raise(signal);
 }
 
 void proclist::kill(pid_t pid, int exit_code)

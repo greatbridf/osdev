@@ -3,16 +3,35 @@
 
 #include <signal.h>
 
+#define sigmask(sig) (1ULL << ((sig)-1))
+
+#define sigmask_now (sigmask(SIGKILL) | sigmask(SIGSTOP))
+
+#define sigmask_ignore (sigmask(SIGCHLD) | sigmask(SIGURG) | sigmask(SIGWINCH))
+
+#define sigmask_coredump (\
+    sigmask(SIGQUIT) | sigmask(SIGILL) | sigmask(SIGTRAP) | sigmask(SIGABRT) | \
+    sigmask(SIGFPE) | sigmask(SIGSEGV) | sigmask(SIGBUS) | sigmask(SIGSYS) | \
+    sigmask(SIGXCPU) | sigmask(SIGXFSZ) )
+
+#define sigmask_stop (\
+    sigmask(SIGSTOP) | sigmask(SIGTSTP) | sigmask(SIGTTIN) | sigmask(SIGTTOU))
+
 using kernel::signal_list;
 using signo_type = signal_list::signo_type;
 
-static void continue_process(int) { }
+static void continue_process(int signal)
+{
+    current_thread->signals.after_signal(signal);
+}
 
-static void stop_process(int)
+static void stop_process(int signal)
 {
     current_thread->sleep();
 
     schedule();
+
+    current_thread->signals.after_signal(signal);
 }
 
 static void terminate_process(int signo)
@@ -25,65 +44,62 @@ static void terminate_process_with_core_dump(int signo)
     terminate_process(signo & 0x80);
 }
 
-static sig_t default_handlers[32] = {
-    nullptr,
-    terminate_process, // SIGHUP
-    terminate_process, // SIGINT
-    terminate_process_with_core_dump, // SIGQUIT
-    terminate_process_with_core_dump, // SIGILL
-    terminate_process_with_core_dump, // SIGTRAP
-    terminate_process_with_core_dump, // SIGABRT, SIGIOT
-    terminate_process_with_core_dump, // SIGBUS
-    terminate_process_with_core_dump, // SIGFPE
-    terminate_process, // SIGKILL
-    terminate_process, // SIGUSR1
-    terminate_process_with_core_dump, // SIGSEGV
-    terminate_process, // SIGUSR2
-    terminate_process, // SIGPIPE
-    terminate_process, // SIGALRM
-    terminate_process, // SIGTERM
-    terminate_process, // SIGSTKFLT
-    nullptr, // SIGCHLD
-    continue_process, // SIGCONT
-    stop_process, // SIGSTOP
-    stop_process, // SIGTSTP
-    stop_process, // SIGTTIN
-    stop_process, // SIGTTOU
-    nullptr, // SIGURG
-    terminate_process_with_core_dump, // SIGXCPU
-    terminate_process_with_core_dump, // SIGXFSZ
-    terminate_process, // SIGVTALRM
-    terminate_process, // SIGPROF
-    nullptr, // SIGWINCH
-    terminate_process, // SIGIO, SIGPOLL
-    terminate_process, // SIGPWR
-    terminate_process_with_core_dump, // SIGSYS, SIGUNUSED
-};
-
-signal_list::signal_list()
-    : m_mask(0)
+void signal_list::set_handler(signo_type signal, const sigaction& action)
 {
-    memcpy(m_handlers, default_handlers, sizeof(m_handlers));
+    if (action.sa_handler == SIG_DFL) {
+        m_handlers.erase(signal);
+        return;
+    }
+    else {
+        m_handlers[signal] = action;
+    }
+}
+
+void signal_list::get_handler(signo_type signal, sigaction& action) const
+{
+    auto iter = m_handlers.find(signal);
+    if (iter == m_handlers.end()) {
+        action.sa_handler = SIG_DFL;
+        action.sa_flags = 0;
+        action.sa_restorer = nullptr;
+        action.sa_mask = 0;
+    }
+    else {
+        action = iter->second;
+    }
 }
 
 void signal_list::on_exec()
 {
-    for (int i = 1; i < 32; ++i) {
-        if (m_handlers[i])
-            m_handlers[i] = default_handlers[i];
-    }
+    std::erase_if(m_handlers, [](auto& pair) {
+        return pair.second.sa_handler != SIG_IGN;
+    });
 }
 
-void signal_list::set(signo_type signal)
+void signal_list::raise(signo_type signal)
 {
-    if (m_mask & (1 << signal))
+    // TODO: clear pending signals
+    // if (signal == SIGCONT) {
+    //     m_list.remove_if([](signo_type sig) {
+    //         return sig == SIGSTOP || sig == SIGTSTP
+    //             || sig == SIGTTIN || sig == SIGTTOU;
+    //     });
+    // }
+
+    // if (signal == SIGSTOP)
+    //     m_list.remove(SIGCONT);
+
+    if (m_mask & sigmask(signal))
         return;
 
-    if (!m_handlers[signal])
-        return;
+    auto iter = m_handlers.find(signal);
+    if (iter != m_handlers.end()) {
+        if (iter->second.sa_handler == SIG_IGN)
+            return;
+    }
 
     m_list.push_back(signal);
-    m_mask |= (1 << signal);
+    m_mask |= sigmask(signal);
 }
 
 signo_type signal_list::handle()
@@ -94,39 +110,41 @@ signo_type signal_list::handle()
     auto signal = m_list.front();
     m_list.pop_front();
 
-    if (!m_handlers[signal])
-        return 0;
+    // default handlers
+    if (sigmask(signal) & sigmask_now) {
+        if (signal == SIGKILL)
+            terminate_process(signal);
+        else // SIGSTOP
+            stop_process(signal);
+        return signal;
+    }
 
-    m_handlers[signal](signal);
+    auto iter = m_handlers.find(signal);
+    if (iter == m_handlers.end()) {
+        if (signal == SIGCONT)
+            continue_process(signal);
+        else if (sigmask(signal) & sigmask_stop)
+            stop_process(signal);
+        else if (sigmask(signal) & sigmask_coredump)
+            terminate_process_with_core_dump(signal);
+        else if (!(sigmask(signal) & sigmask_ignore))
+            terminate_process(signal);
+        else // signal is ignored by default
+            return 0;
+    }
+    else {
+        iter->second.sa_handler(signal);
+    }
 
     return signal;
 }
 
 void signal_list::after_signal(signo_type signal)
 {
-    this->m_mask &= ~(1 << signal);
+    this->m_mask &= ~sigmask(signal);
 }
 
-void signal_list::get_mask(sigset_t* mask) const
-{
-    if (!mask)
-        return;
-
-    memset(mask, 0x00, sizeof(sigset_t));
-    for (int i = 1; i < 32; ++i) {
-        if (is_masked(i))
-            mask->__sig[(i-1)/4] |= 3 << (i-1) % 4 * 2;
-    }
-}
-
-void signal_list::set_mask(const sigset_t* mask)
-{
-    if (!mask)
-        return;
-
-    m_mask = 0;
-    for (int i = 1; i < 32; ++i) {
-        if (mask->__sig[(i-1)/4] & (3 << (i-1) % 4 * 2))
-            m_mask |= (1 << i);
-    }
-}
+kernel::sigmask_type signal_list::get_mask() const { return m_mask; }
+void signal_list::set_mask(sigmask_type mask) { m_mask = mask & ~sigmask_now; }
+void signal_list::mask(sigmask_type mask) { set_mask(m_mask | mask); }
+void signal_list::unmask(sigmask_type mask) { set_mask(m_mask & ~mask); }

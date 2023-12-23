@@ -1,5 +1,6 @@
 #pragma once
 
+#include <map>
 #include <list>
 
 #include <signal.h>
@@ -10,6 +11,15 @@
 
 namespace kernel {
 
+using sigmask_type = uint64_t;
+
+struct sigaction {
+    sighandler_t sa_handler;
+    unsigned long sa_flags;
+    sigrestorer_t sa_restorer;
+    sigmask_type sa_mask;
+};
+
 class signal_list {
 public:
     using signo_type = uint32_t;
@@ -17,29 +27,33 @@ public:
 
 private:
     list_type m_list;
-    signo_type m_mask;
-    sig_t m_handlers[32];
+    sigmask_type m_mask { };
+    std::map<signo_type, sigaction> m_handlers;
 
 public:
     static constexpr bool check_valid(signo_type sig)
     {
-        return sig > 0 && sig < 32;
+        return sig >= 1 && sig <= 64;
     }
 
 public:
-    signal_list();
+    constexpr signal_list() = default;
     constexpr signal_list(const signal_list& val) = default;
     constexpr signal_list(signal_list&& val) = default;
 
     void on_exec();
 
-    void get_mask(sigset_t* __user mask) const;
-    void set_mask(const sigset_t* __user mask);
+    sigmask_type get_mask() const;
+    void set_mask(sigmask_type mask);
+    void mask(sigmask_type mask);
+    void unmask(sigmask_type mask);
 
-    constexpr bool is_masked(signo_type signal) const { return m_mask & (1 << signal); }
+    void set_handler(signo_type signal, const sigaction& action);
+    void get_handler(signo_type signal, sigaction& action) const;
+
     constexpr bool empty(void) const { return m_list.empty(); }
 
-    void set(signo_type signal);
+    void raise(signo_type signal);
     signo_type handle();
     void after_signal(signo_type signal);
 };

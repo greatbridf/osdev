@@ -49,8 +49,7 @@ bool kernel::cond_var::wait(types::mutex& lock)
 {
     kernel::tasks::thread* thd = current_thread;
 
-    current_thread->attr.ready = 0;
-    current_thread->attr.wait = 1;
+    current_thread->sleep();
     m_subscribers.push_back(thd);
 
     lock.unlock();
@@ -69,8 +68,7 @@ void kernel::cond_var::notify(void)
         return;
 
     auto* thd = *iter;
-    thd->attr.ready = 1;
-    thd->attr.wait = 0;
+    thd->wakeup();
     readythds->push(thd);
 
     m_subscribers.erase(iter);
@@ -81,8 +79,7 @@ void kernel::cond_var::notify_all(void)
     types::lock_guard lck(m_mtx);
 
     for (auto& thd : m_subscribers) {
-        thd->attr.ready = 1;
-        thd->attr.wait = 0;
+        thd->wakeup();
         readythds->push(thd);
     }
 

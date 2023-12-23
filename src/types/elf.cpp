@@ -134,7 +134,10 @@ int types::elf::elf32_load(types::elf::elf32_load_data* d)
     // map stack area
     auto ret = mmap((void*)types::elf::ELF_STACK_TOP,
         types::elf::ELF_STACK_SIZE, nullptr, 0, true, false);
-    assert(ret == GB_OK);
+
+    // TODO: destruct local variables before calling kill_current
+    if (ret != GB_OK)
+        kill_current(SIGSEGV);
 
     d->eip = (void*)hdr.entry;
     d->sp = reinterpret_cast<uint32_t*>(types::elf::ELF_STACK_BOTTOM);

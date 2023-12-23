@@ -53,7 +53,6 @@ struct process_attr {
 struct thread_attr {
     uint32_t system : 1;
     uint32_t ready : 1;
-    uint32_t wait : 1;
 };
 
 namespace kernel::tasks {
@@ -79,7 +78,7 @@ public:
 
     explicit inline thread(types::string<> name, pid_t owner)
         : owner { owner }
-        , attr { .system = 1, .ready = 1, .wait = 0, }
+        , attr { .system = 1, .ready = 1, }
         , name { name }
     {
         alloc_kstack();
@@ -90,6 +89,13 @@ public:
     {
         alloc_kstack();
     }
+
+    constexpr void sleep()
+    { attr.ready = 0; }
+    constexpr void wakeup()
+    { attr.ready = 1; }
+    constexpr bool is_ready() const
+    { return attr.ready; }
 
     constexpr thread(thread&& val) = default;
     inline ~thread() { free_kstack(pkstack); }
@@ -343,12 +349,6 @@ public:
         return iter->second;
     }
 
-    constexpr bool has_child(pid_t pid)
-    {
-        auto& proc = find(pid);
-        return !proc.children.empty();
-    }
-
     constexpr void make_children_orphans(pid_t pid)
     {
         auto& children = find(pid).children;
@@ -407,7 +407,7 @@ public:
     constexpr thread* pop(void)
     {
         m_thds.remove_if([](thread* item) {
-            return !item->attr.ready;
+            return !item->is_ready();
         });
         auto* retval = m_thds.front();
         m_thds.pop_front();

@@ -165,14 +165,15 @@ extern "C" void int6_handler(
     uint16_t cs,
     uint32_t eflags)
 {
-    char buf[128] = {};
+    if (!current_process->attr.system)
+        kill_current(SIGSEGV);
+
+    char buf[128];
     snprintf(buf, sizeof(buf),
         "[kernel] int6 data: cs: %x, eflags: %x\n", cs, eflags);
     kmsg(buf);
-    if (!current_process->attr.system)
-        kill_current(SIGSEGV);
-    else
-        die(s_regs, eip);
+
+    die(s_regs, eip);
 }
 
 // general protection
@@ -183,15 +184,16 @@ extern "C" void int13_handler(
     uint16_t cs,
     uint32_t eflags)
 {
+    if (!current_process->attr.system)
+        kill_current(SIGILL);
+
     char buf[128] = {};
     snprintf(buf, sizeof(buf),
         "[kernel] int13 data: error_code: %x, cs: %x, eflags: %x\n",
         error_code, cs, eflags);
     kmsg(buf);
-    if (!current_process->attr.system)
-        kill_current(SIGILL);
-    else
-        die(s_regs, eip);
+
+    die(s_regs, eip);
 }
 
 struct PACKED int14_data {

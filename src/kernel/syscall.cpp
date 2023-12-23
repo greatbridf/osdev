@@ -121,8 +121,7 @@ int _syscall_read(interrupt_stack* data)
 // TODO: sleep seconds
 int _syscall_sleep(interrupt_stack*)
 {
-    current_thread->attr.ready = 0;
-    current_thread->attr.wait = 1;
+    current_thread->sleep();
 
     schedule();
     return 0;
@@ -217,11 +216,14 @@ int _syscall_waitpid(interrupt_stack* data)
     auto& waitlist = current_process->waitlist;
 
     while (waitlist.empty()) {
-        if (!procs->has_child(current_process->pid))
+        if (current_process->children.empty())
             return -ECHILD;
 
-        if (!cv.wait(mtx))
-            return -EINTR;
+        cv.wait(mtx);
+
+        // TODO: check WNOHANG
+        // if (!cv.wait(mtx))
+        //     return -EINTR;
     }
 
     auto iter = waitlist.begin();
@@ -739,6 +741,9 @@ int _syscall_kill(interrupt_stack* data)
 
     if (!kernel::signal_list::check_valid(sig))
         return -EINVAL;
+
+    if (procs->find(pid).is_system())
+        return 0;
 
     // TODO: check permission
     procs->send_signal(pid, sig);

@@ -10,9 +10,7 @@ static void continue_process(int) { }
 
 static void stop_process(int)
 {
-    current_thread->attr.ready = 0;
-    current_thread->attr.wait = 1;
-    readythds->remove_all(current_thread);
+    current_thread->sleep();
 
     schedule();
 }

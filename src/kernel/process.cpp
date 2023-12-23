@@ -170,6 +170,8 @@ void process::send_signal(kernel::signal_list::signo_type signal)
         if (thd.signals.is_masked(signal))
             continue;
         thd.signals.set(signal);
+        thd.wakeup();
+        readythds->push(&thd);
         break;
     }
 }
@@ -178,11 +180,9 @@ void proclist::kill(pid_t pid, int exit_code)
 {
     auto& proc = this->find(pid);
 
-    // remove threads from ready list
-    for (auto& thd : proc.thds) {
-        thd.attr.ready = 0;
-        readythds->remove_all(&thd);
-    }
+    // put all threads into sleep
+    for (auto& thd : proc.thds)
+        thd.sleep();
 
     // if current process is connected to a tty
     // clear its read buffer
@@ -200,7 +200,7 @@ void proclist::kill(pid_t pid, int exit_code)
     // init should never exit
     if (proc.ppid == 0) {
         console->print("kernel panic: init exited!\n");
-        assert(false);
+        freeze();
     }
 
     // make child processes orphans (children of init)

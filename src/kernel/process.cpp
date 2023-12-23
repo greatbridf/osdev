@@ -137,6 +137,8 @@ int filearr::dup2(int old_fd, int new_fd)
     if (!iter)
         return -EBADF;
 
+    int fd = allocate_fd(new_fd);
+    assert(fd == new_fd);
     this->arr.emplace(new_fd, iter->second);
     return new_fd;
 }
@@ -497,8 +499,6 @@ void k_new_thread(void (*func)(void*), void* data)
 SECTION(".text.kinit")
 void NORETURN init_scheduler(void)
 {
-    asm_cli();
-
     procs = new proclist;
     readythds = new readyqueue;
 

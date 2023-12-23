@@ -883,6 +883,38 @@ int _syscall_gettid(interrupt_stack* data)
     return current_process->pid;
 }
 
+int _syscall_mkdir(interrupt_stack* data)
+{
+    SYSCALL_ARG1(const char* __user, pathname);
+    SYSCALL_ARG2(mode_t, mode);
+
+    mode &= (~current_process->umask & 0777);
+
+    auto path = types::make_path(pathname, current_process->pwd);
+
+    auto* dent = fs::vfs_open(*current_process->root, path);
+    if (dent)
+        return -EEXIST;
+
+    // get parent path
+    auto dirname = path.last_name();
+    path.remove_last();
+
+    dent = fs::vfs_open(*current_process->root, path);
+    if (!dent)
+        return -ENOENT;
+
+    if (!S_ISDIR(dent->ind->mode))
+        return -ENOTDIR;
+
+    auto ret = fs::vfs_mkdir(dent, dirname.c_str(), mode);
+
+    if (ret != GB_OK)
+        return ret;
+
+    return 0;
+}
+
 extern "C" void syscall_entry(interrupt_stack* data)
 {
     int syscall_no = SYSCALL_NO;
@@ -920,6 +952,7 @@ void init_syscall(void)
     syscall_handlers[0x0c] = _syscall_chdir;
     syscall_handlers[0x14] = _syscall_getpid;
     syscall_handlers[0x25] = _syscall_kill;
+    syscall_handlers[0x27] = _syscall_mkdir;
     syscall_handlers[0x29] = _syscall_dup;
     syscall_handlers[0x2a] = _syscall_pipe;
     syscall_handlers[0x2d] = _syscall_brk;

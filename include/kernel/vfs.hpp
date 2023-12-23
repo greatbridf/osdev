@@ -212,7 +212,7 @@ public:
     virtual int inode_mkfile(dentry* dir, const char* filename, mode_t mode);
     virtual int inode_mknode(dentry* dir, const char* filename, mode_t mode, dev_t sn);
     virtual int inode_rmfile(dentry* dir, const char* filename);
-    virtual int inode_mkdir(dentry* dir, const char* dirname);
+    virtual int inode_mkdir(dentry* dir, const char* dirname, mode_t mode);
     virtual int inode_statx(dentry* dent, statx* buf, unsigned int mask);
     virtual int inode_stat(dentry* dent, struct stat* stat);
     virtual dev_t inode_devid(inode* file);
@@ -330,7 +330,7 @@ size_t vfs_write(inode* file, const char* buf, size_t offset, size_t n);
 int vfs_mkfile(fs::vfs::dentry* dir, const char* filename, mode_t mode);
 int vfs_mknode(fs::vfs::dentry* dir, const char* filename, mode_t mode, dev_t sn);
 int vfs_rmfile(fs::vfs::dentry* dir, const char* filename);
-int vfs_mkdir(fs::vfs::dentry* dir, const char* dirname);
+int vfs_mkdir(fs::vfs::dentry* dir, const char* dirname, mode_t mode);
 int vfs_stat(fs::vfs::dentry* dent, statx* stat, unsigned int mask);
 
 /**

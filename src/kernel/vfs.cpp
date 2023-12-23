@@ -189,7 +189,7 @@ int fs::vfs::inode_mknode(dentry*, const char*, mode_t, dev_t)
 { return -EINVAL; }
 int fs::vfs::inode_rmfile(dentry*, const char*)
 { return -EINVAL; }
-int fs::vfs::inode_mkdir(dentry*, const char*)
+int fs::vfs::inode_mkdir(dentry*, const char*, mode_t)
 { return -EINVAL; }
 int fs::vfs::inode_statx(dentry*, statx*, unsigned int)
 { return -EINVAL; }
@@ -319,9 +319,9 @@ public:
         return GB_OK;
     }
 
-    virtual int inode_mkdir(dentry* dir, const char* dirname) override
+    virtual int inode_mkdir(dentry* dir, const char* dirname, mode_t mode) override
     {
-        auto new_dir = cache_inode(0, _savedata(mk_fe_vector()), S_IFDIR | 0777, 0, 0);
+        auto new_dir = cache_inode(0, _savedata(mk_fe_vector()), S_IFDIR | (mode & 0777), 0, 0);
         mklink(new_dir, new_dir, ".");
 
         mklink(dir->ind, new_dir, dirname);
@@ -634,9 +634,9 @@ int fs::vfs_rmfile(fs::vfs::dentry* dir, const char* filename)
 {
     return dir->ind->fs->inode_rmfile(dir, filename);
 }
-int fs::vfs_mkdir(fs::vfs::dentry* dir, const char* dirname)
+int fs::vfs_mkdir(fs::vfs::dentry* dir, const char* dirname, mode_t mode)
 {
-    return dir->ind->fs->inode_mkdir(dir, dirname);
+    return dir->ind->fs->inode_mkdir(dir, dirname, mode);
 }
 
 fs::vfs::dentry* fs::vfs_open(fs::vfs::dentry& root, const types::path& path)
@@ -957,9 +957,9 @@ void init_vfs(void)
     fs_es->push_back(rootfs);
     fs_root = rootfs->root();
 
-    vfs_mkdir(fs_root, "dev");
-    vfs_mkdir(fs_root, "root");
-    vfs_mkdir(fs_root, "mnt");
+    vfs_mkdir(fs_root, "dev", 0755);
+    vfs_mkdir(fs_root, "root", 0755);
+    vfs_mkdir(fs_root, "mnt", 0755);
     vfs_mkfile(fs_root, "init", 0755);
 
     auto* init = vfs_open(*fs_root, "/init");

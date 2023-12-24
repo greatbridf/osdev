@@ -14,7 +14,7 @@ private:
     unsigned char* m_bm;
     std::size_t m_size;
 
-    static constexpr std::size_t SZ = sizeof(unsigned char);
+    static constexpr std::size_t SZ = sizeof(unsigned char) * 8;
 
 public:
     constexpr bitmap(const deleter_type& del, unsigned char* bm, std::size_t size)

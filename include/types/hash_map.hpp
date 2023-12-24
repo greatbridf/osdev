@@ -86,7 +86,7 @@ struct linux_hasher<String<Allocator>,
 
 template <typename Key, typename Value,
     template <typename _Key, typename...> class Hasher = types::linux_hasher,
-    template <typename _T> class Allocator = types::kernel_allocator,
+    typename Allocator = std::allocator<std::pair<const Key, Value> >,
     std::enable_if_t<std::is_convertible_v<hash_t, decltype(
         Hasher<Key>::hash(std::declval<Key>(), std::declval<uint32_t>())
     )>, bool> = true>
@@ -103,11 +103,9 @@ public:
     using iterator_type = iterator<pair_type*>;
     using const_iterator_type = iterator<const pair_type*>;
 
-    template <typename T>
-    using adapted_allocator = types::allocator_adapter<T, Allocator>;
-
-    using bucket_type = std::list<pair_type, adapted_allocator<pair_type>>;
-    using bucket_array_type = std::vector<bucket_type, adapted_allocator<bucket_type>>;
+    using bucket_type = std::list<pair_type, Allocator>;
+    using bucket_array_type = std::vector<bucket_type, typename
+        std::allocator_traits<Allocator>:: template rebind_alloc<bucket_type>>;
 
     using hasher_type = Hasher<Key>;
 

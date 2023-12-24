@@ -36,40 +36,6 @@ uint32_t e820_mem_map_count;
 uint32_t e820_mem_map_entry_size;
 struct mem_size_info mem_size_info;
 
-void* operator new(size_t sz)
-{
-    void* ptr = types::__allocator::m_palloc->alloc(sz);
-    assert(ptr);
-    return ptr;
-}
-
-void* operator new[](size_t sz)
-{
-    void* ptr = types::__allocator::m_palloc->alloc(sz);
-    assert(ptr);
-    return ptr;
-}
-
-void operator delete(void* ptr)
-{
-    types::__allocator::m_palloc->free(ptr);
-}
-
-void operator delete(void* ptr, size_t)
-{
-    types::__allocator::m_palloc->free(ptr);
-}
-
-void operator delete[](void* ptr)
-{
-    types::__allocator::m_palloc->free(ptr);
-}
-
-void operator delete[](void* ptr, size_t)
-{
-    types::__allocator::m_palloc->free(ptr);
-}
-
 constexpr void mark_addr_len(pptr_t start, size_t n)
 {
     if (n == 0)
@@ -121,7 +87,7 @@ page allocate_page(void)
 {
     return page {
         .phys_page_id = __alloc_raw_page(),
-        .ref_count = types::_new<types::kernel_ident_allocator, size_t>(0),
+        .ref_count = types::memory::kinew<size_t>(0),
         .pg_pteidx = 0,
         .attr = 0,
     };
@@ -130,7 +96,7 @@ page allocate_page(void)
 void free_page(page* pg)
 {
     if (*pg->ref_count == 1) {
-        types::pdelete<types::kernel_ident_allocator>(pg->ref_count);
+        types::memory::kidelete<size_t>(pg->ref_count);
         __free_raw_page(pg->phys_page_id);
     } else {
         --*pg->ref_count;
@@ -453,8 +419,7 @@ mm mm::split(void *addr)
     mm newmm {
         .start = addr,
         .attr { attr },
-        .pgs = types::_new<types::kernel_ident_allocator, mm::pages_vector>(
-        ),
+        .pgs = types::memory::kinew<mm::pages_vector>(),
         .mapped_file = mapped_file,
         .file_offset = attr.mapped ? file_offset + this_count * PAGE_SIZE : 0,
     };
@@ -517,21 +482,20 @@ void init_mem(void)
     init_mem_layout();
 
     // TODO: replace early kernel pd
-    auto* __kernel_mms = types::_new<types::kernel_ident_allocator,
-            kernel::memory::mm_list>(EARLY_KERNEL_PD_PAGE);
+    auto* __kernel_mms = types::memory::kinew<kernel::memory::mm_list>(EARLY_KERNEL_PD_PAGE);
     kernel::memory::mm_list::s_kernel_mms = __kernel_mms;
 
     // create empty_page struct
     empty_page.attr = 0;
     empty_page.phys_page_id = EMPTY_PAGE;
-    empty_page.ref_count = types::_new<types::kernel_ident_allocator, size_t>(2);
+    empty_page.ref_count = types::memory::kinew<size_t>(2);
     empty_page.pg_pteidx = 0x00002000;
 
     // 0xd0000000 to 0xd4000000 or 3.5GiB, size 64MiB
     __kernel_mms->add_empty_area(KERNEL_HEAP_START,
         64 * 1024 * 1024 / PAGE_SIZE, PAGE_COW, true, true);
 
-    types::__allocator::init_kernel_heap(KERNEL_HEAP_START,
+    kernel::kinit::init_kernel_heap(KERNEL_HEAP_START,
         vptrdiff(KERNEL_HEAP_LIMIT, KERNEL_HEAP_START));
 }
 
@@ -558,8 +522,8 @@ struct mapped_area {
     void* ptr;
 };
 
-static types::hash_map<page_t, mapped_area,
-    types::linux_hasher, types::kernel_ident_allocator>
+static types::hash_map<page_t, mapped_area, types::linux_hasher,
+    types::memory::ident_allocator<std::pair<page_t, mapped_area>>>
     mapped;
 static uint8_t _freebm[0x400 / 8];
 static types::bitmap freebm(

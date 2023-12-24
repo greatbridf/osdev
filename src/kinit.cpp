@@ -71,16 +71,16 @@ static inline int init_console(const char* name)
     if (name[0] == 't' && name[1] == 't' && name[2] == 'y') {
         if (name[3] == 'S' || name[3] == 's') {
             if (name[4] == '0') {
-                console = types::_new<types::kernel_ident_allocator, serial_tty>(PORT_SERIAL0);
+                console = types::memory::kinew<serial_tty>(PORT_SERIAL0);
                 return GB_OK;
             }
             if (name[4] == '1') {
-                console = types::_new<types::kernel_ident_allocator, serial_tty>(PORT_SERIAL1);
+                console = types::memory::kinew<serial_tty>(PORT_SERIAL1);
                 return GB_OK;
             }
         }
         if (name[3] == 'V' && name[3] == 'G' && name[3] == 'A') {
-            console = types::_new<types::kernel_ident_allocator, vga_tty>();
+            console = types::memory::kinew<vga_tty>();
             return GB_OK;
         }
     }

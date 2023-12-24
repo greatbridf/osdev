@@ -282,7 +282,7 @@ extern "C" void int14_handler(int14_data* d)
 
         --*page->ref_count;
 
-        page->ref_count = types::pnew<types::kernel_ident_allocator>(page->ref_count, 1);
+        page->ref_count = types::memory::kinew<size_t>(1);
         page->attr &= ~PAGE_COW;
         page->phys_page_id = new_page;
     }

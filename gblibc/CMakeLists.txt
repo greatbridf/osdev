@@ -15,7 +15,6 @@ add_library(gblibc STATIC
     src/errno.c
     src/init.c
     src/internal.c
-    src/alloca.c
     src/stat.c
     src/time.c
     src/signal.c

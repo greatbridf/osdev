@@ -3,11 +3,11 @@
 
 #include <stdint.h>
 
+#define alloca(size) __builtin_alloca(size)
+
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-void* alloca(size_t size);
 
 #ifdef __cplusplus
 }

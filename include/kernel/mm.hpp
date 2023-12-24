@@ -144,8 +144,7 @@ namespace memory {
 
 struct mm {
 public:
-    using pages_vector = std::vector<page,
-        types::allocator_adapter<page, types::kernel_ident_allocator>>;
+    using pages_vector = std::vector<page, types::memory::ident_allocator<page>>;
 
 public:
     void* start {};
@@ -201,8 +200,7 @@ private:
     };
 
 public:
-    using list_type = std::set<mm, comparator,
-        types::allocator_adapter<mm, types::kernel_ident_allocator>>;
+    using list_type = std::set<mm, comparator, types::memory::ident_allocator<mm>>;
     using iterator = list_type::iterator;
     using const_iterator = list_type::const_iterator;
 
@@ -247,7 +245,7 @@ public:
                 .system = system,
                 .mapped = 0,
             },
-            .pgs = types::_new<types::kernel_ident_allocator, mm::pages_vector>(),
+            .pgs = types::memory::kinew<mm::pages_vector>(),
         });
         assert(inserted);
         return *iter;
@@ -290,7 +288,7 @@ public:
 
             invalidate_tlb((uint32_t)area.start + (i++) * PAGE_SIZE);
         }
-        types::pdelete<types::kernel_ident_allocator>(area.pgs);
+        types::memory::kidelete<mm::pages_vector>(area.pgs);
     }
 
     constexpr mm* find(void* lp)

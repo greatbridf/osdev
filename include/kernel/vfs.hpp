@@ -108,12 +108,10 @@ public:
     struct dentry {
     public:
         using name_type = types::string<>;
-        template <typename T>
-        using allocator_type = types::kernel_allocator<T>;
 
     private:
-        std::list<dentry, types::allocator_adapter<dentry, allocator_type>>* children = nullptr;
-        types::hash_map<name_type, dentry*, types::linux_hasher, allocator_type>* idx_children = nullptr;
+        std::list<dentry>* children = nullptr;
+        types::hash_map<name_type, dentry*>* idx_children = nullptr;
 
     public:
         dentry* parent;
@@ -150,11 +148,11 @@ public:
         constexpr ~dentry()
         {
             if (children) {
-                types::pdelete<allocator_type>(children);
+                delete children;
                 children = nullptr;
             }
             if (idx_children) {
-                types::pdelete<allocator_type>(idx_children);
+                delete idx_children;
                 idx_children = nullptr;
             }
         }
@@ -235,7 +233,7 @@ private:
     static constexpr uint32_t WRITABLE = 2;
 
 private:
-    types::buffer<types::kernel_allocator> buf;
+    types::buffer buf;
     kernel::cond_var m_cv;
     uint32_t flags;
 

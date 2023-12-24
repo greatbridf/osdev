@@ -37,6 +37,7 @@ set(BOOTLOADER_SOURCES src/boot.s
 
 set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
                         src/kinit.cpp
+                        src/kernel/allocator.cc
                         src/kernel/interrupt.cpp
                         src/kernel/process.cpp
                         src/kernel/tty.cpp

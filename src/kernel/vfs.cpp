@@ -21,9 +21,6 @@
 #include <types/path.hpp>
 #include <types/string.hpp>
 
-using types::allocator_traits;
-using types::kernel_allocator;
-
 struct tmpfs_file_entry {
     size_t ino;
     char filename[128];
@@ -33,8 +30,8 @@ fs::vfs::dentry::dentry(dentry* _parent, inode* _ind, name_type _name)
     : parent(_parent) , ind(_ind) , flags { } , name(_name)
 {
     if (!_ind || S_ISDIR(ind->mode)) {
-        children = types::pnew<allocator_type>(children);
-        idx_children = types::pnew<allocator_type>(idx_children);
+        children = new std::list<dentry>;
+        idx_children = new types::hash_map<name_type, dentry*>;
     }
 }
 
@@ -242,15 +239,8 @@ private:
     }
 
 protected:
-    inline vfe_t* mk_fe_vector(void)
-    {
-        return allocator_traits<kernel_allocator<vfe_t>>::allocate_and_construct();
-    }
-
-    inline fdata_t* mk_data_vector(void)
-    {
-        return allocator_traits<kernel_allocator<fdata_t>>::allocate_and_construct();
-    }
+    inline vfe_t* mk_fe_vector() { return new vfe_t{}; }
+    inline fdata_t* mk_data_vector() { return new fdata_t{}; }
 
     void mklink(fs::inode* dir, fs::inode* inode, const char* filename)
     {
@@ -659,7 +649,7 @@ int fs::vfs_stat(fs::vfs::dentry* ent, statx* stat, unsigned int mask)
     return ent->ind->fs->inode_statx(ent, stat, mask);
 }
 
-static std::list<fs::vfs*>* fs_es;
+static std::list<fs::vfs*, types::memory::ident_allocator<fs::vfs*>> fs_es;
 
 int fs::register_block_device(dev_t node, fs::blkdev_ops ops)
 {
@@ -822,7 +812,7 @@ ssize_t fs::char_device_write(dev_t node, const char* buf, size_t n)
 
 fs::vfs* fs::register_fs(vfs* fs)
 {
-    fs_es->push_back(fs);
+    fs_es.push_back(fs);
     return fs;
 }
 
@@ -951,10 +941,8 @@ void init_vfs(void)
     // TODO: add interface to bind console device to other devices
     register_char_device(make_device(2, 0), { console_read, console_write });
 
-    fs_es = types::pnew<types::kernel_ident_allocator>(fs_es);
-
     auto* rootfs = new tmpfs;
-    fs_es->push_back(rootfs);
+    fs_es.push_back(rootfs);
     fs_root = rootfs->root();
 
     vfs_mkdir(fs_root, "dev", 0755);

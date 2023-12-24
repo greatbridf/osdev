@@ -1,15 +1,17 @@
 #pragma once
 
+#include <memory>
+
 #include <stdint.h>
 #include <stdio.h>
 #include <types/allocator.hpp>
 
 namespace types {
 
-template <template <typename> class Allocator>
-class buffer {
+template <typename Allocator>
+class basic_buffer {
 public:
-    using allocator_type = Allocator<char>;
+    using alloc_traits = std::allocator_traits<Allocator>;
 
 private:
     char* const start;
@@ -17,6 +19,7 @@ private:
     char* base;
     char* head;
     size_t count;
+    Allocator alloc { };
 
 private:
     constexpr char _get_char(char* ptr)
@@ -48,8 +51,8 @@ private:
     }
 
 public:
-    constexpr buffer(size_t size)
-        : start { types::allocator_traits<allocator_type>::allocate(size) }
+    constexpr basic_buffer(size_t size)
+        : start { alloc_traits::allocate(alloc, size) }
         , end { start + size - 1 }
         , base { start }
         , head { start }
@@ -57,8 +60,8 @@ public:
     {
     }
 
-    constexpr buffer(const buffer& buf)
-        : start { types::allocator_traits<allocator_type>::allocate(buf.end + 1 - buf.start) }
+    constexpr basic_buffer(const basic_buffer& buf)
+        : start { alloc_traits::allocate(alloc, buf.end + 1 - buf.start) }
         , end { (uint32_t)start + (uint32_t)buf.end - (uint32_t)buf.start }
         , base { (uint32_t)start + (uint32_t)buf.base - (uint32_t)buf.start }
         , head { (uint32_t)start + (uint32_t)buf.base - (uint32_t)buf.start }
@@ -66,7 +69,7 @@ public:
     {
     }
 
-    constexpr buffer(buffer&& buf)
+    constexpr basic_buffer(basic_buffer&& buf)
         : start { buf.start }
         , end { buf.end }
         , base { buf.base }
@@ -75,10 +78,10 @@ public:
     {
     }
 
-    constexpr ~buffer()
+    constexpr ~basic_buffer()
     {
         if (start)
-            types::allocator_traits<allocator_type>::deallocate(start);
+            alloc_traits::deallocate(alloc, start, end - start);
     }
 
     constexpr bool empty(void) const
@@ -151,5 +154,7 @@ public:
         head = base;
     }
 };
+
+using buffer = basic_buffer<std::allocator<char>>;
 
 } // namespace types

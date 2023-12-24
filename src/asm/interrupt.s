@@ -183,15 +183,15 @@ syscall_stub:
     pushal
 
     # stack alignment and push *data
-    movl %esp, %eax
+    movl %esp, %ebx
     subl $0x4, %esp
     andl $0xfffffff0, %esp
-    movl %eax, (%esp)
+    movl %ebx, (%esp)
 
     call syscall_entry
 
     # restore stack
-    popl %esp
+    mov %ebx, %esp
 
 .globl _syscall_stub_fork_return
 .type  _syscall_stub_fork_return @function

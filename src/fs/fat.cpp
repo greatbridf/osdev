@@ -147,11 +147,8 @@ fat32::fat32(inode* _device)
 
     data_region_offset = reserved_sectors + fat_copies * sectors_per_fat;
     fat = (cluster_t*)new char[SECTOR_SIZE * sectors_per_fat];
-    // TODO: optimize
-    for (uint32_t i = 0; i < 4; ++i)
+    for (uint32_t i = 0; i < sectors_per_fat; ++i)
         _raw_read_sector((char*)fat + i * SECTOR_SIZE, reserved_sectors + i);
-    for (uint32_t i = 4; i < sectors_per_fat; ++i)
-        memset((char*)fat + i * SECTOR_SIZE, 0x00, SECTOR_SIZE);
 
     int i = 0;
     while (i < 11 && info->label[i] != 0x20) {

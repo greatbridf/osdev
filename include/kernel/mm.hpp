@@ -15,12 +15,10 @@
 #include <types/status.h>
 #include <types/types.h>
 
-#define invalidate_tlb(addr) asm("invlpg (%0)" \
+#define invalidate_tlb(addr) asm volatile("invlpg (%0)" \
                                  :             \
                                  : "r"(addr)   \
                                  : "memory")
-
-#define memory_fence asm volatile("" ::: "memory")
 
 constexpr size_t THREAD_KERNEL_STACK_SIZE = 2 * PAGE_SIZE;
 

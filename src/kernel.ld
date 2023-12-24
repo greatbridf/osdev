@@ -76,6 +76,7 @@ SECTIONS
         *(.rodata)
         *(.rodata*)
 
+        . = ALIGN(16);
         kmod_loaders_start = .;
 
         *(.kmods)

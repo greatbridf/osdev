@@ -7,7 +7,7 @@ namespace kernel::hw {
 inline uint32_t inl(uint16_t pn)
 {
     uint32_t ret;
-    asm("inl %1, %0"
+    asm volatile("inl %1, %0"
         : "=a"(ret)
         : "d"(pn));
     return ret;
@@ -15,7 +15,7 @@ inline uint32_t inl(uint16_t pn)
 
 inline uint32_t outl(uint16_t pn, uint32_t n)
 {
-    asm("outl %1, %0"
+    asm volatile("outl %1, %0"
         :
         : "d"(pn), "a"(n));
     return n;
@@ -24,7 +24,7 @@ inline uint32_t outl(uint16_t pn, uint32_t n)
 inline uint16_t inw(uint16_t pn)
 {
     uint16_t ret;
-    asm("inw %1, %0"
+    asm volatile("inw %1, %0"
         : "=a"(ret)
         : "d"(pn));
     return ret;
@@ -32,7 +32,7 @@ inline uint16_t inw(uint16_t pn)
 
 inline uint16_t outw(uint16_t pn, uint16_t n)
 {
-    asm("outw %1, %0"
+    asm volatile("outw %1, %0"
         :
         : "d"(pn), "a"(n));
     return n;
@@ -41,7 +41,7 @@ inline uint16_t outw(uint16_t pn, uint16_t n)
 inline uint8_t inb(uint16_t pn)
 {
     uint8_t ret;
-    asm("inb %1, %0"
+    asm volatile("inb %1, %0"
         : "=a"(ret)
         : "d"(pn));
     return ret;
@@ -49,7 +49,7 @@ inline uint8_t inb(uint16_t pn)
 
 inline uint8_t outb(uint16_t pn, uint8_t n)
 {
-    asm("outb %1, %0"
+    asm volatile("outb %1, %0"
         :
         : "d"(pn), "a"(n));
     return n;

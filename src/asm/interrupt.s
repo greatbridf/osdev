@@ -200,8 +200,8 @@ _syscall_stub_fork_return:
     iret
 
 # parameters
-# #1: uint32_t* curr_esp
-# #2: uint32_t next_esp
+# #1: esp* curr_esp
+# #2: esp* next_esp
 .globl asm_ctx_switch
 .type  asm_ctx_switch @function
 asm_ctx_switch:
@@ -215,8 +215,14 @@ asm_ctx_switch:
     push %ebp
     pushfl
 
-    movl %esp, (%ecx)
-    movl %eax, %esp
+    # push esp to restore
+    pushl (%ecx)
+
+    mov %esp, (%ecx)
+    mov (%eax), %esp
+
+    # restore esp
+    popl (%eax)
 
     popfl
     pop %ebp

@@ -56,7 +56,7 @@ void kernel::tasks::thread::alloc_kstack(void)
 {
     static int __allocated;
     if (!pkstack_bmp)
-        pkstack_bmp = new types::bitmap((0x1000000 - 0xc00000) / 0x2000);
+        pkstack_bmp = new types::bitmap((0x1000000 - 0xc00000) / THREAD_KERNEL_STACK_SIZE);
 
     for (int i = 0; i < __allocated; ++i) {
         if (pkstack_bmp->test(i) == 0) {
@@ -72,12 +72,14 @@ void kernel::tasks::thread::alloc_kstack(void)
     kernel::paccess pa(0x00005);
     auto pt = (pt_t)pa.ptr();
     assert(pt);
-    pte_t* pte = *pt + __allocated * 2;
 
-    pte[0].v = 0x3;
-    pte[0].in.page = __alloc_raw_page();
-    pte[1].v = 0x3;
-    pte[1].in.page = __alloc_raw_page();
+    auto cnt = THREAD_KERNEL_STACK_SIZE / PAGE_SIZE;
+    pte_t* pte = *pt + __allocated * cnt;
+
+    for (uint32_t i = 0; i < cnt; ++i) {
+        pte[i].v = 0x3;
+        pte[i].in.page = __alloc_raw_page();
+    }
 
     pkstack = 0xffc00000 + THREAD_KERNEL_STACK_SIZE * (__allocated + 1);
     esp = reinterpret_cast<uint32_t*>(pkstack);
@@ -394,6 +396,7 @@ static void create_kthreadd_process()
     auto& thd = *iter_thd;
 
     auto* esp = &thd.esp;
+    auto old_esp = (uint32_t)thd.esp;
 
     // return(start) address
     push_stack(esp, (uint32_t)kernel_threadd_main);
@@ -407,6 +410,8 @@ static void create_kthreadd_process()
     push_stack(esp, 0);
     // eflags
     push_stack(esp, 0x200);
+    // original esp
+    push_stack(esp, old_esp);
 
     readythds->push(&thd);
 }
@@ -552,17 +557,17 @@ void NORETURN init_scheduler(void)
     freeze();
 }
 
-extern "C" void asm_ctx_switch(uint32_t** curr_esp, uint32_t* next_esp);
+extern "C" void asm_ctx_switch(uint32_t** curr_esp, uint32_t** next_esp);
 bool schedule()
 {
-    auto thd = readythds->query();
+    auto next_thd = readythds->query();
     process* proc = nullptr;
     kernel::tasks::thread* curr_thd = nullptr;
 
-    if (current_thread == thd)
+    if (current_thread == next_thd)
         goto _end;
 
-    proc = &procs->find(thd->owner);
+    proc = &procs->find(next_thd->owner);
     if (current_process != proc) {
         proc->mms.switch_pd();
         current_process = proc;
@@ -570,10 +575,11 @@ bool schedule()
 
     curr_thd = current_thread;
 
-    current_thread = thd;
-    tss.esp0 = current_thread->pkstack;
+    current_thread = next_thd;
+    tss.esp0 = (uint32_t)next_thd->esp;
 
-    asm_ctx_switch(&curr_thd->esp, thd->esp);
+    asm_ctx_switch(&curr_thd->esp, &next_thd->esp);
+    tss.esp0 = (uint32_t)curr_thd->esp;
 
 _end:
 

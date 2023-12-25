@@ -65,6 +65,8 @@ int _syscall_fork(interrupt_stack* data)
 
     readythds->push(newthd);
 
+    uint32_t newthd_oldesp = (uint32_t)newthd->esp;
+
     // create fake interrupt stack
     push_stack(&newthd->esp, data->ss);
     push_stack(&newthd->esp, data->esp);
@@ -96,6 +98,8 @@ int _syscall_fork(interrupt_stack* data)
     push_stack(&newthd->esp, 0);
     // eflags
     push_stack(&newthd->esp, 0);
+    // original esp
+    push_stack(&newthd->esp, newthd_oldesp);
 
     return newproc.pid;
 }

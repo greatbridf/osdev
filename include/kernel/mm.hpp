@@ -20,7 +20,7 @@
                                  : "r"(addr)   \
                                  : "memory")
 
-constexpr size_t THREAD_KERNEL_STACK_SIZE = 2 * PAGE_SIZE;
+constexpr size_t THREAD_KERNEL_STACK_SIZE = 8 * PAGE_SIZE;
 
 constexpr uint32_t PAGE_COW = (1 << 0);
 constexpr uint32_t PAGE_MMAP = (1 << 1);

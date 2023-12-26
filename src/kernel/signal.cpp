@@ -1,5 +1,6 @@
 #include <kernel/process.hpp>
 #include <kernel/signal.hpp>
+#include <kernel/interrupt.h>
 
 #include <signal.h>
 
@@ -29,7 +30,10 @@ static void stop_process(int signal)
 {
     current_thread->sleep();
 
-    schedule();
+    while (true) {
+        if (schedule())
+            break;
+    }
 
     current_thread->signals.after_signal(signal);
 }
@@ -76,37 +80,64 @@ void signal_list::on_exec()
     });
 }
 
-void signal_list::raise(signo_type signal)
+bool signal_list::raise(signo_type signal)
 {
     // TODO: clear pending signals
-    // if (signal == SIGCONT) {
-    //     m_list.remove_if([](signo_type sig) {
-    //         return sig == SIGSTOP || sig == SIGTSTP
-    //             || sig == SIGTTIN || sig == SIGTTOU;
-    //     });
-    // }
+    if (signal == SIGCONT) {
+        m_list.remove_if([](signo_type sig) {
+            return sig == SIGSTOP || sig == SIGTSTP
+                || sig == SIGTTIN || sig == SIGTTOU;
+        });
+        return true;
+    }
 
-    // if (signal == SIGSTOP)
-    //     m_list.remove(SIGCONT);
-
-    if (m_mask & sigmask(signal))
-        return;
+    if (sigmask(signal) & sigmask_stop) {
+        m_list.remove(SIGCONT);
+        return false;
+    }
 
     auto iter = m_handlers.find(signal);
     if (iter != m_handlers.end()) {
         if (iter->second.sa_handler == SIG_IGN)
-            return;
+            return false;
+    } else {
+        if (sigmask(signal) & sigmask_ignore)
+            return false;
     }
 
     m_list.push_back(signal);
     m_mask |= sigmask(signal);
+
+    return true;
 }
 
-signo_type signal_list::handle()
+signo_type signal_list::pending_signal()
 {
-    if (this->empty())
-        return 0;
+    for (auto iter = m_list.begin(); iter != m_list.end(); ++iter) {
+        auto iter_handler = m_handlers.find(*iter);
 
+        // signal default action
+        if (iter_handler == m_handlers.end()) {
+            if (!(sigmask(*iter) & sigmask_ignore))
+                return *iter;
+            iter = m_list.erase(iter);
+            continue;
+        }
+
+        if (iter_handler->second.sa_handler == SIG_IGN) {
+            iter = m_list.erase(iter);
+            continue;
+        }
+
+        return *iter;
+    }
+    
+    return 0;
+}
+
+void signal_list::handle(interrupt_stack* context, mmx_registers* mmxregs)
+{
+    // assume that the pending signal is at the front of the list
     auto signal = m_list.front();
     m_list.pop_front();
 
@@ -116,7 +147,6 @@ signo_type signal_list::handle()
             terminate_process(signal);
         else // SIGSTOP
             stop_process(signal);
-        return signal;
     }
 
     auto iter = m_handlers.find(signal);
@@ -129,14 +159,37 @@ signo_type signal_list::handle()
             terminate_process_with_core_dump(signal);
         else if (!(sigmask(signal) & sigmask_ignore))
             terminate_process(signal);
-        else // signal is ignored by default
-            return 0;
-    }
-    else {
-        iter->second.sa_handler(signal);
+        // signal is ignored by default
+        return;
     }
 
-    return signal;
+    auto& handler = iter->second;
+    if (!(handler.sa_flags & SA_RESTORER))
+        raise(SIGSYS);
+
+    uint32_t esp = (uint32_t)context->esp;
+    esp -= (sizeof(mmx_registers) + sizeof(interrupt_stack) + 16);
+    esp &= 0xfffffff0;
+
+    auto tmpesp = esp;
+    *(uint32_t*)tmpesp = signal; // signal handler argument: int signo
+    tmpesp += 4;
+    *(uint32_t*)tmpesp = context->esp; // original esp
+    tmpesp += 4;
+
+    tmpesp += 8; // padding to align to 16 bytes
+
+    memcpy((void*)tmpesp, mmxregs, sizeof(mmx_registers));
+    tmpesp += sizeof(mmx_registers); // mmx registers
+    memcpy((void*)tmpesp, context, sizeof(interrupt_stack));
+    tmpesp += sizeof(interrupt_stack); // context
+
+    esp -= sizeof(void*);
+    // signal handler return address: restorer
+    *(uint32_t*)esp = (uint32_t)handler.sa_restorer;
+
+    context->esp = esp;
+    context->v_eip = (void*)handler.sa_handler;
 }
 
 void signal_list::after_signal(signo_type signal)

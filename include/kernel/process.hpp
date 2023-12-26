@@ -90,8 +90,7 @@ public:
         alloc_kstack();
     }
 
-    constexpr void sleep()
-    { attr.ready = 0; }
+    void sleep();
     void wakeup();
     constexpr bool is_ready() const
     { return attr.ready; }

@@ -873,7 +873,7 @@ int fs::pipe::write(const char* buf, size_t n)
         types::lock_guard lck(mtx);
 
         if (!is_readable()) {
-            current_thread->signals.raise(SIGPIPE);
+            current_thread->send_signal(SIGPIPE);
             return -EPIPE;
         }
 
@@ -882,7 +882,7 @@ int fs::pipe::write(const char* buf, size_t n)
                 return -EINTR;
 
             if (!is_readable()) {
-                current_thread->signals.raise(SIGPIPE);
+                current_thread->send_signal(SIGPIPE);
                 return -EPIPE;
             }
         }

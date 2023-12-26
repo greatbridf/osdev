@@ -56,6 +56,7 @@ bool kernel::cond_var::wait(types::mutex& lock)
     bool ret = schedule();
     lock.lock();
 
+    m_subscribers.remove(thd);
     return ret;
 }
 

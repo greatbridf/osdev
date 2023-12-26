@@ -159,12 +159,14 @@ irqstub:
     and $0xfffffff0, %esp
 
     # save mmx registers
-    subl $512, %esp
-    fxsave (%esp)
+    sub $(512 + 16), %esp
+    fxsave 16(%esp)
 
-    # push irq number
-    sub $16, %esp
-    mov %eax, (%esp)
+    # save irq number and pointers to context and mmx registers
+    mov %eax, (%esp)  # irq number
+    mov %ebx, 4(%esp) # pointer to context
+    lea 16(%esp), %eax
+    mov %eax, 8(%esp) # pointer to mmx registers
 
     call irq_handler
 
@@ -182,13 +184,25 @@ irqstub:
 syscall_stub:
     pushal
 
-    # stack alignment and push *data
-    movl %esp, %ebx
-    subl $0x4, %esp
-    andl $0xfffffff0, %esp
-    movl %ebx, (%esp)
+    # save current esp
+    mov %esp, %ebx
+
+    # stack alignment
+    and $0xfffffff0, %esp
+
+    # save mmx registers
+    sub $(512 + 16), %esp
+    fxsave 16(%esp)
+
+    # save pointers to context and mmx registers
+    mov %ebx, (%esp) # pointer to context
+    lea 16(%esp), %eax
+    mov %eax, 4(%esp) # pointer to mmx registers
 
     call syscall_entry
+
+    # restore mmx registers
+    fxrstor 16(%esp)
 
     # restore stack
     mov %ebx, %esp

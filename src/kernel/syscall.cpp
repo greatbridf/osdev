@@ -919,7 +919,9 @@ int _syscall_mkdir(interrupt_stack* data)
     return 0;
 }
 
-extern "C" void syscall_entry(interrupt_stack* data)
+extern "C" void syscall_entry(
+    interrupt_stack* data,
+    mmx_registers* mmxregs)
 {
     int syscall_no = SYSCALL_NO;
 
@@ -937,7 +939,8 @@ extern "C" void syscall_entry(interrupt_stack* data)
 
     SYSCALL_RETVAL = ret;
 
-    current_thread->signals.handle();
+    if (current_thread->signals.pending_signal())
+        current_thread->signals.handle(data, mmxregs);
 }
 
 SECTION(".text.kinit")

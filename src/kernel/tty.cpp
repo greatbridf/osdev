@@ -119,16 +119,14 @@ void serial_tty::recvchar(char c)
     // ^C: SIGINT
     case 0x03:
         procs->send_signal_grp(fg_pgroup, SIGINT);
-        this->m_cv.notify();
         break;
     // ^D: EOF
     case 0x04:
         this->m_cv.notify();
         break;
-    // ^Z: SIGSTOP
+    // ^Z: SIGTSTP
     case 0x1a:
-        procs->send_signal_grp(fg_pgroup, SIGSTOP);
-        this->m_cv.notify();
+        procs->send_signal_grp(fg_pgroup, SIGTSTP);
         break;
     // ^[: ESCAPE
     case 0x1b:
@@ -141,7 +139,6 @@ void serial_tty::recvchar(char c)
     // ^\: SIGQUIT
     case 0x1c:
         procs->send_signal_grp(fg_pgroup, SIGQUIT);
-        this->m_cv.notify();
         break;
     default:
         buf.put(c);

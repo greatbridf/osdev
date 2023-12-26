@@ -252,6 +252,12 @@ void process::send_signal(signo_type signal)
         thd.send_signal(signal);
 }
 
+void thread::sleep()
+{
+    attr.ready = 0;
+    readythds->remove_all(this);
+}
+
 void thread::wakeup()
 {
     attr.ready = 1;
@@ -260,9 +266,8 @@ void thread::wakeup()
 
 void thread::send_signal(signo_type signal)
 {
-    if (signal == SIGCONT)
+    if (signals.raise(signal))
         this->wakeup();
-    signals.raise(signal);
 }
 
 void proclist::kill(pid_t pid, int exit_code)
@@ -583,7 +588,7 @@ bool schedule()
 
 _end:
 
-    return current_thread->signals.handle() == 0;
+    return current_thread->signals.pending_signal() == 0;
 }
 
 void NORETURN schedule_noreturn(void)

@@ -310,7 +310,10 @@ extern "C" void int14_handler(int14_data* d)
     }
 }
 
-extern "C" void irq_handler(int irqno)
+extern "C" void irq_handler(
+    int irqno,
+    interrupt_stack* context,
+    mmx_registers* mmxregs)
 {
     asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
     if (irqno >= 8)
@@ -318,4 +321,10 @@ extern "C" void irq_handler(int irqno)
 
     for (const auto& handler : s_irq_handlers[irqno])
         handler();
+
+    if (context->cs != USER_CODE_SEGMENT)
+        return;
+
+    if (current_thread->signals.pending_signal())
+        current_thread->signals.handle(context, mmxregs);
 }

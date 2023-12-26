@@ -22,13 +22,17 @@ struct regs_32 {
     uint32_t eax;
 };
 
-struct PACKED interrupt_stack {
+struct interrupt_stack {
     struct regs_32 s_regs;
     void* v_eip;
     uint32_t cs;
     uint32_t eflags;
     uint32_t esp;
     uint32_t ss;
+};
+
+struct mmx_registers {
+    uint8_t data[512]; // TODO: list of content
 };
 
 // present: When set, the page fault was caused by a page-protection violation.

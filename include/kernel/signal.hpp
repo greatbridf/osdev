@@ -9,6 +9,8 @@
 
 #include <types/cplusplus.hpp>
 
+#include <kernel/interrupt.h>
+
 namespace kernel {
 
 using sigmask_type = uint64_t;
@@ -51,10 +53,11 @@ public:
     void set_handler(signo_type signal, const sigaction& action);
     void get_handler(signo_type signal, sigaction& action) const;
 
-    constexpr bool empty(void) const { return m_list.empty(); }
+    signo_type pending_signal();
 
-    void raise(signo_type signal);
-    signo_type handle();
+    // return value: whether the thread should wake up
+    bool raise(signo_type signal);
+    void handle(interrupt_stack* context, mmx_registers* mmxregs);
     void after_signal(signo_type signal);
 };
 

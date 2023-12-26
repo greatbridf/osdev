@@ -405,7 +405,7 @@ public:
             if (offset)
                 to_copy = 512 - offset;
             else
-                to_copy = std::max(cnt, 512U);
+                to_copy = std::min(cnt, 512U);
             memcpy(buf, b + offset, to_copy);
             offset = 0;
             buf += to_copy;

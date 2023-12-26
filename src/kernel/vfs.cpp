@@ -946,13 +946,23 @@ void init_vfs(void)
     fs_root = rootfs->root();
 
     vfs_mkdir(fs_root, "dev", 0755);
-    vfs_mkdir(fs_root, "root", 0755);
     vfs_mkdir(fs_root, "mnt", 0755);
     vfs_mkfile(fs_root, "init", 0755);
 
     auto* init = vfs_open(*fs_root, "/init");
     assert(init);
-    const char* str = "#/bin/sh\nexec /bin/sh\n";
+    const char* str = "#!/mnt/busybox sh\n"
+                      "cd /\n"
+                      "busybox mkdir etc\n"
+                      "busybox mkdir root\n"
+                      "busybox cat > /etc/passwd <<EOF\n"
+                      "root:x:0:0:root:/root:/mnt/busybox_ sh\n"
+                      "EOF\n"
+                      "busybox cat > /etc/group <<EOF\n"
+                      "root:x:0:root\n"
+                      "EOF\n"
+                      "exec /mnt/init /mnt/busybox_ sh < /dev/console"
+                      "    >> /dev/console 2>>/dev/console\n";
     vfs_write(init->ind, str, 0, strlen(str));
 
     auto* dev = vfs_open(*fs_root, "/dev");

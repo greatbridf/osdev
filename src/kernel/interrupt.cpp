@@ -218,9 +218,6 @@ static inline void _int14_panic(void* eip, void* cr2, struct page_fault_error_co
 
 static inline void NORETURN _int14_kill_user(void)
 {
-    char buf[256] {};
-    snprintf(buf, 256, "Segmentation Fault (pid%d killed)\n", current_process->pid);
-    kmsg(buf);
     kill_current(SIGSEGV);
 }
 

@@ -311,6 +311,26 @@ int thread::load_thread_area() const
     return 0;
 }
 
+process& proclist::real_emplace(pid_t pid, pid_t ppid)
+{
+    auto [ iter, inserted ] = m_procs.try_emplace(pid, pid, ppid);
+    assert(inserted);
+
+    if (ppid && try_find(ppid)) {
+        bool success = false;
+        std::tie(std::ignore, success) =
+            find(ppid).children.insert(pid);
+        assert(success);
+    }
+
+    return iter->second;
+}
+
+process& proclist::emplace(pid_t ppid)
+{
+    return real_emplace(next_pid(), ppid);
+}
+
 void proclist::kill(pid_t pid, int exit_code)
 {
     auto& proc = this->find(pid);
@@ -384,10 +404,13 @@ void kernel_threadd_main(void)
             void (*func)(void*) = nullptr;
             void* data = nullptr;
 
-            {
+            if (1) {
                 types::lock_guard lck(kthreadd_mtx);
-                func = std::exchange(kthreadd_new_thd_func, nullptr);
-                data = std::exchange(kthreadd_new_thd_data, nullptr);
+
+                if (kthreadd_new_thd_func) {
+                    func = std::exchange(kthreadd_new_thd_func, nullptr);
+                    data = std::exchange(kthreadd_new_thd_data, nullptr);
+                }
             }
 
             // TODO
@@ -429,11 +452,14 @@ static void release_kinit()
     }
 }
 
-static void create_kthreadd_process()
+namespace kernel::kinit {
+
+SECTION(".text.kinit")
+void create_kthreadd_process()
 {
     // pid 2 is kernel thread daemon
-    auto& proc = procs->emplace(1);
-    assert(proc.pid == 2);
+    auto& proc = procs->real_emplace(0, 0);
+    assert(proc.pid == 0);
 
     // create thread
     auto [ iter_thd, inserted] =
@@ -462,9 +488,11 @@ static void create_kthreadd_process()
     readythds->push(&thd);
 }
 
+} // namespace kernel::kinit
+
 void NORETURN _kernel_init(void)
 {
-    create_kthreadd_process();
+    kernel::kinit::create_kthreadd_process();
 
     release_kinit();
 
@@ -502,15 +530,15 @@ void NORETURN _kernel_init(void)
     current_process->attr.system = 0;
     current_thread->attr.system = 0;
 
-    const char* argv[] = { "/mnt/init", "/mnt/sh", nullptr };
-    const char* envp[] = { "LANG=C", "HOME=/", nullptr };
+    const char* argv[] = { "/mnt/busybox", "sh", "/init" };
+    const char* envp[] = { "LANG=C", "HOME=/", "PATH=/mnt", "PWD=/", nullptr };
 
     types::elf::elf32_load_data d;
     d.argv = argv;
     d.envp = envp;
     d.system = false;
 
-    d.exec_dent = fs::vfs_open(*fs::fs_root, "/mnt/init");
+    d.exec_dent = fs::vfs_open(*fs::fs_root, argv[0]);
     if (!d.exec_dent) {
         console->print("kernel panic: init not found!\n");
         freeze();

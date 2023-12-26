@@ -203,7 +203,7 @@ int NORETURN _syscall_exit(interrupt_stack* data)
         assert(false);
 
     // terminating a whole process:
-    procs->kill(current_process->pid, exit_code & 0xff);
+    procs->kill(current_process->pid, (exit_code & 0xff) << 8);
 
     // switch to new process and continue
     schedule_noreturn();

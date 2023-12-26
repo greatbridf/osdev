@@ -276,34 +276,25 @@ public:
     void send_signal(kernel::signal_list::signo_type signal);
 };
 
-class proclist final {
-public:
-    using list_type = std::map<pid_t, process>;
-    using iterator = list_type::iterator;
-    using const_iterator = list_type::const_iterator;
+namespace kernel::kinit {
 
+// in process.cpp
+void create_kthreadd_process();
+
+} // namespace kernel::kinit
+
+class proclist final {
 private:
-    list_type m_procs;
+    std::map<pid_t, process> m_procs;
     pid_t m_nextpid = 1;
 
     constexpr pid_t next_pid() { return m_nextpid++; }
+    process& real_emplace(pid_t pid, pid_t ppid);
+
+    friend void kernel::kinit::create_kthreadd_process();
 
 public:
-    process& emplace(pid_t ppid)
-    {
-        pid_t pid = next_pid();
-        auto [ iter, inserted ] = m_procs.try_emplace(pid, pid, ppid);
-        assert(inserted);
-
-        if (try_find(ppid)) {
-            bool success = false;
-            std::tie(std::ignore, success) =
-                find(ppid).children.insert(pid);
-            assert(success);
-        }
-
-        return iter->second;
-    }
+    process& emplace(pid_t ppid);
 
     process& copy_from(process& proc)
     {

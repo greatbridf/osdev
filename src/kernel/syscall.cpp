@@ -65,41 +65,42 @@ int _syscall_fork(interrupt_stack* data)
 
     readythds->push(newthd);
 
-    uint32_t newthd_oldesp = (uint32_t)newthd->esp;
+    uint32_t newthd_oldesp = (uint32_t)newthd->kstack.esp;
+    auto esp = &newthd->kstack.esp;
 
     // create fake interrupt stack
-    push_stack(&newthd->esp, data->ss);
-    push_stack(&newthd->esp, data->esp);
-    push_stack(&newthd->esp, data->eflags);
-    push_stack(&newthd->esp, data->cs);
-    push_stack(&newthd->esp, (uint32_t)data->v_eip);
+    push_stack(esp, data->ss);
+    push_stack(esp, data->esp);
+    push_stack(esp, data->eflags);
+    push_stack(esp, data->cs);
+    push_stack(esp, (uint32_t)data->v_eip);
 
     // eax
-    push_stack(&newthd->esp, 0);
-    push_stack(&newthd->esp, data->s_regs.ecx);
+    push_stack(esp, 0);
+    push_stack(esp, data->s_regs.ecx);
     // edx
-    push_stack(&newthd->esp, 0);
-    push_stack(&newthd->esp, data->s_regs.ebx);
-    push_stack(&newthd->esp, data->s_regs.esp);
-    push_stack(&newthd->esp, data->s_regs.ebp);
-    push_stack(&newthd->esp, data->s_regs.esi);
-    push_stack(&newthd->esp, data->s_regs.edi);
+    push_stack(esp, 0);
+    push_stack(esp, data->s_regs.ebx);
+    push_stack(esp, data->s_regs.esp);
+    push_stack(esp, data->s_regs.ebp);
+    push_stack(esp, data->s_regs.esi);
+    push_stack(esp, data->s_regs.edi);
 
     // ctx_switch stack
     // return address
-    push_stack(&newthd->esp, (uint32_t)_syscall_stub_fork_return);
+    push_stack(esp, (uint32_t)_syscall_stub_fork_return);
     // ebx
-    push_stack(&newthd->esp, 0);
+    push_stack(esp, 0);
     // edi
-    push_stack(&newthd->esp, 0);
+    push_stack(esp, 0);
     // esi
-    push_stack(&newthd->esp, 0);
+    push_stack(esp, 0);
     // ebp
-    push_stack(&newthd->esp, 0);
+    push_stack(esp, 0);
     // eflags
-    push_stack(&newthd->esp, 0);
-    // original esp
-    push_stack(&newthd->esp, newthd_oldesp);
+    push_stack(esp, 0);
+    // original
+    push_stack(esp, newthd_oldesp);
 
     return newproc.pid;
 }
@@ -443,7 +444,13 @@ int _syscall_getppid(interrupt_stack*)
 int _syscall_set_thread_area(interrupt_stack* data)
 {
     SYSCALL_ARG1(kernel::user::user_desc* __user, ptr);
-    return kernel::user::set_thread_area(ptr);
+
+    auto ret = current_thread->set_thread_area(ptr);
+    if (ret != 0)
+        return ret;
+
+    current_thread->load_thread_area();
+    return 0;
 }
 
 int _syscall_set_tid_address(interrupt_stack* data)

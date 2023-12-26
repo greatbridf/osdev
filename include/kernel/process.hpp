@@ -13,6 +13,8 @@
 #include <kernel/event/evtqueue.hpp>
 #include <kernel/interrupt.h>
 #include <kernel/mm.hpp>
+#include <kernel/mem.h>
+#include <kernel/user/thread_local.hpp>
 #include <kernel/signal.hpp>
 #include <kernel/task.h>
 #include <kernel/tty.hpp>
@@ -61,12 +63,18 @@ using tid_t = uint32_t;
 
 struct thread {
 private:
-    void alloc_kstack(void);
-    void free_kstack(uint32_t p);
+    struct kernel_stack {
+        std::byte* stack_base;
+        uint32_t* esp;
+
+        kernel_stack();
+        kernel_stack(const kernel_stack& other);
+        kernel_stack(kernel_stack&& other);
+        ~kernel_stack();
+    };
 
 public:
-    uint32_t* esp;
-    uint32_t pkstack;
+    kernel_stack kstack;
     pid_t owner;
     thread_attr attr;
     signal_list signals;
@@ -76,19 +84,22 @@ public:
 
     types::string<> name {};
 
+    segment_descriptor tls_desc {};
+
     explicit inline thread(types::string<> name, pid_t owner)
         : owner { owner }
         , attr { .system = 1, .ready = 1, }
         , name { name }
     {
-        alloc_kstack();
     }
 
     inline thread(const thread& val, pid_t owner)
         : owner { owner }, attr { val.attr }, name { val.name }
     {
-        alloc_kstack();
     }
+
+    int set_thread_area(user::user_desc* ptr);
+    int load_thread_area() const;
 
     void sleep();
     void wakeup();
@@ -97,15 +108,14 @@ public:
 
     void send_signal(kernel::signal_list::signo_type signal);
 
-    constexpr thread(thread&& val) = default;
-    inline ~thread() { free_kstack(pkstack); }
+    thread(thread&& val) = default;
 
-    constexpr tid_t tid() const { return pkstack; }
+    inline tid_t tid() const { return (tid_t)kstack.stack_base; }
 
-    constexpr bool operator==(const thread& rhs) const
-    { return pkstack == rhs.pkstack; }
-    constexpr bool operator<(const thread& rhs) const
-    { return pkstack < rhs.pkstack; }
+    inline bool operator==(const thread& rhs) const
+    { return tid() == rhs.tid(); }
+    inline bool operator<(const thread& rhs) const
+    { return tid() < rhs.tid(); }
 };
 
 }

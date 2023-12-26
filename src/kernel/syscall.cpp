@@ -815,7 +815,7 @@ int _syscall_rt_sigprocmask(interrupt_stack* data)
         current_thread->signals.mask(*set);
         break;
     case SIG_UNBLOCK:
-        current_thread->signals.set_mask(*set);
+        current_thread->signals.unmask(*set);
         break;
     case SIG_SETMASK:
         current_thread->signals.set_mask(*set);

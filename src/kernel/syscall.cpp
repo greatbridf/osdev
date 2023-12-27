@@ -926,6 +926,28 @@ int _syscall_mkdir(interrupt_stack* data)
     return 0;
 }
 
+int _syscall_truncate(interrupt_stack* data)
+{
+    SYSCALL_ARG1(const char* __user, pathname);
+    SYSCALL_ARG2(long, length);
+
+    auto path = types::make_path(pathname, current_process->pwd);
+
+    auto* dent = fs::vfs_open(*current_process->root, path);
+    if (!dent)
+        return -ENOENT;
+
+    if (S_ISDIR(dent->ind->mode))
+        return -EISDIR;
+
+    auto ret = fs::vfs_truncate(dent->ind, length);
+
+    if (ret != GB_OK)
+        return ret;
+
+    return 0;
+}
+
 extern "C" void syscall_entry(
     interrupt_stack* data,
     mmx_registers* mmxregs)
@@ -978,6 +1000,7 @@ void init_syscall(void)
     syscall_handlers[0x42] = _syscall_setsid;
     syscall_handlers[0x4e] = _syscall_gettimeofday;
     syscall_handlers[0x5b] = _syscall_munmap;
+    syscall_handlers[0x5c] = _syscall_truncate;
     syscall_handlers[0x72] = _syscall_wait4;
     syscall_handlers[0x7a] = _syscall_newuname;
     syscall_handlers[0x84] = _syscall_getpgid;

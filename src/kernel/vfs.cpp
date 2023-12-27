@@ -194,6 +194,8 @@ int fs::vfs::inode_stat(dentry*, struct stat*)
 { return -EINVAL; }
 dev_t fs::vfs::inode_devid(fs::inode*)
 { return -EINVAL; }
+int fs::vfs::truncate(inode*, size_t)
+{ return -EINVAL; }
 
 class tmpfs : public virtual fs::vfs {
 private:
@@ -410,6 +412,17 @@ public:
     virtual dev_t inode_devid(fs::inode* file) override
     {
         return as_val(_getdata(file->ino));
+    }
+
+    virtual int truncate(fs::inode* file, size_t size) override
+    {
+        if (!S_ISREG(file->mode))
+            return -EINVAL;
+
+        auto* data = as_fdata(_getdata(file->ino));
+        data->resize(size);
+        file->size = size;
+        return GB_OK;
     }
 };
 
@@ -647,6 +660,11 @@ fs::vfs::dentry* fs::vfs_open(fs::vfs::dentry& root, const types::path& path)
 int fs::vfs_stat(fs::vfs::dentry* ent, statx* stat, unsigned int mask)
 {
     return ent->ind->fs->inode_statx(ent, stat, mask);
+}
+
+int fs::vfs_truncate(inode *file, size_t size)
+{
+    return file->fs->truncate(file, size);
 }
 
 static std::list<fs::vfs*, types::memory::ident_allocator<fs::vfs*>> fs_es;

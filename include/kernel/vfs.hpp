@@ -215,6 +215,8 @@ public:
     virtual int inode_stat(dentry* dent, struct stat* stat);
     virtual dev_t inode_devid(inode* file);
 
+    virtual int truncate(inode* file, size_t size);
+
     // parameter 'length' in callback:
     // if 0, 'name' should be null terminated
     // else, 'name' size
@@ -330,6 +332,7 @@ int vfs_mknode(fs::vfs::dentry* dir, const char* filename, mode_t mode, dev_t sn
 int vfs_rmfile(fs::vfs::dentry* dir, const char* filename);
 int vfs_mkdir(fs::vfs::dentry* dir, const char* dirname, mode_t mode);
 int vfs_stat(fs::vfs::dentry* dent, statx* stat, unsigned int mask);
+int vfs_truncate(inode* file, size_t size);
 
 /**
  * @brief Opens a file or directory specified by the given path.

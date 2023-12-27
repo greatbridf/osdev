@@ -446,12 +446,9 @@ ssize_t fs::regular_file::read(char* __user buf, size_t n)
     return n_wrote;
 }
 
-ssize_t fs::regular_file::write(const char* __user buf, size_t n)
+ssize_t fs::regular_file::do_write(const char* __user buf, size_t n)
 {
-    if (!flags.write)
-        return -EBADF;
-
-    if (S_ISDIR(ind->mode))
+    if (S_ISDIR(mode))
         return -EISDIR;
 
     // TODO: check privilege of user ptr
@@ -460,6 +457,32 @@ ssize_t fs::regular_file::write(const char* __user buf, size_t n)
         cursor += n_wrote;
 
     return n_wrote;
+}
+
+ssize_t fs::regular_file::seek(off_t n, int whence)
+{
+    if (!S_ISREG(mode))
+        return -ESPIPE;
+
+    size_t pos;
+    switch (whence) {
+    case SEEK_SET:
+        pos = n;
+        break;
+    case SEEK_CUR:
+        pos = cursor + n;
+        break;
+    case SEEK_END:
+        pos = ind->size + n;
+        break;
+    }
+
+    if (pos > ind->size)
+        return -EINVAL;
+
+    cursor = pos;
+
+    return cursor;
 }
 
 int fs::regular_file::getdents(char* __user buf, size_t cnt)
@@ -545,11 +568,8 @@ ssize_t fs::fifo_file::read(char* __user buf, size_t n)
     return ppipe->read(buf, n);
 }
 
-ssize_t fs::fifo_file::write(const char* __user buf, size_t n)
+ssize_t fs::fifo_file::do_write(const char* __user buf, size_t n)
 {
-    if (!flags.write)
-        return -EBADF;
-
     return ppipe->write(buf, n);
 }
 

@@ -198,6 +198,7 @@ int filearr::open(const process &current,
             new fs::regular_file(dentry->parent, {
                 .read = !(flags & O_WRONLY),
                 .write = !!(flags & (O_WRONLY | O_RDWR)),
+                .append = !!(S_ISREG(filemode) && flags & O_APPEND),
             }, 0, dentry->ind),
     } } );
     assert(inserted);

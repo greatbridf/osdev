@@ -5,9 +5,10 @@
 #include <vector>
 #include <functional>
 
+#include <errno.h>
+#include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
-#include <errno.h>
 #include <bits/alltypes.h>
 
 #include <assert.h>
@@ -270,6 +271,7 @@ struct file {
     struct file_flags {
         uint32_t read : 1;
         uint32_t write : 1;
+        uint32_t append : 1;
     } flags {};
 
     file(mode_t mode, vfs::dentry* parent, file_flags flags)
@@ -278,7 +280,22 @@ struct file {
     virtual ~file() = default;
 
     virtual ssize_t read(char* __user buf, size_t n) = 0;
-    virtual ssize_t write(const char* __user buf, size_t n) = 0;
+    virtual ssize_t do_write(const char* __user buf, size_t n) = 0;
+
+    virtual off_t seek(off_t n, int whence)
+    { return (void)n, (void)whence, -ESPIPE; }
+
+    ssize_t write(const char* __user buf, size_t n)
+    {
+        if (!flags.write)
+            return -EBADF;
+
+        if (flags.append) {
+            seek(0, SEEK_END);
+        }
+
+        return do_write(buf, n);
+    }
 
     // regular files should override this method
     virtual int getdents(char* __user buf, size_t cnt)
@@ -295,7 +312,8 @@ struct regular_file : public virtual file {
     regular_file(vfs::dentry* parent, file_flags flags, size_t cursor, inode* ind);
 
     virtual ssize_t read(char* __user buf, size_t n) override;
-    virtual ssize_t write(const char* __user buf, size_t n) override;
+    virtual ssize_t do_write(const char* __user buf, size_t n) override;
+    virtual off_t seek(off_t n, int whence) override;
     virtual int getdents(char* __user buf, size_t cnt) override;
     virtual int getdents64(char* __user buf, size_t cnt) override;
 };
@@ -307,7 +325,7 @@ struct fifo_file : public virtual file {
     fifo_file(vfs::dentry* parent, file_flags flags, std::shared_ptr<fs::pipe> ppipe);
 
     virtual ssize_t read(char* __user buf, size_t n) override;
-    virtual ssize_t write(const char* __user buf, size_t n) override;
+    virtual ssize_t do_write(const char* __user buf, size_t n) override;
 };
 
 inline fs::vfs::dentry* fs_root;

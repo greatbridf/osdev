@@ -25,6 +25,7 @@ extern int* __errno_location(void);
 #define EISDIR 21
 #define EINVAL 22
 #define ENOTTY 25
+#define ESPIPE 29
 #define EPIPE 32
 
 #ifdef __cplusplus

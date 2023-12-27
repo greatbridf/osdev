@@ -32,6 +32,10 @@
 #define AT_STATX_SYNC_FORCE   0x8000
 #define AT_STATX_DONT_SYNC    0x2000
 
+#define SEEK_SET 0
+#define SEEK_CUR 1
+#define SEEK_END 2
+
 #ifdef __cplusplus
 extern "C" {
 #endif

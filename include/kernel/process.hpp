@@ -174,6 +174,7 @@ public:
                 new fs::fifo_file(nullptr, {
                     .read = 1,
                     .write = 0,
+                    .append = 0,
                 }, ppipe),
         } } );
         assert(inserted);
@@ -187,6 +188,7 @@ public:
                 new fs::fifo_file(nullptr, {
                     .read = 0,
                     .write = 1,
+                    .append = 0,
                 }, ppipe),
         } } );
         assert(inserted);

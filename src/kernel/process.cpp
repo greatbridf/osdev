@@ -164,23 +164,30 @@ int filearr::open(const process &current,
             // file already exists
             if (flags & O_EXCL)
                 return -EEXIST;
-
-            if (flags & O_TRUNC) {
-                // TODO: truncate file
-            }
         }
     } else {
         if (!dentry)
             return -ENOENT;
     }
 
+    auto filemode = dentry->ind->mode;
+
     // check whether dentry is a file if O_DIRECTORY is set
     if (flags & O_DIRECTORY) {
-        if (!S_ISDIR(dentry->ind->mode))
+        if (!S_ISDIR(filemode))
             return -ENOTDIR;
     } else {
-        if (S_ISDIR(dentry->ind->mode) && (flags & (O_WRONLY | O_RDWR)))
+        if (S_ISDIR(filemode) && (flags & (O_WRONLY | O_RDWR)))
             return -EISDIR;
+    }
+
+    // truncate file
+    if (flags & O_TRUNC) {
+        if ((flags & (O_WRONLY | O_RDWR)) && S_ISREG(filemode)) {
+            auto ret = fs::vfs_truncate(dentry->ind, 0);
+            if (ret != 0)
+                return ret;
+        }
     }
 
     int fdflag = (flags & O_CLOEXEC) ? FD_CLOEXEC : 0;

@@ -691,12 +691,10 @@ int _syscall_fcntl64(interrupt_stack* data)
 
     switch (cmd) {
     case F_SETFD:
-        return current_process->files.set_flags(
-            fd, (arg & FD_CLOEXEC) ? O_CLOEXEC : 0);
+        return current_process->files.set_flags(fd, arg);
     case F_DUPFD:
     case F_DUPFD_CLOEXEC: {
-        int flag = (cmd & F_DUPFD_CLOEXEC) ? O_CLOEXEC : 0;
-        return current_process->files.dupfd(fd, arg, flag);
+        return current_process->files.dupfd(fd, arg, FD_CLOEXEC);
     }
     default:
         not_implemented();

@@ -212,7 +212,7 @@ public:
     constexpr void onexec()
     {
         for (auto iter = arr.begin(); iter != arr.end(); ) {
-            if (!(iter->second.flags & O_CLOEXEC)) {
+            if (!(iter->second.flags & FD_CLOEXEC)) {
                 ++iter;
                 continue;
             }

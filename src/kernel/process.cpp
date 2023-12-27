@@ -98,7 +98,12 @@ int filearr::dup2(int old_fd, int new_fd)
 
     int fd = allocate_fd(new_fd);
     assert(fd == new_fd);
-    this->arr.emplace(new_fd, iter->second);
+
+    auto [ newiter, inserted ] = this->arr.emplace(new_fd, iter->second);
+    assert(inserted);
+
+    newiter->second.flags = 0;
+
     return new_fd;
 }
 
@@ -178,9 +183,11 @@ int filearr::open(const process &current,
             return -EISDIR;
     }
 
+    int fdflag = (flags & O_CLOEXEC) ? FD_CLOEXEC : 0;
+
     int fd = next_fd();
     auto [ _, inserted ] = arr.emplace(fd, fditem {
-        flags, std::shared_ptr<fs::file> {
+        fdflag, std::shared_ptr<fs::file> {
             new fs::regular_file(dentry->parent, {
                 .read = !(flags & O_WRONLY),
                 .write = !!(flags & (O_WRONLY | O_RDWR)),

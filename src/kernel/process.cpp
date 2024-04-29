@@ -213,7 +213,12 @@ process::process(const process& parent, pid_t pid)
 
 process::process(pid_t pid, pid_t ppid)
     : attr { .system = true }
-    , pwd { "/" } , pid { pid } , ppid { ppid } { }
+    , pwd { "/" } , pid { pid } , ppid { ppid }
+{
+    bool inserted;
+    std::tie(std::ignore, inserted) = thds.emplace("", pid);
+    assert(inserted);
+}
 
 using kernel::tasks::thread;
 using signo_type = kernel::signal_list::signo_type;
@@ -326,24 +331,103 @@ int thread::load_thread_area() const
     return 0;
 }
 
+void kernel_threadd_main(void)
+{
+    kmsg("kernel thread daemon started\n");
+
+    for (;;) {
+        if (kthreadd_new_thd_func) {
+            void (*func)(void*) = nullptr;
+            void* data = nullptr;
+
+            if (1) {
+                types::lock_guard lck(kthreadd_mtx);
+
+                if (kthreadd_new_thd_func) {
+                    func = std::exchange(kthreadd_new_thd_func, nullptr);
+                    data = std::exchange(kthreadd_new_thd_data, nullptr);
+                }
+            }
+
+            // TODO
+            (void)func, (void)data;
+            assert(false);
+
+            // syscall_fork
+            // int ret = syscall(0x00);
+
+            // if (ret == 0) {
+            //     // child process
+            //     func(data);
+            //     // the function shouldn't return here
+            //     assert(false);
+            // }
+        }
+        // TODO: sleep here to wait for new_kernel_thread event
+        asm_hlt();
+    }
+}
+
+SECTION(".text.kinit")
+proclist::proclist()
+{
+    // init process has no parent
+    auto& init = real_emplace(1, 0);
+    assert(init.pid == 1 && init.ppid == 0);
+
+    auto& thd = *init.thds.begin();
+    thd.name.assign("[kernel init]");
+
+    init.files.open(init, "/dev/console", O_RDONLY, 0);
+    init.files.open(init, "/dev/console", O_WRONLY, 0);
+    init.files.open(init, "/dev/console", O_WRONLY, 0);
+
+    current_process = &init;
+    current_thread = &thd;
+    readythds->push(current_thread);
+
+    tss.ss0 = KERNEL_DATA_SEGMENT;
+    tss.esp0 = (uint32_t)current_thread->kstack.esp;
+
+    current_process->mms.switch_pd();
+
+    if (1) {
+        // pid 0 is kernel thread daemon
+        auto& proc = real_emplace(0, 0);
+        assert(proc.pid == 0 && proc.ppid == 0);
+
+        // create thread
+        auto& thd = *proc.thds.begin();
+        thd.name.assign("[kernel thread daemon]");
+
+        auto* esp = &thd.kstack.esp;
+        auto old_esp = (uint32_t)thd.kstack.esp;
+
+        // return(start) address
+        push_stack(esp, (uint32_t)kernel_threadd_main);
+        // ebx
+        push_stack(esp, 0);
+        // edi
+        push_stack(esp, 0);
+        // esi
+        push_stack(esp, 0);
+        // ebp
+        push_stack(esp, 0);
+        // eflags
+        push_stack(esp, 0x200);
+        // original esp
+        push_stack(esp, old_esp);
+
+        readythds->push(&thd);
+    }
+}
+
 process& proclist::real_emplace(pid_t pid, pid_t ppid)
 {
     auto [ iter, inserted ] = m_procs.try_emplace(pid, pid, ppid);
     assert(inserted);
 
-    if (ppid && try_find(ppid)) {
-        bool success = false;
-        std::tie(std::ignore, success) =
-            find(ppid).children.insert(pid);
-        assert(success);
-    }
-
     return iter->second;
-}
-
-process& proclist::emplace(pid_t ppid)
-{
-    return real_emplace(next_pid(), ppid);
 }
 
 void proclist::kill(pid_t pid, int exit_code)
@@ -410,43 +494,6 @@ void proclist::kill(pid_t pid, int exit_code)
     parent.cv_wait.notify();
 }
 
-void kernel_threadd_main(void)
-{
-    kmsg("kernel thread daemon started\n");
-
-    for (;;) {
-        if (kthreadd_new_thd_func) {
-            void (*func)(void*) = nullptr;
-            void* data = nullptr;
-
-            if (1) {
-                types::lock_guard lck(kthreadd_mtx);
-
-                if (kthreadd_new_thd_func) {
-                    func = std::exchange(kthreadd_new_thd_func, nullptr);
-                    data = std::exchange(kthreadd_new_thd_data, nullptr);
-                }
-            }
-
-            // TODO
-            (void)func, (void)data;
-            assert(false);
-
-            // syscall_fork
-            // int ret = syscall(0x00);
-
-            // if (ret == 0) {
-            //     // child process
-            //     func(data);
-            //     // the function shouldn't return here
-            //     assert(false);
-            // }
-        }
-        // TODO: sleep here to wait for new_kernel_thread event
-        asm_hlt();
-    }
-}
-
 static void release_kinit()
 {
     extern char __stage1_start[];
@@ -467,48 +514,8 @@ static void release_kinit()
     }
 }
 
-namespace kernel::kinit {
-
-SECTION(".text.kinit")
-void create_kthreadd_process()
-{
-    // pid 2 is kernel thread daemon
-    auto& proc = procs->real_emplace(0, 0);
-    assert(proc.pid == 0);
-
-    // create thread
-    auto [ iter_thd, inserted] =
-        proc.thds.emplace("[kernel thread daemon]", proc.pid);
-    assert(inserted);
-    auto& thd = *iter_thd;
-
-    auto* esp = &thd.kstack.esp;
-    auto old_esp = (uint32_t)thd.kstack.esp;
-
-    // return(start) address
-    push_stack(esp, (uint32_t)kernel_threadd_main);
-    // ebx
-    push_stack(esp, 0);
-    // edi
-    push_stack(esp, 0);
-    // esi
-    push_stack(esp, 0);
-    // ebp
-    push_stack(esp, 0);
-    // eflags
-    push_stack(esp, 0x200);
-    // original esp
-    push_stack(esp, old_esp);
-
-    readythds->push(&thd);
-}
-
-} // namespace kernel::kinit
-
 void NORETURN _kernel_init(void)
 {
-    kernel::kinit::create_kthreadd_process();
-
     release_kinit();
 
     asm_sti();
@@ -593,29 +600,8 @@ void k_new_thread(void (*func)(void*), void* data)
 SECTION(".text.kinit")
 void NORETURN init_scheduler(void)
 {
-    procs = new proclist;
     readythds = new readyqueue;
-
-    // init process has no parent
-    auto& init = procs->emplace(0);
-    assert(init.pid == 1);
-
-    auto [ iter_thd, inserted ] = init.thds.emplace("[kernel init]", init.pid);
-    assert(inserted);
-    auto& thd = *iter_thd;
-
-    init.files.open(init, "/dev/console", O_RDONLY, 0);
-    init.files.open(init, "/dev/console", O_WRONLY, 0);
-    init.files.open(init, "/dev/console", O_WRONLY, 0);
-
-    current_process = &init;
-    current_thread = &thd;
-    readythds->push(current_thread);
-
-    tss.ss0 = KERNEL_DATA_SEGMENT;
-    tss.esp0 = (uint32_t)current_thread->kstack.esp;
-
-    current_process->mms.switch_pd();
+    procs = new proclist;
 
     asm volatile(
         "movl %0, %%esp\n"

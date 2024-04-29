@@ -325,13 +325,13 @@ int _syscall_getsid(interrupt_stack* data)
 {
     SYSCALL_ARG1(pid_t, pid);
 
-    if (!procs->try_find(pid))
+    auto [ pproc, found ] = procs->try_find(pid);
+    if (!found)
         return -ESRCH;
-    auto& proc = procs->find(pid);
-    if (proc.sid != current_process->sid)
+    if (pproc->sid != current_process->sid)
         return -EPERM;
 
-    return proc.sid;
+    return pproc->sid;
 }
 
 int _syscall_close(interrupt_stack* data)
@@ -374,15 +374,14 @@ int _syscall_setpgid(interrupt_stack* data)
     if (pgid == 0)
         pgid = pid;
 
-    if (!procs->try_find(pid))
+    auto [ pproc, found ] = procs->try_find(pid);
+    if (!found)
         return -ESRCH;
-
-    auto& proc = procs->find(pid);
 
     // TODO: check whether pgid and the original
     //       pgid is in the same session
 
-    proc.pgid = pgid;
+    pproc->pgid = pgid;
 
     return 0;
 }
@@ -461,7 +460,7 @@ int _syscall_set_tid_address(interrupt_stack* data)
 }
 
 // TODO: this operation SHOULD be atomic
-ssize_t _syscall_writev(interrupt_stack* data)
+int _syscall_writev(interrupt_stack* data)
 {
     SYSCALL_ARG1(int, fd);
     SYSCALL_ARG2(const iovec* __user, iov);
@@ -643,6 +642,14 @@ int _syscall_sendfile64(interrupt_stack* data)
         if (ret < 0)
             return ret;
         totn += ret;
+
+        // TODO: this won't work, since when we are in the syscall handler,
+        //       interrupts are blocked.
+        //       one solution is to put the sendfile action into a kernel
+        //       worker and pause the calling thread so that the worker
+        //       thread could be interrupted normally.
+        if (current_thread->signals.pending_signal() != 0)
+            return (totn == 0) ? -EINTR : totn;
     }
 
     return totn;
@@ -778,13 +785,14 @@ int _syscall_kill(interrupt_stack* data)
     SYSCALL_ARG1(pid_t, pid);
     SYSCALL_ARG2(int, sig);
 
-    if (!procs->try_find(pid))
+    auto [ pproc, found ] = procs->try_find(pid);
+    if (!found)
         return -ESRCH;
 
     if (!kernel::signal_list::check_valid(sig))
         return -EINVAL;
 
-    if (procs->find(pid).is_system())
+    if (pproc->is_system())
         return 0;
 
     // TODO: check permission
@@ -879,10 +887,11 @@ pid_t _syscall_getpgid(interrupt_stack* data)
     if (pid == 0)
         return current_process->pgid;
 
-    if (!procs->try_find(pid))
+    auto [ pproc, found ] = procs->try_find(pid);
+    if (!found)
         return -ESRCH;
 
-    return procs->find(pid).pgid;
+    return pproc->pgid;
 }
 
 int _syscall_gettid(interrupt_stack* data)

@@ -278,27 +278,18 @@ public:
     void send_signal(kernel::signal_list::signo_type signal);
 };
 
-namespace kernel::kinit {
-
-// in process.cpp
-void create_kthreadd_process();
-
-} // namespace kernel::kinit
-
 class proclist final {
 private:
     std::map<pid_t, process> m_procs;
-    pid_t m_nextpid = 1;
+    pid_t m_nextpid = 2;
 
     constexpr pid_t next_pid() { return m_nextpid++; }
     process& real_emplace(pid_t pid, pid_t ppid);
 
-    friend void kernel::kinit::create_kthreadd_process();
-
 public:
-    process& emplace(pid_t ppid);
+    proclist();
 
-    process& copy_from(process& proc)
+    constexpr process& copy_from(process& proc)
     {
         pid_t pid = next_pid();
         auto [ iter, inserted ] = m_procs.try_emplace(pid, proc, pid);
@@ -320,15 +311,21 @@ public:
         m_procs.erase(proc_iter);
     }
 
-    constexpr bool try_find(pid_t pid) const
-    { return m_procs.find(pid); }
+    constexpr std::pair<process*, bool> try_find(pid_t pid) const
+    {
+        auto iter = m_procs.find(pid);
+        if (iter)
+            return { (process*)&iter->second, true };
+        else
+            return { nullptr, false };
+    }
 
     // if process doesn't exist, the behavior is undefined
     constexpr process& find(pid_t pid)
     {
-        auto iter = m_procs.find(pid);
-        assert(iter);
-        return iter->second;
+        auto [ ptr, found] = try_find(pid);
+        assert(found);
+        return *ptr;
     }
 
     constexpr void make_children_orphans(pid_t pid)

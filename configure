@@ -88,7 +88,7 @@ case "$OS" in
 esac
 
 event "checking util-linux fdisk"
-if [ "$CROSS_COMPILE" = "" -o "$FDISK_BIN" = "" ]; then
+if [ "$FDISK_BIN" = "" -a "$CROSS_COMPILE" = "" ]; then
     if ! which fdisk > /dev/null 2>&1; then
         echo "no"
         exit 1
@@ -97,7 +97,7 @@ if [ "$CROSS_COMPILE" = "" -o "$FDISK_BIN" = "" ]; then
 fi
 
 if ! $FDISK_BIN -v 2>&1 | grep util-linux > /dev/null 2>&1 ; then
-    echo "no"
+    echo "no, fdisk is not from util-linux"
     exit 1
 else
     echo "$FDISK_BIN"

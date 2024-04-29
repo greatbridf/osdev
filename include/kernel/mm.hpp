@@ -123,15 +123,14 @@ public:
     paccess(paccess&&) = delete;
     paccess& operator=(paccess&&) = delete;
 
-    constexpr explicit paccess(page_t pg, bool cached = true)
+    inline explicit paccess(page_t pg, bool cached = true)
         : m_pg(pg)
     {
         m_ptr = pmap(pg, cached);
     }
-    constexpr void* ptr(void) const
-    {
-        return m_ptr;
-    }
+
+    constexpr void* ptr(void) const { return m_ptr; }
+
     ~paccess()
     {
         pfree(m_pg);

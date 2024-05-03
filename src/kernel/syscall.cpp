@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
 #include <bits/alltypes.h>
 #include <bits/ioctl.h>
 #include <sys/types.h>
@@ -955,6 +956,46 @@ int _syscall_truncate(interrupt_stack* data)
     return 0;
 }
 
+int _syscall_unlink(interrupt_stack* data)
+{
+    SYSCALL_ARG1(const char* __user, pathname);
+
+    auto path = types::make_path(pathname, current_process->pwd);
+    auto* dent = fs::vfs_open(*current_process->root, path);
+
+    if (!dent)
+        return -ENOENT;
+
+    if (S_ISDIR(dent->ind->mode))
+        return -EISDIR;
+
+    return fs::vfs_rmfile(dent->parent, dent->name.c_str());
+}
+
+int _syscall_access(interrupt_stack* data)
+{
+    SYSCALL_ARG1(const char* __user, pathname);
+    SYSCALL_ARG2(int, mode);
+
+    auto path = types::make_path(pathname, current_process->pwd);
+    auto* dent = fs::vfs_open(*current_process->root, path);
+
+    if (!dent)
+        return -ENOENT;
+
+    switch (mode) {
+    case F_OK:
+        return 0;
+    case R_OK:
+    case W_OK:
+    case X_OK:
+        // TODO: check privilege
+        return 0;
+    default:
+        return -EINVAL;
+    }
+}
+
 extern "C" void syscall_entry(
     interrupt_stack* data,
     mmx_registers* mmxregs)
@@ -991,9 +1032,11 @@ void init_syscall(void)
     syscall_handlers[0x05] = _syscall_open;
     syscall_handlers[0x06] = _syscall_close;
     syscall_handlers[0x07] = _syscall_waitpid;
+    syscall_handlers[0x0a] = _syscall_unlink;
     syscall_handlers[0x0b] = _syscall_execve;
     syscall_handlers[0x0c] = _syscall_chdir;
     syscall_handlers[0x14] = _syscall_getpid;
+    syscall_handlers[0x21] = _syscall_access;
     syscall_handlers[0x25] = _syscall_kill;
     syscall_handlers[0x27] = _syscall_mkdir;
     syscall_handlers[0x29] = _syscall_dup;

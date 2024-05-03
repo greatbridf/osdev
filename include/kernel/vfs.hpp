@@ -52,6 +52,8 @@ struct inode {
     vfs* fs;
     size_t size;
 
+    nlink_t nlink;
+
     mode_t mode;
     uid_t uid;
     gid_t gid;
@@ -114,16 +116,14 @@ public:
         std::list<dentry>* children = nullptr;
         types::hash_map<name_type, dentry*>* idx_children = nullptr;
 
-    public:
+public:
         dentry* parent;
         inode* ind;
-        // if the entry is a file, this flag is ignored
-        union {
-            uint32_t v;
-            struct {
-                uint32_t present : 1;
-                uint32_t dirty : 1;
-            } in;
+        struct {
+            uint32_t dir : 1; // whether the dentry is a directory.
+            // if dir is 1, whether children contains valid data.
+            // otherwise, ignored
+            uint32_t present : 1;
         } flags;
         name_type name;
 
@@ -158,12 +158,13 @@ public:
             }
         }
 
-        dentry* append(inode* ind, const name_type& name, bool set_dirty);
-        dentry* append(inode* ind, name_type&& name, bool set_dirty);
+        dentry* append(inode* ind, name_type name);
 
         dentry* find(const name_type& name);
 
         dentry* replace(dentry* val);
+
+        void remove(const name_type& name);
 
         // out_dst SHOULD be empty
         void path(const dentry& root, types::path& out_dst) const;
@@ -187,13 +188,15 @@ protected:
 
 protected:
     inode* cache_inode(size_t size, ino_t ino, mode_t mode, uid_t uid, gid_t gid);
+    void free_inode(ino_t ino);
     inode* get_inode(ino_t ino);
     void register_root_node(inode* root);
 
     int load_dentry(dentry* ent);
 
 public:
-    explicit vfs(void);
+    vfs();
+
     vfs(const vfs&) = delete;
     vfs& operator=(const vfs&) = delete;
     vfs(vfs&&) = delete;
@@ -354,7 +357,7 @@ int vfs_truncate(inode* file, size_t size);
 
 /**
  * @brief Opens a file or directory specified by the given path.
- * 
+ *
  * @param root The root directory of the file system.
  * @param path The absolute path to the file or directory to be opened.
  * @return A pointer to the opened file or directory entry if found.

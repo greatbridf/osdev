@@ -29,31 +29,24 @@ struct tmpfs_file_entry {
 fs::vfs::dentry::dentry(dentry* _parent, inode* _ind, name_type _name)
     : parent(_parent) , ind(_ind) , flags { } , name(_name)
 {
-    if (!_ind || S_ISDIR(ind->mode)) {
+    // the dentry is filesystem root or _ind MUST be non null
+    assert(_ind || !_parent);
+    if (!ind || S_ISDIR(ind->mode)) {
+        flags.dir = 1;
         children = new std::list<dentry>;
         idx_children = new types::hash_map<name_type, dentry*>;
     }
 }
 
-fs::vfs::dentry* fs::vfs::dentry::append(inode* ind, const name_type& name, bool set_dirty)
+fs::vfs::dentry* fs::vfs::dentry::append(inode* ind, name_type name)
 {
     auto& ent = children->emplace_back(this, ind, name);
     idx_children->emplace(ent.name, &ent);
-    if (set_dirty)
-        this->flags.in.dirty = 1;
-    return &ent;
-}
-fs::vfs::dentry* fs::vfs::dentry::append(inode* ind, name_type&& name, bool set_dirty)
-{
-    auto& ent = children->emplace_back(this, ind, std::move(name));
-    idx_children->emplace(ent.name, &ent);
-    if (set_dirty)
-        this->flags.in.dirty = 1;
     return &ent;
 }
 fs::vfs::dentry* fs::vfs::dentry::find(const name_type& name)
 {
-    if (!S_ISDIR(ind->mode))
+    if (!flags.dir)
         return nullptr;
 
     if (name[0] == '.') {
@@ -63,7 +56,7 @@ fs::vfs::dentry* fs::vfs::dentry::find(const name_type& name)
             return parent ? parent : this;
     }
 
-    if (!flags.in.present)
+    if (!flags.present)
         ind->fs->load_dentry(this);
 
     auto iter = idx_children->find(name);
@@ -82,14 +75,25 @@ fs::vfs::dentry* fs::vfs::dentry::replace(dentry* val)
 }
 void fs::vfs::dentry::invalidate(void)
 {
-    // TODO: write back
-    flags.in.dirty = 0;
     children->clear();
     idx_children->clear();
-    flags.in.present = 0;
+    flags.present = 0;
 }
-fs::vfs::vfs(void)
-    : _root(nullptr, nullptr, "")
+
+void fs::vfs::dentry::remove(const name_type& name)
+{
+    for (auto iter = children->begin(); iter != children->end(); ++iter) {
+        if (iter->name != name)
+            continue;
+        children->erase(iter);
+        break;
+    }
+
+    idx_children->remove(name);
+}
+
+fs::vfs::vfs()
+    : _root { nullptr, nullptr, "" }
 {
 }
 
@@ -115,9 +119,15 @@ fs::inode* fs::vfs::cache_inode(size_t size, ino_t ino,
     mode_t mode, uid_t uid, gid_t gid)
 {
     auto [ iter, inserted ] =
-        _inodes.try_emplace(ino, inode { ino, this, size, mode, uid, gid });
+        _inodes.try_emplace(ino, inode { ino, this, size, 0, mode, uid, gid });
     return &iter->second;
 }
+
+void fs::vfs::free_inode(ino_t ino)
+{
+    assert(_inodes.erase(ino) == 1);
+}
+
 fs::inode* fs::vfs::get_inode(ino_t ino)
 {
     auto iter = _inodes.find(ino);
@@ -136,7 +146,7 @@ int fs::vfs::load_dentry(dentry* ent)
 {
     auto* ind = ent->ind;
 
-    if (!S_ISDIR(ind->mode)) {
+    if (!ent->flags.dir || !S_ISDIR(ind->mode)) {
         errno = ENOTDIR;
         return GB_FAILED;
     }
@@ -147,21 +157,21 @@ int fs::vfs::load_dentry(dentry* ent)
         ret = this->inode_readdir(ind, offset,
             [ent, this](const char* name, size_t len, ino_t ino, uint8_t) -> int {
                 if (!len)
-                    ent->append(get_inode(ino), name, false);
+                    ent->append(get_inode(ino), name);
                 else
-                    ent->append(get_inode(ino), dentry::name_type(name, len), false);
+                    ent->append(get_inode(ino), dentry::name_type(name, len));
 
                 return GB_OK;
             });
     }
 
-    ent->flags.in.present = 1;
+    ent->flags.present = 1;
 
     return GB_OK;
 }
 int fs::vfs::mount(dentry* mnt, vfs* new_fs)
 {
-    if (!S_ISDIR(mnt->ind->mode)) {
+    if (!mnt->flags.dir) {
         errno = ENOTDIR;
         return GB_FAILED;
     }
@@ -250,10 +260,14 @@ protected:
         fes->emplace_back(fe_t {
             .ino = inode->ino,
             .filename = {} });
+        dir->size += sizeof(fe_t);
+
         auto& emplaced = fes->back();
+
         strncpy(emplaced.filename, filename, sizeof(emplaced.filename));
         emplaced.filename[sizeof(emplaced.filename) - 1] = 0;
-        dir->size += sizeof(fe_t);
+
+        ++inode->nlink;
     }
 
     virtual int inode_readdir(fs::inode* dir, size_t offset, const fs::vfs::filldir_func& filldir) override
@@ -294,32 +308,49 @@ public:
 
     virtual int inode_mkfile(dentry* dir, const char* filename, mode_t mode) override
     {
+        if (!dir->flags.dir)
+            return -ENOTDIR;
+
         auto& file = *cache_inode(0, _savedata(mk_data_vector()), S_IFREG | mode, 0, 0);
         mklink(dir->ind, &file, filename);
-        dir->append(get_inode(file.ino), filename, true);
+
+        if (dir->flags.present)
+            dir->append(get_inode(file.ino), filename);
+
         return GB_OK;
     }
 
     virtual int inode_mknode(dentry* dir, const char* filename, mode_t mode, dev_t dev) override
     {
+        if (!dir->flags.dir)
+            return -ENOTDIR;
+
         if (!S_ISBLK(mode) && !S_ISCHR(mode))
             return -EINVAL;
 
         auto& node = *cache_inode(0, _savedata(dev), mode, 0, 0);
         mklink(dir->ind, &node, filename);
-        dir->append(get_inode(node.ino), filename, true);
+
+        if (dir->flags.present)
+            dir->append(get_inode(node.ino), filename);
+
         return GB_OK;
     }
 
     virtual int inode_mkdir(dentry* dir, const char* dirname, mode_t mode) override
     {
+        if (!dir->flags.dir)
+            return -ENOTDIR;
+
         auto new_dir = cache_inode(0, _savedata(mk_fe_vector()), S_IFDIR | (mode & 0777), 0, 0);
         mklink(new_dir, new_dir, ".");
 
         mklink(dir->ind, new_dir, dirname);
         mklink(new_dir, dir->ind, "..");
 
-        dir->append(new_dir, dirname, true);
+        if (dir->flags.present)
+            dir->append(new_dir, dirname);
+
         return GB_OK;
     }
 
@@ -364,6 +395,19 @@ public:
         auto* ind = dent->ind;
         const mode_t mode = ind->mode;
 
+        st->stx_mask = 0;
+
+        if (mask & STATX_NLINK) {
+            st->stx_nlink = ind->nlink;
+            st->stx_mask |= STATX_NLINK;
+        }
+
+        // TODO: set modification time
+        if (mask & STATX_MTIME) {
+            st->stx_mtime = {};
+            st->stx_mask |= STATX_MTIME;
+        }
+
         if (mask & STATX_SIZE) {
             st->stx_size = ind->size;
             st->stx_mask |= STATX_SIZE;
@@ -389,7 +433,7 @@ public:
             st->stx_ino = ind->ino;
             st->stx_mask |= STATX_INO;
         }
-        
+
         if (mask & STATX_BLOCKS) {
             st->stx_blocks = align_up<9>(ind->size) / 512;
             st->stx_blksize = 4096;
@@ -407,6 +451,45 @@ public:
         }
 
         return GB_OK;
+    }
+
+    virtual int inode_rmfile(dentry* dir, const char* filename) override
+    {
+        if (!dir->flags.dir)
+            return -ENOTDIR;
+
+        auto* vfe = as_vfe(_getdata(dir->ind->ino));
+        assert(vfe);
+
+        auto* dent = dir->find(filename);
+        if (!dent)
+            return -ENOENT;
+
+        for (auto iter = vfe->begin(); iter != vfe->end(); ) {
+            if (iter->ino != dent->ind->ino) {
+                ++iter;
+                continue;
+            }
+
+            if (S_ISREG(dent->ind->mode)) {
+                // since we do not allow hard links in tmpfs, there is no need
+                // to check references, we remove the file data directly
+                auto* filedata = as_fdata(_getdata(iter->ino));
+                assert(filedata);
+
+                delete filedata;
+            }
+
+            free_inode(iter->ino);
+            dir->remove(filename);
+
+            vfe->erase(iter);
+
+            return 0;
+        }
+
+        kmsg("[tmpfs] warning: file entry not found in vfe\n");
+        return -EIO;
     }
 
     virtual dev_t inode_devid(fs::inode* file) override

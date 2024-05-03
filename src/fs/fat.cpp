@@ -17,7 +17,7 @@ namespace fs::fat {
 // buf MUST be larger than 512 bytes
 inline void fat32::_raw_read_sector(void* buf, uint32_t sector_no)
 {
-    size_t n = vfs_read(
+    size_t n = fs::block_device_read(
         device,
         (char*)buf,
         SECTOR_SIZE,
@@ -92,6 +92,8 @@ int fat32::inode_readdir(fs::inode* dir, size_t offset, const fs::vfs::filldir_f
                 else
                     mode |= S_IFREG;
                 ind = cache_inode(d->size, ino, mode, 0, 0);
+
+                ind->nlink = d->attributes.subdir ? 2 : 1;
             }
 
             types::string<> fname;
@@ -129,7 +131,7 @@ int fat32::inode_readdir(fs::inode* dir, size_t offset, const fs::vfs::filldir_f
 }
 
 fat32::fat32(inode* _device)
-    : device(_device)
+    : device(_device->fs->inode_devid(_device))
     , label { 0 }
 {
     auto* buf = new char[SECTOR_SIZE];
@@ -172,6 +174,9 @@ fat32::fat32(inode* _device)
     auto* n = cache_inode(
         _root_dir_clusters * sectors_per_cluster * SECTOR_SIZE,
         root_dir, S_IFDIR | 0777, 0, 0);
+
+    n->nlink = 2;
+
     register_root_node(n);
 }
 
@@ -238,11 +243,16 @@ int fat32::inode_statx(dentry* ent, statx* st, unsigned int mask)
         st->stx_size = ent->ind->size;
         st->stx_mask |= STATX_SIZE;
     }
-    
+
     if (mask & STATX_BLOCKS) {
         st->stx_blocks = align_up<12>(ent->ind->size) / 512;
         st->stx_blksize = 4096;
         st->stx_mask |= STATX_BLOCKS;
+    }
+
+    if (mask & STATX_NLINK) {
+        st->stx_nlink = ent->ind->nlink;
+        st->stx_mask |= STATX_NLINK;
     }
 
     st->stx_mode = 0;
@@ -280,7 +290,7 @@ int fat32::inode_stat(dentry* dent, struct stat* st)
 
     memset(st, 0x00, sizeof(struct stat));
     st->st_mode = ind->mode;
-    st->st_dev = device->fs->inode_devid(device);
+    st->st_dev = device;
     st->st_nlink = S_ISDIR(ind->mode) ? 2 : 1;
     st->st_size = ind->size;
     st->st_blksize = 4096;

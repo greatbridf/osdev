@@ -4,6 +4,7 @@
 #include <kernel/vfs.hpp>
 #include <stdint.h>
 #include <string.h>
+#include <sys/types.h>
 #include <types/size.h>
 
 namespace fs::fat {
@@ -115,8 +116,7 @@ private:
     uint32_t next_free_cluster_hint;
     cluster_t root_dir;
     cluster_t data_region_offset;
-    // TODO: use block device special node id
-    inode* device;
+    dev_t device;
     uint16_t reserved_sectors;
     uint8_t fat_copies;
     uint8_t sectors_per_cluster;

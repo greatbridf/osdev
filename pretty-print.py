@@ -92,11 +92,16 @@ class rbtreePrinter:
 class stringPrinter:
     def __init__(self, val):
         self.val = val
-    
+
     def to_string(self):
         return self.val['m_data']
-    
+
+    def display_hint(self):
+        return 'string'
+
     def children(self):
+        return
+
         yield 'str', self.val['m_data']
 
         if self.val['m_data'] == 0:
@@ -116,15 +121,27 @@ class stringPrinter:
 
 class listPrinter:
     def __init__(self, val):
-        self.val = val
-    
+        self.val: gdb.Field = val
+        self.type: gdb.Type = val.type
+
+        this_type = self.type.unqualified().strip_typedefs()
+        if this_type.tag == None:
+            this_type = this_type.target()
+
+        self.value_node_type = gdb.lookup_type(this_type.tag + '::node').pointer()
+
     def to_string(self):
+        if self.type.tag == None and self.val == 0:
+            return 'nullptr of std::list'
         return "std::list of size %d" % self.val['m_size']
 
     def display_hint(self):
         return 'array'
 
     def children(self):
+        if self.type.tag == None and self.val == 0:
+            return
+
         head = self.val['m_head']
 
         yield 'head', head.address
@@ -132,9 +149,7 @@ class listPrinter:
         node = head['next']
         idx = 0
         while node != head.address:
-            nodeval = node.reinterpret_cast(
-                gdb.lookup_type(self.val.type.unqualified().strip_typedefs().tag + '::node').pointer()
-                )
+            nodeval = node.reinterpret_cast(self.value_node_type)
             yield '[%d]' % idx, nodeval['value']
             idx += 1
             node = node['next']
@@ -142,41 +157,49 @@ class listPrinter:
 class listIteratorPrinter:
     def __init__(self, val):
         self.val = val
-    
+
+        this_type: gdb.Type = val.type
+        this_type = this_type.unqualified().strip_typedefs()
+
+        if this_type.tag == None:
+            this_type = this_type.target()
+
+        type_tag: str = this_type.tag
+        type_tag = type_tag[:type_tag.rfind('::')]
+
+        self.value_node_type = gdb.lookup_type(type_tag + '::node').pointer()
+
     def children(self):
         yield 'addr', self.val['p']
         if self.val['p'] == 0:
             return
-        
-        nodeptr = self.val['p']
-        iter_type = self.val.type.unqualified().strip_typedefs().tag
-        iter_type = iter_type[:iter_type.rfind('::')]
-        nodeptr = nodeptr.cast(gdb.lookup_type(iter_type + '::node').pointer())
-        
+
+        nodeptr = self.val['p'].cast(self.value_node_type)
+
         yield 'value', nodeptr['value']
 
 class rbtreeIteratorPrinter:
     def __init__(self, val):
         self.val = val
-    
+
     def children(self):
         yield 'addr', self.val['p']
         if self.val['p'] == 0:
             return
-        
+
         yield 'value', self.val['p']['value']
 
 class vectorIteratorPrinter:
     def __init__(self, val):
         self.val = val
-    
+
     def children(self):
         yield 'value', self.val['m_ptr'].dereference()
 
 class pairPrinter:
     def __init__(self, val):
         self.val = val
-    
+
     def children(self):
         yield 'first', self.val['first']
         yield 'second', self.val['second']
@@ -184,7 +207,7 @@ class pairPrinter:
 class tuplePrinter:
     def __init__(self, val):
         self.val = val
-    
+
     def children(self):
         i = 0
         try:
@@ -200,10 +223,10 @@ class tuplePrinter:
 class functionPrinter:
     def __init__(self, val):
         self.val = val
-    
+
     def to_string(self):
         return self.val.type.tag
-    
+
     def children(self):
         print(self.val['_data'].type)
         yield 'function data', self.val['_data']
@@ -211,10 +234,10 @@ class functionPrinter:
 class referenceWrapperPrinter:
     def __init__(self, val):
         self.val = val
-    
+
     def to_string(self):
         return "std::reference_wrapper to %x" % self.val['_ptr']
-    
+
     def children(self):
         yield 'addr', self.val['_ptr'].cast(gdb.lookup_type('void').pointer())
         yield 'reference', self.val['_ptr']
@@ -226,28 +249,28 @@ def build_pretty_printer(val):
         type = type.target()
     if type.code == gdb.TYPE_CODE_PTR:
         type = type.target()
-    
+
     type = type.unqualified().strip_typedefs()
     typename = type.tag
 
     if typename == None:
         return None
-    
+
     if re.compile(r"^std::pair<.*, .*>$").match(typename):
         return pairPrinter(val)
-    
+
     if re.compile(r"^std::tuple<.*>$").match(typename):
         return tuplePrinter(val)
 
     if re.compile(r"^std::function<.*>$").match(typename):
         return functionPrinter(val)
-    
+
     if re.compile(r"^std::reference_wrapper<.*>$").match(typename):
         return referenceWrapperPrinter(val)
 
     # if re.compile(r"^std::list<.*, .*>::node$").match(typename):
     #     return None
-    
+
     if re.compile(r"^std::list<.*, .*>::_iterator<.*?>$").match(typename):
         return listIteratorPrinter(val)
 
@@ -271,7 +294,7 @@ def build_pretty_printer(val):
 
     if re.compile(r"^types::string<.*>$").match(typename):
         return stringPrinter(val)
-    
+
     return None
 
 gdb.pretty_printers.append(build_pretty_printer)

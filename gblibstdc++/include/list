@@ -104,8 +104,8 @@ public:
         { p = p->prev; return *this; }
         constexpr _iterator operator--(int) noexcept
         { _iterator ret(p); (void)this->operator--(); return ret; }
-        constexpr operator bool() { return p; }
-        constexpr operator _iterator<true>() { return _iterator<true> { p }; }
+        constexpr operator bool() const { return p; }
+        constexpr operator _iterator<true>() const { return _iterator<true> { p }; }
     };
 
 private:

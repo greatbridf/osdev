@@ -1,4 +1,5 @@
 #pragma once
+#include <assert.h>
 #include <list>
 #include <vector>
 #include <bit>
@@ -92,7 +93,7 @@ template <typename Key, typename Value,
     )>, bool> = true>
 class hash_map {
 public:
-    template <typename Pointer>
+    template <bool Const>
     class iterator;
 
     using key_type = std::add_const_t<Key>;
@@ -100,8 +101,8 @@ public:
     using pair_type = std::pair<key_type, value_type>;
     using size_type = size_t;
     using difference_type = ssize_t;
-    using iterator_type = iterator<pair_type*>;
-    using const_iterator_type = iterator<const pair_type*>;
+    using iterator_type = iterator<false>;
+    using const_iterator_type = iterator<true>;
 
     using bucket_type = std::list<pair_type, Allocator>;
     using bucket_array_type = std::vector<bucket_type, typename
@@ -112,40 +113,50 @@ public:
     static constexpr size_type INITIAL_BUCKETS_ALLOCATED = 64;
 
 public:
-    template <typename Pointer>
+    template <bool Const>
     class iterator {
     public:
-        using _Value = std::remove_pointer_t<Pointer>;
-        using Reference = std::add_lvalue_reference_t<_Value>;
+        using bucket_iterator = std::conditional_t<Const,
+              typename bucket_type::const_iterator,
+              typename bucket_type::iterator>;
+        using _Value = typename bucket_iterator::value_type;
+        using Pointer = typename bucket_iterator::pointer;
+        using Reference = typename bucket_iterator::reference;
+        using hash_map_pointer = std::conditional_t<Const,
+              const hash_map*, hash_map*>;
 
         friend class hash_map;
 
     public:
         constexpr iterator(const iterator& iter) noexcept
-            : p(iter.p)
+            : n(iter.n), iter(iter.iter), hmap(iter.hmap)
         {
         }
 
         constexpr iterator(iterator&& iter) noexcept
-            : p(iter.p)
+            : n(std::exchange(iter.n, 0))
+            , iter(std::move(iter.iter))
+            , hmap(std::exchange(iter.hmap, nullptr))
         {
-            iter.p = nullptr;
         }
 
         constexpr iterator& operator=(const iterator& iter)
         {
-            p = iter.p;
+            n = iter.n;
+            this->iter = iter.iter;
+            hmap = iter.hmap;
             return *this;
         }
 
-        explicit constexpr iterator(Pointer p) noexcept
-            : p(p)
+        explicit constexpr iterator(std::size_t n, bucket_iterator iter,
+                hash_map_pointer hmap) noexcept
+            : n(n), iter(iter), hmap(hmap)
         {
         }
 
         constexpr bool operator==(const iterator& iter) const noexcept
         {
-            return this->p == iter.p;
+            return (!*this && !iter) || (hmap == iter.hmap && n == iter.n && this->iter == iter.iter);
         }
 
         constexpr bool operator!=(const iterator& iter) const noexcept
@@ -153,22 +164,54 @@ public:
             return !(*this == iter);
         }
 
-        constexpr operator bool(void)
+        constexpr iterator operator++()
         {
-            return p != nullptr;
+            assert((bool)*this);
+
+            ++iter;
+            while (iter == hmap->buckets[n].end()) {
+                ++n;
+                if (n < hmap->buckets.size())
+                    iter = hmap->buckets[n].begin();
+                else
+                    break;
+            }
+
+            return *this;
+        }
+
+        constexpr iterator operator++(int)
+        {
+            iterator ret { *this };
+
+            (void)this->operator++();
+
+            return ret;
+        }
+
+        constexpr operator bool(void) const
+        {
+            return hmap && n < hmap->buckets.size() && !!iter;
         }
 
         constexpr Reference operator*(void) const noexcept
         {
-            return *p;
+            return *iter;
         }
         constexpr Pointer operator->(void) const noexcept
         {
-            return p;
+            return &*iter;
+        }
+
+        constexpr operator const_iterator_type() const noexcept
+        {
+            return const_iterator_type(n, iter, hmap);
         }
 
     protected:
-        Pointer p;
+        std::size_t n;
+        bucket_iterator iter;
+        hash_map_pointer hmap;
     };
 
 private:
@@ -219,38 +262,35 @@ public:
         emplace(std::make_pair(std::forward<_key_type>(key), std::forward<_value_type>(value)));
     }
 
-    constexpr void remove(const key_type& key)
+    constexpr void remove(const_iterator_type iter)
     {
-        auto hash_value = hasher_type::hash(key, hash_length());
-        auto& bucket = buckets.at(hash_value);
-        for (auto iter = bucket.begin(); iter != bucket.end(); ++iter) {
-            if (iter->first == key) {
-                bucket.erase(iter);
-                return;
-            }
-        }
+        auto& bucket = buckets[iter.n];
+        bucket.erase(iter.iter);
     }
 
     constexpr void remove(iterator_type iter)
     {
-        remove(iter->first);
-        iter.p = nullptr;
+        return remove((const_iterator_type)iter);
     }
-    constexpr void remove(const_iterator_type iter)
+
+    constexpr void remove(const key_type& key)
     {
-        remove(iter->first);
-        iter.p = nullptr;
+        const_iterator_type iter = find(key);
+        if (!iter)
+            return;
+
+        remove(iter);
     }
 
     constexpr iterator_type find(const key_type& key)
     {
         auto hash_value = hasher_type::hash(key, hash_length());
         auto& bucket = buckets.at(hash_value);
-        for (auto& item : bucket) {
-            if (key == item.first)
-                return iterator_type(&item);
+        for (auto iter = bucket.begin(); iter != bucket.end(); ++iter) {
+            if (key == iter->first)
+                return iterator_type(hash_value, iter, this);
         }
-        return iterator_type(nullptr);
+        return this->end();
     }
 
     constexpr const_iterator_type find(const key_type& key) const
@@ -258,16 +298,56 @@ public:
         auto hash_value = hasher_type::hash(key, hash_length());
         const auto& bucket = buckets.at(hash_value);
         for (auto iter = bucket.cbegin(); iter != bucket.cend(); ++iter) {
-            if (key == iter->key)
-                return const_iterator_type(&iter);
+            if (key == iter->first)
+                return const_iterator_type(hash_value, iter, this);
         }
-        return const_iterator_type(nullptr);
+        return this->cend();
     }
 
     constexpr void clear(void)
     {
         for (auto& bucket : buckets)
             bucket.clear();
+    }
+
+    constexpr const_iterator_type cend() const noexcept
+    {
+        return const_iterator_type(buckets.size(), buckets[0].end(), this);
+    }
+
+    constexpr const_iterator_type end() const noexcept
+    {
+        return cend();
+    }
+
+    constexpr iterator_type end() noexcept
+    {
+        return iterator_type(buckets.size(), buckets[0].end(), this);
+    }
+
+    constexpr const_iterator_type cbegin() const noexcept
+    {
+        for (std::size_t i = 0; i < buckets.size(); ++i) {
+            if (buckets[i].empty())
+                continue;
+            return const_iterator_type(i, buckets[i].begin(), this);
+        }
+        return cend();
+    }
+
+    constexpr const_iterator_type begin() const noexcept
+    {
+        return cbegin();
+    }
+
+    constexpr iterator_type begin() noexcept
+    {
+        for (std::size_t i = 0; i < buckets.size(); ++i) {
+            if (buckets[i].empty())
+                continue;
+            return iterator_type(i, buckets[i].begin(), this);
+        }
+        return end();
     }
 };
 

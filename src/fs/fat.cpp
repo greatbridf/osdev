@@ -131,9 +131,12 @@ int fat32::inode_readdir(fs::inode* dir, size_t offset, const fs::vfs::filldir_f
 }
 
 fat32::fat32(inode* _device)
-    : device(_device->fs->inode_devid(_device))
+    : device { 0 }
     , label { 0 }
 {
+    // TODO: error handling
+    assert(_device->fs->inode_devid(_device, device) == 0);
+
     auto* buf = new char[SECTOR_SIZE];
     _raw_read_sector(buf, 0);
 

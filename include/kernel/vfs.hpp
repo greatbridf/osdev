@@ -23,27 +23,10 @@
 #include <types/lock.hpp>
 #include <types/types.h>
 
-#define INODE_FILE (1 << 0)
-#define INODE_DIR (1 << 1)
-#define INODE_MNT (1 << 2)
-#define INODE_NODE (1 << 3)
-
-// dirent file types
-#define DT_UNKNOWN 0
-#define DT_FIFO 1
-#define DT_CHR 2
-#define DT_DIR 4
-#define DT_BLK 6
-#define DT_REG 8
-#define DT_LNK 10
-#define DT_SOCK 12
-#define DT_WHT 14
-
-#define DT_MAX (S_DT_MASK + 1) /* 16 */
+#define NODE_MAJOR(node) ((node) >> 16)
+#define NODE_MINOR(node) ((node) & 0xffffU)
 
 namespace fs {
-using blksize_t = size_t;
-using blkcnt_t = size_t;
 
 class vfs;
 
@@ -58,10 +41,6 @@ struct inode {
     uid_t uid;
     gid_t gid;
 };
-
-#define NODE_MAJOR(node) ((node) >> 16)
-#define NODE_MINOR(node) ((node) & 0xffff)
-constexpr dev_t NODE_INVALID = -1U;
 
 constexpr dev_t make_device(uint32_t major, uint32_t minor)
 {
@@ -168,8 +147,6 @@ public:
 
         // out_dst SHOULD be empty
         void path(const dentry& root, types::path& out_dst) const;
-
-        void invalidate(void);
     };
 
 public:
@@ -217,7 +194,7 @@ public:
     virtual int inode_mkdir(dentry* dir, const char* dirname, mode_t mode);
     virtual int inode_statx(dentry* dent, statx* buf, unsigned int mask);
     virtual int inode_stat(dentry* dent, struct stat* stat);
-    virtual dev_t inode_devid(inode* file);
+    virtual int inode_devid(inode* file, dev_t& out_dev);
 
     virtual int truncate(inode* file, size_t size);
 

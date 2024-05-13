@@ -73,12 +73,6 @@ fs::vfs::dentry* fs::vfs::dentry::replace(dentry* val)
     parent->idx_children->find(this->name)->second = val;
     return this;
 }
-void fs::vfs::dentry::invalidate(void)
-{
-    children->clear();
-    idx_children->clear();
-    flags.present = 0;
-}
 
 void fs::vfs::dentry::remove(const name_type& name)
 {
@@ -202,7 +196,7 @@ int fs::vfs::inode_statx(dentry*, statx*, unsigned int)
 { return -EINVAL; }
 int fs::vfs::inode_stat(dentry*, struct stat*)
 { return -EINVAL; }
-dev_t fs::vfs::inode_devid(fs::inode*)
+int fs::vfs::inode_devid(fs::inode*, dev_t&)
 { return -EINVAL; }
 int fs::vfs::truncate(inode*, size_t)
 { return -EINVAL; }
@@ -492,9 +486,10 @@ public:
         return -EIO;
     }
 
-    virtual dev_t inode_devid(fs::inode* file) override
+    virtual int inode_devid(fs::inode* file, dev_t& out_dev) override
     {
-        return as_val(_getdata(file->ino));
+        out_dev = as_val(_getdata(file->ino));
+        return 0;
     }
 
     virtual int truncate(fs::inode* file, size_t size) override
@@ -679,7 +674,11 @@ size_t fs::vfs_read(fs::inode* file, char* buf, size_t buf_size, size_t offset, 
         return file->fs->inode_read(file, buf, buf_size, offset, n);
 
     if (S_ISBLK(file->mode) || S_ISCHR(file->mode)) {
-        dev_t dev = file->fs->inode_devid(file);
+        dev_t dev;
+        if (file->fs->inode_devid(file, dev) != 0) {
+            errno = EINVAL;
+            return -1U;
+        }
 
         ssize_t ret;
         if (S_ISBLK(file->mode))
@@ -709,7 +708,11 @@ size_t fs::vfs_write(fs::inode* file, const char* buf, size_t offset, size_t n)
         return file->fs->inode_write(file, buf, offset, n);
 
     if (S_ISBLK(file->mode) || S_ISCHR(file->mode)) {
-        dev_t dev = file->fs->inode_devid(file);
+        dev_t dev;
+        if (file->fs->inode_devid(file, dev) != 0) {
+            errno = EINVAL;
+            return -1U;
+        }
 
         ssize_t ret;
         if (S_ISBLK(file->mode))
@@ -885,9 +888,6 @@ void fs::partprobe()
 
 ssize_t fs::block_device_read(dev_t node, char* buf, size_t buf_size, size_t offset, size_t n)
 {
-    if (node == fs::NODE_INVALID)
-        return -EINVAL;
-
     auto iter = blkdevs.find(node);
     if (!iter || !iter->second.read)
         return -EINVAL;
@@ -897,9 +897,6 @@ ssize_t fs::block_device_read(dev_t node, char* buf, size_t buf_size, size_t off
 
 ssize_t fs::block_device_write(dev_t node, const char* buf, size_t offset, size_t n)
 {
-    if (node == fs::NODE_INVALID)
-        return -EINVAL;
-
     auto iter = blkdevs.find(node);
     if (!iter || !iter->second.write)
         return -EINVAL;
@@ -909,9 +906,6 @@ ssize_t fs::block_device_write(dev_t node, const char* buf, size_t offset, size_
 
 ssize_t fs::char_device_read(dev_t node, char* buf, size_t buf_size, size_t n)
 {
-    if (node == fs::NODE_INVALID)
-        return -EINVAL;
-
     auto iter = chrdevs.find(node);
     if (!iter || !iter->second.read)
         return -EINVAL;
@@ -921,9 +915,6 @@ ssize_t fs::char_device_read(dev_t node, char* buf, size_t buf_size, size_t n)
 
 ssize_t fs::char_device_write(dev_t node, const char* buf, size_t n)
 {
-    if (node == fs::NODE_INVALID)
-        return -EINVAL;
-
     auto iter = chrdevs.find(node);
     if (!iter || !iter->second.read)
         return -EINVAL;

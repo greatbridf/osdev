@@ -5,7 +5,7 @@
 #include <vector>
 #include <map>
 
-using fs::vfs, fs::inode;
+using fs::vfs, fs::inode, fs::dentry;
 
 struct tmpfs_file_entry {
     size_t ino;
@@ -75,7 +75,7 @@ protected:
         ++inode->nlink;
     }
 
-    virtual int inode_readdir(inode* dir, size_t offset, const fs::vfs::filldir_func& filldir) override
+    virtual int readdir(inode* dir, size_t offset, const fs::vfs::filldir_func& filldir) override
     {
         if (!S_ISDIR(dir->mode)) {
             return -1;
@@ -91,7 +91,7 @@ protected:
             auto* ind = get_inode(entry.ino);
 
             // inode mode filetype is compatible with user dentry filetype
-            auto ret = filldir(entry.filename, 0, entry.ino, ind->mode & S_IFMT);
+            auto ret = filldir(entry.filename, 0, ind, ind->mode & S_IFMT);
             if (ret != GB_OK)
                 break;
         }

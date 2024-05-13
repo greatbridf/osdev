@@ -136,7 +136,7 @@ struct PACKED elf32_section_header_entry {
 };
 
 struct elf32_load_data {
-    const fs::vfs::dentry* exec_dent;
+    const fs::dentry* exec_dent;
     const char* const* argv;
     const char* const* envp;
     int errcode;

@@ -72,6 +72,10 @@ set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
                         include/kernel/module.hpp
                         include/kernel/utsname.hpp
                         include/kernel/vfs.hpp
+                        include/kernel/vfs/dentry.hpp
+                        include/kernel/vfs/file.hpp
+                        include/kernel/vfs/inode.hpp
+                        include/kernel/vfs/vfs.hpp
                         include/kernel/vga.hpp
                         include/kernel/signal.hpp
                         include/kernel/hw/keyboard.h

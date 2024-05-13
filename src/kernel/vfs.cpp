@@ -21,9 +21,9 @@
 #include <types/path.hpp>
 #include <types/string.hpp>
 
-using fs::vfs;
+using fs::vfs, fs::dentry;
 
-vfs::dentry::dentry(dentry* _parent, inode* _ind, name_type _name)
+dentry::dentry(dentry* _parent, inode* _ind, name_type _name)
     : parent(_parent) , ind(_ind) , flags { } , name(_name)
 {
     // the dentry is filesystem root or _ind MUST be non null
@@ -35,13 +35,44 @@ vfs::dentry::dentry(dentry* _parent, inode* _ind, name_type _name)
     }
 }
 
-vfs::dentry* vfs::dentry::append(inode* ind, name_type name)
+int dentry::load()
+{
+    if (!flags.dir || !S_ISDIR(ind->mode))
+        return -ENOTDIR;
+
+    size_t offset = 0;
+    vfs* fs = ind->fs;
+
+    while (true) {
+        int ret = fs->readdir(ind, offset,
+            [this](const char* name, size_t len, inode* ind, uint8_t) -> int {
+                if (!len)
+                    append(ind, name);
+                else
+                    append(ind, dentry::name_type(name, len));
+
+                return GB_OK;
+            });
+
+        if (ret == 0)
+            break;
+
+        offset += ret;
+    }
+
+    flags.present = 1;
+
+    return 0;
+}
+
+dentry* dentry::append(inode* ind, name_type name)
 {
     auto& ent = children->emplace_back(this, ind, name);
     idx_children->emplace(ent.name, &ent);
     return &ent;
 }
-vfs::dentry* vfs::dentry::find(const name_type& name)
+
+dentry* dentry::find(const name_type& name)
 {
     if (!flags.dir)
         return nullptr;
@@ -53,8 +84,13 @@ vfs::dentry* vfs::dentry::find(const name_type& name)
             return parent ? parent : this;
     }
 
-    if (!flags.present)
-        ind->fs->load_dentry(this);
+    if (!flags.present) {
+        int ret = load();
+        if (ret != 0) {
+            errno = -ret;
+            return nullptr;
+        }
+    }
 
     auto iter = idx_children->find(name);
     if (!iter) {
@@ -64,14 +100,15 @@ vfs::dentry* vfs::dentry::find(const name_type& name)
 
     return iter->second;
 }
-vfs::dentry* vfs::dentry::replace(dentry* val)
+
+dentry* dentry::replace(dentry* val)
 {
     // TODO: prevent the dirent to be swapped out of memory
     parent->idx_children->find(this->name)->second = val;
     return this;
 }
 
-void vfs::dentry::remove(const name_type& name)
+void dentry::remove(const name_type& name)
 {
     for (auto iter = children->begin(); iter != children->end(); ++iter) {
         if (iter->name != name)
@@ -83,12 +120,7 @@ void vfs::dentry::remove(const name_type& name)
     idx_children->remove(name);
 }
 
-vfs::vfs()
-    : _root { nullptr, nullptr, "" }
-{
-}
-
-void vfs::dentry::path(
+void dentry::path(
     const dentry& root, types::path &out_dst) const
 {
     const dentry* dents[32];
@@ -104,6 +136,11 @@ void vfs::dentry::path(
     out_dst.append("/");
     for (int i = cnt - 1; i >= 0; --i)
         out_dst.append(dents[i]->name.c_str());
+}
+
+vfs::vfs()
+    : _root { nullptr, nullptr, "" }
+{
 }
 
 fs::inode* vfs::cache_inode(size_t size, ino_t ino,
@@ -134,33 +171,7 @@ void vfs::register_root_node(inode* root)
     if (!_root.ind)
         _root.ind = root;
 }
-int vfs::load_dentry(dentry* ent)
-{
-    auto* ind = ent->ind;
 
-    if (!ent->flags.dir || !S_ISDIR(ind->mode)) {
-        errno = ENOTDIR;
-        return GB_FAILED;
-    }
-
-    size_t offset = 0;
-
-    for (int ret = 1; ret > 0; offset += ret) {
-        ret = this->inode_readdir(ind, offset,
-            [ent, this](const char* name, size_t len, ino_t ino, uint8_t) -> int {
-                if (!len)
-                    ent->append(get_inode(ino), name);
-                else
-                    ent->append(get_inode(ino), dentry::name_type(name, len));
-
-                return GB_OK;
-            });
-    }
-
-    ent->flags.present = 1;
-
-    return GB_OK;
-}
 int vfs::mount(dentry* mnt, vfs* new_fs)
 {
     if (!mnt->flags.dir) {
@@ -233,7 +244,7 @@ int vfs::truncate(inode*, size_t)
     return -EINVAL;
 }
 
-fs::regular_file::regular_file(vfs::dentry* parent,
+fs::regular_file::regular_file(dentry* parent,
     file_flags flags, size_t cursor, inode* ind)
     : file(ind->mode, parent, flags), cursor(cursor), ind(ind) { }
 
@@ -298,8 +309,8 @@ int fs::regular_file::getdents(char* __user buf, size_t cnt)
         return -ENOTDIR;
 
     size_t orig_cnt = cnt;
-    int nread = ind->fs->inode_readdir(ind, cursor,
-        [&buf, &cnt](const char* fn, size_t len, ino_t ino, uint8_t type) {
+    int nread = ind->fs->readdir(ind, cursor,
+        [&buf, &cnt](const char* fn, size_t len, inode* ind, uint8_t type) {
             if (!len)
                 len = strlen(fn);
 
@@ -308,7 +319,7 @@ int fs::regular_file::getdents(char* __user buf, size_t cnt)
                 return GB_FAILED;
 
             auto* dirp = (fs::user_dirent*)buf;
-            dirp->d_ino = ino;
+            dirp->d_ino = ind->ino;
             dirp->d_reclen = reclen;
             // TODO: show offset
             // dirp->d_off = 0;
@@ -334,8 +345,8 @@ int fs::regular_file::getdents64(char* __user buf, size_t cnt)
         return -ENOTDIR;
 
     size_t orig_cnt = cnt;
-    int nread = ind->fs->inode_readdir(ind, cursor,
-        [&buf, &cnt](const char* fn, size_t len, ino_t ino, uint8_t type) {
+    int nread = ind->fs->readdir(ind, cursor,
+        [&buf, &cnt](const char* fn, size_t len, inode* ind, uint8_t type) {
             if (!len)
                 len = strlen(fn);
 
@@ -344,7 +355,7 @@ int fs::regular_file::getdents64(char* __user buf, size_t cnt)
                 return GB_FAILED;
 
             auto* dirp = (fs::user_dirent64*)buf;
-            dirp->d_ino = ino;
+            dirp->d_ino = ind->ino;
             dirp->d_off = 114514;
             dirp->d_reclen = reclen;
             dirp->d_type = type;
@@ -363,7 +374,7 @@ int fs::regular_file::getdents64(char* __user buf, size_t cnt)
     return orig_cnt - cnt;
 }
 
-fs::fifo_file::fifo_file(vfs::dentry* parent, file_flags flags,
+fs::fifo_file::fifo_file(dentry* parent, file_flags flags,
     std::shared_ptr<fs::pipe> ppipe)
     : file(S_IFIFO, parent, flags), ppipe(ppipe) { }
 
@@ -460,26 +471,26 @@ size_t fs::vfs_write(fs::inode* file, const char* buf, size_t offset, size_t n)
     errno = EINVAL;
     return -1U;
 }
-int fs::vfs_mkfile(vfs::dentry* dir, const char* filename, mode_t mode)
+int fs::vfs_mkfile(dentry* dir, const char* filename, mode_t mode)
 {
     return dir->ind->fs->inode_mkfile(dir, filename, mode);
 }
-int fs::vfs_mknode(vfs::dentry* dir, const char* filename, mode_t mode, dev_t dev)
+int fs::vfs_mknode(dentry* dir, const char* filename, mode_t mode, dev_t dev)
 {
     return dir->ind->fs->inode_mknode(dir, filename, mode, dev);
 }
-int fs::vfs_rmfile(vfs::dentry* dir, const char* filename)
+int fs::vfs_rmfile(dentry* dir, const char* filename)
 {
     return dir->ind->fs->inode_rmfile(dir, filename);
 }
-int fs::vfs_mkdir(vfs::dentry* dir, const char* dirname, mode_t mode)
+int fs::vfs_mkdir(dentry* dir, const char* dirname, mode_t mode)
 {
     return dir->ind->fs->inode_mkdir(dir, dirname, mode);
 }
 
-vfs::dentry* fs::vfs_open(vfs::dentry& root, const types::path& path)
+dentry* fs::vfs_open(dentry& root, const types::path& path)
 {
-    vfs::dentry* cur = &root;
+    dentry* cur = &root;
 
     for (const auto& item : path) {
         if (item.empty())
@@ -492,7 +503,7 @@ vfs::dentry* fs::vfs_open(vfs::dentry& root, const types::path& path)
     return cur;
 }
 
-int fs::vfs_stat(vfs::dentry* ent, statx* stat, unsigned int mask)
+int fs::vfs_stat(dentry* ent, statx* stat, unsigned int mask)
 {
     return ent->ind->fs->inode_statx(ent, stat, mask);
 }

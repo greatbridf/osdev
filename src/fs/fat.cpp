@@ -64,7 +64,7 @@ void fat32::release_cluster(cluster_t no)
         --iter->second.ref;
 }
 
-int fat32::inode_readdir(fs::inode* dir, size_t offset, const fs::vfs::filldir_func& filldir)
+int fat32::readdir(fs::inode* dir, size_t offset, const fs::vfs::filldir_func& filldir)
 {
     cluster_t next = cl(dir);
     for (size_t i = 0; i < (offset / (sectors_per_cluster * SECTOR_SIZE)); ++i) {
@@ -116,7 +116,7 @@ int fat32::inode_readdir(fs::inode* dir, size_t offset, const fs::vfs::filldir_f
                 else
                     fname += toupper(d->extension[i]);
             }
-            auto ret = filldir(fname.c_str(), 0, ind->ino, ind->mode & S_IFMT);
+            auto ret = filldir(fname.c_str(), 0, ind, ind->mode & S_IFMT);
 
             if (ret != GB_OK) {
                 release_cluster(next);

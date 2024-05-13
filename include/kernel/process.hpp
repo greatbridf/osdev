@@ -259,7 +259,7 @@ public:
     pid_t sid {};
 
     tty* control_tty {};
-    fs::vfs::dentry* root { fs::fs_root };
+    fs::dentry* root { fs::fs_root };
     std::set<pid_t> children;
 
 public:

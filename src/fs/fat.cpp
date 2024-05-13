@@ -3,6 +3,7 @@
 #include <fs/fat.hpp>
 #include <kernel/mem.h>
 #include <kernel/mm.hpp>
+#include <kernel/module.hpp>
 #include <kernel/vfs.hpp>
 #include <stdint.h>
 #include <stdio.h>
@@ -130,13 +131,10 @@ int fat32::inode_readdir(fs::inode* dir, size_t offset, const fs::vfs::filldir_f
     return nread;
 }
 
-fat32::fat32(inode* _device)
-    : device { 0 }
+fat32::fat32(dev_t _device)
+    : device { _device }
     , label { 0 }
 {
-    // TODO: error handling
-    assert(_device->fs->inode_devid(_device, device) == 0);
-
     auto* buf = new char[SECTOR_SIZE];
     _raw_read_sector(buf, 0);
 
@@ -188,7 +186,7 @@ fat32::~fat32()
     delete[]((char*)fat);
 }
 
-size_t fat32::inode_read(inode* file, char* buf, size_t buf_size, size_t offset, size_t n)
+size_t fat32::read(inode* file, char* buf, size_t buf_size, size_t offset, size_t n)
 {
     cluster_t next = cl(file);
     uint32_t cluster_size = SECTOR_SIZE * sectors_per_cluster;
@@ -302,4 +300,33 @@ int fat32::inode_stat(dentry* dent, struct stat* st)
     return GB_OK;
 }
 
+static fat32* create_fat32(dev_t device)
+{
+    return new fat32(device);
+}
+
+class fat32_module : public virtual kernel::module::module {
+public:
+    fat32_module() : module("fat32") { }
+    ~fat32_module()
+    {
+        // TODO: unregister filesystem
+    }
+
+    virtual int init() override
+    {
+        int ret = fs::register_fs("fat32", create_fat32);
+
+        if (ret != 0)
+            return kernel::module::MODULE_FAILED;
+
+        return kernel::module::MODULE_SUCCESS;
+    }
+};
+
 } // namespace fs::fat
+
+static kernel::module::module* fat32_module_init()
+{ return new fs::fat::fat32_module; }
+
+INTERNAL_MODULE(fat32_module_loader, fat32_module_init);

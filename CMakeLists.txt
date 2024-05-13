@@ -53,6 +53,7 @@ set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
                         src/kernel/hw/timer.c
                         src/kernel/event/event.cpp
                         src/kernel/user/thread_local.cc
+                        src/kernel/vfs/tmpfs.cc
                         src/kernel/signal.cpp
                         src/types/elf.cpp
                         src/types/libstdcpp.cpp

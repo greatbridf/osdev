@@ -22,6 +22,7 @@
 #include <types/path.hpp>
 #include <types/lock.hpp>
 #include <types/types.h>
+#include <types/string.hpp>
 
 #define NODE_MAJOR(node) ((node) >> 16)
 #define NODE_MINOR(node) ((node) & 0xffffU)
@@ -186,16 +187,23 @@ public:
 
     int mount(dentry* mnt, vfs* new_fs);
 
-    virtual size_t inode_read(inode* file, char* buf, size_t buf_size, size_t offset, size_t n);
-    virtual size_t inode_write(inode* file, const char* buf, size_t offset, size_t n);
+    // directory operations
+
     virtual int inode_mkfile(dentry* dir, const char* filename, mode_t mode);
     virtual int inode_mknode(dentry* dir, const char* filename, mode_t mode, dev_t sn);
     virtual int inode_rmfile(dentry* dir, const char* filename);
     virtual int inode_mkdir(dentry* dir, const char* dirname, mode_t mode);
+
+    // metadata operation
+
     virtual int inode_statx(dentry* dent, statx* buf, unsigned int mask);
     virtual int inode_stat(dentry* dent, struct stat* stat);
-    virtual int inode_devid(inode* file, dev_t& out_dev);
 
+    // file operations
+
+    virtual size_t read(inode* file, char* buf, size_t buf_size, size_t offset, size_t n);
+    virtual size_t write(inode* file, const char* buf, size_t offset, size_t n);
+    virtual int dev_id(inode* file, dev_t& out_dev);
     virtual int truncate(inode* file, size_t size);
 
     // parameter 'length' in callback:
@@ -313,6 +321,19 @@ inline fs::vfs::dentry* fs_root;
 int register_block_device(dev_t node, blkdev_ops ops);
 int register_char_device(dev_t node, chrdev_ops ops);
 
+// return value: pointer to created vfs object
+// 1. dev_t: device number
+using create_fs_func_t = std::function<vfs*(dev_t)>;
+
+int register_fs(const char* name, create_fs_func_t);
+
+// in tmpfs.cc
+int register_tmpfs();
+
+// returns a pointer to the vfs object
+// vfs objects are managed by the kernel
+int create_fs(const char* name, dev_t device, vfs*& out_vfs);
+
 void partprobe();
 
 ssize_t block_device_read(dev_t node, char* buf, size_t buf_size, size_t offset, size_t n);
@@ -320,8 +341,6 @@ ssize_t block_device_write(dev_t node, const char* buf, size_t offset, size_t n)
 
 ssize_t char_device_read(dev_t node, char* buf, size_t buf_size, size_t n);
 ssize_t char_device_write(dev_t node, const char* buf, size_t n);
-
-vfs* register_fs(vfs* fs);
 
 size_t vfs_read(inode* file, char* buf, size_t buf_size, size_t offset, size_t n);
 size_t vfs_write(inode* file, const char* buf, size_t offset, size_t n);

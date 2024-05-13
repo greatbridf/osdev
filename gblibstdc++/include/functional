@@ -87,8 +87,7 @@ namespace __inner {
     class _function : public _function_base<Ret, Args...> {
     private:
         using __enable = std::enable_if_t<
-            std::is_same_v<Ret,
-                decltype(std::declval<std::decay_t<FuncLike>>()(std::declval<Args>()...))>
+            std::is_invocable_r_v<Ret, std::decay_t<FuncLike>, Args...>
         >;
         FuncLike func;
 
@@ -179,10 +178,8 @@ public:
 
     template <typename FuncLike, std::enable_if_t
         <
-            std::is_same_v<
-                Ret,
-                decltype(std::declval<std::decay_t<FuncLike>>()(std::declval<Args>()...))
-            >
+            // TODO: check its behavior for nullptr
+            std::is_invocable_r_v<Ret, std::decay_t<FuncLike>, Args...>
             && (sizeof(std::decay_t<FuncLike>) <= STACK_ALLOCATED_SIZE - sizeof(void*))
             && !std::is_same_v<std::decay_t<FuncLike>, function>
         , bool> = true

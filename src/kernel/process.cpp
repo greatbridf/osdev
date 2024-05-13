@@ -540,14 +540,27 @@ void NORETURN _kernel_init(void)
         kmsg(buf);
     }
 
+
+    // mount fat32 /mnt directory
     // TODO: parse kernel parameters
-    auto* drive = fs::vfs_open(*fs::fs_root, "/dev/sda1");
-    assert(drive);
-    auto* _new_fs = fs::register_fs(new fs::fat::fat32(drive->ind));
-    auto* mnt = fs::vfs_open(*fs::fs_root, "/mnt");
-    assert(mnt);
-    int ret = fs::fs_root->ind->fs->mount(mnt, _new_fs);
-    assert(ret == GB_OK);
+    if (1) {
+        auto* drive = fs::vfs_open(*fs::fs_root, "/dev/sda1");
+        assert(drive);
+
+        dev_t drive_device;
+        int ret = drive->ind->fs->dev_id(drive->ind, drive_device);
+        assert(ret == 0);
+
+        fs::vfs* new_fs;
+        ret = fs::create_fs("fat32", drive_device, new_fs);
+        assert(ret == 0);
+
+        auto* mount_point = fs::vfs_open(*fs::fs_root, "/mnt");
+        assert(mount_point);
+
+        ret = fs::fs_root->ind->fs->mount(mount_point, new_fs);
+        assert(ret == GB_OK);
+    }
 
     current_process->attr.system = 0;
     current_thread->attr.system = 0;
@@ -566,7 +579,7 @@ void NORETURN _kernel_init(void)
         freeze();
     }
 
-    ret = types::elf::elf32_load(&d);
+    int ret = types::elf::elf32_load(&d);
     assert(ret == GB_OK);
 
     asm volatile(

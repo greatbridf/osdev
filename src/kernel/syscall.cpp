@@ -406,6 +406,10 @@ int _syscall_ioctl(interrupt_stack* data)
     case TIOCGPGRP: {
         SYSCALL_ARG3(pid_t*, pgid);
         tty* ctrl_tty = current_process->control_tty;
+
+        if (!ctrl_tty)
+            return -ENOTTY;
+
         // TODO: copy_to_user
         *pgid = ctrl_tty->get_pgrp();
         break;
@@ -414,6 +418,10 @@ int _syscall_ioctl(interrupt_stack* data)
         // TODO: copy_from_user
         SYSCALL_ARG3(const pid_t*, pgid);
         tty* ctrl_tty = current_process->control_tty;
+
+        if (!ctrl_tty)
+            return -ENOTTY;
+
         ctrl_tty->set_pgrp(*pgid);
         break;
     }
@@ -996,6 +1004,28 @@ int _syscall_access(interrupt_stack* data)
     }
 }
 
+int _syscall_mknod(interrupt_stack* data)
+{
+    SYSCALL_ARG1(const char* __user, pathname);
+    SYSCALL_ARG2(mode_t, mode);
+    SYSCALL_ARG3(dev_t, dev);
+
+    auto path = types::make_path(pathname, current_process->pwd);
+    auto* dent = fs::vfs_open(*current_process->root, path);
+
+    if (dent)
+        return -EEXIST;
+
+    auto filename = path.last_name();
+    path.remove_last();
+
+    dent = fs::vfs_open(*current_process->root, path);
+    if (!dent)
+        return -ENOENT;
+
+    return fs::vfs_mknode(dent, filename.c_str(), mode, dev);
+}
+
 extern "C" void syscall_entry(
     interrupt_stack* data,
     mmx_registers* mmxregs)
@@ -1035,6 +1065,7 @@ void init_syscall(void)
     syscall_handlers[0x0a] = _syscall_unlink;
     syscall_handlers[0x0b] = _syscall_execve;
     syscall_handlers[0x0c] = _syscall_chdir;
+    syscall_handlers[0x0e] = _syscall_mknod;
     syscall_handlers[0x14] = _syscall_getpid;
     syscall_handlers[0x21] = _syscall_access;
     syscall_handlers[0x25] = _syscall_kill;

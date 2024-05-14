@@ -137,6 +137,7 @@ add_custom_target(boot.img
     COMMAND mcopy -i boot.img@@1M ${CMAKE_BINARY_DIR}/user-space-program/lazybox.out ::pwd
     COMMAND mcopy -i boot.img@@1M ${CMAKE_SOURCE_DIR}/busybox-minimal ::busybox_
     COMMAND mcopy -i boot.img@@1M ${CMAKE_SOURCE_DIR}/busybox ::busybox
+    COMMAND mcopy -i boot.img@@1M ${CMAKE_SOURCE_DIR}/init_script.sh ::initsh
 )
 
 add_custom_command(OUTPUT run

@@ -378,10 +378,6 @@ proclist::proclist()
     auto& thd = *init.thds.begin();
     thd.name.assign("[kernel init]");
 
-    init.files.open(init, "/dev/console", O_RDONLY, 0);
-    init.files.open(init, "/dev/console", O_WRONLY, 0);
-    init.files.open(init, "/dev/console", O_WRONLY, 0);
-
     current_process = &init;
     current_thread = &thd;
     readythds->push(current_thread);
@@ -565,8 +561,8 @@ void NORETURN _kernel_init(void)
     current_process->attr.system = 0;
     current_thread->attr.system = 0;
 
-    const char* argv[] = { "/mnt/busybox", "sh", "/init" };
-    const char* envp[] = { "LANG=C", "HOME=/", "PATH=/mnt", "PWD=/", nullptr };
+    const char* argv[] = { "/mnt/busybox", "sh", "/mnt/initsh" };
+    const char* envp[] = { "LANG=C", "HOME=/root", "PATH=/mnt", "PWD=/", nullptr };
 
     types::elf::elf32_load_data d;
     d.argv = argv;

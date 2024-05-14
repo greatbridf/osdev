@@ -400,8 +400,8 @@ fs::fifo_file::~fifo_file()
         ppipe->close_write();
 }
 
-static std::map<dev_t, fs::blkdev_ops> blkdevs;
-static std::map<dev_t, fs::chrdev_ops> chrdevs;
+static fs::blkdev_ops** blkdevs[256];
+static fs::chrdev_ops** chrdevs[256];
 
 size_t fs::vfs_read(fs::inode* file, char* buf, size_t buf_size, size_t offset, size_t n)
 {
@@ -515,23 +515,33 @@ int fs::vfs_truncate(inode *file, size_t size)
 
 static std::list<fs::vfs*> fs_es;
 
-int fs::register_block_device(dev_t node, fs::blkdev_ops ops)
+int fs::register_block_device(dev_t node, const fs::blkdev_ops& ops)
 {
-    auto iter = blkdevs.find(node);
-    if (iter)
+    int major = NODE_MAJOR(node);
+    int minor = NODE_MINOR(node);
+
+    if (!blkdevs[major])
+        blkdevs[major] = new blkdev_ops*[256] {};
+
+    if (blkdevs[major][minor])
         return -EEXIST;
 
-    std::tie(iter, std::ignore) = blkdevs.emplace(node, std::move(ops));
+    blkdevs[major][minor] = new blkdev_ops { ops };
     return 0;
 }
 
-int fs::register_char_device(dev_t node, fs::chrdev_ops ops)
+int fs::register_char_device(dev_t node, const fs::chrdev_ops& ops)
 {
-    auto iter = chrdevs.find(node);
-    if (iter)
+    int major = NODE_MAJOR(node);
+    int minor = NODE_MINOR(node);
+
+    if (!chrdevs[major])
+        chrdevs[major] = new chrdev_ops*[256] {};
+
+    if (chrdevs[major][minor])
         return -EEXIST;
 
-    std::tie(iter, std::ignore) = chrdevs.emplace(node, std::move(ops));
+    chrdevs[major][minor] = new chrdev_ops { ops };
     return 0;
 }
 
@@ -580,25 +590,18 @@ struct PACKED mbr {
     uint16_t magic;
 };
 
-static inline void mbr_part_probe(dev_t node, char ch)
+// TODO: devtmpfs
+static int mbr_part_probe(dev_t node)
 {
     mbr buf_mbr;
-    // TODO: devtmpfs
-    auto* dev = fs::vfs_open(*fs::fs_root, "/dev");
-    if (!dev)
-        return;
 
-    char label[] = "sda1";
-    label[2] = ch;
-    auto ret = fs::block_device_read(node, (char*)&buf_mbr, sizeof(mbr), 0, 512);
-    if (ret < 0) {
-        kmsg("[kernel] cannot read device for part probing.\n");
-        return;
-    }
+    int ret = fs::block_device_read(node, (char*)&buf_mbr, sizeof(mbr), 0, 512);
+    if (ret < 0)
+        return -EIO;
 
     int n = 1;
     for (const auto& part : buf_mbr.parts) {
-        if (n >= 8)
+        if (n >= 16)
             break;
 
         if (!part.type)
@@ -618,87 +621,94 @@ static inline void mbr_part_probe(dev_t node, char ch)
             }
         });
 
-        ret = fs::vfs_mknode(dev, label, 0660 | S_IFBLK, node + n);
-        ++n, ++label[3];
+        ++n;
     }
+
+    return 0;
 }
 
 void fs::partprobe()
 {
-    auto* dev = fs::vfs_open(*fs::fs_root, "/dev");
-    if (!dev)
-        return;
+    for (int i = 0; i < 256; i += 16) {
+        int ret = mbr_part_probe(make_device(8, i));
 
-    char ch = 'a';
-    char name[] = "sd*";
-    types::string<> path = "/dev/sd*";
-    for (const auto& device : blkdevs) {
-        // only the devices whose minor number is a multiple of 8
-        // are considered as a disk instead of partitions
-        if (NODE_MINOR(device.first) % 8 != 0)
+        if (ret != 0)
             continue;
 
-        path.pop();
-        path += ch;
-        name[2] = ch;
-
-        auto* blkfile = fs::vfs_open(*fs::fs_root, path.c_str());
-        if (!blkfile)
-            vfs_mknode(dev, name, 0660 | S_IFBLK, device.first);
-
-        mbr_part_probe(device.first, ch);
-
-        ++ch;
+        kmsgf("[info] found disk drive sd%c\n", 'a' + (i / 16));
     }
 }
 
 ssize_t fs::block_device_read(dev_t node, char* buf, size_t buf_size, size_t offset, size_t n)
 {
-    auto iter = blkdevs.find(node);
-    if (!iter || !iter->second.read)
+    int major = NODE_MAJOR(node);
+    int minor = NODE_MINOR(node);
+
+    if (!blkdevs[major] || !blkdevs[major][minor])
         return -EINVAL;
 
-    return iter->second.read(buf, buf_size, offset, n);
+    auto& read = blkdevs[major][minor]->read;
+    if (!read)
+        return -EINVAL;
+
+    return read(buf, buf_size, offset, n);
 }
 
 ssize_t fs::block_device_write(dev_t node, const char* buf, size_t offset, size_t n)
 {
-    auto iter = blkdevs.find(node);
-    if (!iter || !iter->second.write)
+    int major = NODE_MAJOR(node);
+    int minor = NODE_MINOR(node);
+
+    if (!blkdevs[major] || !blkdevs[major][minor])
         return -EINVAL;
 
-    return iter->second.write(buf, offset, n);
+    auto& write = blkdevs[major][minor]->write;
+    if (!write)
+        return -EINVAL;
+
+    return write(buf, offset, n);
 }
 
 ssize_t fs::char_device_read(dev_t node, char* buf, size_t buf_size, size_t n)
 {
-    auto iter = chrdevs.find(node);
-    if (!iter || !iter->second.read)
+    int major = NODE_MAJOR(node);
+    int minor = NODE_MINOR(node);
+
+    if (!chrdevs[major] || !chrdevs[major][minor])
         return -EINVAL;
 
-    return iter->second.read(buf, buf_size, n);
+    auto& read = chrdevs[major][minor]->read;
+    if (!read)
+        return -EINVAL;
+
+    return read(buf, buf_size, n);
 }
 
 ssize_t fs::char_device_write(dev_t node, const char* buf, size_t n)
 {
-    auto iter = chrdevs.find(node);
-    if (!iter || !iter->second.read)
+    int major = NODE_MAJOR(node);
+    int minor = NODE_MINOR(node);
+
+    if (!chrdevs[major] || !chrdevs[major][minor])
         return -EINVAL;
 
-    return iter->second.write(buf, n);
+    auto& write = chrdevs[major][minor]->write;
+    if (!write)
+        return -EINVAL;
+
+    return write(buf, n);
 }
 
-ssize_t b_null_read(char* buf, size_t buf_size, size_t n)
+ssize_t b_null_read(char*, size_t, size_t)
 {
-    if (n >= buf_size)
-        n = buf_size;
-    memset(buf, 0x00, n);
-    return n;
+    return 0;
 }
+
 ssize_t b_null_write(const char*, size_t n)
 {
     return n;
 }
+
 static ssize_t console_read(char* buf, size_t buf_size, size_t n)
 {
     return console->read(buf, buf_size, n);
@@ -821,7 +831,4 @@ void init_vfs(void)
 
     assert(ret == 0);
     fs_root = rootfs->root();
-
-    vfs_mkdir(fs_root, "dev", 0755);
-    vfs_mkdir(fs_root, "mnt", 0755);
 }

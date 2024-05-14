@@ -62,8 +62,8 @@ struct user_dirent64 {
 
 inline dentry* fs_root;
 
-int register_block_device(dev_t node, blkdev_ops ops);
-int register_char_device(dev_t node, chrdev_ops ops);
+int register_block_device(dev_t node, const blkdev_ops& ops);
+int register_char_device(dev_t node, const chrdev_ops& ops);
 
 // return value: pointer to created vfs object
 // 1. dev_t: device number

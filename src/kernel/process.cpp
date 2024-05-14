@@ -536,22 +536,21 @@ void NORETURN _kernel_init(void)
         kmsg(buf);
     }
 
-
     // mount fat32 /mnt directory
     // TODO: parse kernel parameters
     if (1) {
-        auto* drive = fs::vfs_open(*fs::fs_root, "/dev/sda1");
-        assert(drive);
-
-        dev_t drive_device;
-        int ret = drive->ind->fs->dev_id(drive->ind, drive_device);
-        assert(ret == 0);
-
         fs::vfs* new_fs;
-        ret = fs::create_fs("fat32", drive_device, new_fs);
+        int ret = fs::create_fs("fat32", fs::make_device(8, 1), new_fs);
         assert(ret == 0);
 
         auto* mount_point = fs::vfs_open(*fs::fs_root, "/mnt");
+        if (!mount_point) {
+            int ret = fs::vfs_mkdir(fs::fs_root, "mnt", 0755);
+            assert(ret == GB_OK);
+
+            mount_point = fs::vfs_open(*fs::fs_root, "/mnt");
+        }
+
         assert(mount_point);
 
         ret = fs::fs_root->ind->fs->mount(mount_point, new_fs);

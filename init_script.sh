@@ -22,5 +22,19 @@ cat > /etc/group <<EOF
 root:x:0:root
 EOF
 
-exec /mnt/init /mnt/busybox_ sh \
+cat > /root/.profile <<EOF
+export PATH=/mnt
+export HOME=/root
+
+export BUSYBOX=/mnt/busybox
+
+alias ls="$BUSYBOX ls "
+alias ll="$BUSYBOX ls -l "
+alias la="$BUSYBOX ls -la "
+
+alias cat="$BUSYBOX cat "
+alias clear="$BUSYBOX clear "
+EOF
+
+exec /mnt/init /mnt/busybox sh -l \
     < /dev/console > /dev/console 2> /dev/console

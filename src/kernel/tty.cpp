@@ -54,6 +54,19 @@ void tty::print(const char* str)
         this->putchar(*(str++));
 }
 
+int tty::poll()
+{
+    types::lock_guard lck(this->mtx_buf);
+    if (this->buf.empty()) {
+        bool interrupted = this->waitlist.wait(this->mtx_buf);
+
+        if (interrupted)
+            return -EINTR;
+    }
+
+    return 1;
+}
+
 size_t tty::read(char* buf, size_t buf_size, size_t n)
 {
     n = std::max(buf_size, n);
@@ -133,8 +146,9 @@ void tty::_real_commit_char(int c)
         if (TERMIOS_LSET(this->termio, ECHONL) || TERMIOS_LSET(this->termio, ECHO))
             this->_echo_char(c);
 
-        if (TERMIOS_LSET(this->termio, ICANON))
-            this->waitlist.notify_all();
+        // if ICANON is set, we notify all waiting processes
+        // if ICANON is not set, since there are data ready, we notify as well
+        this->waitlist.notify_all();
 
         break;
 
@@ -143,6 +157,9 @@ void tty::_real_commit_char(int c)
 
         if (TERMIOS_LSET(this->termio, ECHO))
             this->_echo_char(c);
+
+        if (!TERMIOS_LSET(this->termio, ICANON))
+            this->waitlist.notify_all();
 
         break;
     }

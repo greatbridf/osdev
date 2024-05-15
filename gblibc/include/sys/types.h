@@ -19,6 +19,8 @@ typedef unsigned long nlink_t;
 typedef uint64_t ino64_t;
 typedef int64_t off64_t;
 
+typedef off64_t loff_t;
+
 #ifdef __cplusplus
 }
 #endif

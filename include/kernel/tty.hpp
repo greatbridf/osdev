@@ -38,6 +38,9 @@ public:
 
     void clear_read_buf(void);
 
+    // TODO: formal poll support
+    int poll();
+
     constexpr void set_pgrp(pid_t pgid)
     {
         fg_pgroup = pgid;

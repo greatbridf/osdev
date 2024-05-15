@@ -3,6 +3,7 @@
 
 #include <assert.h>
 #include <errno.h>
+#include <poll.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -1065,6 +1066,74 @@ int _syscall_mknod(interrupt_stack* data)
     return fs::vfs_mknode(dent, filename.c_str(), mode, dev);
 }
 
+int _syscall_poll(interrupt_stack* data)
+{
+    SYSCALL_ARG1(struct pollfd* __user, fds);
+    SYSCALL_ARG2(nfds_t, nfds);
+    SYSCALL_ARG3(int, timeout);
+
+    if (nfds == 0)
+        return 0;
+
+    if (nfds > 1) {
+        NOT_IMPLEMENTED;
+        return -EINVAL;
+    }
+
+    // TODO: handle timeout
+    // if (timeout != -1) {
+    // }
+
+    // for now, we will poll from console only
+    int ret = console->poll();
+    if (ret < 0)
+        return ret;
+
+    fds[0].revents = POLLIN;
+    return ret;
+
+    // TODO: check address validity
+    // TODO: poll multiple fds and other type of files
+    // for (nfds_t i = 0; i < nfds; ++i) {
+    //     auto& pfd = fds[i];
+
+    //     auto* file = current_process->files[pfd.fd];
+    //     if (!file || !S_ISCHR(file->mode))
+    //         return -EINVAL;
+
+    //     // poll the fds
+    // }
+    //
+    // return 0;
+}
+
+int _syscall_llseek(interrupt_stack* data)
+{
+    SYSCALL_ARG1(unsigned int, fd);
+    SYSCALL_ARG2(unsigned long, offset_high);
+    SYSCALL_ARG3(unsigned long, offset_low);
+    SYSCALL_ARG4(loff_t*, result);
+    SYSCALL_ARG5(unsigned int, whence);
+
+    auto* file = current_process->files[fd];
+    if (!file)
+        return -EBADF;
+
+    if (!result)
+        return -EFAULT;
+
+    if (offset_high != 0 || offset_low != 0 || whence != SEEK_END) {
+        NOT_IMPLEMENTED;
+        return -EINVAL;
+    }
+
+    // the function is used for check file size for now
+    // we return all 0
+    *result = 0;
+
+    return 0;
+}
+
 extern "C" void syscall_entry(
     interrupt_stack* data,
     mmx_registers* mmxregs)
@@ -1124,9 +1193,11 @@ void init_syscall(void)
     syscall_handlers[0x72] = _syscall_wait4;
     syscall_handlers[0x7a] = _syscall_newuname;
     syscall_handlers[0x84] = _syscall_getpgid;
+    syscall_handlers[0x8c] = _syscall_llseek;
     syscall_handlers[0x8d] = _syscall_getdents;
     syscall_handlers[0x92] = _syscall_writev;
     syscall_handlers[0x93] = _syscall_getsid;
+    syscall_handlers[0xa8] = _syscall_poll;
     syscall_handlers[0xac] = _syscall_prctl;
     syscall_handlers[0xae] = _syscall_rt_sigaction;
     syscall_handlers[0xaf] = _syscall_rt_sigprocmask;

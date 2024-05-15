@@ -10,7 +10,13 @@
 
 #include <errno.h>
 #include <fcntl.h>
-#include <kernel/event/evtqueue.hpp>
+#include <stdint.h>
+#include <sys/types.h>
+
+#include <kernel/task/thread.hpp>
+#include <kernel/task/current.hpp>
+
+#include <kernel/async/waitlist.hpp>
 #include <kernel/interrupt.h>
 #include <kernel/mm.hpp>
 #include <kernel/mem.h>
@@ -19,8 +25,6 @@
 #include <kernel/task.h>
 #include <kernel/tty.hpp>
 #include <kernel/vfs.hpp>
-#include <stdint.h>
-#include <sys/types.h>
 #include <types/allocator.hpp>
 #include <types/cplusplus.hpp>
 #include <types/hash_map.hpp>
@@ -28,22 +32,14 @@
 #include <types/status.h>
 #include <types/string.hpp>
 #include <types/types.h>
+#include <types/lock.hpp>
 
 class process;
 
-namespace kernel::tasks {
-
-struct thread;
-
-} // namespace kernel::tasks
-
 class proclist;
-class readyqueue;
 
 inline process* volatile current_process;
-inline kernel::tasks::thread* volatile current_thread;
 inline proclist* procs;
-inline readyqueue* readythds;
 
 inline tss32_t tss;
 
@@ -56,69 +52,6 @@ struct thread_attr {
     uint32_t system : 1;
     uint32_t ready : 1;
 };
-
-namespace kernel::tasks {
-
-using tid_t = uint32_t;
-
-struct thread {
-private:
-    struct kernel_stack {
-        std::byte* stack_base;
-        uint32_t* esp;
-
-        kernel_stack();
-        kernel_stack(const kernel_stack& other);
-        kernel_stack(kernel_stack&& other);
-        ~kernel_stack();
-    };
-
-public:
-    kernel_stack kstack;
-    pid_t owner;
-    thread_attr attr;
-    signal_list signals;
-
-    int* __user set_child_tid {};
-    int* __user clear_child_tid {};
-
-    types::string<> name {};
-
-    segment_descriptor tls_desc {};
-
-    explicit inline thread(types::string<> name, pid_t owner)
-        : owner { owner }
-        , attr { .system = 1, .ready = 1, }
-        , name { name }
-    {
-    }
-
-    inline thread(const thread& val, pid_t owner)
-        : owner { owner }, attr { val.attr }, name { val.name }
-    {
-    }
-
-    int set_thread_area(user::user_desc* ptr);
-    int load_thread_area() const;
-
-    void sleep();
-    void wakeup();
-    constexpr bool is_ready() const
-    { return attr.ready; }
-
-    void send_signal(kernel::signal_list::signo_type signal);
-
-    thread(thread&& val) = default;
-
-    inline tid_t tid() const { return (tid_t)kstack.stack_base; }
-
-    inline bool operator==(const thread& rhs) const
-    { return tid() == rhs.tid(); }
-    inline bool operator<(const thread& rhs) const
-    { return tid() < rhs.tid(); }
-};
-
-}
 
 class filearr {
 private:
@@ -245,9 +178,12 @@ public:
 
 public:
     kernel::memory::mm_list mms {};
-    std::set<kernel::tasks::thread> thds;
-    kernel::cond_var cv_wait;
-    std::list<wait_obj> waitlist;
+    std::set<kernel::task::thread> thds;
+    kernel::async::wait_list waitlist;
+
+    types::mutex mtx_waitprocs;
+    std::list<wait_obj> waitprocs;
+
     process_attr attr {};
     filearr files;
     types::path pwd;
@@ -358,50 +294,6 @@ public:
     }
 
     void kill(pid_t pid, int exit_code);
-};
-
-// TODO: lock and unlock
-class readyqueue final {
-public:
-    using thread = kernel::tasks::thread;
-    using list_type = std::list<thread*>;
-
-private:
-    list_type m_thds;
-
-private:
-    readyqueue(const readyqueue&) = delete;
-    readyqueue(readyqueue&&) = delete;
-    readyqueue& operator=(const readyqueue&) = delete;
-    readyqueue& operator=(readyqueue&&) = delete;
-
-    ~readyqueue() = delete;
-
-public:
-    constexpr explicit readyqueue(void) = default;
-
-    constexpr void push(thread* thd)
-    { m_thds.push_back(thd); }
-
-    constexpr thread* pop(void)
-    {
-        m_thds.remove_if([](thread* item) {
-            return !item->is_ready();
-        });
-        auto* retval = m_thds.front();
-        m_thds.pop_front();
-        return retval;
-    }
-
-    constexpr thread* query(void)
-    {
-        auto* thd = this->pop();
-        this->push(thd);
-        return thd;
-    }
-
-    constexpr void remove_all(thread* thd)
-    { m_thds.remove(thd); }
 };
 
 void NORETURN init_scheduler(void);

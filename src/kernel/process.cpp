@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <bits/alltypes.h>
+#include <sys/wait.h>
 
 #include <asm/port_io.h>
 #include <asm/sys.h>
@@ -19,6 +20,8 @@
 #include <kernel/signal.hpp>
 #include <kernel/vfs.hpp>
 #include <kernel/user/thread_local.hpp>
+#include <kernel/task/thread.hpp>
+#include <kernel/task/readyqueue.hpp>
 
 #include <types/allocator.hpp>
 #include <types/bitmap.hpp>
@@ -220,115 +223,12 @@ process::process(pid_t pid, pid_t ppid)
     assert(inserted);
 }
 
-using kernel::tasks::thread;
 using signo_type = kernel::signal_list::signo_type;
 
 void process::send_signal(signo_type signal)
 {
     for (auto& thd : thds)
         thd.send_signal(signal);
-}
-
-static std::priority_queue<std::byte*> s_kstacks;
-thread::kernel_stack::kernel_stack()
-{
-    static int allocated;
-    static types::mutex mtx;
-    types::lock_guard lck(mtx);
-
-    if (!s_kstacks.empty()) {
-        stack_base = s_kstacks.top();
-        esp = (uint32_t*)stack_base;
-        s_kstacks.pop();
-        return;
-    }
-
-    // kernel stack pt is at page#0x00005
-    kernel::paccess pa(0x00005);
-    auto pt = (pt_t)pa.ptr();
-    assert(pt);
-
-    int cnt = THREAD_KERNEL_STACK_SIZE / PAGE_SIZE;
-    pte_t* pte = *pt + allocated * cnt;
-
-    for (int i = 0; i < cnt; ++i) {
-        pte[i].v = 0x3;
-        pte[i].in.page = __alloc_raw_page();
-    }
-
-    stack_base = (std::byte*)(0xffc00000 + THREAD_KERNEL_STACK_SIZE * (allocated + 1));
-    esp = (uint32_t*)stack_base;
-
-    ++allocated;
-}
-
-thread::kernel_stack::kernel_stack(const kernel_stack& other)
-    : kernel_stack()
-{
-    auto offset = vptrdiff(other.stack_base, other.esp);
-    esp = (uint32_t*)(stack_base - offset);
-    memcpy(esp, other.esp, offset);
-}
-
-thread::kernel_stack::kernel_stack(kernel_stack&& other)
-    : stack_base(std::exchange(other.stack_base, nullptr))
-    , esp(std::exchange(other.esp, nullptr)) { }
-
-thread::kernel_stack::~kernel_stack()
-{
-    s_kstacks.push(stack_base);
-}
-
-void thread::sleep()
-{
-    attr.ready = 0;
-    readythds->remove_all(this);
-}
-
-void thread::wakeup()
-{
-    attr.ready = 1;
-    readythds->push(this);
-}
-
-void thread::send_signal(signo_type signal)
-{
-    if (signals.raise(signal))
-        this->wakeup();
-}
-
-int thread::set_thread_area(kernel::user::user_desc* ptr)
-{
-    if (ptr->read_exec_only && ptr->seg_not_present) {
-        void* dst = (void*)ptr->base_addr;
-        std::size_t len = ptr->limit;
-        if (len > 0 && dst)
-            memset(dst, 0x00, len);
-        return 0;
-    }
-
-    if (ptr->entry_number == -1U)
-        ptr->entry_number = 6;
-    else
-        return -1;
-
-    tls_desc.limit_low = ptr->limit & 0xFFFF;
-    tls_desc.base_low = ptr->base_addr & 0xFFFF;
-    tls_desc.base_mid = (ptr->base_addr >> 16) & 0xFF;
-    tls_desc.access = SD_TYPE_DATA_USER;
-    tls_desc.limit_high = (ptr->limit >> 16) & 0xF;
-    tls_desc.flags = (ptr->limit_in_pages << 3) | (ptr->seg_32bit << 2);
-    tls_desc.base_high = (ptr->base_addr >> 24) & 0xFF;
-
-    return 0;
-}
-
-int thread::load_thread_area() const
-{
-    if (tls_desc.flags == 0)
-        return -1;
-    kernel::user::load_thread_area(tls_desc);
-    return 0;
 }
 
 void kernel_threadd_main(void)
@@ -380,7 +280,8 @@ proclist::proclist()
 
     current_process = &init;
     current_thread = &thd;
-    readythds->push(current_thread);
+
+    kernel::task::dispatcher::enqueue(current_thread);
 
     tss.ss0 = KERNEL_DATA_SEGMENT;
     tss.esp0 = (uint32_t)current_thread->kstack.esp;
@@ -414,7 +315,7 @@ proclist::proclist()
         // original esp
         push_stack(esp, old_esp);
 
-        readythds->push(&thd);
+        kernel::task::dispatcher::enqueue(&thd);
     }
 }
 
@@ -432,7 +333,7 @@ void proclist::kill(pid_t pid, int exit_code)
 
     // put all threads into sleep
     for (auto& thd : proc.thds)
-        thd.sleep();
+        thd.set_attr(kernel::task::thread::ZOMBIE);
 
     // write back mmap'ped files and close them
     proc.files.close_all();
@@ -456,31 +357,33 @@ void proclist::kill(pid_t pid, int exit_code)
     auto& init = this->find(1);
 
     bool flag = false;
-    {
-        auto& mtx = init.cv_wait.mtx();
-        types::lock_guard lck(mtx);
+    if (1) {
+        types::lock_guard lck(init.mtx_waitprocs);
 
-        {
-            auto& mtx = proc.cv_wait.mtx();
-            types::lock_guard lck(mtx);
+        if (1) {
+            types::lock_guard lck(proc.mtx_waitprocs);
 
-            for (const auto& item : proc.waitlist) {
-                init.waitlist.push_back(item);
+            for (const auto& item : proc.waitprocs) {
+                if (WIFSTOPPED(item.code) || WIFCONTINUED(item.code))
+                    continue;
+
+                init.waitprocs.push_back(item);
                 flag = true;
             }
 
-            proc.waitlist.clear();
+            proc.waitprocs.clear();
         }
     }
-    if (flag)
-        init.cv_wait.notify();
 
-    {
-        auto& mtx = parent.cv_wait.mtx();
-        types::lock_guard lck(mtx);
-        parent.waitlist.push_back({ pid, exit_code });
+    if (flag)
+        init.waitlist.notify_all();
+
+    if (1) {
+        types::lock_guard lck(parent.mtx_waitprocs);
+        parent.waitprocs.push_back({ pid, exit_code });
     }
-    parent.cv_wait.notify();
+
+    parent.waitlist.notify_all();
 }
 
 static void release_kinit()
@@ -551,7 +454,7 @@ void NORETURN _kernel_init(void)
     }
 
     current_process->attr.system = 0;
-    current_thread->attr.system = 0;
+    current_thread->attr |= kernel::task::thread::SYSTEM;
 
     const char* argv[] = { "/mnt/busybox", "sh", "/mnt/initsh" };
     const char* envp[] = { "LANG=C", "HOME=/root", "PATH=/mnt", "PWD=/", nullptr };
@@ -601,7 +504,6 @@ void k_new_thread(void (*func)(void*), void* data)
 SECTION(".text.kinit")
 void NORETURN init_scheduler(void)
 {
-    readythds = new readyqueue;
     procs = new proclist;
 
     asm volatile(
@@ -636,9 +538,9 @@ void NORETURN init_scheduler(void)
 extern "C" void asm_ctx_switch(uint32_t** curr_esp, uint32_t** next_esp);
 bool schedule()
 {
-    auto next_thd = readythds->query();
+    auto* next_thd = kernel::task::dispatcher::next();
     process* proc = nullptr;
-    kernel::tasks::thread* curr_thd = nullptr;
+    kernel::task::thread* curr_thd = nullptr;
 
     if (current_thread == next_thd)
         goto _end;

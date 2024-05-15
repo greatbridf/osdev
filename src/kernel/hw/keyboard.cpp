@@ -1,5 +1,4 @@
 #include <asm/port_io.h>
-#include <kernel/event/event.h>
 #include <kernel/hw/keyboard.h>
 #include <kernel/input/input_event.h>
 
@@ -26,5 +25,7 @@ handle_keyboard_interrupt(void)
 
     evt.data = keycode;
 
-    commit_input_event(&evt);
+    // TODO: fix it
+    // commit_input_event(&evt);
+    (void)evt;
 }

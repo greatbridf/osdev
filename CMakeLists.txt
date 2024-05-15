@@ -37,6 +37,7 @@ set(BOOTLOADER_SOURCES src/boot.s
 
 set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
                         src/kinit.cpp
+                        src/kernel/async/waitlist.cc
                         src/kernel/allocator.cc
                         src/kernel/interrupt.cpp
                         src/kernel/process.cpp
@@ -51,7 +52,8 @@ set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
                         src/kernel/hw/pci.cc
                         src/kernel/hw/serial.cpp
                         src/kernel/hw/timer.c
-                        src/kernel/event/event.cpp
+                        src/kernel/task/thread.cc
+                        src/kernel/task/readyqueue.cc
                         src/kernel/user/thread_local.cc
                         src/kernel/vfs/tmpfs.cc
                         src/kernel/signal.cpp
@@ -60,8 +62,7 @@ set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
                         include/asm/port_io.h
                         include/asm/sys.h
                         include/fs/fat.hpp
-                        include/kernel/event/event.h
-                        include/kernel/event/evtqueue.hpp
+                        include/kernel/async/waitlist.hpp
                         include/kernel/tty.hpp
                         include/kernel/interrupt.h
                         include/kernel/irq.hpp
@@ -78,13 +79,15 @@ set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
                         include/kernel/vfs/vfs.hpp
                         include/kernel/vga.hpp
                         include/kernel/signal.hpp
+                        include/kernel/task/forward.hpp
+                        include/kernel/task/thread.hpp
+                        include/kernel/task/readyqueue.hpp
                         include/kernel/hw/keyboard.h
                         include/kernel/hw/pci.hpp
                         include/kernel/hw/port.hpp
                         include/kernel/hw/serial.h
                         include/kernel/hw/timer.h
                         include/kernel/input/keycodes.h
-                        include/kernel/input/input_event.h
                         include/kernel/user/thread_local.hpp
                         include/types/bitmap.hpp
                         include/types/buffer.hpp

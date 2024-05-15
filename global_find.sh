@@ -9,4 +9,4 @@ do_find()
     done
 }
 
-do_find "$1" "c h cpp hpp s"
+do_find "$1" "c h cpp hpp s cc"

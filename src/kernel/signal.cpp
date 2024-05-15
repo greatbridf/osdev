@@ -1,3 +1,4 @@
+#include <kernel/task/thread.hpp>
 #include <kernel/process.hpp>
 #include <kernel/signal.hpp>
 #include <kernel/interrupt.h>
@@ -23,12 +24,22 @@ using signo_type = signal_list::signo_type;
 
 static void continue_process(int signal)
 {
+    auto& parent = procs->find(current_process->ppid);
+
+    // signal parent we're running
+    parent.waitprocs.push_back({ current_process->pid, 0xffff });
+
     current_thread->signals.after_signal(signal);
 }
 
 static void stop_process(int signal)
 {
-    current_thread->sleep();
+    auto& parent = procs->find(current_process->ppid);
+
+    current_thread->set_attr(kernel::task::thread::STOPPED);
+
+    // signal parent we're stopped
+    parent.waitprocs.push_back({ current_process->pid, 0x7f });
 
     while (true) {
         if (schedule())

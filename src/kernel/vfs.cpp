@@ -730,28 +730,27 @@ fs::pipe::pipe(void)
 
 void fs::pipe::close_read(void)
 {
-    {
-        types::lock_guard lck(m_cv.mtx());
+    if (1) {
+        types::lock_guard lck(mtx);
         flags &= (~READABLE);
     }
-    m_cv.notify_all();
+    waitlist.notify_all();
 }
 
 void fs::pipe::close_write(void)
 {
-    {
-        types::lock_guard lck(m_cv.mtx());
+    if (1) {
+        types::lock_guard lck(mtx);
         flags &= (~WRITABLE);
     }
-    m_cv.notify_all();
+    waitlist.notify_all();
 }
 
 int fs::pipe::write(const char* buf, size_t n)
 {
     // TODO: check privilege
     // TODO: check EPIPE
-    {
-        auto& mtx = m_cv.mtx();
+    if (1) {
         types::lock_guard lck(mtx);
 
         if (!is_readable()) {
@@ -760,7 +759,8 @@ int fs::pipe::write(const char* buf, size_t n)
         }
 
         while (this->buf.avail() < n) {
-            if (!m_cv.wait(mtx))
+            bool interrupted = waitlist.wait(mtx);
+            if (interrupted)
                 return -EINTR;
 
             if (!is_readable()) {
@@ -773,15 +773,14 @@ int fs::pipe::write(const char* buf, size_t n)
             this->buf.put(*(buf++));
     }
 
-    m_cv.notify();
+    waitlist.notify_all();
     return n;
 }
 
 int fs::pipe::read(char* buf, size_t n)
 {
     // TODO: check privilege
-    {
-        auto& mtx = m_cv.mtx();
+    if (1) {
         types::lock_guard lck(mtx);
 
         if (!is_writeable()) {
@@ -793,7 +792,8 @@ int fs::pipe::read(char* buf, size_t n)
         }
 
         while (this->buf.size() < n) {
-            if (!m_cv.wait(mtx))
+            bool interrupted = waitlist.wait(mtx);
+            if (interrupted)
                 return -EINTR;
 
             if (!is_writeable()) {
@@ -809,7 +809,7 @@ int fs::pipe::read(char* buf, size_t n)
             *(buf++) = this->buf.get();
     }
 
-    m_cv.notify();
+    waitlist.notify_all();
     return n;
 }
 

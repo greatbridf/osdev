@@ -9,7 +9,6 @@
 #include <types/status.h>
 #include <types/types.h>
 
-#include <kernel/event/event.h>
 #include <kernel/hw/keyboard.h>
 #include <kernel/hw/pci.hpp>
 #include <kernel/hw/serial.h>

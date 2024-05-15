@@ -16,8 +16,11 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/utsname.h>
+#include <sys/wait.h>
 
 #include <kernel/user/thread_local.hpp>
+#include <kernel/task/readyqueue.hpp>
+#include <kernel/task/thread.hpp>
 #include <kernel/interrupt.h>
 #include <kernel/log.hpp>
 #include <kernel/mem.h>
@@ -68,7 +71,7 @@ int _syscall_fork(interrupt_stack* data)
     assert(inserted);
     auto* newthd = &*iter_newthd;
 
-    readythds->push(newthd);
+    kernel::task::dispatcher::enqueue(newthd);
 
     uint32_t newthd_oldesp = (uint32_t)newthd->kstack.esp;
     auto esp = &newthd->kstack.esp;
@@ -139,7 +142,7 @@ int _syscall_read(interrupt_stack* data)
 // TODO: sleep seconds
 int _syscall_sleep(interrupt_stack*)
 {
-    current_thread->sleep();
+    current_thread->set_attr(kernel::task::thread::USLEEP);
 
     schedule();
     return 0;
@@ -227,39 +230,47 @@ int _syscall_waitpid(interrupt_stack* data)
     if (pid_to_wait != -1)
         return -EINVAL;
 
-    auto& cv = current_process->cv_wait;
-    auto& mtx = cv.mtx();
-    types::lock_guard lck(mtx);
+    auto& cv = current_process->waitlist;
+    types::lock_guard lck(current_process->mtx_waitprocs);
 
-    auto& waitlist = current_process->waitlist;
+    auto& waitlist = current_process->waitprocs;
 
     // TODO: check if it is waiting for stopped process
-    (void)options;
+    if (options & ~(WNOHANG | WUNTRACED)) {
+        NOT_IMPLEMENTED;
+        return -EINVAL;
+    }
 
     while (waitlist.empty()) {
         if (current_process->children.empty())
             return -ECHILD;
 
-        cv.wait(mtx);
+        if (options & WNOHANG)
+            return 0;
 
-        // TODO: check WNOHANG
-        // if (!cv.wait(mtx))
-        //     return -EINTR;
+        bool interrupted = cv.wait(current_process->mtx_waitprocs);
+        if (interrupted)
+            return -EINTR;
     }
 
-    auto iter = waitlist.begin();
-    assert(iter != waitlist.end());
+    for (auto iter = waitlist.begin(); iter != waitlist.end(); ++iter) {
+        if (WIFSTOPPED(iter->code) && !(options & WUNTRACED))
+            continue;
 
-    auto& obj = *iter;
-    pid_t pid = obj.pid;
+        pid_t pid = iter->pid;
 
-    // TODO: copy_to_user check privilege
-    *arg1 = obj.code;
+        // TODO: copy_to_user check privilege
+        *arg1 = iter->code;
 
-    procs->remove(pid);
-    waitlist.erase(iter);
+        procs->remove(pid);
+        waitlist.erase(iter);
 
-    return pid;
+        return pid;
+    }
+
+    // we should never reach here
+    assert(false);
+    return -EINVAL;
 }
 
 int _syscall_wait4(interrupt_stack* data)

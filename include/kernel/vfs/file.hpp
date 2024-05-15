@@ -1,5 +1,6 @@
 #pragma once
 
+#include <kernel/async/waitlist.hpp>
 #include <kernel/vfs/dentry.hpp>
 
 #include <errno.h>
@@ -8,7 +9,7 @@
 
 #include <types/types.h>
 #include <types/buffer.hpp>
-#include <kernel/event/evtqueue.hpp>
+#include <types/lock.hpp>
 
 namespace fs {
 
@@ -20,7 +21,8 @@ private:
 
 private:
     types::buffer buf;
-    kernel::cond_var m_cv;
+    kernel::async::wait_list waitlist;
+    types::mutex mtx;
     uint32_t flags;
 
 public:

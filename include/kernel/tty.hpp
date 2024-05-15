@@ -4,10 +4,12 @@
 #include <sys/types.h>
 #include <termios.h>
 
-#include <kernel/event/evtqueue.hpp>
 #include <types/allocator.hpp>
 #include <types/buffer.hpp>
 #include <types/cplusplus.hpp>
+#include <types/lock.hpp>
+
+#include <kernel/async/waitlist.hpp>
 
 class tty : public types::non_copyable {
 public:
@@ -50,8 +52,9 @@ public:
     termios termio;
 
 protected:
+    types::mutex mtx_buf;
     types::buffer buf;
-    kernel::cond_var m_cv;
+    kernel::async::wait_list waitlist;
 
     pid_t fg_pgroup;
 };

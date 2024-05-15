@@ -6,7 +6,6 @@
 
 #include <types/lock.hpp>
 
-#include <kernel/event/evtqueue.hpp>
 #include <kernel/hw/serial.h>
 #include <kernel/process.hpp>
 #include <kernel/tty.hpp>
@@ -64,11 +63,10 @@ size_t tty::read(char* buf, size_t buf_size, size_t n)
         if (n == 0)
             break;
 
-        auto& mtx = this->m_cv.mtx();
-        types::lock_guard lck(mtx);
+        types::lock_guard lck(this->mtx_buf);
 
         if (this->buf.empty()) {
-            bool interrupted = !this->m_cv.wait(mtx);
+            bool interrupted = this->waitlist.wait(this->mtx_buf);
 
             if (interrupted)
                 break;
@@ -136,7 +134,7 @@ void tty::_real_commit_char(int c)
             this->_echo_char(c);
 
         if (TERMIOS_LSET(this->termio, ICANON))
-            this->m_cv.notify();
+            this->waitlist.notify_all();
 
         break;
 
@@ -210,7 +208,7 @@ void tty::commit_char(int c)
     // if handled, the character is discarded
     if (TERMIOS_LSET(this->termio, ICANON)) {
         if (TERMIOS_TESTCC(c, this->termio, VEOF)) {
-            this->m_cv.notify();
+            this->waitlist.notify_all();
             return;
         }
 

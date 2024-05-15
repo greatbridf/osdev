@@ -51,11 +51,14 @@
 #define SYSCALL_HANDLERS_SIZE (404)
 syscall_handler syscall_handlers[SYSCALL_HANDLERS_SIZE];
 
-static void not_implemented()
+static void not_implemented(const char* pos, int line)
 {
-    console->print("\n[kernel] this function is not implemented\n");
+    kmsgf("[kernel] the function at %s:%d is not implemented, killing the pid%d...",
+            pos, line, current_process->pid);
     current_thread->send_signal(SIGSYS);
 }
+
+#define NOT_IMPLEMENTED not_implemented(__FILE__, __LINE__)
 
 extern "C" void _syscall_stub_fork_return(void);
 int _syscall_fork(interrupt_stack* data)
@@ -658,7 +661,7 @@ int _syscall_sendfile64(interrupt_stack* data)
         return -EINVAL;
 
     if (offset) {
-        not_implemented();
+        NOT_IMPLEMENTED;
         return -EINVAL;
     }
 
@@ -699,12 +702,12 @@ int _syscall_statx(interrupt_stack* data)
 
     // AT_STATX_SYNC_AS_STAT is the default value
     if (flags != AT_STATX_SYNC_AS_STAT && !(flags & AT_SYMLINK_NOFOLLOW)) {
-        not_implemented();
+        NOT_IMPLEMENTED;
         return -EINVAL;
     }
 
     if (dirfd != AT_FDCWD) {
-        not_implemented();
+        NOT_IMPLEMENTED;
         return -EINVAL;
     }
 
@@ -738,7 +741,7 @@ int _syscall_fcntl64(interrupt_stack* data)
         return current_process->files.dupfd(fd, arg, FD_CLOEXEC);
     }
     default:
-        not_implemented();
+        NOT_IMPLEMENTED;
         return -EINVAL;
     }
 }
@@ -1059,11 +1062,11 @@ extern "C" void syscall_entry(
 
     if (syscall_no >= SYSCALL_HANDLERS_SIZE
         || !syscall_handlers[syscall_no]) {
-        char buf[64];
-        snprintf(buf, 64,
-            "[kernel] syscall %x not implemented\n", syscall_no);
-        console->print(buf);
-        not_implemented();
+        kmsgf("[kernel] syscall %d(%x) is not implemented", syscall_no, syscall_no);
+        NOT_IMPLEMENTED;
+
+        if (current_thread->signals.pending_signal())
+            current_thread->signals.handle(data, mmxregs);
         return;
     }
 

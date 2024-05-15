@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
+#include <termios.h>
 #include <unistd.h>
 #include <bits/alltypes.h>
 #include <bits/ioctl.h>
@@ -431,8 +432,32 @@ int _syscall_ioctl(interrupt_stack* data)
         ws->ws_row = 10;
         break;
     }
+    case TCGETS: {
+        SYSCALL_ARG3(struct termios* __user, argp);
+
+        tty* ctrl_tty = current_process->control_tty;
+        if (!ctrl_tty)
+            return -EINVAL;
+
+        // TODO: use copy_to_user
+        memcpy(argp, &ctrl_tty->termio, sizeof(ctrl_tty->termio));
+
+        break;
+    }
+    case TCSETS: {
+        SYSCALL_ARG3(const struct termios* __user, argp);
+
+        tty* ctrl_tty = current_process->control_tty;
+        if (!ctrl_tty)
+            return -EINVAL;
+
+        // TODO: use copy_from_user
+        memcpy(&ctrl_tty->termio, argp, sizeof(ctrl_tty->termio));
+
+        break;
+    }
     default:
-        not_implemented();
+        kmsgf("[error] the ioctl() function %x is not implemented", request);
         return -EINVAL;
     }
 

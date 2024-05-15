@@ -15,7 +15,7 @@ mknod -m 666 /dev/sda b 8 0
 mknod -m 666 /dev/sda1 b 8 1
 
 cat > /etc/passwd <<EOF
-root:x:0:0:root:/root:/mnt/busybox_ sh
+root:x:0:0:root:/root:/mnt/busybox sh
 EOF
 
 cat > /etc/group <<EOF

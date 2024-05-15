@@ -9,7 +9,7 @@ static void serial_receive_data_interrupt(void)
 {
     while (is_serial_has_data(PORT_SERIAL0)) {
         uint8_t data = serial_read_data(PORT_SERIAL0);
-        console->recvchar(data);
+        console->commit_char(data);
     }
 }
 

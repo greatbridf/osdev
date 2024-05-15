@@ -434,13 +434,6 @@ void proclist::kill(pid_t pid, int exit_code)
     for (auto& thd : proc.thds)
         thd.sleep();
 
-    // if current process is connected to a tty
-    // clear its read buffer
-    // TODO: make tty line discipline handle this
-    tty* ctrl_tty = current_process->control_tty;
-    if (ctrl_tty)
-        ctrl_tty->clear_read_buf();
-
     // write back mmap'ped files and close them
     proc.files.close_all();
 

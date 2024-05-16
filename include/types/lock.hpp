@@ -8,7 +8,7 @@ inline void spin_lock(uint32_t volatile* lock_addr)
         "%=:\n\t\
          movl $1, %%eax\n\t\
          xchgl %%eax, (%0)\n\t\
-         test $0, %%eax\n\t\
+         cmp $0, %%eax\n\t\
          jne %=b\n\t\
         "
         :

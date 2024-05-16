@@ -1,13 +1,19 @@
 #pragma once
 
-#include <kernel/mem.h>
-#include <kernel/vfs.hpp>
+#include <vector>
+
 #include <stdint.h>
 #include <string.h>
 #include <sys/types.h>
+
 #include <types/size.h>
+#include <types/hash_map.hpp>
+
+#include <kernel/mem.h>
+#include <kernel/vfs.hpp>
 
 namespace fs::fat {
+
 using cluster_t = uint32_t;
 
 // for FAT32
@@ -105,7 +111,7 @@ struct PACKED directory_entry {
 // TODO: deallocate inodes when dentry is destroyed
 class fat32 : public virtual fs::vfs {
 private:
-    constexpr static uint32_t SECTOR_SIZE = 512;
+    constexpr static size_t SECTOR_SIZE = 512;
     constexpr static cluster_t EOC = 0xffffff8;
 
 private:
@@ -121,7 +127,7 @@ private:
     uint8_t fat_copies;
     uint8_t sectors_per_cluster;
     char label[12];
-    cluster_t* fat;
+    std::vector<cluster_t> fat;
 
     struct buf_object {
         char* data;
@@ -131,10 +137,12 @@ private:
     types::hash_map<cluster_t, buf_object> buf;
 
     // buf MUST be larger than 512 bytes
-    inline void _raw_read_sector(void* buf, uint32_t sector_no);
+    void _raw_read_sector(void* buf, uint32_t sector_no);
 
     // buf MUST be larger than 4096 bytes
-    inline void _raw_read_cluster(void* buf, cluster_t no);
+    void _raw_read_cluster(void* buf, cluster_t no);
+
+    ssize_t _read_sector_range(void* buf, size_t buf_size, uint32_t sector_offset, size_t sector_cnt);
 
     // buffered version, release_cluster(cluster_no) after used
     char* read_cluster(cluster_t no);
@@ -164,7 +172,6 @@ private:
 public:
     fat32(const fat32&) = delete;
     explicit fat32(dev_t device);
-    ~fat32();
 
     virtual size_t read(inode* file, char* buf, size_t buf_size, size_t offset, size_t n) override;
     virtual int readdir(fs::inode* dir, size_t offset, const fs::vfs::filldir_func& callback) override;

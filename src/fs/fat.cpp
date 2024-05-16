@@ -1,41 +1,64 @@
+#include <algorithm>
+
 #include <assert.h>
 #include <ctype.h>
+#include <stdint.h>
+#include <stdio.h>
+
+#include <types/allocator.hpp>
+#include <types/status.h>
+
 #include <fs/fat.hpp>
 #include <kernel/mem.h>
 #include <kernel/mm.hpp>
 #include <kernel/module.hpp>
 #include <kernel/vfs.hpp>
-#include <stdint.h>
-#include <stdio.h>
-#include <types/allocator.hpp>
-#include <types/hash_map.hpp>
-#include <types/status.h>
 
 #define VFAT_FILENAME_LOWERCASE (0x08)
 #define VFAT_EXTENSION_LOWERCASE (0x10)
 
 namespace fs::fat {
+
 // buf MUST be larger than 512 bytes
-inline void fat32::_raw_read_sector(void* buf, uint32_t sector_no)
+void fat32::_raw_read_sector(void* buf, uint32_t sector_no)
 {
-    size_t n = fs::block_device_read(
-        device,
-        (char*)buf,
-        SECTOR_SIZE,
-        sector_no * SECTOR_SIZE,
-        SECTOR_SIZE);
-    assert(n == SECTOR_SIZE);
+    auto nread = _read_sector_range(
+            buf, SECTOR_SIZE,
+            sector_no, 1
+            );
+
+    assert((size_t)nread == SECTOR_SIZE);
 }
 
 // buf MUST be larger than 4096 bytes
-inline void fat32::_raw_read_cluster(void* buf, cluster_t no)
+void fat32::_raw_read_cluster(void* buf, cluster_t no)
 {
     // data cluster start from cluster #2
     no -= 2;
-    for (int i = 0; i < sectors_per_cluster; ++i) {
-        // skip reserved sectors
-        _raw_read_sector((char*)buf + SECTOR_SIZE * i, data_region_offset + no * sectors_per_cluster + i);
-    }
+
+    auto nread = _read_sector_range(
+            buf, sectors_per_cluster * SECTOR_SIZE,
+            data_region_offset + no * sectors_per_cluster,
+            sectors_per_cluster);
+
+    assert((size_t)nread == SECTOR_SIZE * sectors_per_cluster);
+}
+
+ssize_t fat32::_read_sector_range(void* _buf, size_t buf_size, uint32_t sector_offset, size_t sector_cnt)
+{
+    buf_size &= ~(SECTOR_SIZE - 1);
+
+    sector_cnt = std::min(sector_cnt, buf_size / SECTOR_SIZE);
+
+    auto* buf = (char*)_buf;
+
+    auto n = fs::block_device_read(device,
+            buf, buf_size,
+            sector_offset * SECTOR_SIZE,
+            sector_cnt * SECTOR_SIZE
+        );
+
+    return n;
 }
 
 char* fat32::read_cluster(cluster_t no)
@@ -133,7 +156,7 @@ int fat32::readdir(fs::inode* dir, size_t offset, const fs::vfs::filldir_func& f
 
 fat32::fat32(dev_t _device)
     : device { _device }
-    , label { 0 }
+    , label { }
 {
     auto* buf = new char[SECTOR_SIZE];
     _raw_read_sector(buf, 0);
@@ -149,9 +172,12 @@ fat32::fat32(dev_t _device)
     fat_copies = info->old.fat_copies;
 
     data_region_offset = reserved_sectors + fat_copies * sectors_per_fat;
-    fat = (cluster_t*)new char[SECTOR_SIZE * sectors_per_fat];
-    for (uint32_t i = 0; i < sectors_per_fat; ++i)
-        _raw_read_sector((char*)fat + i * SECTOR_SIZE, reserved_sectors + i);
+
+    // read file allocation table
+    fat.resize(SECTOR_SIZE * sectors_per_fat / sizeof(cluster_t));
+    _read_sector_range(
+            fat.data(), SECTOR_SIZE * sectors_per_fat,
+            reserved_sectors, sectors_per_fat);
 
     int i = 0;
     while (i < 11 && info->label[i] != 0x20) {
@@ -179,11 +205,6 @@ fat32::fat32(dev_t _device)
     n->nlink = 2;
 
     register_root_node(n);
-}
-
-fat32::~fat32()
-{
-    delete[]((char*)fat);
 }
 
 size_t fat32::read(inode* file, char* buf, size_t buf_size, size_t offset, size_t n)

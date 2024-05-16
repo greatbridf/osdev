@@ -347,17 +347,18 @@ private:
         // clear the received fis
         memset(fis, 0x00, sizeof(received_fis));
 
-        // issue the command
-        port->command_issue = 1 << n;
-
-        // TODO: use interrupt
+        // wait until port is not busy
         uint32_t spins = 0;
         SPIN(port->task_file_data & (ATA_DEV_BSY | ATA_DEV_DRQ), spins)
             return -1;
-        
+
+        // TODO: use interrupt
+        // issue the command
+        port->command_issue = 1 << n;
+
         SPIN(port->command_issue & (1 << n), spins)
             return -1;
-        
+
         memcpy(buf, (char*)cmdtable + 512, count);
 
         kernel::pfree(cmdtable_page);
@@ -390,22 +391,21 @@ public:
     {
         cnt = std::min(buf_size, cnt);
 
-        char b[512] {};
+        constexpr size_t READ_BUF_SECTORS = 6;
+
+        char b[READ_BUF_SECTORS * 512] {};
         char* orig_buf = buf;
         size_t start = offset / 512;
         size_t end = std::min((offset + cnt + 511) / 512, sectors);
 
-        offset %= 512;
-        for (size_t i = start; i < end; ++i) {
-            int status = send_command(b, i, 512, 0xC8, false);
+        offset -= start * 512;
+        for (size_t i = start; i < end; i += READ_BUF_SECTORS) {
+            size_t n_read = std::min(end - i, READ_BUF_SECTORS) * 512;
+            int status = send_command(b, i, n_read, 0xC8, false);
             if (status != 0)
                 return -EIO;
 
-            size_t to_copy = 0;
-            if (offset)
-                to_copy = 512 - offset;
-            else
-                to_copy = std::min(cnt, 512U);
+            size_t to_copy = std::min(cnt, n_read - offset);
             memcpy(buf, b + offset, to_copy);
             offset = 0;
             buf += to_copy;
@@ -418,8 +418,11 @@ public:
     {
         if (stop_command(port) != 0)
             return -1;
-        port->interrupt_status = ~0;
+
         // TODO: use interrupt
+        // this is the PxIE register, setting bits here will make
+        //      it generate corresponding interrupts in PxIS
+        //
         // port->interrupt_enable = 1;
 
         port->command_list_base = page << 12;
@@ -510,7 +513,7 @@ public:
 
                 this->ghc->global_host_control =
                     this->ghc->global_host_control | 2; // set interrupt enable
-                
+
                 return this->probe_disks();
         });
 

@@ -314,7 +314,7 @@ extern "C" void irq_handler(
 {
     asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
     if (irqno >= 8)
-        asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
+        asm_outb(PORT_PIC2_COMMAND, PIC_EOI);
 
     for (const auto& handler : s_irq_handlers[irqno])
         handler();

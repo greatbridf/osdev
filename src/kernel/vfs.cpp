@@ -224,6 +224,11 @@ int vfs::inode_mkdir(dentry*, const char*, mode_t)
     return -EINVAL;
 }
 
+int vfs::symlink(dentry*, const char*, const char*)
+{
+    return -EINVAL;
+}
+
 int vfs::inode_statx(dentry*, statx*, unsigned int)
 {
     return -EINVAL;
@@ -235,6 +240,11 @@ int vfs::inode_stat(dentry*, struct stat*)
 }
 
 int vfs::dev_id(inode*, dev_t&)
+{
+    return -EINVAL;
+}
+
+int vfs::readlink(inode*, char*, size_t)
 {
     return -EINVAL;
 }
@@ -488,14 +498,54 @@ int fs::vfs_mkdir(dentry* dir, const char* dirname, mode_t mode)
     return dir->ind->fs->inode_mkdir(dir, dirname, mode);
 }
 
-dentry* fs::vfs_open(dentry& root, const types::path& path)
+dentry* fs::vfs_open(dentry& root, const types::path& path, bool follow, int recurs_no)
 {
+    // too many recursive search layers will cause stack overflow
+    // so we use 16 for now
+    if (recurs_no >= 16)
+        return nullptr;
+
     dentry* cur = &root;
 
+    types::path curpath("/");
     for (const auto& item : path) {
+        if (S_ISLNK(cur->ind->mode)) {
+            char linkpath[256];
+            int ret = cur->ind->fs->readlink(cur->ind, linkpath, sizeof(linkpath));
+
+            // TODO: return error code
+            if (ret < 0)
+                return nullptr;
+
+            curpath.remove_last();
+            curpath.append(linkpath, ret);
+            cur = fs::vfs_open(root, curpath, true, recurs_no+1);
+
+            if (!cur)
+                return nullptr;
+        }
+
         if (item.empty())
             continue;
         cur = cur->find(item);
+        if (!cur)
+            return nullptr;
+
+        curpath.append(item.c_str());
+    }
+
+    if (follow && S_ISLNK(cur->ind->mode)) {
+        char linkpath[256];
+        int ret = cur->ind->fs->readlink(cur->ind, linkpath, sizeof(linkpath));
+
+        // TODO: return error code
+        if (ret < 0)
+            return nullptr;
+
+        curpath.remove_last();
+        curpath.append(linkpath, ret);
+        cur = fs::vfs_open(root, curpath, true, recurs_no+1);
+
         if (!cur)
             return nullptr;
     }

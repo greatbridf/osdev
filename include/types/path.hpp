@@ -21,7 +21,7 @@ public:
     constexpr path() = default;
     constexpr path(const path& val) = default;
     constexpr path(path&& val) = default;
-    constexpr path(const char* str, size_type len = -1U)
+    explicit constexpr path(const char* str, size_type len = -1U)
     { append(str, len); }
 
     constexpr path& operator=(const path& val) = default;
@@ -55,6 +55,10 @@ public:
     constexpr path& append(const char* str, size_type len = -1U)
     {
         const char* start = str;
+
+        if (len && *start == '/')
+            clear();
+
         while (len-- && *str) {
             if (*str == '/') {
                 if (m_vec.empty() || str != start)
@@ -70,6 +74,14 @@ public:
     }
     constexpr path& append(const path& val)
     {
+        if (&val == this)
+            return *this;
+
+        if (val.is_absolute()) {
+            *this = val;
+            return *this;
+        }
+
         m_vec.insert(m_vec.end(), val.m_vec.begin(), val.m_vec.end());
         return *this;
     }
@@ -86,6 +98,11 @@ public:
     constexpr path& operator+=(const path& val)
     { return append(val); }
 
+    constexpr path operator+(const char* str) const
+    { return path{*this}.append(str); }
+    constexpr path operator+(const path& val)
+    { return path{*this}.append(val); }
+
     constexpr bool operator==(const char* str) const
     {
         return full_path() == str;
@@ -94,21 +111,5 @@ public:
     constexpr iterator begin() const { return m_vec.cbegin(); }
     constexpr iterator end() const { return m_vec.cend(); }
 };
-
-constexpr path make_path(const char* pathstr, const char* pwd)
-{
-    if (*pathstr && pathstr[0] == '/')
-        return pathstr;
-    else
-        return path { pwd }.append(pathstr);
-}
-
-constexpr path make_path(const char* pathstr, const path& pwd)
-{
-    if (*pathstr && pathstr[0] == '/')
-        return pathstr;
-    else
-        return path{pwd}.append(pathstr);
-}
 
 } // namespace types

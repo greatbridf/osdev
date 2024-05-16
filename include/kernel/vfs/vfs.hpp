@@ -61,6 +61,8 @@ public:
     virtual int inode_rmfile(dentry* dir, const char* filename);
     virtual int inode_mkdir(dentry* dir, const char* dirname, mode_t mode);
 
+    virtual int symlink(dentry* dir, const char* linkname, const char* target);
+
     // metadata operation
 
     virtual int inode_statx(dentry* dent, statx* buf, unsigned int mask);
@@ -71,6 +73,7 @@ public:
     virtual size_t read(inode* file, char* buf, size_t buf_size, size_t offset, size_t n);
     virtual size_t write(inode* file, const char* buf, size_t offset, size_t n);
     virtual int dev_id(inode* file, dev_t& out_dev);
+    virtual int readlink(inode* file, char* buf, size_t buf_size);
     virtual int truncate(inode* file, size_t size);
 
     // parameter 'length' in callback:

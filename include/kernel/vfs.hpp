@@ -103,7 +103,7 @@ int vfs_truncate(inode* file, size_t size);
  * @return A pointer to the opened file or directory entry if found.
  *         Otherwise, nullptr is returned.
  */
-dentry* vfs_open(dentry& root, const types::path& path);
+dentry* vfs_open(dentry& root, const types::path& path, bool follow_symlinks = true, int recurs_no = 0);
 
 } // namespace fs
 

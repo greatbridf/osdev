@@ -439,12 +439,12 @@ void NORETURN _kernel_init(void)
         int ret = fs::create_fs("fat32", fs::make_device(8, 1), new_fs);
         assert(ret == 0);
 
-        auto* mount_point = fs::vfs_open(*fs::fs_root, "/mnt");
+        auto* mount_point = fs::vfs_open(*fs::fs_root, types::path{"/mnt"});
         if (!mount_point) {
             int ret = fs::vfs_mkdir(fs::fs_root, "mnt", 0755);
             assert(ret == GB_OK);
 
-            mount_point = fs::vfs_open(*fs::fs_root, "/mnt");
+            mount_point = fs::vfs_open(*fs::fs_root, types::path{"/mnt"});
         }
 
         assert(mount_point);
@@ -464,7 +464,7 @@ void NORETURN _kernel_init(void)
     d.envp = envp;
     d.system = false;
 
-    d.exec_dent = fs::vfs_open(*fs::fs_root, argv[0]);
+    d.exec_dent = fs::vfs_open(*fs::fs_root, types::path{argv[0]});
     if (!d.exec_dent) {
         console->print("kernel panic: init not found!\n");
         freeze();

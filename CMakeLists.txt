@@ -43,6 +43,7 @@ set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
                         src/kernel/process.cpp
                         src/kernel/tty.cpp
                         src/kernel/syscall.cpp
+                        src/kernel/syscall/fileops.cc
                         src/kernel/mem.cpp
                         src/kernel/module.cc
                         src/kernel/vfs.cpp

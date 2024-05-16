@@ -2,6 +2,7 @@
 #include <kernel/mm.hpp>
 #include <kernel/log.hpp>
 
+#include <algorithm>
 #include <vector>
 #include <map>
 
@@ -192,6 +193,39 @@ public:
             dir->append(new_dir, dirname);
 
         return GB_OK;
+    }
+
+    virtual int symlink(dentry* dir, const char* linkname, const char* target) override
+    {
+        if (!dir->flags.dir)
+            return -ENOTDIR;
+
+        auto* data = mk_data_vector();
+        data->resize(strlen(target));
+        memcpy(data->data(), target, data->size());
+
+        auto& file = *cache_inode(data->size(), _savedata(data), S_IFLNK | 0777, 0, 0);
+        mklink(dir->ind, &file, linkname);
+
+        if (dir->flags.present)
+            dir->append(get_inode(file.ino), linkname);
+
+        return 0;
+    }
+
+    virtual int readlink(inode* file, char* buf, size_t buf_size) override
+    {
+        if (!S_ISLNK(file->mode))
+            return -EINVAL;
+
+        auto* data = as_fdata(_getdata(file->ino));
+        size_t size = data->size();
+
+        size = std::min(size, buf_size);
+
+        memcpy(buf, data->data(), size);
+
+        return size;
     }
 
     virtual int inode_statx(dentry* dent, statx* st, unsigned int mask) override

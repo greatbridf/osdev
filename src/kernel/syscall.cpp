@@ -3,6 +3,7 @@
 
 #include <assert.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <poll.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -44,13 +45,6 @@
 
 #define SYSCALL_NO ((data)->s_regs.eax)
 #define SYSCALL_RETVAL ((data)->s_regs.eax)
-
-#define SYSCALL_ARG1(type, name) type name = (type)((data)->s_regs.ebx)
-#define SYSCALL_ARG2(type, name) type name = (type)((data)->s_regs.ecx)
-#define SYSCALL_ARG3(type, name) type name = (type)((data)->s_regs.edx)
-#define SYSCALL_ARG4(type, name) type name = (type)((data)->s_regs.esi)
-#define SYSCALL_ARG5(type, name) type name = (type)((data)->s_regs.edi)
-#define SYSCALL_ARG6(type, name) type name = (type)((data)->s_regs.ebp)
 
 #define SYSCALL_HANDLERS_SIZE (404)
 syscall_handler syscall_handlers[SYSCALL_HANDLERS_SIZE];
@@ -154,7 +148,7 @@ int _syscall_chdir(interrupt_stack* data)
     SYSCALL_ARG1(const char*, path);
 
     auto* dir = fs::vfs_open(*current_process->root,
-        types::make_path(path, current_process->pwd));
+            current_process->pwd + path);
     if (!dir)
         return -ENOENT;
 
@@ -183,8 +177,8 @@ int _syscall_execve(interrupt_stack* data)
     d.system = false;
 
     d.exec_dent = fs::vfs_open(*current_process->root,
-        types::make_path(exec, current_process->pwd));
-    
+            current_process->pwd + exec);
+
     if (!d.exec_dent)
         return -ENOENT;
 
@@ -307,7 +301,7 @@ int _syscall_open(interrupt_stack* data)
     mode &= ~current_process->umask;
 
     return current_process->files.open(*current_process,
-        types::make_path(path, current_process->pwd), flags, mode);
+        current_process->pwd + path, flags, mode);
 }
 
 int _syscall_getcwd(interrupt_stack* data)
@@ -713,7 +707,7 @@ int _syscall_statx(interrupt_stack* data)
     SYSCALL_ARG5(statx* __user, statxbuf);
 
     // AT_STATX_SYNC_AS_STAT is the default value
-    if (flags != AT_STATX_SYNC_AS_STAT && !(flags & AT_SYMLINK_NOFOLLOW)) {
+    if ((flags & AT_STATX_SYNC_TYPE) != AT_STATX_SYNC_AS_STAT) {
         NOT_IMPLEMENTED;
         return -EINVAL;
     }
@@ -724,7 +718,8 @@ int _syscall_statx(interrupt_stack* data)
     }
 
     auto* dent = fs::vfs_open(*current_process->root,
-        types::make_path(path, current_process->pwd));
+            current_process->pwd + path,
+            !(flags & AT_SYMLINK_NOFOLLOW));
 
     if (!dent)
         return -ENOENT;
@@ -957,7 +952,7 @@ int _syscall_mkdir(interrupt_stack* data)
 
     mode &= (~current_process->umask & 0777);
 
-    auto path = types::make_path(pathname, current_process->pwd);
+    auto path = current_process->pwd + pathname;
 
     auto* dent = fs::vfs_open(*current_process->root, path);
     if (dent)
@@ -987,7 +982,7 @@ int _syscall_truncate(interrupt_stack* data)
     SYSCALL_ARG1(const char* __user, pathname);
     SYSCALL_ARG2(long, length);
 
-    auto path = types::make_path(pathname, current_process->pwd);
+    auto path = current_process->pwd + pathname;
 
     auto* dent = fs::vfs_open(*current_process->root, path);
     if (!dent)
@@ -1008,8 +1003,8 @@ int _syscall_unlink(interrupt_stack* data)
 {
     SYSCALL_ARG1(const char* __user, pathname);
 
-    auto path = types::make_path(pathname, current_process->pwd);
-    auto* dent = fs::vfs_open(*current_process->root, path);
+    auto path = current_process->pwd + pathname;
+    auto* dent = fs::vfs_open(*current_process->root, path, false);
 
     if (!dent)
         return -ENOENT;
@@ -1025,7 +1020,7 @@ int _syscall_access(interrupt_stack* data)
     SYSCALL_ARG1(const char* __user, pathname);
     SYSCALL_ARG2(int, mode);
 
-    auto path = types::make_path(pathname, current_process->pwd);
+    auto path = current_process->pwd + pathname;
     auto* dent = fs::vfs_open(*current_process->root, path);
 
     if (!dent)
@@ -1050,7 +1045,7 @@ int _syscall_mknod(interrupt_stack* data)
     SYSCALL_ARG2(mode_t, mode);
     SYSCALL_ARG3(dev_t, dev);
 
-    auto path = types::make_path(pathname, current_process->pwd);
+    auto path = current_process->pwd + pathname;
     auto* dent = fs::vfs_open(*current_process->root, path);
 
     if (dent)
@@ -1188,6 +1183,10 @@ void init_syscall(void)
     syscall_handlers[0x40] = _syscall_getppid;
     syscall_handlers[0x42] = _syscall_setsid;
     syscall_handlers[0x4e] = _syscall_gettimeofday;
+    extern int _syscall_symlink(interrupt_stack*);
+    syscall_handlers[0x53] = _syscall_symlink;
+    extern int _syscall_readlink(interrupt_stack*);
+    syscall_handlers[0x55] = _syscall_readlink;
     syscall_handlers[0x5b] = _syscall_munmap;
     syscall_handlers[0x5c] = _syscall_truncate;
     syscall_handlers[0x72] = _syscall_wait4;

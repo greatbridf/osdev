@@ -66,7 +66,7 @@ int tty::poll()
     return 1;
 }
 
-size_t tty::read(char* buf, size_t buf_size, size_t n)
+ssize_t tty::read(char* buf, size_t buf_size, size_t n)
 {
     n = std::max(buf_size, n);
     size_t orig_n = n;

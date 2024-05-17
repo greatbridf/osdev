@@ -26,7 +26,8 @@ public:
     tty();
     virtual void putchar(char c) = 0;
     void print(const char* str);
-    size_t read(char* buf, size_t buf_size, size_t n);
+    ssize_t read(char* buf, size_t buf_size, size_t n);
+    ssize_t write(const char* buf, size_t n);
 
     // characters committed to buffer will be handled
     // by the input line discipline (N_TTY)

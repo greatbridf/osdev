@@ -678,6 +678,9 @@ int _syscall_sendfile64(interrupt_stack* data)
     std::vector<char> buf(bufsize);
     size_t totn = 0;
     while (totn < count) {
+        if (current_thread->signals.pending_signal() != 0)
+            return (totn == 0) ? -EINTR : totn;
+
         size_t n = std::min(count - totn, bufsize);
         ssize_t ret = in_file->read(buf.data(), n);
         if (ret < 0)
@@ -694,8 +697,6 @@ int _syscall_sendfile64(interrupt_stack* data)
         //       one solution is to put the sendfile action into a kernel
         //       worker and pause the calling thread so that the worker
         //       thread could be interrupted normally.
-        if (current_thread->signals.pending_signal() != 0)
-            return (totn == 0) ? -EINTR : totn;
     }
 
     return totn;
@@ -1120,15 +1121,18 @@ int _syscall_llseek(interrupt_stack* data)
     if (!result)
         return -EFAULT;
 
-    if (offset_high != 0 || offset_low != 0 || whence != SEEK_END) {
+    if (offset_high) {
         NOT_IMPLEMENTED;
         return -EINVAL;
     }
 
-    // the function is used for check file size for now
-    // we return all 0
-    *result = 0;
+    // TODO: support long long result
+    auto ret = file->seek(offset_low, whence);
 
+    if (ret < 0)
+        return ret;
+
+    *result = ret;
     return 0;
 }
 

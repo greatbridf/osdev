@@ -303,6 +303,8 @@ ssize_t fs::regular_file::seek(off_t n, int whence)
     case SEEK_END:
         pos = ind->size + n;
         break;
+    default:
+        return -EINVAL;
     }
 
     if (pos > ind->size)

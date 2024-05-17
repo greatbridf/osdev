@@ -1,8 +1,14 @@
 #include <list>
 #include <vector>
 
-#include <asm/port_io.h>
 #include <assert.h>
+#include <stdint.h>
+#include <stdio.h>
+
+#include <types/size.h>
+#include <types/types.h>
+
+#include <asm/port_io.h>
 #include <kernel/hw/keyboard.h>
 #include <kernel/hw/serial.h>
 #include <kernel/hw/timer.h>
@@ -14,10 +20,6 @@
 #include <kernel/process.hpp>
 #include <kernel/vfs.hpp>
 #include <kernel/vga.hpp>
-#include <stdint.h>
-#include <stdio.h>
-#include <types/size.h>
-#include <types/types.h>
 
 struct IDT_entry {
     uint16_t offset_low;

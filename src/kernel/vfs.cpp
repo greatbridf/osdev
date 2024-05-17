@@ -781,7 +781,7 @@ fs::pipe::pipe(void)
 void fs::pipe::close_read(void)
 {
     if (1) {
-        types::lock_guard lck(mtx);
+        kernel::async::lock_guard lck(mtx);
         flags &= (~READABLE);
     }
     waitlist.notify_all();
@@ -790,7 +790,7 @@ void fs::pipe::close_read(void)
 void fs::pipe::close_write(void)
 {
     if (1) {
-        types::lock_guard lck(mtx);
+        kernel::async::lock_guard lck(mtx);
         flags &= (~WRITABLE);
     }
     waitlist.notify_all();
@@ -801,7 +801,7 @@ int fs::pipe::write(const char* buf, size_t n)
     // TODO: check privilege
     // TODO: check EPIPE
     if (1) {
-        types::lock_guard lck(mtx);
+        kernel::async::lock_guard lck(mtx);
 
         if (!is_readable()) {
             current_thread->send_signal(SIGPIPE);
@@ -831,7 +831,7 @@ int fs::pipe::read(char* buf, size_t n)
 {
     // TODO: check privilege
     if (1) {
-        types::lock_guard lck(mtx);
+        kernel::async::lock_guard lck(mtx);
 
         if (!is_writeable()) {
             size_t orig_n = n;

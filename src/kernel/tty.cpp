@@ -4,8 +4,7 @@
 #include <stdio.h>
 #include <termios.h>
 
-#include <types/lock.hpp>
-
+#include <kernel/async/lock.hpp>
 #include <kernel/hw/serial.h>
 #include <kernel/process.hpp>
 #include <kernel/tty.hpp>
@@ -56,7 +55,7 @@ void tty::print(const char* str)
 
 int tty::poll()
 {
-    types::lock_guard lck(this->mtx_buf);
+    kernel::async::lock_guard lck(this->mtx_buf);
     if (this->buf.empty()) {
         bool interrupted = this->waitlist.wait(this->mtx_buf);
 
@@ -76,7 +75,7 @@ size_t tty::read(char* buf, size_t buf_size, size_t n)
         if (n == 0)
             break;
 
-        types::lock_guard lck(this->mtx_buf);
+        kernel::async::lock_guard lck(this->mtx_buf);
 
         if (this->buf.empty()) {
             bool interrupted = this->waitlist.wait(this->mtx_buf);

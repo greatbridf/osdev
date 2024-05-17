@@ -20,6 +20,7 @@
 #include <sys/utsname.h>
 #include <sys/wait.h>
 
+#include <kernel/async/lock.hpp>
 #include <kernel/user/thread_local.hpp>
 #include <kernel/task/readyqueue.hpp>
 #include <kernel/task/thread.hpp>
@@ -38,7 +39,6 @@
 #include <types/allocator.hpp>
 #include <types/elf.hpp>
 #include <types/path.hpp>
-#include <types/lock.hpp>
 #include <types/status.h>
 #include <types/string.hpp>
 #include <types/types.h>
@@ -226,7 +226,7 @@ int _syscall_waitpid(interrupt_stack* data)
         return -EINVAL;
 
     auto& cv = current_process->waitlist;
-    types::lock_guard lck(current_process->mtx_waitprocs);
+    kernel::async::lock_guard lck(current_process->mtx_waitprocs);
 
     auto& waitlist = current_process->waitprocs;
 

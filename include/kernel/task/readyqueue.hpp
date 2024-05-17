@@ -2,8 +2,6 @@
 
 #include <list>
 
-#include <types/lock.hpp>
-
 #include <kernel/task/thread.hpp>
 
 namespace kernel::task::dispatcher {

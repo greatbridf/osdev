@@ -21,7 +21,6 @@
 #include <types/path.hpp>
 #include <types/status.h>
 #include <types/types.h>
-#include <types/lock.hpp>
 
 #include <kernel/async/waitlist.hpp>
 #include <kernel/interrupt.h>
@@ -180,7 +179,7 @@ public:
     std::set<kernel::task::thread> thds;
     kernel::async::wait_list waitlist;
 
-    types::mutex mtx_waitprocs;
+    kernel::async::mutex mtx_waitprocs;
     std::list<wait_obj> waitprocs;
 
     process_attr attr {};

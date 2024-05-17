@@ -2,11 +2,10 @@
 
 #include <queue>
 
-#include <types/lock.hpp>
-
 #include <kernel/log.hpp>
 #include <kernel/mm.hpp>
 #include <kernel/signal.hpp>
+#include <kernel/async/lock.hpp>
 #include <kernel/task/readyqueue.hpp>
 
 using namespace kernel::task;
@@ -37,12 +36,12 @@ bool thread::operator==(const thread& rhs) const
 }
 
 static std::priority_queue<std::byte*> s_kstacks;
+static kernel::async::mutex s_mtx_kstacks;
 
 thread::kernel_stack::kernel_stack()
 {
     static int allocated;
-    static types::mutex mtx;
-    types::lock_guard lck(mtx);
+    kernel::async::lock_guard_irq lck(s_mtx_kstacks);
 
     if (!s_kstacks.empty()) {
         stack_base = s_kstacks.top();
@@ -84,6 +83,7 @@ thread::kernel_stack::kernel_stack(kernel_stack&& other)
 
 thread::kernel_stack::~kernel_stack()
 {
+    kernel::async::lock_guard_irq lck(s_mtx_kstacks);
     s_kstacks.push(stack_base);
 }
 

@@ -1,11 +1,12 @@
 #include <types/allocator.hpp>
-#include <types/lock.hpp>
 
 #include <bit>
 #include <cstddef>
 
 #include <assert.h>
 #include <stdint.h>
+
+#include <kernel/async/lock.hpp>
 
 namespace types::memory {
 
@@ -104,7 +105,7 @@ brk_memory_allocator::brk_memory_allocator(byte* start, size_type size)
 
 void* brk_memory_allocator::allocate(size_type size)
 {
-    types::lock_guard lck(mtx);
+    kernel::async::lock_guard_irq lck(mtx);
     // align to 8 bytes boundary
     size = (size + 7) & ~7;
 
@@ -138,7 +139,7 @@ void* brk_memory_allocator::allocate(size_type size)
 
 void brk_memory_allocator::deallocate(void* ptr)
 {
-    types::lock_guard lck(mtx);
+    kernel::async::lock_guard_irq lck(mtx);
     auto* blk = aspblk(aspbyte(ptr) - sizeof(mem_blk));
 
     blk->flags.is_free = 1;

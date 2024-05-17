@@ -38,6 +38,7 @@ set(BOOTLOADER_SOURCES src/boot.s
 set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
                         src/kinit.cpp
                         src/kernel/async/waitlist.cc
+                        src/kernel/async/lock.cc
                         src/kernel/allocator.cc
                         src/kernel/interrupt.cpp
                         src/kernel/process.cpp
@@ -64,6 +65,7 @@ set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
                         include/asm/sys.h
                         include/fs/fat.hpp
                         include/kernel/async/waitlist.hpp
+                        include/kernel/async/lock.hpp
                         include/kernel/tty.hpp
                         include/kernel/interrupt.h
                         include/kernel/irq.hpp
@@ -99,7 +101,6 @@ set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
                         include/types/status.h
                         include/types/allocator.hpp
                         include/types/cplusplus.hpp
-                        include/types/lock.hpp
                         include/types/string.hpp
                         include/kernel/log.hpp
                         )

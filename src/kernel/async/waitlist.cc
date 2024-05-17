@@ -2,14 +2,13 @@
 
 #include <assert.h>
 
-#include <types/lock.hpp>
-
+#include <kernel/async/lock.hpp>
 #include <kernel/process.hpp>
 #include <kernel/task/thread.hpp>
 
 using namespace kernel::async;
 
-bool wait_list::wait(types::mutex& lock)
+bool wait_list::wait(mutex& lock)
 {
     this->subscribe();
 
@@ -26,7 +25,7 @@ bool wait_list::wait(types::mutex& lock)
 
 void wait_list::subscribe()
 {
-    types::lock_guard lck(m_mtx);
+    lock_guard lck(m_mtx);
 
     auto* thd = current_thread;
 
@@ -38,7 +37,7 @@ void wait_list::subscribe()
 
 void wait_list::notify_one()
 {
-    types::lock_guard lck(m_mtx);
+    lock_guard lck(m_mtx);
 
     if (m_subscribers.empty())
         return;
@@ -51,7 +50,7 @@ void wait_list::notify_one()
 
 void wait_list::notify_all()
 {
-    types::lock_guard lck(m_mtx);
+    lock_guard lck(m_mtx);
 
     if (m_subscribers.empty())
         return;

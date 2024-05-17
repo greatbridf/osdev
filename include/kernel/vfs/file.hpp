@@ -1,15 +1,15 @@
 #pragma once
 
-#include <kernel/async/waitlist.hpp>
-#include <kernel/vfs/dentry.hpp>
-
 #include <errno.h>
 #include <fcntl.h>
 #include <sys/types.h>
 
 #include <types/types.h>
 #include <types/buffer.hpp>
-#include <types/lock.hpp>
+
+#include <kernel/async/waitlist.hpp>
+#include <kernel/async/lock.hpp>
+#include <kernel/vfs/dentry.hpp>
 
 namespace fs {
 
@@ -22,7 +22,7 @@ private:
 private:
     types::buffer buf;
     kernel::async::wait_list waitlist;
-    types::mutex mtx;
+    kernel::async::mutex mtx;
     uint32_t flags;
 
 public:

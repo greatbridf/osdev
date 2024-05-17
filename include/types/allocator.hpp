@@ -8,7 +8,8 @@
 #include <stdint.h>
 #include <types/cplusplus.hpp>
 #include <types/types.h>
-#include <types/lock.hpp>
+
+#include <kernel/async/lock.hpp>
 
 namespace kernel::kinit {
 
@@ -27,7 +28,7 @@ private:
     byte* p_start;
     byte* p_limit;
     byte* p_break;
-    types::mutex mtx;
+    kernel::async::mutex mtx;
 
     constexpr byte* brk(byte* addr)
     {

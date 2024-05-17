@@ -2,15 +2,22 @@
 #include <queue>
 #include <utility>
 
+#include <assert.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <bits/alltypes.h>
 #include <sys/wait.h>
 
+#include <types/allocator.hpp>
+#include <types/bitmap.hpp>
+#include <types/cplusplus.hpp>
+#include <types/elf.hpp>
+#include <types/size.h>
+#include <types/status.h>
+#include <types/types.h>
+
 #include <asm/port_io.h>
 #include <asm/sys.h>
-#include <assert.h>
-#include <fs/fat.hpp>
 #include <kernel/interrupt.h>
 #include <kernel/log.hpp>
 #include <kernel/mem.h>
@@ -19,22 +26,18 @@
 #include <kernel/process.hpp>
 #include <kernel/signal.hpp>
 #include <kernel/vfs.hpp>
+#include <kernel/async/lock.hpp>
 #include <kernel/user/thread_local.hpp>
 #include <kernel/task/thread.hpp>
 #include <kernel/task/readyqueue.hpp>
 
-#include <types/allocator.hpp>
-#include <types/bitmap.hpp>
-#include <types/cplusplus.hpp>
-#include <types/elf.hpp>
-#include <types/lock.hpp>
-#include <types/size.h>
-#include <types/status.h>
-#include <types/types.h>
+using kernel::async::mutex;
+using kernel::async::lock_guard, kernel::async::lock_guard_irq;
 
 static void (*volatile kthreadd_new_thd_func)(void*);
 static void* volatile kthreadd_new_thd_data;
-static types::mutex kthreadd_mtx;
+
+static mutex kthreadd_mtx;
 
 namespace kernel {
 
@@ -240,7 +243,7 @@ void kernel_threadd_main(void)
             void* data = nullptr;
 
             if (1) {
-                types::lock_guard lck(kthreadd_mtx);
+                lock_guard lck(kthreadd_mtx);
 
                 if (kthreadd_new_thd_func) {
                     func = std::exchange(kthreadd_new_thd_func, nullptr);
@@ -357,10 +360,10 @@ void proclist::kill(pid_t pid, int exit_code)
 
     bool flag = false;
     if (1) {
-        types::lock_guard lck(init.mtx_waitprocs);
+        lock_guard_irq lck(init.mtx_waitprocs);
 
         if (1) {
-            types::lock_guard lck(proc.mtx_waitprocs);
+            lock_guard_irq lck(proc.mtx_waitprocs);
 
             for (const auto& item : proc.waitprocs) {
                 if (WIFSTOPPED(item.code) || WIFCONTINUED(item.code))
@@ -378,7 +381,7 @@ void proclist::kill(pid_t pid, int exit_code)
         init.waitlist.notify_all();
 
     if (1) {
-        types::lock_guard lck(parent.mtx_waitprocs);
+        lock_guard_irq lck(parent.mtx_waitprocs);
         parent.waitprocs.push_back({ pid, exit_code });
     }
 
@@ -495,7 +498,7 @@ void NORETURN _kernel_init(void)
 
 void k_new_thread(void (*func)(void*), void* data)
 {
-    types::lock_guard lck(kthreadd_mtx);
+    lock_guard lck(kthreadd_mtx);
     kthreadd_new_thd_func = func;
     kthreadd_new_thd_data = data;
 }
@@ -537,6 +540,9 @@ void NORETURN init_scheduler(void)
 extern "C" void asm_ctx_switch(uint32_t** curr_esp, uint32_t** next_esp);
 bool schedule()
 {
+    if (kernel::async::preempt_count() != 0)
+        return true;
+
     auto* next_thd = kernel::task::dispatcher::next();
     process* proc = nullptr;
     kernel::task::thread* curr_thd = nullptr;

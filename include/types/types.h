@@ -27,6 +27,5 @@
 #endif
 
 #ifdef __cplusplus
-#include <types/allocator.hpp>
 #include <types/cplusplus.hpp>
 #endif

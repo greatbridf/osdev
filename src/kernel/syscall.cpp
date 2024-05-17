@@ -558,11 +558,14 @@ int _syscall_clock_gettime64(interrupt_stack* data)
     SYSCALL_ARG2(timespec* __user, tp);
 
     // TODO: check privilege of tp
-    if (clk_id != CLOCK_REALTIME || !tp)
+    if ((clk_id != CLOCK_REALTIME && clk_id != CLOCK_MONOTONIC) || !tp) {
+        NOT_IMPLEMENTED;
         return -EINVAL;
+    }
 
-    tp->tv_sec = 10 + current_ticks();
-    tp->tv_nsec = 0;
+    int time = current_ticks();
+    tp->tv_sec = time / 1000;;
+    tp->tv_nsec = 1000000 * (time % 1000);
 
     return 0;
 }

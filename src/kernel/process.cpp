@@ -27,7 +27,6 @@
 #include <types/bitmap.hpp>
 #include <types/cplusplus.hpp>
 #include <types/elf.hpp>
-#include <types/hash_map.hpp>
 #include <types/lock.hpp>
 #include <types/size.h>
 #include <types/status.h>

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <map>
 #include <vector>
 
 #include <stdint.h>
@@ -7,7 +8,6 @@
 #include <sys/types.h>
 
 #include <types/size.h>
-#include <types/hash_map.hpp>
 
 #include <kernel/mem.h>
 #include <kernel/vfs.hpp>
@@ -134,7 +134,7 @@ private:
         int ref;
         // bool dirty;
     };
-    types::hash_map<cluster_t, buf_object> buf;
+    std::map<cluster_t, buf_object> buf;
 
     // buf MUST be larger than 512 bytes
     void _raw_read_sector(void* buf, uint32_t sector_no);

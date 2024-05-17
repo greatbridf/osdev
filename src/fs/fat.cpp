@@ -65,7 +65,7 @@ char* fat32::read_cluster(cluster_t no)
 {
     auto iter = buf.find(no);
     if (iter) {
-        auto [ idx, buf ] = *iter;
+        auto& [ idx, buf ] = *iter;
         ++buf.ref;
         return buf.data;
     }

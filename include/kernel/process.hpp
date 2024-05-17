@@ -16,6 +16,13 @@
 #include <kernel/task/thread.hpp>
 #include <kernel/task/current.hpp>
 
+#include <types/allocator.hpp>
+#include <types/cplusplus.hpp>
+#include <types/path.hpp>
+#include <types/status.h>
+#include <types/types.h>
+#include <types/lock.hpp>
+
 #include <kernel/async/waitlist.hpp>
 #include <kernel/interrupt.h>
 #include <kernel/mm.hpp>
@@ -25,14 +32,6 @@
 #include <kernel/task.h>
 #include <kernel/tty.hpp>
 #include <kernel/vfs.hpp>
-#include <types/allocator.hpp>
-#include <types/cplusplus.hpp>
-#include <types/hash_map.hpp>
-#include <types/path.hpp>
-#include <types/status.h>
-#include <types/string.hpp>
-#include <types/types.h>
-#include <types/lock.hpp>
 
 class process;
 

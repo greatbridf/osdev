@@ -111,13 +111,10 @@ private:
     // make m_capacity >= n >= m_size
     constexpr void _pre_resize(size_type n)
     {
-        if (n < m_size) {
-            while (n < m_size)
-                pop_back();
-        }
-        else if (n > m_size) {
-            reserve(n);
-        }
+        while (n < m_size)
+            pop_back();
+
+        reserve(n);
     }
 
 public:
@@ -155,7 +152,7 @@ public:
         , m_size(std::exchange(other.m_size, 0))
         , m_capacity(std::exchange(other.m_capacity, 0))
         , m_alloc(std::move(other.m_alloc)) {}
-    
+
     constexpr vector(vector&& other, const Allocator& alloc)
         : vector(alloc)
     {
@@ -326,7 +323,7 @@ public:
 
     constexpr void shrink_to_fit()
     {
-        if (m_size != m_capacity)
+        if (m_size < m_capacity)
             _reallocate_safe(m_size);
     }
     constexpr void clear() noexcept
@@ -337,7 +334,7 @@ public:
     {
         size_type idx = pos - m_data;
 
-        if (!pos)
+        if (!m_data)
             reserve(1);
 
         if (m_size == m_capacity)

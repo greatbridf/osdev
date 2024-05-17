@@ -7,7 +7,7 @@ set(CMAKE_CXX_LINK_EXECUTABLE
     "<CMAKE_LINKER> <CMAKE_CXX_LINK_FLAGS> <LINK_FLAGS> <OBJECTS> -o <TARGET> <LINK_LIBRARIES>")
 
 set(CMAKE_ASM_FLAGS "-m32")
-set(C_CXX_FLAGS "-nostdinc -m32 -nostdlib -W -Wall -Wextra -Wno-builtin-declaration-mismatch -Wno-format -fverbose-asm -fno-exceptions -ffreestanding -fno-pic -mstack-protector-guard=global")
+set(C_CXX_FLAGS "-nostdinc -m32 -nostdlib -W -Wall -Wextra -Wno-stringop-overflow -Wno-builtin-declaration-mismatch -Wno-format -fverbose-asm -fno-exceptions -ffreestanding -fno-pic -mstack-protector-guard=global")
 set(CMAKE_C_FLAGS "${C_CXX_FLAGS} -Werror=implicit-int -Werror=implicit-function-declaration -Werror=strict-aliasing")
 set(CMAKE_CXX_FLAGS "${C_CXX_FLAGS} -fno-use-cxa-atexit -fno-rtti")
 set(CMAKE_CXX_LINK_FLAGS "")

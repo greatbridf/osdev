@@ -237,9 +237,9 @@ struct rbtree {
         { p = p->prev(); return *this; }
         constexpr _iterator operator--(int)
         { _iterator ret(p); (void)this->operator--(); return ret; }
-        constexpr operator bool(void)
+        constexpr operator bool() const
         { return p; }
-        constexpr operator _iterator<true>()
+        constexpr operator _iterator<true>() const
         { return _iterator<true> { p }; }
     };
 
@@ -597,7 +597,7 @@ public:
         node* nextpos = erase(pos.p);
         delnode(pos.p);
         --_size;
-        return const_iterator { nextpos };
+        return iterator { nextpos };
     }
 
     template <typename U>

@@ -40,7 +40,6 @@
 #include <types/elf.hpp>
 #include <types/path.hpp>
 #include <types/status.h>
-#include <types/string.hpp>
 #include <types/types.h>
 
 #define SYSCALL_NO ((data)->s_regs.eax)

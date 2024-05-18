@@ -1,15 +1,17 @@
+#include <string>
 #include <vector>
 
 #include <assert.h>
 #include <errno.h>
-#include <kernel/mem.h>
-#include <kernel/process.hpp>
-#include <kernel/vfs.hpp>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+
 #include <types/elf.hpp>
-#include <types/string.hpp>
+
+#include <kernel/mem.h>
+#include <kernel/process.hpp>
+#include <kernel/vfs.hpp>
 
 #define align16_down(sp) (sp = ((char*)((uint32_t)(sp)&0xfffffff0)))
 
@@ -78,7 +80,7 @@ int types::elf::elf32_load(types::elf::elf32_load_data* d)
     }
 
     // copy argv and envp
-    std::vector<string<>> argv, envp;
+    std::vector<std::string> argv, envp;
     for (const char* const* p = d->argv; *p; ++p)
         argv.emplace_back(*p);
     for (const char* const* p = d->envp; *p; ++p)

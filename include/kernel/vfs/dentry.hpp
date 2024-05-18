@@ -1,8 +1,8 @@
 #pragma once
 
 #include <list>
+#include <string>
 
-#include <types/string.hpp>
 #include <types/hash_map.hpp>
 #include <types/path.hpp>
 
@@ -12,7 +12,7 @@ namespace fs {
 
 struct dentry {
 public:
-    using name_type = types::string<>;
+    using name_type = std::string;
 
 private:
     std::list<dentry>* children = nullptr;

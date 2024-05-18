@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <string>
 
 #include <assert.h>
 #include <ctype.h>
@@ -120,7 +121,7 @@ int fat32::readdir(fs::inode* dir, size_t offset, const fs::vfs::filldir_func& f
                 ind->nlink = d->attributes.subdir ? 2 : 1;
             }
 
-            types::string<> fname;
+            std::string fname;
             for (int i = 0; i < 8; ++i) {
                 if (d->filename[i] == ' ')
                     break;

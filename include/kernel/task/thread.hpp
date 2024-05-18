@@ -1,11 +1,11 @@
 #pragma once
 
 #include <cstddef>
+#include <string>
 
 #include <stdint.h>
 #include <sys/types.h>
 
-#include <types/string.hpp>
 #include <types/types.h>
 
 #include <kernel/signal.hpp>
@@ -45,11 +45,11 @@ public:
     int* __user set_child_tid {};
     int* __user clear_child_tid {};
 
-    types::string<> name {};
+    std::string name {};
 
     segment_descriptor tls_desc {};
 
-    explicit thread(types::string<> name, pid_t owner);
+    explicit thread(std::string name, pid_t owner);
     thread(const thread& val, pid_t owner);
 
     int set_thread_area(user::user_desc* ptr);

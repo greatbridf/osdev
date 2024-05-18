@@ -1,16 +1,16 @@
 #pragma once
 
-#include <types/string.hpp>
-#include <vector>
 #include <cstddef>
+#include <string>
+#include <vector>
 
 namespace types {
 
 class path {
 public:
-    using item_string = types::string<>;
+    using item_string = std::string;
     using item_vector = std::vector<item_string>;
-    using string_type = types::string<>;
+    using string_type = std::string;
     using size_type = std::size_t;
     using iterator = item_vector::const_iterator;
 

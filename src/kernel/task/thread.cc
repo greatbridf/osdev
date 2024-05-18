@@ -10,7 +10,7 @@
 
 using namespace kernel::task;
 
-thread::thread(types::string<> name, pid_t owner)
+thread::thread(std::string name, pid_t owner)
     : owner { owner }, attr { READY | SYSTEM }, name { name }
 {
 }

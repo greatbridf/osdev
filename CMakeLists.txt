@@ -101,7 +101,6 @@ set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
                         include/types/status.h
                         include/types/allocator.hpp
                         include/types/cplusplus.hpp
-                        include/types/string.hpp
                         include/kernel/log.hpp
                         )
 

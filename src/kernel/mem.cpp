@@ -518,7 +518,7 @@ struct mapped_area {
     void* ptr;
 };
 
-static types::hash_map<page_t, mapped_area, types::linux_hasher,
+static types::hash_map<page_t, mapped_area,
     types::memory::ident_allocator<std::pair<page_t, mapped_area>>>
     mapped;
 static uint8_t _freebm[0x400 / 8];

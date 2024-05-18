@@ -1,15 +1,16 @@
+#include <bit>
 #include <cstddef>
 #include <map>
-#include <sys/types.h>
-#include <vector>
-#include <bit>
+#include <string>
 #include <utility>
+#include <vector>
 
-#include <bits/alltypes.h>
 #include <assert.h>
+#include <bits/alltypes.h>
 #include <errno.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <sys/types.h>
 
 #include <kernel/log.hpp>
 #include <kernel/mem.h>
@@ -17,9 +18,8 @@
 #include <kernel/tty.hpp>
 #include <kernel/vfs.hpp>
 #include <types/allocator.hpp>
-#include <types/status.h>
 #include <types/path.hpp>
-#include <types/string.hpp>
+#include <types/status.h>
 
 using fs::vfs, fs::dentry;
 
@@ -597,11 +597,11 @@ int fs::register_char_device(dev_t node, const fs::chrdev_ops& ops)
     return 0;
 }
 
-static std::list<std::pair<types::string<>, fs::create_fs_func_t>> fs_list;
+static std::list<std::pair<std::string, fs::create_fs_func_t>> fs_list;
 
 int fs::register_fs(const char* name, fs::create_fs_func_t func)
 {
-    fs_list.push_back({ {name}, func });
+    fs_list.push_back({ name, func });
 
     return 0;
 }

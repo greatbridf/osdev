@@ -54,15 +54,23 @@ constexpr void unite_afterwards(mem_blk* blk)
 // @param start_pos position where to start finding
 // @param size the size of the block we're looking for
 // @return found block if suitable block exists, if not, the last block
-constexpr mem_blk* find_blk(mem_blk* start_pos, std::size_t size)
+constexpr mem_blk* find_blk(std::byte** p_start, std::size_t size)
 {
+    mem_blk* start_pos = aspblk(*p_start);
+    bool no_free_so_far = true;
+
     while (true) {
         if (start_pos->flags.is_free) {
             unite_afterwards(start_pos);
 
+            no_free_so_far = false;
+
             if (start_pos->size >= size)
                 break;
         }
+
+        if (no_free_so_far)
+            *p_start = aspbyte(start_pos);
 
         if (!start_pos->flags.has_next)
             break;
@@ -109,7 +117,7 @@ void* brk_memory_allocator::allocate(size_type size)
     // align to 8 bytes boundary
     size = (size + 7) & ~7;
 
-    auto* block_allocated = find_blk(aspblk(p_start), size);
+    auto* block_allocated = find_blk(&p_start, size);
     if (!block_allocated->flags.has_next
         && (!block_allocated->flags.is_free || block_allocated->size < size)) {
         // 'block_allocated' in the argument list is the pointer
@@ -131,9 +139,6 @@ void* brk_memory_allocator::allocate(size_type size)
 
     block_allocated->flags.is_free = 0;
 
-    auto* blkpos = aspbyte(block_allocated);
-    if (blkpos > p_start)
-        p_start = blkpos;
     return block_allocated->data;
 }
 

@@ -322,9 +322,12 @@ int fat32::inode_stat(dentry* dent, struct stat* st)
     return GB_OK;
 }
 
-static fat32* create_fat32(dev_t device)
+static fat32* create_fat32(const char* source, unsigned long, const void*)
 {
-    return new fat32(device);
+    // TODO: flags
+    // TODO: parse source
+    (void)source;
+    return new fat32(fs::make_device(8, 1));
 }
 
 class fat32_module : public virtual kernel::module::module {

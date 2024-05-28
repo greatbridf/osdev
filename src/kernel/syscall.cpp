@@ -1176,6 +1176,8 @@ void init_syscall(void)
     syscall_handlers[0x0c] = _syscall_chdir;
     syscall_handlers[0x0e] = _syscall_mknod;
     syscall_handlers[0x14] = _syscall_getpid;
+    extern int _syscall_mount(interrupt_stack*);
+    syscall_handlers[0x15] = _syscall_mount;
     syscall_handlers[0x21] = _syscall_access;
     syscall_handlers[0x25] = _syscall_kill;
     syscall_handlers[0x27] = _syscall_mkdir;

@@ -10,16 +10,20 @@
 #include <errno.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <sys/mount.h>
 #include <sys/types.h>
+
+#include <types/allocator.hpp>
+#include <types/path.hpp>
+#include <types/status.h>
 
 #include <kernel/log.hpp>
 #include <kernel/mem.h>
 #include <kernel/process.hpp>
 #include <kernel/tty.hpp>
 #include <kernel/vfs.hpp>
-#include <types/allocator.hpp>
-#include <types/path.hpp>
-#include <types/status.h>
+#include <kernel/vfs/dentry.hpp>
+#include <kernel/vfs/vfs.hpp>
 
 using fs::vfs, fs::dentry;
 
@@ -172,12 +176,17 @@ void vfs::register_root_node(inode* root)
         _root.ind = root;
 }
 
-int vfs::mount(dentry* mnt, vfs* new_fs)
+int vfs::mount(dentry* mnt, const char* source, const char* mount_point,
+        const char* fstype, unsigned long flags, const void *data)
 {
-    if (!mnt->flags.dir) {
-        errno = ENOTDIR;
-        return GB_FAILED;
-    }
+    if (!mnt->flags.dir)
+        return -ENOTDIR;
+
+    vfs* new_fs;
+    int ret = fs::create_fs(source, mount_point, fstype, flags, data, new_fs);
+
+    if (ret != 0)
+        return ret;
 
     auto* new_ent = new_fs->root();
 
@@ -187,7 +196,7 @@ int vfs::mount(dentry* mnt, vfs* new_fs)
     auto* orig_ent = mnt->replace(new_ent);
     _mount_recover_list.emplace(new_ent, orig_ent);
 
-    return GB_OK;
+    return 0;
 }
 
 // default behavior is to
@@ -565,8 +574,6 @@ int fs::vfs_truncate(inode *file, size_t size)
     return file->fs->truncate(file, size);
 }
 
-static std::list<fs::vfs*> fs_es;
-
 int fs::register_block_device(dev_t node, const fs::blkdev_ops& ops)
 {
     int major = NODE_MAJOR(node);
@@ -597,30 +604,44 @@ int fs::register_char_device(dev_t node, const fs::chrdev_ops& ops)
     return 0;
 }
 
-static std::list<std::pair<std::string, fs::create_fs_func_t>> fs_list;
+static std::map<std::string, fs::create_fs_func_t> fs_list;
 
 int fs::register_fs(const char* name, fs::create_fs_func_t func)
 {
-    fs_list.push_back({ name, func });
+    fs_list.emplace(name, func);
 
     return 0;
 }
 
-int fs::create_fs(const char* name, dev_t device, vfs*& out_vfs)
+int fs::create_fs(const char* source, const char* mount_point, const char* fstype,
+        unsigned long flags, const void* data, vfs*& out_vfs)
 {
-    for (const auto& [ fsname, func ] : fs_list) {
-        if (fsname != name)
-            continue;
+    auto iter = fs_list.find(fstype);
+    if (!iter)
+        return -ENODEV;
 
-        vfs* created_vfs = func(device);
-        fs_es.emplace_back(created_vfs);
+    auto& [ _, func ] = *iter;
 
-        out_vfs = created_vfs;
+    if (!(flags & MS_NOATIME))
+        flags |= MS_RELATIME;
 
-        return 0;
-    }
+    if (flags & MS_STRICTATIME)
+        flags &= ~(MS_RELATIME | MS_NOATIME);
 
-    return -ENODEV;
+    vfs* created_vfs = func(source, flags, data);
+
+    mount_data mnt_data {
+        .source = source,
+        .mount_point = mount_point,
+        .fstype = fstype,
+        .flags = flags,
+    };
+
+    mounts.emplace(created_vfs, mnt_data);
+
+    out_vfs = created_vfs;
+
+    return 0;
 }
 
 // MBR partition table, used by partprobe()
@@ -879,7 +900,7 @@ void init_vfs(void)
     fs::register_tmpfs();
 
     vfs* rootfs;
-    int ret = create_fs("tmpfs", make_device(0, 0), rootfs);
+    int ret = create_fs("none", "/", "tmpfs", MS_NOATIME, nullptr, rootfs);
 
     assert(ret == 0);
     fs_root = rootfs->root();

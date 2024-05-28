@@ -62,12 +62,23 @@ struct user_dirent64 {
 
 inline dentry* fs_root;
 
+struct mount_data {
+    std::string source;
+    std::string mount_point;
+    std::string fstype;
+    unsigned long flags;
+};
+
+inline std::map<fs::vfs*, mount_data> mounts;
+
 int register_block_device(dev_t node, const blkdev_ops& ops);
 int register_char_device(dev_t node, const chrdev_ops& ops);
 
 // return value: pointer to created vfs object
-// 1. dev_t: device number
-using create_fs_func_t = std::function<vfs*(dev_t)>;
+// 1. const char*: source, such as "/dev/sda" or "proc"
+// 2. unsigned long: flags, such as MS_RDONLY | MS_RELATIME
+// 3. const void*: data, for filesystem use, such as "uid=1000"
+using create_fs_func_t = std::function<vfs*(const char*, unsigned long, const void*)>;
 
 int register_fs(const char* name, create_fs_func_t);
 
@@ -76,7 +87,8 @@ int register_tmpfs();
 
 // returns a pointer to the vfs object
 // vfs objects are managed by the kernel
-int create_fs(const char* name, dev_t device, vfs*& out_vfs);
+int create_fs(const char* source, const char* mount_point, const char* fstype,
+        unsigned long flags, const void* data, vfs*& out_vfs);
 
 void partprobe();
 

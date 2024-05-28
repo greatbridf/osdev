@@ -2,8 +2,6 @@
 
 BUSYBOX=/mnt/busybox
 
-$BUSYBOX mkdir -p /etc
-$BUSYBOX mkdir -p /root
 $BUSYBOX mkdir -p /dev
 
 $BUSYBOX mknod -m 666 /dev/console c 2 0
@@ -19,6 +17,9 @@ $BUSYBOX --install -s /bin
 export PATH="/bin"
 
 echo ok > /dev/console
+
+mkdir -p /etc /root /proc
+mount -t proc proc proc
 
 cat > /etc/passwd <<EOF
 root:x:0:0:root:/root:/mnt/busybox sh

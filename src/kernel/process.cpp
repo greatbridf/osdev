@@ -3,9 +3,10 @@
 #include <utility>
 
 #include <assert.h>
+#include <bits/alltypes.h>
 #include <stdint.h>
 #include <stdio.h>
-#include <bits/alltypes.h>
+#include <sys/mount.h>
 #include <sys/wait.h>
 
 #include <types/allocator.hpp>
@@ -18,6 +19,7 @@
 
 #include <asm/port_io.h>
 #include <asm/sys.h>
+#include <kernel/async/lock.hpp>
 #include <kernel/interrupt.h>
 #include <kernel/log.hpp>
 #include <kernel/mem.h>
@@ -25,11 +27,10 @@
 #include <kernel/module.hpp>
 #include <kernel/process.hpp>
 #include <kernel/signal.hpp>
-#include <kernel/vfs.hpp>
-#include <kernel/async/lock.hpp>
-#include <kernel/user/thread_local.hpp>
-#include <kernel/task/thread.hpp>
 #include <kernel/task/readyqueue.hpp>
+#include <kernel/task/thread.hpp>
+#include <kernel/user/thread_local.hpp>
+#include <kernel/vfs.hpp>
 
 using kernel::async::mutex;
 using kernel::async::lock_guard, kernel::async::lock_guard_irq;
@@ -437,22 +438,19 @@ void NORETURN _kernel_init(void)
     // mount fat32 /mnt directory
     // TODO: parse kernel parameters
     if (1) {
-        fs::vfs* new_fs;
-        int ret = fs::create_fs("fat32", fs::make_device(8, 1), new_fs);
-        assert(ret == 0);
-
         auto* mount_point = fs::vfs_open(*fs::fs_root, types::path{"/mnt"});
         if (!mount_point) {
             int ret = fs::vfs_mkdir(fs::fs_root, "mnt", 0755);
-            assert(ret == GB_OK);
+            assert(ret == 0);
 
             mount_point = fs::vfs_open(*fs::fs_root, types::path{"/mnt"});
         }
 
         assert(mount_point);
 
-        ret = fs::fs_root->ind->fs->mount(mount_point, new_fs);
-        assert(ret == GB_OK);
+        int ret = fs::fs_root->ind->fs->mount(mount_point, "/dev/sda", "/mnt",
+                "fat32", MS_RDONLY | MS_NOATIME | MS_NODEV | MS_NOSUID, "ro,nodev");
+        assert(ret == 0);
     }
 
     current_process->attr.system = 0;

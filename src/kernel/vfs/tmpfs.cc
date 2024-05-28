@@ -348,8 +348,9 @@ public:
     }
 };
 
-static tmpfs* create_tmpfs(dev_t)
+static tmpfs* create_tmpfs(const char*, unsigned long, const void*)
 {
+    // TODO: flags
     return new tmpfs;
 }
 

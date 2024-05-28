@@ -36,6 +36,7 @@ set(BOOTLOADER_SOURCES src/boot.s
                        )
 
 set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
+                        src/fs/procfs.cc
                         src/kinit.cpp
                         src/kernel/async/waitlist.cc
                         src/kernel/async/lock.cc
@@ -45,6 +46,7 @@ set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
                         src/kernel/tty.cpp
                         src/kernel/syscall.cpp
                         src/kernel/syscall/fileops.cc
+                        src/kernel/syscall/mount.cc
                         src/kernel/mem.cpp
                         src/kernel/module.cc
                         src/kernel/vfs.cpp

@@ -52,7 +52,8 @@ public:
         return &_root;
     }
 
-    int mount(dentry* mnt, vfs* new_fs);
+    int mount(dentry* mnt, const char* source, const char* mount_point,
+            const char* fstype, unsigned long flags, const void* data);
 
     // directory operations
 

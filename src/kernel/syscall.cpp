@@ -673,7 +673,7 @@ int _syscall_sendfile64(interrupt_stack* data)
         return -EINVAL;
     }
 
-    constexpr size_t bufsize = 512;
+    constexpr size_t bufsize = 4096;
     std::vector<char> buf(bufsize);
     size_t totn = 0;
     while (totn < count) {

@@ -858,8 +858,10 @@ int fs::pipe::read(char* buf, size_t n)
 
         if (!is_writeable()) {
             size_t orig_n = n;
-            while (!this->buf.empty() && n--)
+            while (!this->buf.empty() && n) {
+                --n;
                 *(buf++) = this->buf.get();
+            }
 
             return orig_n - n;
         }
@@ -871,8 +873,10 @@ int fs::pipe::read(char* buf, size_t n)
 
             if (!is_writeable()) {
                 size_t orig_n = n;
-                while (!this->buf.empty() && n--)
+                while (!this->buf.empty() && n) {
+                    --n;
                     *(buf++) = this->buf.get();
+                }
 
                 return orig_n - n;
             }

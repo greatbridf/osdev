@@ -501,6 +501,38 @@ int _syscall_set_tid_address(interrupt_stack* data)
     return current_thread->tid();
 }
 
+int _syscall_readv(interrupt_stack* data)
+{
+    SYSCALL_ARG1(int, fd);
+    SYSCALL_ARG2(const iovec* __user, iov);
+    SYSCALL_ARG3(int, iovcnt);
+
+    auto* file = current_process->files[fd];
+
+    if (!file)
+        return -EBADF;
+
+    // TODO: fix fake EOF
+    ssize_t totn = 0;
+    for (int i = 0; i < iovcnt; ++i) {
+        ssize_t ret = file->read(
+            (char*)iov[i].iov_base, iov[i].iov_len);
+
+        if (ret < 0)
+            return ret;
+
+        if (ret == 0)
+            break;
+
+        totn += ret;
+
+        if ((size_t)ret != iov[i].iov_len)
+            break;
+    }
+
+    return totn;
+}
+
 // TODO: this operation SHOULD be atomic
 int _syscall_writev(interrupt_stack* data)
 {
@@ -563,8 +595,8 @@ int _syscall_clock_gettime64(interrupt_stack* data)
     }
 
     int time = current_ticks();
-    tp->tv_sec = time / 1000;;
-    tp->tv_nsec = 1000000 * (time % 1000);
+    tp->tv_sec = time / 100;
+    tp->tv_nsec = 10000000 * (time % 100);
 
     return 0;
 }
@@ -1202,6 +1234,7 @@ void init_syscall(void)
     syscall_handlers[0x84] = _syscall_getpgid;
     syscall_handlers[0x8c] = _syscall_llseek;
     syscall_handlers[0x8d] = _syscall_getdents;
+    syscall_handlers[0x91] = _syscall_readv;
     syscall_handlers[0x92] = _syscall_writev;
     syscall_handlers[0x93] = _syscall_getsid;
     syscall_handlers[0xa8] = _syscall_poll;

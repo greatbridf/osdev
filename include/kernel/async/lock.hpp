@@ -16,8 +16,8 @@ void init_spinlock(spinlock_t& lock);
 void spin_lock(spinlock_t& lock);
 void spin_unlock(spinlock_t& lock);
 
-uint32_t spin_lock_irqsave(spinlock_t& lock);
-void spin_unlock_irqrestore(spinlock_t& lock, uint32_t state);
+size_t spin_lock_irqsave(spinlock_t& lock);
+void spin_unlock_irqrestore(spinlock_t& lock, size_t state);
 
 class mutex {
 private:

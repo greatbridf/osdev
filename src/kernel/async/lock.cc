@@ -29,12 +29,12 @@ static inline void _raw_spin_unlock(spinlock_t* lock_addr)
         : "eax", "memory");
 }
 
-static inline uint32_t _save_interrupt_state()
+static inline size_t _save_interrupt_state()
 {
-    uint32_t retval;
+    size_t retval;
     asm volatile(
-        "pushfl\n\t"
-        "popl %0\n\t"
+        "pushfq\n\t"
+        "pop %0\n\t"
         "cli"
         : "=g"(retval)
         :
@@ -44,11 +44,11 @@ static inline uint32_t _save_interrupt_state()
     return retval;
 }
 
-static inline void _restore_interrupt_state(uint32_t flags)
+static inline void _restore_interrupt_state(size_t flags)
 {
     asm volatile(
-        "pushl %0\n\t"
-        "popfl"
+        "push %0\n\t"
+        "popf"
         :
         : "g"(flags)
         :
@@ -90,7 +90,7 @@ void spin_unlock(spinlock_t& lock)
     preempt_enable();
 }
 
-uint32_t spin_lock_irqsave(spinlock_t& lock)
+size_t spin_lock_irqsave(spinlock_t& lock)
 {
     auto state = _save_interrupt_state();
     preempt_disable();
@@ -100,7 +100,7 @@ uint32_t spin_lock_irqsave(spinlock_t& lock)
     return state;
 }
 
-void spin_unlock_irqrestore(spinlock_t& lock, uint32_t state)
+void spin_unlock_irqrestore(spinlock_t& lock, size_t state)
 {
     _raw_spin_unlock(&lock);
     preempt_enable();

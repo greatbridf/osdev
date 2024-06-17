@@ -26,7 +26,10 @@ inline void _user_push(char** sp, const char* str)
 {
     size_t len = strlen(str);
     *sp -= (len + 1);
-    align16_down(*sp);
+    size_t nsp = (size_t)sp;
+    size_t mask = 0xf;
+    nsp &= ~mask;
+    *sp = std::bit_cast<char*>(nsp);
     memcpy(*sp, str, len + 1);
 }
 

@@ -29,6 +29,6 @@ constexpr int MODULE_DELAYED = 2;
 // TODO: unique_ptr and Deleter
 int insmod(module* mod);
 
-extern "C" module_loader kmod_loaders_start[];
+extern "C" module_loader KMOD_LOADERS_START[];
 
 } // namespace kernel::module

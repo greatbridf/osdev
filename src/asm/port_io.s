@@ -1,26 +1,24 @@
-.code32
-
 .text
 
 .globl asm_outb
 .type  asm_outb @function
 asm_outb:
-    pushl %eax
-    pushl %edx
-    movw 12(%esp), %dx
-    movb 16(%esp), %al
+    push %rax
+    push %rdx
+    mov 12(%esp), %dx
+    mov 16(%esp), %al
     outb %al, %dx
-    popl %edx
-    popl %eax
+    pop %rdx
+    pop %rax
     ret
 
 .globl asm_inb
 .type  asm_inb @function
 asm_inb:
-    pushl %edx
-    movw 8(%esp), %dx
+    push %rdx
+    mov 8(%esp), %dx
     inb %dx, %al
-    popl %edx
+    pop %rdx
     ret
 
 .globl asm_hlt
@@ -40,17 +38,3 @@ asm_cli:
 asm_sti:
     sti
     ret
-
-.section .text.kinit
-.globl asm_enable_sse
-.type  asm_enable_sse @function
-asm_enable_sse:
-	movl %cr0, %eax
-    andl $0xfffffff3, %eax
-	orl $0b100010, %eax
-	movl %eax, %cr0
-	movl %cr4, %eax
-	orl $0b11000000000, %eax
-	movl %eax, %cr4
-    fninit
-	ret

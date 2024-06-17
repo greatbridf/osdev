@@ -29,7 +29,6 @@ extern uint8_t asm_inb(port_id_t port_number);
 extern void asm_hlt(void);
 extern void asm_cli(void);
 extern void asm_sti(void);
-extern void asm_enable_sse(void);
 
 #ifdef __cplusplus
 }

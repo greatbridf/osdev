@@ -13,7 +13,7 @@
 
 namespace kernel::task {
 
-using tid_t = uint32_t;
+using tid_t = std::size_t;
 
 struct thread {
 public:

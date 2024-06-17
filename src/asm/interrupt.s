@@ -1,14 +1,15 @@
-.code32
-
 .text
+
+# TODO: LONG MODE
+# rewrite interrupt handlers
 
 # TODO: stack alignment
 .globl int6
 .type  int6 @function
 int6:
-    pushal
+# pushal
     call int6_handler
-    popal
+# popal
 
     iret
 
@@ -23,9 +24,9 @@ int8:
 .globl int13
 .type  int13 @function
 int13:
-    pushal
+# pushal
     call int13_handler
-    popal
+# popal
 
 # remove the 32bit error code from stack
     addl $4, %esp
@@ -35,11 +36,11 @@ int13:
 .type  int14 @function
 int14:
     # push general purpose registers
-    pushal
+# pushal
 
     # save %cr2
-    movl %cr2, %eax
-    pushl %eax
+    mov %cr2, %rax
+    push %rax
 
     # save current esp (also pointer to struct int14_data)
     mov %esp, %ebx
@@ -63,7 +64,7 @@ int14:
 
     # restore stack and general purpose registers
     leal 4(%ebx), %esp
-    popal
+# popal
 
 # remove the 32bit error code from stack
     addl $4, %esp
@@ -71,82 +72,82 @@ int14:
 
 .globl irq0
 irq0:
-    pushal
+# pushal
     mov $0, %eax
     jmp irqstub
 .globl irq1
 irq1:
-    pushal
+# pushal
     mov $1, %eax
     jmp irqstub
 .globl irq2
 irq2:
-    pushal
+# pushal
     mov $2, %eax
     jmp irqstub
 .globl irq3
 irq3:
-    pushal
+# pushal
     mov $3, %eax
     jmp irqstub
 .globl irq4
 irq4:
-    pushal
+# pushal
     mov $4, %eax
     jmp irqstub
 .globl irq5
 irq5:
-    pushal
+# pushal
     mov $5, %eax
     jmp irqstub
 .globl irq6
 irq6:
-    pushal
+# pushal
     mov $6, %eax
     jmp irqstub
 .globl irq7
 irq7:
-    pushal
+# pushal
     mov $7, %eax
     jmp irqstub
 .globl irq8
 irq8:
-    pushal
+# pushal
     mov $8, %eax
     jmp irqstub
 .globl irq9
 irq9:
-    pushal
+# pushal
     mov $9, %eax
     jmp irqstub
 .globl irq10
 irq10:
-    pushal
+# pushal
     mov $10, %eax
     jmp irqstub
 .globl irq11
 irq11:
-    pushal
+# pushal
     mov $11, %eax
     jmp irqstub
 .globl irq12
 irq12:
-    pushal
+# pushal
     mov $12, %eax
     jmp irqstub
 .globl irq13
 irq13:
-    pushal
+# pushal
     mov $13, %eax
     jmp irqstub
 .globl irq14
 irq14:
-    pushal
+# pushal
     mov $14, %eax
     jmp irqstub
 .globl irq15
 irq15:
-    pushal
+# pushal
     mov $15, %eax
     jmp irqstub
 
@@ -175,14 +176,14 @@ irqstub:
 
     # restore stack and general purpose registers
     mov %ebx, %esp
-    popal
+# popal
 
     iret
 
 .globl syscall_stub
 .type  syscall_stub @function
 syscall_stub:
-    pushal
+# pushal
 
     # save current esp
     mov %esp, %ebx
@@ -199,7 +200,8 @@ syscall_stub:
     lea 16(%esp), %eax
     mov %eax, 4(%esp) # pointer to mmx registers
 
-    call syscall_entry
+    # TODO: LONG MODE
+    # call syscall_entry
 
     # restore mmx registers
     fxrstor 16(%esp)
@@ -210,7 +212,7 @@ syscall_stub:
 .globl _syscall_stub_fork_return
 .type  _syscall_stub_fork_return @function
 _syscall_stub_fork_return:
-    popal
+# popal
     iret
 
 # parameters
@@ -222,27 +224,27 @@ asm_ctx_switch:
     movl 4(%esp), %ecx
     movl 8(%esp), %eax
 
-    push $_ctx_switch_return
-    push %ebx
-    push %edi
-    push %esi
-    push %ebp
-    pushfl
+    pushq $_ctx_switch_return
+    push %rbx
+    push %rdi
+    push %rsi
+    push %rbp
+    pushf
 
     # push esp to restore
-    pushl (%ecx)
+    push (%rcx)
 
-    mov %esp, (%ecx)
-    mov (%eax), %esp
+    mov %esp, (%rcx)
+    mov (%rax), %esp
 
     # restore esp
-    popl (%eax)
+    pop (%rax)
 
-    popfl
-    pop %ebp
-    pop %esi
-    pop %edi
-    pop %ebx
+    popf
+    pop %rbp
+    pop %rsi
+    pop %rdi
+    pop %rbx
 
     ret
 

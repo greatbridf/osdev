@@ -64,24 +64,24 @@ constexpr uint32_t pow()
 }
 
 template <int N>
-constexpr uint32_t align_down(uint32_t v)
+constexpr std::size_t align_down(std::size_t v)
 {
     return v & ~(pow<2, N>() - 1);
 }
 template <int N>
 constexpr void* align_down(void* v)
 {
-    return std::bit_cast<void*>(align_down<N>(std::bit_cast<uint32_t>(v)));
+    return std::bit_cast<void*>(align_down<N>(std::bit_cast<std::size_t>(v)));
 }
 template <int N>
-constexpr uint32_t align_up(uint32_t v)
+constexpr std::size_t align_up(std::size_t v)
 {
     return align_down<N>(v + pow<2, N>() - 1);
 }
 template <int N>
 constexpr void* align_up(void* v)
 {
-    return std::bit_cast<void*>(align_up<N>(std::bit_cast<uint32_t>(v)));
+    return std::bit_cast<void*>(align_up<N>(std::bit_cast<std::size_t>(v)));
 }
 
 constexpr size_t vptrdiff(void* p1, void* p2)
@@ -283,7 +283,7 @@ public:
 
             free_page(&pg);
 
-            invalidate_tlb((uint32_t)area.start + (i++) * PAGE_SIZE);
+            invalidate_tlb((std::size_t)area.start + (i++) * PAGE_SIZE);
         }
         types::memory::kidelete<mm::pages_vector>(area.pgs);
     }
@@ -350,13 +350,13 @@ inline page empty_page;
 // {
 //     return p << 12;
 // }
-constexpr size_t v_to_pdi(void* addr)
+constexpr std::size_t v_to_pdi(void* addr)
 {
-    return std::bit_cast<uint32_t>(addr) >> 22;
+    return std::bit_cast<std::size_t>(addr) >> 22;
 }
-constexpr size_t v_to_pti(void* addr)
+constexpr std::size_t v_to_pti(void* addr)
 {
-    return (std::bit_cast<uint32_t>(addr) >> 12) & 0x3ff;
+    return (std::bit_cast<std::size_t>(addr) >> 12) & 0x3ff;
 }
 // inline constexpr pte_t* to_pte(pt_t pt, page_t pg)
 // {

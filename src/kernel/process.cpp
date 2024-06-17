@@ -286,8 +286,9 @@ proclist::proclist()
 
     kernel::task::dispatcher::enqueue(current_thread);
 
-    tss.ss0 = KERNEL_DATA_SEGMENT;
-    tss.esp0 = (uint32_t)current_thread->kstack.esp;
+    // TODO: LONG MODE
+    // tss.ss0 = KERNEL_DATA_SEGMENT;
+    // tss.esp0 = (uint32_t)current_thread->kstack.esp;
 
     current_process->mms.switch_pd();
 
@@ -300,25 +301,26 @@ proclist::proclist()
         auto& thd = *proc.thds.begin();
         thd.name.assign("[kernel thread daemon]");
 
-        auto* esp = &thd.kstack.esp;
-        auto old_esp = (uint32_t)thd.kstack.esp;
+        // TODO: LONG MODE
+        // auto* esp = &thd.kstack.esp;
+        // auto old_esp = (uint32_t)thd.kstack.esp;
 
-        // return(start) address
-        push_stack(esp, (uint32_t)kernel_threadd_main);
-        // ebx
-        push_stack(esp, 0);
-        // edi
-        push_stack(esp, 0);
-        // esi
-        push_stack(esp, 0);
-        // ebp
-        push_stack(esp, 0);
-        // eflags
-        push_stack(esp, 0x200);
-        // original esp
-        push_stack(esp, old_esp);
+        // // return(start) address
+        // push_stack(esp, (uint32_t)kernel_threadd_main);
+        // // ebx
+        // push_stack(esp, 0);
+        // // edi
+        // push_stack(esp, 0);
+        // // esi
+        // push_stack(esp, 0);
+        // // ebp
+        // push_stack(esp, 0);
+        // // eflags
+        // push_stack(esp, 0x200);
+        // // original esp
+        // push_stack(esp, old_esp);
 
-        kernel::task::dispatcher::enqueue(&thd);
+        // kernel::task::dispatcher::enqueue(&thd);
     }
 }
 
@@ -391,9 +393,6 @@ void proclist::kill(pid_t pid, int exit_code)
 
 static void release_kinit()
 {
-    extern char __stage1_start[];
-    extern char __kinit_end[];
-
     kernel::paccess pa(EARLY_KERNEL_PD_PAGE);
     auto pd = (pd_t)pa.ptr();
     assert(pd);
@@ -403,10 +402,11 @@ static void release_kinit()
     __free_raw_page(0x00002);
 
     // free .stage1 and .kinit
-    for (uint32_t i = ((uint32_t)__stage1_start >> 12);
-            i < ((uint32_t)__kinit_end >> 12); ++i) {
-        __free_raw_page(i);
-    }
+    // TODO: LONG MODE
+    // for (uint32_t i = ((uint32_t)__stage1_start >> 12);
+    //         i < ((uint32_t)__kinit_end >> 12); ++i) {
+    //     __free_raw_page(i);
+    // }
 }
 
 void NORETURN _kernel_init(void)
@@ -420,7 +420,7 @@ void NORETURN _kernel_init(void)
     // ------------------------------------------
 
     // load kmods
-    for (auto loader = kernel::module::kmod_loaders_start; *loader; ++loader) {
+    for (auto loader = kernel::module::KMOD_LOADERS_START; *loader; ++loader) {
         auto* mod = (*loader)();
         if (!mod)
             continue;
@@ -474,17 +474,17 @@ void NORETURN _kernel_init(void)
     assert(ret == GB_OK);
 
     asm volatile(
-        "movw $0x23, %%ax\n"
-        "movw %%ax, %%ds\n"
-        "movw %%ax, %%es\n"
-        "movw %%ax, %%fs\n"
-        "movw %%ax, %%gs\n"
+        "mov $0x23, %%ax\n"
+        "mov %%ax, %%ds\n"
+        "mov %%ax, %%es\n"
+        "mov %%ax, %%fs\n"
+        "mov %%ax, %%gs\n"
 
-        "pushl $0x23\n"
-        "pushl %0\n"
-        "pushl $0x200\n"
-        "pushl $0x1b\n"
-        "pushl %1\n"
+        "push $0x23\n"
+        "push %0\n"
+        "push $0x200\n"
+        "push $0x1b\n"
+        "push %1\n"
 
         "iret\n"
         :
@@ -507,22 +507,22 @@ void NORETURN init_scheduler(void)
     procs = new proclist;
 
     asm volatile(
-        "movl %0, %%esp\n"
-        "pushl %=f\n"
-        "pushl %1\n"
+        "mov %0, %%rsp\n"
+        "push %=f\n"
+        "push %1\n"
 
-        "movw $0x10, %%ax\n"
-        "movw %%ax, %%ss\n"
-        "movw %%ax, %%ds\n"
-        "movw %%ax, %%es\n"
-        "movw %%ax, %%fs\n"
-        "movw %%ax, %%gs\n"
+        "mov $0x10, %%ax\n"
+        "mov %%ax, %%ss\n"
+        "mov %%ax, %%ds\n"
+        "mov %%ax, %%es\n"
+        "mov %%ax, %%fs\n"
+        "mov %%ax, %%gs\n"
 
-        "xorl %%ebp, %%ebp\n"
-        "xorl %%edx, %%edx\n"
+        "xor %%ebp, %%ebp\n"
+        "xor %%edx, %%edx\n"
 
-        "pushl $0x0\n"
-        "popfl\n"
+        "push $0x0\n"
+        "popf\n"
 
         "ret\n"
 
@@ -556,13 +556,14 @@ bool schedule()
 
     curr_thd = current_thread;
 
-    current_thread = next_thd;
-    tss.esp0 = (uint32_t)next_thd->kstack.esp;
+    // TODO: LONG MODE
+    // current_thread = next_thd;
+    // tss.esp0 = (uint32_t)next_thd->kstack.esp;
 
-    next_thd->load_thread_area();
+    // next_thd->load_thread_area();
 
-    asm_ctx_switch(&curr_thd->kstack.esp, &next_thd->kstack.esp);
-    tss.esp0 = (uint32_t)curr_thd->kstack.esp;
+    // asm_ctx_switch(&curr_thd->kstack.esp, &next_thd->kstack.esp);
+    // tss.esp0 = (uint32_t)curr_thd->kstack.esp;
 
 _end:
 

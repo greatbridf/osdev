@@ -178,29 +178,30 @@ void signal_list::handle(interrupt_stack* context, mmx_registers* mmxregs)
     if (!(handler.sa_flags & SA_RESTORER))
         raise(SIGSYS);
 
-    uint32_t esp = (uint32_t)context->esp;
-    esp -= (sizeof(mmx_registers) + sizeof(interrupt_stack) + 16);
-    esp &= 0xfffffff0;
+    // TODO: LONG MODE
+    // uint32_t esp = (uint32_t)context->esp;
+    // esp -= (sizeof(mmx_registers) + sizeof(interrupt_stack) + 16);
+    // esp &= 0xfffffff0;
 
-    auto tmpesp = esp;
-    *(uint32_t*)tmpesp = signal; // signal handler argument: int signo
-    tmpesp += 4;
-    *(uint32_t*)tmpesp = context->esp; // original esp
-    tmpesp += 4;
+    // auto tmpesp = esp;
+    // *(uint32_t*)tmpesp = signal; // signal handler argument: int signo
+    // tmpesp += 4;
+    // *(uint32_t*)tmpesp = context->esp; // original esp
+    // tmpesp += 4;
 
-    tmpesp += 8; // padding to align to 16 bytes
+    // tmpesp += 8; // padding to align to 16 bytes
 
-    memcpy((void*)tmpesp, mmxregs, sizeof(mmx_registers));
-    tmpesp += sizeof(mmx_registers); // mmx registers
-    memcpy((void*)tmpesp, context, sizeof(interrupt_stack));
-    tmpesp += sizeof(interrupt_stack); // context
+    // memcpy((void*)tmpesp, mmxregs, sizeof(mmx_registers));
+    // tmpesp += sizeof(mmx_registers); // mmx registers
+    // memcpy((void*)tmpesp, context, sizeof(interrupt_stack));
+    // tmpesp += sizeof(interrupt_stack); // context
 
-    esp -= sizeof(void*);
-    // signal handler return address: restorer
-    *(uint32_t*)esp = (uint32_t)handler.sa_restorer;
+    // esp -= sizeof(void*);
+    // // signal handler return address: restorer
+    // *(uint32_t*)esp = (uint32_t)handler.sa_restorer;
 
-    context->esp = esp;
-    context->v_eip = (void*)handler.sa_handler;
+    // context->esp = esp;
+    // context->v_eip = (void*)handler.sa_handler;
 }
 
 void signal_list::after_signal(signo_type signal)

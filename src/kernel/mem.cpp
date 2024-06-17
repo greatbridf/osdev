@@ -134,16 +134,13 @@ static inline void init_mem_layout(void)
     mark_addr_range(0x00006000, 0x00008000);
     // mark EBDA and upper memory as allocated
     mark_addr_range(0x80000, 0x100000);
-    extern char __stage1_start[];
-    extern char __kinit_end[];
-    extern char __text_start[];
-    extern char __data_end[];
 
     constexpr pptr_t PHYS_BSS_START = 0x100000;
+    // TODO: LONG MODE
     // mark .stage1 and .kinit
-    mark_addr_range((pptr_t)__stage1_start, (pptr_t)__kinit_end);
+    // mark_addr_range((pptr_t)__stage1_start, (pptr_t)__kinit_end);
     // mark kernel .text to .data
-    mark_addr_len((pptr_t)__kinit_end, __data_end - __text_start);
+    // mark_addr_len((pptr_t)__kinit_end, __data_end - __text_start);
     // mark kernel .bss
     mark_addr_len(PHYS_BSS_START, bss_len);
 
@@ -444,7 +441,7 @@ int mmap(
     }
 
     // TODO: find another address
-    assert(((uint32_t)hint & 0xfff) == 0);
+    assert(((ptr_t)hint & 0xfff) == 0);
     // TODO: return failed
     assert((offset & 0xfff) == 0);
 
@@ -528,59 +525,62 @@ static types::bitmap freebm(
 
 void* kernel::pmap(page_t pg, bool cached)
 {
-    auto* const pmap_pt = std::bit_cast<pte_t*>(0xff001000);
-    auto* const mapped_start = std::bit_cast<void*>(0xff000000);
-
-    auto iter = __physmapper::mapped.find(pg);
-    if (iter) {
-        auto [ idx, area ] = *iter;
-        ++area.ref;
-        return area.ptr;
-    }
-
-    for (int i = 2; i < 0x400; ++i) {
-        if (__physmapper::freebm.test(i) == 0) {
-            auto* pte = pmap_pt + i;
-            if (cached)
-                pte->v = 0x3;
-            else
-                pte->v = 0x13;
-            pte->in.page = pg;
-
-            void* ptr = vptradd(mapped_start, 0x1000 * i);
-            invalidate_tlb(ptr);
-
-            __physmapper::freebm.set(i);
-            __physmapper::mapped.emplace(pg,
-                __physmapper::mapped_area { 1, ptr });
-            return ptr;
-        }
-    }
-
     return nullptr;
+    // TODO: LONG MODE
+    // auto* const pmap_pt = std::bit_cast<pte_t*>(0xff001000);
+    // auto* const mapped_start = std::bit_cast<void*>(0xff000000);
+
+    // auto iter = __physmapper::mapped.find(pg);
+    // if (iter) {
+    //     auto [ idx, area ] = *iter;
+    //     ++area.ref;
+    //     return area.ptr;
+    // }
+
+    // for (int i = 2; i < 0x400; ++i) {
+    //     if (__physmapper::freebm.test(i) == 0) {
+    //         auto* pte = pmap_pt + i;
+    //         if (cached)
+    //             pte->v = 0x3;
+    //         else
+    //             pte->v = 0x13;
+    //         pte->in.page = pg;
+
+    //         void* ptr = vptradd(mapped_start, 0x1000 * i);
+    //         invalidate_tlb(ptr);
+
+    //         __physmapper::freebm.set(i);
+    //         __physmapper::mapped.emplace(pg,
+    //             __physmapper::mapped_area { 1, ptr });
+    //         return ptr;
+    //     }
+    // }
+
+    // return nullptr;
 }
 void kernel::pfree(page_t pg)
 {
-    auto* const pmap_pt = std::bit_cast<pte_t*>(0xff001000);
-    auto* const mapped_start = std::bit_cast<void*>(0xff000000);
+    // TODO: LONG MODE
+    // auto* const pmap_pt = std::bit_cast<pte_t*>(0xff001000);
+    // auto* const mapped_start = std::bit_cast<void*>(0xff000000);
 
-    auto iter = __physmapper::mapped.find(pg);
-    if (!iter)
-        return;
-    auto& [ ref, ptr ] = iter->second;
+    // auto iter = __physmapper::mapped.find(pg);
+    // if (!iter)
+    //     return;
+    // auto& [ ref, ptr ] = iter->second;
 
-    if (ref > 1) {
-        --ref;
-        return;
-    }
+    // if (ref > 1) {
+    //     --ref;
+    //     return;
+    // }
 
-    int i = vptrdiff(ptr, mapped_start);
-    i /= 0x1000;
+    // int i = vptrdiff(ptr, mapped_start);
+    // i /= 0x1000;
 
-    auto* pte = pmap_pt + i;
-    pte->v = 0;
-    invalidate_tlb(ptr);
+    // auto* pte = pmap_pt + i;
+    // pte->v = 0;
+    // invalidate_tlb(ptr);
 
-    __physmapper::freebm.clear(i);
-    __physmapper::mapped.remove(iter);
+    // __physmapper::freebm.clear(i);
+    // __physmapper::mapped.remove(iter);
 }

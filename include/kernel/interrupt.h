@@ -11,24 +11,32 @@ extern "C" {
 
 #define PIC_EOI (0x20)
 
-struct regs_32 {
-    uint32_t edi;
-    uint32_t esi;
-    uint32_t ebp;
-    uint32_t esp;
-    uint32_t ebx;
-    uint32_t edx;
-    uint32_t ecx;
-    uint32_t eax;
+struct regs_64 {
+    uint64_t rax;
+    uint64_t rbx;
+    uint64_t rcx;
+    uint64_t rdx;
+    uint64_t rsi;
+    uint64_t rdi;
+    uint64_t rsp;
+    uint64_t rbp;
+    uint64_t r8;
+    uint64_t r9;
+    uint64_t r10;
+    uint64_t r11;
+    uint64_t r12;
+    uint64_t r13;
+    uint64_t r14;
+    uint64_t r15;
 };
 
 struct interrupt_stack {
-    struct regs_32 s_regs;
-    void* v_eip;
-    uint32_t cs;
-    uint32_t eflags;
-    uint32_t esp;
-    uint32_t ss;
+    regs_64 s_regs;
+    void* v_rip;
+    uint64_t cs;
+    uint64_t flags;
+    uint64_t rsp;
+    uint64_t ss;
 };
 
 struct mmx_registers {

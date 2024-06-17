@@ -1,5 +1,5 @@
 #!/bin/sh
-QEMU_EXECUTABLES="qemu-system-i386 qemu-system-x86_64"
+QEMU_EXECUTABLES="qemu-system-x86_64"
 GDB_EXECUTABLES="gdb x86_64-elf-gdb"
 
 event() {
@@ -77,13 +77,8 @@ case "$OS" in
         QEMU_ACCEL='-enable-kvm'
         ;;
     "Darwin")
-        if [ "$QEMU" = "qemu-system-x86_64" ]; then
-            echo "hvf"
-            QEMU_ACCEL='-accel hvf'
-        else
-            echo "tcg"
-            QEMU_ACCEL='-accel tcg'
-        fi
+        echo "tcg"
+        QEMU_ACCEL='-accel tcg'
         ;;
 esac
 

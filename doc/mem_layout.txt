@@ -1,12 +1,26 @@
-0x00000000 - 0x00001000 kernel pd
-0x00001000 - 0x00005000 kernel pt
-0x00005000 - 0x00006000 empty page
+physical memory
 
-....
+0x0000 - 0x1000: early kernel data
+0x1000 - 0x2000: kernel stage1
+0x2000 - ?     : kernel image
 
-0x00100000 - 0x???????? kernel code, data, bss
-0x???????? - 0x01000000 kernel early stack
+0x100000 - 0x101000 : kernel PML4
+0x101000 - 0x102000 : kernel PDPT for physical memory mappings
+0x102000 - 0x103000 : kernel PDPT for kernel space
+0x103000 - 0x104000 : kernel PD for kernel image
+0x104000 - 0x105000 : kernel PT for kernel image
 
-....
+0x106000 - 0x200000 : unused empty pages
+0x200000 - 0x300000 : first kernel bss page (2MB)
 
-0x30000000 - 0x40000000 kernel heap
+
+virtual address space
+
+0xffffff0000000000 - 0xffffff3fffffffff  256GB physical memory (cached)
+0xffffff4000000000 - 0xffffff7fffffffff  256GB physical memory (not cached)
+0xffffff8000000000 - 0xffffffbfffffffff  256GB kernel bss
+
+0xffffffc000000000 - 0xffffffffffbfffff ~256GB unused
+
+0xffffffffffc00000 - 0xffffffffffdfffff    2MB kernel image
+0xffffffffffe00000 - 0xffffffffffffffff    2MB unused

@@ -16,19 +16,30 @@ namespace types {
 
 // taken from linux
 constexpr uint32_t GOLDEN_RATIO_32 = 0x61C88647;
-// constexpr uint64_t GOLDEN_RATIO_64 = 0x61C8864680B583EBull;
+constexpr uint64_t GOLDEN_RATIO_64 = 0x61C8864680B583EBull;
 
-using hash_t = size_t;
+using hash_t = std::size_t;
 
 static inline constexpr hash_t _hash32(uint32_t val)
 {
     return val * GOLDEN_RATIO_32;
 }
 
-static inline constexpr hash_t hash32(uint32_t val, uint32_t bits)
+static inline constexpr hash_t hash32(uint32_t val, std::size_t bits)
 {
     // higher bits are more random
-    return _hash32(val) >> (32 - bits);
+    return _hash32(val) >> (8 * sizeof(hash_t) - bits);
+}
+
+static inline constexpr hash_t _hash64(uint64_t val)
+{
+    return val * GOLDEN_RATIO_64;
+}
+
+static inline constexpr hash_t hash64(uint64_t val, std::size_t bits)
+{
+    // higher bits are more random
+    return _hash64(val) >> (8 * sizeof(hash_t) - bits);
 }
 
 template <typename T>
@@ -36,17 +47,17 @@ constexpr bool is_c_string_v = std::is_same_v<std::decay_t<T>, char*>
     || std::is_same_v<std::decay_t<T>, const char*>;
 
 template <typename T,
-    std::enable_if_t<std::is_convertible_v<T, uint32_t>, bool> = true>
+    std::enable_if_t<std::is_convertible_v<T, uint64_t>, bool> = true>
 inline hash_t hash(T val, std::size_t bits)
 {
-    return hash32(static_cast<uint32_t>(val), bits);
+    return hash64(static_cast<uint64_t>(val), bits);
 }
 
 template <typename T,
     std::enable_if_t<std::is_pointer_v<T> && !is_c_string_v<T>, bool> = true>
 inline hash_t hash(T val, std::size_t bits)
 {
-    return hash32(std::bit_cast<uint32_t>(val), bits);
+    return hash(std::bit_cast<ptr_t>(val), bits);
 }
 
 inline hash_t hash(const char* str, std::size_t bits)

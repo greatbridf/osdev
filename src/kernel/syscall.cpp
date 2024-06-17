@@ -72,21 +72,22 @@ int _syscall_fork(interrupt_stack* data)
 
     // create fake interrupt stack
     push_stack(esp, data->ss);
-    push_stack(esp, data->esp);
-    push_stack(esp, data->eflags);
+    push_stack(esp, data->rsp);
+    push_stack(esp, data->flags);
     push_stack(esp, data->cs);
-    push_stack(esp, (uint32_t)data->v_eip);
+    push_stack(esp, (uint64_t)data->v_rip);
 
+    // TODO: LONG MODE
     // eax
-    push_stack(esp, 0);
-    push_stack(esp, data->s_regs.ecx);
+    // push_stack(esp, 0);
+    // push_stack(esp, data->s_regs.ecx);
     // edx
-    push_stack(esp, 0);
-    push_stack(esp, data->s_regs.ebx);
-    push_stack(esp, data->s_regs.esp);
-    push_stack(esp, data->s_regs.ebp);
-    push_stack(esp, data->s_regs.esi);
-    push_stack(esp, data->s_regs.edi);
+    // push_stack(esp, 0);
+    // push_stack(esp, data->s_regs.ebx);
+    // push_stack(esp, data->s_regs.esp);
+    // push_stack(esp, data->s_regs.ebp);
+    // push_stack(esp, data->s_regs.esi);
+    // push_stack(esp, data->s_regs.edi);
 
     // ctx_switch stack
     // return address

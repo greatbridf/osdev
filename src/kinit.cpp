@@ -27,18 +27,19 @@ typedef void (*constructor)(void);
 extern constructor const SECTION(".rodata.kinit") start_ctors;
 extern constructor const SECTION(".rodata.kinit") end_ctors;
 
-extern struct mem_size_info SECTION(".stage1") asm_mem_size_info;
-extern uint8_t SECTION(".stage1") asm_e820_mem_map[1024];
-extern uint32_t SECTION(".stage1") asm_e820_mem_map_count;
-extern uint32_t SECTION(".stage1") asm_e820_mem_map_entry_size;
+// TODO: LONG MODE
+// extern struct mem_size_info SECTION(".stage1") asm_mem_size_info;
+// extern uint8_t SECTION(".stage1") asm_e820_mem_map[1024];
+// extern uint32_t SECTION(".stage1") asm_e820_mem_map_count;
+// extern uint32_t SECTION(".stage1") asm_e820_mem_map_entry_size;
 
 SECTION(".text.kinit")
 static inline void save_loader_data(void)
 {
-    memcpy(e820_mem_map, asm_e820_mem_map, sizeof(e820_mem_map));
-    e820_mem_map_count = asm_e820_mem_map_count;
-    e820_mem_map_entry_size = asm_e820_mem_map_entry_size;
-    memcpy(&mem_size_info, &asm_mem_size_info, sizeof(struct mem_size_info));
+    // memcpy(e820_mem_map, asm_e820_mem_map, sizeof(e820_mem_map));
+    // e820_mem_map_count = asm_e820_mem_map_count;
+    // e820_mem_map_entry_size = asm_e820_mem_map_entry_size;
+    // memcpy(&mem_size_info, &asm_mem_size_info, sizeof(struct mem_size_info));
 }
 
 SECTION(".text.kinit")
@@ -49,7 +50,7 @@ static inline void load_new_gdt(void)
     create_segment_descriptor(gdt + 2, 0, ~0, 0b1100, SD_TYPE_DATA_SYSTEM);
     create_segment_descriptor(gdt + 3, 0, ~0, 0b1100, SD_TYPE_CODE_USER);
     create_segment_descriptor(gdt + 4, 0, ~0, 0b1100, SD_TYPE_DATA_USER);
-    create_segment_descriptor(gdt + 5, (uint32_t)&tss, sizeof(tss), 0b0000, SD_TYPE_TSS);
+    create_segment_descriptor(gdt + 5, (std::size_t)&tss, sizeof(tss), 0b0000, SD_TYPE_TSS);
     create_segment_descriptor(gdt + 6, 0, 0, 0b1100, SD_TYPE_DATA_USER);
 
     asm_load_gdt((7 * 8 - 1) << 16, (pptr_t)gdt);
@@ -104,9 +105,30 @@ static void init_uname()
 
 } // namespace kernel::kinit
 
-extern "C" SECTION(".text.kinit") void NORETURN kernel_init(void)
+struct PACKED bootloader_data {
+    uint32_t meminfo_entry_count;
+    uint32_t meminfo_entry_size;
+    std::byte data[1024 - 2*4];
+};
+
+extern "C" SECTION(".text.kinit")
+void NORETURN kernel_init(bootloader_data* data)
 {
-    asm_enable_sse();
+    // enable SSE
+    asm volatile(
+            "mov %%cr0, %%rax\n\t"
+            "and $(~0xc), %%rax\n\t"
+            "or $0x22, %%rax\n\t"
+            "mov %%rax, %%cr0\n\t"
+            "\n\t"
+            "mov %%cr4, %%rax\n\t"
+            "or $0x600, %%rax\n\t"
+            "mov %%rax, %%cr4\n\t"
+            "fninit\n\t"
+            ::: "rax"
+            );
+
+    int a = data->meminfo_entry_count;
 
     init_bss_section();
 
@@ -137,7 +159,8 @@ extern "C" SECTION(".text.kinit") void NORETURN kernel_init(void)
 
     kernel::kinit::init_pci();
     init_vfs();
-    init_syscall();
+    // TODO: LONG MODE
+    // init_syscall();
 
     kmsg("switching execution to the scheduler...\n");
     init_scheduler();

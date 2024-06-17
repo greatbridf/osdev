@@ -66,19 +66,18 @@ extern "C" void asm_load_idt(uint16_t idt_descriptor[3], int sti);
 
 static struct IDT_entry IDT[256];
 
-static inline void NORETURN die(regs_32& regs, ptr_t eip)
+static inline void NORETURN die(regs_64& regs, void* rip)
 {
-    char buf[512] = {};
-    snprintf(
-        buf, sizeof(buf),
-        "***** KERNEL PANIC *****\n"
-        "eax: %x, ebx: %x, ecx: %x, edx: %x\n"
-        "esp: %x, ebp: %x, esi: %x, edi: %x\n"
-        "eip: %x\n",
-        regs.eax, regs.ebx, regs.ecx,
-        regs.edx, regs.esp, regs.ebp,
-        regs.esi, regs.edi, eip);
-    kmsg(buf);
+    kmsgf( "***** KERNEL PANIC *****\n"
+           "rax: %llx, rbx: %llx, rcx: %llx, rdx: %llx\n"
+           "rsp: %llx, rbp: %llx, rsi: %llx, rdi: %llx\n"
+           "r8 : %llx, r9 : %llx, r10: %llx, r11: %llx\n"
+           "r12: %llx, r13: %llx, r14: %llx, r15: %llx\n"
+           "rip: %llx\n",
+           regs.rax, regs.rbx, regs.rcx, regs.rdx,
+           regs.rsp, regs.rbp, regs.rsi, regs.rdi,
+           regs.r8 , regs.r9 , regs.r10, regs.r11,
+           regs.r12, regs.r13, regs.r14, regs.r15, rip);
     freeze();
 }
 
@@ -162,59 +161,55 @@ void init_pic(void)
 }
 
 extern "C" void int6_handler(
-    regs_32 s_regs,
-    ptr_t eip,
-    uint16_t cs,
-    uint32_t eflags)
+    regs_64 s_regs,
+    void* rip,
+    uint64_t cs,
+    uint64_t rflags,
+    uint64_t rsp,
+    uint64_t ss)
 {
     if (!current_process->attr.system)
-        kill_current(SIGSEGV);
+        kill_current(SIGSEGV); // noreturn
 
-    char buf[128];
-    snprintf(buf, sizeof(buf),
-        "[kernel] int6 data: cs: %x, eflags: %x\n", cs, eflags);
-    kmsg(buf);
-
-    die(s_regs, eip);
+    kmsgf("[kernel] int6: cs: %llx, rflags: %llx, rsp: %llx, ss: %llx",
+            cs, rflags, rsp, ss);
+    die(s_regs, rip); // noreturn
 }
 
 // general protection
 extern "C" void int13_handler(
-    struct regs_32 s_regs,
-    uint32_t error_code,
-    ptr_t eip,
-    uint16_t cs,
-    uint32_t eflags)
+    regs_64 s_regs,
+    uint64_t error_code,
+    void* rip,
+    uint64_t cs,
+    uint64_t rflags,
+    uint64_t rsp,
+    uint64_t ss)
 {
     if (!current_process->attr.system)
-        kill_current(SIGILL);
+        kill_current(SIGILL); // noreturn
 
-    char buf[128] = {};
-    snprintf(buf, sizeof(buf),
-        "[kernel] int13 data: error_code: %x, cs: %x, eflags: %x\n",
-        error_code, cs, eflags);
-    kmsg(buf);
+    kmsgf("[kernel] int13: error_code: %llx, cs: %llx, rflags: %llx, rsp: %llx, ss: %llx",
+            error_code, cs, rflags, rsp, ss);
 
-    die(s_regs, eip);
+    die(s_regs, rip); // noreturn
 }
 
 struct PACKED int14_data {
     void* l_addr;
-    struct regs_32 s_regs;
-    struct page_fault_error_code error_code;
+    regs_64 s_regs;
+    page_fault_error_code error_code;
     void* v_eip;
     uint32_t cs;
     uint32_t eflags;
 };
 
-static inline void _int14_panic(void* eip, void* cr2, struct page_fault_error_code error_code)
+static inline void _int14_panic(
+        void* rip, void* cr2,
+        struct page_fault_error_code error_code)
 {
-    char buf[128] = {};
-    snprintf(buf, sizeof(buf),
-        "[kernel] int14 data: eip: %p, cr2: %p, error_code: %x\n"
-        "[kernel] freezing...\n",
-        eip, cr2, error_code);
-    kmsg(buf);
+    kmsgf("[kernel] int14: rip: %p, cr2: %p, error_code: %llx",
+          rip, cr2, error_code);
     freeze();
 }
 
@@ -287,8 +282,8 @@ extern "C" void int14_handler(int14_data* d)
     if (page->attr & PAGE_MMAP) {
         pte->in.p = 1;
 
-        size_t offset = align_down<12>((uint32_t)d->l_addr);
-        offset -= (uint32_t)mm_area->start;
+        size_t offset = align_down<12>((std::size_t)d->l_addr);
+        offset -= (std::size_t)mm_area->start;
 
         kernel::paccess pa(page->phys_page_id);
         auto* data = (char*)pa.ptr();

@@ -6,8 +6,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_CXX_LINK_EXECUTABLE
     "<CMAKE_LINKER> <CMAKE_CXX_LINK_FLAGS> <LINK_FLAGS> <OBJECTS> -o <TARGET> <LINK_LIBRARIES>")
 
-set(CMAKE_ASM_FLAGS "-m32")
-set(C_CXX_FLAGS "-nostdinc -m32 -nostdlib -W -Wall -Wextra -Wno-stringop-overflow -Wno-builtin-declaration-mismatch -Wno-format -fverbose-asm -fno-exceptions -ffreestanding -fno-pic -mstack-protector-guard=global")
+set(C_CXX_FLAGS "-nostdinc -nostdlib -W -Wall -Wextra -Wno-stringop-overflow -Wno-builtin-declaration-mismatch -Wno-format -fverbose-asm -fno-exceptions -ffreestanding -fno-pic -mno-red-zone -mstack-protector-guard=global -mcmodel=kernel")
 set(CMAKE_C_FLAGS "${C_CXX_FLAGS} -Werror=implicit-int -Werror=implicit-function-declaration -Werror=strict-aliasing")
 set(CMAKE_CXX_FLAGS "${C_CXX_FLAGS} -fno-use-cxa-atexit -fno-rtti")
 set(CMAKE_CXX_LINK_FLAGS "")
@@ -30,6 +29,7 @@ add_subdirectory(gblibstdc++)
 add_subdirectory(user-space-program)
 
 set(BOOTLOADER_SOURCES src/boot.s
+                       src/mbr.S
                        src/asm/interrupt.s
                        src/asm/port_io.s
                        src/asm/sys.s
@@ -44,7 +44,7 @@ set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
                         src/kernel/interrupt.cpp
                         src/kernel/process.cpp
                         src/kernel/tty.cpp
-                        src/kernel/syscall.cpp
+                        # src/kernel/syscall.cpp
                         src/kernel/syscall/fileops.cc
                         src/kernel/syscall/mount.cc
                         src/kernel/mem.cpp
@@ -110,14 +110,8 @@ add_executable(kernel.out ${KERNEL_MAIN_SOURCES} ${BOOTLOADER_SOURCES})
 target_link_libraries(kernel.out gblibc gblibstdc++)
 target_include_directories(kernel.out PRIVATE ${PROJECT_SOURCE_DIR}/include)
 target_link_options(kernel.out PRIVATE
-    -T ${CMAKE_SOURCE_DIR}/src/kernel.ld -melf_i386 -lgblibc -L${CMAKE_BINARY_DIR}/gblibc)
+    -T ${CMAKE_SOURCE_DIR}/src/kernel.ld -lgblibc -L${CMAKE_BINARY_DIR}/gblibc)
 set_target_properties(kernel.out PROPERTIES LINK_DEPENDS ${CMAKE_SOURCE_DIR}/src/kernel.ld)
-
-add_custom_command(OUTPUT mbr.bin
-    DEPENDS ${PROJECT_SOURCE_DIR}/src/mbr.S ${PROJECT_SOURCE_DIR}/src/mbr.ld
-    COMMAND ${CMAKE_ASM_COMPILER} -m32 -c ${PROJECT_SOURCE_DIR}/src/mbr.S -o mbr.o
-    COMMAND ${CMAKE_LINKER} -T ${PROJECT_SOURCE_DIR}/src/mbr.ld mbr.o -o mbr.bin
-)
 
 add_custom_command(OUTPUT mbr_hole.bin
     DEPENDS kernel.out
@@ -125,11 +119,9 @@ add_custom_command(OUTPUT mbr_hole.bin
 )
 
 add_custom_target(boot.img
-    DEPENDS mbr.bin
     DEPENDS mbr_hole.bin
     DEPENDS user_space_programs
-    COMMAND dd if=mbr.bin of=boot.img
-    COMMAND cat mbr_hole.bin >> boot.img
+    COMMAND dd if=mbr_hole.bin of=boot.img
     COMMAND dd if=/dev/zero of=boot.img bs=`expr 512 \\* 1024 \\* 1024` count=0 seek=1
     COMMAND sh -c \"echo n\; echo\; echo\; echo\; echo\; echo a\; echo w\" | ${FDISK_BIN} boot.img
     COMMAND mkfs.fat --offset=2048 -v -n SYSTEM boot.img

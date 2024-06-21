@@ -7,9 +7,6 @@
 #include <string.h>
 #include <sys/types.h>
 
-#include <types/size.h>
-
-#include <kernel/mem.h>
 #include <kernel/vfs.hpp>
 
 namespace fs::fat {

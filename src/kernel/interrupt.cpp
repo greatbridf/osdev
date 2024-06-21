@@ -5,7 +5,6 @@
 #include <stdint.h>
 #include <stdio.h>
 
-#include <types/size.h>
 #include <types/types.h>
 
 #include <asm/port_io.h>
@@ -15,7 +14,6 @@
 #include <kernel/interrupt.h>
 #include <kernel/irq.hpp>
 #include <kernel/log.hpp>
-#include <kernel/mem.h>
 #include <kernel/mm.hpp>
 #include <kernel/process.hpp>
 #include <kernel/vfs.hpp>
@@ -40,12 +38,12 @@ extern "C" void int13(); extern "C" void int14();
 extern "C" void syscall_stub();
 
 #define SET_UP_IRQ(N, SELECTOR)                   \
-    ptr_t addr_irq##N = (ptr_t)irq##N;            \
+    uintptr_t addr_irq##N = (uintptr_t)irq##N;            \
     set_idt_entry(IDT, 0x20 + (N), (addr_irq##N), \
         (SELECTOR), KERNEL_INTERRUPT_GATE_TYPE);
 
 #define SET_IDT_ENTRY_FN(N, FUNC_NAME, SELECTOR, TYPE) \
-    ptr_t addr_##FUNC_NAME = (ptr_t)FUNC_NAME;         \
+    uintptr_t addr_##FUNC_NAME = (uintptr_t)FUNC_NAME;         \
     set_idt_entry(IDT, (N), (addr_##FUNC_NAME), (SELECTOR), (TYPE));
 
 SECTION(".text.kinit")
@@ -84,8 +82,6 @@ static inline void NORETURN die(regs_64& regs, void* rip)
 SECTION(".text.kinit")
 void init_idt()
 {
-    asm_cli();
-
     memset(IDT, 0x00, sizeof(IDT));
 
     // invalid opcode
@@ -99,11 +95,16 @@ void init_idt()
     // system call
     SET_IDT_ENTRY_FN(0x80, syscall_stub, 0x08, USER_INTERRUPT_GATE_TYPE);
 
-    uint16_t idt_descriptor[3];
-    idt_descriptor[0] = sizeof(struct IDT_entry) * 256;
-    *((uint32_t*)(idt_descriptor + 1)) = (ptr_t)IDT;
+    uint64_t idt_descriptor[2];
+    idt_descriptor[0] = (sizeof(IDT_entry) * 256) << 48;
+    idt_descriptor[1] = (uintptr_t)IDT;
 
-    asm_load_idt(idt_descriptor, 0);
+    asm volatile(
+            "lidt (%0)"
+            :
+            : "r"((uintptr_t)idt_descriptor + 6)
+            :
+            );
 }
 
 using kernel::irq::irq_handler_t;
@@ -221,11 +222,11 @@ static inline void NORETURN _int14_kill_user(void)
 // page fault
 extern "C" void int14_handler(int14_data* d)
 {
-    kernel::memory::mm_list* mms = nullptr;
+    kernel::mem::mm_list* mms = nullptr;
     if (current_process) [[likely]]
         mms = &current_process->mms;
     else
-        mms = kernel::memory::mm_list::s_kernel_mms;
+        mms = kernel::mem::mm_list::s_kernel_mms;
 
     auto* mm_area = mms->find(d->l_addr);
     if (!mm_area) [[unlikely]] {
@@ -239,69 +240,70 @@ extern "C" void int14_handler(int14_data* d)
     if (d->error_code.user && mm_area->attr.system)
         _int14_kill_user();
 
-    page* page = &(*mm_area->pgs)[vptrdiff(d->l_addr, mm_area->start) / PAGE_SIZE];
-    kernel::paccess pa(page->pg_pteidx >> 12);
-    auto pt = (pt_t)pa.ptr();
-    assert(pt);
-    pte_t* pte = *pt + (page->pg_pteidx & 0xfff);
+    // TODO: LONG MODE
+    // kernel::mem::paging::page* page = &(*mm_area->pgs)[vptrdiff(d->l_addr, mm_area->start) >> 12];
+    // kernel::paccess pa(page->pg_pteidx >> 12);
+    // auto pt = (pt_t)pa.ptr();
+    // assert(pt);
+    // pte_t* pte = *pt + (page->pg_pteidx & 0xfff);
 
-    if (unlikely(d->error_code.present == 0 && !mm_area->mapped_file))
-        _int14_panic(d->v_eip, d->l_addr, d->error_code);
+    // if (unlikely(d->error_code.present == 0 && !mm_area->mapped_file))
+    //     _int14_panic(d->v_eip, d->l_addr, d->error_code);
 
-    if (page->attr & PAGE_COW) {
-        // if it is a dying page
-        if (*page->ref_count == 1) {
-            page->attr &= ~PAGE_COW;
-            pte->in.p = 1;
-            pte->in.a = 0;
-            pte->in.rw = mm_area->attr.write;
-            return;
-        }
-        // duplicate the page
-        page_t new_page = __alloc_raw_page();
+    // if (page->attr & PAGE_COW) {
+    //     // if it is a dying page
+    //     if (*page->ref_count == 1) {
+    //         page->attr &= ~PAGE_COW;
+    //         pte->in.p = 1;
+    //         pte->in.a = 0;
+    //         pte->in.rw = mm_area->attr.write;
+    //         return;
+    //     }
+    //     // duplicate the page
+    //     page_t new_page = __alloc_raw_page();
 
-        {
-            kernel::paccess pdst(new_page), psrc(page->phys_page_id);
-            auto* new_page_data = (char*)pdst.ptr();
-            auto* src = psrc.ptr();
-            assert(new_page_data && src);
-            memcpy(new_page_data, src, PAGE_SIZE);
-        }
+    //     {
+    //         kernel::paccess pdst(new_page), psrc(page->phys_page_id);
+    //         auto* new_page_data = (char*)pdst.ptr();
+    //         auto* src = psrc.ptr();
+    //         assert(new_page_data && src);
+    //         memcpy(new_page_data, src, PAGE_SIZE);
+    //     }
 
-        pte->in.page = new_page;
-        pte->in.rw = mm_area->attr.write;
-        pte->in.a = 0;
+    //     pte->in.page = new_page;
+    //     pte->in.rw = mm_area->attr.write;
+    //     pte->in.a = 0;
 
-        --*page->ref_count;
+    //     --*page->ref_count;
 
-        page->ref_count = types::memory::kinew<size_t>(1);
-        page->attr &= ~PAGE_COW;
-        page->phys_page_id = new_page;
-    }
+    //     page->ref_count = types::memory::kinew<size_t>(1);
+    //     page->attr &= ~PAGE_COW;
+    //     page->phys_page_id = new_page;
+    // }
 
-    if (page->attr & PAGE_MMAP) {
-        pte->in.p = 1;
+    // if (page->attr & PAGE_MMAP) {
+    //     pte->in.p = 1;
 
-        size_t offset = align_down<12>((std::size_t)d->l_addr);
-        offset -= (std::size_t)mm_area->start;
+    //     size_t offset = align_down<12>((std::size_t)d->l_addr);
+    //     offset -= (std::size_t)mm_area->start;
 
-        kernel::paccess pa(page->phys_page_id);
-        auto* data = (char*)pa.ptr();
-        assert(data);
+    //     kernel::paccess pa(page->phys_page_id);
+    //     auto* data = (char*)pa.ptr();
+    //     assert(data);
 
-        int n = vfs_read(
-            mm_area->mapped_file,
-            data,
-            PAGE_SIZE,
-            mm_area->file_offset + offset,
-            PAGE_SIZE);
+    //     int n = vfs_read(
+    //         mm_area->mapped_file,
+    //         data,
+    //         PAGE_SIZE,
+    //         mm_area->file_offset + offset,
+    //         PAGE_SIZE);
 
-        // TODO: send SIGBUS if offset is greater than real size
-        if (n != PAGE_SIZE)
-            memset(data + n, 0x00, PAGE_SIZE - n);
+    //     // TODO: send SIGBUS if offset is greater than real size
+    //     if (n != PAGE_SIZE)
+    //         memset(data + n, 0x00, PAGE_SIZE - n);
 
-        page->attr &= ~PAGE_MMAP;
-    }
+    //     page->attr &= ~PAGE_MMAP;
+    // }
 }
 
 extern "C" void irq_handler(
@@ -316,8 +318,9 @@ extern "C" void irq_handler(
     for (const auto& handler : s_irq_handlers[irqno])
         handler();
 
-    if (context->cs != USER_CODE_SEGMENT)
-        return;
+    // TODO: LONG MODE
+    // if (context->cs != USER_CODE_SEGMENT)
+    //     return;
 
     if (current_thread->signals.pending_signal())
         current_thread->signals.handle(context, mmxregs);

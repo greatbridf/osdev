@@ -156,28 +156,9 @@ void brk_memory_allocator::deallocate(void* ptr)
     unite_afterwards(blk);
 }
 
-static std::byte ki_heap[0x100000];
-static brk_memory_allocator ki_alloc(ki_heap, sizeof(ki_heap));
 static brk_memory_allocator* k_alloc;
 
-void* kimalloc(std::size_t size)
-{
-    return ki_alloc.allocate(size);
-}
-
-void kifree(void* ptr)
-{
-    ki_alloc.deallocate(ptr);
-}
-
 } // namespace types::memory
-
-SECTION(".text.kinit")
-void kernel::kinit::init_kernel_heap(void *start, std::size_t size)
-{
-    using namespace types::memory;
-    k_alloc = kinew<brk_memory_allocator>((std::byte*)start, size);
-}
 
 void* operator new(size_t sz)
 {

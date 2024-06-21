@@ -32,7 +32,6 @@ set(BOOTLOADER_SOURCES src/boot.s
                        src/mbr.S
                        src/asm/interrupt.s
                        src/asm/port_io.s
-                       src/asm/sys.s
                        )
 
 set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
@@ -47,6 +46,8 @@ set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
                         # src/kernel/syscall.cpp
                         src/kernel/syscall/fileops.cc
                         src/kernel/syscall/mount.cc
+                        src/kernel/mem/paging.cc
+                        src/kernel/mem/slab.cc
                         src/kernel/mem.cpp
                         src/kernel/module.cc
                         src/kernel/vfs.cpp
@@ -64,7 +65,6 @@ set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
                         src/types/elf.cpp
                         src/types/libstdcpp.cpp
                         include/asm/port_io.h
-                        include/asm/sys.h
                         include/fs/fat.hpp
                         include/kernel/async/waitlist.hpp
                         include/kernel/async/lock.hpp
@@ -73,7 +73,9 @@ set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
                         include/kernel/irq.hpp
                         include/kernel/process.hpp
                         include/kernel/syscall.hpp
-                        include/kernel/mem.h
+                        include/kernel/mem/paging.hpp
+                        include/kernel/mem/slab.hpp
+                        include/kernel/mem/types.hpp
                         include/kernel/mm.hpp
                         include/kernel/module.hpp
                         include/kernel/utsname.hpp
@@ -99,8 +101,6 @@ set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
                         include/types/elf.hpp
                         include/types/hash_map.hpp
                         include/types/types.h
-                        include/types/size.h
-                        include/types/status.h
                         include/types/allocator.hpp
                         include/types/cplusplus.hpp
                         include/kernel/log.hpp

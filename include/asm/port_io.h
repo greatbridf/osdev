@@ -30,6 +30,14 @@ extern void asm_hlt(void);
 extern void asm_cli(void);
 extern void asm_sti(void);
 
+inline void NORETURN die()
+{
+    for (;;) {
+        asm_cli();
+        asm_hlt();
+    }
+}
+
 #ifdef __cplusplus
 }
 #endif

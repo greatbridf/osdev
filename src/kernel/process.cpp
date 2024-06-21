@@ -10,19 +10,14 @@
 #include <sys/wait.h>
 
 #include <types/allocator.hpp>
-#include <types/bitmap.hpp>
 #include <types/cplusplus.hpp>
 #include <types/elf.hpp>
-#include <types/size.h>
-#include <types/status.h>
 #include <types/types.h>
 
 #include <asm/port_io.h>
-#include <asm/sys.h>
 #include <kernel/async/lock.hpp>
 #include <kernel/interrupt.h>
 #include <kernel/log.hpp>
-#include <kernel/mem.h>
 #include <kernel/mm.hpp>
 #include <kernel/module.hpp>
 #include <kernel/process.hpp>
@@ -162,7 +157,7 @@ int filearr::open(const process &current,
             if (!parent)
                 return -EINVAL;
             int ret = fs::vfs_mkfile(parent, filename.c_str(), mode);
-            if (ret != GB_OK)
+            if (ret != 0)
                 return ret;
             dentry = fs::vfs_open(*current.root, filepath);
             assert(dentry);
@@ -393,16 +388,16 @@ void proclist::kill(pid_t pid, int exit_code)
 
 static void release_kinit()
 {
-    kernel::paccess pa(EARLY_KERNEL_PD_PAGE);
-    auto pd = (pd_t)pa.ptr();
-    assert(pd);
-    (*pd)[0].v = 0;
+    // TODO: LONG MODE
+    // kernel::paccess pa(EARLY_KERNEL_PD_PAGE);
+    // auto pd = (pd_t)pa.ptr();
+    // assert(pd);
+    // (*pd)[0].v = 0;
 
-    // free pt#0
-    __free_raw_page(0x00002);
+    // // free pt#0
+    // __free_raw_page(0x00002);
 
     // free .stage1 and .kinit
-    // TODO: LONG MODE
     // for (uint32_t i = ((uint32_t)__stage1_start >> 12);
     //         i < ((uint32_t)__kinit_end >> 12); ++i) {
     //     __free_raw_page(i);
@@ -471,7 +466,7 @@ void NORETURN _kernel_init(void)
     }
 
     int ret = types::elf::elf32_load(&d);
-    assert(ret == GB_OK);
+    assert(ret == 0);
 
     asm volatile(
         "mov $0x23, %%ax\n"

@@ -5,7 +5,8 @@ MEMORY
     MBR    (wx) : org = 0x0e00, l = 512
     STAGE1 (wx) : org = 0x1000, l = 4K
     PHYMEM (w)  : org = 0xffffff0000000000, len = 512 * 1024M
-    KBSS   (w)  : org = 0xffffffffff800000, len = 2M
+    PARRAY (w)  : org = 0xffffff8000000000, len = 128 * 1024M
+    KBSS   (w)  : org = 0xffffffffc0200000, len = 2M
     KIMAGE (wx) : org = 0xffffffffffc00000, len = 2M
 }
 
@@ -84,9 +85,9 @@ SECTIONS
 
         . = ALIGN(16);
 
-        bss_addr = .;
+        BSS_ADDR = .;
         QUAD(ABSOLUTE(BSS_START));
-        bss_len = .;
+        BSS_LENGTH = .;
         QUAD(BSS_END - BSS_START);
 
         . = ALIGN(0x1000);

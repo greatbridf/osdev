@@ -57,7 +57,7 @@ template <typename T,
     std::enable_if_t<std::is_pointer_v<T> && !is_c_string_v<T>, bool> = true>
 inline hash_t hash(T val, std::size_t bits)
 {
-    return hash(std::bit_cast<ptr_t>(val), bits);
+    return hash(std::bit_cast<uintptr_t>(val), bits);
 }
 
 inline hash_t hash(const char* str, std::size_t bits)

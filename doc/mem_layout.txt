@@ -9,18 +9,26 @@ physical memory
 0x102000 - 0x103000 : kernel PDPT for kernel space
 0x103000 - 0x104000 : kernel PD for kernel image
 0x104000 - 0x105000 : kernel PT for kernel image
+0x105000 - 0x106000 : kernel PD for struct page array#1
 
 0x106000 - 0x200000 : unused empty pages
-0x200000 - 0x300000 : first kernel bss page (2MB)
+0x200000 - 0x400000 : first kernel bss page (2MB)
 
 
 virtual address space
 
-0xffffff0000000000 - 0xffffff3fffffffff  256GB physical memory (cached)
-0xffffff4000000000 - 0xffffff7fffffffff  256GB physical memory (not cached)
-0xffffff8000000000 - 0xffffffbfffffffff  256GB kernel bss
+0xffff ff0 000 000 000 - 0xffff ff3 fff fff fff  256GB physical memory (cached)
+0xffff ff4 000 000 000 - 0xffff ff7 fff fff fff  256GB physical memory (not cached)
+0xffff ff8 000 000 000 - 0xffff ff8 03f fff fff    1GB unused
+0xffff ff8 040 000 000 - 0xffff ff8 13f fff fff    4GB struct page array
+0xffff ff8 140 000 000 - 0xffff ff8 17f fff fff    1GB unused
+0xffff ff8 180 000 000 - 0xffff ffb fff fff fff  250GB kernel heap
 
-0xffffffc000000000 - 0xffffffffffbfffff ~256GB unused
+0xffff ffc 000 000 000 - 0xffff ffc 03f fff fff    1GB unused
+0xffff ffc 040 000 000 - 0xffff fff fbf fff fff  254GB kernel stack
 
-0xffffffffffc00000 - 0xffffffffffdfffff    2MB kernel image
-0xffffffffffe00000 - 0xffffffffffffffff    2MB unused
+0xffff fff fc0 000 000 - 0xffff fff fc0 1ff fff    2MB unused
+0xffff fff fc0 200 000 - 0xffff fff fff 9ff fff 1016MB kernel bss
+0xffff fff fff a00 000 - 0xffff fff fff bff fff    2MB unused
+0xffff fff fff c00 000 - 0xffff fff fff dff fff    2MB kernel image
+0xffff fff fff e00 000 - 0xffff fff fff fff fff    2MB unused

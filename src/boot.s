@@ -50,8 +50,8 @@ _fill_loop1:
     adc $0, %edx
     loop _fill_loop1
 
-    # set PCD
-    or $0x00000010, %ebx
+    # set PCD, PWT
+    or $0x00000018, %ebx
     mov $256, %ecx
     xor %esi, %esi
 _fill_loop2:
@@ -66,8 +66,8 @@ _fill_loop2:
     # PML4E 0xff8
     mov %edi, %esi # 0x102000
     mov $0x100ff8, %edi
-    # clear PCD, PS
-    and $(~0x00000090), %ebx
+    # clear PCD, PWT, PS
+    and $(~0x00000098), %ebx
     call fill_pxe
 
     # PDPTE 0xff8

@@ -6,35 +6,14 @@
 #include <cstddef>
 #include <utility>
 
-#include <kernel/mem.h>
+#include <kernel/mem/paging.hpp>
 #include <kernel/vfs.hpp>
 #include <stdint.h>
 #include <types/allocator.hpp>
 #include <types/cplusplus.hpp>
-#include <types/size.h>
-#include <types/status.h>
 #include <types/types.h>
 
-#define invalidate_tlb(addr) asm volatile("invlpg (%0)" \
-                                 :             \
-                                 : "r"(addr)   \
-                                 : "memory")
-
-constexpr size_t THREAD_KERNEL_STACK_SIZE = 8 * PAGE_SIZE;
-
-constexpr uint32_t PAGE_COW = (1 << 0);
-constexpr uint32_t PAGE_MMAP = (1 << 1);
-#define PAGE_COW PAGE_COW
-#define PAGE_MMAP PAGE_MMAP
-
-struct page {
-    page_t phys_page_id;
-    size_t* ref_count;
-    // 0 :11 : pte_index
-    // 12:31 : pt_page
-    uint32_t pg_pteidx;
-    mutable uint32_t attr;
-};
+#define invalidate_tlb(addr) asm volatile("invlpg (%0)": : "r"(addr) : "memory")
 
 // private memory mapping
 // changes won't be neither written back to file nor shared between processes
@@ -50,23 +29,10 @@ int mmap(
     int write,
     int priv);
 
-template <uint32_t base, uint32_t expo>
-constexpr uint32_t pow()
-{
-    if constexpr (expo == 0)
-        return 1;
-    if constexpr (expo == 1)
-        return base;
-    if constexpr (expo % 2 == 0)
-        return pow<base, expo / 2>() * pow<base, expo / 2>();
-    else
-        return pow<base, expo / 2>() * pow<base, expo / 2 + 1>();
-}
-
 template <int N>
 constexpr std::size_t align_down(std::size_t v)
 {
-    return v & ~(pow<2, N>() - 1);
+    return v & ~((1 << N) - 1);
 }
 template <int N>
 constexpr void* align_down(void* v)
@@ -76,7 +42,7 @@ constexpr void* align_down(void* v)
 template <int N>
 constexpr std::size_t align_up(std::size_t v)
 {
-    return align_down<N>(v + pow<2, N>() - 1);
+    return align_down<N>(v + (1 << N) - 1);
 }
 template <int N>
 constexpr void* align_up(void* v)
@@ -97,52 +63,18 @@ constexpr void* vptradd(void* p, std::size_t off)
     return _p + off;
 }
 
-void dealloc_pd(page_t pd);
+// TODO: LONG MODE
+// void dealloc_pd(page_t pd);
 
 // allocate a struct page together with the raw page
-page allocate_page(void);
-void free_page(page* pg);
-
-// TODO: this is for alloc_kstack()
-// CHANGE THIS
-page_t __alloc_raw_page(void);
-void __free_raw_page(page_t pg);
+kernel::mem::paging::page allocate_page(void);
+void free_page(kernel::mem::paging::page* pg);
 
 namespace kernel {
 
-void* pmap(page_t pg, bool cached = true);
-void pfree(page_t pg);
-
-class paccess : public types::non_copyable {
-private:
-    page_t m_pg;
-    void* m_ptr;
-
-public:
-    paccess(void) = delete;
-    paccess(paccess&&) = delete;
-    paccess& operator=(paccess&&) = delete;
-
-    inline explicit paccess(page_t pg, bool cached = true)
-        : m_pg(pg)
-    {
-        m_ptr = pmap(pg, cached);
-    }
-
-    constexpr void* ptr(void) const { return m_ptr; }
-
-    ~paccess()
-    {
-        pfree(m_pg);
-    }
-};
-
-namespace memory {
+namespace mem {
 
 struct mm {
-public:
-    using pages_vector = std::vector<page, types::memory::ident_allocator<page>>;
-
 public:
     void* start {};
     struct mm_attr {
@@ -150,13 +82,13 @@ public:
         uint32_t system : 1;
         uint32_t mapped : 1;
     } attr {};
-    pages_vector* pgs {};
     fs::inode* mapped_file {};
     size_t file_offset {};
+    std::size_t page_count;
 
 public:
     constexpr void* end() const noexcept
-    { return vptradd(start, pgs->size() * PAGE_SIZE); }
+    { return vptradd(start, page_count * 4096); } // TODO: LONG MODE
     constexpr bool is_kernel_space() const noexcept
     { return attr.system; }
     constexpr bool is_avail(void* ostart, void* oend) const noexcept
@@ -167,7 +99,7 @@ public:
         return (ostart >= m_end || oend <= m_start);
     }
 
-    void append_page(pd_t pd, const page& pg, uint32_t attr, bool priv);
+    // void append_page(pd_t pd, const page& pg, uint32_t attr, bool priv); TODO: LONG MODE
 
     /**
      * @brief Splits the memory block at the specified address.
@@ -197,7 +129,8 @@ private:
     };
 
 public:
-    using list_type = std::set<mm, comparator, types::memory::ident_allocator<mm>>;
+    // TODO: LONG MODE: use slab allocator
+    using list_type = std::set<mm, comparator>;
     using iterator = list_type::iterator;
     using const_iterator = list_type::const_iterator;
 
@@ -206,12 +139,12 @@ public:
 
 private:
     list_type m_areas;
-    page_t m_pd;
+    kernel::mem::paging::pfn_t m_pd;
     mm* m_brk {};
 
 public:
     // for system initialization only
-    explicit constexpr mm_list(page_t pd)
+    explicit constexpr mm_list(kernel::mem::paging::pfn_t pd)
         : m_pd(pd) { }
 
     // default constructor copies kernel_mms
@@ -242,7 +175,6 @@ public:
                 .system = system,
                 .mapped = 0,
             },
-            .pgs = types::memory::kinew<mm::pages_vector>(),
         });
         assert(inserted);
         return *iter;
@@ -259,34 +191,36 @@ public:
                 continue;
             }
 
-            this->unmap(*iter);
+            // TODO: LONG MODE
+            // this->unmap(*iter);
             iter = m_areas.erase(iter);
         }
         m_brk = nullptr;
     }
 
-    inline void unmap(mm& area)
-    {
-        int i = 0;
+    // TODO: LONG MODE
+    // inline void unmap(mm& area)
+    // {
+    //     int i = 0;
 
-        // TODO:
-        // if there are more than 4 pages, calling invlpg
-        // should be faster. otherwise, we use movl cr3
-        // bool should_invlpg = (area->pgs->size() > 4);
+    //     // TODO:
+    //     // if there are more than 4 pages, calling invlpg
+    //     // should be faster. otherwise, we use movl cr3
+    //     // bool should_invlpg = (area->pgs->size() > 4);
 
-        for (auto& pg : *area.pgs) {
-            kernel::paccess pa(pg.pg_pteidx >> 12);
-            auto pt = (pt_t)pa.ptr();
-            assert(pt);
-            auto* pte = *pt + (pg.pg_pteidx & 0xfff);
-            pte->v = 0;
+    //     for (auto& pg : *area.pgs) {
+    //         kernel::paccess pa(pg.pg_pteidx >> 12);
+    //         auto pt = (pt_t)pa.ptr();
+    //         assert(pt);
+    //         auto* pte = *pt + (pg.pg_pteidx & 0xfff);
+    //         pte->v = 0;
 
-            free_page(&pg);
+    //         free_page(&pg);
 
-            invalidate_tlb((std::size_t)area.start + (i++) * PAGE_SIZE);
-        }
-        types::memory::kidelete<mm::pages_vector>(area.pgs);
-    }
+    //         invalidate_tlb((std::size_t)area.start + (i++) * PAGE_SIZE);
+    //     }
+    //     types::memory::kidelete<mm::pages_vector>(area.pgs);
+    // }
 
     constexpr mm* find(void* lp)
     {
@@ -324,77 +258,3 @@ public:
 } // namespace memory
 
 } // namespace kernel
-
-// global variables
-inline page empty_page;
-// --------------------------------
-
-// inline constexpr page* lto_page(mm* mm_area, void* l_ptr)
-// {
-//     size_t offset = vptrdiff(l_ptr, mm_area->start);
-//     return &mm_area->pgs->at(offset / PAGE_SIZE);
-// }
-// inline constexpr page_t to_page(pptr_t ptr)
-// {
-//     return ptr >> 12;
-// }
-// inline constexpr size_t to_pdi(page_t pg)
-// {
-//     return pg >> 10;
-// }
-// inline constexpr size_t to_pti(page_t pg)
-// {
-//     return pg & (1024 - 1);
-// }
-// inline constexpr pptr_t to_pp(page_t p)
-// {
-//     return p << 12;
-// }
-constexpr std::size_t v_to_pdi(void* addr)
-{
-    return std::bit_cast<std::size_t>(addr) >> 22;
-}
-constexpr std::size_t v_to_pti(void* addr)
-{
-    return (std::bit_cast<std::size_t>(addr) >> 12) & 0x3ff;
-}
-// inline constexpr pte_t* to_pte(pt_t pt, page_t pg)
-// {
-//     return *pt + to_pti(pg);
-// }
-// inline void* to_vp(page_t pg)
-// {
-//     return ptovp(to_pp(pg));
-// }
-// inline pd_t to_pd(page_t pg)
-// {
-//     return reinterpret_cast<pd_t>(to_vp(pg));
-// }
-// inline pt_t to_pt(page_t pg)
-// {
-//     return reinterpret_cast<pt_t>(to_vp(pg));
-// }
-// inline pt_t to_pt(pde_t* pde)
-// {
-//     return to_pt(pde->in.pt_page);
-// }
-// inline pde_t* to_pde(pd_t pd, void* addr)
-// {
-//     return *pd + lto_pdi((pptr_t)addr);
-// }
-// inline pte_t* to_pte(pt_t pt, void* addr)
-// {
-//     return *pt + lto_pti((pptr_t)addr);
-// }
-// inline pte_t* to_pte(pde_t* pde, void* addr)
-// {
-//     return to_pte(to_pt(pde), addr);
-// }
-// inline pte_t* to_pte(pd_t pd, void* addr)
-// {
-//     return to_pte(to_pde(pd, addr), addr);
-// }
-// inline pte_t* to_pte(pde_t* pde, page_t pg)
-// {
-//     return to_pte(to_pt(pde), pg);
-// }

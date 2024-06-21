@@ -9,7 +9,6 @@
 
 #include <types/elf.hpp>
 
-#include <kernel/mem.h>
 #include <kernel/process.hpp>
 #include <kernel/vfs.hpp>
 
@@ -38,7 +37,7 @@ int types::elf::elf32_load(types::elf::elf32_load_data* d)
     auto* ent_exec = d->exec_dent;
     if (!ent_exec) {
         d->errcode = ENOENT;
-        return GB_FAILED;
+        return -1;
     }
 
     // TODO: detect file format
@@ -51,7 +50,7 @@ int types::elf::elf32_load(types::elf::elf32_load_data* d)
 
     if (n_read != sizeof(types::elf::elf32_header)) {
         d->errcode = EINVAL;
-        return GB_FAILED;
+        return -1;
     }
 
     size_t phents_size = hdr.phentsize * hdr.phnum;
@@ -66,7 +65,7 @@ int types::elf::elf32_load(types::elf::elf32_load_data* d)
     // broken file or I/O error
     if (n_read != phents_size) {
         d->errcode = EINVAL;
-        return GB_FAILED;
+        return -1;
     }
 
     std::vector<types::elf::elf32_section_header_entry> shents(hdr.shnum);
@@ -79,7 +78,7 @@ int types::elf::elf32_load(types::elf::elf32_load_data* d)
     // broken file or I/O error
     if (n_read != shents_size) {
         d->errcode = EINVAL;
-        return GB_FAILED;
+        return -1;
     }
 
     // copy argv and envp
@@ -113,7 +112,7 @@ int types::elf::elf32_load(types::elf::elf32_load_data* d)
                 1,
                 d->system);
 
-            if (ret != GB_OK)
+            if (ret != 0)
                 kill_current(SIGSEGV);
         }
 
@@ -121,7 +120,7 @@ int types::elf::elf32_load(types::elf::elf32_load_data* d)
             auto ret = mmap((char*)vaddr + flen, vlen - flen,
                 nullptr, 0, true, d->system);
 
-            if (ret != GB_OK)
+            if (ret != 0)
                 kill_current(SIGSEGV);
         }
 
@@ -141,7 +140,7 @@ int types::elf::elf32_load(types::elf::elf32_load_data* d)
         types::elf::ELF_STACK_SIZE, nullptr, 0, true, false);
 
     // TODO: destruct local variables before calling kill_current
-    if (ret != GB_OK)
+    if (ret != 0)
         kill_current(SIGSEGV);
 
     d->eip = (void*)hdr.entry;
@@ -184,5 +183,5 @@ int types::elf::elf32_load(types::elf::elf32_load_data* d)
     // rename current thread
     current_thread->name = ent_exec->name;
 
-    return GB_OK;
+    return 0;
 }

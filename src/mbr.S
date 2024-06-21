@@ -83,9 +83,9 @@ _loop_read_kernel:
 
 _get_memory_size_use_ax:
     sub $1024, %esp
-    movzwl %ax, %eax
+    movzw %ax, %eax
     mov %eax, 8(%esp)  # 1k blocks
-    movzwl %bx, %ebx
+    movzw %bx, %ebx
     mov %ebx, 12(%esp) # 64k blocks
 
     # save the destination address to es:di

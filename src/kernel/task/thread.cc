@@ -50,23 +50,24 @@ thread::kernel_stack::kernel_stack()
         return;
     }
 
+    // TODO: LONG MODE
     // kernel stack pt is at page#0x00005
-    kernel::paccess pa(0x00005);
-    auto pt = (pt_t)pa.ptr();
-    assert(pt);
+    // kernel::paccess pa(0x00005);
+    // auto pt = (pt_t)pa.ptr();
+    // assert(pt);
 
-    int cnt = THREAD_KERNEL_STACK_SIZE / PAGE_SIZE;
-    pte_t* pte = *pt + allocated * cnt;
+    // int cnt = THREAD_KERNEL_STACK_SIZE / PAGE_SIZE;
+    // pte_t* pte = *pt + allocated * cnt;
 
-    for (int i = 0; i < cnt; ++i) {
-        pte[i].v = 0x3;
-        pte[i].in.page = __alloc_raw_page();
-    }
+    // for (int i = 0; i < cnt; ++i) {
+    //     pte[i].v = 0x3;
+    //     pte[i].in.page = __alloc_raw_page();
+    // }
 
-    stack_base = (std::byte*)(0xffc00000 + THREAD_KERNEL_STACK_SIZE * (allocated + 1));
-    esp = (uint32_t*)stack_base;
+    // stack_base = (std::byte*)(0xffc00000 + THREAD_KERNEL_STACK_SIZE * (allocated + 1));
+    // esp = (uint32_t*)stack_base;
 
-    ++allocated;
+    // ++allocated;
 }
 
 thread::kernel_stack::kernel_stack(const kernel_stack& other)
@@ -141,34 +142,36 @@ void thread::send_signal(signal_list::signo_type signal)
 
 int thread::set_thread_area(kernel::user::user_desc* ptr)
 {
-    if (ptr->read_exec_only && ptr->seg_not_present) {
-        void* dst = (void*)ptr->base_addr;
-        std::size_t len = ptr->limit;
-        if (len > 0 && dst)
-            memset(dst, 0x00, len);
-        return 0;
-    }
+    // TODO: LONG MODE
+    // if (ptr->read_exec_only && ptr->seg_not_present) {
+    //     void* dst = (void*)ptr->base_addr;
+    //     std::size_t len = ptr->limit;
+    //     if (len > 0 && dst)
+    //         memset(dst, 0x00, len);
+    //     return 0;
+    // }
 
-    if (ptr->entry_number == -1U)
-        ptr->entry_number = 6;
-    else
-        return -1;
+    // if (ptr->entry_number == -1U)
+    //     ptr->entry_number = 6;
+    // else
+    //     return -1;
 
-    tls_desc.limit_low = ptr->limit & 0xFFFF;
-    tls_desc.base_low = ptr->base_addr & 0xFFFF;
-    tls_desc.base_mid = (ptr->base_addr >> 16) & 0xFF;
-    tls_desc.access = SD_TYPE_DATA_USER;
-    tls_desc.limit_high = (ptr->limit >> 16) & 0xF;
-    tls_desc.flags = (ptr->limit_in_pages << 3) | (ptr->seg_32bit << 2);
-    tls_desc.base_high = (ptr->base_addr >> 24) & 0xFF;
+    // tls_desc.limit_low = ptr->limit & 0xFFFF;
+    // tls_desc.base_low = ptr->base_addr & 0xFFFF;
+    // tls_desc.base_mid = (ptr->base_addr >> 16) & 0xFF;
+    // tls_desc.access = SD_TYPE_DATA_USER;
+    // tls_desc.limit_high = (ptr->limit >> 16) & 0xF;
+    // tls_desc.flags = (ptr->limit_in_pages << 3) | (ptr->seg_32bit << 2);
+    // tls_desc.base_high = (ptr->base_addr >> 24) & 0xFF;
 
-    return 0;
+    // return 0;
 }
 
 int thread::load_thread_area() const
 {
-    if (tls_desc.flags == 0)
-        return -1;
-    kernel::user::load_thread_area(tls_desc);
-    return 0;
+    // TODO: LONG MODE
+    // if (tls_desc.flags == 0)
+    //     return -1;
+    // kernel::user::load_thread_area(tls_desc);
+    // return 0;
 }

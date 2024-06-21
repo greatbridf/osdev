@@ -1,10 +1,12 @@
-#include <kernel/vfs.hpp>
-#include <kernel/mm.hpp>
-#include <kernel/log.hpp>
-
 #include <algorithm>
-#include <vector>
 #include <map>
+#include <vector>
+
+#include <stdint.h>
+
+#include <kernel/log.hpp>
+#include <kernel/mm.hpp>
+#include <kernel/vfs.hpp>
 
 using fs::vfs, fs::inode, fs::dentry;
 
@@ -37,9 +39,9 @@ private:
     {
         return static_cast<fdata_t*>(data);
     }
-    static constexpr ptr_t as_val(void* data)
+    static constexpr uintptr_t as_val(void* data)
     {
-        return std::bit_cast<ptr_t>(data);
+        return std::bit_cast<uintptr_t>(data);
     }
     inline void* _getdata(ino_t ino) const
     {
@@ -51,7 +53,7 @@ private:
         inode_data.insert(std::make_pair(ino, data));
         return ino;
     }
-    inline ino_t _savedata(ptr_t data)
+    inline ino_t _savedata(uintptr_t data)
     {
         return _savedata((void*)data);
     }
@@ -93,7 +95,7 @@ protected:
 
             // inode mode filetype is compatible with user dentry filetype
             auto ret = filldir(entry.filename, 0, ind, ind->mode & S_IFMT);
-            if (ret != GB_OK)
+            if (ret != 0)
                 break;
         }
 
@@ -158,7 +160,7 @@ public:
         if (dir->flags.present)
             dir->append(get_inode(file.ino), filename);
 
-        return GB_OK;
+        return 0;
     }
 
     virtual int inode_mknode(dentry* dir, const char* filename, mode_t mode, dev_t dev) override
@@ -175,7 +177,7 @@ public:
         if (dir->flags.present)
             dir->append(get_inode(node.ino), filename);
 
-        return GB_OK;
+        return 0;
     }
 
     virtual int inode_mkdir(dentry* dir, const char* dirname, mode_t mode) override
@@ -192,7 +194,7 @@ public:
         if (dir->flags.present)
             dir->append(new_dir, dirname);
 
-        return GB_OK;
+        return 0;
     }
 
     virtual int symlink(dentry* dir, const char* linkname, const char* target) override
@@ -288,7 +290,7 @@ public:
             st->stx_mask |= STATX_GID;
         }
 
-        return GB_OK;
+        return 0;
     }
 
     virtual int inode_rmfile(dentry* dir, const char* filename) override
@@ -344,7 +346,7 @@ public:
         auto* data = as_fdata(_getdata(file->ino));
         data->resize(size);
         file->size = size;
-        return GB_OK;
+        return 0;
     }
 };
 

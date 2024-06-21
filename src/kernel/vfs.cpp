@@ -15,10 +15,8 @@
 
 #include <types/allocator.hpp>
 #include <types/path.hpp>
-#include <types/status.h>
 
 #include <kernel/log.hpp>
-#include <kernel/mem.h>
 #include <kernel/process.hpp>
 #include <kernel/tty.hpp>
 #include <kernel/vfs.hpp>
@@ -55,7 +53,7 @@ int dentry::load()
                 else
                     append(ind, dentry::name_type(name, len));
 
-                return GB_OK;
+                return 0;
             });
 
         if (ret == 0)
@@ -296,7 +294,7 @@ ssize_t fs::regular_file::do_write(const char* __user buf, size_t n)
     return n_wrote;
 }
 
-ssize_t fs::regular_file::seek(off_t n, int whence)
+off_t fs::regular_file::seek(off_t n, int whence)
 {
     if (!S_ISREG(mode))
         return -ESPIPE;
@@ -337,7 +335,7 @@ int fs::regular_file::getdents(char* __user buf, size_t cnt)
 
             size_t reclen = sizeof(fs::user_dirent) + 1 + len;
             if (cnt < reclen)
-                return GB_FAILED;
+                return -EFAULT;
 
             auto* dirp = (fs::user_dirent*)buf;
             dirp->d_ino = ind->ino;
@@ -351,7 +349,7 @@ int fs::regular_file::getdents(char* __user buf, size_t cnt)
 
             buf += reclen;
             cnt -= reclen;
-            return GB_OK;
+            return 0;
         });
 
     if (nread > 0)
@@ -373,7 +371,7 @@ int fs::regular_file::getdents64(char* __user buf, size_t cnt)
 
             size_t reclen = sizeof(fs::user_dirent64) + len;
             if (cnt < reclen)
-                return GB_FAILED;
+                return -EFAULT;
 
             auto* dirp = (fs::user_dirent64*)buf;
             dirp->d_ino = ind->ino;
@@ -386,7 +384,7 @@ int fs::regular_file::getdents64(char* __user buf, size_t cnt)
 
             buf += reclen;
             cnt -= reclen;
-            return GB_OK;
+            return 0;
         });
 
     if (nread > 0)

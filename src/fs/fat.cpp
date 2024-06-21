@@ -7,10 +7,8 @@
 #include <stdio.h>
 
 #include <types/allocator.hpp>
-#include <types/status.h>
 
 #include <fs/fat.hpp>
-#include <kernel/mem.h>
 #include <kernel/mm.hpp>
 #include <kernel/module.hpp>
 #include <kernel/vfs.hpp>
@@ -142,7 +140,7 @@ int fat32::readdir(fs::inode* dir, size_t offset, const fs::vfs::filldir_func& f
             }
             auto ret = filldir(fname.c_str(), 0, ind, ind->mode & S_IFMT);
 
-            if (ret != GB_OK) {
+            if (ret != 0) {
                 release_cluster(next);
                 return nread;
             }
@@ -304,7 +302,7 @@ int fat32::inode_statx(dentry* ent, statx* st, unsigned int mask)
         st->stx_mask |= STATX_GID;
     }
 
-    return GB_OK;
+    return 0;
 }
 
 int fat32::inode_stat(dentry* dent, struct stat* st)
@@ -319,7 +317,7 @@ int fat32::inode_stat(dentry* dent, struct stat* st)
     st->st_blksize = 4096;
     st->st_blocks = (ind->size + 511) / 512;
     st->st_ino = ind->ino;
-    return GB_OK;
+    return 0;
 }
 
 static fat32* create_fat32(const char* source, unsigned long, const void*)

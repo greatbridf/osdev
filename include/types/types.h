@@ -1,7 +1,5 @@
 #pragma once
 
-#include "size.h"
-#include "status.h"
 #include "stdint.h"
 
 #define __user
@@ -19,12 +17,20 @@
 #endif
 
 #ifdef __GNUC__
+#define PACKED __attribute__((__packed__))
+#else
+#error "no definition for ((PACKED))"
+#endif
+
+#ifdef __GNUC__
 #define likely(expr) (__builtin_expect(!!(expr), 1))
 #define unlikely(expr) (__builtin_expect(!!(expr), 0))
 #else
 #define likely(expr) (!!(expr))
 #define unlikely(expr) (!!(expr))
 #endif
+
+typedef size_t refcount_t;
 
 #ifdef __cplusplus
 #include <types/cplusplus.hpp>

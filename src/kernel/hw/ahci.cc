@@ -1,3 +1,4 @@
+#include "kernel/mem/phys.hpp"
 #include <vector>
 #include <cstddef>
 #include <algorithm>
@@ -9,8 +10,6 @@
 #include <kernel/hw/pci.hpp>
 #include <kernel/irq.hpp>
 
-#include <types/size.h>
-
 #include <stdint.h>
 #include <errno.h>
 
@@ -21,6 +20,8 @@
 
 using namespace kernel::module;
 using namespace kernel::hw::pci;
+
+using kernel::mem::physaddr;
 
 constexpr uint32_t MAX_SPINS = 100000;
 
@@ -40,11 +41,8 @@ constexpr uint32_t PORT_CMD_CR = 0x00008000;
 namespace ahci {
 
 typedef volatile struct hba_port_t {
-    uint32_t command_list_base;
-    uint32_t command_list_base_upper;
-
-    uint32_t fis_base;
-    uint32_t fis_base_upper;
+    uint64_t command_list_base;
+    uint64_t fis_base;
 
     uint32_t interrupt_status;
     uint32_t interrupt_enable;
@@ -102,8 +100,7 @@ struct command_header {
 
     uint32_t volatile bytes_transferred;
 
-    uint32_t command_table_base;
-    uint32_t command_table_base_upper;
+    uint64_t command_table_base;
 
     uint32_t reserved1[4];
 };
@@ -220,8 +217,7 @@ struct received_fis {
 };
 
 struct prdt_entry {
-    uint32_t data_base;
-    uint32_t data_base_upper;
+    uint64_t data_base;
 
     uint32_t reserved0;
 
@@ -291,9 +287,8 @@ struct quick_queue {
 struct ahci_port {
 private:
     // quick_queue<32> qu;
-    page_t page;
+    physaddr<command_header, false> cmd_header;
     hba_port* port;
-    command_header* cmd_header { };
     received_fis* fis { };
     std::size_t sectors { -1U };
 
@@ -309,7 +304,7 @@ private:
 
         // for now, we read 3.5KB at most at a time
         // command fis and prdt will take up the lower 128+Bytes
-        auto cmdtable_page = __alloc_raw_page();
+        physaddr<command_table> cmdtable{nullptr}; // TODO: LONG MODE allocate a page
 
         // construct command header
         memset(cmd_header + n, 0x00, sizeof(command_header));
@@ -318,9 +313,8 @@ private:
 
         cmd_header[n].write = write;
         cmd_header[n].prdt_length = 1;
-        cmd_header[n].command_table_base = cmdtable_page << 12;
+        cmd_header[n].command_table_base = cmdtable.phys();
 
-        auto* cmdtable = (command_table*)kernel::pmap(cmdtable_page);
         memset(cmdtable, 0x00, sizeof(command_table) + sizeof(prdt_entry));
 
         // first, set up command fis
@@ -340,7 +334,7 @@ private:
 
         // fill in prdt
         auto* pprdt = cmdtable->prdt;
-        pprdt->data_base = (cmdtable_page << 12) + 512;
+        pprdt->data_base = cmdtable.phys() + 512;
         pprdt->byte_count = count;
         pprdt->interrupt = 1;
 
@@ -359,10 +353,9 @@ private:
         SPIN(port->command_issue & (1 << n), spins)
             return -1;
 
-        memcpy(buf, (char*)cmdtable + 512, count);
+        memcpy(buf, cmdtable.cast_to<char*>() + 512, count);
 
-        kernel::pfree(cmdtable_page);
-        __free_raw_page(cmdtable_page);
+        // TODO: free cmdtable
         return 0;
     }
 
@@ -377,14 +370,14 @@ private:
 
 public:
     explicit ahci_port(hba_port* port)
-        : page(__alloc_raw_page()), port(port) { }
+        // TODO: LONG MODE
+        : cmd_header{nullptr}, port(port) { }
 
     ~ahci_port()
     {
         if (!cmd_header)
             return;
-        kernel::pfree(page);
-        __free_raw_page(page);
+        // TODO: free cmd_header
     }
 
     ssize_t read(char* buf, std::size_t buf_size, std::size_t offset, std::size_t cnt)
@@ -425,13 +418,9 @@ public:
         //
         // port->interrupt_enable = 1;
 
-        port->command_list_base = page << 12;
-        port->command_list_base_upper = 0;
+        port->command_list_base = cmd_header.phys();
+        port->fis_base = cmd_header.phys() + 0x400;
 
-        port->fis_base = (page << 12) + 0x400;
-        port->fis_base_upper = 0;
-
-        cmd_header = (command_header*)kernel::pmap(page, false);
         fis = (received_fis*)(cmd_header + 1);
 
         if (start_command(port) != 0)
@@ -455,9 +444,6 @@ public:
     ~ahci_module()
     {
         // TODO: release PCI device
-        if (ghc)
-            kernel::pfree(dev->reg[PCI_REG_ABAR] >> 12);
-
         for (auto& item : ports) {
             if (!item)
                 continue;
@@ -506,10 +492,9 @@ public:
         auto ret = kernel::hw::pci::register_driver(VENDOR_INTEL, DEVICE_AHCI,
             [this](pci_device* dev) -> int {
                 this->dev = dev;
-                uint32_t abar_address = dev->reg[PCI_REG_ABAR];
 
-                void* base = kernel::pmap(abar_address >> 12, false);
-                this->ghc = (hba_ghc*)base;
+                physaddr<hba_ghc, false> pp_base{dev->reg[PCI_REG_ABAR]};
+                this->ghc = pp_base;
 
                 this->ghc->global_host_control =
                     this->ghc->global_host_control | 2; // set interrupt enable

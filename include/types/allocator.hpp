@@ -11,12 +11,6 @@
 
 #include <kernel/async/lock.hpp>
 
-namespace kernel::kinit {
-
-void init_kernel_heap(void* start, std::size_t size);
-
-} // namespace kernel::kinit
-
 namespace types::memory {
 
 class brk_memory_allocator {
@@ -47,40 +41,5 @@ public:
     void* allocate(size_type size);
     void deallocate(void* ptr);
 };
-
-void* kimalloc(std::size_t size);
-void kifree(void* ptr);
-
-template <typename T>
-struct ident_allocator {
-    using value_type = T;
-    using propagate_on_container_move_assignment = std::true_type;
-
-    constexpr ident_allocator() = default;
-
-    template <typename U>
-    constexpr ident_allocator(const ident_allocator<U>&) noexcept {}
-    
-    inline T* allocate(std::size_t n)
-    { return (T*)kimalloc(n * sizeof(T)); }
-    inline void deallocate(T* ptr, std::size_t) { return kifree(ptr); }
-};
-
-template <typename T, typename... Args>
-constexpr T* kinew(Args&&... args)
-{
-    ident_allocator<T> alloc { };
-    T* ptr = std::allocator_traits<ident_allocator<T>>::allocate(alloc, 1);
-    std::allocator_traits<ident_allocator<T>>::construct(alloc, ptr, std::forward<Args>(args)...);
-    return ptr;
-}
-
-template <typename T>
-constexpr void kidelete(T* ptr)
-{
-    ident_allocator<T> alloc { };
-    std::allocator_traits<ident_allocator<T>>::destroy(alloc, ptr);
-    std::allocator_traits<ident_allocator<T>>::deallocate(alloc, ptr, 1);
-}
 
 } // namespace types::memory

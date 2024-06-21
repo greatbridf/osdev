@@ -47,7 +47,8 @@ public:
 
     std::string name {};
 
-    segment_descriptor tls_desc {};
+    // TODO: LONG MODE
+    // segment_descriptor tls_desc {};
 
     explicit thread(std::string name, pid_t owner);
     thread(const thread& val, pid_t owner);

@@ -5,8 +5,6 @@
 #include <sys/mount.h>
 #include <unistd.h>
 
-#include <types/status.h>
-
 #include <kernel/module.hpp>
 #include <kernel/vfs.hpp>
 #include <kernel/vfs/vfs.hpp>
@@ -160,7 +158,7 @@ public:
         for (const auto& [ ino, pf ] : files) {
             auto* ind = get_inode(ino);
             int ret = callback(pf.name.c_str(), 0, ind, ind->mode);
-            if (ret != GB_OK)
+            if (ret != 0)
                 return -EIO;
             ++nread;
         }

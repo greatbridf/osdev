@@ -19,13 +19,11 @@
 #include <types/allocator.hpp>
 #include <types/cplusplus.hpp>
 #include <types/path.hpp>
-#include <types/status.h>
 #include <types/types.h>
 
 #include <kernel/async/waitlist.hpp>
 #include <kernel/interrupt.h>
 #include <kernel/mm.hpp>
-#include <kernel/mem.h>
 #include <kernel/user/thread_local.hpp>
 #include <kernel/signal.hpp>
 #include <kernel/task.h>
@@ -175,7 +173,7 @@ public:
     };
 
 public:
-    kernel::memory::mm_list mms {};
+    kernel::mem::mm_list mms {};
     std::set<kernel::task::thread> thds;
     kernel::async::wait_list waitlist;
 

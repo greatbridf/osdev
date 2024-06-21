@@ -1,9 +1,10 @@
+#include <errno.h>
+#include <stdio.h>
+
 #include <asm/port_io.h>
 #include <kernel/hw/serial.h>
 #include <kernel/irq.hpp>
 #include <kernel/tty.hpp>
-#include <stdio.h>
-#include <types/status.h>
 
 static void serial_receive_data_interrupt(void)
 {
@@ -31,9 +32,8 @@ int32_t init_serial_port(port_id_t port)
     asm_outb(port + 0, 0xAE); // Test serial chip (send byte 0xAE and check if serial returns same byte)
 
     // Check if serial is faulty (i.e: not same byte as sent)
-    if (asm_inb(port + 0) != 0xAE) {
-        return GB_FAILED;
-    }
+    if (asm_inb(port + 0) != 0xAE)
+        return -EIO;
 
     // If serial is not faulty set it in normal operation mode
     // (not-loopback with IRQs enabled and OUT#1 and OUT#2 bits enabled)
@@ -43,7 +43,7 @@ int32_t init_serial_port(port_id_t port)
 
     kernel::irq::register_handler(4, serial_receive_data_interrupt);
 
-    return GB_OK;
+    return 0;
 }
 
 int32_t is_serial_has_data(port_id_t port)

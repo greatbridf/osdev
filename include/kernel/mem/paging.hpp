@@ -46,12 +46,13 @@ constexpr psattr_t PA_NXE  = 0x8000000000000000ULL;
 constexpr psattr_t PA_MASK = 0xfff0000000000fffULL;
 
 constexpr psattr_t PA_DATA = PA_P | PA_RW | PA_NXE;
+constexpr psattr_t PA_KERNEL_DATA = PA_DATA | PA_G;
 
 constexpr psattr_t PA_PAGE_TABLE = PA_DATA;
-constexpr psattr_t PA_KERNEL_PAGE_TABLE = PA_DATA;
+constexpr psattr_t PA_KERNEL_PAGE_TABLE = PA_PAGE_TABLE | PA_G;
 
-constexpr psattr_t PA_KERNEL_DATA = PA_DATA | PA_G;
-constexpr psattr_t PA_KERNEL_DATA_HUGE = PA_KERNEL_DATA | PA_PS;
+constexpr psattr_t PA_DATA_HUGE = PA_DATA | PA_PS;
+constexpr psattr_t PA_KERNEL_DATA_HUGE = PA_DATA_HUGE | PA_G;
 
 namespace __inner {
     using pse_t = uint64_t;

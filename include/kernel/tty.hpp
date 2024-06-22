@@ -69,13 +69,4 @@ public:
     virtual void putchar(char c) override;
 };
 
-class serial_tty : public virtual tty {
-public:
-    serial_tty(int id);
-    virtual void putchar(char c) override;
-
-public:
-    uint16_t id;
-};
-
 inline tty* console;

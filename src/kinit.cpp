@@ -1,31 +1,23 @@
-#include <asm/port_io.h>
-
 #include <assert.h>
 #include <stdint.h>
-#include <stdio.h>
 #include <sys/utsname.h>
 
 #include <types/allocator.hpp>
 #include <types/types.h>
 
-#include <kernel/hw/keyboard.h>
 #include <kernel/hw/pci.hpp>
-#include <kernel/hw/serial.h>
-#include <kernel/hw/timer.h>
+#include <kernel/hw/timer.hpp>
 #include <kernel/interrupt.h>
 #include <kernel/log.hpp>
 #include <kernel/mem/paging.hpp>
 #include <kernel/mem/types.hpp>
 #include <kernel/process.hpp>
 #include <kernel/syscall.hpp>
-#include <kernel/task.h>
-#include <kernel/tty.hpp>
 #include <kernel/utsname.hpp>
-#include <kernel/vga.hpp>
 
-typedef void (*constructor)(void);
-extern constructor const SECTION(".rodata.kinit") start_ctors;
-extern constructor const SECTION(".rodata.kinit") end_ctors;
+using constructor = void (*)();
+extern "C" constructor const start_ctors, end_ctors;
+extern "C" uint64_t BSS_ADDR, BSS_LENGTH;
 
 struct PACKED bootloader_data {
     uint32_t meminfo_entry_count;
@@ -62,29 +54,7 @@ static inline void enable_sse()
 }
 
 SECTION(".text.kinit")
-static inline int init_console(const char* name)
-{
-    if (name[0] == 't' && name[1] == 't' && name[2] == 'y') {
-        if (name[3] == 'S' || name[3] == 's') {
-            if (name[4] == '0') {
-                console = new serial_tty(PORT_SERIAL0);
-                return 0;
-            }
-            if (name[4] == '1') {
-                console = new serial_tty(PORT_SERIAL1);
-                return 0;
-            }
-        }
-        if (name[3] == 'V' && name[3] == 'G' && name[3] == 'A') {
-            console = new vga_tty{};
-            return 0;
-        }
-    }
-    return -EINVAL;
-}
-
-SECTION(".text.kinit")
-static void init_uname()
+static inline void set_uname()
 {
     kernel::sys_utsname = new new_utsname;
     strcpy(kernel::sys_utsname->sysname, "Linux"); // linux compatible
@@ -104,31 +74,21 @@ void NORETURN real_kernel_init()
     for (auto* ctor = &start_ctors; ctor != &end_ctors; ++ctor)
         (*ctor)();
 
+    set_uname();
+
     init_idt();
-    // TODO: LONG MODE
-    // init_mem();
     init_pic();
-    init_pit();
-
-    init_uname();
-
-    int ret = init_serial_port(PORT_SERIAL0);
-    assert(ret == 0);
-
-    ret = init_console("ttyS0");
-    assert(ret == 0);
+    hw::timer::init_pit();
 
     kernel::kinit::init_pci();
+
+    // TODO: remove this
     init_vfs();
     // TODO: LONG MODE
     // init_syscall();
 
-    kmsg("switching execution to the scheduler...\n");
     init_scheduler();
 }
-
-extern "C" uint64_t BSS_ADDR;
-extern "C" uint64_t BSS_LENGTH;
 
 SECTION(".text.kinit")
 static inline void setup_early_kernel_page_table()
@@ -261,7 +221,8 @@ void NORETURN kernel_init(bootloader_data* data)
             : "r"(real_kernel_init)
             :
             );
-    die();
+    for (;;)
+        asm volatile("cli\n\thlt");
 }
 
 } // namespace kernel::kinit

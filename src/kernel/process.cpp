@@ -14,7 +14,6 @@
 #include <types/elf.hpp>
 #include <types/types.h>
 
-#include <asm/port_io.h>
 #include <kernel/async/lock.hpp>
 #include <kernel/interrupt.h>
 #include <kernel/log.hpp>
@@ -40,7 +39,7 @@ namespace kernel {
 struct no_irq_guard {
     explicit no_irq_guard()
     {
-        asm_cli();
+        asm volatile("cli");
     }
 
     no_irq_guard(const no_irq_guard&) = delete;
@@ -48,7 +47,7 @@ struct no_irq_guard {
 
     ~no_irq_guard()
     {
-        asm_sti();
+        asm volatile("sti");
     }
 };
 
@@ -262,7 +261,7 @@ void kernel_threadd_main(void)
             // }
         }
         // TODO: sleep here to wait for new_kernel_thread event
-        asm_hlt();
+        asm volatile("hlt");
     }
 }
 
@@ -343,7 +342,7 @@ void proclist::kill(pid_t pid, int exit_code)
 
     // init should never exit
     if (proc.ppid == 0) {
-        console->print("kernel panic: init exited!\n");
+        kmsg("kernel panic: init exited!\n");
         freeze();
     }
 
@@ -408,7 +407,7 @@ void NORETURN _kernel_init(void)
 {
     release_kinit();
 
-    asm_sti();
+    asm volatile("sti");
 
     // ------------------------------------------
     // interrupt enabled
@@ -461,7 +460,7 @@ void NORETURN _kernel_init(void)
 
     d.exec_dent = fs::vfs_open(*fs::fs_root, types::path{argv[0]});
     if (!d.exec_dent) {
-        console->print("kernel panic: init not found!\n");
+        kmsg("kernel panic: init not found!\n");
         freeze();
     }
 
@@ -573,10 +572,8 @@ void NORETURN schedule_noreturn(void)
 
 void NORETURN freeze(void)
 {
-    asm_cli();
-    asm_hlt();
     for (;;)
-        ;
+        asm volatile("cli\n\thlt");
 }
 
 void NORETURN kill_current(int signo)

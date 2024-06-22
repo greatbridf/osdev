@@ -11,4 +11,4 @@
         console->print(buf); \
     }
 
-#define kmsg(msg) console->print(msg)
+#define kmsg(msg) if (console) console->print(msg)

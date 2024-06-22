@@ -1,4 +1,3 @@
-#include <asm/port_io.h>
 #include <assert.h>
 #include <kernel/log.hpp>
 #include <kernel/process.hpp>

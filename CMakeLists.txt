@@ -31,7 +31,6 @@ add_subdirectory(user-space-program)
 set(BOOTLOADER_SOURCES src/boot.s
                        src/mbr.S
                        src/asm/interrupt.s
-                       src/asm/port_io.s
                        )
 
 set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
@@ -53,10 +52,9 @@ set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
                         src/kernel/vfs.cpp
                         src/kernel/vga.cpp
                         src/kernel/hw/ahci.cc
-                        src/kernel/hw/keyboard.cpp
                         src/kernel/hw/pci.cc
-                        src/kernel/hw/serial.cpp
-                        src/kernel/hw/timer.c
+                        src/kernel/hw/serial.cc
+                        src/kernel/hw/timer.cc
                         src/kernel/task/thread.cc
                         src/kernel/task/readyqueue.cc
                         src/kernel/user/thread_local.cc
@@ -64,7 +62,6 @@ set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
                         src/kernel/signal.cpp
                         src/types/elf.cpp
                         src/types/libstdcpp.cpp
-                        include/asm/port_io.h
                         include/fs/fat.hpp
                         include/kernel/async/waitlist.hpp
                         include/kernel/async/lock.hpp
@@ -89,11 +86,10 @@ set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
                         include/kernel/task/forward.hpp
                         include/kernel/task/thread.hpp
                         include/kernel/task/readyqueue.hpp
-                        include/kernel/hw/keyboard.h
                         include/kernel/hw/pci.hpp
                         include/kernel/hw/port.hpp
-                        include/kernel/hw/serial.h
-                        include/kernel/hw/timer.h
+                        include/kernel/hw/serial.hpp
+                        include/kernel/hw/timer.hpp
                         include/kernel/input/keycodes.h
                         include/kernel/user/thread_local.hpp
                         include/types/bitmap.hpp

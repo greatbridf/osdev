@@ -1,14 +1,14 @@
-#include "kernel/mem/phys.hpp"
 #include <vector>
 #include <cstddef>
 #include <algorithm>
 
-#include <kernel/vfs.hpp>
-#include <kernel/log.hpp>
-#include <kernel/mm.hpp>
-#include <kernel/module.hpp>
 #include <kernel/hw/pci.hpp>
 #include <kernel/irq.hpp>
+#include <kernel/log.hpp>
+#include <kernel/mem/phys.hpp>
+#include <kernel/mm.hpp>
+#include <kernel/module.hpp>
+#include <kernel/vfs.hpp>
 
 #include <stdint.h>
 #include <errno.h>

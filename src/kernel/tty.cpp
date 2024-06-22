@@ -5,7 +5,6 @@
 #include <termios.h>
 
 #include <kernel/async/lock.hpp>
-#include <kernel/hw/serial.h>
 #include <kernel/process.hpp>
 #include <kernel/tty.hpp>
 #include <kernel/vga.hpp>
@@ -283,17 +282,6 @@ void tty::show_char(int c)
 vga_tty::vga_tty()
 {
     snprintf(this->name, sizeof(this->name), "ttyVGA");
-}
-
-serial_tty::serial_tty(int id)
-    : id(id)
-{
-    snprintf(this->name, sizeof(this->name), "ttyS%x", (int)id);
-}
-
-void serial_tty::putchar(char c)
-{
-    serial_send_data(id, c);
 }
 
 void vga_tty::putchar(char c)

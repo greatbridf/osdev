@@ -1,5 +1,4 @@
 #include <asm/port_io.h>
-#include <asm/sys.h>
 
 #include <assert.h>
 #include <errno.h>

@@ -9,8 +9,6 @@ extern "C" {
 #define KERNEL_INTERRUPT_GATE_TYPE (0x8e)
 #define USER_INTERRUPT_GATE_TYPE (0xee)
 
-#define PIC_EOI (0x20)
-
 struct regs_64 {
     uint64_t rax;
     uint64_t rbx;

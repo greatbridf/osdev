@@ -7,10 +7,8 @@
 
 #include <types/types.h>
 
-#include <asm/port_io.h>
-#include <kernel/hw/keyboard.h>
-#include <kernel/hw/serial.h>
-#include <kernel/hw/timer.h>
+#include <kernel/hw/port.hpp>
+#include <kernel/hw/timer.hpp>
 #include <kernel/interrupt.h>
 #include <kernel/irq.hpp>
 #include <kernel/log.hpp>
@@ -18,6 +16,11 @@
 #include <kernel/process.hpp>
 #include <kernel/vfs.hpp>
 #include <kernel/vga.hpp>
+
+constexpr kernel::hw::p8 port_pic1_command{0x20};
+constexpr kernel::hw::p8 port_pic1_data{0x21};
+constexpr kernel::hw::p8 port_pic2_command{0xa0};
+constexpr kernel::hw::p8 port_pic2_data{0xa1};
 
 struct IDT_entry {
     uint16_t offset_low;
@@ -118,29 +121,27 @@ void kernel::irq::register_handler(int irqno, irq_handler_t handler)
 SECTION(".text.kinit")
 void init_pic(void)
 {
-    asm_cli();
-
     s_irq_handlers.resize(16);
 
     // TODO: move this to timer driver
     kernel::irq::register_handler(0, []() {
-        inc_tick();
+        kernel::hw::timer::inc_tick();
         schedule();
     });
 
-    asm_outb(PORT_PIC1_COMMAND, 0x11); // edge trigger mode
-    asm_outb(PORT_PIC1_DATA, 0x20); // start from int 0x20
-    asm_outb(PORT_PIC1_DATA, 0x04); // PIC1 is connected to IRQ2 (1 << 2)
-    asm_outb(PORT_PIC1_DATA, 0x01); // no buffer mode
+    port_pic1_command = 0x11; // edge trigger mode
+    port_pic1_data = 0x20;    // start from int 0x20
+    port_pic1_data = 0x04;    // PIC1 is connected to IRQ2 (1 << 2)
+    port_pic1_data = 0x01;    // no buffer mode
 
-    asm_outb(PORT_PIC2_COMMAND, 0x11); // edge trigger mode
-    asm_outb(PORT_PIC2_DATA, 0x28); // start from int 0x28
-    asm_outb(PORT_PIC2_DATA, 0x02); // connected to IRQ2
-    asm_outb(PORT_PIC2_DATA, 0x01); // no buffer mode
+    port_pic2_command = 0x11; // edge trigger mode
+    port_pic2_data = 0x28;    // start from int 0x28
+    port_pic2_data = 0x02;    // connected to IRQ2
+    port_pic2_data = 0x01;    // no buffer mode
 
     // allow all the interrupts
-    asm_outb(PORT_PIC1_DATA, 0x00);
-    asm_outb(PORT_PIC2_DATA, 0x00);
+    port_pic1_data = 0x00;
+    port_pic2_data = 0x00;
 
     // 0x08 stands for kernel code segment
     SET_UP_IRQ(0, 0x08);
@@ -311,9 +312,11 @@ extern "C" void irq_handler(
     interrupt_stack* context,
     mmx_registers* mmxregs)
 {
-    asm_outb(PORT_PIC1_COMMAND, PIC_EOI);
+    constexpr uint8_t PIC_EOI = 0x20;
+
+    port_pic1_command = PIC_EOI;
     if (irqno >= 8)
-        asm_outb(PORT_PIC2_COMMAND, PIC_EOI);
+        port_pic2_command = PIC_EOI;
 
     for (const auto& handler : s_irq_handlers[irqno])
         handler();

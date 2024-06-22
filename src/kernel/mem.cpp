@@ -5,7 +5,6 @@
 #include <stdint.h>
 #include <stdio.h>
 
-#include <asm/port_io.h>
 #include <kernel/mem/paging.hpp>
 #include <kernel/mm.hpp>
 #include <kernel/process.hpp>

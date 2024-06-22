@@ -1,3 +1,6 @@
+#include <assert.h>
+#include <string.h>
+
 #include <kernel/mem/paging.hpp>
 #include <kernel/mem/slab.hpp>
 
@@ -30,6 +33,8 @@ constexpr pfn_t parent(pfn_t pfn, int order)
 page* _create_zone(pfn_t pfn, int order)
 {
     page* zone = pfn_to_page(pfn);
+
+    assert(zone->flags & PAGE_PRESENT);
     zone->flags |= PAGE_BUDDY;
 
     zone->next = zones[order].next;
@@ -57,6 +62,7 @@ page* _alloc_zone(int order)
 
         auto* zone = zones[i].next;
         zones[i].next = zone->next;
+        zones[i].count--;
 
         // TODO: set free bitmap
         zone->refcount++;
@@ -64,6 +70,7 @@ page* _alloc_zone(int order)
         if (i > order)
             _split_zone(zone, i, order);
 
+        assert(zone->flags & PAGE_PRESENT && zone->flags & PAGE_BUDDY);
         return zone;
     }
 
@@ -95,6 +102,17 @@ void kernel::mem::paging::create_zone(uintptr_t start, uintptr_t end)
     }
 }
 
+void kernel::mem::paging::mark_present(uintptr_t start, uintptr_t end)
+{
+    start >>= 12;
+
+    end += (4096 - 1);
+    end >>= 12;
+
+    while (start < end)
+        PAGE_ARRAY[start++].flags |= PAGE_PRESENT;
+}
+
 page* kernel::mem::paging::alloc_pages(int order)
 {
     auto* zone = _alloc_zone(order);
@@ -109,6 +127,16 @@ page* kernel::mem::paging::alloc_pages(int order)
 page* kernel::mem::paging::alloc_page()
 {
     return alloc_pages(0);
+}
+
+pfn_t kernel::mem::paging::alloc_page_table()
+{
+    page* zone = alloc_page();
+    pfn_t pfn = page_to_pfn(zone);
+
+    memset(physaddr<void>{pfn}, 0x00, 0x1000);
+
+    return pfn;
 }
 
 pfn_t kernel::mem::paging::page_to_pfn(page* _page)

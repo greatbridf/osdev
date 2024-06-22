@@ -22,17 +22,14 @@ private:
     byte* p_start;
     byte* p_limit;
     byte* p_break;
+    byte* p_allocated;
     kernel::async::mutex mtx;
 
-    constexpr byte* brk(byte* addr)
-    {
-        if (addr >= p_limit) [[unlikely]]
-            return nullptr;
-        return p_break = addr;
-    }
+    byte* brk(byte* addr);
+    byte* sbrk(size_type increment);
 
-    constexpr byte* sbrk(size_type increment)
-    { return brk(p_break + increment); }
+    constexpr byte* sbrk() const noexcept
+    { return p_break; }
 
 public:
     explicit brk_memory_allocator(byte* start, size_type size);
@@ -40,6 +37,13 @@ public:
 
     void* allocate(size_type size);
     void deallocate(void* ptr);
+
+    bool allocated(void* ptr) const noexcept;
 };
 
 } // namespace types::memory
+
+namespace kernel::kinit {
+void init_allocator();
+
+} // namespace kernel::kinit

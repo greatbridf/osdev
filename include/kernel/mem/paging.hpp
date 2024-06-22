@@ -45,6 +45,14 @@ constexpr psattr_t PA_FRE  = 0x0000000000000800ULL; // unused flag
 constexpr psattr_t PA_NXE  = 0x8000000000000000ULL;
 constexpr psattr_t PA_MASK = 0xfff0000000000fffULL;
 
+constexpr psattr_t PA_DATA = PA_P | PA_RW | PA_NXE;
+
+constexpr psattr_t PA_PAGE_TABLE = PA_DATA;
+constexpr psattr_t PA_KERNEL_PAGE_TABLE = PA_DATA;
+
+constexpr psattr_t PA_KERNEL_DATA = PA_DATA | PA_G;
+constexpr psattr_t PA_KERNEL_DATA_HUGE = PA_KERNEL_DATA | PA_PS;
+
 namespace __inner {
     using pse_t = uint64_t;
 
@@ -66,6 +74,16 @@ public:
         *m_ptrbase = (attributes & PA_MASK) | (pfn & ~PA_MASK);
     }
 
+    constexpr pfn_t pfn() const noexcept
+    {
+        return *m_ptrbase & ~PA_MASK;
+    }
+
+    constexpr psattr_t attributes() const noexcept
+    {
+        return *m_ptrbase & PA_MASK;
+    }
+
     constexpr PSE operator[](std::size_t nth) const noexcept
     {
         return PSE{m_ptrbase.phys() + 8 * nth};
@@ -81,6 +99,7 @@ constexpr PSE KERNEL_PAGE_TABLE{0x100000};
 
 constexpr unsigned long PAGE_PRESENT = 0x00000001;
 constexpr unsigned long PAGE_BUDDY   = 0x00000002;
+constexpr unsigned long PAGE_SLAB    = 0x00000004;
 
 struct page {
     refcount_t refcount;
@@ -95,11 +114,14 @@ struct page {
 inline page* PAGE_ARRAY;
 
 void create_zone(uintptr_t start, uintptr_t end);
+void mark_present(uintptr_t start, uintptr_t end);
 
 // order represents power of 2
 page* alloc_page();
 page* alloc_pages(int order);
 void free_page(page* page, int order);
+
+pfn_t alloc_page_table();
 
 pfn_t page_to_pfn(page* page);
 page* pfn_to_page(pfn_t pfn);

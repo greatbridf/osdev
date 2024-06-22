@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <sys/utsname.h>
 
+#include <types/allocator.hpp>
 #include <types/types.h>
 
 #include <kernel/hw/keyboard.h>
@@ -143,7 +144,7 @@ static inline void setup_early_kernel_page_table()
     auto pd = pdpt[std::get<2>(idx)].parse();
 
     // kernel bss, size 2M
-    pd[std::get<3>(idx)].set(PA_P | PA_RW | PA_PS | PA_G | PA_NXE, 0x200000);
+    pd[std::get<3>(idx)].set(PA_KERNEL_DATA_HUGE, 0x200000);
 
     // clear kernel bss
     memset((void*)BSS_ADDR, 0x00, BSS_LENGTH);
@@ -155,21 +156,15 @@ static inline void make_early_kernel_stack()
     using namespace kernel::mem;
     using namespace kernel::mem::paging;
 
-    auto* kstack_pdpt_page = alloc_page();
-    auto* kstack_page = alloc_pages(9);
-
-    memset(physaddr<char>{page_to_pfn(kstack_pdpt_page)}, 0x00, 0x1000);
-
     constexpr auto idx = idx_all(0xffffffc040000000ULL);
 
     // early kernel stack
     auto pdpte = KERNEL_PAGE_TABLE[std::get<1>(idx)].parse()[std::get<2>(idx)];
-    pdpte.set(PA_P | PA_RW | PA_G | PA_NXE, page_to_pfn(kstack_pdpt_page));
+    pdpte.set(PA_KERNEL_PAGE_TABLE, alloc_page_table());
 
     auto pd = pdpte.parse();
-    pd[std::get<3>(idx)].set(
-            PA_P | PA_RW | PA_PS | PA_G | PA_NXE,
-            page_to_pfn(kstack_page));
+    pd[std::get<3>(idx)].set(PA_KERNEL_DATA_HUGE,
+        page_to_pfn(alloc_pages(9)));
 }
 
 SECTION(".text.kinit")
@@ -187,12 +182,11 @@ static inline void setup_buddy(uintptr_t addr_max)
     memset(physaddr<void>{0x105000}, 0x00, 4096);
 
     auto pdpte = KERNEL_PAGE_TABLE[std::get<1>(idx)].parse()[std::get<2>(idx)];
-    pdpte.set(PA_P | PA_RW | PA_G | PA_NXE, 0x105000);
+    pdpte.set(PA_KERNEL_PAGE_TABLE, 0x105000);
 
     auto pd = pdpte.parse();
     for (int i = 0; i < count; ++i, start_pfn += 0x200000) {
-        pd[std::get<3>(idx)+i].set(
-            PA_P | PA_RW | PA_PS | PA_G | PA_NXE, start_pfn);
+        pd[std::get<3>(idx)+i].set(PA_KERNEL_DATA_HUGE, start_pfn);
     }
 
     PAGE_ARRAY = (page*)0xffffff8040000000ULL;
@@ -200,8 +194,10 @@ static inline void setup_buddy(uintptr_t addr_max)
 
     for (int i = 0; i < (int)info::e820_entry_count; ++i) {
         auto& ent = info::e820_entries[i];
+
         if (ent.type != 1) // type == 1: free area
             continue;
+        mark_present(ent.base, ent.base + ent.len);
 
         auto start = ent.base;
         auto end = start + ent.len;
@@ -253,6 +249,8 @@ void NORETURN kernel_init(bootloader_data* data)
     }
 
     setup_buddy(addr_max);
+    init_allocator();
+
     make_early_kernel_stack();
 
     asm volatile(

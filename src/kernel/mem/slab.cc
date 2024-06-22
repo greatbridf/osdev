@@ -81,21 +81,34 @@ slab_head* _make_slab(uintptr_t start, std::size_t size)
 
     std::byte* ptr = (std::byte*)slab->free;
     for (unsigned i = 0; i < slab->free_count; ++i) {
+        void* nextptr = ptr + size;
         if (i == slab->free_count-1)
             *(void**)ptr = nullptr;
         else
-            *(void**)ptr = ptr + size;
-        ++ptr;
+            *(void**)ptr = nextptr;
+        ptr = (std::byte*)nextptr;
     }
 
     return slab;
+}
+
+void _slab_add_page(slab_cache* cache) {
+    auto* new_page = paging::alloc_page();
+    auto new_page_pfn = paging::page_to_pfn(new_page);
+
+    new_page->flags |= paging::PAGE_SLAB;
+
+    auto* slab = _make_slab(new_page_pfn, cache->obj_size);
+    slab->cache = cache;
+
+    list_insert(&cache->slabs_empty, slab);
 }
 
 void* kernel::mem::slab_alloc(slab_cache* cache) {
     slab_head* slab = cache->slabs_partial;
     if (!slab) { // no partial slabs, try to get an empty slab
         if (!cache->slabs_empty) // no empty slabs, create a new one
-            slab_add_page(cache, paging::page_to_pfn(paging::alloc_page()));
+            _slab_add_page(cache);
 
         slab = list_get(&cache->slabs_empty);
 
@@ -135,17 +148,12 @@ void kernel::mem::slab_free(void* ptr) {
     }
 }
 
-void kernel::mem::slab_add_page(slab_cache* cache, paging::pfn_t pfn) {
-    auto slab = _make_slab(pfn, cache->obj_size);
-    slab->cache = cache;
-
-    list_insert(&cache->slabs_empty, slab);
-}
-
 void kernel::mem::init_slab_cache(slab_cache* cache, std::size_t obj_size)
 {
     cache->obj_size = obj_size;
     cache->slabs_empty = nullptr;
     cache->slabs_partial = nullptr;
     cache->slabs_full = nullptr;
+
+    _slab_add_page(cache);
 }

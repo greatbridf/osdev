@@ -5,8 +5,8 @@
 #include <kernel/hw/pci.hpp>
 #include <kernel/irq.hpp>
 #include <kernel/log.hpp>
+#include <kernel/mem/paging.hpp>
 #include <kernel/mem/phys.hpp>
-#include <kernel/mm.hpp>
 #include <kernel/module.hpp>
 #include <kernel/vfs.hpp>
 
@@ -20,6 +20,7 @@
 
 using namespace kernel::module;
 using namespace kernel::hw::pci;
+using namespace kernel::mem::paging;
 
 using kernel::mem::physaddr;
 
@@ -292,7 +293,7 @@ private:
     received_fis* fis { };
     std::size_t sectors { -1U };
 
-    int send_command(char* buf, uint64_t lba, uint32_t count, uint8_t cmd, bool write)
+    int send_command(physaddr<void> buf, uint64_t lba, uint32_t count, uint8_t cmd, bool write)
     {
         // count must be a multiple of 512
         if (count & (512 - 1))
@@ -302,9 +303,10 @@ private:
         int n = 0;
         // auto n = qu.pop();
 
-        // for now, we read 3.5KB at most at a time
         // command fis and prdt will take up the lower 128+Bytes
-        physaddr<command_table> cmdtable{nullptr}; // TODO: LONG MODE allocate a page
+        // TODO: buffer array
+        pfn_t command_table_pfn = page_to_pfn(alloc_page());
+        physaddr<command_table, false> cmdtable{command_table_pfn};
 
         // construct command header
         memset(cmd_header + n, 0x00, sizeof(command_header));
@@ -334,7 +336,7 @@ private:
 
         // fill in prdt
         auto* pprdt = cmdtable->prdt;
-        pprdt->data_base = cmdtable.phys() + 512;
+        pprdt->data_base = buf.phys();
         pprdt->byte_count = count;
         pprdt->interrupt = 1;
 
@@ -353,16 +355,17 @@ private:
         SPIN(port->command_issue & (1 << n), spins)
             return -1;
 
-        memcpy(buf, cmdtable.cast_to<char*>() + 512, count);
-
-        // TODO: free cmdtable
+        free_page(command_table_pfn);
         return 0;
     }
 
     int identify()
     {
-        char buf[512];
-        int ret = send_command(buf, 0, 512, 0xEC, false);
+        pfn_t buffer_page = page_to_pfn(alloc_page());
+        int ret = send_command(physaddr<void>{buffer_page},
+                0, 512, 0xEC, false);
+
+        free_page(buffer_page);
         if (ret != 0)
             return -1;
         return 0;
@@ -370,40 +373,43 @@ private:
 
 public:
     explicit ahci_port(hba_port* port)
-        // TODO: LONG MODE
-        : cmd_header{nullptr}, port(port) { }
+        : cmd_header{page_to_pfn(alloc_page())}, port(port) { }
 
     ~ahci_port()
     {
         if (!cmd_header)
             return;
-        // TODO: free cmd_header
+        free_page(cmd_header.phys());
     }
 
     ssize_t read(char* buf, std::size_t buf_size, std::size_t offset, std::size_t cnt)
     {
         cnt = std::min(buf_size, cnt);
 
-        constexpr size_t READ_BUF_SECTORS = 6;
+        pfn_t buffer_page = page_to_pfn(alloc_page());
+        physaddr<void> buffer_ptr{buffer_page};
 
-        char b[READ_BUF_SECTORS * 512] {};
         char* orig_buf = buf;
         size_t start = offset / 512;
         size_t end = std::min((offset + cnt + 511) / 512, sectors);
 
         offset -= start * 512;
-        for (size_t i = start; i < end; i += READ_BUF_SECTORS) {
-            size_t n_read = std::min(end - i, READ_BUF_SECTORS) * 512;
-            int status = send_command(b, i, n_read, 0xC8, false);
-            if (status != 0)
+        for (size_t i = start; i < end; i += 4096UL / 512) {
+            size_t n_read = std::min(end - i, 4096UL / 512) * 512;
+            int status = send_command(buffer_ptr, i, n_read, 0xC8, false);
+            if (status != 0) {
+                free_page(buffer_page);
                 return -EIO;
+            }
 
             size_t to_copy = std::min(cnt, n_read - offset);
-            memcpy(buf, b + offset, to_copy);
+            memcpy(buf, (std::byte*)(void*)buffer_ptr + offset, to_copy);
             offset = 0;
             buf += to_copy;
             cnt -= to_copy;
         }
+
+        free_page(buffer_page);
         return buf - orig_buf;
     }
 

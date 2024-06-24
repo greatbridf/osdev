@@ -1,45 +1,40 @@
-#include <asm/port_io.h>
-
 #include <assert.h>
+#include <bits/alltypes.h>
+#include <bits/ioctl.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
-#include <time.h>
-#include <termios.h>
-#include <unistd.h>
-#include <bits/alltypes.h>
-#include <bits/ioctl.h>
-#include <sys/types.h>
-#include <sys/prctl.h>
 #include <sys/mman.h>
+#include <sys/prctl.h>
 #include <sys/stat.h>
+#include <sys/types.h>
 #include <sys/utsname.h>
 #include <sys/wait.h>
-
-#include <kernel/async/lock.hpp>
-#include <kernel/user/thread_local.hpp>
-#include <kernel/task/readyqueue.hpp>
-#include <kernel/task/thread.hpp>
-#include <kernel/interrupt.h>
-#include <kernel/log.hpp>
-#include <kernel/mem.h>
-#include <kernel/mm.hpp>
-#include <kernel/process.hpp>
-#include <kernel/signal.hpp>
-#include <kernel/syscall.hpp>
-#include <kernel/tty.hpp>
-#include <kernel/utsname.hpp>
-#include <kernel/vfs.hpp>
-#include <kernel/hw/timer.h>
+#include <termios.h>
+#include <time.h>
+#include <unistd.h>
 
 #include <types/allocator.hpp>
 #include <types/elf.hpp>
 #include <types/path.hpp>
-#include <types/status.h>
 #include <types/types.h>
+
+#include <kernel/async/lock.hpp>
+#include <kernel/hw/timer.hpp>
+#include <kernel/interrupt.hpp>
+#include <kernel/log.hpp>
+#include <kernel/process.hpp>
+#include <kernel/signal.hpp>
+#include <kernel/syscall.hpp>
+#include <kernel/task/readyqueue.hpp>
+#include <kernel/task/thread.hpp>
+#include <kernel/tty.hpp>
+#include <kernel/user/thread_local.hpp>
+#include <kernel/utsname.hpp>
+#include <kernel/vfs.hpp>
 
 #define SYSCALL_NO ((data)->s_regs.eax)
 #define SYSCALL_RETVAL ((data)->s_regs.eax)
@@ -57,7 +52,7 @@ static void not_implemented(const char* pos, int line)
 #define NOT_IMPLEMENTED not_implemented(__FILE__, __LINE__)
 
 extern "C" void _syscall_stub_fork_return(void);
-int _syscall_fork(interrupt_stack* data)
+long _syscall_fork(interrupt_stack* data)
 {
     auto& newproc = procs->copy_from(*current_process);
     auto [ iter_newthd, inserted ] = newproc.thds.emplace(*current_thread, newproc.pid);
@@ -66,7 +61,7 @@ int _syscall_fork(interrupt_stack* data)
 
     kernel::task::dispatcher::enqueue(newthd);
 
-    uint32_t newthd_oldesp = (uint32_t)newthd->kstack.esp;
+    uint32_t newthd_oldesp = (uintptr_t)newthd->kstack.esp;
     auto esp = &newthd->kstack.esp;
 
     // create fake interrupt stack
@@ -90,7 +85,7 @@ int _syscall_fork(interrupt_stack* data)
 
     // ctx_switch stack
     // return address
-    push_stack(esp, (uint32_t)_syscall_stub_fork_return);
+    push_stack(esp, (uintptr_t)_syscall_stub_fork_return);
     // ebx
     push_stack(esp, 0);
     // edi
@@ -107,7 +102,7 @@ int _syscall_fork(interrupt_stack* data)
     return newproc.pid;
 }
 
-int _syscall_write(interrupt_stack* data)
+long _syscall_write(interrupt_stack* data)
 {
     SYSCALL_ARG1(int, fd);
     SYSCALL_ARG2(const char* __user, buf);
@@ -120,7 +115,7 @@ int _syscall_write(interrupt_stack* data)
     return file->write(buf, n);
 }
 
-int _syscall_read(interrupt_stack* data)
+long _syscall_read(interrupt_stack* data)
 {
     SYSCALL_ARG1(int, fd);
     SYSCALL_ARG2(char* __user, buf);
@@ -134,7 +129,7 @@ int _syscall_read(interrupt_stack* data)
 }
 
 // TODO: sleep seconds
-int _syscall_sleep(interrupt_stack*)
+long _syscall_sleep(interrupt_stack*)
 {
     current_thread->set_attr(kernel::task::thread::USLEEP);
 
@@ -142,7 +137,7 @@ int _syscall_sleep(interrupt_stack*)
     return 0;
 }
 
-int _syscall_chdir(interrupt_stack* data)
+long _syscall_chdir(interrupt_stack* data)
 {
     SYSCALL_ARG1(const char*, path);
 
@@ -164,7 +159,7 @@ int _syscall_chdir(interrupt_stack* data)
 // @param exec: the path of program to execute
 // @param argv: arguments end with nullptr
 // @param envp: environment variables end with nullptr
-int _syscall_execve(interrupt_stack* data)
+long _syscall_execve(interrupt_stack* data)
 {
     SYSCALL_ARG1(const char*, exec);
     SYSCALL_ARG2(char* const*, argv);
@@ -184,11 +179,11 @@ int _syscall_execve(interrupt_stack* data)
     current_process->files.onexec();
 
     int ret = types::elf::elf32_load(&d);
-    if (ret != GB_OK)
+    if (ret != 0)
         return -d.errcode;
 
-    data->v_eip = d.eip;
-    data->esp = (uint32_t)d.sp;
+    data->v_rip = d.eip;
+    data->rsp = (uintptr_t)d.sp;
 
     current_thread->signals.on_exec();
 
@@ -196,7 +191,7 @@ int _syscall_execve(interrupt_stack* data)
 }
 
 // @param exit_code
-int NORETURN _syscall_exit(interrupt_stack* data)
+long NORETURN _syscall_exit(interrupt_stack* data)
 {
     SYSCALL_ARG1(int, exit_code);
 
@@ -211,11 +206,17 @@ int NORETURN _syscall_exit(interrupt_stack* data)
     schedule_noreturn();
 }
 
+long NORETURN _syscall_exit_group(interrupt_stack* data)
+{
+    // we implement exit_group as exit for now
+    _syscall_exit(data);
+}
+
 // @param pid: pid of the process to wait
 // @param status: the exit code of the exited process
 // @param options: options for waitpid
 // @return pid of the exited process
-int _syscall_waitpid(interrupt_stack* data)
+long _syscall_waitpid(interrupt_stack* data)
 {
     SYSCALL_ARG1(pid_t, pid_to_wait);
     SYSCALL_ARG2(int*, arg1);
@@ -267,7 +268,7 @@ int _syscall_waitpid(interrupt_stack* data)
     return -EINVAL;
 }
 
-int _syscall_wait4(interrupt_stack* data)
+long _syscall_wait4(interrupt_stack* data)
 {
     SYSCALL_ARG4(void* __user, rusage);
 
@@ -278,7 +279,7 @@ int _syscall_wait4(interrupt_stack* data)
     return _syscall_waitpid(data);
 }
 
-int _syscall_getdents(interrupt_stack* data)
+long _syscall_getdents(interrupt_stack* data)
 {
     SYSCALL_ARG1(int, fd);
     SYSCALL_ARG2(char* __user, buf);
@@ -291,7 +292,7 @@ int _syscall_getdents(interrupt_stack* data)
     return dir->getdents(buf, cnt);
 }
 
-int _syscall_open(interrupt_stack* data)
+long _syscall_open(interrupt_stack* data)
 {
     SYSCALL_ARG1(const char* __user, path);
     SYSCALL_ARG2(int, flags);
@@ -303,7 +304,7 @@ int _syscall_open(interrupt_stack* data)
         current_process->pwd + path, flags, mode);
 }
 
-int _syscall_getcwd(interrupt_stack* data)
+long _syscall_getcwd(interrupt_stack* data)
 {
     SYSCALL_ARG1(char*, buf);
     SYSCALL_ARG2(size_t, bufsize);
@@ -313,10 +314,10 @@ int _syscall_getcwd(interrupt_stack* data)
     strncpy(buf, path.c_str(), bufsize);
     buf[bufsize - 1] = 0;
 
-    return (uint32_t)buf;
+    return (uintptr_t)buf;
 }
 
-int _syscall_setsid(interrupt_stack*)
+long _syscall_setsid(interrupt_stack*)
 {
     if (current_process->pid == current_process->pgid)
         return -EPERM;
@@ -331,7 +332,7 @@ int _syscall_setsid(interrupt_stack*)
     return current_process->pid;
 }
 
-int _syscall_getsid(interrupt_stack* data)
+long _syscall_getsid(interrupt_stack* data)
 {
     SYSCALL_ARG1(pid_t, pid);
 
@@ -344,33 +345,33 @@ int _syscall_getsid(interrupt_stack* data)
     return pproc->sid;
 }
 
-int _syscall_close(interrupt_stack* data)
+long _syscall_close(interrupt_stack* data)
 {
     SYSCALL_ARG1(int, fd);
     current_process->files.close(fd);
     return 0;
 }
 
-int _syscall_dup(interrupt_stack* data)
+long _syscall_dup(interrupt_stack* data)
 {
     SYSCALL_ARG1(int, old_fd);
     return current_process->files.dup(old_fd);
 }
 
-int _syscall_dup2(interrupt_stack* data)
+long _syscall_dup2(interrupt_stack* data)
 {
     SYSCALL_ARG1(int, old_fd);
     SYSCALL_ARG2(int, new_fd);
     return current_process->files.dup2(old_fd, new_fd);
 }
 
-int _syscall_pipe(interrupt_stack* data)
+long _syscall_pipe(interrupt_stack* data)
 {
     SYSCALL_ARG1(int* __user, pipefd);
     return current_process->files.pipe(pipefd);
 }
 
-int _syscall_setpgid(interrupt_stack* data)
+long _syscall_setpgid(interrupt_stack* data)
 {
     SYSCALL_ARG1(pid_t, pid);
     SYSCALL_ARG2(pid_t, pgid);
@@ -396,7 +397,7 @@ int _syscall_setpgid(interrupt_stack* data)
     return 0;
 }
 
-int _syscall_ioctl(interrupt_stack* data)
+long _syscall_ioctl(interrupt_stack* data)
 {
     SYSCALL_ARG1(int, fd);
     SYSCALL_ARG2(unsigned long, request);
@@ -472,17 +473,17 @@ int _syscall_ioctl(interrupt_stack* data)
     return 0;
 }
 
-int _syscall_getpid(interrupt_stack*)
+long _syscall_getpid(interrupt_stack*)
 {
     return current_process->pid;
 }
 
-int _syscall_getppid(interrupt_stack*)
+long _syscall_getppid(interrupt_stack*)
 {
     return current_process->ppid;
 }
 
-int _syscall_set_thread_area(interrupt_stack* data)
+long _syscall_set_thread_area(interrupt_stack* data)
 {
     SYSCALL_ARG1(kernel::user::user_desc* __user, ptr);
 
@@ -494,14 +495,14 @@ int _syscall_set_thread_area(interrupt_stack* data)
     return 0;
 }
 
-int _syscall_set_tid_address(interrupt_stack* data)
+long _syscall_set_tid_address(interrupt_stack* data)
 {
     SYSCALL_ARG1(int* __user, tidptr);
     current_thread->set_child_tid = tidptr;
     return current_thread->tid();
 }
 
-int _syscall_readv(interrupt_stack* data)
+long _syscall_readv(interrupt_stack* data)
 {
     SYSCALL_ARG1(int, fd);
     SYSCALL_ARG2(const iovec* __user, iov);
@@ -534,7 +535,7 @@ int _syscall_readv(interrupt_stack* data)
 }
 
 // TODO: this operation SHOULD be atomic
-int _syscall_writev(interrupt_stack* data)
+long _syscall_writev(interrupt_stack* data)
 {
     SYSCALL_ARG1(int, fd);
     SYSCALL_ARG2(const iovec* __user, iov);
@@ -558,7 +559,7 @@ int _syscall_writev(interrupt_stack* data)
     return totn;
 }
 
-int _syscall_prctl(interrupt_stack* data)
+long _syscall_prctl(interrupt_stack* data)
 {
     SYSCALL_ARG1(int, option);
 
@@ -583,7 +584,7 @@ int _syscall_prctl(interrupt_stack* data)
     return 0;
 }
 
-int _syscall_clock_gettime64(interrupt_stack* data)
+long _syscall_clock_gettime64(interrupt_stack* data)
 {
     SYSCALL_ARG1(clockid_t, clk_id);
     SYSCALL_ARG2(timespec* __user, tp);
@@ -594,31 +595,31 @@ int _syscall_clock_gettime64(interrupt_stack* data)
         return -EINVAL;
     }
 
-    int time = current_ticks();
+    auto time = kernel::hw::timer::current_ticks();
     tp->tv_sec = time / 100;
     tp->tv_nsec = 10000000 * (time % 100);
 
     return 0;
 }
 
-int _syscall_getuid(interrupt_stack*)
+long _syscall_getuid(interrupt_stack*)
 {
     return 0; // all user are root for now
 }
 
-int _syscall_geteuid(interrupt_stack*)
+long _syscall_geteuid(interrupt_stack*)
 {
     return 0; // all user are root for now
 }
 
-int _syscall_brk(interrupt_stack* data)
+long _syscall_brk(interrupt_stack* data)
 {
     SYSCALL_ARG1(void*, addr);
 
-    return (int)current_process->mms.set_brk(addr);
+    return (uintptr_t)current_process->mms.set_brk(addr);
 }
 
-int _syscall_mmap_pgoff(interrupt_stack* data)
+long _syscall_mmap_pgoff(interrupt_stack* data)
 {
     SYSCALL_ARG1(void*, addr);
     SYSCALL_ARG2(size_t, len);
@@ -627,7 +628,7 @@ int _syscall_mmap_pgoff(interrupt_stack* data)
     SYSCALL_ARG5(int, fd);
     SYSCALL_ARG6(off_t, pgoffset);
 
-    if ((ptr_t)addr % PAGE_SIZE != 0)
+    if ((uintptr_t)addr % 4096 != 0)
         return -EINVAL;
     if (len == 0)
         return -EINVAL;
@@ -652,7 +653,7 @@ int _syscall_mmap_pgoff(interrupt_stack* data)
         // do unmapping, equal to munmap, MAP_FIXED set
         if (prot == PROT_NONE) {
             auto ret = mms.unmap(addr, len, false);
-            if (ret != GB_OK)
+            if (ret != 0)
                 return ret;
         }
         else {
@@ -664,26 +665,26 @@ int _syscall_mmap_pgoff(interrupt_stack* data)
             }
 
             // TODO: append pages to the end of area if possible
-            mms.add_empty_area(addr, len / PAGE_SIZE,
+            mms.add_empty_area(addr, len / 4096,
                 PAGE_COW, prot & PROT_WRITE, false);
         }
     }
 
-    return (int)addr;
+    return (uintptr_t)addr;
 }
 
-int _syscall_munmap(interrupt_stack* data)
+long _syscall_munmap(interrupt_stack* data)
 {
     SYSCALL_ARG1(void*, addr);
     SYSCALL_ARG2(size_t, len);
 
-    if ((ptr_t)addr % PAGE_SIZE != 0)
+    if ((uintptr_t)addr % 4096 != 0)
         return -EINVAL;
 
     return current_process->mms.unmap(addr, len, false);
 }
 
-int _syscall_sendfile64(interrupt_stack* data)
+long _syscall_sendfile64(interrupt_stack* data)
 {
     SYSCALL_ARG1(int, out_fd);
     SYSCALL_ARG2(int, in_fd);
@@ -733,7 +734,7 @@ int _syscall_sendfile64(interrupt_stack* data)
     return totn;
 }
 
-int _syscall_statx(interrupt_stack* data)
+long _syscall_statx(interrupt_stack* data)
 {
     SYSCALL_ARG1(int, dirfd);
     SYSCALL_ARG2(const char* __user, path);
@@ -765,7 +766,7 @@ int _syscall_statx(interrupt_stack* data)
     return ret;
 }
 
-int _syscall_fcntl64(interrupt_stack* data)
+long _syscall_fcntl64(interrupt_stack* data)
 {
     SYSCALL_ARG1(int, fd);
     SYSCALL_ARG2(int, cmd);
@@ -788,7 +789,7 @@ int _syscall_fcntl64(interrupt_stack* data)
     }
 }
 
-int _syscall_getdents64(interrupt_stack* data)
+long _syscall_getdents64(interrupt_stack* data)
 {
     SYSCALL_ARG1(int, fd);
     SYSCALL_ARG2(char* __user, buf);
@@ -802,7 +803,7 @@ int _syscall_getdents64(interrupt_stack* data)
 }
 
 /* TODO: implement vfs_stat(stat*)
-int _syscall_stat(interrupt_stack* data)
+long _syscall_stat(interrupt_stack* data)
 {
     SYSCALL_ARG1(const char* __user, pathname);
     SYSCALL_ARG2(struct stat* __user, buf);
@@ -818,7 +819,7 @@ int _syscall_stat(interrupt_stack* data)
 */
 
 /* TODO: implement vfs_stat(stat*)
-int _syscall_fstat(interrupt_stack* data)
+long _syscall_fstat(interrupt_stack* data)
 {
     SYSCALL_ARG1(int, fd);
     SYSCALL_ARG2(struct stat* __user, buf);
@@ -831,7 +832,7 @@ int _syscall_fstat(interrupt_stack* data)
 }
 */
 
-int _syscall_gettimeofday(interrupt_stack* data)
+long _syscall_gettimeofday(interrupt_stack* data)
 {
     SYSCALL_ARG1(timeval* __user, tv);
     SYSCALL_ARG2(void* __user, tz);
@@ -842,14 +843,15 @@ int _syscall_gettimeofday(interrupt_stack* data)
 
     if (likely(tv)) {
         // TODO: use copy_to_user
-        tv->tv_sec = current_ticks() / 100;
-        tv->tv_usec = current_ticks() * 10 * 1000;
+        auto ticks = kernel::hw::timer::current_ticks();
+        tv->tv_sec = ticks / 100;
+        tv->tv_usec = ticks * 10 * 1000;
     }
 
     return 0;
 }
 
-int _syscall_umask(interrupt_stack* data)
+long _syscall_umask(interrupt_stack* data)
 {
     SYSCALL_ARG1(mode_t, mask);
 
@@ -859,7 +861,7 @@ int _syscall_umask(interrupt_stack* data)
     return old;
 }
 
-int _syscall_kill(interrupt_stack* data)
+long _syscall_kill(interrupt_stack* data)
 {
     SYSCALL_ARG1(pid_t, pid);
     SYSCALL_ARG2(int, sig);
@@ -880,7 +882,7 @@ int _syscall_kill(interrupt_stack* data)
     return 0;
 }
 
-int _syscall_rt_sigprocmask(interrupt_stack* data)
+long _syscall_rt_sigprocmask(interrupt_stack* data)
 {
     using kernel::sigmask_type;
 
@@ -917,7 +919,7 @@ int _syscall_rt_sigprocmask(interrupt_stack* data)
     return 0;
 }
 
-int _syscall_rt_sigaction(interrupt_stack* data)
+long _syscall_rt_sigaction(interrupt_stack* data)
 {
     using kernel::sigaction;
     using kernel::sigmask_type;
@@ -946,7 +948,7 @@ int _syscall_rt_sigaction(interrupt_stack* data)
     return 0;
 }
 
-int _syscall_newuname(interrupt_stack* data)
+long _syscall_newuname(interrupt_stack* data)
 {
     SYSCALL_ARG1(new_utsname* __user, buf);
 
@@ -959,7 +961,7 @@ int _syscall_newuname(interrupt_stack* data)
     return 0;
 }
 
-pid_t _syscall_getpgid(interrupt_stack* data)
+long _syscall_getpgid(interrupt_stack* data)
 {
     SYSCALL_ARG1(pid_t, pid);
 
@@ -973,14 +975,14 @@ pid_t _syscall_getpgid(interrupt_stack* data)
     return pproc->pgid;
 }
 
-int _syscall_gettid(interrupt_stack* data)
+long _syscall_gettid(interrupt_stack* data)
 {
     // TODO: real tid
     (void)data;
     return current_process->pid;
 }
 
-int _syscall_mkdir(interrupt_stack* data)
+long _syscall_mkdir(interrupt_stack* data)
 {
     SYSCALL_ARG1(const char* __user, pathname);
     SYSCALL_ARG2(mode_t, mode);
@@ -1006,13 +1008,13 @@ int _syscall_mkdir(interrupt_stack* data)
 
     auto ret = fs::vfs_mkdir(dent, dirname.c_str(), mode);
 
-    if (ret != GB_OK)
+    if (ret != 0)
         return ret;
 
     return 0;
 }
 
-int _syscall_truncate(interrupt_stack* data)
+long _syscall_truncate(interrupt_stack* data)
 {
     SYSCALL_ARG1(const char* __user, pathname);
     SYSCALL_ARG2(long, length);
@@ -1028,13 +1030,13 @@ int _syscall_truncate(interrupt_stack* data)
 
     auto ret = fs::vfs_truncate(dent->ind, length);
 
-    if (ret != GB_OK)
+    if (ret != 0)
         return ret;
 
     return 0;
 }
 
-int _syscall_unlink(interrupt_stack* data)
+long _syscall_unlink(interrupt_stack* data)
 {
     SYSCALL_ARG1(const char* __user, pathname);
 
@@ -1050,7 +1052,7 @@ int _syscall_unlink(interrupt_stack* data)
     return fs::vfs_rmfile(dent->parent, dent->name.c_str());
 }
 
-int _syscall_access(interrupt_stack* data)
+long _syscall_access(interrupt_stack* data)
 {
     SYSCALL_ARG1(const char* __user, pathname);
     SYSCALL_ARG2(int, mode);
@@ -1074,7 +1076,7 @@ int _syscall_access(interrupt_stack* data)
     }
 }
 
-int _syscall_mknod(interrupt_stack* data)
+long _syscall_mknod(interrupt_stack* data)
 {
     SYSCALL_ARG1(const char* __user, pathname);
     SYSCALL_ARG2(mode_t, mode);
@@ -1096,7 +1098,7 @@ int _syscall_mknod(interrupt_stack* data)
     return fs::vfs_mknode(dent, filename.c_str(), mode, dev);
 }
 
-int _syscall_poll(interrupt_stack* data)
+long _syscall_poll(interrupt_stack* data)
 {
     SYSCALL_ARG1(struct pollfd* __user, fds);
     SYSCALL_ARG2(nfds_t, nfds);
@@ -1137,7 +1139,7 @@ int _syscall_poll(interrupt_stack* data)
     // return 0;
 }
 
-int _syscall_llseek(interrupt_stack* data)
+long _syscall_llseek(interrupt_stack* data)
 {
     SYSCALL_ARG1(unsigned int, fd);
     SYSCALL_ARG2(unsigned long, offset_high);
@@ -1191,68 +1193,64 @@ extern "C" void syscall_entry(
         current_thread->signals.handle(data, mmxregs);
 }
 
+#define REGISTER_SYSCALL_HANDLER(no, name) if (1) { extern long _syscall_ ## name (interrupt_stack*); syscall_handlers[(no)] = _syscall_ ## name; }
+
 SECTION(".text.kinit")
 void init_syscall(void)
 {
-    memset(syscall_handlers, 0x00, sizeof(syscall_handlers));
-
-    syscall_handlers[0x01] = _syscall_exit;
-    syscall_handlers[0x02] = _syscall_fork;
-    syscall_handlers[0x03] = _syscall_read;
-    syscall_handlers[0x04] = _syscall_write;
-    syscall_handlers[0x05] = _syscall_open;
-    syscall_handlers[0x06] = _syscall_close;
-    syscall_handlers[0x07] = _syscall_waitpid;
-    syscall_handlers[0x0a] = _syscall_unlink;
-    syscall_handlers[0x0b] = _syscall_execve;
-    syscall_handlers[0x0c] = _syscall_chdir;
-    syscall_handlers[0x0e] = _syscall_mknod;
-    syscall_handlers[0x14] = _syscall_getpid;
-    extern int _syscall_mount(interrupt_stack*);
-    syscall_handlers[0x15] = _syscall_mount;
-    syscall_handlers[0x21] = _syscall_access;
-    syscall_handlers[0x25] = _syscall_kill;
-    syscall_handlers[0x27] = _syscall_mkdir;
-    syscall_handlers[0x29] = _syscall_dup;
-    syscall_handlers[0x2a] = _syscall_pipe;
-    syscall_handlers[0x2d] = _syscall_brk;
-    syscall_handlers[0x36] = _syscall_ioctl;
-    syscall_handlers[0x39] = _syscall_setpgid;
-    syscall_handlers[0x3c] = _syscall_umask;
-    syscall_handlers[0x3f] = _syscall_dup2;
-    syscall_handlers[0x40] = _syscall_getppid;
-    syscall_handlers[0x42] = _syscall_setsid;
-    syscall_handlers[0x4e] = _syscall_gettimeofday;
-    extern int _syscall_symlink(interrupt_stack*);
-    syscall_handlers[0x53] = _syscall_symlink;
-    extern int _syscall_readlink(interrupt_stack*);
-    syscall_handlers[0x55] = _syscall_readlink;
-    syscall_handlers[0x5b] = _syscall_munmap;
-    syscall_handlers[0x5c] = _syscall_truncate;
-    syscall_handlers[0x72] = _syscall_wait4;
-    syscall_handlers[0x7a] = _syscall_newuname;
-    syscall_handlers[0x84] = _syscall_getpgid;
-    syscall_handlers[0x8c] = _syscall_llseek;
-    syscall_handlers[0x8d] = _syscall_getdents;
-    syscall_handlers[0x91] = _syscall_readv;
-    syscall_handlers[0x92] = _syscall_writev;
-    syscall_handlers[0x93] = _syscall_getsid;
-    syscall_handlers[0xa8] = _syscall_poll;
-    syscall_handlers[0xac] = _syscall_prctl;
-    syscall_handlers[0xae] = _syscall_rt_sigaction;
-    syscall_handlers[0xaf] = _syscall_rt_sigprocmask;
-    syscall_handlers[0xb7] = _syscall_getcwd;
-    syscall_handlers[0xc0] = _syscall_mmap_pgoff;
-    syscall_handlers[0xc7] = _syscall_getuid;
-    syscall_handlers[0xc9] = _syscall_geteuid;
-    syscall_handlers[0xdc] = _syscall_getdents64;
-    syscall_handlers[0xdd] = _syscall_fcntl64;
-    syscall_handlers[0xe0] = _syscall_gettid;
-    syscall_handlers[0xef] = _syscall_sendfile64;
-    syscall_handlers[0xf3] = _syscall_set_thread_area;
-    syscall_handlers[0xfc] = _syscall_exit; // we implement exit_group as exit for now
-    syscall_handlers[0x102] = _syscall_set_tid_address;
-    syscall_handlers[0x17f] = _syscall_statx;
-    syscall_handlers[0x193] = _syscall_clock_gettime64;
-    // syscall_handlers[35] = _syscall_sleep;
+    REGISTER_SYSCALL_HANDLER(0x01, exit);
+    REGISTER_SYSCALL_HANDLER(0x02, fork);
+    REGISTER_SYSCALL_HANDLER(0x03, read);
+    REGISTER_SYSCALL_HANDLER(0x04, write);
+    REGISTER_SYSCALL_HANDLER(0x05, open);
+    REGISTER_SYSCALL_HANDLER(0x06, close);
+    REGISTER_SYSCALL_HANDLER(0x07, waitpid);
+    REGISTER_SYSCALL_HANDLER(0x0a, unlink);
+    REGISTER_SYSCALL_HANDLER(0x0b, execve);
+    REGISTER_SYSCALL_HANDLER(0x0c, chdir);
+    REGISTER_SYSCALL_HANDLER(0x0e, mknod);
+    REGISTER_SYSCALL_HANDLER(0x14, getpid);
+    REGISTER_SYSCALL_HANDLER(0x15, mount);
+    REGISTER_SYSCALL_HANDLER(0x21, access);
+    REGISTER_SYSCALL_HANDLER(0x25, kill);
+    REGISTER_SYSCALL_HANDLER(0x27, mkdir);
+    REGISTER_SYSCALL_HANDLER(0x29, dup);
+    REGISTER_SYSCALL_HANDLER(0x2a, pipe);
+    REGISTER_SYSCALL_HANDLER(0x2d, brk);
+    REGISTER_SYSCALL_HANDLER(0x36, ioctl);
+    REGISTER_SYSCALL_HANDLER(0x39, setpgid);
+    REGISTER_SYSCALL_HANDLER(0x3c, umask);
+    REGISTER_SYSCALL_HANDLER(0x3f, dup2);
+    REGISTER_SYSCALL_HANDLER(0x40, getppid);
+    REGISTER_SYSCALL_HANDLER(0x42, setsid);
+    REGISTER_SYSCALL_HANDLER(0x4e, gettimeofday);
+    REGISTER_SYSCALL_HANDLER(0x53, symlink);
+    REGISTER_SYSCALL_HANDLER(0x55, readlink);
+    REGISTER_SYSCALL_HANDLER(0x5b, munmap);
+    REGISTER_SYSCALL_HANDLER(0x5c, truncate);
+    REGISTER_SYSCALL_HANDLER(0x72, wait4);
+    REGISTER_SYSCALL_HANDLER(0x7a, newuname);
+    REGISTER_SYSCALL_HANDLER(0x84, getpgid);
+    REGISTER_SYSCALL_HANDLER(0x8c, llseek);
+    REGISTER_SYSCALL_HANDLER(0x8d, getdents);
+    REGISTER_SYSCALL_HANDLER(0x91, readv);
+    REGISTER_SYSCALL_HANDLER(0x92, writev);
+    REGISTER_SYSCALL_HANDLER(0x93, getsid);
+    REGISTER_SYSCALL_HANDLER(0xa8, poll);
+    REGISTER_SYSCALL_HANDLER(0xac, prctl);
+    REGISTER_SYSCALL_HANDLER(0xae, rt_sigaction);
+    REGISTER_SYSCALL_HANDLER(0xaf, rt_sigprocmask);
+    REGISTER_SYSCALL_HANDLER(0xb7, getcwd);
+    REGISTER_SYSCALL_HANDLER(0xc0, mmap_pgoff);
+    REGISTER_SYSCALL_HANDLER(0xc7, getuid);
+    REGISTER_SYSCALL_HANDLER(0xc9, geteuid);
+    REGISTER_SYSCALL_HANDLER(0xdc, getdents64);
+    REGISTER_SYSCALL_HANDLER(0xdd, fcntl64);
+    REGISTER_SYSCALL_HANDLER(0xe0, gettid);
+    REGISTER_SYSCALL_HANDLER(0xef, sendfile64);
+    REGISTER_SYSCALL_HANDLER(0xf3, set_thread_area);
+    REGISTER_SYSCALL_HANDLER(0xfc, exit_group);
+    REGISTER_SYSCALL_HANDLER(0x10, _set_tid_address);
+    REGISTER_SYSCALL_HANDLER(0x17, _statx);
+    REGISTER_SYSCALL_HANDLER(0x19, _clock_gettime64);
 }

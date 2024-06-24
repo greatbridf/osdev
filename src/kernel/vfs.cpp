@@ -155,7 +155,8 @@ fs::inode* vfs::cache_inode(size_t size, ino_t ino,
 
 void vfs::free_inode(ino_t ino)
 {
-    assert(_inodes.erase(ino) == 1);
+    int n = _inodes.erase(ino);
+    assert(n == 1);
 }
 
 fs::inode* vfs::get_inode(ino_t ino)

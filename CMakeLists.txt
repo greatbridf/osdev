@@ -10,6 +10,7 @@ set(C_CXX_FLAGS "-nostdinc -nostdlib -W -Wall -Wextra -Wno-stringop-overflow -Wn
 set(CMAKE_C_FLAGS "${C_CXX_FLAGS} -Werror=implicit-int -Werror=implicit-function-declaration -Werror=strict-aliasing")
 set(CMAKE_CXX_FLAGS "${C_CXX_FLAGS} -fno-use-cxa-atexit -fno-rtti")
 set(CMAKE_CXX_LINK_FLAGS "")
+SET(CMAKE_ASM_FLAGS "${CFLAGS} -x assembler-with-cpp")
 set(CMAKE_CXX_STANDARD 20)
 
 if (CMAKE_BUILD_TYPE STREQUAL "Debug")
@@ -45,9 +46,9 @@ set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
                         # src/kernel/syscall.cpp
                         src/kernel/syscall/fileops.cc
                         src/kernel/syscall/mount.cc
+                        src/kernel/mem/mm_list.cc
                         src/kernel/mem/paging.cc
                         src/kernel/mem/slab.cc
-                        src/kernel/mem.cpp
                         src/kernel/module.cc
                         src/kernel/vfs.cpp
                         src/kernel/vga.cpp
@@ -66,14 +67,15 @@ set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
                         include/kernel/async/waitlist.hpp
                         include/kernel/async/lock.hpp
                         include/kernel/tty.hpp
-                        include/kernel/interrupt.h
+                        include/kernel/interrupt.hpp
                         include/kernel/irq.hpp
                         include/kernel/process.hpp
                         include/kernel/syscall.hpp
+                        include/kernel/mem/mm_list.hpp
                         include/kernel/mem/paging.hpp
                         include/kernel/mem/slab.hpp
                         include/kernel/mem/types.hpp
-                        include/kernel/mm.hpp
+                        include/kernel/mem/vm_area.hpp
                         include/kernel/module.hpp
                         include/kernel/utsname.hpp
                         include/kernel/vfs.hpp
@@ -96,6 +98,7 @@ set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
                         include/types/buffer.hpp
                         include/types/elf.hpp
                         include/types/hash_map.hpp
+                        include/types/list.hpp
                         include/types/types.h
                         include/types/allocator.hpp
                         include/types/cplusplus.hpp

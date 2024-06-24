@@ -5,7 +5,6 @@
 #include <stdint.h>
 
 #include <kernel/log.hpp>
-#include <kernel/mm.hpp>
 #include <kernel/vfs.hpp>
 
 using fs::vfs, fs::inode, fs::dentry;
@@ -275,7 +274,7 @@ public:
         }
 
         if (mask & STATX_BLOCKS) {
-            st->stx_blocks = align_up<9>(ind->size) / 512;
+            st->stx_blocks = ((ind->size + 0x1ff) & ~0x1ff) / 512;
             st->stx_blksize = 4096;
             st->stx_mask |= STATX_BLOCKS;
         }

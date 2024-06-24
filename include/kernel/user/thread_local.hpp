@@ -16,7 +16,9 @@ struct user_desc {
     uint32_t useable : 1;
 };
 
-// TODO: LONG MODE
-// void load_thread_area(const segment_descriptor& desc);
+void load_thread_area32(uint64_t desc);
+void load_thread_area64(uint64_t desc_lo, uint64_t desc_hi);
+
+void load_thread_area(uint64_t desc_lo, uint64_t desc_hi);
 
 } // namespace kernel::user

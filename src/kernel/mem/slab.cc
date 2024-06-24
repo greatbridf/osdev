@@ -2,49 +2,15 @@
 
 #include <assert.h>
 
+#include <types/list.hpp>
+
 #include <kernel/mem/paging.hpp>
 #include <kernel/mem/slab.hpp>
 
 using namespace kernel::mem;
+using namespace types::list;
 
 constexpr std::size_t SLAB_PAGE_SIZE = 0x1000; // 4K
-
-template <typename ListNode>
-void list_insert(ListNode** head, ListNode* node)
-{
-    node->next = *head;
-    if (*head)
-        (*head)->prev = node;
-    *head = node;
-}
-
-template <typename ListNode>
-ListNode* list_get(ListNode** head)
-{
-    ListNode* node = *head;
-    if (node) {
-        *head = node->next;
-
-        node->next = nullptr;
-        node->prev = nullptr;
-    }
-    return node;
-}
-
-template <typename ListNode>
-void list_remove(ListNode** head, ListNode* node)
-{
-    if (node->prev)
-        node->prev->next = node->next;
-    else
-        *head = node->next;
-
-    if (node->next)
-        node->next->prev = node->prev;
-
-    node->next = nullptr;
-    node->prev = nullptr;
-}
 
 std::ptrdiff_t _slab_data_start_offset(std::size_t size)
 {

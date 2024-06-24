@@ -6,7 +6,7 @@
 #include <kernel/syscall.hpp>
 #include <kernel/vfs.hpp>
 
-int _syscall_mount(interrupt_stack* data)
+long _syscall_mount(interrupt_stack_normal* data)
 {
     SYSCALL_ARG1(const char __user*, source);
     SYSCALL_ARG2(const char __user*, target);

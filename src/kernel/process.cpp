@@ -15,9 +15,7 @@
 #include <types/types.h>
 
 #include <kernel/async/lock.hpp>
-#include <kernel/interrupt.h>
 #include <kernel/log.hpp>
-#include <kernel/mm.hpp>
 #include <kernel/module.hpp>
 #include <kernel/process.hpp>
 #include <kernel/signal.hpp>
@@ -338,7 +336,7 @@ void proclist::kill(pid_t pid, int exit_code)
     proc.files.close_all();
 
     // unmap all user memory areas
-    proc.mms.clear_user();
+    proc.mms.clear();
 
     // init should never exit
     if (proc.ppid == 0) {
@@ -450,21 +448,20 @@ void NORETURN _kernel_init(void)
     current_process->attr.system = 0;
     current_thread->attr |= kernel::task::thread::SYSTEM;
 
-    const char* argv[] = { "/mnt/busybox", "sh", "/mnt/initsh" };
-    const char* envp[] = { "LANG=C", "HOME=/root", "PATH=/mnt", "PWD=/", nullptr };
+    types::elf::elf32_load_data d{
+        .exec_dent{},
+        .argv{ "/mnt/busybox", "sh", "/mnt/initsh" },
+        .envp{ "LANG=C", "HOME=/root", "PATH=/mnt", "PWD=/" },
+        .ip{}, .sp{}
+    };
 
-    types::elf::elf32_load_data d;
-    d.argv = argv;
-    d.envp = envp;
-    d.system = false;
-
-    d.exec_dent = fs::vfs_open(*fs::fs_root, types::path{argv[0]});
+    d.exec_dent = fs::vfs_open(*fs::fs_root, types::path{d.argv[0].c_str()});
     if (!d.exec_dent) {
         kmsg("kernel panic: init not found!\n");
         freeze();
     }
 
-    int ret = types::elf::elf32_load(&d);
+    int ret = types::elf::elf32_load(d);
     assert(ret == 0);
 
     asm volatile(
@@ -480,10 +477,8 @@ void NORETURN _kernel_init(void)
         "push $0x1b\n"
         "push %1\n"
 
-        "iret\n"
-        :
-        : "c"(d.sp), "d"(d.eip)
-        : "eax", "memory");
+        "iretq\n"
+        : : "g"(d.sp), "g"(d.ip) : "eax", "memory");
 
     freeze();
 }
@@ -502,7 +497,13 @@ void NORETURN init_scheduler(void)
 
     asm volatile(
         "mov %0, %%rsp\n"
-        "push %=f\n"
+        "sub $16, %%rsp\n"
+        "mov %=f, %%rbx\n"
+        "mov %%rbx, 8(%%rsp)\n" // return address
+        "xor %%rbx, %%rbx\n"
+        "mov %%rbx, (%%rsp)\n"  // previous rbp
+        "mov %%rsp, %%rbp\n"
+
         "push %1\n"
 
         "mov $0x10, %%ax\n"
@@ -512,9 +513,6 @@ void NORETURN init_scheduler(void)
         "mov %%ax, %%fs\n"
         "mov %%ax, %%gs\n"
 
-        "xor %%ebp, %%ebp\n"
-        "xor %%edx, %%edx\n"
-
         "push $0x0\n"
         "popf\n"
 
@@ -523,7 +521,7 @@ void NORETURN init_scheduler(void)
         "%=:\n"
         "ud2"
         :
-        : "a"(current_thread->kstack.esp), "c"(_kernel_init)
+        : "a"(current_thread->kstack.sp), "c"(_kernel_init)
         : "memory");
 
     freeze();
@@ -532,6 +530,8 @@ void NORETURN init_scheduler(void)
 extern "C" void asm_ctx_switch(uint32_t** curr_esp, uint32_t** next_esp);
 bool schedule()
 {
+    freeze();
+
     if (kernel::async::preempt_count() != 0)
         return true;
 

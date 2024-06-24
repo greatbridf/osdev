@@ -7,6 +7,8 @@
 
 #include <types/types.h>
 
+#include <kernel/mem/types.hpp>
+
 namespace kernel::mem {
 
 template <typename T, bool Cached = true>
@@ -42,5 +44,22 @@ public:
         return m_ptr;
     }
 };
+
+//  gdt[0]:  null
+//  gdt[1]:  kernel code
+//  gdt[2]:  kernel data
+//  gdt[3]:  user code
+//  gdt[4]:  user data
+//  gdt[5]:  user code compability mode
+//  gdt[6]:  user data compability mode
+//  gdt[7]:  reserved
+//  gdt[8]:  tss descriptor low
+//  gdt[9]:  tss descriptor high
+//  gdt[10]: ldt descriptor low
+//  gdt[11]: ldt descriptor high
+//  gdt[12]: thread local(in ldt)
+//  gdt[13]: thread local(in ldt)
+// &gdt[14]: tss of 0x68 bytes from here
+constexpr physaddr<uint64_t> gdt{0x00000000 + 1 - 1};
 
 } // namespace kernel::mem

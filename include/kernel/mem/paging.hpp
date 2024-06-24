@@ -6,8 +6,6 @@
 
 #include <stdint.h>
 
-#include <types/types.h>
-
 #include <kernel/mem/phys.hpp>
 
 namespace kernel::mem::paging {
@@ -41,7 +39,7 @@ constexpr psattr_t PA_PS   = 0x0000000000000080ULL;
 constexpr psattr_t PA_G    = 0x0000000000000100ULL;
 constexpr psattr_t PA_COW  = 0x0000000000000200ULL; // copy on write
 constexpr psattr_t PA_MMAP = 0x0000000000000400ULL; // memory mapped
-constexpr psattr_t PA_FRE  = 0x0000000000000800ULL; // unused flag
+constexpr psattr_t PA_ANON = 0x0000000000000800ULL; // anonymous map
 constexpr psattr_t PA_NXE  = 0x8000000000000000ULL;
 constexpr psattr_t PA_MASK = 0xfff0000000000fffULL;
 
@@ -53,6 +51,9 @@ constexpr psattr_t PA_KERNEL_PAGE_TABLE = PA_PAGE_TABLE | PA_G;
 
 constexpr psattr_t PA_DATA_HUGE = PA_DATA | PA_PS;
 constexpr psattr_t PA_KERNEL_DATA_HUGE = PA_DATA_HUGE | PA_G;
+
+constexpr psattr_t PA_ANONYMOUS_PAGE = PA_P | PA_US | PA_COW | PA_ANON;
+constexpr psattr_t PA_MMAPPED_PAGE = PA_US | PA_COW | PA_ANON | PA_MMAP;
 
 namespace __inner {
     using pse_t = uint64_t;
@@ -96,6 +97,10 @@ public:
     }
 };
 
+constexpr pfn_t EMPTY_PAGE_PFN = 0x7f000;
+
+constexpr uintptr_t KERNEL_PAGE_TABLE_ADDR = 0x100000;
+constexpr physaddr<void> KERNEL_PAGE_TABLE_PHYS_ADDR{KERNEL_PAGE_TABLE_ADDR};
 constexpr PSE KERNEL_PAGE_TABLE{0x100000};
 
 constexpr unsigned long PAGE_PRESENT = 0x00000001;
@@ -103,13 +108,12 @@ constexpr unsigned long PAGE_BUDDY   = 0x00000002;
 constexpr unsigned long PAGE_SLAB    = 0x00000004;
 
 struct page {
-    refcount_t refcount;
+    // TODO: use atomic
+    unsigned long refcount;
     unsigned long flags;
 
     page* next;
-
-    // padding
-    uint64_t padding;
+    page* prev;
 };
 
 inline page* PAGE_ARRAY;
@@ -117,14 +121,69 @@ inline page* PAGE_ARRAY;
 void create_zone(uintptr_t start, uintptr_t end);
 void mark_present(uintptr_t start, uintptr_t end);
 
+[[nodiscard]] page* alloc_page();
 // order represents power of 2
-page* alloc_page();
-page* alloc_pages(int order);
-void free_page(page* page, int order);
+[[nodiscard]] page* alloc_pages(int order);
 
-pfn_t alloc_page_table();
+// order represents power of 2
+void free_pages(page* page, int order);
+void free_page(page* page);
+
+// order represents power of 2
+void free_pages(pfn_t pfn, int order);
+void free_page(pfn_t pfn);
+
+// clear the page all zero
+[[nodiscard]] pfn_t alloc_page_table();
 
 pfn_t page_to_pfn(page* page);
 page* pfn_to_page(pfn_t pfn);
+
+void increase_refcount(page* page);
+
+constexpr unsigned long PAGE_FAULT_P   = 0x00000001;
+constexpr unsigned long PAGE_FAULT_W   = 0x00000002;
+constexpr unsigned long PAGE_FAULT_U   = 0x00000004;
+constexpr unsigned long PAGE_FAULT_R   = 0x00000008;
+constexpr unsigned long PAGE_FAULT_I   = 0x00000010;
+constexpr unsigned long PAGE_FAULT_PK  = 0x00000020;
+constexpr unsigned long PAGE_FAULT_SS  = 0x00000040;
+constexpr unsigned long PAGE_FAULT_SGX = 0x00008000;
+
+void handle_page_fault(unsigned long err);
+
+class vaddr_range {
+    std::size_t n;
+
+    int idx4;
+    int idx3;
+    int idx2;
+    int idx1;
+
+    PSE pml4;
+    PSE pdpt;
+    PSE pd;
+    PSE pt;
+
+    uintptr_t m_start;
+    uintptr_t m_end;
+
+    bool is_privilege;
+
+public:
+    explicit vaddr_range(pfn_t pt, uintptr_t start, uintptr_t end, bool is_privilege = false);
+    explicit vaddr_range(std::nullptr_t);
+
+    vaddr_range begin() const noexcept;
+    vaddr_range end() const noexcept;
+
+    PSE operator*() const noexcept;
+
+    vaddr_range& operator++();
+    operator bool() const noexcept;
+
+    // compares remaining pages to iterate
+    bool operator==(const vaddr_range& other) const noexcept;
+};
 
 } // namespace kernel::mem::paging

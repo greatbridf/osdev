@@ -6,7 +6,7 @@
 #include <kernel/syscall.hpp>
 #include <kernel/vfs.hpp>
 
-int _syscall_symlink(interrupt_stack* data)
+long _syscall_symlink(interrupt_stack_normal* data)
 {
     SYSCALL_ARG1(const char __user*, target);
     SYSCALL_ARG2(const char __user*, linkpath);
@@ -28,7 +28,7 @@ int _syscall_symlink(interrupt_stack* data)
     return dent->ind->fs->symlink(dent, linkname.c_str(), target);
 }
 
-int _syscall_readlink(interrupt_stack* data)
+long _syscall_readlink(interrupt_stack_normal* data)
 {
     SYSCALL_ARG1(const char __user*, pathname);
     SYSCALL_ARG2(char __user*, buf);

@@ -1,11 +1,14 @@
 #pragma once
 
+#include <cstddef>
+
 #include <stdint.h>
 
 namespace kernel::async {
 
-using spinlock_t = uint32_t volatile;
-using preempt_count_t = size_t;
+using spinlock_t = unsigned long volatile;
+using lock_context_t = unsigned long;
+using preempt_count_t = std::size_t;
 
 void preempt_disable();
 void preempt_enable();
@@ -16,8 +19,8 @@ void init_spinlock(spinlock_t& lock);
 void spin_lock(spinlock_t& lock);
 void spin_unlock(spinlock_t& lock);
 
-size_t spin_lock_irqsave(spinlock_t& lock);
-void spin_unlock_irqrestore(spinlock_t& lock, size_t state);
+lock_context_t spin_lock_irqsave(spinlock_t& lock);
+void spin_unlock_irqrestore(spinlock_t& lock, lock_context_t context);
 
 class mutex {
 private:
@@ -31,8 +34,8 @@ public:
     void lock();
     void unlock();
 
-    uint32_t lock_irq();
-    void unlock_irq(uint32_t state);
+    lock_context_t lock_irq();
+    void unlock_irq(lock_context_t state);
 };
 
 class lock_guard {
@@ -50,7 +53,7 @@ public:
 class lock_guard_irq {
 private:
     mutex& m_mtx;
-    uint32_t state;
+    lock_context_t state;
 
 public:
     explicit inline lock_guard_irq(mutex& mtx)

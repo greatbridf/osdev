@@ -9,7 +9,6 @@
 #include <types/allocator.hpp>
 
 #include <fs/fat.hpp>
-#include <kernel/mm.hpp>
 #include <kernel/module.hpp>
 #include <kernel/vfs.hpp>
 
@@ -266,7 +265,7 @@ int fat32::inode_statx(dentry* ent, statx* st, unsigned int mask)
     }
 
     if (mask & STATX_BLOCKS) {
-        st->stx_blocks = align_up<12>(ent->ind->size) / 512;
+        st->stx_blocks = ((ent->ind->size + 0xfff) & ~0xfff) / 512;
         st->stx_blksize = 4096;
         st->stx_mask |= STATX_BLOCKS;
     }

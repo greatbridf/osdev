@@ -1,7 +1,7 @@
 #pragma once
 
-#include <map>
 #include <list>
+#include <map>
 #include <memory>
 #include <queue>
 #include <set>
@@ -13,8 +13,8 @@
 #include <stdint.h>
 #include <sys/types.h>
 
-#include <kernel/task/thread.hpp>
 #include <kernel/task/current.hpp>
+#include <kernel/task/thread.hpp>
 
 #include <types/allocator.hpp>
 #include <types/cplusplus.hpp>
@@ -22,12 +22,11 @@
 #include <types/types.h>
 
 #include <kernel/async/waitlist.hpp>
-#include <kernel/interrupt.h>
-#include <kernel/mm.hpp>
-#include <kernel/user/thread_local.hpp>
+#include <kernel/interrupt.hpp>
+#include <kernel/mem/mm_list.hpp>
 #include <kernel/signal.hpp>
-#include <kernel/task.h>
 #include <kernel/tty.hpp>
+#include <kernel/user/thread_local.hpp>
 #include <kernel/vfs.hpp>
 
 class process;
@@ -36,8 +35,6 @@ class proclist;
 
 inline process* volatile current_process;
 inline proclist* procs;
-
-inline tss32_t tss;
 
 struct process_attr {
     uint16_t system : 1;
@@ -296,13 +293,6 @@ void NORETURN init_scheduler(void);
 /// @return true if returned normally, false if being interrupted
 bool schedule(void);
 void NORETURN schedule_noreturn(void);
-
-constexpr uint32_t push_stack(uint32_t** stack, uint32_t val)
-{
-    --*stack;
-    **stack = val;
-    return val;
-}
 
 void k_new_thread(void (*func)(void*), void* data);
 

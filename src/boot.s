@@ -117,14 +117,14 @@ _fill_loop3:
 
     # create gdt
 	xor %eax, %eax # at 0x0000
-	mov %eax,   (%eax)
-	mov %eax,  4(%eax) # null descriptor
-	mov %eax,  8(%eax) # code segment lower
-	mov %eax, 16(%eax) # data segment lower
+	mov %eax, 0x00(%eax)
+	mov %eax, 0x04(%eax) # null descriptor
+	mov %eax, 0x08(%eax) # code segment lower
+	mov %eax, 0x10(%eax) # data segment lower
 	mov $0x00209a00, %ecx
-	mov %ecx, 12(%eax) # code segment higher
+	mov %ecx, 0x0c(%eax) # code segment higher
 	mov $0x00009200, %ecx
-	mov %ecx, 20(%eax) # data segment higher
+	mov %ecx, 0x14(%eax) # data segment higher
 
     # gdt descriptor
 	push %eax

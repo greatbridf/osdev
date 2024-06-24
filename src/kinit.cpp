@@ -7,9 +7,10 @@
 
 #include <kernel/hw/pci.hpp>
 #include <kernel/hw/timer.hpp>
-#include <kernel/interrupt.h>
+#include <kernel/interrupt.hpp>
 #include <kernel/log.hpp>
 #include <kernel/mem/paging.hpp>
+#include <kernel/mem/phys.hpp>
 #include <kernel/mem/types.hpp>
 #include <kernel/process.hpp>
 #include <kernel/syscall.hpp>
@@ -76,15 +77,13 @@ void NORETURN real_kernel_init()
 
     set_uname();
 
-    init_idt();
-    init_pic();
+    init_interrupt();
     hw::timer::init_pit();
 
-    kernel::kinit::init_pci();
+    init_pci();
 
     // TODO: remove this
     init_vfs();
-    // TODO: LONG MODE
     // init_syscall();
 
     init_scheduler();
@@ -108,6 +107,9 @@ static inline void setup_early_kernel_page_table()
 
     // clear kernel bss
     memset((void*)BSS_ADDR, 0x00, BSS_LENGTH);
+
+    // clear empty page
+    memset(mem::physaddr<void>{EMPTY_PAGE_PFN}, 0x00, 0x1000);
 }
 
 SECTION(".text.kinit")
@@ -134,6 +136,7 @@ static inline void setup_buddy(uintptr_t addr_max)
     using namespace kernel::mem::paging;
     constexpr auto idx = idx_all(0xffffff8040000000ULL);
 
+    addr_max += 0xfff;
     addr_max >>= 12;
     int count = (addr_max * sizeof(page) + 0x200000 - 1) / 0x200000;
 
@@ -191,15 +194,55 @@ static inline void save_memory_info(bootloader_data* data)
         sizeof(kernel::mem::info::e820_entries));
 }
 
+SECTION(".text.kinit")
+void setup_gdt()
+{
+    // user code
+    mem::gdt[3]  = 0x0020'fa00'0000'0000;
+    // user data
+    mem::gdt[4]  = 0x0000'f200'0000'0000;
+    // user code32
+    mem::gdt[5]  = 0x00cf'fa00'0000'ffff;
+    // user data32
+    mem::gdt[6]  = 0x00cf'f200'0000'ffff;
+    // reserved
+    mem::gdt[7]  = 0x0000'0000'0000'0000;
+
+    // TSS descriptor
+    mem::gdt[8]  = 0x0000'8900'0070'0067;
+    mem::gdt[9]  = 0x0000'0000'0000'0000;
+
+    // LDT descriptor
+    mem::gdt[10] = 0x0000'8200'0060'000f;
+    mem::gdt[11] = 0x0000'0000'0000'0000;
+
+    // thread local
+    mem::gdt[12] = 0x0000'0000'0000'0000;
+    mem::gdt[13] = 0x0000'0000'0000'0000;
+
+    uint64_t descriptor[] = {
+        0x005f'0000'0000'0000, (uintptr_t)(uint64_t*)mem::gdt
+    };
+
+    asm volatile(
+            "lgdt (%0)\n\t"
+            "mov $0x50, %%ax\n\t"
+            "lldt %%ax\n\t"
+            "mov $0x40, %%ax\n\t"
+            "ltr %%ax\n\t"
+            : : "r"((uintptr_t)descriptor+6): "ax"
+    );
+}
+
 extern "C" SECTION(".text.kinit")
 void NORETURN kernel_init(bootloader_data* data)
 {
     enable_sse();
 
     setup_early_kernel_page_table();
+    setup_gdt();
     save_memory_info(data);
 
-    // create struct pages
     uintptr_t addr_max = 0;
     for (int i = 0; i < (int)kernel::mem::info::e820_entry_count; ++i) {
         auto& ent = kernel::mem::info::e820_entries[i];

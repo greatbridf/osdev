@@ -8,6 +8,7 @@
 
 #include <types/types.h>
 
+#include <kernel/mem/paging.hpp>
 #include <kernel/signal.hpp>
 #include <kernel/user/thread_local.hpp>
 
@@ -27,13 +28,16 @@ public:
 
 private:
     struct kernel_stack {
-        std::byte* stack_base;
-        uint32_t* esp;
+        mem::paging::pfn_t pfn;
+        uintptr_t sp;
 
         kernel_stack();
         kernel_stack(const kernel_stack& other);
         kernel_stack(kernel_stack&& other);
         ~kernel_stack();
+
+        uint64_t pushq(uint64_t val);
+        uint32_t pushl(uint32_t val);
     };
 
 public:
@@ -47,8 +51,7 @@ public:
 
     std::string name {};
 
-    // TODO: LONG MODE
-    // segment_descriptor tls_desc {};
+    uint64_t tls_desc[2] {};
 
     explicit thread(std::string name, pid_t owner);
     thread(const thread& val, pid_t owner);

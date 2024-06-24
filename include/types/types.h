@@ -30,8 +30,6 @@
 #define unlikely(expr) (!!(expr))
 #endif
 
-typedef size_t refcount_t;
-
 #ifdef __cplusplus
 #include <types/cplusplus.hpp>
 #endif

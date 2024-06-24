@@ -116,7 +116,7 @@ extern "C" void interrupt_handler(
         } break;
         case 14: {
             kernel::mem::paging::handle_page_fault(with_code->error_code);
-            context->int_no = (unsigned long)context + 0x80;
+            context->int_no = (unsigned long)context + 0x88;
         }
         }
         freeze();
@@ -137,6 +137,6 @@ extern "C" void interrupt_handler(
     if (real_context->cs == 0x1b && current_thread->signals.pending_signal())
         current_thread->signals.handle(real_context, mmxregs);
 
-    context->int_no = (unsigned long)context + 0x78;
+    context->int_no = (unsigned long)context + 0x80;
     return;
 }

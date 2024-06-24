@@ -327,7 +327,7 @@ public:
             return 0;
         }
 
-        kmsg("[tmpfs] warning: file entry not found in vfe\n");
+        kmsg("[tmpfs] warning: file entry not found in vfe");
         return -EIO;
     }
 

@@ -50,6 +50,8 @@ _fill_loop1:
     adc $0, %edx
     loop _fill_loop1
 
+	mov $0x80000000, %edx
+
     # set PCD, PWT
     or $0x00000018, %ebx
     mov $256, %ecx

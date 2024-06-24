@@ -41,6 +41,15 @@ SECTIONS
         . = ALIGN(16);
         *(.rodata.kinit)
 
+        KINIT_START_ADDR = .;
+        QUAD(ABSOLUTE(KINIT_START));
+
+        KINIT_END_ADDR = .;
+        QUAD(ABSOLUTE(KINIT_END));
+
+        KINIT_PAGES = .;
+        QUAD((KINIT_END - KINIT_START) / 0x1000);
+
         . = ALIGN(16);
         start_ctors = .;
         KEEP(*(.init_array));

@@ -1,6 +1,6 @@
 physical memory
 
-0x0000 - 0x1000: early kernel data
+0x0000 - 0x1000: GDT, TSS, LDT and some early kernel data
 0x1000 - 0x2000: kernel stage1
 0x2000 - ?     : kernel image
 

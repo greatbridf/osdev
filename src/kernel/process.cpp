@@ -16,6 +16,7 @@
 
 #include <kernel/async/lock.hpp>
 #include <kernel/log.hpp>
+#include <kernel/mem/paging.hpp>
 #include <kernel/module.hpp>
 #include <kernel/process.hpp>
 #include <kernel/signal.hpp>
@@ -228,7 +229,7 @@ void process::send_signal(signo_type signal)
 
 void kernel_threadd_main(void)
 {
-    kmsg("kernel thread daemon started\n");
+    kmsg("kernel thread daemon started");
 
     for (;;) {
         if (kthreadd_new_thd_func) {
@@ -340,7 +341,7 @@ void proclist::kill(pid_t pid, int exit_code)
 
     // init should never exit
     if (proc.ppid == 0) {
-        kmsg("kernel panic: init exited!\n");
+        kmsg("kernel panic: init exited!");
         freeze();
     }
 
@@ -385,20 +386,17 @@ void proclist::kill(pid_t pid, int exit_code)
 
 static void release_kinit()
 {
-    // TODO: LONG MODE
-    // kernel::paccess pa(EARLY_KERNEL_PD_PAGE);
-    // auto pd = (pd_t)pa.ptr();
-    // assert(pd);
-    // (*pd)[0].v = 0;
+    // free .kinit
+    using namespace kernel::mem::paging;
+    extern uintptr_t KINIT_START_ADDR, KINIT_END_ADDR, KINIT_PAGES;
 
-    // // free pt#0
-    // __free_raw_page(0x00002);
+    auto range = vaddr_range{KERNEL_PAGE_TABLE_ADDR,
+        KINIT_START_ADDR, KINIT_END_ADDR, true};
 
-    // free .stage1 and .kinit
-    // for (uint32_t i = ((uint32_t)__stage1_start >> 12);
-    //         i < ((uint32_t)__kinit_end >> 12); ++i) {
-    //     __free_raw_page(i);
-    // }
+    for (auto pte : range)
+        pte.clear();
+
+    create_zone(0x2000, 0x2000 + 0x1000 * KINIT_PAGES);
 }
 
 void NORETURN _kernel_init(void)
@@ -417,14 +415,10 @@ void NORETURN _kernel_init(void)
         if (!mod)
             continue;
 
-        auto ret = insmod(mod);
-        if (ret == kernel::module::MODULE_SUCCESS)
+        if (auto ret = insmod(mod); ret == kernel::module::MODULE_SUCCESS)
             continue;
 
-        char buf[256];
-        snprintf(buf, sizeof(buf),
-            "[kernel] An error occured while loading \"%s\"\n", mod->name);
-        kmsg(buf);
+        kmsgf("[kernel] An error occured while loading \"%s\"", mod->name);
     }
 
     // mount fat32 /mnt directory
@@ -457,7 +451,7 @@ void NORETURN _kernel_init(void)
 
     d.exec_dent = fs::vfs_open(*fs::fs_root, types::path{d.argv[0].c_str()});
     if (!d.exec_dent) {
-        kmsg("kernel panic: init not found!\n");
+        kmsg("kernel panic: init not found!");
         freeze();
     }
 
@@ -530,8 +524,6 @@ void NORETURN init_scheduler(void)
 extern "C" void asm_ctx_switch(uint32_t** curr_esp, uint32_t** next_esp);
 bool schedule()
 {
-    freeze();
-
     if (kernel::async::preempt_count() != 0)
         return true;
 
@@ -550,6 +542,7 @@ bool schedule()
 
     curr_thd = current_thread;
 
+    freeze();
     // TODO: LONG MODE
     // current_thread = next_thd;
     // tss.esp0 = (uint32_t)next_thd->kstack.esp;

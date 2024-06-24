@@ -473,7 +473,7 @@ public:
             auto* port = new ahci_port(ghc_port);
             if (port->init() != 0) {
                 delete port;
-                kmsg("An error occurred while configuring an ahci port\n");
+                kmsg("An error occurred while configuring an ahci port");
                 continue;
             }
 

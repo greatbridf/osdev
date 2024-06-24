@@ -148,9 +148,8 @@ static inline void setup_buddy(uintptr_t addr_max)
     pdpte.set(PA_KERNEL_PAGE_TABLE, 0x105000);
 
     auto pd = pdpte.parse();
-    for (int i = 0; i < count; ++i, start_pfn += 0x200000) {
+    for (int i = 0; i < count; ++i, start_pfn += 0x200000)
         pd[std::get<3>(idx)+i].set(PA_KERNEL_DATA_HUGE, start_pfn);
-    }
 
     PAGE_ARRAY = (page*)0xffffff8040000000ULL;
     memset(PAGE_ARRAY, 0x00, addr_max * sizeof(page));
@@ -164,22 +163,22 @@ static inline void setup_buddy(uintptr_t addr_max)
 
         auto start = ent.base;
         auto end = start + ent.len;
-        if (end <= 0x106000)
+        if (end <= start_pfn)
             continue;
 
-        if (start < 0x106000)
-            start = 0x106000;
-
-        if (start < 0x200000 && end >= 0x200000) {
-            mem::paging::create_zone(start, 0x200000);
+        if (start < start_pfn)
             start = start_pfn;
-        }
 
         if (start > end)
             continue;
 
         mem::paging::create_zone(start, end);
     }
+
+    // free .stage1
+    create_zone(0x1000, 0x2000);
+    // unused space
+    create_zone(0x106000, 0x200000);
 }
 
 SECTION(".text.kinit")

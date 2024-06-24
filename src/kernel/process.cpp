@@ -440,7 +440,7 @@ void NORETURN _kernel_init(void)
     }
 
     current_process->attr.system = 0;
-    current_thread->attr |= kernel::task::thread::SYSTEM;
+    current_thread->attr &= ~kernel::task::thread::SYSTEM;
 
     types::elf::elf32_load_data d{
         .exec_dent{},
@@ -491,12 +491,13 @@ void NORETURN init_scheduler(void)
 
     asm volatile(
         "mov %0, %%rsp\n"
-        "sub $16, %%rsp\n"
+        "sub $24, %%rsp\n"
         "mov %=f, %%rbx\n"
-        "mov %%rbx, 8(%%rsp)\n" // return address
+        "mov %%rbx, (%%rsp)\n"   // return address
+        "mov %%rbx, 16(%%rsp)\n" // previous frame return address
         "xor %%rbx, %%rbx\n"
-        "mov %%rbx, (%%rsp)\n"  // previous rbp
-        "mov %%rsp, %%rbp\n"
+        "mov %%rbx, 8(%%rsp)\n"  // previous frame rbp
+        "mov %%rsp, %%rbp\n"     // current frame rbp
 
         "push %1\n"
 

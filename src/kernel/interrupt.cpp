@@ -96,34 +96,36 @@ void kernel::irq::register_handler(int irqno, irq_handler_t handler)
     s_irq_handlers[irqno].emplace_back(std::move(handler));
 }
 
-extern "C" void interrupt_handler(
-        interrupt_stack_head* context,
+static inline void fault_handler(
+        interrupt_stack_with_code* context,
         mmx_registers* mmxregs)
 {
-    // interrupt is a fault
-    if (context->int_no < 0x20) {
-        auto* with_code = (interrupt_stack_with_code*)context;
-
-        switch (context->int_no) {
-        case 6:
-        case 8: {
-            if (!current_process->attr.system)
-                kill_current(SIGSEGV); // noreturn
-        } break;
-        case 13: {
-            if (!current_process->attr.system)
-                kill_current(SIGILL); // noreturn
-        } break;
-        case 14: {
-            kernel::mem::paging::handle_page_fault(with_code->error_code);
-            context->int_no = (unsigned long)context + 0x88;
-        }
-        }
-        freeze();
+    switch (context->head.int_no) {
+    case 6:
+    case 8: {
+        if (!current_process->attr.system)
+            kill_current(SIGSEGV); // noreturn
+    } break;
+    case 13: {
+        if (!current_process->attr.system)
+            kill_current(SIGILL); // noreturn
+    } break;
+    case 14: {
+        kernel::mem::paging::handle_page_fault(context->error_code);
+        context->head.int_no = (unsigned long)context + 0x88;
+        return;
+    } break;
     }
-    auto* real_context = (interrupt_stack_normal*)context;
 
-    int irqno = context->int_no - 0x20;
+    // fault can not be resolved
+    freeze();
+}
+
+static inline void irq_handler(
+        interrupt_stack_normal* context,
+        mmx_registers* mmxregs)
+{
+    int irqno = context->head.int_no - 0x20;
 
     constexpr uint8_t PIC_EOI = 0x20;
 
@@ -134,9 +136,24 @@ extern "C" void interrupt_handler(
     for (const auto& handler : s_irq_handlers[irqno])
         handler();
 
-    if (real_context->cs == 0x1b && current_thread->signals.pending_signal())
-        current_thread->signals.handle(real_context, mmxregs);
+    // syscall by int 0x80
+    if (context->cs == 0x1b && current_thread->signals.pending_signal())
+        current_thread->signals.handle(context, mmxregs);
 
-    context->int_no = (unsigned long)context + 0x80;
-    return;
+    context->head.int_no = (unsigned long)context + 0x80;
+}
+
+extern "C" void interrupt_handler(
+        interrupt_stack_head* context,
+        mmx_registers* mmxregs)
+{
+    // interrupt is a fault
+    if (context->int_no < 0x20) {
+        auto* with_code = (interrupt_stack_with_code*)context;
+        fault_handler(with_code, mmxregs);
+    }
+    else {
+        auto* normal = (interrupt_stack_normal*)context;
+        irq_handler(normal, mmxregs);
+    }
 }

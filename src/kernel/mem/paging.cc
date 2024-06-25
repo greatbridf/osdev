@@ -395,13 +395,13 @@ vaddr_range& vaddr_range::operator++()
             // if idx4 is 0 after update, we have an overflow
             assert(idx4 != 0);
 
-            pdpt = pml4[idx4];
+            pdpt = __parse_pse(pml4[idx4], is_privilege);
         } while (false);
 
-        pd = pdpt[idx3];
+        pd = __parse_pse(pdpt[idx3], is_privilege);
     } while (false);
 
-    pt = pd[idx2];
+    pt = __parse_pse(pd[idx2], is_privilege);
     return *this;
 }
 

@@ -25,7 +25,7 @@ static inline void __user_push_string32(uintptr_t* sp, const char* str)
     size_t len = strlen(str);
 
     *sp -= (len + 1);
-    *sp &= 0xf; // align to 16 bytes
+    *sp &= ~0xf; // align to 16 bytes
 
     memcpy((void*)*sp, str, len + 1);
 }
@@ -95,7 +95,7 @@ int types::elf::elf32_load(types::elf::elf32_load_data& d)
             mm_list::map_args args{};
 
             args.vaddr = vaddr;
-            args.length = phent.filesz + (phent.vaddr & 0xfff);
+            args.length = flen;
             args.file_inode = exec->ind;
             args.file_offset = fileoff;
 

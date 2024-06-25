@@ -8,7 +8,7 @@
     if (1) {\
         char buf[512]; \
         snprintf(buf, sizeof(buf), fmt "\n" __VA_OPT__(,) __VA_ARGS__); \
-        if (console) console->print(buf); \
+        if (kernel::tty::console) kernel::tty::console->print(buf); \
     }
 
-#define kmsg(msg) if (console) console->print(msg "\n")
+#define kmsg(msg) if (kernel::tty::console) kernel::tty::console->print(msg "\n")

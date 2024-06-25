@@ -24,6 +24,7 @@
 #include <kernel/async/waitlist.hpp>
 #include <kernel/interrupt.hpp>
 #include <kernel/mem/mm_list.hpp>
+#include <kernel/mem/paging.hpp>
 #include <kernel/signal.hpp>
 #include <kernel/tty.hpp>
 #include <kernel/user/thread_local.hpp>
@@ -187,7 +188,7 @@ public:
     pid_t pgid {};
     pid_t sid {};
 
-    tty* control_tty {};
+    kernel::tty::tty* control_tty {};
     fs::dentry* root { fs::fs_root };
     std::set<pid_t> children;
 
@@ -289,7 +290,7 @@ public:
     void kill(pid_t pid, int exit_code);
 };
 
-void NORETURN init_scheduler(void);
+void NORETURN init_scheduler(kernel::mem::paging::pfn_t kernel_stack_pfn);
 /// @return true if returned normally, false if being interrupted
 bool schedule(void);
 void NORETURN schedule_noreturn(void);

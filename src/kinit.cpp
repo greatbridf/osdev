@@ -67,7 +67,7 @@ static inline void set_uname()
 }
 
 SECTION(".text.kinit")
-void NORETURN real_kernel_init()
+void NORETURN real_kernel_init(mem::paging::pfn_t kernel_stack_pfn)
 {
     // call global constructors
     // NOTE: the initializer of global objects MUST NOT contain
@@ -86,7 +86,7 @@ void NORETURN real_kernel_init()
     init_vfs();
     // init_syscall();
 
-    init_scheduler();
+    init_scheduler(kernel_stack_pfn);
 }
 
 SECTION(".text.kinit")
@@ -110,23 +110,6 @@ static inline void setup_early_kernel_page_table()
 
     // clear empty page
     memset(mem::physaddr<void>{EMPTY_PAGE_PFN}, 0x00, 0x1000);
-}
-
-SECTION(".text.kinit")
-static inline void make_early_kernel_stack()
-{
-    using namespace kernel::mem;
-    using namespace kernel::mem::paging;
-
-    constexpr auto idx = idx_all(0xffffffc040000000ULL);
-
-    // early kernel stack
-    auto pdpte = KERNEL_PAGE_TABLE[std::get<1>(idx)].parse()[std::get<2>(idx)];
-    pdpte.set(PA_KERNEL_PAGE_TABLE, alloc_page_table());
-
-    auto pd = pdpte.parse();
-    pd[std::get<3>(idx)].set(PA_KERNEL_DATA_HUGE,
-        page_to_pfn(alloc_pages(9)));
 }
 
 SECTION(".text.kinit")
@@ -209,11 +192,11 @@ void setup_gdt()
 
     // TSS descriptor
     mem::gdt[8]  = 0x0000'8900'0070'0067;
-    mem::gdt[9]  = 0x0000'0000'0000'0000;
+    mem::gdt[9]  = 0x0000'0000'ffff'ff00;
 
     // LDT descriptor
     mem::gdt[10] = 0x0000'8200'0060'000f;
-    mem::gdt[11] = 0x0000'0000'0000'0000;
+    mem::gdt[11] = 0x0000'0000'ffff'ff00;
 
     // thread local
     mem::gdt[12] = 0x0000'0000'0000'0000;
@@ -253,18 +236,20 @@ void NORETURN kernel_init(bootloader_data* data)
     setup_buddy(addr_max);
     init_allocator();
 
-    make_early_kernel_stack();
+    using namespace mem::paging;
+    auto kernel_stack_pfn = page_to_pfn(alloc_pages(9));
+    auto kernel_stack_ptr =
+        mem::physaddr<std::byte>{kernel_stack_pfn} + (1<<9) * 0x1000;
 
     asm volatile(
-            "mov $0xffffffc040200000, %%rsp\n\t"
+            "mov %1, %%rdi\n\t"
+            "mov %2, %%rsp\n\t"
             "xor %%rbp, %%rbp\n\t"
             "call *%0\n\t"
-            :
-            : "r"(real_kernel_init)
-            :
-            );
-    for (;;)
-        asm volatile("cli\n\thlt");
+            : : "r"(real_kernel_init), "g"(kernel_stack_pfn), "g"(kernel_stack_ptr):
+    );
+
+    freeze();
 }
 
 } // namespace kernel::kinit

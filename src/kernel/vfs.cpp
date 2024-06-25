@@ -783,13 +783,14 @@ ssize_t b_null_write(const char*, size_t n)
 
 static ssize_t console_read(char* buf, size_t buf_size, size_t n)
 {
-    return console->read(buf, buf_size, n);
+    return kernel::tty::console->read(buf, buf_size, n);
 }
+
 static ssize_t console_write(const char* buf, size_t n)
 {
     size_t orig_n = n;
     while (n--)
-        console->putchar(*(buf++));
+        kernel::tty::console->putchar(*(buf++));
 
     return orig_n;
 }

@@ -2,6 +2,8 @@
 
 #include <stdint.h>
 
+#include <types/types.h>
+
 #include <kernel/async/lock.hpp>
 #include <kernel/log.hpp>
 #include <kernel/mem/paging.hpp>
@@ -13,7 +15,18 @@
 constexpr std::size_t KERNEL_STACK_ORDER = 3; // 2^3 * 4096 = 32KB
 
 using namespace kernel::task;
+using namespace kernel::mem;
 using namespace kernel::mem::paging;
+
+struct PACKED tss64_t {
+    uint32_t _reserved1;
+    uint64_t rsp[3];
+    uint64_t _reserved2;
+    uint64_t ist[7];
+    uint64_t _reserved3;
+    uint32_t _reserved4;
+};
+constexpr physaddr<tss64_t> tss{0x00000070};
 
 thread::thread(std::string name, pid_t owner)
     : owner { owner }, attr { READY | SYSTEM }, name { name } { }
@@ -80,6 +93,11 @@ uint32_t thread::kernel_stack::pushl(uint32_t val)
     *(uint32_t*)sp = val;
     sp -= 4;
     return val;
+}
+
+void thread::kernel_stack::load_interrupt_stack() const
+{
+    tss->rsp[0] = sp;
 }
 
 void thread::set_attr(thd_attr_t new_attr)

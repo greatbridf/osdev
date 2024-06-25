@@ -289,7 +289,9 @@ int mm_list::mmap(const map_args& args)
 
     // PA_RW is set during page fault while PA_NXE is preserved
     // so we set PA_NXE now
-    psattr_t attributes = (flags & MM_EXECUTE) ? 0 : PA_NXE;
+    psattr_t attributes = PA_US;
+    if (!(flags & MM_EXECUTE))
+        attributes |= PA_NXE;
 
     if (flags & MM_MAPPED) {
         assert(finode);

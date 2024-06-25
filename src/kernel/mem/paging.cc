@@ -24,7 +24,7 @@ static inline void __page_fault_die(uintptr_t vaddr)
 
 static inline PSE __parse_pse(PSE pse, bool priv)
 {
-    auto attr = priv ? PA_KERNEL_PAGE_TABLE : PA_PAGE_TABLE;
+    auto attr = priv ? PA_KERNEL_PAGE_TABLE : PA_USER_PAGE_TABLE;
     if (!(pse.attributes() & PA_P))
         pse.set(attr, alloc_page_table());
 

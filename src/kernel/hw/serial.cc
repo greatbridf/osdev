@@ -3,35 +3,46 @@
 
 #include <kernel/hw/port.hpp>
 #include <kernel/irq.hpp>
+#include <kernel/log.hpp>
 #include <kernel/module.hpp>
 #include <kernel/tty.hpp>
+
+using namespace kernel::tty;
+using namespace kernel::hw;
 
 constexpr int PORT0 = 0x3f8;
 constexpr int PORT1 = 0x2f8;
 
-using port_group = kernel::hw::p8[6];
+using port_group = const p8[6];
 
-constexpr kernel::hw::p8 port0[] = {
-    kernel::hw::p8{PORT0+0},
-    kernel::hw::p8{PORT0+1},
-    kernel::hw::p8{PORT0+2},
-    kernel::hw::p8{PORT0+3},
-    kernel::hw::p8{PORT0+4},
-    kernel::hw::p8{PORT0+5},
+constexpr p8 port0[] = {
+    p8{PORT0+0},
+    p8{PORT0+1},
+    p8{PORT0+2},
+    p8{PORT0+3},
+    p8{PORT0+4},
+    p8{PORT0+5},
 };
 
-constexpr kernel::hw::p8 port1[] = {
-    kernel::hw::p8{PORT1+0},
-    kernel::hw::p8{PORT1+1},
-    kernel::hw::p8{PORT1+2},
-    kernel::hw::p8{PORT1+3},
-    kernel::hw::p8{PORT1+4},
-    kernel::hw::p8{PORT1+5},
+constexpr p8 port1[] = {
+    p8{PORT1+0},
+    p8{PORT1+1},
+    p8{PORT1+2},
+    p8{PORT1+3},
+    p8{PORT1+4},
+    p8{PORT1+5},
 };
 
-static inline bool _serial_has_data(port_group ports)
+static void _serial0_receive_data_interrupt()
 {
-    return *ports[5] & 1;
+    while (*port0[5] & 1)
+        console->commit_char(*port0[0]);
+}
+
+static void _serial1_receive_data_interrupt()
+{
+    while (*port1[5] & 1)
+        console->commit_char(*port1[0]);
 }
 
 static inline int _init_port(port_group ports)
@@ -60,55 +71,25 @@ static inline int _init_port(port_group ports)
 
     ports[1] = 0x01; // Enable interrupts #0: Received Data Available
 
-    // TODO: LONG MODE
-    // kernel::irq::register_handler(4, serial_receive_data_interrupt);
-
     return 0;
 }
 
-// TODO: LONG MODE
-// static void serial_receive_data_interrupt(void)
-// {
-//     while (_serial_has_data(PORT_SERIAL0)) {
-//         uint8_t data = serial_read_data(PORT_SERIAL0);
-//         console->commit_char(data);
-//     }
-// }
-// 
-// uint8_t serial_read_data(port_id_t port)
-// {
-//     while (is_serial_has_data(port) == 0)
-//         ;
-//     return asm_inb(port);
-// }
-// 
-// int32_t is_serial_ready_for_transmition(port_id_t port)
-// {
-//     return asm_inb(port + 5) & 0x20;
-// }
-// 
-// void serial_send_data(port_id_t port, uint8_t data)
-// {
-//     while (is_serial_ready_for_transmition(port) == 0)
-//         ;
-//     return asm_outb(port, data);
-// }
-
 class serial_tty : public virtual tty {
+    const p8* ports;
+
 public:
-    serial_tty(int id): id(id)
+    serial_tty(port_group ports, int id)
+        : tty{"ttyS"}, ports(ports)
     {
-        snprintf(name, sizeof(name), "ttyS%d", id);
+        name += '0'+id;
     }
 
     virtual void putchar(char c) override
     {
-        // TODO: LONG MODE
-        // serial_send_data(id, c);
+        while (!(*ports[5] & 0x20))
+            ; // nop
+        ports[0] = c;
     }
-
-public:
-    uint16_t id;
 };
 
 class serial_module : public virtual kernel::module::module {
@@ -117,8 +98,23 @@ public:
 
     virtual int init() override
     {
-        // TODO: LONG MODE
-        return kernel::module::MODULE_FAILED;
+        if (int ret = _init_port(port0); ret == 0) {
+            auto* dev = new serial_tty(port0, 0);
+            kernel::irq::register_handler(4, _serial0_receive_data_interrupt);
+
+            if (int ret = register_tty(dev); ret != 0)
+                kmsg("[serial] cannot register ttyS0");
+        }
+
+        if (int ret = _init_port(port1); ret == 0) {
+            auto* dev = new serial_tty(port1, 0);
+            kernel::irq::register_handler(3, _serial1_receive_data_interrupt);
+
+            if (int ret = register_tty(dev); ret != 0)
+                kmsg("[serial] cannot register ttyS1");
+        }
+
+        return kernel::module::MODULE_SUCCESS;
     }
 
 };

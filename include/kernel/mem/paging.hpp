@@ -45,12 +45,15 @@ constexpr psattr_t PA_MASK = 0xfff0000000000fffULL;
 
 constexpr psattr_t PA_DATA = PA_P | PA_RW | PA_NXE;
 constexpr psattr_t PA_KERNEL_DATA = PA_DATA | PA_G;
+constexpr psattr_t PA_USER_DATA = PA_DATA | PA_G | PA_US;
 
-constexpr psattr_t PA_PAGE_TABLE = PA_DATA;
+constexpr psattr_t PA_PAGE_TABLE = PA_P | PA_RW;
 constexpr psattr_t PA_KERNEL_PAGE_TABLE = PA_PAGE_TABLE | PA_G;
+constexpr psattr_t PA_USER_PAGE_TABLE = PA_PAGE_TABLE | PA_US;
 
 constexpr psattr_t PA_DATA_HUGE = PA_DATA | PA_PS;
 constexpr psattr_t PA_KERNEL_DATA_HUGE = PA_DATA_HUGE | PA_G;
+constexpr psattr_t PA_USER_DATA_HUGE = PA_DATA_HUGE | PA_US;
 
 constexpr psattr_t PA_ANONYMOUS_PAGE = PA_P | PA_US | PA_COW | PA_ANON;
 constexpr psattr_t PA_MMAPPED_PAGE = PA_US | PA_COW | PA_ANON | PA_MMAP;

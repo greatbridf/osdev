@@ -279,10 +279,7 @@ proclist::proclist()
 
     kernel::task::dispatcher::enqueue(current_thread);
 
-    // TODO: LONG MODE
-    // tss.ss0 = KERNEL_DATA_SEGMENT;
-    // tss.esp0 = (uint32_t)current_thread->kstack.esp;
-
+    current_thread->kstack.load_interrupt_stack();
     current_process->mms.switch_pd();
 
     if (1) {
@@ -388,19 +385,20 @@ static void release_kinit()
 {
     // free .kinit
     using namespace kernel::mem::paging;
-    extern uintptr_t KINIT_START_ADDR, KINIT_END_ADDR, KINIT_PAGES;
+    extern uintptr_t volatile KINIT_START_ADDR, KINIT_END_ADDR, KINIT_PAGES;
 
+    std::size_t pages = KINIT_PAGES;
     auto range = vaddr_range{KERNEL_PAGE_TABLE_ADDR,
         KINIT_START_ADDR, KINIT_END_ADDR, true};
-
     for (auto pte : range)
         pte.clear();
 
-    create_zone(0x2000, 0x2000 + 0x1000 * KINIT_PAGES);
+    create_zone(0x2000, 0x2000 + 0x1000 * pages);
 }
 
-void NORETURN _kernel_init(void)
+void NORETURN _kernel_init(kernel::mem::paging::pfn_t kernel_stack_pfn)
 {
+    kernel::mem::paging::free_pages(kernel_stack_pfn, 9);
     release_kinit();
 
     asm volatile("sti");
@@ -485,11 +483,12 @@ void k_new_thread(void (*func)(void*), void* data)
 }
 
 SECTION(".text.kinit")
-void NORETURN init_scheduler(void)
+void NORETURN init_scheduler(kernel::mem::paging::pfn_t kernel_stack_pfn)
 {
     procs = new proclist;
 
     asm volatile(
+        "mov %2, %%rdi\n"
         "mov %0, %%rsp\n"
         "sub $24, %%rsp\n"
         "mov %=f, %%rbx\n"
@@ -516,7 +515,7 @@ void NORETURN init_scheduler(void)
         "%=:\n"
         "ud2"
         :
-        : "a"(current_thread->kstack.sp), "c"(_kernel_init)
+        : "a"(current_thread->kstack.sp), "c"(_kernel_init), "g"(kernel_stack_pfn)
         : "memory");
 
     freeze();

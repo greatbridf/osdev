@@ -38,6 +38,8 @@ private:
 
         uint64_t pushq(uint64_t val);
         uint32_t pushl(uint32_t val);
+
+        void load_interrupt_stack() const;
     };
 
 public:

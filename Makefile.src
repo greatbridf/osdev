@@ -43,6 +43,7 @@ clean-all: clean
 .PHONY: debug
 debug:
 	$(GDB_BIN) --symbols=build/kernel.out --init-eval-command 'source pretty-print.py' --init-eval-command 'set pagination off' --init-eval-command 'target remote:1234' --init-eval-command 'layout regs' --eval-command 'hbr _kernel_init' --eval-command 'c'
+	-killall $(QEMU_BIN)
 
 build/boot.vdi: build/boot.img
 	-rm build/boot.vdi

@@ -126,10 +126,10 @@ private:
     char label[12];
     std::vector<cluster_t> fat;
 
+    // TODO: dirty flag
     struct buf_object {
         char* data;
         int ref;
-        // bool dirty;
     };
     std::map<cluster_t, buf_object> buf;
 

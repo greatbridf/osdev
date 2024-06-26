@@ -9,6 +9,8 @@
 #include <types/allocator.hpp>
 
 #include <fs/fat.hpp>
+#include <kernel/mem/paging.hpp>
+#include <kernel/mem/phys.hpp>
 #include <kernel/module.hpp>
 #include <kernel/vfs.hpp>
 
@@ -67,14 +69,15 @@ char* fat32::read_cluster(cluster_t no)
         ++buf.ref;
         return buf.data;
     }
-    auto* data = new char[sectors_per_cluster * SECTOR_SIZE];
+    // TODO: page buffer class
+    using namespace kernel::mem;
+    using namespace paging;
+    assert(sectors_per_cluster * SECTOR_SIZE <= 0x1000);
+
+    char* data = physaddr<char>{page_to_pfn(alloc_page())};
     _raw_read_cluster(data, no);
-    buf.emplace(no,
-        buf_object {
-            data,
-            1,
-            // false,
-        });
+    buf.emplace(no, buf_object { data, 1 });
+
     return data;
 }
 
@@ -207,51 +210,29 @@ fat32::fat32(dev_t _device)
 
 size_t fat32::read(inode* file, char* buf, size_t buf_size, size_t offset, size_t n)
 {
-    cluster_t next = cl(file);
     uint32_t cluster_size = SECTOR_SIZE * sectors_per_cluster;
     size_t orig_n = n;
 
-    do {
-        if (offset == 0) {
-            if (n > cluster_size) {
-                auto* data = read_cluster(next);
-                memcpy(buf, data, cluster_size);
-                release_cluster(next);
-
-                buf_size -= cluster_size;
-                buf += cluster_size;
-                n -= cluster_size;
-            } else {
-                auto* data = read_cluster(next);
-                auto read = _write_buf_n(buf, buf_size, data, n);
-                release_cluster(next);
-
-                return orig_n - n + read;
-            }
-        } else {
-            if (offset > cluster_size) {
-                offset -= cluster_size;
-            } else {
-                auto* data = read_cluster(next);
-
-                auto to_read = cluster_size - offset;
-                if (to_read > n)
-                    to_read = n;
-
-                auto read = _write_buf_n(buf, buf_size, data + offset, to_read);
-                buf += read;
-                n -= read;
-
-                release_cluster(next);
-                if (read != to_read) {
-                    return orig_n - n;
-                }
-
-                offset = 0;
-            }
+    for (cluster_t cno = cl(file); n && cno < EOC; cno = fat[cno]) {
+        if (offset >= cluster_size) {
+            offset -= cluster_size;
+            continue;
         }
-        next = fat[next];
-    } while (n && next < EOC);
+
+        auto* data = read_cluster(cno);
+        data += offset;
+
+        auto to_copy = std::min(n, cluster_size - offset);
+        auto ncopied = _write_buf_n(buf, buf_size, data, to_copy);
+
+        buf += ncopied, n -= ncopied;
+
+        release_cluster(cno);
+        if (ncopied != to_copy)
+            break;
+
+        offset = 0;
+    }
 
     return orig_n - n;
 }

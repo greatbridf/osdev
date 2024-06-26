@@ -262,8 +262,17 @@ void kernel::mem::paging::handle_page_fault(unsigned long err)
         __page_fault_die(vaddr);
     }
 
-    if (err & PAGE_FAULT_U && err & PAGE_FAULT_P)
-        kill_current(SIGSEGV);
+    // user access to a present page caused the fault
+    // check access rights
+    if (err & PAGE_FAULT_U && err & PAGE_FAULT_P) {
+        // write to read only pages
+        if (err & PAGE_FAULT_W && !(mm_area->flags & MM_WRITE))
+            kill_current(SIGSEGV);
+
+        // execute from non-executable pages
+        if (err & PAGE_FAULT_I && !(mm_area->flags & MM_EXECUTE))
+            kill_current(SIGSEGV);
+    }
 
     auto idx = idx_all(vaddr);
 

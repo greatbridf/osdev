@@ -183,8 +183,8 @@ int types::elf::elf32_load(types::elf::elf32_load_data& d)
     __user_push32(sp, 0);
 
     // push argv
-    for (auto ent : args)
-        __user_push32(sp, ent);
+    for (int i = args.size()-1; i >= 0; --i)
+        __user_push32(sp, args[i]);
 
     // push argc
     __user_push32(sp, args.size());

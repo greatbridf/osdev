@@ -164,27 +164,25 @@ int thread::set_thread_area(kernel::user::user_desc* ptr)
     }
 
     if (ptr->entry_number == -1U)
-        ptr->entry_number = 6;
+        ptr->entry_number = 7;
     else
         return -1;
 
     if (!ptr->seg_32bit)
         return -1;
 
-    tls_desc[0]  = ptr->limit & 0x0000'ffff;
-    tls_desc[0] |= (ptr->base_addr & 0x00ff'ffffULL) << 16;
-    tls_desc[0] |= 0xe2'00'0000'0000;
-    tls_desc[0] |= (ptr->limit & 0x000f'0000ULL) << (48-16);
-    tls_desc[0] |= ((ptr->limit_in_pages + 0ULL) << 55);
-    tls_desc[0] |= (ptr->base_addr & 0xf000'0000) << (56-28);
-
-    tls_desc[1]  = 0; // 63:32: all 0, 31:0: ptr->base_addr[63:32]
+    tls_desc32  = ptr->limit & 0x0'ffff;
+    tls_desc32 |= (ptr->base_addr & 0x00'ffffffULL) << 16;
+    tls_desc32 |= 0x4'0'f2'000000'0000;
+    tls_desc32 |= (ptr->limit & 0xf'0000ULL) << (48-16);
+    tls_desc32 |= ((ptr->limit_in_pages + 0ULL) << 55);
+    tls_desc32 |= (ptr->base_addr & 0xff'000000ULL) << (56-24);
 
     return 0;
 }
 
-int thread::load_thread_area() const
+int thread::load_thread_area32() const
 {
-    kernel::user::load_thread_area(tls_desc[0], tls_desc[1]);
+    kernel::user::load_thread_area32(tls_desc32);
     return 0;
 }

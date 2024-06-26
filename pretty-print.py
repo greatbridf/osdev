@@ -94,30 +94,15 @@ class stringPrinter:
         self.val = val
 
     def to_string(self):
-        return self.val['m_data']
+        if self.val['m_data']['stackdata']['end'] == 0:
+            return self.val['m_data']['stackdata']['str'].string()
+        return self.val['m_data']['heapdata']['m_ptr'].string()
+
+    def num_children(self):
+        return 0
 
     def display_hint(self):
         return 'string'
-
-    def children(self):
-        return
-
-        yield 'str', self.val['m_data']
-
-        if self.val['m_data'] == 0:
-            return
-
-        yield 'length', self.val['m_size'] - 1
-
-        ptr = self.val['m_data']
-        i = 0
-
-        while ptr.dereference() != 0:
-            yield '[%d]' % i, ptr.dereference()
-            ptr += 1
-            i += 1
-
-        yield '[%d]' % i, 0
 
 class listPrinter:
     def __init__(self, val):
@@ -292,7 +277,7 @@ def build_pretty_printer(val):
     if re.compile(r"^std::impl::rbtree<.*, .*, .*>::_iterator<.*?>$").match(typename):
         return rbtreeIteratorPrinter(val)
 
-    if re.compile(r"^types::string<.*>$").match(typename):
+    if re.compile(r"^std::basic_string<.*>$").match(typename):
         return stringPrinter(val)
 
     return None

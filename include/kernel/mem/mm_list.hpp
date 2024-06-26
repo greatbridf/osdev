@@ -11,7 +11,7 @@ namespace kernel::mem {
 
 constexpr uintptr_t KERNEL_SPACE_START    = 0x8000000000000000ULL;
 constexpr uintptr_t USER_SPACE_MEMORY_TOP = 0x0000800000000000ULL;
-constexpr uintptr_t MMAP_MIN_ADDR         = 0x0000600000000000ULL;
+constexpr uintptr_t MMAP_MIN_ADDR         = 0x0000000000001000ULL;
 constexpr uintptr_t STACK_MIN_ADDR        = 0x0000700000000000ULL;
 
 class mm_list {

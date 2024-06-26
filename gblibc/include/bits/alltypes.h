@@ -13,7 +13,6 @@ typedef size_t blkcnt_t;
 struct timespec {
     time_t tv_sec;
     long tv_nsec;
-    int : 32; // padding
 };
 
 struct timeval {

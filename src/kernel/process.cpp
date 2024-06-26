@@ -229,7 +229,7 @@ void process::send_signal(signo_type signal)
 
 void kernel_threadd_main(void)
 {
-    kmsg("kernel thread daemon started");
+    kmsg("[kernel] kthread daemon started");
 
     for (;;) {
         if (kthreadd_new_thd_func) {
@@ -248,20 +248,27 @@ void kernel_threadd_main(void)
             // TODO
             (void)func, (void)data;
             assert(false);
-
-            // syscall_fork
-            // int ret = syscall(0x00);
-
-            // if (ret == 0) {
-            //     // child process
-            //     func(data);
-            //     // the function shouldn't return here
-            //     assert(false);
-            // }
         }
         // TODO: sleep here to wait for new_kernel_thread event
         asm volatile("hlt");
     }
+}
+
+static inline void __spawn(kernel::task::thread& thd, uintptr_t entry)
+{
+    auto prev_sp = thd.kstack.sp;
+
+    // return(start) address
+    thd.kstack.pushq(entry);
+    thd.kstack.pushq(0x200);       // flags
+    thd.kstack.pushq(0);           // 0 for alignment
+    thd.kstack.pushq(0);           // rbx
+    thd.kstack.pushq(0);           // rbp
+    thd.kstack.pushq(0);           // r12
+    thd.kstack.pushq(0);           // r13
+    thd.kstack.pushq(0);           // r14
+    thd.kstack.pushq(0);           // r15
+    thd.kstack.pushq(prev_sp);     // previous sp
 }
 
 SECTION(".text.kinit")
@@ -271,8 +278,8 @@ proclist::proclist()
     auto& init = real_emplace(1, 0);
     assert(init.pid == 1 && init.ppid == 0);
 
-    auto& thd = *init.thds.begin();
-    thd.name.assign("[kernel init]");
+    auto thd = init.thds.begin();
+    thd->name.assign("[kernel init]");
 
     current_process = &init;
     current_thread = &thd;
@@ -288,29 +295,12 @@ proclist::proclist()
         assert(proc.pid == 0 && proc.ppid == 0);
 
         // create thread
-        auto& thd = *proc.thds.begin();
-        thd.name.assign("[kernel thread daemon]");
+        auto thd = proc.thds.begin();
+        thd->name.assign("[kernel thread daemon]");
 
-        // TODO: LONG MODE
-        // auto* esp = &thd.kstack.esp;
-        // auto old_esp = (uint32_t)thd.kstack.esp;
+        __spawn(*thd, (uintptr_t)kernel_threadd_main);
 
-        // // return(start) address
-        // push_stack(esp, (uint32_t)kernel_threadd_main);
-        // // ebx
-        // push_stack(esp, 0);
-        // // edi
-        // push_stack(esp, 0);
-        // // esi
-        // push_stack(esp, 0);
-        // // ebp
-        // push_stack(esp, 0);
-        // // eflags
-        // push_stack(esp, 0x200);
-        // // original esp
-        // push_stack(esp, old_esp);
-
-        // kernel::task::dispatcher::enqueue(&thd);
+        kernel::task::dispatcher::enqueue(&thd);
     }
 }
 
@@ -326,6 +316,12 @@ void proclist::kill(pid_t pid, int exit_code)
 {
     auto& proc = this->find(pid);
 
+    // init should never exit
+    if (proc.ppid == 0) {
+        kmsg("kernel panic: init exited!");
+        freeze();
+    }
+
     // put all threads into sleep
     for (auto& thd : proc.thds)
         thd.set_attr(kernel::task::thread::ZOMBIE);
@@ -335,12 +331,6 @@ void proclist::kill(pid_t pid, int exit_code)
 
     // unmap all user memory areas
     proc.mms.clear();
-
-    // init should never exit
-    if (proc.ppid == 0) {
-        kmsg("kernel panic: init exited!");
-        freeze();
-    }
 
     // make child processes orphans (children of init)
     this->make_children_orphans(pid);
@@ -456,21 +446,24 @@ void NORETURN _kernel_init(kernel::mem::paging::pfn_t kernel_stack_pfn)
     int ret = types::elf::elf32_load(d);
     assert(ret == 0);
 
+    int ds = 0x33, cs = 0x2b;
+
     asm volatile(
-        "mov $0x23, %%ax\n"
+        "mov %0, %%rax\n"
         "mov %%ax, %%ds\n"
         "mov %%ax, %%es\n"
         "mov %%ax, %%fs\n"
         "mov %%ax, %%gs\n"
 
-        "push $0x23\n"
-        "push %0\n"
+        "push %%rax\n"
+        "push %2\n"
         "push $0x200\n"
-        "push $0x1b\n"
         "push %1\n"
+        "push %3\n"
 
         "iretq\n"
-        : : "g"(d.sp), "g"(d.ip) : "eax", "memory");
+        : : "g"(ds), "g"(cs), "g"(d.sp),
+            "g"(d.ip) : "eax", "memory");
 
     freeze();
 }
@@ -521,38 +514,34 @@ void NORETURN init_scheduler(kernel::mem::paging::pfn_t kernel_stack_pfn)
     freeze();
 }
 
-extern "C" void asm_ctx_switch(uint32_t** curr_esp, uint32_t** next_esp);
+extern "C" void asm_ctx_switch(uintptr_t* curr_sp, uintptr_t* next_sp);
+
+extern "C" void after_ctx_switch()
+{
+    current_thread->kstack.load_interrupt_stack();
+    current_thread->load_thread_area32();
+}
+
 bool schedule()
 {
     if (kernel::async::preempt_count() != 0)
         return true;
+    return true;
 
     auto* next_thd = kernel::task::dispatcher::next();
-    process* proc = nullptr;
-    kernel::task::thread* curr_thd = nullptr;
 
-    if (current_thread == next_thd)
-        goto _end;
+    if (current_thread != next_thd) {
+        auto* proc = &procs->find(next_thd->owner);
+        if (current_process != proc) {
+            proc->mms.switch_pd();
+            current_process = proc;
+        }
 
-    proc = &procs->find(next_thd->owner);
-    if (current_process != proc) {
-        proc->mms.switch_pd();
-        current_process = proc;
+        auto* curr_thd = current_thread;
+        current_thread = next_thd;
+
+        asm_ctx_switch(&curr_thd->kstack.sp, &next_thd->kstack.sp);
     }
-
-    curr_thd = current_thread;
-
-    freeze();
-    // TODO: LONG MODE
-    // current_thread = next_thd;
-    // tss.esp0 = (uint32_t)next_thd->kstack.esp;
-
-    // next_thd->load_thread_area();
-
-    // asm_ctx_switch(&curr_thd->kstack.esp, &next_thd->kstack.esp);
-    // tss.esp0 = (uint32_t)curr_thd->kstack.esp;
-
-_end:
 
     return current_thread->signals.pending_signal() == 0;
 }

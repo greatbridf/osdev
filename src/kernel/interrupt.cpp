@@ -14,6 +14,7 @@
 #include <kernel/log.hpp>
 #include <kernel/mem/paging.hpp>
 #include <kernel/process.hpp>
+#include <kernel/syscall.hpp>
 #include <kernel/vfs.hpp>
 
 #define KERNEL_INTERRUPT_GATE_TYPE (0x8e)
@@ -61,6 +62,7 @@ void kernel::kinit::init_interrupt()
 {
     for (int i = 0; i < 0x30; ++i)
         set_idt_entry(IDT, i, ISR_START_ADDR+8*i, 0x08, KERNEL_INTERRUPT_GATE_TYPE);
+    set_idt_entry(IDT, 0x80, ISR_START_ADDR+8*0x80, 0x08, USER_INTERRUPT_GATE_TYPE);
 
     uint64_t idt_descriptor[2];
     idt_descriptor[0] = (sizeof(IDT_entry) * 256) << 48;
@@ -98,7 +100,7 @@ void kernel::irq::register_handler(int irqno, irq_handler_t handler)
 
 static inline void fault_handler(
         interrupt_stack_with_code* context,
-        mmx_registers* mmxregs)
+        mmx_registers*)
 {
     switch (context->head.int_no) {
     case 6:
@@ -123,7 +125,7 @@ static inline void fault_handler(
 
 static inline void irq_handler(
         interrupt_stack_normal* context,
-        mmx_registers* mmxregs)
+        mmx_registers*)
 {
     int irqno = context->head.int_no - 0x20;
 
@@ -135,12 +137,6 @@ static inline void irq_handler(
 
     for (const auto& handler : s_irq_handlers[irqno])
         handler();
-
-    // syscall by int 0x80
-    if (context->cs == 0x1b && current_thread->signals.pending_signal())
-        current_thread->signals.handle(context, mmxregs);
-
-    context->head.int_no = (unsigned long)context + 0x80;
 }
 
 extern "C" void interrupt_handler(
@@ -152,8 +148,14 @@ extern "C" void interrupt_handler(
         auto* with_code = (interrupt_stack_with_code*)context;
         fault_handler(with_code, mmxregs);
     }
+    else if (context->int_no == 0x80) { // syscall by int 0x80
+        auto* normal = (interrupt_stack_normal*)context;
+        kernel::handle_syscall32(context->s_regs.rax, normal, mmxregs);
+        context->int_no = (unsigned long)context + 0x80;
+    }
     else {
         auto* normal = (interrupt_stack_normal*)context;
         irq_handler(normal, mmxregs);
+        context->int_no = (unsigned long)context + 0x80;
     }
 }

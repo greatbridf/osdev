@@ -52,13 +52,13 @@ public:
 //  gdt[4]:  user data
 //  gdt[5]:  user code compability mode
 //  gdt[6]:  user data compability mode
-//  gdt[7]:  reserved
+//  gdt[7]:  thread local 32bit
 //  gdt[8]:  tss descriptor low
 //  gdt[9]:  tss descriptor high
 //  gdt[10]: ldt descriptor low
 //  gdt[11]: ldt descriptor high
-//  gdt[12]: thread local(in ldt)
-//  gdt[13]: thread local(in ldt)
+//  gdt[12]: null segment(in ldt)
+//  gdt[13]: thread local 64bit(in ldt)
 // &gdt[14]: tss of 0x68 bytes from here
 constexpr physaddr<uint64_t> gdt{0x00000000 + 1 - 1};
 

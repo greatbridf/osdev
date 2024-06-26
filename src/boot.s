@@ -98,7 +98,7 @@ _fill_loop3:
     # set msr
     mov $0xc0000080, %ecx
     rdmsr
-    or $0x900, %eax # set LME, NXE
+    or $0x901, %eax # set LME, NXE, SCE
     wrmsr
 
     # set cr4

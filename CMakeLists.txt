@@ -43,9 +43,11 @@ set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
                         src/kernel/interrupt.cpp
                         src/kernel/process.cpp
                         src/kernel/tty.cpp
-                        # src/kernel/syscall.cpp
+                        src/kernel/syscall.cpp
                         src/kernel/syscall/fileops.cc
+                        src/kernel/syscall/infoops.cc
                         src/kernel/syscall/mount.cc
+                        src/kernel/syscall/procops.cc
                         src/kernel/mem/mm_list.cc
                         src/kernel/mem/paging.cc
                         src/kernel/mem/slab.cc

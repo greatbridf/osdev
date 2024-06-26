@@ -84,7 +84,7 @@ void NORETURN real_kernel_init(mem::paging::pfn_t kernel_stack_pfn)
 
     // TODO: remove this
     init_vfs();
-    // init_syscall();
+    init_syscall_table();
 
     init_scheduler(kernel_stack_pfn);
 }
@@ -187,7 +187,7 @@ void setup_gdt()
     mem::gdt[5]  = 0x00cf'fa00'0000'ffff;
     // user data32
     mem::gdt[6]  = 0x00cf'f200'0000'ffff;
-    // reserved
+    // thread load 32bit
     mem::gdt[7]  = 0x0000'0000'0000'0000;
 
     // TSS descriptor
@@ -195,11 +195,12 @@ void setup_gdt()
     mem::gdt[9]  = 0x0000'0000'ffff'ff00;
 
     // LDT descriptor
-    mem::gdt[10] = 0x0000'8200'0060'000f;
+    mem::gdt[10] = 0x0000'8200'0060'001f;
     mem::gdt[11] = 0x0000'0000'ffff'ff00;
 
-    // thread local
+    // null segment
     mem::gdt[12] = 0x0000'0000'0000'0000;
+    // thread local 64bit
     mem::gdt[13] = 0x0000'0000'0000'0000;
 
     uint64_t descriptor[] = {
@@ -212,7 +213,7 @@ void setup_gdt()
             "lldt %%ax\n\t"
             "mov $0x40, %%ax\n\t"
             "ltr %%ax\n\t"
-            : : "r"((uintptr_t)descriptor+6): "ax"
+            : : "r"((uintptr_t)descriptor+6): "ax", "memory"
     );
 }
 

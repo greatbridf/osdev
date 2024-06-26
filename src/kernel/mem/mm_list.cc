@@ -48,7 +48,12 @@ mm_list::mm_list(const mm_list& other): mm_list{}
     m_areas = other.m_areas;
 
     using namespace paging;
-    for (const auto& area : m_areas) {
+    for (auto iter = m_areas.begin(); iter != m_areas.end(); ++iter) {
+        auto& area = *iter;
+
+        if (area.flags & MM_BREAK)
+            m_brk = iter;
+
         auto this_iter = vaddr_range{m_pt, area.start, area.end};
         auto other_iter = vaddr_range{other.m_pt, area.start, area.end};
 
@@ -104,11 +109,7 @@ bool mm_list::is_avail(uintptr_t addr) const
 
 uintptr_t mm_list::find_avail(uintptr_t hint, size_t len) const
 {
-    auto addr = hint;
-
-    // use default value of mmapp'ed area
-    if (!addr)
-        addr = MMAP_MIN_ADDR;
+    auto addr = std::max(hint, MMAP_MIN_ADDR);
 
     while (!is_avail(addr, len)) {
         auto iter = m_areas.lower_bound(addr);
@@ -128,6 +129,7 @@ void mm_list::switch_pd() const noexcept
 
 int mm_list::register_brk(uintptr_t addr)
 {
+    assert(m_brk == m_areas.end());
     if (!is_avail(addr))
         return -ENOMEM;
 
@@ -155,7 +157,7 @@ uintptr_t mm_list::set_brk(uintptr_t addr)
         pte.set(PA_ANONYMOUS_PAGE | PA_NXE, EMPTY_PAGE_PFN);
 
     m_brk->end = addr;
-    return curbrk;
+    return m_brk->end;
 }
 
 void mm_list::clear()
@@ -164,6 +166,7 @@ void mm_list::clear()
         unmap(iter);
 
     m_areas.clear();
+    m_brk = m_areas.end();
 }
 
 mm_list::iterator mm_list::split(iterator area, uintptr_t addr)
@@ -177,11 +180,12 @@ mm_list::iterator mm_list::split(iterator area, uintptr_t addr)
     if (area->mapped_file)
         new_file_offset = area->file_offset + old_len;
 
-    auto [ iter, inserted ] =
-        m_areas.emplace(addr, area->flags, area->end,
-                area->mapped_file, new_file_offset);
-
+    auto new_end = area->end;
     area->end = addr;
+
+    auto [ iter, inserted ] =
+        m_areas.emplace(addr, area->flags, new_end,
+                area->mapped_file, new_file_offset);
 
     assert(inserted);
     return iter;

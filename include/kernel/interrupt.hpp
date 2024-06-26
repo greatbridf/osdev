@@ -9,8 +9,8 @@ struct saved_regs {
     unsigned long rbx;
     unsigned long rcx;
     unsigned long rdx;
-    unsigned long rsi;
     unsigned long rdi;
+    unsigned long rsi;
     unsigned long r8;
     unsigned long r9;
     unsigned long r10;

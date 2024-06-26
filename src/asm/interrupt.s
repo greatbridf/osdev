@@ -1,5 +1,8 @@
 .text
 
+.extern after_ctx_switch
+.globl ISR_stub_restore
+
 ISR_stub:
 	sub $0x78, %rsp
 	mov %rax,  0x00(%rsp)
@@ -33,6 +36,7 @@ ISR_stub:
 	mov %rsp, %rsi
 	call interrupt_handler
 
+ISR_stub_restore:
 	fxrstor (%rsp)
 	mov %rbx, %rsp
 
@@ -55,75 +59,45 @@ ISR_stub:
 	mov 0x78(%rsp), %rsp
 	iretq
 
-.globl syscall_stub
-.type  syscall_stub @function
-syscall_stub:
-    # pushal
-
-    # save current esp
-    mov %esp, %ebx
-
-    # stack alignment
-    and $0xfffffff0, %esp
-
-    # save mmx registers
-    sub $(512 + 16), %esp
-    fxsave 16(%esp)
-
-    # save pointers to context and mmx registers
-    mov %ebx, (%esp) # pointer to context
-    lea 16(%esp), %eax
-    mov %eax, 4(%esp) # pointer to mmx registers
-
-    # TODO: LONG MODE
-    # call syscall_entry
-
-    # restore mmx registers
-    fxrstor 16(%esp)
-
-    # restore stack
-    mov %ebx, %esp
-
-.globl _syscall_stub_fork_return
-.type  _syscall_stub_fork_return @function
-_syscall_stub_fork_return:
-    # popal
-    iretq
-
 # parameters
-# #1: esp* curr_esp
-# #2: esp* next_esp
+# #1: sp* current_task_sp
+# #2: sp* target_task_sp
 .globl asm_ctx_switch
 .type  asm_ctx_switch @function
 asm_ctx_switch:
-    movl 4(%esp), %ecx
-    movl 8(%esp), %eax
-
-    pushq $_ctx_switch_return
-    push %rbx
-    push %rdi
-    push %rsi
-    push %rbp
     pushf
+	sub $0x38, %rsp  # extra 8 bytes to align to 16 bytes
 
-    # push esp to restore
-    push (%rcx)
+    mov %rbx, 0x08(%rsp)
+	mov %rbp, 0x10(%rsp)
+	mov %r12, 0x18(%rsp)
+	mov %r13, 0x20(%rsp)
+	mov %r14, 0x28(%rsp)
+	mov %r15, 0x30(%rsp)
 
-    mov %esp, (%rcx)
-    mov (%rax), %esp
+    push (%rdi) 	 # save sp of previous stack frame of current
+	                 # acts as saving bp
 
-    # restore esp
-    pop (%rax)
+    mov %rsp, (%rdi) # save sp of current stack
+    mov (%rsi), %rsp # load sp of target stack
 
+    pop (%rsi)       # load sp of previous stack frame of target
+	                 # acts as restoring previous bp
+
+	pop %rax         # align to 16 bytes
+
+	call after_ctx_switch
+
+	mov %r15, 0x28(%rsp)
+	mov %r14, 0x20(%rsp)
+	mov %r13, 0x18(%rsp)
+	mov %r12, 0x10(%rsp)
+	mov %rbp, 0x08(%rsp)
+    mov %rbx, 0x00(%rsp)
+
+	add $0x30, %rsp
     popf
-    pop %rbp
-    pop %rsi
-    pop %rdi
-    pop %rbx
 
-    ret
-
-_ctx_switch_return:
     ret
 
 .altmacro
@@ -134,7 +108,7 @@ _ctx_switch_return:
 .endm
 
 .set i, 0
-.rept 48
+.rept 0x80+1
 	build_isr %i
 	.set i, i+1
 .endr

@@ -53,13 +53,13 @@ public:
 
     std::string name {};
 
-    uint64_t tls_desc[2] {};
+    uint64_t tls_desc32;
 
     explicit thread(std::string name, pid_t owner);
     thread(const thread& val, pid_t owner);
 
     int set_thread_area(user::user_desc* ptr);
-    int load_thread_area() const;
+    int load_thread_area32() const;
 
     void set_attr(thd_attr_t new_attr);
 

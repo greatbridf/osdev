@@ -38,51 +38,62 @@ static struct zone_info {
 
 static mutex zone_lock;
 
-constexpr int _msb(std::size_t x)
+constexpr unsigned _msb(std::size_t x)
 {
-    int n = 0;
+    unsigned n = 0;
     while (x >>= 1)
         n++;
     return n;
 }
 
-constexpr pfn_t buddy(pfn_t pfn, int order)
+constexpr pfn_t buddy(pfn_t pfn, unsigned order)
 {
     return pfn ^ (1 << (order + 12));
 }
 
-constexpr pfn_t parent(pfn_t pfn, int order)
+constexpr pfn_t parent(pfn_t pfn, unsigned order)
 {
     return pfn & ~(1 << (order + 12));
 }
 
 // call with zone_lock held
-static inline void _zone_list_insert(int order, page* zone)
+static inline void _zone_list_insert(unsigned order, page* zone)
 {
+    assert(zone->flags & PAGE_PRESENT && zone->flags & PAGE_BUDDY);
+    assert((zone->flags & 0xff) == 0);
+    zone->flags |= order;
+
     zones[order].count++;
     list_insert(&zones[order].next, zone);
 }
 
 // call with zone_lock held
-static inline void _zone_list_remove(int order, page* zone)
+static inline void _zone_list_remove(unsigned order, page* zone)
 {
+    assert(zone->flags & PAGE_PRESENT && zone->flags & PAGE_BUDDY);
+    assert(zones[order].count > 0 && (zone->flags & 0xff) == order);
+    zone->flags &= ~0xff;
+
     zones[order].count--;
     list_remove(&zones[order].next, zone);
 }
 
 // call with zone_lock held
-static inline page* _zone_list_get(int order)
+static inline page* _zone_list_get(unsigned order)
 {
     if (zones[order].count == 0)
         return nullptr;
 
     zones[order].count--;
-    return list_get(&zones[order].next);
+    auto* pg = list_get(&zones[order].next);
+
+    assert((pg->flags & 0xff) == order);
+    return pg;
 }
 
 // where order represents power of 2
 // call with zone_lock held
-static inline page* _create_zone(pfn_t pfn, int order)
+static inline page* _create_zone(pfn_t pfn, unsigned order)
 {
     page* zone = pfn_to_page(pfn);
 
@@ -94,7 +105,7 @@ static inline page* _create_zone(pfn_t pfn, int order)
 }
 
 // call with zone_lock held
-static inline void _split_zone(page* zone, int order, int target_order)
+static inline void _split_zone(page* zone, unsigned order, unsigned target_order)
 {
     while (order > target_order) {
         pfn_t pfn = page_to_pfn(zone);
@@ -102,12 +113,15 @@ static inline void _split_zone(page* zone, int order, int target_order)
 
         order--;
     }
+
+    zone->flags &= ~0xff;
+    zone->flags |= target_order;
 }
 
 // call with zone_lock held
-static inline page* _alloc_zone(int order)
+static inline page* _alloc_zone(unsigned order)
 {
-    for (int i = order; i < 52; ++i) {
+    for (unsigned i = order; i < 52; ++i) {
         auto zone = _zone_list_get(i);
         if (!zone)
             continue;
@@ -136,7 +150,7 @@ void kernel::mem::paging::create_zone(uintptr_t start, uintptr_t end)
     lock_guard_irq lock{zone_lock};
 
     unsigned long low = start;
-    for (int i = 0; i < _msb(end); ++i, low >>= 1) {
+    for (unsigned i = 0; i < _msb(end); ++i, low >>= 1) {
         if (!(low & 1))
             continue;
         _create_zone(low << (12+i), i);
@@ -145,7 +159,7 @@ void kernel::mem::paging::create_zone(uintptr_t start, uintptr_t end)
 
     low = 1 << _msb(end);
     while (low < end) {
-        int order = _msb(end - low);
+        unsigned order = _msb(end - low);
         _create_zone(low << 12, order);
         low |= (1 << order);
     }
@@ -162,7 +176,7 @@ void kernel::mem::paging::mark_present(uintptr_t start, uintptr_t end)
         PAGE_ARRAY[start++].flags |= PAGE_PRESENT;
 }
 
-page* kernel::mem::paging::alloc_pages(int order)
+page* kernel::mem::paging::alloc_pages(unsigned order)
 {
     lock_guard_irq lock{zone_lock};
     auto* zone = _alloc_zone(order);
@@ -187,8 +201,10 @@ pfn_t kernel::mem::paging::alloc_page_table()
     return pfn;
 }
 
-void kernel::mem::paging::free_pages(page* pg, int order)
+void kernel::mem::paging::free_pages(page* pg, unsigned order)
 {
+    assert((pg->flags & 0xff) == order);
+
     // TODO: atomic
     if (!(pg->flags & PAGE_BUDDY) || --pg->refcount)
         return;
@@ -199,7 +215,13 @@ void kernel::mem::paging::free_pages(page* pg, int order)
         pfn_t buddy_pfn = buddy(pfn, order);
         page* buddy_page = pfn_to_page(buddy_pfn);
 
-        if (!(buddy_page->flags & PAGE_BUDDY) || buddy_page->refcount)
+        if (!(buddy_page->flags & PAGE_BUDDY))
+            break;
+
+        if ((buddy_page->flags & 0xff) != order)
+            break;
+
+        if (buddy_page->refcount)
             break;
 
         _zone_list_remove(order, buddy_page);
@@ -211,6 +233,7 @@ void kernel::mem::paging::free_pages(page* pg, int order)
         order++;
     }
 
+    pg->flags &= ~0xff;
     _zone_list_insert(order, pg);
 }
 
@@ -219,7 +242,7 @@ void kernel::mem::paging::free_page(page* page)
     return free_pages(page, 0);
 }
 
-void kernel::mem::paging::free_pages(pfn_t pfn, int order)
+void kernel::mem::paging::free_pages(pfn_t pfn, unsigned order)
 {
     return free_pages(pfn_to_page(pfn), order);
 }

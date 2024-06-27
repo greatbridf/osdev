@@ -261,13 +261,13 @@ static inline void __spawn(kernel::task::thread& thd, uintptr_t entry)
     // return(start) address
     thd.kstack.pushq(entry);
     thd.kstack.pushq(0x200);       // flags
-    thd.kstack.pushq(0);           // 0 for alignment
-    thd.kstack.pushq(0);           // rbx
-    thd.kstack.pushq(0);           // rbp
-    thd.kstack.pushq(0);           // r12
-    thd.kstack.pushq(0);           // r13
-    thd.kstack.pushq(0);           // r14
     thd.kstack.pushq(0);           // r15
+    thd.kstack.pushq(0);           // r14
+    thd.kstack.pushq(0);           // r13
+    thd.kstack.pushq(0);           // r12
+    thd.kstack.pushq(0);           // rbp
+    thd.kstack.pushq(0);           // rbx
+    thd.kstack.pushq(0);           // 0 for alignment
     thd.kstack.pushq(prev_sp);     // previous sp
 }
 
@@ -526,7 +526,6 @@ bool schedule()
 {
     if (kernel::async::preempt_count() != 0)
         return true;
-    return true;
 
     auto* next_thd = kernel::task::dispatcher::next();
 

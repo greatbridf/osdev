@@ -1,3 +1,6 @@
+#include <string>
+#include <vector>
+
 #include <sys/prctl.h>
 #include <sys/utsname.h>
 #include <sys/wait.h>
@@ -38,24 +41,19 @@ int kernel::syscall::do_chdir(const char __user* path)
 }
 
 execve_retval kernel::syscall::do_execve(
-        const char __user* exec,
-        char __user* const __user* argv,
-        char __user* const __user* envp)
+        const std::string& exec,
+        const std::vector<std::string>& args,
+        const std::vector<std::string>& envs)
 {
-    types::elf::elf32_load_data d;
-
-    if (!exec || !argv || !envp)
-        return { 0, 0, -EFAULT };
-
-    // TODO: use copy_from_user
-    while (*argv)
-        d.argv.push_back(*(argv++));
-
-    while (*envp)
-        d.envp.push_back(*(envp++));
+    types::elf::elf32_load_data d{
+        .exec_dent{},
+        .argv{args},
+        .envp{envs},
+        .ip{}, .sp{},
+    };
 
     d.exec_dent = fs::vfs_open(*current_process->root,
-            current_process->pwd + exec);
+            current_process->pwd + exec.c_str());
 
     if (!d.exec_dent)
         return { 0, 0, -ENOENT };

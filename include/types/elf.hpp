@@ -145,8 +145,8 @@ struct PACKED elf32_section_header_entry {
 
 struct elf32_load_data {
     const fs::dentry* exec_dent;
-    std::vector<std::string> argv;
-    std::vector<std::string> envp;
+    const std::vector<std::string>& argv;
+    const std::vector<std::string>& envp;
     uintptr_t ip;
     uintptr_t sp;
 };

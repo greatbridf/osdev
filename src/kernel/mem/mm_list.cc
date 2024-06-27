@@ -5,7 +5,17 @@
 #include <kernel/mem/paging.hpp>
 #include <kernel/mem/vm_area.hpp>
 
+
 using namespace kernel::mem;
+
+static inline void __invalidate_all_tlb()
+{
+    asm volatile(
+            "mov %%cr3, %%rax\n\t"
+            "mov %%rax, %%cr3\n\t"
+            : : : "rax", "memory"
+            );
+}
 
 static inline void __dealloc_page_table_all(
         paging::pfn_t pt, int depth, int from, int to)
@@ -68,9 +78,17 @@ mm_list::mm_list(const mm_list& other): mm_list{}
 
             increase_refcount(pfn_to_page(pfn));
 
+            // TODO: create a function to set COW mappings
+            attributes = other_pte.attributes();
+            attributes &= ~PA_RW;
+            attributes |= PA_COW;
+            other_pte.set(attributes, pfn);
+
             ++this_iter, ++other_iter;
         }
     }
+
+    __invalidate_all_tlb();
 }
 
 mm_list::~mm_list()
@@ -163,7 +181,9 @@ uintptr_t mm_list::set_brk(uintptr_t addr)
 void mm_list::clear()
 {
     for (auto iter = m_areas.begin(); iter != m_areas.end(); ++iter)
-        unmap(iter);
+        unmap(iter, false);
+
+    __invalidate_all_tlb();
 
     m_areas.clear();
     m_brk = m_areas.end();
@@ -191,11 +211,11 @@ mm_list::iterator mm_list::split(iterator area, uintptr_t addr)
     return iter;
 }
 
-int mm_list::unmap(iterator area)
+int mm_list::unmap(iterator area, bool should_invalidate_tlb)
 {
     using namespace paging;
 
-    bool should_invlpg = area->end - area->start <= 0x4000;
+    bool should_use_invlpg = area->end - area->start <= 0x4000;
     auto range = vaddr_range{m_pt, area->start, area->end};
     uintptr_t cur_addr = area->start;
 
@@ -204,19 +224,19 @@ int mm_list::unmap(iterator area)
         free_page(pte.pfn());
         pte.clear();
 
-        if (should_invlpg) {
-            asm volatile("invlpg (%0)": :"r"(cur_addr) :"memory");
+        if (should_invalidate_tlb && should_use_invlpg) {
+            asm volatile("invlpg (%0)": : "r"(cur_addr): "memory");
             cur_addr += 0x1000;
         }
     }
 
-    if (!should_invlpg)
-        asm volatile("mov %%cr3, %%rax\n\t mov %%rax, %%cr3": : : "rax", "memory");
+    if (should_invalidate_tlb && !should_use_invlpg)
+        __invalidate_all_tlb();
 
     return 0;
 }
 
-int mm_list::unmap(uintptr_t start, std::size_t length)
+int mm_list::unmap(uintptr_t start, std::size_t length, bool should_invalidate_tlb)
 {
     // standard says that addr and len MUST be
     // page-aligned or the call is invalid
@@ -246,7 +266,7 @@ int mm_list::unmap(uintptr_t start, std::size_t length)
         // iter.end <= end
         // it is safe to unmap the area directly
         if (*iter < end) {
-            if (int ret = unmap(iter); ret != 0)
+            if (int ret = unmap(iter, should_invalidate_tlb); ret != 0)
                 return ret;
 
             iter = m_areas.erase(iter);
@@ -263,7 +283,7 @@ int mm_list::unmap(uintptr_t start, std::size_t length)
         }
 
         (void)split(iter, end);
-        if (int ret = unmap(iter); ret != 0)
+        if (int ret = unmap(iter, should_invalidate_tlb); ret != 0)
             return ret;
 
         iter = m_areas.erase(iter);

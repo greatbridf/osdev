@@ -88,12 +88,12 @@ asm_ctx_switch:
 
 	call after_ctx_switch
 
-	mov %r15, 0x28(%rsp)
-	mov %r14, 0x20(%rsp)
-	mov %r13, 0x18(%rsp)
-	mov %r12, 0x10(%rsp)
-	mov %rbp, 0x08(%rsp)
-    mov %rbx, 0x00(%rsp)
+	mov 0x28(%rsp), %r15
+	mov 0x20(%rsp), %r14
+	mov 0x18(%rsp), %r13
+	mov 0x10(%rsp), %r12
+	mov 0x08(%rsp), %rbp
+    mov 0x00(%rsp), %rbx
 
 	add $0x30, %rsp
     popf

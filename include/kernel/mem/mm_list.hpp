@@ -77,8 +77,8 @@ public:
 
     uintptr_t find_avail(uintptr_t hint, size_t length) const;
 
-    int unmap(iterator area);
-    int unmap(uintptr_t start, std::size_t length);
+    int unmap(iterator area, bool should_invalidate_tlb);
+    int unmap(uintptr_t start, std::size_t length, bool should_invalidate_tlb);
 
     int mmap(const map_args& args);
 

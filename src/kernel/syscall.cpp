@@ -11,6 +11,7 @@
 #include <sys/prctl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <sys/uio.h>
 #include <sys/utsname.h>
 #include <sys/wait.h>
 #include <termios.h>
@@ -21,6 +22,7 @@
 #include <types/elf.hpp>
 #include <types/path.hpp>
 #include <types/types.h>
+#include <types/user_types.hpp>
 
 #include <kernel/async/lock.hpp>
 #include <kernel/hw/timer.hpp>
@@ -120,8 +122,6 @@ DEFINE_SYSCALL32(chdir, const char __user*, path)
 DEFINE_SYSCALL32(symlink, const char __user*, target, const char __user*, linkpath)
 DEFINE_SYSCALL32(readlink, const char __user*, pathname, char __user*, buf, size_t, buf_size)
 DEFINE_SYSCALL32(ioctl, int, fd, unsigned long, request, uintptr_t, arg3)
-DEFINE_SYSCALL32(readv, int, fd, const iovec __user*, iov, int, iovcnt)
-DEFINE_SYSCALL32(writev, int, fd, const iovec __user*, iov, int, iovcnt)
 DEFINE_SYSCALL32(munmap, uintptr_t, addr, size_t, len)
 DEFINE_SYSCALL32(poll, pollfd __user*, fds, nfds_t, nfds, int, timeout)
 DEFINE_SYSCALL32(mknod, const char __user*, pathname, mode_t, mode, dev_t, dev)
@@ -201,9 +201,9 @@ static uint32_t _syscall32_fork(interrupt_stack_normal* data, mmx_registers* mmx
     newthd->kstack.pushq(data->flags);
     newthd->kstack.pushq(data->cs);
     newthd->kstack.pushq(data->v_rip);
-    newthd->kstack.pushq(0); // 0 for 16 bytes alignment
-
     auto cur_sp = newthd->kstack.sp;
+
+    newthd->kstack.pushq(0); // 0 for 16 bytes alignment
     newthd->kstack.pushq(cur_sp);
     newthd->kstack.pushq(data->head.s_regs.rbp);
     newthd->kstack.pushq(data->head.s_regs.r15);
@@ -219,7 +219,7 @@ static uint32_t _syscall32_fork(interrupt_stack_normal* data, mmx_registers* mmx
     newthd->kstack.pushq(data->head.s_regs.rdx);
     newthd->kstack.pushq(data->head.s_regs.rcx);
     newthd->kstack.pushq(data->head.s_regs.rbx);
-    newthd->kstack.pushq(data->head.s_regs.rax);
+    newthd->kstack.pushq(0); // rax: return value
 
     cur_sp = newthd->kstack.sp;
 
@@ -229,14 +229,14 @@ static uint32_t _syscall32_fork(interrupt_stack_normal* data, mmx_registers* mmx
     // asm_ctx_switch stack
     // return(start) address
     newthd->kstack.pushq((uintptr_t)ISR_stub_restore);
-    newthd->kstack.pushq(0x200);          // flags
-    newthd->kstack.pushq(0);              // 0 for alignment
-    newthd->kstack.pushq(cur_sp);         // rbx
-    newthd->kstack.pushq(0);              // rbp
-    newthd->kstack.pushq(0);              // r12
-    newthd->kstack.pushq(0);              // r13
-    newthd->kstack.pushq(0);              // r14
+    newthd->kstack.pushq(0);              // flags
     newthd->kstack.pushq(0);              // r15
+    newthd->kstack.pushq(0);              // r14
+    newthd->kstack.pushq(0);              // r13
+    newthd->kstack.pushq(0);              // r12
+    newthd->kstack.pushq(0);              // rbp
+    newthd->kstack.pushq(cur_sp);         // rbx
+    newthd->kstack.pushq(0);              // 0 for alignment
     newthd->kstack.pushq(newthd_prev_sp); // previous sp
 
     return newproc.pid;
@@ -265,6 +265,48 @@ static uint32_t _syscall32_llseek(interrupt_stack_normal* data, mmx_registers*)
     return 0;
 }
 
+static uint32_t _syscall32_readv(interrupt_stack_normal* data, mmx_registers*)
+{
+    SYSCALL32_ARG1(int, fd);
+    SYSCALL32_ARG2(const types::iovec32 __user*, _iov);
+    SYSCALL32_ARG3(int, iovcnt);
+
+    // TODO: use copy_from_user
+    if (!_iov)
+        return -EFAULT;
+
+    std::vector<iovec> iov(iovcnt);
+    for (int i = 0; i < iovcnt; ++i) {
+        // TODO: check access right
+        uintptr_t base = _iov[i].iov_base;
+        iov[i].iov_base = (void*)base;
+        iov[i].iov_len = _iov[i].iov_len;
+    }
+
+    return kernel::syscall::do_readv(fd, iov.data(), iovcnt);
+}
+
+static uint32_t _syscall32_writev(interrupt_stack_normal* data, mmx_registers*)
+{
+    SYSCALL32_ARG1(int, fd);
+    SYSCALL32_ARG2(const types::iovec32 __user*, _iov);
+    SYSCALL32_ARG3(int, iovcnt);
+
+    // TODO: use copy_from_user
+    if (!_iov)
+        return -EFAULT;
+
+    std::vector<iovec> iov(iovcnt);
+    for (int i = 0; i < iovcnt; ++i) {
+        // TODO: check access right
+        uintptr_t base = _iov[i].iov_base;
+        iov[i].iov_base = (void*)base;
+        iov[i].iov_len = _iov[i].iov_len;
+    }
+
+    return kernel::syscall::do_writev(fd, iov.data(), iovcnt);
+}
+
 [[noreturn]] static uint32_t _syscall32_exit_group(
         interrupt_stack_normal* data, mmx_registers* mmxregs)
 {
@@ -275,9 +317,26 @@ static uint32_t _syscall32_llseek(interrupt_stack_normal* data, mmx_registers*)
 static uint32_t _syscall32_execve(interrupt_stack_normal* data, mmx_registers*)
 {
     SYSCALL32_ARG1(const char __user*, exec);
-    SYSCALL32_ARG2(char __user* const __user*, argv);
-    SYSCALL32_ARG3(char __user* const __user*, envp);
-    auto retval = kernel::syscall::do_execve(exec, argv, envp);
+    SYSCALL32_ARG2(const uint32_t __user*, argv);
+    SYSCALL32_ARG3(const uint32_t __user*, envp);
+
+    if (!exec || !argv || !envp)
+        return -EFAULT;
+
+    std::vector<std::string> args, envs;
+
+    // TODO: use copy_from_user
+    while (*argv) {
+        uintptr_t addr = *(argv++);
+        args.push_back((char __user*)addr);
+    }
+
+    while (*envp) {
+        uintptr_t addr = *(envp++);
+        envs.push_back((char __user*)addr);
+    }
+
+    auto retval = kernel::syscall::do_execve(exec, args, envs);
 
     if (retval.status == 0) {
         // TODO: switch cs ans ss

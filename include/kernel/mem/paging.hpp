@@ -106,9 +106,9 @@ constexpr uintptr_t KERNEL_PAGE_TABLE_ADDR = 0x100000;
 constexpr physaddr<void> KERNEL_PAGE_TABLE_PHYS_ADDR{KERNEL_PAGE_TABLE_ADDR};
 constexpr PSE KERNEL_PAGE_TABLE{0x100000};
 
-constexpr unsigned long PAGE_PRESENT = 0x00000001;
-constexpr unsigned long PAGE_BUDDY   = 0x00000002;
-constexpr unsigned long PAGE_SLAB    = 0x00000004;
+constexpr unsigned long PAGE_PRESENT = 0x00010000;
+constexpr unsigned long PAGE_BUDDY   = 0x00020000;
+constexpr unsigned long PAGE_SLAB    = 0x00040000;
 
 struct page {
     // TODO: use atomic
@@ -126,14 +126,14 @@ void mark_present(uintptr_t start, uintptr_t end);
 
 [[nodiscard]] page* alloc_page();
 // order represents power of 2
-[[nodiscard]] page* alloc_pages(int order);
+[[nodiscard]] page* alloc_pages(unsigned order);
 
 // order represents power of 2
-void free_pages(page* page, int order);
+void free_pages(page* page, unsigned order);
 void free_page(page* page);
 
 // order represents power of 2
-void free_pages(pfn_t pfn, int order);
+void free_pages(pfn_t pfn, unsigned order);
 void free_page(pfn_t pfn);
 
 // clear the page all zero

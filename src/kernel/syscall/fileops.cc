@@ -195,7 +195,7 @@ int kernel::syscall::do_ioctl(int fd, unsigned long request, uintptr_t arg3)
     return 0;
 }
 
-ssize_t kernel::syscall::do_readv(int fd, const iovec __user* iov, int iovcnt)
+ssize_t kernel::syscall::do_readv(int fd, const iovec* iov, int iovcnt)
 {
     auto* file = current_process->files[fd];
 
@@ -224,7 +224,7 @@ ssize_t kernel::syscall::do_readv(int fd, const iovec __user* iov, int iovcnt)
 }
 
 // TODO: this operation SHOULD be atomic
-ssize_t kernel::syscall::do_writev(int fd, const iovec __user* iov, int iovcnt)
+ssize_t kernel::syscall::do_writev(int fd, const iovec* iov, int iovcnt)
 {
     auto* file = current_process->files[fd];
 
@@ -281,7 +281,7 @@ uintptr_t kernel::syscall::do_mmap_pgoff(uintptr_t addr, size_t len,
 
         // do unmapping, equal to munmap, MAP_FIXED set
         if (prot == PROT_NONE) {
-            if (int ret = mms.unmap(addr, len); ret != 0)
+            if (int ret = mms.unmap(addr, len, true); ret != 0)
                 return ret;
         }
         else {
@@ -320,7 +320,7 @@ int kernel::syscall::do_munmap(uintptr_t addr, size_t len)
     if (addr & 0xfff)
         return -EINVAL;
 
-    return current_process->mms.unmap(addr, len);
+    return current_process->mms.unmap(addr, len, true);
 }
 
 ssize_t kernel::syscall::do_sendfile(int out_fd, int in_fd,

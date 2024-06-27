@@ -1,5 +1,8 @@
 #pragma once
 
+#include <string>
+#include <vector>
+
 #include <bits/alltypes.h>
 #include <poll.h>
 #include <sys/stat.h>
@@ -41,8 +44,8 @@ int do_open(const char __user* path, int flags, mode_t mode);
 int do_symlink(const char __user* target, const char __user* linkpath);
 int do_readlink(const char __user* pathname, char __user* buf, size_t buf_size);
 int do_ioctl(int fd, unsigned long request, uintptr_t arg3);
-ssize_t do_readv(int fd, const iovec __user* iov, int iovcnt);
-ssize_t do_writev(int fd, const iovec __user* iov, int iovcnt);
+ssize_t do_readv(int fd, const iovec* iov, int iovcnt);
+ssize_t do_writev(int fd, const iovec* iov, int iovcnt);
 off_t do_lseek(int fd, off_t offset, int whence);
 uintptr_t do_mmap_pgoff(uintptr_t addr, size_t len,
         int prot, int flags, int fd, off_t pgoffset);
@@ -93,9 +96,9 @@ struct execve_retval {
 };
 
 execve_retval do_execve(
-        const char __user* exec,
-        char __user* const __user* argv,
-        char __user* const __user* envp);
+        const std::string& exec,
+        const std::vector<std::string>& args,
+        const std::vector<std::string>& envs);
 
 // in mount.cc
 int do_mount(

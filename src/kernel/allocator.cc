@@ -17,10 +17,8 @@ constexpr uintptr_t KERNEL_HEAP_SIZE  = KERNEL_HEAP_END - KERNEL_HEAP_START;
 namespace types::memory {
 
 struct mem_blk_flags {
-    uint8_t is_free;
-    uint8_t has_next;
-    uint8_t : 8; // unused1
-    uint8_t : 8; // unused2
+    unsigned long is_free  : 8;
+    unsigned long has_next : 8;
 };
 
 struct mem_blk {
@@ -90,7 +88,7 @@ constexpr void split_block(mem_blk* blk, std::size_t this_size)
     // block is too small to get split
     // that is, the block to be split should have enough room
     // for "this_size" bytes and also could contain a new block
-    if (blk->size < this_size + sizeof(mem_blk) + 8)
+    if (blk->size < this_size + sizeof(mem_blk) + 1024)
         return;
 
     mem_blk* blk_next = next(blk, this_size);

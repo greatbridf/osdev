@@ -83,15 +83,15 @@ thread::kernel_stack::~kernel_stack()
 
 uint64_t thread::kernel_stack::pushq(uint64_t val)
 {
-    *(uint64_t*)sp = val;
     sp -= 8;
+    *(uint64_t*)sp = val;
     return val;
 }
 
 uint32_t thread::kernel_stack::pushl(uint32_t val)
 {
-    *(uint32_t*)sp = val;
     sp -= 4;
+    *(uint32_t*)sp = val;
     return val;
 }
 

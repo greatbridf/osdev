@@ -32,7 +32,7 @@ thread::thread(std::string name, pid_t owner)
     : owner { owner }, attr { READY | SYSTEM }, name { name } { }
 
 thread::thread(const thread& val, pid_t owner)
-    : owner { owner }, attr { val.attr }, name { val.name } { }
+    : owner { owner }, attr { val.attr }, name { val.name }, tls_desc32{val.tls_desc32} { }
 
 tid_t thread::tid() const
 {
@@ -170,6 +170,10 @@ int thread::set_thread_area(kernel::user::user_desc* ptr)
 
     if (!ptr->seg_32bit)
         return -1;
+
+    if ((ptr->limit & 0xffff) != 0xffff) {
+        asm volatile("nop": : : "memory");
+    }
 
     tls_desc32  = ptr->limit & 0x0'ffff;
     tls_desc32 |= (ptr->base_addr & 0x00'ffffffULL) << 16;

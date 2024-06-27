@@ -19,7 +19,7 @@ export PATH="/bin"
 echo ok > /dev/console
 
 mkdir -p /etc /root /proc
-mount -t proc proc proc
+mount -t procfs proc proc
 
 cat > /etc/passwd <<EOF
 root:x:0:0:root:/root:/mnt/busybox sh

@@ -52,8 +52,8 @@ public:
     int* __user clear_child_tid {};
 
     std::string name {};
-
-    uint64_t tls_desc32;
+    uint64_t tls_desc32 {};
+    std::size_t elected_times {};
 
     explicit thread(std::string name, pid_t owner);
     thread(const thread& val, pid_t owner);

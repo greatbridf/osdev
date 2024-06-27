@@ -288,6 +288,9 @@ public:
     }
 
     void kill(pid_t pid, int exit_code);
+
+    constexpr auto begin() const { return m_procs.begin(); }
+    constexpr auto end() const { return m_procs.end(); }
 };
 
 void NORETURN init_scheduler(kernel::mem::paging::pfn_t kernel_stack_pfn);

@@ -5,7 +5,9 @@
 #include <sys/mount.h>
 #include <unistd.h>
 
+#include <kernel/hw/timer.hpp>
 #include <kernel/module.hpp>
+#include <kernel/process.hpp>
 #include <kernel/vfs.hpp>
 #include <kernel/vfs/vfs.hpp>
 
@@ -62,6 +64,28 @@ static ssize_t mounts_read(char* page, size_t n)
     return orig_n - n;
 }
 
+static ssize_t schedstat_read(char* page, size_t n)
+{
+    auto orig_n = n;
+
+    if (n == 0)
+        return n;
+
+    int nw = snprintf(page, n, "%d\n", kernel::hw::timer::current_ticks());
+    n -= nw, page += nw;
+
+    for (const auto& proc : *procs) {
+        for (const auto& thd : proc.second.thds) {
+            int nwrote = snprintf(page, n, "%d %x %d\n", proc.first, thd.tid(), thd.elected_times);
+
+            n -= nwrote;
+            page += nwrote;
+        }
+    }
+
+    return orig_n - n;
+}
+
 namespace fs::proc {
 
 struct proc_file {
@@ -105,6 +129,7 @@ public:
         auto* ind = cache_inode(0, 0, S_IFDIR | 0777, 0, 0);
 
         create_file("mounts", mounts_read, nullptr);
+        create_file("schedstat", schedstat_read, nullptr);
 
         register_root_node(ind);
     }

@@ -9,8 +9,8 @@ static inline void _raw_spin_lock(spinlock_t* lock_addr)
 {
     asm volatile(
         "%=:\n\t\
-         movl $1, %%eax\n\t\
-         xchgl %%eax, (%0)\n\t\
+         mov $1, %%eax\n\t\
+         xchg %%eax, (%0)\n\t\
          cmp $0, %%eax\n\t\
          jne %=b\n\t\
         "
@@ -22,19 +22,19 @@ static inline void _raw_spin_lock(spinlock_t* lock_addr)
 static inline void _raw_spin_unlock(spinlock_t* lock_addr)
 {
     asm volatile(
-        "movl $0, %%eax\n\
-         xchgl %%eax, (%0)"
+        "mov $0, %%eax\n\
+         xchg %%eax, (%0)"
         :
         : "r"(lock_addr)
         : "eax", "memory");
 }
 
-static inline uint32_t _save_interrupt_state()
+static inline lock_context_t _save_interrupt_state()
 {
-    uint32_t retval;
+    lock_context_t retval;
     asm volatile(
-        "pushfl\n\t"
-        "popl %0\n\t"
+        "pushf\n\t"
+        "pop %0\n\t"
         "cli"
         : "=g"(retval)
         :
@@ -44,13 +44,13 @@ static inline uint32_t _save_interrupt_state()
     return retval;
 }
 
-static inline void _restore_interrupt_state(uint32_t flags)
+static inline void _restore_interrupt_state(lock_context_t context)
 {
     asm volatile(
-        "pushl %0\n\t"
-        "popfl"
+        "push %0\n\t"
+        "popf"
         :
-        : "g"(flags)
+        : "g"(context)
         :
         );
 }
@@ -90,7 +90,7 @@ void spin_unlock(spinlock_t& lock)
     preempt_enable();
 }
 
-uint32_t spin_lock_irqsave(spinlock_t& lock)
+lock_context_t spin_lock_irqsave(spinlock_t& lock)
 {
     auto state = _save_interrupt_state();
     preempt_disable();
@@ -100,7 +100,7 @@ uint32_t spin_lock_irqsave(spinlock_t& lock)
     return state;
 }
 
-void spin_unlock_irqrestore(spinlock_t& lock, uint32_t state)
+void spin_unlock_irqrestore(spinlock_t& lock, lock_context_t state)
 {
     _raw_spin_unlock(&lock);
     preempt_enable();
@@ -122,12 +122,12 @@ void mutex::unlock()
     spin_unlock(m_lock);
 }
 
-uint32_t mutex::lock_irq()
+lock_context_t mutex::lock_irq()
 {
     return spin_lock_irqsave(m_lock);
 }
 
-void mutex::unlock_irq(uint32_t state)
+void mutex::unlock_irq(lock_context_t state)
 {
     spin_unlock_irqrestore(m_lock, state);
 }

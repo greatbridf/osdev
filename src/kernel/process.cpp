@@ -10,20 +10,13 @@
 #include <sys/wait.h>
 
 #include <types/allocator.hpp>
-#include <types/bitmap.hpp>
 #include <types/cplusplus.hpp>
 #include <types/elf.hpp>
-#include <types/size.h>
-#include <types/status.h>
 #include <types/types.h>
 
-#include <asm/port_io.h>
-#include <asm/sys.h>
 #include <kernel/async/lock.hpp>
-#include <kernel/interrupt.h>
 #include <kernel/log.hpp>
-#include <kernel/mem.h>
-#include <kernel/mm.hpp>
+#include <kernel/mem/paging.hpp>
 #include <kernel/module.hpp>
 #include <kernel/process.hpp>
 #include <kernel/signal.hpp>
@@ -45,7 +38,7 @@ namespace kernel {
 struct no_irq_guard {
     explicit no_irq_guard()
     {
-        asm_cli();
+        asm volatile("cli");
     }
 
     no_irq_guard(const no_irq_guard&) = delete;
@@ -53,7 +46,7 @@ struct no_irq_guard {
 
     ~no_irq_guard()
     {
-        asm_sti();
+        asm volatile("sti");
     }
 };
 
@@ -162,7 +155,7 @@ int filearr::open(const process &current,
             if (!parent)
                 return -EINVAL;
             int ret = fs::vfs_mkfile(parent, filename.c_str(), mode);
-            if (ret != GB_OK)
+            if (ret != 0)
                 return ret;
             dentry = fs::vfs_open(*current.root, filepath);
             assert(dentry);
@@ -236,7 +229,7 @@ void process::send_signal(signo_type signal)
 
 void kernel_threadd_main(void)
 {
-    kmsg("kernel thread daemon started\n");
+    kmsg("[kernel] kthread daemon started");
 
     for (;;) {
         if (kthreadd_new_thd_func) {
@@ -255,20 +248,27 @@ void kernel_threadd_main(void)
             // TODO
             (void)func, (void)data;
             assert(false);
-
-            // syscall_fork
-            // int ret = syscall(0x00);
-
-            // if (ret == 0) {
-            //     // child process
-            //     func(data);
-            //     // the function shouldn't return here
-            //     assert(false);
-            // }
         }
         // TODO: sleep here to wait for new_kernel_thread event
-        asm_hlt();
+        asm volatile("hlt");
     }
+}
+
+static inline void __spawn(kernel::task::thread& thd, uintptr_t entry)
+{
+    auto prev_sp = thd.kstack.sp;
+
+    // return(start) address
+    thd.kstack.pushq(entry);
+    thd.kstack.pushq(0x200);       // flags
+    thd.kstack.pushq(0);           // r15
+    thd.kstack.pushq(0);           // r14
+    thd.kstack.pushq(0);           // r13
+    thd.kstack.pushq(0);           // r12
+    thd.kstack.pushq(0);           // rbp
+    thd.kstack.pushq(0);           // rbx
+    thd.kstack.pushq(0);           // 0 for alignment
+    thd.kstack.pushq(prev_sp);     // previous sp
 }
 
 SECTION(".text.kinit")
@@ -278,17 +278,15 @@ proclist::proclist()
     auto& init = real_emplace(1, 0);
     assert(init.pid == 1 && init.ppid == 0);
 
-    auto& thd = *init.thds.begin();
-    thd.name.assign("[kernel init]");
+    auto thd = init.thds.begin();
+    thd->name.assign("[kernel init]");
 
     current_process = &init;
     current_thread = &thd;
 
     kernel::task::dispatcher::enqueue(current_thread);
 
-    tss.ss0 = KERNEL_DATA_SEGMENT;
-    tss.esp0 = (uint32_t)current_thread->kstack.esp;
-
+    current_thread->kstack.load_interrupt_stack();
     current_process->mms.switch_pd();
 
     if (1) {
@@ -297,26 +295,10 @@ proclist::proclist()
         assert(proc.pid == 0 && proc.ppid == 0);
 
         // create thread
-        auto& thd = *proc.thds.begin();
-        thd.name.assign("[kernel thread daemon]");
+        auto thd = proc.thds.begin();
+        thd->name.assign("[kernel thread daemon]");
 
-        auto* esp = &thd.kstack.esp;
-        auto old_esp = (uint32_t)thd.kstack.esp;
-
-        // return(start) address
-        push_stack(esp, (uint32_t)kernel_threadd_main);
-        // ebx
-        push_stack(esp, 0);
-        // edi
-        push_stack(esp, 0);
-        // esi
-        push_stack(esp, 0);
-        // ebp
-        push_stack(esp, 0);
-        // eflags
-        push_stack(esp, 0x200);
-        // original esp
-        push_stack(esp, old_esp);
+        __spawn(*thd, (uintptr_t)kernel_threadd_main);
 
         kernel::task::dispatcher::enqueue(&thd);
     }
@@ -334,6 +316,12 @@ void proclist::kill(pid_t pid, int exit_code)
 {
     auto& proc = this->find(pid);
 
+    // init should never exit
+    if (proc.ppid == 0) {
+        kmsg("kernel panic: init exited!");
+        freeze();
+    }
+
     // put all threads into sleep
     for (auto& thd : proc.thds)
         thd.set_attr(kernel::task::thread::ZOMBIE);
@@ -342,13 +330,7 @@ void proclist::kill(pid_t pid, int exit_code)
     proc.files.close_all();
 
     // unmap all user memory areas
-    proc.mms.clear_user();
-
-    // init should never exit
-    if (proc.ppid == 0) {
-        console->print("kernel panic: init exited!\n");
-        freeze();
-    }
+    proc.mms.clear();
 
     // make child processes orphans (children of init)
     this->make_children_orphans(pid);
@@ -391,48 +373,40 @@ void proclist::kill(pid_t pid, int exit_code)
 
 static void release_kinit()
 {
-    extern char __stage1_start[];
-    extern char __kinit_end[];
+    // free .kinit
+    using namespace kernel::mem::paging;
+    extern uintptr_t volatile KINIT_START_ADDR, KINIT_END_ADDR, KINIT_PAGES;
 
-    kernel::paccess pa(EARLY_KERNEL_PD_PAGE);
-    auto pd = (pd_t)pa.ptr();
-    assert(pd);
-    (*pd)[0].v = 0;
+    std::size_t pages = KINIT_PAGES;
+    auto range = vaddr_range{KERNEL_PAGE_TABLE_ADDR,
+        KINIT_START_ADDR, KINIT_END_ADDR, true};
+    for (auto pte : range)
+        pte.clear();
 
-    // free pt#0
-    __free_raw_page(0x00002);
-
-    // free .stage1 and .kinit
-    for (uint32_t i = ((uint32_t)__stage1_start >> 12);
-            i < ((uint32_t)__kinit_end >> 12); ++i) {
-        __free_raw_page(i);
-    }
+    create_zone(0x2000, 0x2000 + 0x1000 * pages);
 }
 
-void NORETURN _kernel_init(void)
+void NORETURN _kernel_init(kernel::mem::paging::pfn_t kernel_stack_pfn)
 {
+    kernel::mem::paging::free_pages(kernel_stack_pfn, 9);
     release_kinit();
 
-    asm_sti();
+    asm volatile("sti");
 
     // ------------------------------------------
     // interrupt enabled
     // ------------------------------------------
 
     // load kmods
-    for (auto loader = kernel::module::kmod_loaders_start; *loader; ++loader) {
+    for (auto loader = kernel::module::KMOD_LOADERS_START; *loader; ++loader) {
         auto* mod = (*loader)();
         if (!mod)
             continue;
 
-        auto ret = insmod(mod);
-        if (ret == kernel::module::MODULE_SUCCESS)
+        if (auto ret = insmod(mod); ret == kernel::module::MODULE_SUCCESS)
             continue;
 
-        char buf[256];
-        snprintf(buf, sizeof(buf),
-            "[kernel] An error occured while loading \"%s\"\n", mod->name);
-        kmsg(buf);
+        kmsgf("[kernel] An error occured while loading \"%s\"", mod->name);
     }
 
     // mount fat32 /mnt directory
@@ -454,42 +428,42 @@ void NORETURN _kernel_init(void)
     }
 
     current_process->attr.system = 0;
-    current_thread->attr |= kernel::task::thread::SYSTEM;
+    current_thread->attr &= ~kernel::task::thread::SYSTEM;
 
-    const char* argv[] = { "/mnt/busybox", "sh", "/mnt/initsh" };
-    const char* envp[] = { "LANG=C", "HOME=/root", "PATH=/mnt", "PWD=/", nullptr };
+    types::elf::elf32_load_data d{
+        .exec_dent{},
+        .argv{ "/mnt/busybox", "sh", "/mnt/initsh" },
+        .envp{ "LANG=C", "HOME=/root", "PATH=/mnt", "PWD=/" },
+        .ip{}, .sp{}
+    };
 
-    types::elf::elf32_load_data d;
-    d.argv = argv;
-    d.envp = envp;
-    d.system = false;
-
-    d.exec_dent = fs::vfs_open(*fs::fs_root, types::path{argv[0]});
+    d.exec_dent = fs::vfs_open(*fs::fs_root, types::path{d.argv[0].c_str()});
     if (!d.exec_dent) {
-        console->print("kernel panic: init not found!\n");
+        kmsg("kernel panic: init not found!");
         freeze();
     }
 
-    int ret = types::elf::elf32_load(&d);
-    assert(ret == GB_OK);
+    int ret = types::elf::elf32_load(d);
+    assert(ret == 0);
+
+    int ds = 0x33, cs = 0x2b;
 
     asm volatile(
-        "movw $0x23, %%ax\n"
-        "movw %%ax, %%ds\n"
-        "movw %%ax, %%es\n"
-        "movw %%ax, %%fs\n"
-        "movw %%ax, %%gs\n"
+        "mov %0, %%rax\n"
+        "mov %%ax, %%ds\n"
+        "mov %%ax, %%es\n"
+        "mov %%ax, %%fs\n"
+        "mov %%ax, %%gs\n"
 
-        "pushl $0x23\n"
-        "pushl %0\n"
-        "pushl $0x200\n"
-        "pushl $0x1b\n"
-        "pushl %1\n"
+        "push %%rax\n"
+        "push %2\n"
+        "push $0x200\n"
+        "push %1\n"
+        "push %3\n"
 
-        "iret\n"
-        :
-        : "c"(d.sp), "d"(d.eip)
-        : "eax", "memory");
+        "iretq\n"
+        : : "g"(ds), "g"(cs), "g"(d.sp),
+            "g"(d.ip) : "eax", "memory");
 
     freeze();
 }
@@ -502,69 +476,71 @@ void k_new_thread(void (*func)(void*), void* data)
 }
 
 SECTION(".text.kinit")
-void NORETURN init_scheduler(void)
+void NORETURN init_scheduler(kernel::mem::paging::pfn_t kernel_stack_pfn)
 {
     procs = new proclist;
 
     asm volatile(
-        "movl %0, %%esp\n"
-        "pushl %=f\n"
-        "pushl %1\n"
+        "mov %2, %%rdi\n"
+        "mov %0, %%rsp\n"
+        "sub $24, %%rsp\n"
+        "mov %=f, %%rbx\n"
+        "mov %%rbx, (%%rsp)\n"   // return address
+        "mov %%rbx, 16(%%rsp)\n" // previous frame return address
+        "xor %%rbx, %%rbx\n"
+        "mov %%rbx, 8(%%rsp)\n"  // previous frame rbp
+        "mov %%rsp, %%rbp\n"     // current frame rbp
 
-        "movw $0x10, %%ax\n"
-        "movw %%ax, %%ss\n"
-        "movw %%ax, %%ds\n"
-        "movw %%ax, %%es\n"
-        "movw %%ax, %%fs\n"
-        "movw %%ax, %%gs\n"
+        "push %1\n"
 
-        "xorl %%ebp, %%ebp\n"
-        "xorl %%edx, %%edx\n"
+        "mov $0x10, %%ax\n"
+        "mov %%ax, %%ss\n"
+        "mov %%ax, %%ds\n"
+        "mov %%ax, %%es\n"
+        "mov %%ax, %%fs\n"
+        "mov %%ax, %%gs\n"
 
-        "pushl $0x0\n"
-        "popfl\n"
+        "push $0x0\n"
+        "popf\n"
 
         "ret\n"
 
         "%=:\n"
         "ud2"
         :
-        : "a"(current_thread->kstack.esp), "c"(_kernel_init)
+        : "a"(current_thread->kstack.sp), "c"(_kernel_init), "g"(kernel_stack_pfn)
         : "memory");
 
     freeze();
 }
 
-extern "C" void asm_ctx_switch(uint32_t** curr_esp, uint32_t** next_esp);
+extern "C" void asm_ctx_switch(uintptr_t* curr_sp, uintptr_t* next_sp);
+
+extern "C" void after_ctx_switch()
+{
+    current_thread->kstack.load_interrupt_stack();
+    current_thread->load_thread_area32();
+}
+
 bool schedule()
 {
     if (kernel::async::preempt_count() != 0)
         return true;
 
     auto* next_thd = kernel::task::dispatcher::next();
-    process* proc = nullptr;
-    kernel::task::thread* curr_thd = nullptr;
 
-    if (current_thread == next_thd)
-        goto _end;
+    if (current_thread != next_thd) {
+        auto* proc = &procs->find(next_thd->owner);
+        if (current_process != proc) {
+            proc->mms.switch_pd();
+            current_process = proc;
+        }
 
-    proc = &procs->find(next_thd->owner);
-    if (current_process != proc) {
-        proc->mms.switch_pd();
-        current_process = proc;
+        auto* curr_thd = current_thread;
+        current_thread = next_thd;
+
+        asm_ctx_switch(&curr_thd->kstack.sp, &next_thd->kstack.sp);
     }
-
-    curr_thd = current_thread;
-
-    current_thread = next_thd;
-    tss.esp0 = (uint32_t)next_thd->kstack.esp;
-
-    next_thd->load_thread_area();
-
-    asm_ctx_switch(&curr_thd->kstack.esp, &next_thd->kstack.esp);
-    tss.esp0 = (uint32_t)curr_thd->kstack.esp;
-
-_end:
 
     return current_thread->signals.pending_signal() == 0;
 }
@@ -577,10 +553,8 @@ void NORETURN schedule_noreturn(void)
 
 void NORETURN freeze(void)
 {
-    asm_cli();
-    asm_hlt();
     for (;;)
-        ;
+        asm volatile("cli\n\thlt");
 }
 
 void NORETURN kill_current(int signo)

@@ -5,7 +5,6 @@
 #include <termios.h>
 
 #include <kernel/async/lock.hpp>
-#include <kernel/hw/serial.h>
 #include <kernel/process.hpp>
 #include <kernel/tty.hpp>
 #include <kernel/vga.hpp>
@@ -20,7 +19,9 @@
 
 #define TERMIOS_TESTCC(c, termios, cc) ((c != 0xff) && (c == ((termios).c_cc[cc])))
 
-tty::tty()
+using namespace kernel::tty;
+
+tty::tty(std::string name)
     : termio {
         .c_iflag = ICRNL | IXOFF,
         .c_oflag = OPOST | ONLCR,
@@ -32,6 +33,7 @@ tty::tty()
         .c_ispeed = 38400,
         .c_ospeed = 38400,
     }
+    , name{name}
     , buf(BUFFER_SIZE)
     , fg_pgroup { 0 }
 {
@@ -280,21 +282,7 @@ void tty::show_char(int c)
     this->putchar(c);
 }
 
-vga_tty::vga_tty()
-{
-    snprintf(this->name, sizeof(this->name), "ttyVGA");
-}
-
-serial_tty::serial_tty(int id)
-    : id(id)
-{
-    snprintf(this->name, sizeof(this->name), "ttyS%x", (int)id);
-}
-
-void serial_tty::putchar(char c)
-{
-    serial_send_data(id, c);
-}
+vga_tty::vga_tty(): tty{"ttyVGA"} { }
 
 void vga_tty::putchar(char c)
 {
@@ -306,4 +294,13 @@ void vga_tty::putchar(char c)
 void tty::clear_read_buf(void)
 {
     this->buf.clear();
+}
+
+int kernel::tty::register_tty(tty* tty_dev)
+{
+    // TODO: manage all ttys
+    if (!console)
+        console = tty_dev;
+
+    return 0;
 }

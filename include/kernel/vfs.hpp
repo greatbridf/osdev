@@ -52,7 +52,7 @@ struct PACKED user_dirent {
     // uint8_t d_type; // file type, with offset of (d_reclen - 1)
 };
 
-struct user_dirent64 {
+struct PACKED user_dirent64 {
     ino64_t d_ino; // inode number
     uint64_t d_off; // implementation-defined field, ignored
     uint16_t d_reclen; // length of this struct user_dirent

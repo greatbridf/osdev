@@ -369,6 +369,8 @@ public:
         root = copy(other.root);
         if (root)
             root->parent = nullptr;
+
+        return *this;
     }
     
     constexpr rbtree& operator=(rbtree&& other) noexcept
@@ -380,6 +382,8 @@ public:
         if constexpr (node_alloc_traits::
             propagate_on_container_move_assignment::value)
             alloc = std::move(other.alloc);
+
+        return *this;
     }
 
     constexpr void rotateleft(node* rt)

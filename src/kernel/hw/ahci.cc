@@ -2,14 +2,13 @@
 #include <cstddef>
 #include <algorithm>
 
-#include <kernel/vfs.hpp>
-#include <kernel/log.hpp>
-#include <kernel/mm.hpp>
-#include <kernel/module.hpp>
 #include <kernel/hw/pci.hpp>
 #include <kernel/irq.hpp>
-
-#include <types/size.h>
+#include <kernel/log.hpp>
+#include <kernel/mem/paging.hpp>
+#include <kernel/mem/phys.hpp>
+#include <kernel/module.hpp>
+#include <kernel/vfs.hpp>
 
 #include <stdint.h>
 #include <errno.h>
@@ -21,6 +20,9 @@
 
 using namespace kernel::module;
 using namespace kernel::hw::pci;
+using namespace kernel::mem::paging;
+
+using kernel::mem::physaddr;
 
 constexpr uint32_t MAX_SPINS = 100000;
 
@@ -40,11 +42,8 @@ constexpr uint32_t PORT_CMD_CR = 0x00008000;
 namespace ahci {
 
 typedef volatile struct hba_port_t {
-    uint32_t command_list_base;
-    uint32_t command_list_base_upper;
-
-    uint32_t fis_base;
-    uint32_t fis_base_upper;
+    uint64_t command_list_base;
+    uint64_t fis_base;
 
     uint32_t interrupt_status;
     uint32_t interrupt_enable;
@@ -102,8 +101,7 @@ struct command_header {
 
     uint32_t volatile bytes_transferred;
 
-    uint32_t command_table_base;
-    uint32_t command_table_base_upper;
+    uint64_t command_table_base;
 
     uint32_t reserved1[4];
 };
@@ -220,8 +218,7 @@ struct received_fis {
 };
 
 struct prdt_entry {
-    uint32_t data_base;
-    uint32_t data_base_upper;
+    uint64_t data_base;
 
     uint32_t reserved0;
 
@@ -291,13 +288,12 @@ struct quick_queue {
 struct ahci_port {
 private:
     // quick_queue<32> qu;
-    page_t page;
+    physaddr<command_header, false> cmd_header;
     hba_port* port;
-    command_header* cmd_header { };
     received_fis* fis { };
     std::size_t sectors { -1U };
 
-    int send_command(char* buf, uint64_t lba, uint32_t count, uint8_t cmd, bool write)
+    int send_command(physaddr<void> buf, uint64_t lba, uint32_t count, uint8_t cmd, bool write)
     {
         // count must be a multiple of 512
         if (count & (512 - 1))
@@ -307,9 +303,10 @@ private:
         int n = 0;
         // auto n = qu.pop();
 
-        // for now, we read 3.5KB at most at a time
         // command fis and prdt will take up the lower 128+Bytes
-        auto cmdtable_page = __alloc_raw_page();
+        // TODO: buffer array
+        pfn_t command_table_pfn = page_to_pfn(alloc_page());
+        physaddr<command_table, false> cmdtable{command_table_pfn};
 
         // construct command header
         memset(cmd_header + n, 0x00, sizeof(command_header));
@@ -318,9 +315,8 @@ private:
 
         cmd_header[n].write = write;
         cmd_header[n].prdt_length = 1;
-        cmd_header[n].command_table_base = cmdtable_page << 12;
+        cmd_header[n].command_table_base = cmdtable.phys();
 
-        auto* cmdtable = (command_table*)kernel::pmap(cmdtable_page);
         memset(cmdtable, 0x00, sizeof(command_table) + sizeof(prdt_entry));
 
         // first, set up command fis
@@ -340,7 +336,7 @@ private:
 
         // fill in prdt
         auto* pprdt = cmdtable->prdt;
-        pprdt->data_base = (cmdtable_page << 12) + 512;
+        pprdt->data_base = buf.phys();
         pprdt->byte_count = count;
         pprdt->interrupt = 1;
 
@@ -359,17 +355,17 @@ private:
         SPIN(port->command_issue & (1 << n), spins)
             return -1;
 
-        memcpy(buf, (char*)cmdtable + 512, count);
-
-        kernel::pfree(cmdtable_page);
-        __free_raw_page(cmdtable_page);
+        free_page(command_table_pfn);
         return 0;
     }
 
     int identify()
     {
-        char buf[512];
-        int ret = send_command(buf, 0, 512, 0xEC, false);
+        pfn_t buffer_page = page_to_pfn(alloc_page());
+        int ret = send_command(physaddr<void>{buffer_page},
+                0, 512, 0xEC, false);
+
+        free_page(buffer_page);
         if (ret != 0)
             return -1;
         return 0;
@@ -377,40 +373,43 @@ private:
 
 public:
     explicit ahci_port(hba_port* port)
-        : page(__alloc_raw_page()), port(port) { }
+        : cmd_header{page_to_pfn(alloc_page())}, port(port) { }
 
     ~ahci_port()
     {
         if (!cmd_header)
             return;
-        kernel::pfree(page);
-        __free_raw_page(page);
+        free_page(cmd_header.phys());
     }
 
     ssize_t read(char* buf, std::size_t buf_size, std::size_t offset, std::size_t cnt)
     {
         cnt = std::min(buf_size, cnt);
 
-        constexpr size_t READ_BUF_SECTORS = 6;
+        pfn_t buffer_page = page_to_pfn(alloc_page());
+        physaddr<void> buffer_ptr{buffer_page};
 
-        char b[READ_BUF_SECTORS * 512] {};
         char* orig_buf = buf;
         size_t start = offset / 512;
         size_t end = std::min((offset + cnt + 511) / 512, sectors);
 
         offset -= start * 512;
-        for (size_t i = start; i < end; i += READ_BUF_SECTORS) {
-            size_t n_read = std::min(end - i, READ_BUF_SECTORS) * 512;
-            int status = send_command(b, i, n_read, 0xC8, false);
-            if (status != 0)
+        for (size_t i = start; i < end; i += 4096UL / 512) {
+            size_t n_read = std::min(end - i, 4096UL / 512) * 512;
+            int status = send_command(buffer_ptr, i, n_read, 0xC8, false);
+            if (status != 0) {
+                free_page(buffer_page);
                 return -EIO;
+            }
 
             size_t to_copy = std::min(cnt, n_read - offset);
-            memcpy(buf, b + offset, to_copy);
+            memcpy(buf, (std::byte*)(void*)buffer_ptr + offset, to_copy);
             offset = 0;
             buf += to_copy;
             cnt -= to_copy;
         }
+
+        free_page(buffer_page);
         return buf - orig_buf;
     }
 
@@ -425,13 +424,9 @@ public:
         //
         // port->interrupt_enable = 1;
 
-        port->command_list_base = page << 12;
-        port->command_list_base_upper = 0;
+        port->command_list_base = cmd_header.phys();
+        port->fis_base = cmd_header.phys() + 0x400;
 
-        port->fis_base = (page << 12) + 0x400;
-        port->fis_base_upper = 0;
-
-        cmd_header = (command_header*)kernel::pmap(page, false);
         fis = (received_fis*)(cmd_header + 1);
 
         if (start_command(port) != 0)
@@ -455,9 +450,6 @@ public:
     ~ahci_module()
     {
         // TODO: release PCI device
-        if (ghc)
-            kernel::pfree(dev->reg[PCI_REG_ABAR] >> 12);
-
         for (auto& item : ports) {
             if (!item)
                 continue;
@@ -481,7 +473,7 @@ public:
             auto* port = new ahci_port(ghc_port);
             if (port->init() != 0) {
                 delete port;
-                kmsg("An error occurred while configuring an ahci port\n");
+                kmsg("An error occurred while configuring an ahci port");
                 continue;
             }
 
@@ -506,10 +498,9 @@ public:
         auto ret = kernel::hw::pci::register_driver(VENDOR_INTEL, DEVICE_AHCI,
             [this](pci_device* dev) -> int {
                 this->dev = dev;
-                uint32_t abar_address = dev->reg[PCI_REG_ABAR];
 
-                void* base = kernel::pmap(abar_address >> 12, false);
-                this->ghc = (hba_ghc*)base;
+                physaddr<hba_ghc, false> pp_base{dev->reg[PCI_REG_ABAR]};
+                this->ghc = pp_base;
 
                 this->ghc->global_host_control =
                     this->ghc->global_host_control | 2; // set interrupt enable

@@ -493,12 +493,12 @@ public:
 
     constexpr int compare(const basic_string& str) const noexcept
     {
-        return traits_type::compare(c_str(), str.c_str(), size());
+        return traits_type::compare(c_str(), str.c_str(), size()+1);
     }
 
     constexpr int compare(const Char* str) const
     {
-        return traits_type::compare(c_str(), str, size());
+        return traits_type::compare(c_str(), str, size()+1);
     }
 };
 

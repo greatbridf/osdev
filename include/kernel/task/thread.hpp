@@ -8,12 +8,13 @@
 
 #include <types/types.h>
 
+#include <kernel/mem/paging.hpp>
 #include <kernel/signal.hpp>
 #include <kernel/user/thread_local.hpp>
 
 namespace kernel::task {
 
-using tid_t = uint32_t;
+using tid_t = std::size_t;
 
 struct thread {
 public:
@@ -27,13 +28,18 @@ public:
 
 private:
     struct kernel_stack {
-        std::byte* stack_base;
-        uint32_t* esp;
+        mem::paging::pfn_t pfn;
+        uintptr_t sp;
 
         kernel_stack();
         kernel_stack(const kernel_stack& other);
         kernel_stack(kernel_stack&& other);
         ~kernel_stack();
+
+        uint64_t pushq(uint64_t val);
+        uint32_t pushl(uint32_t val);
+
+        void load_interrupt_stack() const;
     };
 
 public:
@@ -46,14 +52,14 @@ public:
     int* __user clear_child_tid {};
 
     std::string name {};
-
-    segment_descriptor tls_desc {};
+    uint64_t tls_desc32 {};
+    std::size_t elected_times {};
 
     explicit thread(std::string name, pid_t owner);
     thread(const thread& val, pid_t owner);
 
     int set_thread_area(user::user_desc* ptr);
-    int load_thread_area() const;
+    int load_thread_area32() const;
 
     void set_attr(thd_attr_t new_attr);
 

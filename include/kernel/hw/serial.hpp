@@ -1,5 +1,4 @@
 #pragma once
-#include <asm/port_io.h>
 
 #ifdef __cplusplus
 extern "C" {

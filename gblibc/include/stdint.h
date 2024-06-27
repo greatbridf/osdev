@@ -22,7 +22,7 @@ typedef __UINTPTR_TYPE__ uintptr_t;
 typedef __INTPTR_TYPE__ intptr_t;
 
 typedef __SIZE_TYPE__ size_t;
-typedef int32_t ssize_t;
+typedef int64_t ssize_t;
 
 typedef uint64_t time_t;
 typedef int64_t time_diff_t;

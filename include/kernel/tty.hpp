@@ -1,5 +1,7 @@
 #pragma once
 
+#include <string>
+
 #include <stdint.h>
 #include <sys/types.h>
 #include <termios.h>
@@ -11,10 +13,11 @@
 #include <kernel/async/waitlist.hpp>
 #include <kernel/async/lock.hpp>
 
+namespace kernel::tty {
+
 class tty : public types::non_copyable {
 public:
     static constexpr size_t BUFFER_SIZE = 4096;
-    static constexpr size_t NAME_SIZE = 32;
 
 private:
     void _real_commit_char(int c);
@@ -23,7 +26,7 @@ private:
     int _do_erase(bool should_echo);
 
 public:
-    tty();
+    explicit tty(std::string name);
     virtual void putchar(char c) = 0;
     void print(const char* str);
     ssize_t read(char* buf, size_t buf_size, size_t n);
@@ -52,13 +55,13 @@ public:
         return fg_pgroup;
     }
 
-    char name[NAME_SIZE];
     termios termio;
+    std::string name;
 
 protected:
-    kernel::async::mutex mtx_buf;
+    async::mutex mtx_buf;
     types::buffer buf;
-    kernel::async::wait_list waitlist;
+    async::wait_list waitlist;
 
     pid_t fg_pgroup;
 };
@@ -69,13 +72,8 @@ public:
     virtual void putchar(char c) override;
 };
 
-class serial_tty : public virtual tty {
-public:
-    serial_tty(int id);
-    virtual void putchar(char c) override;
-
-public:
-    uint16_t id;
-};
-
 inline tty* console;
+
+int register_tty(tty* tty_dev);
+
+} // namespace kernel::tty

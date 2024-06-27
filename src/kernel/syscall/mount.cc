@@ -6,14 +6,13 @@
 #include <kernel/syscall.hpp>
 #include <kernel/vfs.hpp>
 
-int _syscall_mount(interrupt_stack* data)
+int kernel::syscall::do_mount(
+        const char __user* source,
+        const char __user* target,
+        const char __user* fstype,
+        unsigned long flags,
+        const void __user* _fsdata)
 {
-    SYSCALL_ARG1(const char __user*, source);
-    SYSCALL_ARG2(const char __user*, target);
-    SYSCALL_ARG3(const char __user*, fstype);
-    SYSCALL_ARG4(unsigned long, flags);
-    SYSCALL_ARG5(const void __user*, _fsdata);
-
     if (!fstype)
         return -EINVAL;
 

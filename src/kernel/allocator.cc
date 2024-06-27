@@ -7,14 +7,18 @@
 #include <stdint.h>
 
 #include <kernel/async/lock.hpp>
+#include <kernel/mem/paging.hpp>
+#include <kernel/mem/slab.hpp>
+
+constexpr uintptr_t KERNEL_HEAP_START = 0xffff'ff81'8000'0000;
+constexpr uintptr_t KERNEL_HEAP_END   = 0xffff'ffbf'ffff'ffff;
+constexpr uintptr_t KERNEL_HEAP_SIZE  = KERNEL_HEAP_END - KERNEL_HEAP_START;
 
 namespace types::memory {
 
 struct mem_blk_flags {
-    uint8_t is_free;
-    uint8_t has_next;
-    uint8_t : 8; // unused1
-    uint8_t : 8; // unused2
+    unsigned long is_free  : 8;
+    unsigned long has_next : 8;
 };
 
 struct mem_blk {
@@ -84,7 +88,7 @@ constexpr void split_block(mem_blk* blk, std::size_t this_size)
     // block is too small to get split
     // that is, the block to be split should have enough room
     // for "this_size" bytes and also could contain a new block
-    if (blk->size < this_size + sizeof(mem_blk) + 8)
+    if (blk->size < this_size + sizeof(mem_blk) + 1024)
         return;
 
     mem_blk* blk_next = next(blk, this_size);
@@ -100,13 +104,52 @@ constexpr void split_block(mem_blk* blk, std::size_t this_size)
     blk->size = this_size;
 }
 
+std::byte* brk_memory_allocator::brk(byte* addr)
+{
+    if (addr >= p_limit)
+        return nullptr;
+
+    uintptr_t current_allocated = reinterpret_cast<uintptr_t>(p_allocated);
+    uintptr_t new_brk = reinterpret_cast<uintptr_t>(addr);
+
+    current_allocated &= ~(0x200000-1);
+    new_brk &= ~(0x200000-1);
+
+    using namespace kernel::mem::paging;
+    while (current_allocated <= new_brk) {
+        auto idx = idx_all(current_allocated);
+        auto pdpt = KERNEL_PAGE_TABLE[std::get<1>(idx)].parse();
+
+        auto pdpte = pdpt[std::get<2>(idx)];
+        if (!pdpte.pfn())
+            pdpte.set(PA_KERNEL_PAGE_TABLE, alloc_page_table());
+
+        auto pde = pdpte.parse()[std::get<3>(idx)];
+        assert(!(pde.attributes() & PA_P));
+        pde.set(PA_KERNEL_DATA_HUGE, page_to_pfn(alloc_pages(9)));
+
+        current_allocated += 0x200000;
+    }
+    p_allocated = (std::byte*)current_allocated;
+
+    return p_break = addr;
+}
+
+std::byte* brk_memory_allocator::sbrk(size_type increment)
+{
+    return brk(p_break + increment);
+}
+
 brk_memory_allocator::brk_memory_allocator(byte* start, size_type size)
     : p_start(start)
     , p_limit(start + size)
+    , p_break(start)
+    , p_allocated(start)
 {
-    brk(p_start);
-    auto* p_blk = aspblk(sbrk(0));
-    p_blk->size = 8;
+    auto* p_blk = aspblk(brk(p_start));
+    sbrk(sizeof(mem_blk) + 1024); // 1024 bytes (minimum size for a block)
+
+    p_blk->size = 1024;
     p_blk->flags.has_next = 0;
     p_blk->flags.is_free = 1;
 }
@@ -114,8 +157,8 @@ brk_memory_allocator::brk_memory_allocator(byte* start, size_type size)
 void* brk_memory_allocator::allocate(size_type size)
 {
     kernel::async::lock_guard_irq lck(mtx);
-    // align to 8 bytes boundary
-    size = (size + 7) & ~7;
+    // align to 1024 bytes boundary
+    size = (size + 1024-1) & ~(1024-1);
 
     auto* block_allocated = find_blk(&p_start, size);
     if (!block_allocated->flags.has_next
@@ -156,59 +199,101 @@ void brk_memory_allocator::deallocate(void* ptr)
     unite_afterwards(blk);
 }
 
-static std::byte ki_heap[0x100000];
-static brk_memory_allocator ki_alloc(ki_heap, sizeof(ki_heap));
+bool brk_memory_allocator::allocated(void* ptr) const noexcept
+{
+    return (void*)KERNEL_HEAP_START <= aspbyte(ptr) && aspbyte(ptr) < sbrk();
+}
+
 static brk_memory_allocator* k_alloc;
-
-void* kimalloc(std::size_t size)
-{
-    return ki_alloc.allocate(size);
-}
-
-void kifree(void* ptr)
-{
-    ki_alloc.deallocate(ptr);
-}
 
 } // namespace types::memory
 
+static kernel::mem::slab_cache caches[7];
+
+static constexpr int __cache_index(std::size_t size)
+{
+    if (size <= 32)
+        return 0;
+    if (size <= 64)
+        return 1;
+    if (size <= 96)
+        return 2;
+    if (size <= 128)
+        return 3;
+    if (size <= 192)
+        return 4;
+    if (size <= 256)
+        return 5;
+    if (size <= 512)
+        return 6;
+    return -1;
+}
+
 SECTION(".text.kinit")
-void kernel::kinit::init_kernel_heap(void *start, std::size_t size)
+void kernel::kinit::init_allocator()
 {
-    using namespace types::memory;
-    k_alloc = kinew<brk_memory_allocator>((std::byte*)start, size);
+    mem::init_slab_cache(caches+0, 32);
+    mem::init_slab_cache(caches+1, 64);
+    mem::init_slab_cache(caches+2, 96);
+    mem::init_slab_cache(caches+3, 128);
+    mem::init_slab_cache(caches+4, 192);
+    mem::init_slab_cache(caches+5, 256);
+    mem::init_slab_cache(caches+6, 512);
+
+    types::memory::k_alloc = new types::memory::brk_memory_allocator(
+        (std::byte*)KERNEL_HEAP_START, KERNEL_HEAP_SIZE);
 }
 
-void* operator new(size_t sz)
+void* operator new(size_t size)
 {
-    void* ptr = types::memory::k_alloc->allocate(sz);
-    assert(ptr);
-    return ptr;
-}
+    int idx = __cache_index(size);
+    void* ptr = nullptr;
+    if (idx < 0)
+        ptr = types::memory::k_alloc->allocate(size);
+    else
+        ptr = kernel::mem::slab_alloc(&caches[idx]);
 
-void* operator new[](size_t sz)
-{
-    void* ptr = types::memory::k_alloc->allocate(sz);
     assert(ptr);
     return ptr;
 }
 
 void operator delete(void* ptr)
 {
-    types::memory::k_alloc->deallocate(ptr);
+    if (!ptr)
+        return;
+
+    if (types::memory::k_alloc->allocated(ptr))
+        types::memory::k_alloc->deallocate(ptr);
+    else
+        kernel::mem::slab_free(ptr);
 }
 
-void operator delete(void* ptr, size_t)
+void operator delete(void* ptr, std::size_t size)
 {
-    types::memory::k_alloc->deallocate(ptr);
+    if (!ptr)
+        return;
+
+    if (types::memory::k_alloc->allocated(ptr)) {
+        types::memory::k_alloc->deallocate(ptr);
+        return;
+    }
+    int idx = __cache_index(size);
+    assert(idx >= 0);
+
+    kernel::mem::slab_free(ptr);
+}
+
+void* operator new[](size_t sz)
+{
+    return ::operator new(sz);
 }
 
 void operator delete[](void* ptr)
 {
-    types::memory::k_alloc->deallocate(ptr);
+    ::operator delete(ptr);
 }
 
-void operator delete[](void* ptr, size_t)
+void operator delete[](void* ptr, std::size_t size)
 {
-    types::memory::k_alloc->deallocate(ptr);
+    ::operator delete(ptr, size);
 }

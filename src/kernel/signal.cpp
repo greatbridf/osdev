@@ -1,7 +1,7 @@
 #include <kernel/task/thread.hpp>
 #include <kernel/process.hpp>
 #include <kernel/signal.hpp>
-#include <kernel/interrupt.h>
+#include <kernel/interrupt.hpp>
 
 #include <signal.h>
 
@@ -142,11 +142,11 @@ signo_type signal_list::pending_signal()
 
         return *iter;
     }
-    
+
     return 0;
 }
 
-void signal_list::handle(interrupt_stack* context, mmx_registers* mmxregs)
+void signal_list::handle(interrupt_stack_normal* context, mmx_registers* mmxregs)
 {
     // assume that the pending signal is at the front of the list
     auto signal = m_list.front();
@@ -178,29 +178,28 @@ void signal_list::handle(interrupt_stack* context, mmx_registers* mmxregs)
     if (!(handler.sa_flags & SA_RESTORER))
         raise(SIGSYS);
 
-    uint32_t esp = (uint32_t)context->esp;
-    esp -= (sizeof(mmx_registers) + sizeof(interrupt_stack) + 16);
-    esp &= 0xfffffff0;
+    // save current interrupt context to 128 bytes above current user stack
+    uintptr_t sp = (uintptr_t)context->rsp;
+    sp -= (128 + sizeof(mmx_registers) + sizeof(interrupt_stack_normal) + 16);
+    sp &= ~0xf;
 
-    auto tmpesp = esp;
-    *(uint32_t*)tmpesp = signal; // signal handler argument: int signo
-    tmpesp += 4;
-    *(uint32_t*)tmpesp = context->esp; // original esp
-    tmpesp += 4;
+    auto tmpsp = sp;
+    *(uint64_t*)tmpsp = signal; // signal handler argument: int signo
+    tmpsp += 8;
+    *(uintptr_t*)tmpsp = context->rsp; // original rsp
+    tmpsp += 8;
 
-    tmpesp += 8; // padding to align to 16 bytes
+    memcpy((void*)tmpsp, mmxregs, sizeof(mmx_registers));
+    tmpsp += sizeof(mmx_registers); // mmx registers
+    memcpy((void*)tmpsp, context, sizeof(interrupt_stack_normal));
+    tmpsp += sizeof(interrupt_stack_normal); // context
 
-    memcpy((void*)tmpesp, mmxregs, sizeof(mmx_registers));
-    tmpesp += sizeof(mmx_registers); // mmx registers
-    memcpy((void*)tmpesp, context, sizeof(interrupt_stack));
-    tmpesp += sizeof(interrupt_stack); // context
-
-    esp -= sizeof(void*);
+    sp -= sizeof(void*);
     // signal handler return address: restorer
-    *(uint32_t*)esp = (uint32_t)handler.sa_restorer;
+    *(uintptr_t*)sp = (uintptr_t)handler.sa_restorer;
 
-    context->esp = esp;
-    context->v_eip = (void*)handler.sa_handler;
+    context->rsp = sp;
+    context->v_rip = (uintptr_t)handler.sa_handler;
 }
 
 void signal_list::after_signal(signo_type signal)

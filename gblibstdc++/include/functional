@@ -147,7 +147,7 @@ public:
     using result_type = Ret;
 
 private:
-    static constexpr std::size_t STACK_ALLOCATED_SIZE = 12;
+    static constexpr std::size_t STACK_ALLOCATED_SIZE = 24;
 
     char _data[STACK_ALLOCATED_SIZE];
     using fb_t = __inner::_function_base<Ret, Args...>;

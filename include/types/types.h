@@ -1,7 +1,5 @@
 #pragma once
 
-#include "size.h"
-#include "status.h"
 #include "stdint.h"
 
 #define __user
@@ -16,6 +14,12 @@
 #define SECTION(x) __attribute__((section(x)))
 #else
 #error "no definition for ((SECTION))"
+#endif
+
+#ifdef __GNUC__
+#define PACKED __attribute__((__packed__))
+#else
+#error "no definition for ((PACKED))"
 #endif
 
 #ifdef __GNUC__

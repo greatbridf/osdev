@@ -1,7 +1,5 @@
 #pragma once
 
-#include <kernel/mem.h>
-
 #include <stdint.h>
 
 namespace kernel::user {
@@ -18,6 +16,6 @@ struct user_desc {
     uint32_t useable : 1;
 };
 
-void load_thread_area(const segment_descriptor& desc);
+void load_thread_area32(uint64_t desc);
 
 } // namespace kernel::user

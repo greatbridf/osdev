@@ -1,7 +1,7 @@
 #pragma once
 
-#include <map>
 #include <list>
+#include <map>
 #include <memory>
 #include <queue>
 #include <set>
@@ -13,23 +13,21 @@
 #include <stdint.h>
 #include <sys/types.h>
 
-#include <kernel/task/thread.hpp>
 #include <kernel/task/current.hpp>
+#include <kernel/task/thread.hpp>
 
 #include <types/allocator.hpp>
 #include <types/cplusplus.hpp>
 #include <types/path.hpp>
-#include <types/status.h>
 #include <types/types.h>
 
 #include <kernel/async/waitlist.hpp>
-#include <kernel/interrupt.h>
-#include <kernel/mm.hpp>
-#include <kernel/mem.h>
-#include <kernel/user/thread_local.hpp>
+#include <kernel/interrupt.hpp>
+#include <kernel/mem/mm_list.hpp>
+#include <kernel/mem/paging.hpp>
 #include <kernel/signal.hpp>
-#include <kernel/task.h>
 #include <kernel/tty.hpp>
+#include <kernel/user/thread_local.hpp>
 #include <kernel/vfs.hpp>
 
 class process;
@@ -38,8 +36,6 @@ class proclist;
 
 inline process* volatile current_process;
 inline proclist* procs;
-
-inline tss32_t tss;
 
 struct process_attr {
     uint16_t system : 1;
@@ -175,7 +171,7 @@ public:
     };
 
 public:
-    kernel::memory::mm_list mms {};
+    kernel::mem::mm_list mms {};
     std::set<kernel::task::thread> thds;
     kernel::async::wait_list waitlist;
 
@@ -192,7 +188,7 @@ public:
     pid_t pgid {};
     pid_t sid {};
 
-    tty* control_tty {};
+    kernel::tty::tty* control_tty {};
     fs::dentry* root { fs::fs_root };
     std::set<pid_t> children;
 
@@ -292,19 +288,15 @@ public:
     }
 
     void kill(pid_t pid, int exit_code);
+
+    constexpr auto begin() const { return m_procs.begin(); }
+    constexpr auto end() const { return m_procs.end(); }
 };
 
-void NORETURN init_scheduler(void);
+void NORETURN init_scheduler(kernel::mem::paging::pfn_t kernel_stack_pfn);
 /// @return true if returned normally, false if being interrupted
 bool schedule(void);
 void NORETURN schedule_noreturn(void);
-
-constexpr uint32_t push_stack(uint32_t** stack, uint32_t val)
-{
-    --*stack;
-    **stack = val;
-    return val;
-}
 
 void k_new_thread(void (*func)(void*), void* data);
 

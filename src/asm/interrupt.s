@@ -1,264 +1,122 @@
-.code32
-
 .text
 
-# TODO: stack alignment
-.globl int6
-.type  int6 @function
-int6:
-    pushal
-    call int6_handler
-    popal
+.extern after_ctx_switch
+.globl ISR_stub_restore
 
-    iret
+ISR_stub:
+	sub $0x78, %rsp
+	mov %rax,  0x00(%rsp)
+	mov %rbx,  0x08(%rsp)
+	mov %rcx,  0x10(%rsp)
+	mov %rdx,  0x18(%rsp)
+	mov %rdi,  0x20(%rsp)
+	mov %rsi,  0x28(%rsp)
+	mov %r8,   0x30(%rsp)
+	mov %r9,   0x38(%rsp)
+	mov %r10,  0x40(%rsp)
+	mov %r11,  0x48(%rsp)
+	mov %r12,  0x50(%rsp)
+	mov %r13,  0x58(%rsp)
+	mov %r14,  0x60(%rsp)
+	mov %r15,  0x68(%rsp)
+	mov %rbp,  0x70(%rsp)
 
-# TODO: stack alignment
-.globl int8
-.type  int8 @function
-int8:
-    nop
-    iret
+	mov 0x78(%rsp), %rax
+	sub $ISR0, %rax
+	shr $3, %rax
+	mov %rax, 0x78(%rsp)
 
-# TODO: stack alignment
-.globl int13
-.type  int13 @function
-int13:
-    pushal
-    call int13_handler
-    popal
+	mov %rsp, %rbx
+	and $~0xf, %rsp
 
-# remove the 32bit error code from stack
-    addl $4, %esp
-    iret
+	sub $512, %rsp
+	fxsave (%rsp)
 
-.globl int14
-.type  int14 @function
-int14:
-    # push general purpose registers
-    pushal
+	mov %rbx, %rdi
+	mov %rsp, %rsi
+	call interrupt_handler
 
-    # save %cr2
-    movl %cr2, %eax
-    pushl %eax
+ISR_stub_restore:
+	fxrstor (%rsp)
+	mov %rbx, %rsp
 
-    # save current esp (also pointer to struct int14_data)
-    mov %esp, %ebx
+	mov 0x00(%rsp), %rax
+	mov 0x08(%rsp), %rbx
+	mov 0x10(%rsp), %rcx
+	mov 0x18(%rsp), %rdx
+	mov 0x20(%rsp), %rdi
+	mov 0x28(%rsp), %rsi
+	mov 0x30(%rsp), %r8
+	mov 0x38(%rsp), %r9
+	mov 0x40(%rsp), %r10
+	mov 0x48(%rsp), %r11
+	mov 0x50(%rsp), %r12
+	mov 0x58(%rsp), %r13
+	mov 0x60(%rsp), %r14
+	mov 0x68(%rsp), %r15
+	mov 0x70(%rsp), %rbp
 
-    # allocate space for mmx registers and argument
-    subl $0x210, %esp
-
-    # align stack to 16byte boundary
-    and $0xfffffff0, %esp
-
-    # save mmx registers
-    fxsave 16(%esp)
-
-    # push (interrupt_stack*)data
-    mov %ebx, (%esp)
-
-    call int14_handler
-
-    # restore mmx registers
-    fxrstor 16(%esp)
-
-    # restore stack and general purpose registers
-    leal 4(%ebx), %esp
-    popal
-
-# remove the 32bit error code from stack
-    addl $4, %esp
-    iret
-
-.globl irq0
-irq0:
-    pushal
-    mov $0, %eax
-    jmp irqstub
-.globl irq1
-irq1:
-    pushal
-    mov $1, %eax
-    jmp irqstub
-.globl irq2
-irq2:
-    pushal
-    mov $2, %eax
-    jmp irqstub
-.globl irq3
-irq3:
-    pushal
-    mov $3, %eax
-    jmp irqstub
-.globl irq4
-irq4:
-    pushal
-    mov $4, %eax
-    jmp irqstub
-.globl irq5
-irq5:
-    pushal
-    mov $5, %eax
-    jmp irqstub
-.globl irq6
-irq6:
-    pushal
-    mov $6, %eax
-    jmp irqstub
-.globl irq7
-irq7:
-    pushal
-    mov $7, %eax
-    jmp irqstub
-.globl irq8
-irq8:
-    pushal
-    mov $8, %eax
-    jmp irqstub
-.globl irq9
-irq9:
-    pushal
-    mov $9, %eax
-    jmp irqstub
-.globl irq10
-irq10:
-    pushal
-    mov $10, %eax
-    jmp irqstub
-.globl irq11
-irq11:
-    pushal
-    mov $11, %eax
-    jmp irqstub
-.globl irq12
-irq12:
-    pushal
-    mov $12, %eax
-    jmp irqstub
-.globl irq13
-irq13:
-    pushal
-    mov $13, %eax
-    jmp irqstub
-.globl irq14
-irq14:
-    pushal
-    mov $14, %eax
-    jmp irqstub
-.globl irq15
-irq15:
-    pushal
-    mov $15, %eax
-    jmp irqstub
-
-.globl irqstub
-irqstub:
-    # save current esp
-    mov %esp, %ebx
-
-    # align stack to 16byte boundary
-    and $0xfffffff0, %esp
-
-    # save mmx registers
-    sub $(512 + 16), %esp
-    fxsave 16(%esp)
-
-    # save irq number and pointers to context and mmx registers
-    mov %eax, (%esp)  # irq number
-    mov %ebx, 4(%esp) # pointer to context
-    lea 16(%esp), %eax
-    mov %eax, 8(%esp) # pointer to mmx registers
-
-    call irq_handler
-
-    # restore mmx registers
-    fxrstor 16(%esp)
-
-    # restore stack and general purpose registers
-    mov %ebx, %esp
-    popal
-
-    iret
-
-.globl syscall_stub
-.type  syscall_stub @function
-syscall_stub:
-    pushal
-
-    # save current esp
-    mov %esp, %ebx
-
-    # stack alignment
-    and $0xfffffff0, %esp
-
-    # save mmx registers
-    sub $(512 + 16), %esp
-    fxsave 16(%esp)
-
-    # save pointers to context and mmx registers
-    mov %ebx, (%esp) # pointer to context
-    lea 16(%esp), %eax
-    mov %eax, 4(%esp) # pointer to mmx registers
-
-    call syscall_entry
-
-    # restore mmx registers
-    fxrstor 16(%esp)
-
-    # restore stack
-    mov %ebx, %esp
-
-.globl _syscall_stub_fork_return
-.type  _syscall_stub_fork_return @function
-_syscall_stub_fork_return:
-    popal
-    iret
+	mov 0x78(%rsp), %rsp
+	iretq
 
 # parameters
-# #1: esp* curr_esp
-# #2: esp* next_esp
+# #1: sp* current_task_sp
+# #2: sp* target_task_sp
 .globl asm_ctx_switch
 .type  asm_ctx_switch @function
 asm_ctx_switch:
-    movl 4(%esp), %ecx
-    movl 8(%esp), %eax
+    pushf
+	sub $0x38, %rsp  # extra 8 bytes to align to 16 bytes
 
-    push $_ctx_switch_return
-    push %ebx
-    push %edi
-    push %esi
-    push %ebp
-    pushfl
+    mov %rbx, 0x08(%rsp)
+	mov %rbp, 0x10(%rsp)
+	mov %r12, 0x18(%rsp)
+	mov %r13, 0x20(%rsp)
+	mov %r14, 0x28(%rsp)
+	mov %r15, 0x30(%rsp)
 
-    # push esp to restore
-    pushl (%ecx)
+    push (%rdi) 	 # save sp of previous stack frame of current
+	                 # acts as saving bp
 
-    mov %esp, (%ecx)
-    mov (%eax), %esp
+    mov %rsp, (%rdi) # save sp of current stack
+    mov (%rsi), %rsp # load sp of target stack
 
-    # restore esp
-    popl (%eax)
+    pop (%rsi)       # load sp of previous stack frame of target
+	                 # acts as restoring previous bp
 
-    popfl
-    pop %ebp
-    pop %esi
-    pop %edi
-    pop %ebx
+	pop %rax         # align to 16 bytes
+
+	call after_ctx_switch
+
+	mov 0x28(%rsp), %r15
+	mov 0x20(%rsp), %r14
+	mov 0x18(%rsp), %r13
+	mov 0x10(%rsp), %r12
+	mov 0x08(%rsp), %rbp
+    mov 0x00(%rsp), %rbx
+
+	add $0x30, %rsp
+    popf
 
     ret
 
-_ctx_switch_return:
-    ret
+.altmacro
+.macro build_isr name
+	.align 8
+	ISR\name:
+		call ISR_stub
+.endm
 
-.section .text.kinit
+.set i, 0
+.rept 0x80+1
+	build_isr %i
+	.set i, i+1
+.endr
 
-.globl asm_load_idt
-.type  asm_load_idt @function
-asm_load_idt:
-    movl 4(%esp), %edx
-    lidt (%edx)
-    movl 8(%esp), %edx
-    cmpl $0, %edx
-    je asm_load_idt_skip
-    sti
-asm_load_idt_skip:
-    ret
+.section .rodata
+
+.align 8
+.globl ISR_START_ADDR
+.type  ISR_START_ADDR @object
+ISR_START_ADDR:
+	.quad ISR0

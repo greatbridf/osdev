@@ -40,5 +40,5 @@ alias ll="ls -l "
 alias la="ls -la "
 EOF
 
-exec /bin/sh -l \
+exec /mnt/init /bin/sh -l \
     < /dev/console > /dev/console 2> /dev/console

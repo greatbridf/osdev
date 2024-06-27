@@ -12,7 +12,7 @@ int open(const char* filename, int flags, ...)
         va_list vl;
         va_start(vl, flags);
 
-        ret = syscall3(SYS_open, (uint32_t)filename, flags, va_arg(vl, mode_t));
+        ret = syscall3(SYS_open, (uint32_t)filename, flags, va_arg(vl, int));
 
         va_end(vl);
     }

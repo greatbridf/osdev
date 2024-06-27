@@ -68,7 +68,7 @@ inline hash_t hash(const char* str, std::size_t bits)
         while (*str)
             hash = hash * seed + (*str++);
 
-        return hash32(hash, bits);
+        return hash64(hash, bits);
 };
 
 template <template <typename, typename, typename> typename String,

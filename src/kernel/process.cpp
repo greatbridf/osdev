@@ -300,7 +300,7 @@ proclist::proclist()
 
         __spawn(*thd, (uintptr_t)kernel_threadd_main);
 
-        kernel::task::dispatcher::enqueue(&thd);
+        kernel::task::dispatcher::setup_idle(&thd);
     }
 }
 

@@ -10,6 +10,12 @@ using kernel::async::mutex, kernel::async::lock_guard_irq;
 
 static mutex dispatcher_mtx;
 static std::list<thread*> dispatcher_thds;
+static thread* idle_task;
+
+void dispatcher::setup_idle(thread* _idle)
+{
+    idle_task = _idle;
+}
 
 void dispatcher::enqueue(thread* thd)
 {
@@ -28,28 +34,19 @@ void dispatcher::dequeue(thread* thd)
 thread* dispatcher::next()
 {
     lock_guard_irq lck(dispatcher_mtx);
-    auto back = dispatcher_thds.back();
 
-    if (dispatcher_thds.size() == 1) {
-        back->elected_times++;
-        return back;
+    if (dispatcher_thds.empty()) {
+        idle_task->elected_times++;
+        return idle_task;
     }
 
-    if (dispatcher_thds.size() == 2) {
-        if (back->owner == 0) {
-            auto front = dispatcher_thds.front();
-            front->elected_times++;
-            return front;
-        }
-        back->elected_times++;
-        return back;
+    auto* front = dispatcher_thds.front();
+
+    if (dispatcher_thds.size() != 1) {
+        dispatcher_thds.pop_front();
+        dispatcher_thds.push_back(front);
     }
 
-    auto* retval = dispatcher_thds.front();
-
-    dispatcher_thds.pop_front();
-    dispatcher_thds.push_back(retval);
-
-    retval->elected_times++;
-    return retval;
+    front->elected_times++;
+    return front;
 }

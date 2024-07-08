@@ -112,10 +112,8 @@ void thread::set_attr(thd_attr_t new_attr)
             break;
         }
 
-        if (attr & READY) {
-            kmsgf("[kernel:warn] pid%d tries to wake up from ready state", owner);
+        if (attr & READY)
             break;
-        }
 
         attr &= SYSTEM;
         attr |= READY;

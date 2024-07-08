@@ -1,7 +1,8 @@
-#include <kernel/task/thread.hpp>
+#include <kernel/async/lock.hpp>
+#include <kernel/interrupt.hpp>
 #include <kernel/process.hpp>
 #include <kernel/signal.hpp>
-#include <kernel/interrupt.hpp>
+#include <kernel/task/thread.hpp>
 
 #include <signal.h>
 
@@ -40,6 +41,7 @@ static void stop_process(int signal)
 
     // signal parent we're stopped
     parent.waitprocs.push_back({ current_process->pid, 0x7f });
+    parent.waitlist.notify_all();
 
     while (true) {
         if (schedule())
@@ -61,13 +63,10 @@ static void terminate_process_with_core_dump(int signo)
 
 void signal_list::set_handler(signo_type signal, const sigaction& action)
 {
-    if (action.sa_handler == SIG_DFL) {
+    if (action.sa_handler == SIG_DFL)
         m_handlers.erase(signal);
-        return;
-    }
-    else {
+    else
         m_handlers[signal] = action;
-    }
 }
 
 void signal_list::get_handler(signo_type signal, sigaction& action) const
@@ -93,6 +92,8 @@ void signal_list::on_exec()
 
 bool signal_list::raise(signo_type signal)
 {
+    async::lock_guard lck{m_mtx};
+
     // TODO: clear pending signals
     if (signal == SIGCONT) {
         m_list.remove_if([](signo_type sig) {
@@ -124,6 +125,7 @@ bool signal_list::raise(signo_type signal)
 
 signo_type signal_list::pending_signal()
 {
+    async::lock_guard lck{m_mtx};
     for (auto iter = m_list.begin(); iter != m_list.end(); ++iter) {
         auto iter_handler = m_handlers.find(*iter);
 
@@ -148,9 +150,13 @@ signo_type signal_list::pending_signal()
 
 void signal_list::handle(interrupt_stack_normal* context, mmx_registers* mmxregs)
 {
-    // assume that the pending signal is at the front of the list
-    auto signal = m_list.front();
-    m_list.pop_front();
+    unsigned int signal;
+    if (1) {
+        async::lock_guard lck{m_mtx};
+        // assume that the pending signal is at the front of the list
+        signal = m_list.front();
+        m_list.pop_front();
+    }
 
     // default handlers
     if (sigmask(signal) & sigmask_now) {
@@ -204,7 +210,7 @@ void signal_list::handle(interrupt_stack_normal* context, mmx_registers* mmxregs
 
 void signal_list::after_signal(signo_type signal)
 {
-    this->m_mask &= ~sigmask(signal);
+    m_mask &= ~sigmask(signal);
 }
 
 kernel::sigmask_type signal_list::get_mask() const { return m_mask; }

@@ -12,3 +12,9 @@
     }
 
 #define kmsg(msg) if (kernel::tty::console) kernel::tty::console->print(msg "\n")
+
+#ifdef NDEBUG
+#define kmsgf_debug(...)
+#else
+#define kmsgf_debug(...) kmsgf(__VA_ARGS__)
+#endif

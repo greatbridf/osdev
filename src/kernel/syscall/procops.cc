@@ -7,6 +7,7 @@
 
 #include <types/elf.hpp>
 
+#include <kernel/async/lock.hpp>
 #include <kernel/log.hpp>
 #include <kernel/process.hpp>
 #include <kernel/signal.hpp>
@@ -60,11 +61,19 @@ execve_retval kernel::syscall::do_execve(
 
     current_process->files.onexec();
 
+    async::preempt_disable();
+
     // TODO: set cs and ss to compatibility mode
-    if (int ret = types::elf::elf32_load(d); ret != 0)
+    if (int ret = types::elf::elf32_load(d); ret != 0) {
+        async::preempt_enable();
+        if (ret == types::elf::ELF_LOAD_FAIL_NORETURN)
+            kill_current(SIGSEGV);
+
         return { 0, 0, ret };
+    }
 
     current_thread->signals.on_exec();
+    async::preempt_enable();
 
     return { d.ip, d.sp, 0 };
 }
@@ -88,7 +97,7 @@ int kernel::syscall::do_waitpid(pid_t waitpid, int __user* arg1, int options)
         return -EINVAL;
 
     auto& cv = current_process->waitlist;
-    kernel::async::lock_guard lck(current_process->mtx_waitprocs);
+    async::lock_guard lck(current_process->mtx_waitprocs);
 
     auto& waitlist = current_process->waitprocs;
 
@@ -274,6 +283,27 @@ int kernel::syscall::do_kill(pid_t pid, int sig)
 
     // TODO: check permission
     procs->send_signal(pid, sig);
+
+    return 0;
+}
+
+int kernel::syscall::do_tkill(pid_t tid, int sig)
+{
+    NOT_IMPLEMENTED;
+    return -EINVAL;
+
+    auto [ pproc, found ] = procs->try_find(tid);
+    if (!found)
+        return -ESRCH;
+
+    if (!kernel::signal_list::check_valid(sig))
+        return -EINVAL;
+
+    if (pproc->is_system())
+        return 0;
+
+    // TODO: check permission
+    procs->send_signal(tid, sig);
 
     return 0;
 }

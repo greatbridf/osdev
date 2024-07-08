@@ -83,6 +83,7 @@ char __user* do_getcwd(char __user* buf, size_t buf_size);
 uintptr_t do_brk(uintptr_t addr);
 int do_umask(mode_t mask);
 int do_kill(pid_t pid, int sig);
+int do_tkill(pid_t pid, int sig);
 int do_rt_sigprocmask(int how, const kernel::sigmask_type __user* set,
         kernel::sigmask_type __user* oldset, size_t sigsetsize);
 int do_rt_sigaction(int signum, const sigaction __user* act,

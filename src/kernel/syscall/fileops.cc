@@ -358,12 +358,6 @@ ssize_t kernel::syscall::do_sendfile(int out_fd, int in_fd,
         if (ret < 0)
             return ret;
         totn += ret;
-
-        // TODO: this won't work, since when we are in the syscall handler,
-        //       interrupts are blocked.
-        //       one solution is to put the sendfile action into a kernel
-        //       worker and pause the calling thread so that the worker
-        //       thread could be interrupted normally.
     }
 
     return totn;

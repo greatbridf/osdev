@@ -100,7 +100,12 @@ static uint32_t _syscall32_##name(interrupt_stack_normal* data, mmx_registers* m
     _DEFINE_SYSCALL32_END(name, __VA_ARGS__); \
 }
 
-static uint32_t (*syscall_handlers[SYSCALL_HANDLERS_SIZE])(interrupt_stack_normal*, mmx_registers*);
+struct syscall_handler_t {
+    uint32_t (*handler)(interrupt_stack_normal*, mmx_registers*);
+    const char* name;
+};
+
+static syscall_handler_t syscall_handlers[SYSCALL_HANDLERS_SIZE];
 
 static inline void not_implemented(const char* pos, int line)
 {
@@ -169,6 +174,7 @@ DEFINE_SYSCALL32(arch_prctl, int, option, uintptr_t, arg2)
 DEFINE_SYSCALL32(brk, uintptr_t, addr)
 DEFINE_SYSCALL32(umask, mode_t, mask)
 DEFINE_SYSCALL32(kill, pid_t, pid, int, sig)
+DEFINE_SYSCALL32(tkill, pid_t, tid, int, sig)
 DEFINE_SYSCALL32(rt_sigprocmask, int, how,
         const kernel::sigmask_type __user*, set,
         kernel::sigmask_type __user*, oldset, size_t, sigsetsize)
@@ -191,6 +197,7 @@ static uint32_t _syscall32_fork(interrupt_stack_normal* data, mmx_registers* mmx
     assert(inserted);
     auto* newthd = &*iter_newthd;
 
+    kernel::async::preempt_disable();
     kernel::task::dispatcher::enqueue(newthd);
 
     auto newthd_prev_sp = newthd->kstack.sp;
@@ -239,6 +246,7 @@ static uint32_t _syscall32_fork(interrupt_stack_normal* data, mmx_registers* mmx
     newthd->kstack.pushq(0);              // 0 for alignment
     newthd->kstack.pushq(newthd_prev_sp); // previous sp
 
+    kernel::async::preempt_enable();
     return newproc.pid;
 }
 
@@ -360,7 +368,7 @@ static uint32_t _syscall32_wait4(interrupt_stack_normal* data, mmx_registers* mm
 
 void kernel::handle_syscall32(int no, interrupt_stack_normal* data, mmx_registers* mmxregs)
 {
-    if (no >= SYSCALL_HANDLERS_SIZE || !syscall_handlers[no]) {
+    if (no >= SYSCALL_HANDLERS_SIZE || !syscall_handlers[no].handler) {
         kmsgf("[kernel] syscall %d(%x) isn't implemented", no, no);
         NOT_IMPLEMENTED;
 
@@ -369,7 +377,10 @@ void kernel::handle_syscall32(int no, interrupt_stack_normal* data, mmx_register
         return;
     }
 
-    data->head.s_regs.rax = syscall_handlers[no](data, mmxregs);
+    // kmsgf_debug("[kernel:debug] (pid\t%d) %s()", current_process->pid, syscall_handlers[no].name);
+
+    asm volatile("sti");
+    data->head.s_regs.rax = syscall_handlers[no].handler(data, mmxregs);
     data->head.s_regs.r8 = 0;
     data->head.s_regs.r9 = 0;
     data->head.s_regs.r10 = 0;
@@ -383,7 +394,9 @@ void kernel::handle_syscall32(int no, interrupt_stack_normal* data, mmx_register
         current_thread->signals.handle(data, mmxregs);
 }
 
-#define REGISTER_SYSCALL_HANDLER(no, name) syscall_handlers[(no)] = _syscall32_ ## name
+#define REGISTER_SYSCALL_HANDLER(no, _name) \
+    syscall_handlers[(no)].handler = _syscall32_ ## _name; \
+    syscall_handlers[(no)].name = #_name; \
 
 SECTION(".text.kinit")
 void kernel::init_syscall_table()
@@ -441,6 +454,7 @@ void kernel::init_syscall_table()
     REGISTER_SYSCALL_HANDLER(0xdc, getdents64);
     REGISTER_SYSCALL_HANDLER(0xdd, fcntl64);
     REGISTER_SYSCALL_HANDLER(0xe0, gettid);
+    REGISTER_SYSCALL_HANDLER(0xee, tkill);
     REGISTER_SYSCALL_HANDLER(0xef, sendfile64);
     REGISTER_SYSCALL_HANDLER(0xf3, set_thread_area);
     REGISTER_SYSCALL_HANDLER(0xfc, exit_group);

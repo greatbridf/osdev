@@ -21,30 +21,32 @@ private:
 
 private:
     types::buffer buf;
-    kernel::async::wait_list waitlist;
-    kernel::async::mutex mtx;
     uint32_t flags;
+    kernel::async::mutex mtx;
+
+    kernel::async::wait_list waitlist_r;
+    kernel::async::wait_list waitlist_w;
 
 public:
-    pipe(void);
+    pipe();
 
-    void close_read(void);
-    void close_write(void);
+    void close_read();
+    void close_write();
 
     int write(const char* buf, size_t n);
     int read(char* buf, size_t n);
 
-    constexpr bool is_readable(void) const
+    constexpr bool is_readable() const
     {
         return flags & READABLE;
     }
 
-    constexpr bool is_writeable(void) const
+    constexpr bool is_writeable() const
     {
         return flags & WRITABLE;
     }
 
-    constexpr bool is_free(void) const
+    constexpr bool is_free() const
     {
         return !(flags & (READABLE | WRITABLE));
     }

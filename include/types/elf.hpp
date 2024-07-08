@@ -19,6 +19,8 @@ constexpr elf32_addr_t ELF32_STACK_BOTTOM = 0xbffff000;
 constexpr elf32_off_t ELF32_STACK_SIZE = 8 * 1024 * 1024;
 constexpr elf32_addr_t ELF32_STACK_TOP = ELF32_STACK_BOTTOM - ELF32_STACK_SIZE;
 
+constexpr int ELF_LOAD_FAIL_NORETURN = 0x114514;
+
 struct PACKED elf32_header {
     // 0x7f, "ELF"
     char magic[4];

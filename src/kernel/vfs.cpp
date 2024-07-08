@@ -803,36 +803,32 @@ fs::pipe::pipe(void)
 
 void fs::pipe::close_read(void)
 {
-    if (1) {
-        kernel::async::lock_guard lck(mtx);
-        flags &= (~READABLE);
-    }
-    waitlist.notify_all();
+    kernel::async::lock_guard lck{mtx};
+    flags &= (~READABLE);
+    waitlist_w.notify_all();
 }
 
 void fs::pipe::close_write(void)
 {
-    if (1) {
-        kernel::async::lock_guard lck(mtx);
-        flags &= (~WRITABLE);
-    }
-    waitlist.notify_all();
+    kernel::async::lock_guard lck{mtx};
+    flags &= (~WRITABLE);
+    waitlist_r.notify_all();
 }
 
 int fs::pipe::write(const char* buf, size_t n)
 {
     // TODO: check privilege
     // TODO: check EPIPE
-    if (1) {
-        kernel::async::lock_guard lck(mtx);
+    kernel::async::lock_guard lck{mtx};
 
-        if (!is_readable()) {
-            current_thread->send_signal(SIGPIPE);
-            return -EPIPE;
-        }
+    if (!is_readable()) {
+        current_thread->send_signal(SIGPIPE);
+        return -EPIPE;
+    }
 
+    if (n <= PIPE_SIZE) {
         while (this->buf.avail() < n) {
-            bool interrupted = waitlist.wait(mtx);
+            bool interrupted = waitlist_w.wait(mtx);
             if (interrupted)
                 return -EINTR;
 
@@ -844,50 +840,61 @@ int fs::pipe::write(const char* buf, size_t n)
 
         for (size_t i = 0; i < n; ++i)
             this->buf.put(*(buf++));
+
+        waitlist_r.notify_all();
+
+        return n;
     }
 
-    waitlist.notify_all();
-    return n;
+    size_t orig_n = n;
+    while (true) {
+        bool write = false;
+        while (n && !this->buf.full()) {
+            --n, this->buf.put(*(buf++));
+            write = true;
+        }
+
+        if (write)
+            waitlist_r.notify_all();
+
+        if (n == 0)
+            break;
+
+        bool interrupted = waitlist_w.wait(mtx);
+        if (interrupted)
+            return -EINTR;
+
+        if (!is_readable()) {
+            current_thread->send_signal(SIGPIPE);
+            return -EPIPE;
+        }
+    }
+
+    return orig_n - n;
 }
 
 int fs::pipe::read(char* buf, size_t n)
 {
     // TODO: check privilege
-    if (1) {
-        kernel::async::lock_guard lck(mtx);
+    kernel::async::lock_guard lck{mtx};
+    size_t orig_n = n;
 
-        if (!is_writeable()) {
-            size_t orig_n = n;
-            while (!this->buf.empty() && n) {
-                --n;
-                *(buf++) = this->buf.get();
-            }
-
-            return orig_n - n;
-        }
-
-        while (this->buf.size() < n) {
-            bool interrupted = waitlist.wait(mtx);
+    if (n <= PIPE_SIZE || this->buf.empty()) {
+        while (is_writeable() && this->buf.size() < n) {
+            bool interrupted = waitlist_r.wait(mtx);
             if (interrupted)
                 return -EINTR;
 
-            if (!is_writeable()) {
-                size_t orig_n = n;
-                while (!this->buf.empty() && n) {
-                    --n;
-                    *(buf++) = this->buf.get();
-                }
-
-                return orig_n - n;
-            }
+            if (n > PIPE_SIZE)
+                break;
         }
-
-        for (size_t i = 0; i < n; ++i)
-            *(buf++) = this->buf.get();
     }
 
-    waitlist.notify_all();
-    return n;
+    while (!this->buf.empty() && n)
+        --n, *(buf++) = this->buf.get();
+
+    waitlist_w.notify_all();
+    return orig_n - n;
 }
 
 SECTION(".text.kinit")

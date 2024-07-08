@@ -107,7 +107,7 @@ int types::elf::elf32_load(types::elf::elf32_load_data& d)
                 args.flags |= MM_EXECUTE;
 
             if (auto ret = mms.mmap(args); ret != 0)
-                kill_current(SIGSEGV);
+                return ELF_LOAD_FAIL_NORETURN;
         }
 
         if (vlen > flen) {
@@ -124,7 +124,7 @@ int types::elf::elf32_load(types::elf::elf32_load_data& d)
                 args.flags |= MM_EXECUTE;
 
             if (auto ret = mms.mmap(args); ret != 0)
-                kill_current(SIGSEGV);
+                return ELF_LOAD_FAIL_NORETURN;
         }
 
         if (vaddr + vlen > data_segment_end)
@@ -148,8 +148,7 @@ int types::elf::elf32_load(types::elf::elf32_load_data& d)
         args.flags = MM_ANONYMOUS | MM_WRITE;
 
         if (auto ret = mms.mmap(args); ret != 0)
-            kill_current(SIGSEGV);
-        // TODO: deconstruct local variables before calling kill_current
+            return ELF_LOAD_FAIL_NORETURN;
     }
 
     d.ip = hdr.entry;

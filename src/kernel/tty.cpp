@@ -57,7 +57,7 @@ void tty::print(const char* str)
 
 int tty::poll()
 {
-    kernel::async::lock_guard lck(this->mtx_buf);
+    async::lock_guard_irq lck(this->mtx_buf);
     if (this->buf.empty()) {
         bool interrupted = this->waitlist.wait(this->mtx_buf);
 
@@ -77,7 +77,7 @@ ssize_t tty::read(char* buf, size_t buf_size, size_t n)
         if (n == 0)
             break;
 
-        kernel::async::lock_guard lck(this->mtx_buf);
+        async::lock_guard_irq lck(this->mtx_buf);
 
         if (this->buf.empty()) {
             bool interrupted = this->waitlist.wait(this->mtx_buf);

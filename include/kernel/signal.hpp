@@ -9,6 +9,7 @@
 
 #include <types/cplusplus.hpp>
 
+#include <kernel/async/lock.hpp>
 #include <kernel/interrupt.hpp>
 
 namespace kernel {
@@ -31,6 +32,7 @@ private:
     list_type m_list;
     sigmask_type m_mask { };
     std::map<signo_type, sigaction> m_handlers;
+    async::mutex m_mtx;
 
 public:
     static constexpr bool check_valid(signo_type sig)
@@ -40,8 +42,13 @@ public:
 
 public:
     constexpr signal_list() = default;
-    constexpr signal_list(const signal_list& val) = default;
-    constexpr signal_list(signal_list&& val) = default;
+    constexpr signal_list(const signal_list& val)
+        : m_list{val.m_list}, m_mask{val.m_mask}
+        , m_handlers{val.m_handlers}, m_mtx{} { }
+
+    constexpr signal_list(signal_list&& val)
+        : m_list{std::move(val.m_list)}, m_mask{std::move(val.m_mask)}
+        , m_handlers{std::move(val.m_handlers)}, m_mtx{} { }
 
     void on_exec();
 

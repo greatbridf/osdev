@@ -26,7 +26,7 @@
 #include <kernel/vfs.hpp>
 
 using kernel::async::mutex;
-using kernel::async::lock_guard, kernel::async::lock_guard_irq;
+using kernel::async::lock_guard;
 
 static void (*volatile kthreadd_new_thd_func)(void*);
 static void* volatile kthreadd_new_thd_data;
@@ -322,6 +322,8 @@ void proclist::kill(pid_t pid, int exit_code)
         freeze();
     }
 
+    kernel::async::preempt_disable();
+
     // put all threads into sleep
     for (auto& thd : proc.thds)
         thd.set_attr(kernel::task::thread::ZOMBIE);
@@ -343,10 +345,10 @@ void proclist::kill(pid_t pid, int exit_code)
 
     bool flag = false;
     if (1) {
-        lock_guard_irq lck(init.mtx_waitprocs);
+        lock_guard lck(init.mtx_waitprocs);
 
         if (1) {
-            lock_guard_irq lck(proc.mtx_waitprocs);
+            lock_guard lck(proc.mtx_waitprocs);
 
             for (const auto& item : proc.waitprocs) {
                 if (WIFSTOPPED(item.code) || WIFCONTINUED(item.code))
@@ -364,11 +366,13 @@ void proclist::kill(pid_t pid, int exit_code)
         init.waitlist.notify_all();
 
     if (1) {
-        lock_guard_irq lck(parent.mtx_waitprocs);
+        lock_guard lck(parent.mtx_waitprocs);
         parent.waitprocs.push_back({ pid, exit_code });
     }
 
     parent.waitlist.notify_all();
+
+    kernel::async::preempt_enable();
 }
 
 static void release_kinit()
@@ -522,11 +526,8 @@ extern "C" void after_ctx_switch()
     current_thread->load_thread_area32();
 }
 
-bool schedule()
+bool _schedule()
 {
-    if (kernel::async::preempt_count() != 0)
-        return true;
-
     auto* next_thd = kernel::task::dispatcher::next();
 
     if (current_thread != next_thd) {
@@ -545,9 +546,17 @@ bool schedule()
     return current_thread->signals.pending_signal() == 0;
 }
 
+bool schedule()
+{
+    if (kernel::async::preempt_count() != 0)
+        return true;
+
+    return _schedule();
+}
+
 void NORETURN schedule_noreturn(void)
 {
-    schedule();
+    _schedule();
     freeze();
 }
 

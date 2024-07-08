@@ -229,7 +229,7 @@ void kernel::mem::paging::free_pages(page* pg, unsigned order)
         if (buddy_page < pg)
             std::swap(buddy_page, pg);
 
-        buddy_page->flags &= ~PAGE_BUDDY;
+        buddy_page->flags &= ~(PAGE_BUDDY | 0xff);
         order++;
     }
 

@@ -139,14 +139,17 @@ int kernel::syscall::do_waitpid(pid_t waitpid, int __user* arg1, int options)
     return -EINVAL;
 }
 
-char __user* kernel::syscall::do_getcwd(char __user* buf, size_t buf_size)
+int kernel::syscall::do_getcwd(char __user* buf, size_t buf_size)
 {
-    // TODO: use copy_to_user
     auto path = current_process->pwd.full_path();
-    strncpy(buf, path.c_str(), buf_size);
-    buf[buf_size - 1] = 0;
 
-    return buf;
+    int len = std::min(buf_size-1, path.size());
+
+    // TODO: use copy_to_user
+    strncpy(buf, path.c_str(), len);
+    buf[len] = 0;
+
+    return len;
 }
 
 pid_t kernel::syscall::do_setsid()

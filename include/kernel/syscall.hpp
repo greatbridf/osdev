@@ -79,7 +79,7 @@ uid_t do_getuid();
 uid_t do_geteuid();
 gid_t do_getgid();
 pid_t do_gettid();
-char __user* do_getcwd(char __user* buf, size_t buf_size);
+int do_getcwd(char __user* buf, size_t buf_size);
 uintptr_t do_brk(uintptr_t addr);
 int do_umask(mode_t mask);
 int do_kill(pid_t pid, int sig);

@@ -379,10 +379,20 @@ private:
 
         constexpr control_block_base(std::size_t ref_count,
             std::size_t weak_count, pointer ptr)
-            : ref_count(ref_count), weak_count(weak_count), ptr(ptr) { }
+            : ref_count(ref_count)
+            , weak_count(weak_count)
+            , ptr(ptr)
+        {
+        }
 
         virtual constexpr ~control_block_base() = default;
         virtual constexpr void do_delete() = 0;
+
+        // template <typename U, std::enable_if_t<std::is_convertible_v<T*, U*>, bool> = true>
+        // constexpr operator typename shared_ptr<U>::control_block_base*() const
+        // {
+        //     return this;
+        // }
     };
 
     template <typename Deleter>
@@ -394,7 +404,9 @@ private:
         constexpr control_block(std::size_t ref_count,
             std::size_t weak_count, pointer ptr, UDeleter&& deleter)
             : control_block_base { ref_count, weak_count, ptr }
-            , deleter(std::forward<UDeleter>(deleter)) { }
+            , deleter(std::forward<UDeleter>(deleter))
+        {
+        }
 
         virtual constexpr void do_delete() override
         {
@@ -409,7 +421,9 @@ private:
 
         constexpr default_control_block(std::size_t ref_count,
             std::size_t weak_count, pointer ptr)
-            : control_block_base { ref_count, weak_count, ptr } { }
+            : control_block_base { ref_count, weak_count, ptr }
+        {
+        }
 
         virtual constexpr void do_delete() override
         {
@@ -419,7 +433,8 @@ private:
         }
     };
 
-    control_block_base* cb { };
+    control_block_base* cb {};
+    pointer ptr {};
 
     void inc_ref()
     {
@@ -438,128 +453,139 @@ private:
 
 private:
     template <typename Deleter>
-    using rebind_allocator = typename std::allocator_traits<Deleter>::template
-        rebind_alloc<control_block<Deleter>>;
+    using rebind_allocator = typename std::allocator_traits<Deleter>::template rebind_alloc<control_block<Deleter>>;
 
     template <typename U>
     friend class shared_ptr;
 
 public:
     constexpr shared_ptr() noexcept = default;
-    constexpr shared_ptr(std::nullptr_t) noexcept : cb { } { }
+    constexpr shared_ptr(std::nullptr_t) noexcept { }
 
-    template <typename U>
-    __GBLIBCPP_CONSTEXPR
-    explicit shared_ptr(U* ptr) // TODO: array type
-        : cb(new default_control_block { 1, 0, ptr }) { }
+    template <typename U, enable_if_t<is_convertible_v<U*, T*>, bool> = true>
+    __GBLIBCPP_CONSTEXPR explicit shared_ptr(U* p) // TODO: array type
+        : cb(new default_control_block { 1, 0, p })
+        , ptr(p)
+    {
+    }
 
-    template <typename U, typename Deleter>
-    __GBLIBCPP_CONSTEXPR
-    explicit shared_ptr(U* ptr, Deleter d)
-        : cb(new control_block<Deleter> { 1, 0, ptr, d }) { }
+    template <typename U, typename Deleter, enable_if_t<is_convertible_v<U*, T*>, bool> = true>
+    __GBLIBCPP_CONSTEXPR explicit shared_ptr(U* p, Deleter d)
+        : cb(new control_block<Deleter> { 1, 0, p, d })
+        , ptr(p)
+    {
+    }
 
     template <typename Deleter>
-    __GBLIBCPP_CONSTEXPR
-    explicit shared_ptr(std::nullptr_t, Deleter d)
-        : cb(new control_block<Deleter> { 1, 0, nullptr, d }) { }
+    __GBLIBCPP_CONSTEXPR explicit shared_ptr(std::nullptr_t, Deleter d)
+        : cb(new control_block<Deleter> { 1, 0, nullptr, d })
+    {
+    }
 
-    // TODO: what the fuck
-    // template <typename U, typename Deleter, typename Allocator>
-    // __GBLIBCPP_CONSTEXPR
-    // explicit shared_ptr(U* ptr, Deleter d, Allocator alloc)
-    // {
-    //     cb = std::allocator_traits<
-    //         rebind_allocator<Deleter>>::allocate(alloc, 1);
+    template <typename U, typename Deleter, typename Allocator,
+        enable_if_t<is_convertible_v<U*, T*>, bool> = true>
+    __GBLIBCPP_CONSTEXPR explicit shared_ptr(U* p, Deleter d, Allocator alloc)
+    {
+        cb = std::allocator_traits<
+            rebind_allocator<Deleter>>::allocate(alloc, 1);
 
-    //     std::allocator_traits<
-    //         rebind_allocator<Deleter>>::construct(alloc, cb, 1, 0, ptr, d);
-    // }
+        std::allocator_traits<
+            rebind_allocator<Deleter>>::construct(alloc, cb, 1, 0, p, d);
 
-    // template <typename Deleter, typename Allocator>
-    // __GBLIBCPP_CONSTEXPR
-    // explicit shared_ptr(std::nullptr_t, Deleter d, Allocator alloc)
-    // {
-    //     cb = std::allocator_traits<
-    //         rebind_allocator<Deleter>>::allocate(alloc, 1);
+        ptr = p;
+    }
 
-    //     std::allocator_traits<
-    //         rebind_allocator<Deleter>>::construct(alloc, cb, 1, 0, nullptr, d);
-    // }
+    template <typename Deleter, typename Allocator>
+    __GBLIBCPP_CONSTEXPR explicit shared_ptr(std::nullptr_t, Deleter d, Allocator alloc)
+    {
+        cb = std::allocator_traits<
+            rebind_allocator<Deleter>>::allocate(alloc, 1);
+
+        std::allocator_traits<
+            rebind_allocator<Deleter>>::construct(alloc, cb, 1, 0, nullptr, d);
+    }
 
     __GBLIBCPP_CONSTEXPR
     shared_ptr(const shared_ptr& other) noexcept
-        : cb(other.cb) { inc_ref(); }
-
-    template <typename U>
-    __GBLIBCPP_CONSTEXPR
-    shared_ptr(const shared_ptr<U>& other) noexcept
-        : cb(other.cb) { inc_ref(); }
+        : cb(other.cb)
+        , ptr(other.ptr)
+    {
+        inc_ref();
+    }
 
     __GBLIBCPP_CONSTEXPR
     shared_ptr(shared_ptr&& other) noexcept
-        : cb(std::exchange(other.cb, nullptr)) { }
+        : cb(std::exchange(other.cb, nullptr))
+        , ptr(std::exchange(other.ptr, nullptr))
+    {
+    }
 
-    template <typename U>
+    template <typename U, enable_if_t<is_convertible_v<U*, T*>, bool> = true>
+    __GBLIBCPP_CONSTEXPR
+    shared_ptr(const shared_ptr<U>& other) noexcept
+        : cb((control_block_base*)other.cb)
+        , ptr((T*)other.ptr)
+    {
+        inc_ref();
+    }
+
+    template <typename U, enable_if_t<is_convertible_v<U*, T*>, bool> = true>
     __GBLIBCPP_CONSTEXPR
     shared_ptr(shared_ptr<U>&& other) noexcept
-        : cb(std::exchange(other.cb, nullptr)) { }
-    
+        : cb((control_block_base*)std::exchange(other.cb, nullptr))
+        , ptr((T*)std::exchange(other.ptr, nullptr))
+    {
+    }
+
     // TODO: weak_ptr and unique_ptr
 
     __GBLIBCPP_CONSTEXPR
-    ~shared_ptr() { dec_ref(); }
+    ~shared_ptr()
+    {
+        dec_ref();
+        cb = nullptr;
+        ptr = nullptr;
+    }
 
     __GBLIBCPP_CONSTEXPR
     shared_ptr& operator=(const shared_ptr& other) noexcept
     {
-        if (cb != other.cb) {
-            dec_ref();
-            cb = other.cb;
-            inc_ref();
-        }
+        shared_ptr { other }.swap(*this);
         return *this;
     }
 
-    template <typename U>
-    __GBLIBCPP_CONSTEXPR
-    shared_ptr& operator=(const shared_ptr<U>& other) noexcept
+    template <typename U, enable_if_t<is_convertible_v<U*, T*>, bool> = true>
+    __GBLIBCPP_CONSTEXPR shared_ptr& operator=(const shared_ptr<U>& other) noexcept
     {
-        if (cb != other.cb) {
-            dec_ref();
-            cb = other.cb;
-            inc_ref();
-        }
+        shared_ptr { other }.swap(*this);
         return *this;
     }
 
     __GBLIBCPP_CONSTEXPR
     shared_ptr& operator=(shared_ptr&& other) noexcept
     {
-        if (cb != other.cb) {
-            dec_ref();
-            cb = std::exchange(other.cb, nullptr);
-        }
+        shared_ptr { move(other) }.swap(*this);
         return *this;
     }
 
-    template <typename U>
-    __GBLIBCPP_CONSTEXPR
-    shared_ptr& operator=(shared_ptr<U>&& other) noexcept
+    template <typename U, enable_if_t<is_convertible_v<U*, T*>, bool> = true>
+    __GBLIBCPP_CONSTEXPR shared_ptr& operator=(shared_ptr<U>&& other) noexcept
     {
-        if (cb != other.cb) {
-            dec_ref();
-            cb = std::exchange(other.cb, nullptr);
-        }
+        shared_ptr { move(other) }.swap(*this);
         return *this;
     }
 
     __GBLIBCPP_CONSTEXPR
     element_type* get() const noexcept
-    { return cb ? cb->ptr : nullptr; }
+    {
+        return cb ? ptr : nullptr;
+    }
 
     __GBLIBCPP_CONSTEXPR
     explicit operator bool() const noexcept
-    { return get(); }
+    {
+        return get();
+    }
 
     __GBLIBCPP_CONSTEXPR
     T& operator*() const noexcept { return *get(); }
@@ -573,36 +599,41 @@ public:
 
     __GBLIBCPP_CONSTEXPR
     bool owner_before(const shared_ptr& other) const noexcept
-    { return cb < other.cb; }
+    {
+        return cb < other.cb;
+    }
 
     __GBLIBCPP_CONSTEXPR
-    void swap(shared_ptr& other) noexcept { std::swap(cb->ptr, other.cb->ptr); }
+    void swap(shared_ptr& other) noexcept
+    {
+        std::swap(cb, other.cb);
+        std::swap(ptr, other.ptr);
+    }
 
     __GBLIBCPP_CONSTEXPR
-    void reset() noexcept { dec_ref(); cb = nullptr; }
+    void reset() noexcept
+    {
+        shared_ptr {}.swap(*this);
+    }
 
-    template <typename U>
-    __GBLIBCPP_CONSTEXPR
-    void reset(U* ptr) noexcept
-    { dec_ref(); cb = new default_control_block { 1, 0, ptr }; }
+    template <typename U, enable_if_t<is_convertible_v<U*, T*>, bool> = true>
+    __GBLIBCPP_CONSTEXPR void reset(U* p) noexcept
+    {
+        shared_ptr { p }.swap(*this);
+    }
 
-    template <typename U, typename Deleter>
-    __GBLIBCPP_CONSTEXPR
-    void reset(U* ptr, Deleter d) noexcept
-    { dec_ref(); cb = new control_block<Deleter> { 1, 0, ptr, d }; }
+    template <typename U, typename Deleter, enable_if_t<is_convertible_v<U*, T*>, bool> = true>
+    __GBLIBCPP_CONSTEXPR void reset(U* p, Deleter d) noexcept
+    {
+        shared_ptr { p, d }.swap(*this);
+    }
 
-    // TODO: what the fuck
-    // template <typename U, typename Deleter, typename Allocator>
-    // __GBLIBCPP_CONSTEXPR
-    // void reset(U* ptr, Deleter d, Allocator alloc)
-    // {
-    //     dec_ref();
-    //     cb = std::allocator_traits<
-    //         rebind_allocator<Deleter>>::allocate(alloc, 1);
-
-    //     std::allocator_traits<
-    //         rebind_allocator<Deleter>>::construct(alloc, cb, 1, 0, ptr, d);
-    // }
+    template <typename U, typename Deleter, typename Allocator,
+        enable_if_t<is_convertible_v<U*, T*>, bool> = true>
+    __GBLIBCPP_CONSTEXPR void reset(U* p, Deleter d, Allocator alloc)
+    {
+        shared_ptr { p, d, alloc }.swap(*this);
+    }
 };
 
 // TODO: use only one allocation

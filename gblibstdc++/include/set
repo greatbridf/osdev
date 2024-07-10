@@ -49,7 +49,7 @@ public:
     set(const Compare& comp,
         const Allocator& alloc = Allocator())
         : tree(comp, alloc) {}
-    
+
     explicit __GBLIBCPP_CONSTEXPR
     set(const Allocator& alloc)
         : set(Compare(), alloc) {}
@@ -91,15 +91,15 @@ public:
         const Allocator& alloc = Allocator())
         : set(comp, alloc)
     { insert(ilist.begin(), ilist.end()); }
-    
+
     __GBLIBCPP_CONSTEXPR
     set(std::initializer_list<Key> ilist,
         const Allocator& alloc)
         : set(ilist, Compare(), alloc) {}
-    
+
     __GBLIBCPP_CONSTEXPR
     ~set() { clear(); }
-    
+
     __GBLIBCPP_CONSTEXPR
     set& operator=(const set& other) = default;
     __GBLIBCPP_CONSTEXPR

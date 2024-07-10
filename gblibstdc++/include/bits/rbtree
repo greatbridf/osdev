@@ -24,7 +24,7 @@ struct rbtree {
         constexpr node(T&& val)
             : parent {}, left {}, right {}
             , value { std::move(val) } , color {node_color::RED} {}
-        
+
         template <typename... Args, std::enable_if_t<
             (sizeof...(Args) > 1)
             || !(... && std::is_same_v<T, std::remove_cvref_t<Args>>)
@@ -343,7 +343,7 @@ public:
         if (root)
             root->parent = nullptr;
     }
-    
+
     constexpr rbtree(rbtree&& other) noexcept
         : root(std::exchange(other.root, nullptr))
         , alloc(std::move(other.alloc))
@@ -354,7 +354,7 @@ public:
         : root(std::exchange(other.root, nullptr))
         , alloc(alloc) , _size(std::exchange(other._size, 0))
         , comp(std::move(other.comp)) {}
-    
+
     constexpr ~rbtree() { destroy(); }
 
     constexpr rbtree& operator=(const rbtree& other)
@@ -372,7 +372,7 @@ public:
 
         return *this;
     }
-    
+
     constexpr rbtree& operator=(rbtree&& other) noexcept
     {
         destroy(root);

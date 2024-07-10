@@ -178,8 +178,6 @@ void NORETURN init_scheduler(kernel::mem::paging::pfn_t kernel_stack_pfn);
 bool schedule(void);
 void NORETURN schedule_noreturn(void);
 
-void k_new_thread(void (*func)(void*), void* data);
-
 void NORETURN freeze(void);
 void NORETURN kill_current(int signo);
 

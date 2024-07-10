@@ -25,33 +25,6 @@
 #include <kernel/user/thread_local.hpp>
 #include <kernel/vfs.hpp>
 
-using kernel::async::mutex;
-using kernel::async::lock_guard;
-
-static void (*volatile kthreadd_new_thd_func)(void*);
-static void* volatile kthreadd_new_thd_data;
-
-static mutex kthreadd_mtx;
-
-namespace kernel {
-
-struct no_irq_guard {
-    explicit no_irq_guard()
-    {
-        asm volatile("cli");
-    }
-
-    no_irq_guard(const no_irq_guard&) = delete;
-    no_irq_guard& operator=(const no_irq_guard&) = delete;
-
-    ~no_irq_guard()
-    {
-        asm volatile("sti");
-    }
-};
-
-} // namespace kernel
-
 process::process(const process& parent, pid_t pid)
     : mms { parent.mms }, attr { parent.attr } , files { parent.files.copy() }
     , pwd { parent.pwd }, umask { parent.umask }, pid { pid }
@@ -79,27 +52,9 @@ void kernel_threadd_main(void)
 {
     kmsg("[kernel] kthread daemon started");
 
-    for (;;) {
-        if (kthreadd_new_thd_func) {
-            void (*func)(void*) = nullptr;
-            void* data = nullptr;
-
-            if (1) {
-                lock_guard lck(kthreadd_mtx);
-
-                if (kthreadd_new_thd_func) {
-                    func = std::exchange(kthreadd_new_thd_func, nullptr);
-                    data = std::exchange(kthreadd_new_thd_data, nullptr);
-                }
-            }
-
-            // TODO
-            (void)func, (void)data;
-            assert(false);
-        }
-        // TODO: sleep here to wait for new_kernel_thread event
+    // TODO: create new kthread
+    for (;;)
         asm volatile("hlt");
-    }
 }
 
 static inline void __spawn(kernel::task::thread& thd, uintptr_t entry)
@@ -194,6 +149,7 @@ void proclist::kill(pid_t pid, int exit_code)
     auto& parent = this->find(proc.ppid);
     auto& init = this->find(1);
 
+    using kernel::async::lock_guard;
     bool flag = false;
     if (1) {
         lock_guard lck(init.mtx_waitprocs);
@@ -321,13 +277,6 @@ void NORETURN _kernel_init(kernel::mem::paging::pfn_t kernel_stack_pfn)
             "g"(d.ip) : "eax", "memory");
 
     freeze();
-}
-
-void k_new_thread(void (*func)(void*), void* data)
-{
-    lock_guard lck(kthreadd_mtx);
-    kthreadd_new_thd_func = func;
-    kthreadd_new_thd_data = data;
 }
 
 SECTION(".text.kinit")

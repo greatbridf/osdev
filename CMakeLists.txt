@@ -61,6 +61,7 @@ set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
                         src/kernel/task/thread.cc
                         src/kernel/task/readyqueue.cc
                         src/kernel/user/thread_local.cc
+                        src/kernel/vfs/filearr.cc
                         src/kernel/vfs/tmpfs.cc
                         src/kernel/signal.cpp
                         src/types/elf.cpp
@@ -83,6 +84,7 @@ set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
                         include/kernel/vfs.hpp
                         include/kernel/vfs/dentry.hpp
                         include/kernel/vfs/file.hpp
+                        include/kernel/vfs/filearr.hpp
                         include/kernel/vfs/inode.hpp
                         include/kernel/vfs/vfs.hpp
                         include/kernel/vga.hpp

@@ -45,11 +45,6 @@ public:
     {
         return flags & WRITABLE;
     }
-
-    constexpr bool is_free() const
-    {
-        return !(flags & (READABLE | WRITABLE));
-    }
 };
 
 struct file {

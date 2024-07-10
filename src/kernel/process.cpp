@@ -52,160 +52,8 @@ struct no_irq_guard {
 
 } // namespace kernel
 
-int filearr::allocate_fd(int from)
-{
-    if (from < min_avail)
-        from = min_avail;
-
-    if (from == min_avail) {
-        int nextfd = min_avail + 1;
-        auto iter = arr.find(nextfd);
-        while (iter != arr.end() && nextfd == iter->first)
-            ++nextfd, ++iter;
-
-        int retval = min_avail;
-        min_avail = nextfd;
-        return retval;
-    }
-
-    int fd = from;
-    auto iter = arr.find(fd);
-    while (iter != arr.end() && fd == iter->first)
-        ++fd, ++iter;
-
-    return fd;
-}
-
-void filearr::release_fd(int fd)
-{
-    if (fd < min_avail)
-        min_avail = fd;
-}
-
-int filearr::dup(int old_fd)
-{
-    return dup2(old_fd, next_fd());
-}
-
-int filearr::dup2(int old_fd, int new_fd)
-{
-    close(new_fd);
-
-    auto iter = arr.find(old_fd);
-    if (!iter)
-        return -EBADF;
-
-    int fd = allocate_fd(new_fd);
-    assert(fd == new_fd);
-
-    auto [ newiter, inserted ] = this->arr.emplace(new_fd, iter->second);
-    assert(inserted);
-
-    newiter->second.flags = 0;
-
-    return new_fd;
-}
-
-int filearr::dupfd(int fd, int minfd, int flags)
-{
-    auto iter = arr.find(fd);
-    if (!iter)
-        return -EBADF;
-
-    int new_fd = allocate_fd(minfd);
-    auto [ newiter, inserted ] = arr.emplace(new_fd, iter->second);
-    assert(inserted);
-
-    newiter->second.flags = flags;
-    return new_fd;
-}
-
-int filearr::set_flags(int fd, int flags)
-{
-    auto iter = arr.find(fd);
-    if (!iter)
-        return -EBADF;
-    iter->second.flags |= flags;
-    return 0;
-}
-
-int filearr::clear_flags(int fd, int flags)
-{
-    auto iter = arr.find(fd);
-    if (!iter)
-        return -EBADF;
-    iter->second.flags &= ~flags;
-    return 0;
-}
-
-// TODO: file opening permissions check
-int filearr::open(const process &current,
-    const types::path& filepath, int flags, mode_t mode)
-{
-    auto* dentry = fs::vfs_open(*current.root, filepath);
-
-    if (flags & O_CREAT) {
-        if (!dentry) {
-            // create file
-            auto filename = filepath.last_name();
-            auto parent_path = filepath;
-            parent_path.remove_last();
-
-            auto* parent = fs::vfs_open(*current.root, parent_path);
-            if (!parent)
-                return -EINVAL;
-            int ret = fs::vfs_mkfile(parent, filename.c_str(), mode);
-            if (ret != 0)
-                return ret;
-            dentry = fs::vfs_open(*current.root, filepath);
-            assert(dentry);
-        } else {
-            // file already exists
-            if (flags & O_EXCL)
-                return -EEXIST;
-        }
-    } else {
-        if (!dentry)
-            return -ENOENT;
-    }
-
-    auto filemode = dentry->ind->mode;
-
-    // check whether dentry is a file if O_DIRECTORY is set
-    if (flags & O_DIRECTORY) {
-        if (!S_ISDIR(filemode))
-            return -ENOTDIR;
-    } else {
-        if (S_ISDIR(filemode) && (flags & (O_WRONLY | O_RDWR)))
-            return -EISDIR;
-    }
-
-    // truncate file
-    if (flags & O_TRUNC) {
-        if ((flags & (O_WRONLY | O_RDWR)) && S_ISREG(filemode)) {
-            auto ret = fs::vfs_truncate(dentry->ind, 0);
-            if (ret != 0)
-                return ret;
-        }
-    }
-
-    int fdflag = (flags & O_CLOEXEC) ? FD_CLOEXEC : 0;
-
-    int fd = next_fd();
-    auto [ _, inserted ] = arr.emplace(fd, fditem {
-        fdflag, std::shared_ptr<fs::file> {
-            new fs::regular_file(dentry->parent, {
-                .read = !(flags & O_WRONLY),
-                .write = !!(flags & (O_WRONLY | O_RDWR)),
-                .append = !!(S_ISREG(filemode) && flags & O_APPEND),
-            }, 0, dentry->ind),
-    } } );
-    assert(inserted);
-    return fd;
-}
-
 process::process(const process& parent, pid_t pid)
-    : mms { parent.mms }, attr { parent.attr } , files { parent.files }
+    : mms { parent.mms }, attr { parent.attr } , files { parent.files.copy() }
     , pwd { parent.pwd }, umask { parent.umask }, pid { pid }
     , ppid { parent.pid }, pgid { parent.pgid } , sid { parent.sid }
     , control_tty { parent.control_tty }, root { parent.root } { }
@@ -328,8 +176,11 @@ void proclist::kill(pid_t pid, int exit_code)
     for (auto& thd : proc.thds)
         thd.set_attr(kernel::task::thread::ZOMBIE);
 
+    // TODO: CHANGE THIS
+    //       files should only be closed when this is the last thread
+    //
     // write back mmap'ped files and close them
-    proc.files.close_all();
+    proc.files.clear();
 
     // unmap all user memory areas
     proc.mms.clear();

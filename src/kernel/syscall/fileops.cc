@@ -52,12 +52,13 @@ int kernel::syscall::do_dup(int old_fd)
 
 int kernel::syscall::do_dup2(int old_fd, int new_fd)
 {
-    return current_process->files.dup2(old_fd, new_fd);
+    return current_process->files.dup(old_fd, new_fd, 0);
 }
 
 int kernel::syscall::do_pipe(int __user* pipefd)
 {
-    return current_process->files.pipe(pipefd);
+    // TODO: use copy_from_user and copy_to_user
+    return current_process->files.pipe(*(int(*)[2])pipefd);
 }
 
 ssize_t kernel::syscall::do_getdents(int fd, char __user* buf, size_t cnt)
@@ -82,7 +83,7 @@ int kernel::syscall::do_open(const char __user* path, int flags, mode_t mode)
 {
     mode &= ~current_process->umask;
 
-    return current_process->files.open(*current_process,
+    return current_process->files.open(*current_process->root,
         current_process->pwd + path, flags, mode);
 }
 

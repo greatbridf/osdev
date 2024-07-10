@@ -29,6 +29,7 @@
 #include <kernel/tty.hpp>
 #include <kernel/user/thread_local.hpp>
 #include <kernel/vfs.hpp>
+#include <kernel/vfs/filearr.hpp>
 
 class process;
 
@@ -40,127 +41,6 @@ inline proclist* procs;
 struct process_attr {
     uint16_t system : 1;
     uint16_t zombie : 1 = 0;
-};
-
-struct thread_attr {
-    uint32_t system : 1;
-    uint32_t ready : 1;
-};
-
-class filearr {
-private:
-    // TODO: change this
-    struct fditem {
-        int flags;
-        std::shared_ptr<fs::file> file;
-    };
-
-    std::map<int, fditem> arr;
-    int min_avail { };
-
-private:
-    int allocate_fd(int from);
-    void release_fd(int fd);
-    inline int next_fd() { return allocate_fd(min_avail); }
-
-public:
-    constexpr filearr() = default;
-    constexpr filearr(const filearr& val) = default;
-    constexpr filearr(filearr&& val) = default;
-
-    constexpr filearr& operator=(const filearr&) = delete;
-    constexpr filearr& operator=(filearr&&) = delete;
-
-    // TODO: the third parameter should be int flags
-    //       determining whether the fd should be closed
-    //       after exec() (FD_CLOEXEC)
-    int dup2(int old_fd, int new_fd);
-    int dup(int old_fd);
-
-    int dupfd(int fd, int minfd, int flags);
-
-    int set_flags(int fd, int flags);
-    int clear_flags(int fd, int flags);
-
-    constexpr fs::file* operator[](int i) const
-    {
-        auto iter = arr.find(i);
-        if (!iter)
-            return nullptr;
-        return iter->second.file.get();
-    }
-
-    int pipe(int pipefd[2])
-    {
-        std::shared_ptr<fs::pipe> ppipe { new fs::pipe };
-
-        bool inserted = false;
-        int fd = next_fd();
-        std::tie(std::ignore, inserted) = arr.emplace(fd, fditem {
-            0, std::shared_ptr<fs::file> {
-                new fs::fifo_file(nullptr, {
-                    .read = 1,
-                    .write = 0,
-                    .append = 0,
-                }, ppipe),
-        } } );
-        assert(inserted);
-
-        // TODO: use copy_to_user()
-        pipefd[0] = fd;
-
-        fd = next_fd();
-        std::tie(std::ignore, inserted) = arr.emplace(fd, fditem {
-            0, std::shared_ptr<fs::file> {
-                new fs::fifo_file(nullptr, {
-                    .read = 0,
-                    .write = 1,
-                    .append = 0,
-                }, ppipe),
-        } } );
-        assert(inserted);
-
-        // TODO: use copy_to_user()
-        pipefd[1] = fd;
-
-        return 0;
-    }
-
-    int open(const process& current, const types::path& filepath, int flags, mode_t mode);
-
-    constexpr void close(int fd)
-    {
-        auto iter = arr.find(fd);
-        if (!iter)
-            return;
-
-        release_fd(fd);
-        arr.erase(iter);
-    }
-
-    constexpr void onexec()
-    {
-        for (auto iter = arr.begin(); iter != arr.end(); ) {
-            if (!(iter->second.flags & FD_CLOEXEC)) {
-                ++iter;
-                continue;
-            }
-            release_fd(iter->first);
-            iter = arr.erase(iter);
-        }
-    }
-
-    constexpr void close_all(void)
-    {
-        for (const auto& item : arr)
-            release_fd(item.first);
-        arr.clear();
-    }
-
-    constexpr ~filearr()
-    {
-        close_all();
-    }
 };
 
 class process {
@@ -179,7 +59,7 @@ public:
     std::list<wait_obj> waitprocs;
 
     process_attr attr {};
-    filearr files;
+    fs::filearray files;
     types::path pwd;
     mode_t umask { 0022 };
 

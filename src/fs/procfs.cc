@@ -118,15 +118,18 @@ public:
         auto [ _, inserted ] =
             files.insert({ino, proc_file {name, read_func, write_func}});
 
-        cache_inode(0, ino, S_IFREG | 0666, 0, 0);
+        auto* ind = alloc_inode(ino);
+        ind->mode = S_IFREG | 0666;
 
         return inserted ? 0 : -EEXIST;
     }
 
     procfs(const char* _source)
-        : source{_source}
+        : vfs(make_device(0, 10), 4096)
+        , source{_source}
     {
-        auto* ind = cache_inode(0, 0, S_IFDIR | 0777, 0, 0);
+        auto* ind = alloc_inode(0);
+        ind->mode = S_IFDIR | 0777;
 
         create_file("mounts", mounts_read, nullptr);
         create_file("schedstat", schedstat_read, nullptr);
@@ -134,7 +137,7 @@ public:
         register_root_node(ind);
     }
 
-    size_t read(inode* file, char* buf, size_t buf_size, size_t offset, size_t n) override
+    ssize_t read(inode* file, char* buf, size_t buf_size, size_t n, off_t offset) override
     {
         if (file->ino == 0)
             return -EISDIR;
@@ -170,7 +173,7 @@ public:
         return n;
     }
 
-    int readdir(inode *dir, size_t offset, const filldir_func &callback) override
+    ssize_t readdir(inode *dir, size_t offset, const filldir_func &callback) override
     {
         if (dir->ino != 0)
             return -ENOTDIR;
@@ -189,63 +192,6 @@ public:
         }
 
         return nread;
-    }
-
-    virtual int inode_statx(dentry* dent, statx* st, unsigned int mask) override
-    {
-        auto* ind = dent->ind;
-
-        st->stx_mask = 0;
-
-        if (mask & STATX_NLINK) {
-            st->stx_nlink = ind->nlink;
-            st->stx_mask |= STATX_NLINK;
-        }
-
-        // TODO: set modification time
-        if (mask & STATX_MTIME) {
-            st->stx_mtime = {};
-            st->stx_mask |= STATX_MTIME;
-        }
-
-        if (mask & STATX_SIZE) {
-            st->stx_size = ind->size;
-            st->stx_mask |= STATX_SIZE;
-        }
-
-        st->stx_mode = 0;
-        if (mask & STATX_MODE) {
-            st->stx_mode |= ind->mode & ~S_IFMT;
-            st->stx_mask |= STATX_MODE;
-        }
-
-        if (mask & STATX_TYPE) {
-            st->stx_mode |= ind->mode & S_IFMT;
-            st->stx_mask |= STATX_TYPE;
-        }
-
-        if (mask & STATX_INO) {
-            st->stx_ino = ind->ino;
-            st->stx_mask |= STATX_INO;
-        }
-
-        if (mask & STATX_BLOCKS) {
-            st->stx_blocks = 0;
-            st->stx_blksize = 4096;
-            st->stx_mask |= STATX_BLOCKS;
-        }
-
-        if (mask & STATX_UID) {
-            st->stx_uid = ind->uid;
-            st->stx_mask |= STATX_UID;
-        }
-
-        if (mask & STATX_GID) {
-            st->stx_gid = ind->gid;
-            st->stx_mask |= STATX_GID;
-        }
-
-        return 0;
     }
 };
 

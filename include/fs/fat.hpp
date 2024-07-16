@@ -119,7 +119,6 @@ private:
     uint32_t next_free_cluster_hint;
     cluster_t root_dir;
     cluster_t data_region_offset;
-    dev_t device;
     uint16_t reserved_sectors;
     uint8_t fat_copies;
     uint8_t sectors_per_cluster;
@@ -167,14 +166,10 @@ private:
     }
 
 public:
-    fat32(const fat32&) = delete;
     explicit fat32(dev_t device);
 
-    virtual size_t read(inode* file, char* buf, size_t buf_size, size_t offset, size_t n) override;
-    virtual int readdir(fs::inode* dir, size_t offset, const fs::vfs::filldir_func& callback) override;
-
-    virtual int inode_statx(dentry* ent, statx* st, unsigned int mask) override;
-    virtual int inode_stat(dentry* ent, struct stat* st) override;
+    virtual ssize_t read(inode* file, char* buf, size_t buf_size, size_t count, off_t offset) override;
+    virtual ssize_t readdir(fs::inode* dir, size_t offset, const vfs::filldir_func& callback) override;
 };
 
 }; // namespace fs::fat

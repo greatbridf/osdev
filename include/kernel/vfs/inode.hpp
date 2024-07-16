@@ -1,22 +1,28 @@
 #pragma once
 
+#include <bits/alltypes.h>
 #include <stdint.h>
 #include <sys/types.h>
 
+#include <kernel/vfs/vfsfwd.hpp>
+
 namespace fs {
 
-class vfs;
-
 struct inode {
-    ino_t ino;
-    vfs* fs;
-    size_t size;
+    ino_t ino {};
+    size_t size {};
+    nlink_t nlink {};
 
-    nlink_t nlink;
+    vfs* fs {};
+    void* fs_data {};
 
-    mode_t mode;
-    uid_t uid;
-    gid_t gid;
+    struct timespec atime {};
+    struct timespec ctime {};
+    struct timespec mtime {};
+
+    mode_t mode {};
+    uid_t uid {};
+    gid_t gid {};
 };
 
 } // namespace fs

@@ -16,23 +16,23 @@ namespace fs {
 
 class vfs {
 public:
-
-public:
-    using filldir_func = std::function<int(const char*, size_t, inode*, uint8_t)>;
+    using filldir_func = std::function<ssize_t(const char*, size_t, inode*, uint8_t)>;
 
 private:
-    // TODO: use allocator designed for small objects
-    using inode_list = std::map<ino_t, inode>;
-
-private:
-    inode_list _inodes;
-    types::hash_map<dentry*, dentry*> _mount_recover_list;
+    std::map<ino_t, inode> m_inodes;
+    types::hash_map<dentry*, dentry*> m_mount_recover_list;
 
 protected:
-    dentry _root;
+    dentry m_root;
+
+    dev_t m_device;
+    size_t m_io_blksize;
 
 protected:
-    inode* cache_inode(size_t size, ino_t ino, mode_t mode, uid_t uid, gid_t gid);
+    vfs(dev_t device, size_t io_blksize);
+
+    inode* alloc_inode(ino_t ino);
+
     void free_inode(ino_t ino);
     inode* get_inode(ino_t ino);
     void register_root_node(inode* root);
@@ -40,8 +40,6 @@ protected:
     int load_dentry(dentry* ent);
 
 public:
-    vfs();
-
     vfs(const vfs&) = delete;
     vfs& operator=(const vfs&) = delete;
     vfs(vfs&&) = delete;
@@ -49,14 +47,16 @@ public:
 
     constexpr dentry* root(void)
     {
-        return &_root;
+        return &m_root;
     }
+
+    dev_t fs_device() const noexcept;
+    size_t io_blksize() const noexcept;
 
     int mount(dentry* mnt, const char* source, const char* mount_point,
             const char* fstype, unsigned long flags, const void* data);
 
     // directory operations
-
     virtual int inode_mkfile(dentry* dir, const char* filename, mode_t mode);
     virtual int inode_mknode(dentry* dir, const char* filename, mode_t mode, dev_t sn);
     virtual int inode_rmfile(dentry* dir, const char* filename);
@@ -64,18 +64,18 @@ public:
 
     virtual int symlink(dentry* dir, const char* linkname, const char* target);
 
-    // metadata operation
-
-    virtual int inode_statx(dentry* dent, statx* buf, unsigned int mask);
-    virtual int inode_stat(dentry* dent, struct stat* stat);
+    // metadata operations
+    int statx(inode* ind, struct statx* st, unsigned int mask);
 
     // file operations
+    virtual ssize_t read(inode* file, char* buf, size_t buf_size, size_t count, off_t offset);
+    virtual ssize_t write(inode* file, const char* buf, size_t count, off_t offset);
 
-    virtual size_t read(inode* file, char* buf, size_t buf_size, size_t offset, size_t n);
-    virtual size_t write(inode* file, const char* buf, size_t offset, size_t n);
-    virtual int dev_id(inode* file, dev_t& out_dev);
+    virtual dev_t i_device(inode* ind);
     virtual int readlink(inode* file, char* buf, size_t buf_size);
     virtual int truncate(inode* file, size_t size);
+
+    // directory operations
 
     // parameter 'length' in callback:
     // if 0, 'name' should be null terminated
@@ -85,7 +85,7 @@ public:
     // return -1 if an error occurred
     // return 0 if no more entry available
     // otherwise, return bytes to be added to the offset
-    virtual int readdir(inode* dir, size_t offset, const filldir_func& callback) = 0;
+    virtual ssize_t readdir(inode* dir, size_t offset, const filldir_func& callback) = 0;
 };
 
 } // namespace fs

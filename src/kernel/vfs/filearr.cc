@@ -245,8 +245,7 @@ int filearray::open(dentry& root, const types::path& filepath, int flags, mode_t
     }
 
     return pimpl->place_new_file(
-        std::make_shared<regular_file>(
-            dent->parent, fflags, 0, dent->ind),
+        std::make_shared<regular_file>(fflags, 0, dent->ind),
         fdflag);
 }
 
@@ -259,12 +258,12 @@ int filearray::pipe(int (&pipefd)[2])
 
         pipefd[0] = pimpl->place_new_file(
             std::make_shared<fifo_file>(
-                nullptr, file::file_flags { 1, 0, 0 }, ppipe),
+                file::file_flags { 1, 0, 0 }, ppipe),
             0);
 
         pipefd[1] = pimpl->place_new_file(
             std::make_shared<fifo_file>(
-                nullptr, file::file_flags { 0, 1, 0 }, ppipe),
+                file::file_flags { 0, 1, 0 }, ppipe),
             0);
     }
 

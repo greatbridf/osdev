@@ -52,7 +52,7 @@ ssize_t fat32::_read_sector_range(void* _buf, size_t buf_size, uint32_t sector_o
 
     auto* buf = (char*)_buf;
 
-    auto n = fs::block_device_read(device,
+    auto n = block_device_read(m_device,
             buf, buf_size,
             sector_offset * SECTOR_SIZE,
             sector_cnt * SECTOR_SIZE
@@ -88,7 +88,7 @@ void fat32::release_cluster(cluster_t no)
         --iter->second.ref;
 }
 
-int fat32::readdir(fs::inode* dir, size_t offset, const fs::vfs::filldir_func& filldir)
+ssize_t fat32::readdir(inode* dir, size_t offset, const vfs::filldir_func& filldir)
 {
     cluster_t next = cl(dir);
     for (size_t i = 0; i < (offset / (sectors_per_cluster * SECTOR_SIZE)); ++i) {
@@ -116,8 +116,10 @@ int fat32::readdir(fs::inode* dir, size_t offset, const fs::vfs::filldir_func& f
                     mode |= S_IFDIR;
                 else
                     mode |= S_IFREG;
-                ind = cache_inode(d->size, ino, mode, 0, 0);
 
+                ind = alloc_inode(ino);
+                ind->size = d->size;
+                ind->mode = mode;
                 ind->nlink = d->attributes.subdir ? 2 : 1;
             }
 
@@ -156,7 +158,7 @@ int fat32::readdir(fs::inode* dir, size_t offset, const fs::vfs::filldir_func& f
 }
 
 fat32::fat32(dev_t _device)
-    : device { _device }
+    : vfs(_device, 4096)
     , label { }
 {
     auto* buf = new char[SECTOR_SIZE];
@@ -199,16 +201,16 @@ fat32::fat32(dev_t _device)
     cluster_t next = root_dir;
     while ((next = fat[next]) < EOC)
         ++_root_dir_clusters;
-    auto* n = cache_inode(
-        _root_dir_clusters * sectors_per_cluster * SECTOR_SIZE,
-        root_dir, S_IFDIR | 0777, 0, 0);
 
+    auto* n = alloc_inode(root_dir);
+    n->size = _root_dir_clusters * sectors_per_cluster * SECTOR_SIZE;
+    n->mode = S_IFDIR | 0777;
     n->nlink = 2;
 
     register_root_node(n);
 }
 
-size_t fat32::read(inode* file, char* buf, size_t buf_size, size_t offset, size_t n)
+ssize_t fat32::read(inode* file, char* buf, size_t buf_size, size_t n, off_t offset)
 {
     uint32_t cluster_size = SECTOR_SIZE * sectors_per_cluster;
     size_t orig_n = n;
@@ -222,7 +224,7 @@ size_t fat32::read(inode* file, char* buf, size_t buf_size, size_t offset, size_
         auto* data = read_cluster(cno);
         data += offset;
 
-        auto to_copy = std::min(n, cluster_size - offset);
+        auto to_copy = std::min(n, (size_t)(cluster_size - offset));
         auto ncopied = _write_buf_n(buf, buf_size, data, to_copy);
 
         buf += ncopied, n -= ncopied;
@@ -235,69 +237,6 @@ size_t fat32::read(inode* file, char* buf, size_t buf_size, size_t offset, size_
     }
 
     return orig_n - n;
-}
-
-int fat32::inode_statx(dentry* ent, statx* st, unsigned int mask)
-{
-    st->stx_mask = 0;
-    if (mask & STATX_SIZE) {
-        st->stx_size = ent->ind->size;
-        st->stx_mask |= STATX_SIZE;
-    }
-
-    if (mask & STATX_BLOCKS) {
-        st->stx_blocks = ((ent->ind->size + 0xfff) & ~0xfff) / 512;
-        st->stx_blksize = 4096;
-        st->stx_mask |= STATX_BLOCKS;
-    }
-
-    if (mask & STATX_NLINK) {
-        st->stx_nlink = ent->ind->nlink;
-        st->stx_mask |= STATX_NLINK;
-    }
-
-    st->stx_mode = 0;
-    if (mask & STATX_MODE) {
-        st->stx_mode |= ent->ind->mode & ~S_IFMT;
-        st->stx_mask |= STATX_MODE;
-    }
-
-    if (mask & STATX_TYPE) {
-        st->stx_mode |= ent->ind->mode & S_IFMT;
-        st->stx_mask |= STATX_TYPE;
-    }
-
-    if (mask & STATX_INO) {
-        st->stx_ino = ent->ind->ino;
-        st->stx_mask |= STATX_INO;
-    }
-
-    if (mask & STATX_UID) {
-        st->stx_uid = ent->ind->uid;
-        st->stx_mask |= STATX_UID;
-    }
-
-    if (mask & STATX_GID) {
-        st->stx_gid = ent->ind->gid;
-        st->stx_mask |= STATX_GID;
-    }
-
-    return 0;
-}
-
-int fat32::inode_stat(dentry* dent, struct stat* st)
-{
-    auto* ind = dent->ind;
-
-    memset(st, 0x00, sizeof(struct stat));
-    st->st_mode = ind->mode;
-    st->st_dev = device;
-    st->st_nlink = S_ISDIR(ind->mode) ? 2 : 1;
-    st->st_size = ind->size;
-    st->st_blksize = 4096;
-    st->st_blocks = (ind->size + 511) / 512;
-    st->st_ino = ind->ino;
-    return 0;
 }
 
 static fat32* create_fat32(const char* source, unsigned long, const void*)

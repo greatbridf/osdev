@@ -49,15 +49,14 @@ public:
 
 struct file {
     mode_t mode; // stores the file type in the same format as inode::mode
-    dentry* parent {};
     struct file_flags {
         uint32_t read : 1;
         uint32_t write : 1;
         uint32_t append : 1;
     } flags {};
 
-    file(mode_t mode, dentry* parent, file_flags flags)
-        : mode(mode) , parent(parent), flags(flags) { }
+    file(mode_t mode, file_flags flags)
+        : mode(mode), flags(flags) { }
 
     virtual ~file() = default;
 
@@ -91,7 +90,7 @@ struct regular_file : public virtual file {
     std::size_t cursor { };
     inode* ind { };
 
-    regular_file(dentry* parent, file_flags flags, size_t cursor, inode* ind);
+    regular_file(file_flags flags, size_t cursor, inode* ind);
 
     virtual ssize_t read(char* __user buf, size_t n) override;
     virtual ssize_t do_write(const char* __user buf, size_t n) override;
@@ -104,7 +103,7 @@ struct fifo_file : public virtual file {
     virtual ~fifo_file() override;
     std::shared_ptr<pipe> ppipe;
 
-    fifo_file(dentry* parent, file_flags flags, std::shared_ptr<fs::pipe> ppipe);
+    fifo_file(file_flags flags, std::shared_ptr<fs::pipe> ppipe);
 
     virtual ssize_t read(char* __user buf, size_t n) override;
     virtual ssize_t do_write(const char* __user buf, size_t n) override;

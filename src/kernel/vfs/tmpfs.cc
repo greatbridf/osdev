@@ -7,11 +7,11 @@
 #include <kernel/log.hpp>
 #include <kernel/vfs.hpp>
 
-using fs::vfs, fs::inode, fs::dentry;
+using namespace fs;
 
 struct tmpfs_file_entry {
-    size_t ino;
-    char filename[128];
+    ino_t ino;
+    std::string filename;
 };
 
 class tmpfs : public virtual vfs {
@@ -21,69 +21,33 @@ private:
     using fdata_t = std::vector<char>;
 
 private:
-    std::map<ino_t, void*> inode_data;
-    ino_t _next_ino;
+    ino_t m_next_ino;
 
 private:
-    ino_t _assign_ino(void)
+    ino_t assign_ino()
     {
-        return _next_ino++;
-    }
-
-    static constexpr vfe_t* as_vfe(void* data)
-    {
-        return static_cast<vfe_t*>(data);
-    }
-    static constexpr fdata_t* as_fdata(void* data)
-    {
-        return static_cast<fdata_t*>(data);
-    }
-    static constexpr uintptr_t as_val(void* data)
-    {
-        return std::bit_cast<uintptr_t>(data);
-    }
-    inline void* _getdata(ino_t ino) const
-    {
-        return inode_data.find(ino)->second;
-    }
-    inline ino_t _savedata(void* data)
-    {
-        ino_t ino = _assign_ino();
-        inode_data.insert(std::make_pair(ino, data));
-        return ino;
-    }
-    inline ino_t _savedata(uintptr_t data)
-    {
-        return _savedata((void*)data);
+        return m_next_ino++;
     }
 
 protected:
-    inline vfe_t* mk_fe_vector() { return new vfe_t{}; }
-    inline fdata_t* mk_data_vector() { return new fdata_t{}; }
+    inline vfe_t* make_vfe() { return new vfe_t{}; }
+    inline fdata_t* make_fdata() { return new fdata_t{}; }
 
-    void mklink(inode* dir, inode* inode, const char* filename)
+    void mklink(inode* dir, inode* ind, const char* filename)
     {
-        auto* fes = as_vfe(_getdata(dir->ino));
-        fes->emplace_back(fe_t {
-            .ino = inode->ino,
-            .filename = {} });
+        auto& fes = *(vfe_t*)dir->fs_data;
+        fes.emplace_back(fe_t { ind->ino, filename });
+
         dir->size += sizeof(fe_t);
-
-        auto& emplaced = fes->back();
-
-        strncpy(emplaced.filename, filename, sizeof(emplaced.filename));
-        emplaced.filename[sizeof(emplaced.filename) - 1] = 0;
-
-        ++inode->nlink;
+        ++ind->nlink;
     }
 
-    virtual int readdir(inode* dir, size_t offset, const fs::vfs::filldir_func& filldir) override
+    virtual ssize_t readdir(inode* dir, size_t offset, const vfs::filldir_func& filldir) override
     {
-        if (!S_ISDIR(dir->mode)) {
-            return -1;
-        }
+        if (!S_ISDIR(dir->mode))
+            return -ENOTDIR;
 
-        auto& entries = *as_vfe(_getdata(dir->ino));
+        auto& entries = *(vfe_t*)dir->fs_data;
         size_t off = offset / sizeof(fe_t);
 
         size_t nread = 0;
@@ -93,7 +57,7 @@ protected:
             auto* ind = get_inode(entry.ino);
 
             // inode mode filetype is compatible with user dentry filetype
-            auto ret = filldir(entry.filename, 0, ind, ind->mode & S_IFMT);
+            auto ret = filldir(entry.filename.c_str(), 0, ind, ind->mode & S_IFMT);
             if (ret != 0)
                 break;
         }
@@ -102,50 +66,55 @@ protected:
     }
 
 public:
-    explicit tmpfs(void)
-        : _next_ino(1)
+    explicit tmpfs()
+        : vfs(make_device(0, 2), 4096)
+        , m_next_ino{1}
     {
-        auto& in = *cache_inode(0, _savedata(mk_fe_vector()), S_IFDIR | 0777, 0, 0);
+        auto* in = alloc_inode(assign_ino());
 
-        mklink(&in, &in, ".");
-        mklink(&in, &in, "..");
+        in->fs_data = make_vfe();
+        in->mode = S_IFDIR | 0777;
 
-        register_root_node(&in);
+        mklink(in, in, ".");
+        mklink(in, in, "..");
+
+        register_root_node(in);
     }
-    virtual size_t read(inode* file, char* buf, size_t buf_size, size_t offset, size_t n) override
+
+    virtual ssize_t read(inode* file, char* buf, size_t buf_size, size_t count, off_t offset) override
     {
         if (!S_ISREG(file->mode))
-            return 0;
+            return -EINVAL;
 
-        auto* data = as_fdata(_getdata(file->ino));
+        auto* data = (fdata_t*)file->fs_data;
         size_t fsize = data->size();
 
-        if (offset + n > fsize)
-            n = fsize - offset;
+        if (offset + count > fsize)
+            count = fsize - offset;
 
-        if (buf_size < n) {
-            n = buf_size;
+        if (buf_size < count) {
+            count = buf_size;
         }
 
-        memcpy(buf, data->data() + offset, n);
+        memcpy(buf, data->data() + offset, count);
 
-        return n;
+        return count;
     }
 
-    virtual size_t write(inode* file, const char* buf, size_t offset, size_t n) override
+    virtual ssize_t write(inode* file, const char* buf, size_t count, off_t offset) override
     {
         if (!S_ISREG(file->mode))
-            return 0;
+            return -EINVAL;
 
-        auto* data = as_fdata(_getdata(file->ino));
+        auto* data = (fdata_t*)file->fs_data;
 
-        if (data->size() < offset + n)
-            data->resize(offset+n);
-        memcpy(data->data() + offset, buf, n);
+        if (data->size() < offset + count)
+            data->resize(offset+count);
+        memcpy(data->data() + offset, buf, count);
 
         file->size = data->size();
 
-        return n;
+        return count;
     }
 
     virtual int inode_mkfile(dentry* dir, const char* filename, mode_t mode) override
@@ -153,11 +122,14 @@ public:
         if (!dir->flags.dir)
             return -ENOTDIR;
 
-        auto& file = *cache_inode(0, _savedata(mk_data_vector()), S_IFREG | mode, 0, 0);
-        mklink(dir->ind, &file, filename);
+        auto* file = alloc_inode(assign_ino());
+        file->mode = S_IFREG | (mode & 0777);
+        file->fs_data = make_fdata();
+
+        mklink(dir->ind, file, filename);
 
         if (dir->flags.present)
-            dir->append(get_inode(file.ino), filename);
+            dir->append(file, filename);
 
         return 0;
     }
@@ -170,11 +142,17 @@ public:
         if (!S_ISBLK(mode) && !S_ISCHR(mode))
             return -EINVAL;
 
-        auto& node = *cache_inode(0, _savedata(dev), mode, 0, 0);
-        mklink(dir->ind, &node, filename);
+        if (dev & ~0xffff)
+            return -EINVAL;
+
+        auto* node = alloc_inode(assign_ino());
+        node->mode = mode;
+        node->fs_data = (void*)(uintptr_t)dev;
+
+        mklink(dir->ind, node, filename);
 
         if (dir->flags.present)
-            dir->append(get_inode(node.ino), filename);
+            dir->append(node, filename);
 
         return 0;
     }
@@ -184,7 +162,10 @@ public:
         if (!dir->flags.dir)
             return -ENOTDIR;
 
-        auto new_dir = cache_inode(0, _savedata(mk_fe_vector()), S_IFDIR | (mode & 0777), 0, 0);
+        auto* new_dir = alloc_inode(assign_ino());
+        new_dir->mode = S_IFDIR | (mode & 0777);
+        new_dir->fs_data = make_vfe();
+
         mklink(new_dir, new_dir, ".");
 
         mklink(dir->ind, new_dir, dirname);
@@ -201,15 +182,19 @@ public:
         if (!dir->flags.dir)
             return -ENOTDIR;
 
-        auto* data = mk_data_vector();
+        auto* data = make_fdata();
         data->resize(strlen(target));
         memcpy(data->data(), target, data->size());
 
-        auto& file = *cache_inode(data->size(), _savedata(data), S_IFLNK | 0777, 0, 0);
-        mklink(dir->ind, &file, linkname);
+        auto* file = alloc_inode(assign_ino());
+        file->mode = S_IFLNK | 0777;
+        file->fs_data = data;
+        file->size = data->size();
+
+        mklink(dir->ind, file, linkname);
 
         if (dir->flags.present)
-            dir->append(get_inode(file.ino), linkname);
+            dir->append(file, linkname);
 
         return 0;
     }
@@ -219,7 +204,7 @@ public:
         if (!S_ISLNK(file->mode))
             return -EINVAL;
 
-        auto* data = as_fdata(_getdata(file->ino));
+        auto* data = (fdata_t*)file->fs_data;
         size_t size = data->size();
 
         size = std::min(size, buf_size);
@@ -229,75 +214,12 @@ public:
         return size;
     }
 
-    virtual int inode_statx(dentry* dent, statx* st, unsigned int mask) override
-    {
-        auto* ind = dent->ind;
-        const mode_t mode = ind->mode;
-
-        st->stx_mask = 0;
-
-        if (mask & STATX_NLINK) {
-            st->stx_nlink = ind->nlink;
-            st->stx_mask |= STATX_NLINK;
-        }
-
-        // TODO: set modification time
-        if (mask & STATX_MTIME) {
-            st->stx_mtime = {};
-            st->stx_mask |= STATX_MTIME;
-        }
-
-        if (mask & STATX_SIZE) {
-            st->stx_size = ind->size;
-            st->stx_mask |= STATX_SIZE;
-        }
-
-        st->stx_mode = 0;
-        if (mask & STATX_MODE) {
-            st->stx_mode |= ind->mode & ~S_IFMT;
-            st->stx_mask |= STATX_MODE;
-        }
-
-        if (mask & STATX_TYPE) {
-            st->stx_mode |= ind->mode & S_IFMT;
-            if (S_ISBLK(mode) || S_ISCHR(mode)) {
-                auto nd = (dev_t)as_val(_getdata(ind->ino));
-                st->stx_rdev_major = NODE_MAJOR(nd);
-                st->stx_rdev_minor = NODE_MINOR(nd);
-            }
-            st->stx_mask |= STATX_TYPE;
-        }
-
-        if (mask & STATX_INO) {
-            st->stx_ino = ind->ino;
-            st->stx_mask |= STATX_INO;
-        }
-
-        if (mask & STATX_BLOCKS) {
-            st->stx_blocks = ((ind->size + 0x1ff) & ~0x1ff) / 512;
-            st->stx_blksize = 4096;
-            st->stx_mask |= STATX_BLOCKS;
-        }
-
-        if (mask & STATX_UID) {
-            st->stx_uid = ind->uid;
-            st->stx_mask |= STATX_UID;
-        }
-
-        if (mask & STATX_GID) {
-            st->stx_gid = ind->gid;
-            st->stx_mask |= STATX_GID;
-        }
-
-        return 0;
-    }
-
     virtual int inode_rmfile(dentry* dir, const char* filename) override
     {
         if (!dir->flags.dir)
             return -ENOTDIR;
 
-        auto* vfe = as_vfe(_getdata(dir->ind->ino));
+        auto* vfe = (vfe_t*)dir->ind->fs_data;
         assert(vfe);
 
         auto* dent = dir->find(filename);
@@ -313,7 +235,7 @@ public:
             if (S_ISREG(dent->ind->mode)) {
                 // since we do not allow hard links in tmpfs, there is no need
                 // to check references, we remove the file data directly
-                auto* filedata = as_fdata(_getdata(iter->ino));
+                auto* filedata = (fdata_t*)dent->ind->fs_data;
                 assert(filedata);
 
                 delete filedata;
@@ -331,10 +253,11 @@ public:
         return -EIO;
     }
 
-    virtual int dev_id(inode* file, dev_t& out_dev) override
+    virtual dev_t i_device(inode* file) override
     {
-        out_dev = as_val(_getdata(file->ino));
-        return 0;
+        if (file->mode & S_IFMT & (S_IFBLK | S_IFCHR))
+            return (dev_t)(uintptr_t)file->fs_data;
+        return -ENODEV;
     }
 
     virtual int truncate(inode* file, size_t size) override
@@ -342,7 +265,7 @@ public:
         if (!S_ISREG(file->mode))
             return -EINVAL;
 
-        auto* data = as_fdata(_getdata(file->ino));
+        auto* data = (fdata_t*)file->fs_data;
         data->resize(size);
         file->size = size;
         return 0;

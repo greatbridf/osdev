@@ -140,131 +140,13 @@ void dentry::path(
         out_dst.append(dents[i]->name.c_str());
 }
 
-vfs::vfs()
-    : _root { nullptr, nullptr, "" }
-{
-}
-
-fs::inode* vfs::cache_inode(size_t size, ino_t ino,
-    mode_t mode, uid_t uid, gid_t gid)
-{
-    auto [ iter, inserted ] =
-        _inodes.try_emplace(ino, inode { ino, this, size, 0, mode, uid, gid });
-    return &iter->second;
-}
-
-void vfs::free_inode(ino_t ino)
-{
-    int n = _inodes.erase(ino);
-    assert(n == 1);
-}
-
-fs::inode* vfs::get_inode(ino_t ino)
-{
-    auto iter = _inodes.find(ino);
-    // TODO: load inode from disk if not found
-    if (iter)
-        return &iter->second;
-    else
-        return nullptr;
-}
-
-void vfs::register_root_node(inode* root)
-{
-    if (!_root.ind)
-        _root.ind = root;
-}
-
-int vfs::mount(dentry* mnt, const char* source, const char* mount_point,
-        const char* fstype, unsigned long flags, const void *data)
-{
-    if (!mnt->flags.dir)
-        return -ENOTDIR;
-
-    vfs* new_fs;
-    int ret = fs::create_fs(source, mount_point, fstype, flags, data, new_fs);
-
-    if (ret != 0)
-        return ret;
-
-    auto* new_ent = new_fs->root();
-
-    new_ent->parent = mnt->parent;
-    new_ent->name = mnt->name;
-
-    auto* orig_ent = mnt->replace(new_ent);
-    _mount_recover_list.emplace(new_ent, orig_ent);
-
-    return 0;
-}
-
-// default behavior is to
-// return -EINVAL to show that the operation
-// is not supported by the fs
-
-size_t vfs::read(inode*, char*, size_t, size_t, size_t)
-{
-    return -EINVAL;
-}
-
-size_t vfs::write(inode*, const char*, size_t, size_t)
-{
-    return -EINVAL;
-}
-
-int vfs::inode_mkfile(dentry*, const char*, mode_t)
-{
-    return -EINVAL;
-}
-
-int vfs::inode_mknode(dentry*, const char*, mode_t, dev_t)
-{
-    return -EINVAL;
-}
-
-int vfs::inode_rmfile(dentry*, const char*)
-{
-    return -EINVAL;
-}
-
-int vfs::inode_mkdir(dentry*, const char*, mode_t)
-{
-    return -EINVAL;
-}
-
-int vfs::symlink(dentry*, const char*, const char*)
-{
-    return -EINVAL;
-}
-
-int vfs::inode_statx(dentry*, statx*, unsigned int)
-{
-    return -EINVAL;
-}
-
-int vfs::inode_stat(dentry*, struct stat*)
-{
-    return -EINVAL;
-}
-
-int vfs::dev_id(inode*, dev_t&)
-{
-    return -EINVAL;
-}
-
-int vfs::readlink(inode*, char*, size_t)
-{
-    return -EINVAL;
-}
-
-int vfs::truncate(inode*, size_t)
-{
-    return -EINVAL;
-}
-
-fs::regular_file::regular_file(dentry* parent,
+fs::regular_file::regular_file(
     file_flags flags, size_t cursor, inode* ind)
-    : file(ind->mode, parent, flags), cursor(cursor), ind(ind) { }
+    : file(ind->mode, flags)
+    , cursor(cursor)
+    , ind(ind)
+{
+}
 
 ssize_t fs::regular_file::read(char* __user buf, size_t n)
 {
@@ -394,9 +276,12 @@ int fs::regular_file::getdents64(char* __user buf, size_t cnt)
     return orig_cnt - cnt;
 }
 
-fs::fifo_file::fifo_file(dentry* parent, file_flags flags,
+fs::fifo_file::fifo_file(file_flags flags,
     std::shared_ptr<fs::pipe> ppipe)
-    : file(S_IFIFO, parent, flags), ppipe(ppipe) { }
+    : file(S_IFIFO, flags)
+    , ppipe(ppipe)
+{
+}
 
 ssize_t fs::fifo_file::read(char* __user buf, size_t n)
 {
@@ -431,11 +316,11 @@ size_t fs::vfs_read(fs::inode* file, char* buf, size_t buf_size, size_t offset, 
     }
 
     if (S_ISREG(file->mode))
-        return file->fs->read(file, buf, buf_size, offset, n);
+        return file->fs->read(file, buf, buf_size, n, offset);
 
     if (S_ISBLK(file->mode) || S_ISCHR(file->mode)) {
-        dev_t dev;
-        if (file->fs->dev_id(file, dev) != 0) {
+        dev_t dev = file->fs->i_device(file);
+        if (dev & 0x80000000) {
             errno = EINVAL;
             return -1U;
         }
@@ -465,11 +350,11 @@ size_t fs::vfs_write(fs::inode* file, const char* buf, size_t offset, size_t n)
     }
 
     if (S_ISREG(file->mode))
-        return file->fs->write(file, buf, offset, n);
+        return file->fs->write(file, buf, n, offset);
 
     if (S_ISBLK(file->mode) || S_ISCHR(file->mode)) {
-        dev_t dev;
-        if (file->fs->dev_id(file, dev) != 0) {
+        dev_t dev = file->fs->i_device(file);
+        if (dev & 0x80000000) {
             errno = EINVAL;
             return -1U;
         }
@@ -565,7 +450,7 @@ dentry* fs::vfs_open(dentry& root, const types::path& path, bool follow, int rec
 
 int fs::vfs_stat(dentry* ent, statx* stat, unsigned int mask)
 {
-    return ent->ind->fs->inode_statx(ent, stat, mask);
+    return ent->ind->fs->statx(ent->ind, stat, mask);
 }
 
 int fs::vfs_truncate(inode *file, size_t size)

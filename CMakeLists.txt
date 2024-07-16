@@ -62,7 +62,9 @@ set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
                         src/kernel/task/readyqueue.cc
                         src/kernel/user/thread_local.cc
                         src/kernel/vfs/filearr.cc
+                        src/kernel/vfs/inode.cc
                         src/kernel/vfs/tmpfs.cc
+                        src/kernel/vfs/vfs.cc
                         src/kernel/signal.cpp
                         src/types/elf.cpp
                         src/types/libstdcpp.cpp

@@ -61,6 +61,7 @@ set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
                         src/kernel/task/thread.cc
                         src/kernel/task/readyqueue.cc
                         src/kernel/user/thread_local.cc
+                        src/kernel/vfs/dentry.cc
                         src/kernel/vfs/filearr.cc
                         src/kernel/vfs/inode.cc
                         src/kernel/vfs/tmpfs.cc
@@ -103,7 +104,7 @@ set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
                         include/types/bitmap.hpp
                         include/types/buffer.hpp
                         include/types/elf.hpp
-                        include/types/hash_map.hpp
+                        include/types/hash.hpp
                         include/types/list.hpp
                         include/types/types.h
                         include/types/allocator.hpp

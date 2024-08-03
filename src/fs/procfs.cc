@@ -185,7 +185,7 @@ public:
         int nread = 0;
         for (const auto& [ ino, pf ] : files) {
             auto* ind = get_inode(ino);
-            int ret = callback(pf.name.c_str(), 0, ind, ind->mode);
+            int ret = callback(pf.name.c_str(), ind, ind->mode);
             if (ret != 0)
                 return -EIO;
             ++nread;

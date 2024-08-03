@@ -2,6 +2,7 @@
 #include <map>
 #include <vector>
 
+#include <assert.h>
 #include <stdint.h>
 
 #include <kernel/log.hpp>
@@ -33,10 +34,10 @@ protected:
     inline vfe_t* make_vfe() { return new vfe_t{}; }
     inline fdata_t* make_fdata() { return new fdata_t{}; }
 
-    void mklink(inode* dir, inode* ind, const char* filename)
+    void mklink(inode* dir, inode* ind, std::string filename)
     {
         auto& fes = *(vfe_t*)dir->fs_data;
-        fes.emplace_back(fe_t { ind->ino, filename });
+        fes.emplace_back(fe_t { ind->ino, std::move(filename) });
 
         dir->size += sizeof(fe_t);
         ++ind->nlink;
@@ -57,7 +58,7 @@ protected:
             auto* ind = get_inode(entry.ino);
 
             // inode mode filetype is compatible with user dentry filetype
-            auto ret = filldir(entry.filename.c_str(), 0, ind, ind->mode & S_IFMT);
+            auto ret = filldir(entry.filename.c_str(), ind, ind->mode & S_IFMT);
             if (ret != 0)
                 break;
         }
@@ -81,7 +82,7 @@ public:
         register_root_node(in);
     }
 
-    virtual ssize_t read(inode* file, char* buf, size_t buf_size, size_t count, off_t offset) override
+    virtual ssize_t read(struct inode* file, char* buf, size_t buf_size, size_t count, off_t offset) override
     {
         if (!S_ISREG(file->mode))
             return -EINVAL;
@@ -101,7 +102,7 @@ public:
         return count;
     }
 
-    virtual ssize_t write(inode* file, const char* buf, size_t count, off_t offset) override
+    virtual ssize_t write(struct inode* file, const char* buf, size_t count, off_t offset) override
     {
         if (!S_ISREG(file->mode))
             return -EINVAL;
@@ -117,27 +118,28 @@ public:
         return count;
     }
 
-    virtual int inode_mkfile(dentry* dir, const char* filename, mode_t mode) override
+    virtual int creat(struct inode* dir, struct dentry* at, mode_t mode) override
     {
-        if (!dir->flags.dir)
+        if (!S_ISDIR(dir->mode))
             return -ENOTDIR;
+        assert(at->parent && at->parent->inode == dir);
 
         auto* file = alloc_inode(assign_ino());
         file->mode = S_IFREG | (mode & 0777);
         file->fs_data = make_fdata();
 
-        mklink(dir->ind, file, filename);
+        mklink(dir, file, at->name);
 
-        if (dir->flags.present)
-            dir->append(file, filename);
-
+        at->inode = file;
+        at->flags |= fs::D_PRESENT;
         return 0;
     }
 
-    virtual int inode_mknode(dentry* dir, const char* filename, mode_t mode, dev_t dev) override
+    virtual int mknod(struct inode* dir, struct dentry* at, mode_t mode, dev_t dev) override
     {
-        if (!dir->flags.dir)
+        if (!S_ISDIR(dir->mode))
             return -ENOTDIR;
+        assert(at->parent && at->parent->inode == dir);
 
         if (!S_ISBLK(mode) && !S_ISCHR(mode))
             return -EINVAL;
@@ -149,38 +151,38 @@ public:
         node->mode = mode;
         node->fs_data = (void*)(uintptr_t)dev;
 
-        mklink(dir->ind, node, filename);
+        mklink(dir, node, at->name);
 
-        if (dir->flags.present)
-            dir->append(node, filename);
-
+        at->inode = node;
+        at->flags |= fs::D_PRESENT;
         return 0;
     }
 
-    virtual int inode_mkdir(dentry* dir, const char* dirname, mode_t mode) override
+    virtual int mkdir(struct inode* dir, struct dentry* at, mode_t mode) override
     {
-        if (!dir->flags.dir)
+        if (!S_ISDIR(dir->mode))
             return -ENOTDIR;
+        assert(at->parent && at->parent->inode == dir);
 
         auto* new_dir = alloc_inode(assign_ino());
         new_dir->mode = S_IFDIR | (mode & 0777);
         new_dir->fs_data = make_vfe();
 
         mklink(new_dir, new_dir, ".");
+        mklink(new_dir, dir, "..");
 
-        mklink(dir->ind, new_dir, dirname);
-        mklink(new_dir, dir->ind, "..");
+        mklink(dir, new_dir, at->name);
 
-        if (dir->flags.present)
-            dir->append(new_dir, dirname);
-
+        at->inode = new_dir;
+        at->flags |= fs::D_PRESENT | fs::D_DIRECTORY | fs::D_LOADED;
         return 0;
     }
 
-    virtual int symlink(dentry* dir, const char* linkname, const char* target) override
+    virtual int symlink(struct inode* dir, struct dentry* at, const char* target) override
     {
-        if (!dir->flags.dir)
+        if (!S_ISDIR(dir->mode))
             return -ENOTDIR;
+        assert(at->parent && at->parent->inode == dir);
 
         auto* data = make_fdata();
         data->resize(strlen(target));
@@ -191,15 +193,14 @@ public:
         file->fs_data = data;
         file->size = data->size();
 
-        mklink(dir->ind, file, linkname);
+        mklink(dir, file, at->name);
 
-        if (dir->flags.present)
-            dir->append(file, linkname);
-
+        at->inode = file;
+        at->flags |= fs::D_PRESENT;
         return 0;
     }
 
-    virtual int readlink(inode* file, char* buf, size_t buf_size) override
+    virtual int readlink(struct inode* file, char* buf, size_t buf_size) override
     {
         if (!S_ISLNK(file->mode))
             return -EINVAL;
@@ -214,38 +215,38 @@ public:
         return size;
     }
 
-    virtual int inode_rmfile(dentry* dir, const char* filename) override
+    virtual int unlink(struct inode* dir, struct dentry* at) override
     {
-        if (!dir->flags.dir)
+        if (!S_ISDIR(dir->mode))
             return -ENOTDIR;
+        assert(at->parent && at->parent->inode == dir);
 
-        auto* vfe = (vfe_t*)dir->ind->fs_data;
+        auto* vfe = (vfe_t*)dir->fs_data;
         assert(vfe);
 
-        auto* dent = dir->find(filename);
-        if (!dent)
-            return -ENOENT;
-
         for (auto iter = vfe->begin(); iter != vfe->end(); ) {
-            if (iter->ino != dent->ind->ino) {
+            if (iter->ino != at->inode->ino) {
                 ++iter;
                 continue;
             }
 
-            if (S_ISREG(dent->ind->mode)) {
+            if (S_ISDIR(at->inode->mode))
+                return -EISDIR;
+
+            if (S_ISREG(at->inode->mode)) {
                 // since we do not allow hard links in tmpfs, there is no need
                 // to check references, we remove the file data directly
-                auto* filedata = (fdata_t*)dent->ind->fs_data;
+                auto* filedata = (fdata_t*)at->inode->fs_data;
                 assert(filedata);
 
                 delete filedata;
             }
 
             free_inode(iter->ino);
-            dir->remove(filename);
+            at->flags &= ~fs::D_PRESENT;
+            at->inode = nullptr;
 
             vfe->erase(iter);
-
             return 0;
         }
 

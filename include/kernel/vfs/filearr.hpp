@@ -2,6 +2,10 @@
 
 #include <memory>
 
+#include <types/path.hpp>
+
+#include <kernel/vfs.hpp>
+
 #include "dentry.hpp"
 #include "file.hpp"
 
@@ -14,7 +18,7 @@ private:
     filearray(std::shared_ptr<impl>);
 
 public:
-    filearray();
+    filearray(const fs_context* ctx);
     filearray(filearray&& other) = default;
 
     filearray copy() const;
@@ -33,7 +37,8 @@ public:
     int set_flags(int fd, int flags);
 
     int pipe(int (&pipefd)[2]);
-    int open(dentry& root, const types::path& filepath, int flags, mode_t mode);
+    int open(dentry* cwd, types::path_iterator filepath, int flags, mode_t mode);
+    int open(types::path_iterator filepath, int flags, mode_t mode);
 
     int close(int fd);
 

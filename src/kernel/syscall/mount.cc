@@ -17,12 +17,9 @@ int kernel::syscall::do_mount(
         return -EINVAL;
 
     // TODO: use copy_from_user
-    auto path = current_process->pwd + target;
-    auto* mountpoint = fs::vfs_open(*current_process->root, path);
+    auto [ mountpoint, status ] = fs::current_open(current_process->cwd, target);
+    if (!mountpoint || status)
+        return status;
 
-    if (!mountpoint)
-        return -ENOENT;
-
-    return mountpoint->ind->fs->mount(mountpoint, source,
-            path.full_path().c_str(), fstype, flags, _fsdata);
+    return fs::mount(mountpoint, source, target, fstype, flags, _fsdata);
 }

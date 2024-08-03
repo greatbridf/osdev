@@ -42,10 +42,10 @@ _run_sh:;
             shell_argv[0] = "/bin/sh";
         else
             shell_argv[0] = argv[1];
-        
+
         for (int i = 2; i < argc; ++i)
             shell_argv[i - 1] = argv[i];
-        
+
         execve(shell_argv[0], shell_argv, environ);
 
         print("[init] unable to run sh, exiting...\n");

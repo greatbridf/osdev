@@ -3,75 +3,55 @@
 #include <list>
 #include <string>
 
-#include <types/hash_map.hpp>
+#include <types/hash.hpp>
 #include <types/path.hpp>
 
+#include <kernel/async/lock.hpp>
 #include <kernel/vfs/inode.hpp>
 
 namespace fs {
+static constexpr unsigned long D_PRESENT    = 1 << 0;
+static constexpr unsigned long D_DIRECTORY  = 1 << 1;
+static constexpr unsigned long D_LOADED     = 1 << 2;
+static constexpr unsigned long D_MOUNTPOINT = 1 << 3;
 
 struct dentry {
-public:
-    using name_type = std::string;
+    struct dcache* cache;
+    vfs* fs;
 
-private:
-    std::list<dentry>* children = nullptr;
-    types::hash_map<name_type, dentry*>* idx_children = nullptr;
+    struct inode* inode;
+    struct dentry* parent;
 
-public:
-    dentry* parent;
-    inode* ind;
-    struct {
-        uint32_t dir : 1; // whether the dentry is a directory.
-        // if dir is 1, whether children contains valid data.
-        // otherwise, ignored
-        uint32_t present : 1;
-    } flags;
-    name_type name;
+    // list head
+    struct dentry* prev;
+    struct dentry* next;
 
-    explicit dentry(dentry* parent, inode* ind, name_type name);
-    dentry(const dentry& val) = delete;
-    constexpr dentry(dentry&& val)
-        : children(std::exchange(val.children, nullptr))
-        , idx_children(std::exchange(val.idx_children, nullptr))
-        , parent(std::exchange(val.parent, nullptr))
-        , ind(std::exchange(val.ind, nullptr))
-        , flags { val.flags }
-        , name(std::move(val.name))
-    {
-        if (children) {
-            for (auto& item : *children)
-                item.parent = this;
-        }
-    }
+    unsigned long flags;
+    types::hash_t hash;
 
-    dentry& operator=(const dentry& val) = delete;
-    dentry& operator=(dentry&& val) = delete;
+    // TODO: use atomic
+    std::size_t refcount;
 
-    constexpr ~dentry()
-    {
-        if (children) {
-            delete children;
-            children = nullptr;
-        }
-        if (idx_children) {
-            delete idx_children;
-            idx_children = nullptr;
-        }
-    }
-
-    int load();
-
-    dentry* append(inode* ind, name_type name);
-
-    dentry* find(const name_type& name);
-
-    dentry* replace(dentry* val);
-
-    void remove(const name_type& name);
-
-    // out_dst SHOULD be empty
-    void path(const dentry& root, types::path& out_dst) const;
+    std::string name;
 };
+
+struct dcache {
+    struct dentry** arr;
+    int hash_bits;
+
+    std::size_t size;
+};
+
+std::pair<struct dentry*, int> d_find(struct dentry* parent, types::string_view name);
+std::string d_path(const struct dentry* dentry, const struct dentry* root);
+
+struct dentry* d_get(struct dentry* dentry);
+struct dentry* d_put(struct dentry* dentry);
+
+void dcache_init(struct dcache* cache, int hash_bits);
+void dcache_drop(struct dcache* cache);
+
+struct dentry* dcache_alloc(struct dcache* cache);
+void dcache_init_root(struct dcache* cache, struct dentry* root);
 
 } // namespace fs

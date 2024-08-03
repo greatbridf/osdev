@@ -10,21 +10,18 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 
-#include <types/hash_map.hpp>
-
 namespace fs {
 
 class vfs {
 public:
-    using filldir_func = std::function<ssize_t(const char*, size_t, inode*, uint8_t)>;
+    using filldir_func = std::function<ssize_t(const char*, inode*, uint8_t)>;
 
 private:
+    struct dcache m_dcache;
+    struct dentry* m_root {};
     std::map<ino_t, inode> m_inodes;
-    types::hash_map<dentry*, dentry*> m_mount_recover_list;
 
 protected:
-    dentry m_root;
-
     dev_t m_device;
     size_t m_io_blksize;
 
@@ -37,19 +34,16 @@ protected:
     inode* get_inode(ino_t ino);
     void register_root_node(inode* root);
 
-    int load_dentry(dentry* ent);
-
 public:
+    static std::pair<vfs*, int> create(const char* source,
+        const char* fstype, unsigned long flags, const void* data);
+
     vfs(const vfs&) = delete;
     vfs& operator=(const vfs&) = delete;
     vfs(vfs&&) = delete;
     vfs& operator=(vfs&&) = delete;
 
-    constexpr dentry* root(void)
-    {
-        return &m_root;
-    }
-
+    struct dentry* root() const noexcept;
     dev_t fs_device() const noexcept;
     size_t io_blksize() const noexcept;
 
@@ -57,12 +51,12 @@ public:
             const char* fstype, unsigned long flags, const void* data);
 
     // directory operations
-    virtual int inode_mkfile(dentry* dir, const char* filename, mode_t mode);
-    virtual int inode_mknode(dentry* dir, const char* filename, mode_t mode, dev_t sn);
-    virtual int inode_rmfile(dentry* dir, const char* filename);
-    virtual int inode_mkdir(dentry* dir, const char* dirname, mode_t mode);
+    virtual int creat(struct inode* dir, dentry* at, mode_t mode);
+    virtual int mkdir(struct inode* dir, dentry* at, mode_t mode);
+    virtual int mknod(struct inode* dir, dentry* at, mode_t mode, dev_t device);
+    virtual int unlink(struct inode* dir, dentry* at);
 
-    virtual int symlink(dentry* dir, const char* linkname, const char* target);
+    virtual int symlink(struct inode* dir, dentry* at, const char* target);
 
     // metadata operations
     int statx(inode* ind, struct statx* st, unsigned int mask);

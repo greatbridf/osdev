@@ -3,6 +3,7 @@
 namespace fs {
 
 // in dentry.hpp
+struct dcache;
 struct dentry;
 
 // in file.hpp

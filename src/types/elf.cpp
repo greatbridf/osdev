@@ -37,8 +37,8 @@ int types::elf::elf32_load(types::elf::elf32_load_data& d)
         return -ENOENT;
 
     types::elf::elf32_header hdr {};
-    auto n_read = fs::vfs_read(
-        exec->ind,
+    auto n_read = fs::read(
+        exec->inode,
         (char*)&hdr,
         sizeof(types::elf::elf32_header),
         0, sizeof(types::elf::elf32_header));
@@ -53,8 +53,8 @@ int types::elf::elf32_load(types::elf::elf32_load_data& d)
     size_t phents_size = hdr.phentsize * hdr.phnum;
     size_t shents_size = hdr.shentsize * hdr.shnum;
     std::vector<types::elf::elf32_program_header_entry> phents(hdr.phnum);
-    n_read = fs::vfs_read(
-        exec->ind,
+    n_read = fs::read(
+        exec->inode,
         (char*)phents.data(),
         phents_size,
         hdr.phoff, phents_size);
@@ -64,8 +64,8 @@ int types::elf::elf32_load(types::elf::elf32_load_data& d)
         return -EINVAL;
 
     std::vector<types::elf::elf32_section_header_entry> shents(hdr.shnum);
-    n_read = fs::vfs_read(
-        exec->ind,
+    n_read = fs::read(
+        exec->inode,
         (char*)shents.data(),
         shents_size,
         hdr.shoff, shents_size);
@@ -96,7 +96,7 @@ int types::elf::elf32_load(types::elf::elf32_load_data& d)
 
             args.vaddr = vaddr;
             args.length = flen;
-            args.file_inode = exec->ind;
+            args.file_inode = exec->inode;
             args.file_offset = fileoff;
 
             args.flags = MM_MAPPED;

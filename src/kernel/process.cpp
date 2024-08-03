@@ -27,13 +27,17 @@
 
 process::process(const process& parent, pid_t pid)
     : mms { parent.mms }, attr { parent.attr } , files { parent.files.copy() }
-    , pwd { parent.pwd }, umask { parent.umask }, pid { pid }
+    , cwd { parent.cwd }, umask { parent.umask }, pid { pid }
     , ppid { parent.pid }, pgid { parent.pgid } , sid { parent.sid }
-    , control_tty { parent.control_tty }, root { parent.root } { }
+    , control_tty { parent.control_tty }, fs_context { parent.fs_context }
+{
+    fs::d_get(cwd);
+    fs::d_get(fs_context.root);
+}
 
 process::process(pid_t pid, pid_t ppid)
-    : attr { .system = true }
-    , pwd { "/" } , pid { pid } , ppid { ppid }
+    : attr { .system = true }, files{&fs_context}
+    , pid { pid } , ppid { ppid }
 {
     bool inserted;
     std::tie(std::ignore, inserted) = thds.emplace("", pid);
@@ -204,6 +208,18 @@ void NORETURN _kernel_init(kernel::mem::paging::pfn_t kernel_stack_pfn)
 
     asm volatile("sti");
 
+    // mount rootfs
+
+    fs::vfs* rootfs;
+    if (1) {
+        int ret;
+        std::tie(rootfs, ret) = fs::vfs::create("none",
+                "tmpfs", MS_NOATIME, nullptr);
+        assert(ret == 0);
+    }
+    current_process->fs_context.root = rootfs->root();
+    current_process->cwd = rootfs->root();
+
     // ------------------------------------------
     // interrupt enabled
     // ------------------------------------------
@@ -220,20 +236,18 @@ void NORETURN _kernel_init(kernel::mem::paging::pfn_t kernel_stack_pfn)
         kmsgf("[kernel] An error occured while loading \"%s\"", mod->name);
     }
 
+    const auto& context = current_process->fs_context;
+
     // mount fat32 /mnt directory
     // TODO: parse kernel parameters
     if (1) {
-        auto* mount_point = fs::vfs_open(*fs::fs_root, types::path{"/mnt"});
-        if (!mount_point) {
-            int ret = fs::vfs_mkdir(fs::fs_root, "mnt", 0755);
-            assert(ret == 0);
+        auto [ mnt, status ] = fs::open(context, context.root, "/mnt");
+        assert(mnt && status == -ENOENT);
 
-            mount_point = fs::vfs_open(*fs::fs_root, types::path{"/mnt"});
-        }
+        if (int ret = fs::mkdir(mnt, 0755); 1)
+            assert(ret == 0 && mnt->flags & fs::D_PRESENT);
 
-        assert(mount_point);
-
-        int ret = fs::fs_root->ind->fs->mount(mount_point, "/dev/sda", "/mnt",
+        int ret = rootfs->mount(mnt, "/dev/sda", "/mnt",
                 "fat32", MS_RDONLY | MS_NOATIME | MS_NODEV | MS_NOSUID, "ro,nodev");
         assert(ret == 0);
     }
@@ -248,14 +262,15 @@ void NORETURN _kernel_init(kernel::mem::paging::pfn_t kernel_stack_pfn)
         .ip{}, .sp{}
     };
 
-    d.exec_dent = fs::vfs_open(*fs::fs_root, types::path{d.argv[0].c_str()});
-    if (!d.exec_dent) {
+    int ret;
+    std::tie(d.exec_dent, ret) = fs::open(context, context.root, d.argv[0]);
+    if (!d.exec_dent || ret) {
         kmsg("kernel panic: init not found!");
         freeze();
     }
 
-    int ret = types::elf::elf32_load(d);
-    assert(ret == 0);
+    if (int ret = types::elf::elf32_load(d); 1)
+        assert(ret == 0);
 
     int ds = 0x33, cs = 0x2b;
 

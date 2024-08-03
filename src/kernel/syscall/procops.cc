@@ -13,6 +13,7 @@
 #include <kernel/signal.hpp>
 #include <kernel/syscall.hpp>
 #include <kernel/utsname.hpp>
+#include <kernel/vfs/dentry.hpp>
 
 using namespace kernel::syscall;
 
@@ -27,17 +28,15 @@ static inline void not_implemented(const char* pos, int line)
 
 int kernel::syscall::do_chdir(const char __user* path)
 {
-    auto* dir = fs::vfs_open(*current_process->root,
-            current_process->pwd + path);
-    if (!dir)
-        return -ENOENT;
+    // TODO: use copy_from_user
+    auto [dir, ret] = fs::current_open(current_process->cwd, path);
+    if (!dir || ret)
+        return ret;
 
-    if (!S_ISDIR(dir->ind->mode))
+    if (!(dir->flags & fs::D_DIRECTORY))
         return -ENOTDIR;
 
-    current_process->pwd.clear();
-    dir->path(*current_process->root, current_process->pwd);
-
+    current_process->cwd = dir;
     return 0;
 }
 
@@ -53,11 +52,13 @@ execve_retval kernel::syscall::do_execve(
         .ip{}, .sp{},
     };
 
-    d.exec_dent = fs::vfs_open(*current_process->root,
-            current_process->pwd + exec.c_str());
+    if (1) {
+        int ret;
+        std::tie(d.exec_dent, ret) = fs::current_open(current_process->cwd, exec);
 
-    if (!d.exec_dent)
-        return { 0, 0, -ENOENT };
+        if (!d.exec_dent || ret)
+            return { 0, 0, ret };
+    }
 
     current_process->files.onexec();
 
@@ -141,7 +142,7 @@ int kernel::syscall::do_waitpid(pid_t waitpid, int __user* arg1, int options)
 
 int kernel::syscall::do_getcwd(char __user* buf, size_t buf_size)
 {
-    auto path = current_process->pwd.full_path();
+    auto path = fs::d_path(current_process->cwd, current_process->fs_context.root);
 
     int len = std::min(buf_size-1, path.size());
 

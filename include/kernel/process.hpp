@@ -8,6 +8,7 @@
 #include <tuple>
 #include <utility>
 
+#include <assert.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <stdint.h>
@@ -60,7 +61,7 @@ public:
 
     process_attr attr {};
     fs::filearray files;
-    types::path pwd;
+    fs::dentry* cwd {};
     mode_t umask { 0022 };
 
     pid_t pid {};
@@ -69,7 +70,7 @@ public:
     pid_t sid {};
 
     kernel::tty::tty* control_tty {};
-    fs::dentry* root { fs::fs_root };
+    struct fs::fs_context fs_context;
     std::set<pid_t> children;
 
 public:

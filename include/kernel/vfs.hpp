@@ -60,16 +60,19 @@ struct PACKED user_dirent64 {
     char d_name[1]; // file name with a padding zero
 };
 
-inline dentry* fs_root;
+struct fs_context {
+    dentry* root;
+};
 
 struct mount_data {
+    fs::vfs* fs;
     std::string source;
     std::string mount_point;
     std::string fstype;
     unsigned long flags;
 };
 
-inline std::map<fs::vfs*, mount_data> mounts;
+inline std::map<struct dentry*, mount_data> mounts;
 
 int register_block_device(dev_t node, const blkdev_ops& ops);
 int register_char_device(dev_t node, const chrdev_ops& ops);
@@ -85,11 +88,6 @@ int register_fs(const char* name, create_fs_func_t);
 // in tmpfs.cc
 int register_tmpfs();
 
-// returns a pointer to the vfs object
-// vfs objects are managed by the kernel
-int create_fs(const char* source, const char* mount_point, const char* fstype,
-        unsigned long flags, const void* data, vfs*& out_vfs);
-
 void partprobe();
 
 ssize_t block_device_read(dev_t node, char* buf, size_t buf_size, size_t offset, size_t n);
@@ -98,24 +96,25 @@ ssize_t block_device_write(dev_t node, const char* buf, size_t offset, size_t n)
 ssize_t char_device_read(dev_t node, char* buf, size_t buf_size, size_t n);
 ssize_t char_device_write(dev_t node, const char* buf, size_t n);
 
-size_t vfs_read(inode* file, char* buf, size_t buf_size, size_t offset, size_t n);
-size_t vfs_write(inode* file, const char* buf, size_t offset, size_t n);
-int vfs_mkfile(dentry* dir, const char* filename, mode_t mode);
-int vfs_mknode(dentry* dir, const char* filename, mode_t mode, dev_t sn);
-int vfs_rmfile(dentry* dir, const char* filename);
-int vfs_mkdir(dentry* dir, const char* dirname, mode_t mode);
-int vfs_stat(dentry* dent, statx* stat, unsigned int mask);
-int vfs_truncate(inode* file, size_t size);
+int creat(struct dentry* at, mode_t mode);
+int mkdir(struct dentry* at, mode_t mode);
+int mknod(struct dentry* at, mode_t mode, dev_t sn);
+int unlink(struct dentry* at);
+int symlink(struct dentry* at, const char* target);
 
-/**
- * @brief Opens a file or directory specified by the given path.
- *
- * @param root The root directory of the file system.
- * @param path The absolute path to the file or directory to be opened.
- * @return A pointer to the opened file or directory entry if found.
- *         Otherwise, nullptr is returned.
- */
-dentry* vfs_open(dentry& root, const types::path& path, bool follow_symlinks = true, int recurs_no = 0);
+int statx(struct inode* inode, struct statx* stat, unsigned int mask);
+int readlink(struct inode* inode, char* buf, size_t buf_size);
+int truncate(struct inode* file, size_t size);
+size_t read(struct inode* file, char* buf, size_t buf_size, size_t offset, size_t n);
+size_t write(struct inode* file, const char* buf, size_t offset, size_t n);
+
+int mount(dentry* mnt, const char* source, const char* mount_point,
+        const char* fstype, unsigned long flags, const void *data);
+
+std::pair<dentry*, int> open(const fs_context& context, dentry* cwd, types::path_iterator path,
+        bool follow_symlinks = true, int recurs_no = 0);
+
+std::pair<dentry*, int> current_open(dentry* cwd, types::path_iterator path, bool follow_symlinks = true);
 
 } // namespace fs
 

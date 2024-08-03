@@ -28,6 +28,7 @@ extern int* __errno_location(void);
 #define ENOTTY 25
 #define ESPIPE 29
 #define EPIPE 32
+#define ELOOP 40
 
 #ifdef __cplusplus
 }

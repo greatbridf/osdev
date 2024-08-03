@@ -1,5 +1,7 @@
 #include <set>
 
+#include <assert.h>
+
 #include <kernel/async/lock.hpp>
 #include <kernel/vfs.hpp>
 #include <kernel/vfs/filearr.hpp>
@@ -35,6 +37,7 @@ struct fditem_comparator {
 struct filearray::impl {
     mutex mtx;
 
+    const fs_context* context;
     std::set<fditem, fditem_comparator> arr;
     int min_avail{};
 
@@ -172,52 +175,39 @@ int filearray::close(int fd)
     return 0;
 }
 
-static inline int _open_file(dentry*& out_dent, dentry& root, const types::path& filepath, int flags, mode_t mode)
+static inline std::pair<dentry*, int>
+_open_file(const fs_context& context, dentry* cwd, types::path_iterator filepath, int flags, mode_t mode)
 {
-    auto* dent = vfs_open(root, filepath);
+    auto [ dent, ret ] = fs::open(context, cwd, filepath);
+    if (!dent)
+        return {nullptr, ret};
 
-    if (dent) {
+    if (dent->flags & D_PRESENT) {
         if ((flags & O_CREAT) && (flags & O_EXCL))
-            return -EEXIST;
-        out_dent = dent;
-        return 0;
+            return {nullptr, -EEXIST};
+        return {dent, 0};
     }
 
     if (!(flags & O_CREAT))
-        return -ENOENT;
+        return {nullptr, -ENOENT};
 
     // create file
+    if (int ret = fs::creat(dent, mode); ret != 0)
+        return {nullptr, ret};
 
-    auto filename = filepath.last_name();
-    auto parent_path = filepath;
-    parent_path.remove_last();
-
-    auto* parent = vfs_open(root, parent_path);
-    if (!parent)
-        return -EINVAL;
-
-    int ret = vfs_mkfile(parent, filename.c_str(), mode);
-    if (ret != 0)
-        return ret;
-
-    dent = parent->find(filename);
-    assert(dent);
-
-    out_dent = dent;
-    return 0;
+    return {dent, 0};
 }
 
 // TODO: file opening permissions check
-int filearray::open(dentry& root, const types::path& filepath, int flags, mode_t mode)
+int filearray::open(dentry* cwd, types::path_iterator filepath, int flags, mode_t mode)
 {
     lock_guard lck{pimpl->mtx};
 
-    dentry* dent {};
-    int ret = _open_file(dent, root, filepath, flags, mode);
+    auto [dent, ret] = _open_file(*pimpl->context, cwd, filepath, flags, mode);
     if (ret != 0)
         return ret;
 
-    auto filemode = dent->ind->mode;
+    auto filemode = dent->inode->mode;
 
     int fdflag = (flags & O_CLOEXEC) ? FD_CLOEXEC : 0;
 
@@ -238,14 +228,14 @@ int filearray::open(dentry& root, const types::path& filepath, int flags, mode_t
     // truncate file
     if (flags & O_TRUNC) {
         if (fflags.write && S_ISREG(filemode)) {
-            auto ret = vfs_truncate(dent->ind, 0);
+            auto ret = fs::truncate(dent->inode, 0);
             if (ret != 0)
                 return ret;
         }
     }
 
     return pimpl->place_new_file(
-        std::make_shared<regular_file>(fflags, 0, dent->ind),
+        std::make_shared<regular_file>(fflags, 0, dent->inode),
         fdflag);
 }
 
@@ -275,15 +265,16 @@ filearray::filearray(std::shared_ptr<impl> ptr)
 {
 }
 
-filearray::filearray()
+filearray::filearray(const fs_context* context)
     : filearray { std::make_shared<impl>() }
 {
+    pimpl->context = context;
 }
 
 filearray filearray::copy() const
 {
     lock_guard lck { pimpl->mtx };
-    filearray ret {};
+    filearray ret { pimpl->context };
 
     ret.pimpl->min_avail = pimpl->min_avail;
     ret.pimpl->arr = pimpl->arr;

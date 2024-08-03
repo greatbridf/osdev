@@ -23,125 +23,10 @@
 #include <kernel/vfs/dentry.hpp>
 #include <kernel/vfs/vfs.hpp>
 
-using fs::vfs, fs::dentry;
-
-dentry::dentry(dentry* _parent, inode* _ind, name_type _name)
-    : parent(_parent) , ind(_ind) , flags { } , name(_name)
-{
-    // the dentry is filesystem root or _ind MUST be non null
-    assert(_ind || !_parent);
-    if (!ind || S_ISDIR(ind->mode)) {
-        flags.dir = 1;
-        children = new std::list<dentry>;
-        idx_children = new types::hash_map<name_type, dentry*>;
-    }
-}
-
-int dentry::load()
-{
-    if (!flags.dir || !S_ISDIR(ind->mode))
-        return -ENOTDIR;
-
-    size_t offset = 0;
-    vfs* fs = ind->fs;
-
-    while (true) {
-        int ret = fs->readdir(ind, offset,
-            [this](const char* name, size_t len, inode* ind, uint8_t) -> int {
-                if (!len)
-                    append(ind, name);
-                else
-                    append(ind, dentry::name_type(name, len));
-
-                return 0;
-            });
-
-        if (ret == 0)
-            break;
-
-        offset += ret;
-    }
-
-    flags.present = 1;
-
-    return 0;
-}
-
-dentry* dentry::append(inode* ind, name_type name)
-{
-    auto& ent = children->emplace_back(this, ind, name);
-    idx_children->emplace(ent.name, &ent);
-    return &ent;
-}
-
-dentry* dentry::find(const name_type& name)
-{
-    if (!flags.dir)
-        return nullptr;
-
-    if (name[0] == '.') {
-        if (!name[1])
-            return this;
-        if (name[1] == '.' && !name[2])
-            return parent ? parent : this;
-    }
-
-    if (!flags.present) {
-        int ret = load();
-        if (ret != 0) {
-            errno = -ret;
-            return nullptr;
-        }
-    }
-
-    auto iter = idx_children->find(name);
-    if (!iter) {
-        errno = ENOENT;
-        return nullptr;
-    }
-
-    return iter->second;
-}
-
-dentry* dentry::replace(dentry* val)
-{
-    // TODO: prevent the dirent to be swapped out of memory
-    parent->idx_children->find(this->name)->second = val;
-    return this;
-}
-
-void dentry::remove(const name_type& name)
-{
-    for (auto iter = children->begin(); iter != children->end(); ++iter) {
-        if (iter->name != name)
-            continue;
-        children->erase(iter);
-        break;
-    }
-
-    idx_children->remove(name);
-}
-
-void dentry::path(
-    const dentry& root, types::path &out_dst) const
-{
-    const dentry* dents[32];
-    int cnt = 0;
-
-    const dentry* cur = this;
-    while (cur != &root) {
-        assert(cnt < 32);
-        dents[cnt++] = cur;
-        cur = cur->parent;
-    }
-
-    out_dst.append("/");
-    for (int i = cnt - 1; i >= 0; --i)
-        out_dst.append(dents[i]->name.c_str());
-}
+using fs::dentry;
 
 fs::regular_file::regular_file(
-    file_flags flags, size_t cursor, inode* ind)
+    file_flags flags, size_t cursor, struct inode* ind)
     : file(ind->mode, flags)
     , cursor(cursor)
     , ind(ind)
@@ -157,7 +42,7 @@ ssize_t fs::regular_file::read(char* __user buf, size_t n)
         return -EISDIR;
 
     // TODO: copy to user function !IMPORTANT
-    ssize_t n_wrote = fs::vfs_read(ind, buf, n, cursor, n);
+    ssize_t n_wrote = fs::read(ind, buf, n, cursor, n);
     if (n_wrote >= 0)
         cursor += n_wrote;
 
@@ -170,7 +55,7 @@ ssize_t fs::regular_file::do_write(const char* __user buf, size_t n)
         return -EISDIR;
 
     // TODO: check privilege of user ptr
-    ssize_t n_wrote = fs::vfs_write(ind, buf, cursor, n);
+    ssize_t n_wrote = fs::write(ind, buf, cursor, n);
     if (n_wrote >= 0)
         cursor += n_wrote;
 
@@ -212,11 +97,10 @@ int fs::regular_file::getdents(char* __user buf, size_t cnt)
 
     size_t orig_cnt = cnt;
     int nread = ind->fs->readdir(ind, cursor,
-        [&buf, &cnt](const char* fn, size_t len, inode* ind, uint8_t type) {
-            if (!len)
-                len = strlen(fn);
+        [&buf, &cnt](const char* fn, struct inode* ind, uint8_t type) {
+            size_t filename_len = strlen(fn);
 
-            size_t reclen = sizeof(fs::user_dirent) + 1 + len;
+            size_t reclen = sizeof(fs::user_dirent) + 1 + filename_len;
             if (cnt < reclen)
                 return -EFAULT;
 
@@ -226,7 +110,7 @@ int fs::regular_file::getdents(char* __user buf, size_t cnt)
             // TODO: show offset
             // dirp->d_off = 0;
             // TODO: use copy_to_user
-            memcpy(dirp->d_name, fn, len);
+            memcpy(dirp->d_name, fn, filename_len);
             buf[reclen - 2] = 0;
             buf[reclen - 1] = type;
 
@@ -248,11 +132,10 @@ int fs::regular_file::getdents64(char* __user buf, size_t cnt)
 
     size_t orig_cnt = cnt;
     int nread = ind->fs->readdir(ind, cursor,
-        [&buf, &cnt](const char* fn, size_t len, inode* ind, uint8_t type) {
-            if (!len)
-                len = strlen(fn);
+        [&buf, &cnt](const char* fn, struct inode* ind, uint8_t type) {
+            size_t filename_len = strlen(fn);
 
-            size_t reclen = sizeof(fs::user_dirent64) + len;
+            size_t reclen = sizeof(fs::user_dirent64) + filename_len;
             if (cnt < reclen)
                 return -EFAULT;
 
@@ -262,7 +145,7 @@ int fs::regular_file::getdents64(char* __user buf, size_t cnt)
             dirp->d_reclen = reclen;
             dirp->d_type = type;
             // TODO: use copy_to_user
-            memcpy(dirp->d_name, fn, len);
+            memcpy(dirp->d_name, fn, filename_len);
             buf[reclen - 1] = 0;
 
             buf += reclen;
@@ -308,7 +191,7 @@ fs::fifo_file::~fifo_file()
 static fs::blkdev_ops** blkdevs[256];
 static fs::chrdev_ops** chrdevs[256];
 
-size_t fs::vfs_read(fs::inode* file, char* buf, size_t buf_size, size_t offset, size_t n)
+size_t fs::read(struct fs::inode* file, char* buf, size_t buf_size, size_t offset, size_t n)
 {
     if (S_ISDIR(file->mode)) {
         errno = EISDIR;
@@ -342,7 +225,7 @@ size_t fs::vfs_read(fs::inode* file, char* buf, size_t buf_size, size_t offset, 
     errno = EINVAL;
     return -1U;
 }
-size_t fs::vfs_write(fs::inode* file, const char* buf, size_t offset, size_t n)
+size_t fs::write(struct fs::inode* file, const char* buf, size_t offset, size_t n)
 {
     if (S_ISDIR(file->mode)) {
         errno = EISDIR;
@@ -376,86 +259,138 @@ size_t fs::vfs_write(fs::inode* file, const char* buf, size_t offset, size_t n)
     errno = EINVAL;
     return -1U;
 }
-int fs::vfs_mkfile(dentry* dir, const char* filename, mode_t mode)
+
+std::pair<dentry*, int> fs::current_open(dentry* cwd, types::path_iterator path, bool follow_symlinks)
 {
-    return dir->ind->fs->inode_mkfile(dir, filename, mode);
-}
-int fs::vfs_mknode(dentry* dir, const char* filename, mode_t mode, dev_t dev)
-{
-    return dir->ind->fs->inode_mknode(dir, filename, mode, dev);
-}
-int fs::vfs_rmfile(dentry* dir, const char* filename)
-{
-    return dir->ind->fs->inode_rmfile(dir, filename);
-}
-int fs::vfs_mkdir(dentry* dir, const char* dirname, mode_t mode)
-{
-    return dir->ind->fs->inode_mkdir(dir, dirname, mode);
+    return fs::open(current_process->fs_context, cwd, path, follow_symlinks);
 }
 
-dentry* fs::vfs_open(dentry& root, const types::path& path, bool follow, int recurs_no)
+std::pair<dentry*, int> fs::open(const fs_context& context, dentry* cwd,
+    types::path_iterator path, bool follow, int recurs_no)
 {
     // too many recursive search layers will cause stack overflow
     // so we use 16 for now
     if (recurs_no >= 16)
-        return nullptr;
+        return {nullptr, -ELOOP};
 
-    dentry* cur = &root;
+    if (path.is_absolute())
+        cwd = context.root;
 
-    types::path curpath("/");
-    for (const auto& item : path) {
-        if (S_ISLNK(cur->ind->mode)) {
-            char linkpath[256];
-            int ret = cur->ind->fs->readlink(cur->ind, linkpath, sizeof(linkpath));
-
-            // TODO: return error code
-            if (ret < 0)
-                return nullptr;
-
-            curpath.remove_last();
-            curpath.append(linkpath, ret);
-            cur = fs::vfs_open(root, curpath, true, recurs_no+1);
-
-            if (!cur)
-                return nullptr;
-        }
-
+    for ( ; path; ++path) {
+        auto item = *path;
         if (item.empty())
             continue;
-        cur = cur->find(item);
-        if (!cur)
-            return nullptr;
 
-        curpath.append(item.c_str());
+        if (!(cwd->flags & D_PRESENT))
+            return {nullptr, -ENOENT};
+
+        assert(cwd->inode);
+        if (S_ISLNK(cwd->inode->mode)) {
+            char linkpath[256];
+            int ret = fs::readlink(cwd->inode, linkpath, sizeof(linkpath));
+            if (ret < 0)
+                return {nullptr, ret};
+            linkpath[ret] = 0;
+
+            std::tie(cwd, ret) = fs::open(context, cwd, linkpath, true, recurs_no + 1);
+
+            if (!cwd || (cwd->flags & D_PRESENT))
+                return {nullptr, ret};
+        }
+
+        int ret;
+        std::tie(cwd, ret) = d_find(cwd, item);
+        if (!cwd)
+            return {nullptr, ret};
+
+        if (cwd->flags & D_MOUNTPOINT) {
+            auto iter = mounts.find(cwd);
+            assert(iter);
+
+            auto* fs = iter->second.fs;
+            assert(fs);
+
+            cwd = fs->root();
+            assert(cwd);
+        }
     }
 
-    if (follow && S_ISLNK(cur->ind->mode)) {
+    if (!(cwd->flags & D_PRESENT))
+        return {cwd, -ENOENT};
+
+    if (follow && S_ISLNK(cwd->inode->mode)) {
         char linkpath[256];
-        int ret = cur->ind->fs->readlink(cur->ind, linkpath, sizeof(linkpath));
-
-        // TODO: return error code
+        int ret = fs::readlink(cwd->inode, linkpath, sizeof(linkpath));
         if (ret < 0)
-            return nullptr;
+            return {nullptr, ret};
+        linkpath[ret] = 0;
 
-        curpath.remove_last();
-        curpath.append(linkpath, ret);
-        cur = fs::vfs_open(root, curpath, true, recurs_no+1);
-
-        if (!cur)
-            return nullptr;
+        return fs::open(context, cwd, linkpath, true, recurs_no+1);
     }
 
-    return cur;
+    return {cwd, 0};
 }
 
-int fs::vfs_stat(dentry* ent, statx* stat, unsigned int mask)
+int fs::statx(struct inode* inode, struct statx* stat, unsigned int mask)
 {
-    return ent->ind->fs->statx(ent->ind, stat, mask);
+    assert(inode && inode->fs);
+    return inode->fs->statx(inode, stat, mask);
 }
 
-int fs::vfs_truncate(inode *file, size_t size)
+int fs::truncate(struct inode *file, size_t size)
 {
+    assert(file && file->fs);
     return file->fs->truncate(file, size);
+}
+
+int fs::readlink(struct inode* inode, char* buf, size_t size)
+{
+    assert(inode && inode->fs);
+    return inode->fs->readlink(inode, buf, size);
+}
+
+int fs::symlink(struct dentry* at, const char* target)
+{
+    assert(at && at->parent && at->parent->fs);
+    return at->parent->fs->symlink(at->parent->inode, at, target);
+}
+
+int fs::unlink(struct dentry* at)
+{
+    assert(at && at->parent && at->parent->fs);
+    return at->parent->fs->unlink(at->parent->inode, at);
+}
+
+int fs::mknod(struct dentry* at, mode_t mode, dev_t dev)
+{
+    assert(at && at->parent && at->parent->fs);
+    return at->parent->fs->mknod(at->parent->inode, at, mode, dev);
+}
+
+int fs::creat(struct dentry* at, mode_t mode)
+{
+    assert(at && at->parent && at->parent->fs);
+    return at->parent->fs->creat(at->parent->inode, at, mode);
+}
+
+int fs::mount(struct dentry* mnt, const char* source, const char* mount_point,
+        const char* fstype, unsigned long flags, const void *data)
+{
+    assert(mnt && mnt->fs);
+    return mnt->fs->mount(mnt, source, mount_point, fstype, flags, data);
+}
+
+int fs::mkdir(struct dentry* at, mode_t mode)
+{
+    assert(at && at->parent && at->parent->fs);
+    return at->parent->fs->mkdir(at->parent->inode, at, mode);
+}
+
+int mount(dentry* mnt, const char* source, const char* mount_point,
+        const char* fstype, unsigned long flags, const void *data)
+{
+    assert(mnt && mnt->fs);
+    return mnt->fs->mount(mnt, source, mount_point, fstype, flags, data);
 }
 
 int fs::register_block_device(dev_t node, const fs::blkdev_ops& ops)
@@ -485,46 +420,6 @@ int fs::register_char_device(dev_t node, const fs::chrdev_ops& ops)
         return -EEXIST;
 
     chrdevs[major][minor] = new chrdev_ops { ops };
-    return 0;
-}
-
-static std::map<std::string, fs::create_fs_func_t> fs_list;
-
-int fs::register_fs(const char* name, fs::create_fs_func_t func)
-{
-    fs_list.emplace(name, func);
-
-    return 0;
-}
-
-int fs::create_fs(const char* source, const char* mount_point, const char* fstype,
-        unsigned long flags, const void* data, vfs*& out_vfs)
-{
-    auto iter = fs_list.find(fstype);
-    if (!iter)
-        return -ENODEV;
-
-    auto& [ _, func ] = *iter;
-
-    if (!(flags & MS_NOATIME))
-        flags |= MS_RELATIME;
-
-    if (flags & MS_STRICTATIME)
-        flags &= ~(MS_RELATIME | MS_NOATIME);
-
-    vfs* created_vfs = func(source, flags, data);
-
-    mount_data mnt_data {
-        .source = source,
-        .mount_point = mount_point,
-        .fstype = fstype,
-        .flags = flags,
-    };
-
-    mounts.emplace(created_vfs, mnt_data);
-
-    out_vfs = created_vfs;
-
     return 0;
 }
 
@@ -794,10 +689,4 @@ void init_vfs(void)
 
     // register tmpfs
     fs::register_tmpfs();
-
-    vfs* rootfs;
-    int ret = create_fs("none", "/", "tmpfs", MS_NOATIME, nullptr, rootfs);
-
-    assert(ret == 0);
-    fs_root = rootfs->root();
 }

@@ -355,7 +355,7 @@ void kernel::mem::paging::handle_page_fault(unsigned long err)
         size_t offset = (vaddr & ~0xfff) - mm_area->start;
         char* data = physaddr<char>{pfn};
 
-        int n = vfs_read(
+        int n = fs::read(
             mm_area->mapped_file,
             data,
             4096,

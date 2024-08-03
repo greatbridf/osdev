@@ -1,14 +1,44 @@
+#include <assert.h>
 #include <errno.h>
+#include <sys/mount.h>
 
 #include <kernel/vfs.hpp>
+#include <kernel/vfs/dentry.hpp>
 #include <kernel/vfs/vfs.hpp>
 
 using namespace fs;
 
-vfs::vfs(dev_t device, size_t io_blksize)
-    : m_root { nullptr, nullptr, "" }
-    , m_device(device), m_io_blksize(io_blksize)
+static std::map<std::string, fs::create_fs_func_t> fs_list;
+
+int fs::register_fs(const char* name, fs::create_fs_func_t func)
 {
+    fs_list.emplace(name, func);
+
+    return 0;
+}
+
+vfs::vfs(dev_t device, size_t io_blksize)
+    : m_device(device), m_io_blksize(io_blksize)
+{
+    dcache_init(&m_dcache, 8);
+}
+
+std::pair<vfs*, int> vfs::create(const char* source,
+    const char* fstype, unsigned long flags, const void* data)
+{
+    auto iter = fs_list.find(fstype);
+    if (!iter)
+        return {nullptr, -ENODEV};
+
+    auto& [ _, func ] = *iter;
+
+    if (!(flags & MS_NOATIME))
+        flags |= MS_RELATIME;
+
+    if (flags & MS_STRICTATIME)
+        flags &= ~(MS_RELATIME | MS_NOATIME);
+
+    return {func(source, flags, data), 0};
 }
 
 fs::inode* vfs::alloc_inode(ino_t ino)
@@ -37,31 +67,43 @@ fs::inode* vfs::get_inode(ino_t ino)
         return nullptr;
 }
 
-void vfs::register_root_node(inode* root)
+void vfs::register_root_node(struct inode* root_inode)
 {
-    if (!m_root.ind)
-        m_root.ind = root;
+    assert(!root());
+
+    m_root = fs::dcache_alloc(&m_dcache);
+    m_root->fs = this;
+
+    m_root->inode = root_inode;
+    m_root->flags = D_DIRECTORY | D_PRESENT;
+
+    fs::dcache_init_root(&m_dcache, m_root);
 }
 
 int vfs::mount(dentry* mnt, const char* source, const char* mount_point,
         const char* fstype, unsigned long flags, const void *data)
 {
-    if (!mnt->flags.dir)
+    if (!(mnt->flags & D_DIRECTORY))
         return -ENOTDIR;
 
-    vfs* new_fs;
-    int ret = fs::create_fs(source, mount_point, fstype, flags, data, new_fs);
-
+    auto [new_fs, ret] = vfs::create(source, fstype, flags, data);
     if (ret != 0)
         return ret;
+
+    mounts.emplace(mnt, mount_data {
+                            .fs = new_fs,
+                            .source = source,
+                            .mount_point = mount_point,
+                            .fstype = fstype,
+                            .flags = flags,
+                        });
+    mnt->flags |= D_MOUNTPOINT;
 
     auto* new_ent = new_fs->root();
 
     new_ent->parent = mnt->parent;
     new_ent->name = mnt->name;
-
-    auto* orig_ent = mnt->replace(new_ent);
-    m_mount_recover_list.emplace(new_ent, orig_ent);
+    new_ent->hash = mnt->hash;
 
     return 0;
 }
@@ -80,27 +122,27 @@ ssize_t vfs::write(inode*, const char*, size_t, off_t)
     return -EINVAL;
 }
 
-int vfs::inode_mkfile(dentry*, const char*, mode_t)
+int vfs::creat(inode*, dentry*, mode_t)
 {
     return -EINVAL;
 }
 
-int vfs::inode_mknode(dentry*, const char*, mode_t, dev_t)
+int vfs::mknod(inode*, dentry*, mode_t, dev_t)
 {
     return -EINVAL;
 }
 
-int vfs::inode_rmfile(dentry*, const char*)
+int vfs::unlink(inode*, dentry*)
 {
     return -EINVAL;
 }
 
-int vfs::inode_mkdir(dentry*, const char*, mode_t)
+int vfs::mkdir(inode*, dentry*, mode_t)
 {
     return -EINVAL;
 }
 
-int vfs::symlink(dentry*, const char*, const char*)
+int vfs::symlink(inode*, dentry*, const char*)
 {
     return -EINVAL;
 }
@@ -113,6 +155,11 @@ int vfs::readlink(inode*, char*, size_t)
 int vfs::truncate(inode*, size_t)
 {
     return -EINVAL;
+}
+
+struct dentry* vfs::root() const noexcept
+{
+    return m_root;
 }
 
 dev_t vfs::fs_device() const noexcept

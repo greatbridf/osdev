@@ -148,7 +148,7 @@ signo_type signal_list::pending_signal()
     return 0;
 }
 
-void signal_list::handle(interrupt_stack_normal* context, mmx_registers* mmxregs)
+void signal_list::handle(interrupt_stack* context, mmx_registers* mmxregs)
 {
     unsigned int signal;
     if (1) {
@@ -186,7 +186,7 @@ void signal_list::handle(interrupt_stack_normal* context, mmx_registers* mmxregs
 
     // save current interrupt context to 128 bytes above current user stack
     uintptr_t sp = (uintptr_t)context->rsp;
-    sp -= (128 + sizeof(mmx_registers) + sizeof(interrupt_stack_normal) + 16);
+    sp -= (128 + sizeof(mmx_registers) + sizeof(interrupt_stack) + 16);
     sp &= ~0xf;
 
     auto tmpsp = sp;
@@ -197,8 +197,8 @@ void signal_list::handle(interrupt_stack_normal* context, mmx_registers* mmxregs
 
     memcpy((void*)tmpsp, mmxregs, sizeof(mmx_registers));
     tmpsp += sizeof(mmx_registers); // mmx registers
-    memcpy((void*)tmpsp, context, sizeof(interrupt_stack_normal));
-    tmpsp += sizeof(interrupt_stack_normal); // context
+    memcpy((void*)tmpsp, context, sizeof(interrupt_stack));
+    tmpsp += sizeof(interrupt_stack); // context
 
     sp -= sizeof(void*);
     // signal handler return address: restorer

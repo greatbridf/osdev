@@ -27,8 +27,8 @@
 namespace kernel {
 void init_syscall_table();
 
-void handle_syscall32(int no, interrupt_stack_normal* data, mmx_registers* mmxregs);
-void handle_syscall64(int no, interrupt_stack_normal* data, mmx_registers* mmxregs);
+void handle_syscall32(int no, interrupt_stack* data, mmx_registers* mmxregs);
+void handle_syscall64(int no, interrupt_stack* data, mmx_registers* mmxregs);
 
 namespace syscall {
 // in fileops.cc

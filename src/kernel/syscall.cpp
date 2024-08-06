@@ -42,12 +42,12 @@
 
 #define NOT_IMPLEMENTED not_implemented(__FILE__, __LINE__)
 
-#define SYSCALL32_ARG1(type, name) type name = (type)((data)->head.s_regs.rbx)
-#define SYSCALL32_ARG2(type, name) type name = (type)((data)->head.s_regs.rcx)
-#define SYSCALL32_ARG3(type, name) type name = (type)((data)->head.s_regs.rdx)
-#define SYSCALL32_ARG4(type, name) type name = (type)((data)->head.s_regs.rsi)
-#define SYSCALL32_ARG5(type, name) type name = (type)((data)->head.s_regs.rdi)
-#define SYSCALL32_ARG6(type, name) type name = (type)((data)->head.s_regs.rbp)
+#define SYSCALL32_ARG1(type, name) type name = (type)((data)->regs.rbx)
+#define SYSCALL32_ARG2(type, name) type name = (type)((data)->regs.rcx)
+#define SYSCALL32_ARG3(type, name) type name = (type)((data)->regs.rdx)
+#define SYSCALL32_ARG4(type, name) type name = (type)((data)->regs.rsi)
+#define SYSCALL32_ARG5(type, name) type name = (type)((data)->regs.rdi)
+#define SYSCALL32_ARG6(type, name) type name = (type)((data)->regs.rbp)
 
 #define _DEFINE_SYSCALL32_ARGS1(type, name, ...) \
 SYSCALL32_ARG1(type, name); \
@@ -83,7 +83,7 @@ SYSCALL32_ARG6(type, name);
     kernel::syscall::do_ ## name ( __VA_OPT__(_DEFINE_SYSCALL32_END_PARAMS1(__VA_ARGS__)) )
 
 #define DEFINE_SYSCALL32_TO(name, to, ...) \
-static uint32_t _syscall32_##name(interrupt_stack_normal* data, mmx_registers* mmxregs) \
+static uint32_t _syscall32_##name(interrupt_stack* data, mmx_registers* mmxregs) \
 { \
     (void)data, (void)mmxregs; \
     __VA_OPT__(_DEFINE_SYSCALL32_ARGS1(__VA_ARGS__);) \
@@ -93,7 +93,7 @@ static uint32_t _syscall32_##name(interrupt_stack_normal* data, mmx_registers* m
 #define DEFINE_SYSCALL32(name, ...) DEFINE_SYSCALL32_TO(name, name __VA_OPT__(,) __VA_ARGS__)
 
 #define DEFINE_SYSCALL32_NORETURN(name, ...) \
-[[noreturn]] static uint32_t _syscall32_##name(interrupt_stack_normal* data, mmx_registers* mmxregs) \
+[[noreturn]] static uint32_t _syscall32_##name(interrupt_stack* data, mmx_registers* mmxregs) \
 { \
     (void)data, (void)mmxregs; \
     __VA_OPT__(_DEFINE_SYSCALL32_ARGS1(__VA_ARGS__);) \
@@ -101,7 +101,7 @@ static uint32_t _syscall32_##name(interrupt_stack_normal* data, mmx_registers* m
 }
 
 struct syscall_handler_t {
-    uint32_t (*handler)(interrupt_stack_normal*, mmx_registers*);
+    uint32_t (*handler)(interrupt_stack*, mmx_registers*);
     const char* name;
 };
 
@@ -190,7 +190,7 @@ DEFINE_SYSCALL32_TO(clock_gettime64, clock_gettime,
         clockid_t, clk_id, timespec __user*, tp)
 
 extern "C" void NORETURN ISR_stub_restore();
-static uint32_t _syscall32_fork(interrupt_stack_normal* data, mmx_registers* mmxregs)
+static uint32_t _syscall32_fork(interrupt_stack* data, mmx_registers* mmxregs)
 {
     auto& newproc = procs->copy_from(*current_process);
     auto [ iter_newthd, inserted ] = newproc.thds.emplace(*current_thread, newproc.pid);
@@ -201,34 +201,13 @@ static uint32_t _syscall32_fork(interrupt_stack_normal* data, mmx_registers* mmx
     kernel::task::dispatcher::enqueue(newthd);
 
     auto newthd_prev_sp = newthd->kstack.sp;
+    assert(!(newthd_prev_sp & 0xf));
 
-    // create fake interrupt stack
-    newthd->kstack.pushq(data->ss);
-    newthd->kstack.pushq(data->rsp);
-    newthd->kstack.pushq(data->flags);
-    newthd->kstack.pushq(data->cs);
-    newthd->kstack.pushq(data->v_rip);
-    auto cur_sp = newthd->kstack.sp;
+    newthd->kstack.sp -= sizeof(interrupt_stack);
+    memcpy((void*)(newthd->kstack.sp), data, sizeof(interrupt_stack));
 
-    newthd->kstack.pushq(0); // 0 for 16 bytes alignment
-    newthd->kstack.pushq(cur_sp);
-    newthd->kstack.pushq(data->head.s_regs.rbp);
-    newthd->kstack.pushq(data->head.s_regs.r15);
-    newthd->kstack.pushq(data->head.s_regs.r14);
-    newthd->kstack.pushq(data->head.s_regs.r13);
-    newthd->kstack.pushq(data->head.s_regs.r12);
-    newthd->kstack.pushq(data->head.s_regs.r11);
-    newthd->kstack.pushq(data->head.s_regs.r10);
-    newthd->kstack.pushq(data->head.s_regs.r9);
-    newthd->kstack.pushq(data->head.s_regs.r8);
-    newthd->kstack.pushq(data->head.s_regs.rsi);
-    newthd->kstack.pushq(data->head.s_regs.rdi);
-    newthd->kstack.pushq(data->head.s_regs.rdx);
-    newthd->kstack.pushq(data->head.s_regs.rcx);
-    newthd->kstack.pushq(data->head.s_regs.rbx);
-    newthd->kstack.pushq(0); // rax: return value
-
-    cur_sp = newthd->kstack.sp;
+    ((interrupt_stack*)(newthd->kstack.sp))->regs.rax = 0; // return value
+    auto isr_restore_sp = newthd->kstack.sp;
 
     newthd->kstack.sp -= sizeof(mmx_registers);
     memcpy((void*)(newthd->kstack.sp), mmxregs, sizeof(mmx_registers));
@@ -242,7 +221,7 @@ static uint32_t _syscall32_fork(interrupt_stack_normal* data, mmx_registers* mmx
     newthd->kstack.pushq(0);              // r13
     newthd->kstack.pushq(0);              // r12
     newthd->kstack.pushq(0);              // rbp
-    newthd->kstack.pushq(cur_sp);         // rbx
+    newthd->kstack.pushq(isr_restore_sp); // rbx
     newthd->kstack.pushq(0);              // 0 for alignment
     newthd->kstack.pushq(newthd_prev_sp); // previous sp
 
@@ -250,7 +229,7 @@ static uint32_t _syscall32_fork(interrupt_stack_normal* data, mmx_registers* mmx
     return newproc.pid;
 }
 
-static uint32_t _syscall32_llseek(interrupt_stack_normal* data, mmx_registers*)
+static uint32_t _syscall32_llseek(interrupt_stack* data, mmx_registers*)
 {
     SYSCALL32_ARG1(unsigned int, fd);
     SYSCALL32_ARG2(unsigned long, offset_high);
@@ -273,7 +252,7 @@ static uint32_t _syscall32_llseek(interrupt_stack_normal* data, mmx_registers*)
     return 0;
 }
 
-static uint32_t _syscall32_readv(interrupt_stack_normal* data, mmx_registers*)
+static uint32_t _syscall32_readv(interrupt_stack* data, mmx_registers*)
 {
     SYSCALL32_ARG1(int, fd);
     SYSCALL32_ARG2(const types::iovec32 __user*, _iov);
@@ -294,7 +273,7 @@ static uint32_t _syscall32_readv(interrupt_stack_normal* data, mmx_registers*)
     return kernel::syscall::do_readv(fd, iov.data(), iovcnt);
 }
 
-static uint32_t _syscall32_writev(interrupt_stack_normal* data, mmx_registers*)
+static uint32_t _syscall32_writev(interrupt_stack* data, mmx_registers*)
 {
     SYSCALL32_ARG1(int, fd);
     SYSCALL32_ARG2(const types::iovec32 __user*, _iov);
@@ -316,13 +295,13 @@ static uint32_t _syscall32_writev(interrupt_stack_normal* data, mmx_registers*)
 }
 
 [[noreturn]] static uint32_t _syscall32_exit_group(
-        interrupt_stack_normal* data, mmx_registers* mmxregs)
+        interrupt_stack* data, mmx_registers* mmxregs)
 {
     // we implement exit_group as exit for now
     _syscall32_exit(data, mmxregs);
 }
 
-static uint32_t _syscall32_execve(interrupt_stack_normal* data, mmx_registers*)
+static uint32_t _syscall32_execve(interrupt_stack* data, mmx_registers*)
 {
     SYSCALL32_ARG1(const char __user*, exec);
     SYSCALL32_ARG2(const uint32_t __user*, argv);
@@ -355,7 +334,7 @@ static uint32_t _syscall32_execve(interrupt_stack_normal* data, mmx_registers*)
     return retval.status;
 }
 
-static uint32_t _syscall32_wait4(interrupt_stack_normal* data, mmx_registers* mmxregs)
+static uint32_t _syscall32_wait4(interrupt_stack* data, mmx_registers* mmxregs)
 {
     SYSCALL32_ARG4(void __user*, rusage);
 
@@ -366,7 +345,7 @@ static uint32_t _syscall32_wait4(interrupt_stack_normal* data, mmx_registers* mm
     return _syscall32_waitpid(data, mmxregs);
 }
 
-void kernel::handle_syscall32(int no, interrupt_stack_normal* data, mmx_registers* mmxregs)
+void kernel::handle_syscall32(int no, interrupt_stack* data, mmx_registers* mmxregs)
 {
     if (no >= SYSCALL_HANDLERS_SIZE || !syscall_handlers[no].handler) {
         kmsgf("[kernel] syscall %d(%x) isn't implemented", no, no);
@@ -380,15 +359,15 @@ void kernel::handle_syscall32(int no, interrupt_stack_normal* data, mmx_register
     // kmsgf_debug("[kernel:debug] (pid\t%d) %s()", current_process->pid, syscall_handlers[no].name);
 
     asm volatile("sti");
-    data->head.s_regs.rax = syscall_handlers[no].handler(data, mmxregs);
-    data->head.s_regs.r8 = 0;
-    data->head.s_regs.r9 = 0;
-    data->head.s_regs.r10 = 0;
-    data->head.s_regs.r11 = 0;
-    data->head.s_regs.r12 = 0;
-    data->head.s_regs.r13 = 0;
-    data->head.s_regs.r14 = 0;
-    data->head.s_regs.r15 = 0;
+    data->regs.rax = syscall_handlers[no].handler(data, mmxregs);
+    data->regs.r8 = 0;
+    data->regs.r9 = 0;
+    data->regs.r10 = 0;
+    data->regs.r11 = 0;
+    data->regs.r12 = 0;
+    data->regs.r13 = 0;
+    data->regs.r14 = 0;
+    data->regs.r15 = 0;
 
     if (current_thread->signals.pending_signal())
         current_thread->signals.handle(data, mmxregs);

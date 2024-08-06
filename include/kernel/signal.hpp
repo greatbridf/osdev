@@ -64,7 +64,7 @@ public:
 
     // return value: whether the thread should wake up
     bool raise(signo_type signal);
-    void handle(interrupt_stack_normal* context, mmx_registers* mmxregs);
+    void handle(interrupt_stack* context, mmx_registers* mmxregs);
     void after_signal(signo_type signal);
 };
 

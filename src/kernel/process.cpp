@@ -24,6 +24,7 @@
 #include <kernel/task/thread.hpp>
 #include <kernel/user/thread_local.hpp>
 #include <kernel/vfs.hpp>
+#include <kernel/vfs/dentry.hpp>
 
 process::process(const process& parent, pid_t pid)
     : mms { parent.mms }, attr { parent.attr } , files { parent.files.copy() }
@@ -250,6 +251,8 @@ void NORETURN _kernel_init(kernel::mem::paging::pfn_t kernel_stack_pfn)
         int ret = rootfs->mount(mnt, "/dev/sda", "/mnt",
                 "fat32", MS_RDONLY | MS_NOATIME | MS_NODEV | MS_NOSUID, "ro,nodev");
         assert(ret == 0);
+
+        fs::d_put(mnt);
     }
 
     current_process->attr.system = 0;

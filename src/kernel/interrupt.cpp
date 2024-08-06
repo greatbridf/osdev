@@ -98,11 +98,9 @@ void kernel::irq::register_handler(int irqno, irq_handler_t handler)
     s_irq_handlers[irqno].emplace_back(std::move(handler));
 }
 
-static inline void fault_handler(
-        interrupt_stack_with_code* context,
-        mmx_registers*)
+static inline void fault_handler(interrupt_stack* context, mmx_registers*)
 {
-    switch (context->head.int_no) {
+    switch (context->int_no) {
     case 6:
     case 8: {
         if (!current_process->attr.system)
@@ -114,7 +112,6 @@ static inline void fault_handler(
     } break;
     case 14: {
         kernel::mem::paging::handle_page_fault(context->error_code);
-        context->head.int_no = (unsigned long)context + 0x88;
         return;
     } break;
     }
@@ -123,11 +120,9 @@ static inline void fault_handler(
     freeze();
 }
 
-static inline void irq_handler(
-        interrupt_stack_normal* context,
-        mmx_registers*)
+static inline void irq_handler(interrupt_stack* context, mmx_registers*)
 {
-    int irqno = context->head.int_no - 0x20;
+    int irqno = context->int_no - 0x20;
 
     constexpr uint8_t PIC_EOI = 0x20;
 
@@ -139,23 +134,12 @@ static inline void irq_handler(
         handler();
 }
 
-extern "C" void interrupt_handler(
-        interrupt_stack_head* context,
-        mmx_registers* mmxregs)
+extern "C" void interrupt_handler(interrupt_stack* context, mmx_registers* mmxregs)
 {
-    // interrupt is a fault
-    if (context->int_no < 0x20) {
-        auto* with_code = (interrupt_stack_with_code*)context;
-        fault_handler(with_code, mmxregs);
-    }
-    else if (context->int_no == 0x80) { // syscall by int 0x80
-        auto* normal = (interrupt_stack_normal*)context;
-        kernel::handle_syscall32(context->s_regs.rax, normal, mmxregs);
-        context->int_no = (unsigned long)context + 0x80;
-    }
-    else {
-        auto* normal = (interrupt_stack_normal*)context;
-        irq_handler(normal, mmxregs);
-        context->int_no = (unsigned long)context + 0x80;
-    }
+    if (context->int_no < 0x20) // interrupt is a fault
+        fault_handler(context, mmxregs);
+    else if (context->int_no == 0x80) // syscall by int 0x80
+        kernel::handle_syscall32(context->regs.rax, context, mmxregs);
+    else
+        irq_handler(context, mmxregs);
 }

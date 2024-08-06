@@ -38,7 +38,7 @@ class reference_wrapper {
 private:
     T* _ptr;
 
-    template <typename Ref, typename = 
+    template <typename Ref, typename =
         decltype(__helpers::__reference_wrapper_check<T>(std::declval<Ref>()))>
     struct __check_reference_valid
         : public bool_constant<!std::is_same_v<reference_wrapper, std::decay_t<Ref>>> {};

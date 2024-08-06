@@ -2,6 +2,7 @@
 #define __GBLIBCPP_VECTOR__
 
 #include <bits/iter_ops>
+#include <bits/compressed_pair>
 
 #include <functional>
 #include <memory>
@@ -84,27 +85,31 @@ public:
     using const_iterator = _iterator<true>;
 
 private:
-    T* m_data;
+    impl::compressed_pair<T*, allocator_type> m_data;
     size_type m_size;
     size_type m_capacity;
-    allocator_type m_alloc;
 
 private:
+    constexpr allocator_type& _alloc() noexcept { return m_data.second(); }
+    constexpr const allocator_type& _alloc() const noexcept { return m_data.second(); }
+    constexpr T*& _data() noexcept { return m_data.first(); }
+    constexpr T* const& _data() const noexcept { return m_data.first(); }
+
     // assert(n >= m_size)
     constexpr void _reallocate_safe(size_type n)
     {
         T* newptr = nullptr;
         if (n)
-            newptr = alloc_traits::allocate(m_alloc, n);
+            newptr = alloc_traits::allocate(_alloc(), n);
 
         for (size_t i = 0; i < m_size; ++i) {
             if (n)
-                alloc_traits::construct(m_alloc, newptr + i, std::move(m_data[i]));
-            alloc_traits::destroy(m_alloc, m_data + i);
+                alloc_traits::construct(_alloc(), newptr + i, std::move(_data()[i]));
+            alloc_traits::destroy(_alloc(), _data() + i);
         }
 
-        alloc_traits::deallocate(m_alloc, m_data, m_capacity);
-        m_data = newptr;
+        alloc_traits::deallocate(_alloc(), _data(), m_capacity);
+        _data() = newptr;
         m_capacity = n;
     }
 
@@ -120,10 +125,10 @@ private:
 public:
     constexpr vector(void)
         noexcept(noexcept(Allocator()))
-        : m_data(), m_size(), m_capacity(), m_alloc() {}
+        : m_data{impl::default_construct_t{}}, m_size(), m_capacity() {}
 
     constexpr explicit vector(const Allocator& alloc) noexcept
-        : m_data(), m_size(), m_capacity(), m_alloc(alloc) {}
+        : m_data{nullptr, alloc}, m_size(), m_capacity() {}
 
     constexpr vector(size_type n, const T& val,
         const Allocator& alloc = Allocator())
@@ -141,23 +146,22 @@ public:
 
     constexpr vector(const vector& other)
         : vector(std::allocator_traits<allocator_type>::
-            select_on_container_copy_construction(other.m_alloc))
+            select_on_container_copy_construction(other._alloc()))
     { insert(cbegin(), other.begin(), other.end()); }
 
     constexpr vector(const vector& other, const Allocator& alloc)
         : vector(alloc) { insert(cbegin(), other.begin(), other.end()); }
 
     constexpr vector(vector&& other) noexcept
-        : m_data(std::exchange(other.m_data, nullptr))
+        : m_data{std::exchange(other._data(), nullptr), std::move(other._alloc())}
         , m_size(std::exchange(other.m_size, 0))
-        , m_capacity(std::exchange(other.m_capacity, 0))
-        , m_alloc(std::move(other.m_alloc)) {}
+        , m_capacity(std::exchange(other.m_capacity, 0)) { }
 
     constexpr vector(vector&& other, const Allocator& alloc)
         : vector(alloc)
     {
-        if (alloc == other.get_allocator()) {
-            m_data = std::exchange(other.m_data, nullptr);
+        if (alloc == other._alloc()) {
+            _data() = std::exchange(other._data(), nullptr);
             m_size = std::exchange(other.m_size, 0);
             m_capacity = std::exchange(other.m_capacity, 0);
         } else {
@@ -185,9 +189,9 @@ public:
 
         if constexpr (alloc_traits::
             propagate_on_container_copy_assignment::value) {
-            if (m_alloc != other.m_alloc)
+            if (_alloc() != other._alloc())
                 shrink_to_fit();
-            m_alloc = other.m_alloc;
+            _alloc() = other._alloc();
         }
 
         insert(cbegin(), other.begin(), other.end());
@@ -201,10 +205,10 @@ public:
         if constexpr (alloc_traits::
             propagate_on_container_move_assignment::value) {
             shrink_to_fit();
-            m_alloc = std::move(other.m_alloc);
+            _alloc() = std::move(other._alloc());
         }
         else {
-            if (m_alloc != other.m_alloc) {
+            if (_alloc() != other._alloc()) {
                 // TODO: std::move_iterator
                 for (auto& item : other)
                     emplace_back(std::move(item));
@@ -213,7 +217,7 @@ public:
             shrink_to_fit();
         }
 
-        m_data = std::exchange(other.m_data, nullptr);
+        _data() = std::exchange(other._data(), nullptr);
         m_size = std::exchange(other.m_size, 0);
         m_capacity = std::exchange(other.m_capacity, 0);
         return *this;
@@ -245,55 +249,55 @@ public:
     }
 
     constexpr allocator_type get_allocator(void) const noexcept
-    { return m_alloc; }
+    { return _alloc(); }
 
     constexpr reference at(size_type pos)
     {
         // TODO: exceptions
         // if (pos >= sz)
         //     throw std::out_of_range("vector::at");
-        return m_data[pos];
+        return _data()[pos];
     }
     constexpr const_reference at(size_type pos) const
     {
         // TODO: exceptions
         // if (pos >= sz)
         //     throw std::out_of_range("vector::at");
-        return m_data[pos];
+        return _data()[pos];
     }
 
     constexpr reference operator[](size_type pos) noexcept
-    { return m_data[pos]; }
+    { return _data()[pos]; }
     constexpr const_reference operator[](size_type pos) const noexcept
-    { return m_data[pos]; }
+    { return _data()[pos]; }
 
     constexpr reference front() noexcept
-    { return m_data[0]; }
+    { return _data()[0]; }
     constexpr const_reference front() const noexcept
-    { return m_data[0]; }
+    { return _data()[0]; }
     constexpr reference back() noexcept
-    { return m_data[m_size - 1]; }
+    { return _data()[m_size - 1]; }
     constexpr const_reference back() const noexcept
-    { return m_data[m_size - 1]; }
+    { return _data()[m_size - 1]; }
 
     constexpr T* data(void) noexcept
-    { return m_data; }
+    { return _data(); }
     constexpr const T* data(void) const noexcept
-    { return m_data; }
+    { return _data(); }
 
     // TODO: std::reverse_iterator
     constexpr iterator begin() noexcept
-    { return iterator { m_data }; }
+    { return iterator { _data() }; }
     constexpr const_iterator begin() const noexcept
-    { return const_iterator { m_data }; }
+    { return const_iterator { _data() }; }
     constexpr const_iterator cbegin() const noexcept
-    { return const_iterator { m_data }; }
+    { return const_iterator { _data() }; }
     constexpr iterator end() noexcept
-    { return iterator { m_data + m_size }; }
+    { return iterator { _data() + m_size }; }
     constexpr const_iterator end() const noexcept
-    { return const_iterator { m_data + m_size }; }
+    { return const_iterator { _data() + m_size }; }
     constexpr const_iterator cend() const noexcept
-    { return const_iterator { m_data + m_size }; }
+    { return const_iterator { _data() + m_size }; }
 
     [[nodiscard]] constexpr bool empty() const noexcept
     { return m_size == 0; }
@@ -332,22 +336,22 @@ public:
     template <typename... Args>
     constexpr iterator emplace(const_iterator pos, Args&&... args)
     {
-        size_type idx = pos - m_data;
+        size_type idx = pos - _data();
 
-        if (!m_data)
+        if (!_data())
             reserve(1);
 
         if (m_size == m_capacity)
             reserve(m_capacity * 2);
 
         for (size_type i = m_size; i > idx; --i)
-            alloc_traits::construct(m_alloc, m_data + i, std::move(m_data[i-1]));
+            alloc_traits::construct(_alloc(), _data() + i, std::move(_data()[i-1]));
 
-        alloc_traits::construct(m_alloc, m_data + idx,
+        alloc_traits::construct(_alloc(), _data() + idx,
             std::forward<Args>(args)...);
 
         ++m_size;
-        return iterator { m_data + idx };
+        return iterator { _data() + idx };
     }
 
     constexpr iterator insert(const_iterator pos, T&& val)
@@ -360,18 +364,18 @@ public:
         if (!n)
             return pos;
 
-        size_type idx = pos - m_data;
+        size_type idx = pos - _data();
         if (!pos)
             reserve(n);
 
         if (m_size + n > m_capacity)
             reserve(m_size + n);
         for (size_type i = m_size + n - 1; i >= idx + n; --i)
-            alloc_traits::construct(m_alloc, m_data + i, std::move(m_data[i-n]));
+            alloc_traits::construct(_alloc(), _data() + i, std::move(_data()[i-n]));
         for (size_type i = idx; i < idx + n; ++i)
-            alloc_traits::construct(m_alloc, m_data + i, val);
+            alloc_traits::construct(_alloc(), _data() + i, val);
         m_size += n;
-        return iterator { m_data + idx };
+        return iterator { _data() + idx };
     }
 
     // TODO: LegacyInputIterator version of this
@@ -379,7 +383,7 @@ public:
     constexpr iterator insert(const_iterator pos,
         ForwardIter first, ForwardIter last)
     {
-        size_type idx = pos - m_data;
+        size_type idx = pos - _data();
         size_type n = 0;
 
         ForwardIter tmp = first;
@@ -395,11 +399,11 @@ public:
         if (m_size + n > m_capacity)
             reserve(m_size + n);
         for (size_type i = m_size + n - 1; i >= idx + n; --i)
-            alloc_traits::construct(m_alloc, m_data + i, std::move(m_data[i-n]));
+            alloc_traits::construct(_alloc(), _data() + i, std::move(_data()[i-n]));
         for (size_type i = idx; i < idx + n; ++i)
-            alloc_traits::construct(m_alloc, m_data + i, *first++);
+            alloc_traits::construct(_alloc(), _data() + i, *first++);
         m_size += n;
-        return iterator { m_data + idx };
+        return iterator { _data() + idx };
     }
 
     constexpr iterator insert(const_iterator pos, std::initializer_list<T> init)
@@ -407,12 +411,12 @@ public:
 
     constexpr iterator erase(const_iterator pos)
     {
-        size_type idx = pos - m_data;
-        alloc_traits::destroy(m_alloc, m_data + idx);
+        size_type idx = pos - _data();
+        alloc_traits::destroy(_alloc(), _data() + idx);
         for (size_type i = idx; i < m_size - 1; ++i)
-            alloc_traits::construct(m_alloc, m_data + i, std::move(m_data[i+1]));
+            alloc_traits::construct(_alloc(), _data() + i, std::move(_data()[i+1]));
         --m_size;
-        return iterator { m_data + idx };
+        return iterator { _data() + idx };
     }
 
     constexpr iterator erase(const_iterator first, const_iterator last)
@@ -421,15 +425,15 @@ public:
         if (!n)
             return last;
 
-        size_type idx = first - m_data;
+        size_type idx = first - _data();
         for (size_type i = idx; i < idx + n; ++i)
-            alloc_traits::destroy(m_alloc, m_data + i);
+            alloc_traits::destroy(_alloc(), _data() + i);
 
         for (size_type i = idx; i < m_size - n; ++i)
-            m_alloc.construct(m_data + i, std::move(m_data[i+n]));
+            _alloc().construct(_data() + i, std::move(_data()[i+n]));
 
         m_size -= n;
-        return iterator { m_data + idx };
+        return iterator { _data() + idx };
     }
 
     constexpr void push_back(const T& val) { insert(cend(), val); }
@@ -446,8 +450,8 @@ public:
         || alloc_traits::is_always_equal::value)
     {
         if (alloc_traits::propagate_on_container_swap::value)
-            std::swap(m_alloc, other.m_alloc);
-        std::swap(m_data, other.m_data);
+            std::swap(_alloc(), other.m_alloc);
+        std::swap(_data(), other.m_data);
         std::swap(m_size, other.m_size);
         std::swap(m_capacity, other.m_capacity);
     }

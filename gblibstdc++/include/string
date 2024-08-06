@@ -1,6 +1,7 @@
 #ifndef __GBLIBCPP_STRING__
 #define __GBLIBCPP_STRING__
 
+#include <bits/compressed_pair>
 #include <bits/iter_ops>
 
 #include <algorithm>
@@ -106,7 +107,7 @@ private:
     static constexpr std::size_t STATIC_COUNT =
         STATIC_SIZE / sizeof(Char) - 2;
 
-    union {
+    struct string_data_type { union {
         std::byte __data[STATIC_SIZE];
 
         struct {
@@ -124,17 +125,20 @@ private:
             Char* m_ptr;
         } heapdata;
 
-    } m_data;
-    Allocator m_alloc;
+    } in; };
+    impl::compressed_pair<string_data_type, Allocator> m_data;
+
+    constexpr Allocator& _alloc() noexcept { return m_data.second(); }
+    constexpr const Allocator& _alloc() const noexcept { return m_data.second(); }
 
     constexpr bool _stack_data() const
     {
-        return m_data.stackdata.end == 0;
+        return m_data.first().in.stackdata.end == 0;
     }
 
     constexpr bool _stack_data(bool val)
     {
-        return (m_data.stackdata.end = !val), val;
+        return (m_data.first().in.stackdata.end = !val), val;
     }
 
     constexpr void _release()
@@ -144,7 +148,7 @@ private:
             return;
         }
 
-        alloc_traits::deallocate(m_alloc, data(), capacity()+1);
+        alloc_traits::deallocate(m_data.second(), data(), capacity()+1);
 
         _stack_data(true);
         _size(0);
@@ -154,7 +158,7 @@ private:
     constexpr void _reserve(std::size_t cnt)
     {
         std::size_t cursize = size();
-        Char* newdata = alloc_traits::allocate(m_alloc, cnt+1);
+        Char* newdata = alloc_traits::allocate(_alloc(), cnt+1);
 
         memcpy(newdata, data(), size());
         newdata[cursize] = 0;
@@ -164,7 +168,7 @@ private:
             _size(cursize);
         }
         else {
-            alloc_traits::deallocate(m_alloc, data(), capacity()+1);
+            alloc_traits::deallocate(_alloc(), data(), capacity()+1);
         }
 
         _capacity(cnt);
@@ -174,17 +178,17 @@ private:
     constexpr std::size_t _size() const
     {
         if (_stack_data())
-            return m_data.stackdata.m_size.n;
+            return m_data.first().in.stackdata.m_size.n;
         else
-            return m_data.heapdata.m_size;
+            return m_data.first().in.heapdata.m_size;
     }
 
     constexpr std::size_t _size(std::size_t val)
     {
         if (_stack_data())
-            return m_data.stackdata.m_size.n = (Char)val;
+            return m_data.first().in.stackdata.m_size.n = (Char)val;
         else
-            return m_data.heapdata.m_size = val;
+            return m_data.first().in.heapdata.m_size = val;
     }
 
     constexpr std::size_t _capacity() const
@@ -192,7 +196,7 @@ private:
         if (_stack_data())
             return STATIC_COUNT;
         else
-            return m_data.heapdata.m_capacity;
+            return m_data.first().in.heapdata.m_capacity;
     }
 
     constexpr std::size_t _capacity(std::size_t val)
@@ -200,31 +204,31 @@ private:
         if (_stack_data())
             return STATIC_COUNT;
         else
-            return m_data.heapdata.m_capacity = val;
+            return m_data.first().in.heapdata.m_capacity = val;
     }
 
     constexpr const Char* _data() const
     {
         if (_stack_data())
-            return m_data.stackdata.str;
+            return m_data.first().in.stackdata.str;
         else
-            return m_data.heapdata.m_ptr;
+            return m_data.first().in.heapdata.m_ptr;
     }
 
     constexpr Char* _data()
     {
         if (_stack_data())
-            return m_data.stackdata.str;
+            return m_data.first().in.stackdata.str;
         else
-            return m_data.heapdata.m_ptr;
+            return m_data.first().in.heapdata.m_ptr;
     }
 
     constexpr Char* _data(Char* val)
     {
         if (_stack_data())
-            return m_data.stackdata.str;
+            return m_data.first().in.stackdata.str;
         else
-            return m_data.heapdata.m_ptr = val;
+            return m_data.first().in.heapdata.m_ptr = val;
     }
 
 public:
@@ -232,7 +236,7 @@ public:
         : basic_string{Allocator{}} { }
 
     constexpr explicit basic_string(const Allocator& alloc) noexcept
-        : m_data{}, m_alloc{alloc} { }
+        : m_data{{}, alloc} { }
 
     constexpr basic_string(const basic_string& other, const Allocator& alloc)
         : basic_string{alloc}
@@ -242,12 +246,11 @@ public:
 
     constexpr basic_string(const basic_string& other)
         : basic_string{other, alloc_traits::
-            select_on_container_copy_construction(other.m_alloc)} { }
+            select_on_container_copy_construction(other._alloc())} { }
 
     constexpr basic_string(basic_string&& other) noexcept
-        : m_alloc{std::move(other.m_alloc)}
+        : m_data{other.m_data.first(), std::move(other._alloc())}
     {
-        memcpy(&m_data, &other.m_data, sizeof(m_data));
         other._stack_data(true);
         other._size(0);
         other._data()[0] = 0;
@@ -256,8 +259,8 @@ public:
     constexpr basic_string(basic_string&& other, const Allocator& alloc)
         : basic_string{alloc}
     {
-        if (alloc == other.m_alloc) {
-            memcpy(&m_data, &other.m_data, sizeof(m_data));
+        if (alloc == other._alloc()) {
+            m_data.first() = other.m_data.first();
             other._stack_data(true);
             other._size(0);
             other._data()[0] = 0;
@@ -308,17 +311,17 @@ public:
         if constexpr (alloc_traits::
                 propagate_on_container_move_assignment::value) {
             _release();
-            m_alloc = std::move(other.m_alloc);
+            _alloc() = std::move(other._alloc());
         }
         else {
-            if (m_alloc != other.m_alloc) {
+            if (_alloc() != other._alloc()) {
                 assign(other.c_str(), other.size());
                 return *this;
             }
             _release();
         }
 
-        memcpy(&m_data, &other.m_data, sizeof(m_data));
+        m_data.first() = other.m_data.first();
         other._stack_data(true);
         other._size(0);
         other._data()[0] = 0;
@@ -487,8 +490,8 @@ public:
         || alloc_traits::is_always_equal::value)
     {
         if (alloc_traits::propagate_on_container_swap::value)
-            std::swap(m_alloc, other.m_alloc);
-        std::swap(m_data, other.m_data);
+            std::swap(_alloc(), other._alloc());
+        std::swap(m_data.first(), other.m_data.first());
     }
 
     constexpr int compare(const basic_string& str) const noexcept

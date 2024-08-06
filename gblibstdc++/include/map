@@ -26,25 +26,24 @@ public:
     using allocator_type = Allocator;
 
 private:
-    class value_compare {
+    class value_compare : public Compare {
     protected:
-        Compare comp;
-        constexpr value_compare(Compare c) : comp(c) {}
+        constexpr value_compare(Compare c): Compare{c} {}
 
         friend class map;
 
     public:
         constexpr bool operator()(
             const value_type& lhs, const value_type& rhs) const
-        { return comp(lhs.first, rhs.first); }
+        { return Compare::operator()(lhs.first, rhs.first); }
 
         constexpr bool operator()(
             const Key& lhs, const value_type& rhs) const
-        { return comp(lhs, rhs.first); }
+        { return Compare::operator()(lhs, rhs.first); }
 
         constexpr bool operator()(
             const value_type& lhs, const Key& rhs) const
-        { return comp(lhs.first, rhs); }
+        { return Compare::operator()(lhs.first, rhs); }
     };
 
     using rbtree_type = impl::rbtree<value_type, value_compare, Allocator>;
@@ -76,7 +75,7 @@ public:
     map(const Compare& comp,
         const Allocator& alloc = Allocator())
         : tree(comp, alloc) {}
-    
+
     explicit __GBLIBCPP_CONSTEXPR
     map(const Allocator& alloc)
         : map(Compare(), alloc) {}
@@ -111,7 +110,7 @@ public:
     __GBLIBCPP_CONSTEXPR
     map(map&& other, const Allocator& alloc)
         : tree(std::move(other.tree), alloc) {}
-    
+
     __GBLIBCPP_CONSTEXPR
     map(std::initializer_list<value_type> init,
         const Compare& comp = Compare(),
@@ -123,10 +122,10 @@ public:
     map(std::initializer_list<value_type> init,
         const Allocator& alloc)
         : map(init, Compare(), alloc) {}
-    
+
     __GBLIBCPP_CONSTEXPR
     ~map() { clear(); }
-    
+
     __GBLIBCPP_CONSTEXPR
     map& operator=(const map& other) = default;
     __GBLIBCPP_CONSTEXPR

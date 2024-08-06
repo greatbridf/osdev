@@ -48,7 +48,7 @@ public:
     __GBLIBCPP_CONSTEXPR
     explicit priority_queue(const Compare& comp)
         : priority_queue(comp, Container()) {}
-    
+
     template <typename InputIter>
     __GBLIBCPP_CONSTEXPR
     priority_queue(InputIter first, InputIter last,

@@ -126,7 +126,7 @@ struct pair {
         second = std::forward<U2>(other.second);
         return *this;
     }
-    
+
     constexpr void swap(pair& other)
     {
         std::swap(first, other.first);

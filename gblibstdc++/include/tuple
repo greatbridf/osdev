@@ -80,7 +80,7 @@ class tuple_impl<0> {
     template <std::size_t> constexpr void _getr(void) const = delete;
 public:
     constexpr tuple_impl() noexcept = default;
-    
+
     constexpr tuple_impl(const tuple_impl& arg) noexcept = default;
     constexpr tuple_impl(tuple_impl&& arg) noexcept = default;
 
@@ -88,7 +88,7 @@ public:
     constexpr tuple_impl(const std::tuple<UTypes...>& other) = delete;
     template <typename... UTypes>
     constexpr tuple_impl(std::tuple<UTypes...>&& other) = delete;
-    
+
     constexpr tuple_impl& operator=(const tuple_impl& other) noexcept = default;
     constexpr tuple_impl& operator=(tuple_impl&& other) noexcept = default;
 };
@@ -157,13 +157,13 @@ class tuple_impl<I, Type, Types...> {
 public:
     constexpr tuple_impl()
         : val(), next() {}
-    
+
     constexpr tuple_impl(const tuple_impl& arg) = default;
     constexpr tuple_impl(tuple_impl&& arg) = default;
 
     constexpr tuple_impl(const Type& val, const Types&... vals)
         : val(val), next(vals...) {}
-    
+
     template <typename UType, typename... UTypes>
     constexpr tuple_impl(UType&& val, UTypes&&... vals)
         : val(std::forward<UType>(val)), next(std::forward<UTypes>(vals)...) {}
@@ -174,7 +174,7 @@ public:
     template <typename... UTypes>
     constexpr tuple_impl(std::tuple<UTypes...>&& other)
         : val(std::get<I>(other)), next(std::move(other)) {}
-    
+
     constexpr tuple_impl& operator=(const tuple_impl& other) = default;
     constexpr tuple_impl& operator=(tuple_impl&& other) = default;
 };
@@ -227,7 +227,7 @@ class tuple_impl<I, Type> {
 public:
     constexpr tuple_impl()
         : val() {}
-    
+
     constexpr tuple_impl(const tuple_impl& arg) = default;
     constexpr tuple_impl(tuple_impl&& arg) = default;
 
@@ -329,7 +329,7 @@ public:
     , bool> = true>
     constexpr tuple(const Types&... args)
         : base(args...) {}
-    
+
     template <typename... UTypes, std::enable_if_t<
         sizeof...(UTypes) == sizeof...(Types)
         && sizeof...(Types) >= 1
@@ -353,14 +353,14 @@ public:
     , bool> = true>
     constexpr tuple(tuple<UTypes...>&& other)
         : base(std::move(other)) {}
-    
+
     template <typename U1, typename U2, std::enable_if_t<
         __helpers::tuple_constraints<Types...>::template
             tuple_pair_constructible<const std::pair<U1, U2>&>::value
     , bool> = true>
     constexpr tuple(const std::pair<U1, U2>& p)
         : base(std::get<0>(p), std::get<1>(p)) {}
-    
+
     template <typename U1, typename U2, std::enable_if_t<
         __helpers::tuple_constraints<Types...>::template
             tuple_pair_constructible<std::pair<U1, U2>&&>::value

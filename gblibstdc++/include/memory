@@ -362,6 +362,19 @@ struct allocator_traits {
     { return __helpers::allocator_select_on_copy<Allocator>::get(alloc); }
 };
 
+template <typename T>
+struct default_delete {
+    __GBLIBCPP_CONSTEXPR default_delete() noexcept = default;
+
+    template <typename U, std::enable_if_t<std::is_convertible_v<U*, T*>, bool> = true>
+    __GBLIBCPP_CONSTEXPR default_delete(const default_delete<U>&) noexcept {}
+
+    __GBLIBCPP_CONSTEXPR void operator()(T* p) const
+    {
+        delete p;
+    }
+};
+
 // TODO: weak_ptr
 template <typename T>
 class shared_ptr {
@@ -397,40 +410,27 @@ private:
     };
 
     template <typename Deleter>
-    struct control_block : public virtual control_block_base {
-        Deleter deleter;
+    struct control_block : public virtual control_block_base, private Deleter {
+        using Base = control_block_base;
+
         virtual constexpr ~control_block() = default;
+
+        constexpr control_block(std::size_t ref_count, std::size_t weak_count, pointer ptr)
+            : control_block_base { ref_count, weak_count, ptr }, Deleter{} { }
 
         template <typename UDeleter>
         constexpr control_block(std::size_t ref_count,
             std::size_t weak_count, pointer ptr, UDeleter&& deleter)
             : control_block_base { ref_count, weak_count, ptr }
-            , deleter(std::forward<UDeleter>(deleter))
+            , Deleter(std::forward<UDeleter>(deleter))
         {
         }
 
         virtual constexpr void do_delete() override
         {
-            if (this->ptr)
-                deleter(this->ptr);
-            this->ptr = nullptr;
-        }
-    };
-
-    struct default_control_block : public virtual control_block_base {
-        virtual constexpr ~default_control_block() = default;
-
-        constexpr default_control_block(std::size_t ref_count,
-            std::size_t weak_count, pointer ptr)
-            : control_block_base { ref_count, weak_count, ptr }
-        {
-        }
-
-        virtual constexpr void do_delete() override
-        {
-            if (this->ptr)
-                delete this->ptr;
-            this->ptr = nullptr;
+            if (this->Base::ptr)
+                this->Deleter::operator()(this->Base::ptr);
+            this->Base::ptr = nullptr;
         }
     };
 
@@ -465,7 +465,7 @@ public:
 
     template <typename U, enable_if_t<is_convertible_v<U*, T*>, bool> = true>
     __GBLIBCPP_CONSTEXPR explicit shared_ptr(U* p) // TODO: array type
-        : cb(new default_control_block { 1, 0, p })
+        : cb(new control_block<default_delete<T>> { 1, 0, p })
         , ptr(p)
     {
     }
@@ -634,19 +634,6 @@ public:
     __GBLIBCPP_CONSTEXPR void reset(U* p, Deleter d, Allocator alloc)
     {
         shared_ptr { p, d, alloc }.swap(*this);
-    }
-};
-
-template <typename T>
-struct default_delete {
-    __GBLIBCPP_CONSTEXPR default_delete() noexcept = default;
-
-    template <typename U, std::enable_if_t<std::is_convertible_v<U*, T*>, bool> = true>
-    __GBLIBCPP_CONSTEXPR default_delete(const default_delete<U>&) noexcept {}
-
-    __GBLIBCPP_CONSTEXPR void operator()(T* p) const
-    {
-        delete p;
     }
 };
 

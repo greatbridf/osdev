@@ -15,6 +15,7 @@ set(GBSTDLIBCPP_PUBLIC_HEADERS
     gblibstdc++/include/cstddef
     gblibstdc++/include/map
     gblibstdc++/include/bits
+    gblibstdc++/include/bits/compressed_pair
     gblibstdc++/include/bits/fwd_functional
     gblibstdc++/include/bits/rbtree
     gblibstdc++/include/bits/iter_ops

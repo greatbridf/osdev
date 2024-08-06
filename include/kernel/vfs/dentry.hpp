@@ -35,6 +35,12 @@ struct dentry {
     std::string name;
 };
 
+struct dentry_deleter {
+    void operator()(struct dentry* dentry) const;
+};
+
+using dentry_pointer = std::unique_ptr<struct dentry, dentry_deleter>;
+
 struct dcache {
     struct dentry** arr;
     int hash_bits;
@@ -45,6 +51,7 @@ struct dcache {
 std::pair<struct dentry*, int> d_find(struct dentry* parent, types::string_view name);
 std::string d_path(const struct dentry* dentry, const struct dentry* root);
 
+dentry_pointer d_get(const dentry_pointer& dp);
 struct dentry* d_get(struct dentry* dentry);
 struct dentry* d_put(struct dentry* dentry);
 

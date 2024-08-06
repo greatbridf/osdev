@@ -1,10 +1,11 @@
 #ifndef __GBLIBCPP_MEMORY__
 #define __GBLIBCPP_MEMORY__
 
+#include <bits/compressed_pair>
 #include <cstddef>
+#include <new>
 #include <type_traits>
 #include <utility>
-#include <new>
 
 namespace std {
 
@@ -459,8 +460,8 @@ private:
     friend class shared_ptr;
 
 public:
-    constexpr shared_ptr() noexcept = default;
-    constexpr shared_ptr(std::nullptr_t) noexcept { }
+    __GBLIBCPP_CONSTEXPR shared_ptr() noexcept = default;
+    __GBLIBCPP_CONSTEXPR shared_ptr(std::nullptr_t) noexcept { }
 
     template <typename U, enable_if_t<is_convertible_v<U*, T*>, bool> = true>
     __GBLIBCPP_CONSTEXPR explicit shared_ptr(U* p) // TODO: array type
@@ -636,11 +637,126 @@ public:
     }
 };
 
+template <typename T>
+struct default_delete {
+    __GBLIBCPP_CONSTEXPR default_delete() noexcept = default;
+
+    template <typename U, std::enable_if_t<std::is_convertible_v<U*, T*>, bool> = true>
+    __GBLIBCPP_CONSTEXPR default_delete(const default_delete<U>&) noexcept {}
+
+    __GBLIBCPP_CONSTEXPR void operator()(T* p) const
+    {
+        delete p;
+    }
+};
+
+template <typename T, typename Deleter = std::default_delete<T>>
+class unique_ptr {
+public:
+    using element_type = T;
+    using deleter_type = Deleter;
+    using pointer = element_type*;
+
+private:
+    impl::compressed_pair<pointer, deleter_type> data;
+
+public:
+    __GBLIBCPP_CONSTEXPR unique_ptr() noexcept: data{impl::default_construct_t{}} { }
+    __GBLIBCPP_CONSTEXPR unique_ptr(std::nullptr_t) noexcept: unique_ptr{} { }
+    __GBLIBCPP_CONSTEXPR unique_ptr(pointer p) noexcept: data{p, deleter_type{}} { }
+    __GBLIBCPP_CONSTEXPR unique_ptr(pointer p, const deleter_type& d) noexcept: data{p, d} { }
+    __GBLIBCPP_CONSTEXPR unique_ptr(pointer p, deleter_type&& d) noexcept: data{p, std::move(d)} { }
+    __GBLIBCPP_CONSTEXPR unique_ptr(const unique_ptr&) = delete;
+
+    __GBLIBCPP_CONSTEXPR unique_ptr(unique_ptr&& other) noexcept
+        : data{std::exchange(other.data.first(), nullptr), std::move(other.data.second())} { }
+
+    template <typename U, typename E, std::enable_if_t<
+        !std::is_array_v<U> && std::is_convertible_v<U*, T*>
+            && std::is_convertible_v<E, Deleter>, bool> = true>
+    __GBLIBCPP_CONSTEXPR unique_ptr(unique_ptr<U, E>&& other) noexcept
+        : data{std::exchange(other.data.first(), nullptr), std::move(other.data.second())} { }
+
+    __GBLIBCPP_CONSTEXPR ~unique_ptr() { reset(); }
+
+    __GBLIBCPP_CONSTEXPR unique_ptr& operator=(const unique_ptr&) = delete;
+    __GBLIBCPP_CONSTEXPR unique_ptr& operator=(std::nullptr_t) noexcept
+    {
+        reset();
+        return *this;
+    }
+
+    __GBLIBCPP_CONSTEXPR unique_ptr& operator=(unique_ptr&& other) noexcept
+    {
+        reset(other.release());
+        get_deleter() = std::move(other.get_deleter());
+        return *this;
+    }
+
+    template <typename U, typename E, std::enable_if_t<
+        !std::is_array_v<U> && std::is_convertible_v<U*, T*>
+            && std::is_assignable_v<Deleter&, E&&>, bool> = true>
+    __GBLIBCPP_CONSTEXPR unique_ptr& operator=(unique_ptr<U, E>&& other) noexcept
+    {
+        reset(other.release());
+        get_deleter() = std::move(other.get_deleter());
+        return *this;
+    }
+
+    __GBLIBCPP_CONSTEXPR void swap(unique_ptr& other) noexcept
+    {
+        std::swap(data, other.data);
+    }
+
+    __GBLIBCPP_CONSTEXPR pointer get() const noexcept { return data.first(); }
+    __GBLIBCPP_CONSTEXPR deleter_type& get_deleter() noexcept { return data.second(); }
+    __GBLIBCPP_CONSTEXPR const deleter_type& get_deleter() const noexcept { return data.second(); }
+
+    __GBLIBCPP_CONSTEXPR pointer release() noexcept
+    {
+        pointer ret = get();
+        data.first() = nullptr;
+        return ret;
+    }
+
+    __GBLIBCPP_CONSTEXPR void reset(pointer p = pointer{}) noexcept
+    {
+        pointer old = release();
+        data.first() = p;
+        if (old)
+            get_deleter()(old);
+    }
+
+    __GBLIBCPP_CONSTEXPR explicit operator bool() const noexcept { return get(); }
+    __GBLIBCPP_CONSTEXPR pointer operator->() const noexcept { return get(); }
+
+    __GBLIBCPP_CONSTEXPR std::add_lvalue_reference_t<T> operator*() const
+        noexcept(noexcept(*std::declval<pointer>())) { return *get(); }
+};
+
 // TODO: use only one allocation
 template <typename T, typename... Args>
 std::shared_ptr<T> make_shared(Args&&... args)
 {
     return std::shared_ptr<T>(new T(std::forward<Args>(args)...));
+}
+
+template <typename T, typename... Args>
+__GBLIBCPP_CONSTEXPR std::unique_ptr<T> make_unique(Args&&... args)
+{
+    return std::unique_ptr<T>(new T(std::forward<Args>(args)...));
+}
+
+template <typename T>
+__GBLIBCPP_CONSTEXPR void swap(std::shared_ptr<T>& lhs, std::shared_ptr<T>& rhs) noexcept
+{
+    lhs.swap(rhs);
+}
+
+template <typename T, typename D>
+__GBLIBCPP_CONSTEXPR void swap(std::unique_ptr<T, D>& lhs, std::unique_ptr<T, D>& rhs) noexcept
+{
+    lhs.swap(rhs);
 }
 
 } // namespace std

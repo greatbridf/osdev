@@ -260,12 +260,7 @@ size_t fs::write(struct fs::inode* file, const char* buf, size_t offset, size_t 
     return -1U;
 }
 
-std::pair<dentry*, int> fs::current_open(dentry* cwd, types::path_iterator path, bool follow_symlinks)
-{
-    return fs::open(current_process->fs_context, cwd, path, follow_symlinks);
-}
-
-std::pair<dentry*, int> fs::open(const fs_context& context, dentry* cwd,
+std::pair<fs::dentry_pointer, int> fs::open(const fs_context& context, dentry* _cwd,
     types::path_iterator path, bool follow, int recurs_no)
 {
     // too many recursive search layers will cause stack overflow
@@ -273,8 +268,7 @@ std::pair<dentry*, int> fs::open(const fs_context& context, dentry* cwd,
     if (recurs_no >= 16)
         return {nullptr, -ELOOP};
 
-    if (path.is_absolute())
-        cwd = context.root;
+    dentry_pointer cwd{path.is_absolute() ? d_get(context.root) : d_get(_cwd)};
 
     for ( ; path; ++path) {
         auto item = *path;
@@ -292,31 +286,31 @@ std::pair<dentry*, int> fs::open(const fs_context& context, dentry* cwd,
                 return {nullptr, ret};
             linkpath[ret] = 0;
 
-            std::tie(cwd, ret) = fs::open(context, cwd, linkpath, true, recurs_no + 1);
-
-            if (!cwd || (cwd->flags & D_PRESENT))
+            std::tie(cwd, ret) = fs::open(context, cwd->parent, linkpath, true, recurs_no + 1);
+            if (!cwd || ret)
                 return {nullptr, ret};
         }
 
-        int ret;
-        std::tie(cwd, ret) = d_find(cwd, item);
-        if (!cwd)
-            return {nullptr, ret};
+        if (1) {
+            int status;
+            std::tie(cwd, status) = d_find(cwd.get(), item);
+            if (!cwd)
+                return {nullptr, status};
+        }
 
         if (cwd->flags & D_MOUNTPOINT) {
-            auto iter = mounts.find(cwd);
+            auto iter = mounts.find(cwd.get());
             assert(iter);
 
             auto* fs = iter->second.fs;
             assert(fs);
 
-            cwd = fs->root();
-            assert(cwd);
+            cwd = d_get(fs->root());
         }
     }
 
     if (!(cwd->flags & D_PRESENT))
-        return {cwd, -ENOENT};
+        return {std::move(cwd), -ENOENT};
 
     if (follow && S_ISLNK(cwd->inode->mode)) {
         char linkpath[256];
@@ -325,10 +319,10 @@ std::pair<dentry*, int> fs::open(const fs_context& context, dentry* cwd,
             return {nullptr, ret};
         linkpath[ret] = 0;
 
-        return fs::open(context, cwd, linkpath, true, recurs_no+1);
+        return fs::open(context, cwd->parent, linkpath, true, recurs_no+1);
     }
 
-    return {cwd, 0};
+    return {std::move(cwd), 0};
 }
 
 int fs::statx(struct inode* inode, struct statx* stat, unsigned int mask)

@@ -29,14 +29,14 @@ static inline void not_implemented(const char* pos, int line)
 int kernel::syscall::do_chdir(const char __user* path)
 {
     // TODO: use copy_from_user
-    auto [dir, ret] = fs::current_open(current_process->cwd, path);
+    auto [dir, ret] = current_open(path);
     if (!dir || ret)
         return ret;
 
     if (!(dir->flags & fs::D_DIRECTORY))
         return -ENOTDIR;
 
-    current_process->cwd = dir;
+    current_process->cwd = std::move(dir);
     return 0;
 }
 
@@ -52,12 +52,15 @@ execve_retval kernel::syscall::do_execve(
         .ip{}, .sp{},
     };
 
+    fs::dentry_pointer dent;
     if (1) {
         int ret;
-        std::tie(d.exec_dent, ret) = fs::current_open(current_process->cwd, exec);
+        std::tie(dent, ret) = current_open(exec);
 
-        if (!d.exec_dent || ret)
+        if (!dent || ret)
             return { 0, 0, ret };
+
+        d.exec_dent = dent.get();
     }
 
     current_process->files.onexec();
@@ -66,7 +69,9 @@ execve_retval kernel::syscall::do_execve(
 
     // TODO: set cs and ss to compatibility mode
     if (int ret = types::elf::elf32_load(d); ret != 0) {
+        dent.reset();
         async::preempt_enable();
+
         if (ret == types::elf::ELF_LOAD_FAIL_NORETURN)
             kill_current(SIGSEGV);
 
@@ -142,7 +147,7 @@ int kernel::syscall::do_waitpid(pid_t waitpid, int __user* arg1, int options)
 
 int kernel::syscall::do_getcwd(char __user* buf, size_t buf_size)
 {
-    auto path = fs::d_path(current_process->cwd, current_process->fs_context.root);
+    auto path = fs::d_path(current_process->cwd.get(), current_process->fs_context.root.get());
 
     int len = std::min(buf_size-1, path.size());
 

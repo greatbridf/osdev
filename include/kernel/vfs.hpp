@@ -5,6 +5,8 @@
 #include <kernel/vfs/inode.hpp>
 #include <kernel/vfs/vfs.hpp>
 
+#include <memory>
+
 #include <stdint.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -61,7 +63,7 @@ struct PACKED user_dirent64 {
 };
 
 struct fs_context {
-    dentry* root;
+    dentry_pointer root;
 };
 
 struct mount_data {
@@ -111,10 +113,9 @@ size_t write(struct inode* file, const char* buf, size_t offset, size_t n);
 int mount(dentry* mnt, const char* source, const char* mount_point,
         const char* fstype, unsigned long flags, const void *data);
 
-std::pair<dentry*, int> open(const fs_context& context, dentry* cwd, types::path_iterator path,
-        bool follow_symlinks = true, int recurs_no = 0);
-
-std::pair<dentry*, int> current_open(dentry* cwd, types::path_iterator path, bool follow_symlinks = true);
+#define current_open(...) fs::open(current_process->fs_context, current_process->cwd.get(), __VA_ARGS__)
+std::pair<dentry_pointer, int> open(const fs_context& context, dentry* cwd,
+        types::path_iterator path, bool follow_symlinks = true, int recurs_no = 0);
 
 } // namespace fs
 

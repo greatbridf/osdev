@@ -90,7 +90,7 @@ int vfs::mount(dentry* mnt, const char* source, const char* mount_point,
     if (ret != 0)
         return ret;
 
-    mounts.emplace(mnt, mount_data {
+    mounts.emplace(d_get(mnt), mount_data {
                             .fs = new_fs,
                             .source = source,
                             .mount_point = mount_point,

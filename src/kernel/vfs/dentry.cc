@@ -54,12 +54,14 @@ static inline struct dentry*& __d_first(struct dcache* cache, hash_t hash)
 
 static inline void __d_add(struct dentry* parent, struct dentry* dentry)
 {
-    assert(parent == dentry->parent);
+    assert(!dentry->parent);
+    assert(parent->refcount && dentry->refcount);
 
+    dentry->parent = d_get(parent);
     dentry->prev = nullptr;
     dentry->next = __d_first(parent->cache, dentry->hash);
 
-    __d_first(parent->cache, dentry->hash) = dentry;
+    __d_first(parent->cache, dentry->hash) = d_get(dentry);
     parent->cache->size++;
 }
 
@@ -73,7 +75,7 @@ static inline struct dentry* __d_find_fast(struct dentry* parent, types::string_
         if (!__d_equal(dentry, parent, name))
             continue;
 
-        return dentry;
+        return d_get(dentry);
     }
 
     return nullptr;
@@ -101,10 +103,7 @@ static inline int __d_load(struct dentry* parent)
                 struct dentry* dentry = dcache_alloc(parent->cache);
 
                 dentry->fs = inode->fs;
-
                 dentry->inode = inode;
-                dentry->parent = parent;
-
                 dentry->name = fn;
 
                 if (S_ISDIR(mode))
@@ -116,6 +115,7 @@ static inline int __d_load(struct dentry* parent)
 
                 __d_add(parent, dentry);
 
+                d_put(dentry);
                 return 0;
             });
 
@@ -154,16 +154,15 @@ std::pair<struct dentry*, int> fs::d_find(struct dentry* parent, types::string_v
         auto* dentry = dcache_alloc(parent->cache);
         dentry->fs = parent->fs;
 
-        dentry->parent = parent;
         dentry->name.assign(name.data(), name.size());
         dentry->hash = __d_hash(parent, dentry->name);
 
         __d_add(parent, dentry);
 
-        return {d_get(dentry), -ENOENT};
+        return {dentry, -ENOENT};
     }
 
-    return {d_get(ret), 0};
+    return {ret, 0};
 }
 
 std::string fs::d_path(const struct dentry* dentry, const struct dentry* root)
@@ -187,6 +186,11 @@ std::string fs::d_path(const struct dentry* dentry, const struct dentry* root)
     return ret;
 }
 
+dentry_pointer fs::d_get(const dentry_pointer& dentry)
+{
+    return d_get(dentry.get());
+}
+
 struct dentry* fs::d_get(struct dentry* dentry)
 {
     assert(dentry);
@@ -201,6 +205,11 @@ struct dentry* fs::d_put(struct dentry* dentry)
     // TODO: if refcount is zero, mark dentry as unused
     --dentry->refcount;
     return dentry;;
+}
+
+void dentry_deleter::operator()(struct dentry* dentry) const
+{
+    fs::d_put(dentry);
 }
 
 void fs::dcache_init(struct dcache* cache, int hash_bits)
@@ -221,7 +230,7 @@ struct dentry* fs::dcache_alloc(struct dcache* cache)
     struct dentry* dentry = new struct dentry();
     dentry->cache = cache;
 
-    return dentry;
+    return d_get(dentry);
 }
 
 void fs::dcache_init_root(struct dcache* cache, struct dentry* root)
@@ -229,7 +238,7 @@ void fs::dcache_init_root(struct dcache* cache, struct dentry* root)
     assert(cache->size == 0);
 
     root->prev = root->next = nullptr;
-    __d_first(cache, root->hash) = root;
+    __d_first(cache, root->hash) = d_get(root);
 
     cache->size++;
 }

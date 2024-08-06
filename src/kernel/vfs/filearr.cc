@@ -4,6 +4,7 @@
 
 #include <kernel/async/lock.hpp>
 #include <kernel/vfs.hpp>
+#include <kernel/vfs/dentry.hpp>
 #include <kernel/vfs/filearr.hpp>
 
 using namespace fs;
@@ -175,7 +176,7 @@ int filearray::close(int fd)
     return 0;
 }
 
-static inline std::pair<dentry*, int>
+static inline std::pair<dentry_pointer, int>
 _open_file(const fs_context& context, dentry* cwd, types::path_iterator filepath, int flags, mode_t mode)
 {
     auto [ dent, ret ] = fs::open(context, cwd, filepath);
@@ -185,17 +186,17 @@ _open_file(const fs_context& context, dentry* cwd, types::path_iterator filepath
     if (dent->flags & D_PRESENT) {
         if ((flags & O_CREAT) && (flags & O_EXCL))
             return {nullptr, -EEXIST};
-        return {dent, 0};
+        return {std::move(dent), 0};
     }
 
     if (!(flags & O_CREAT))
         return {nullptr, -ENOENT};
 
     // create file
-    if (int ret = fs::creat(dent, mode); ret != 0)
+    if (int ret = fs::creat(dent.get(), mode); ret != 0)
         return {nullptr, ret};
 
-    return {dent, 0};
+    return {std::move(dent), 0};
 }
 
 // TODO: file opening permissions check
@@ -204,6 +205,8 @@ int filearray::open(dentry* cwd, types::path_iterator filepath, int flags, mode_
     lock_guard lck{pimpl->mtx};
 
     auto [dent, ret] = _open_file(*pimpl->context, cwd, filepath, flags, mode);
+
+    assert(dent || ret != 0);
     if (ret != 0)
         return ret;
 

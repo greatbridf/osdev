@@ -27,13 +27,15 @@
 #include <kernel/vfs/dentry.hpp>
 
 process::process(const process& parent, pid_t pid)
-    : mms { parent.mms }, attr { parent.attr } , files { parent.files.copy() }
-    , cwd { parent.cwd }, umask { parent.umask }, pid { pid }
-    , ppid { parent.pid }, pgid { parent.pgid } , sid { parent.sid }
-    , control_tty { parent.control_tty }, fs_context { parent.fs_context }
+    : mms{parent.mms}, attr{parent.attr}, files{parent.files.copy()}, umask{parent.umask}
+    , pid{pid}, ppid{parent.pid}, pgid{parent.pgid}, sid{parent.sid}
+    , control_tty{parent.control_tty}
 {
-    fs::d_get(cwd);
-    fs::d_get(fs_context.root);
+    if (parent.cwd)
+        cwd = fs::d_get(parent.cwd);
+
+    if (parent.fs_context.root)
+        fs_context.root = fs::d_get(parent.fs_context.root);
 }
 
 process::process(pid_t pid, pid_t ppid)
@@ -145,6 +147,10 @@ void proclist::kill(pid_t pid, int exit_code)
     // unmap all user memory areas
     proc.mms.clear();
 
+    // free cwd and fs_context dentry
+    proc.cwd.reset();
+    proc.fs_context.root.reset();
+
     // make child processes orphans (children of init)
     this->make_children_orphans(pid);
 
@@ -218,8 +224,8 @@ void NORETURN _kernel_init(kernel::mem::paging::pfn_t kernel_stack_pfn)
                 "tmpfs", MS_NOATIME, nullptr);
         assert(ret == 0);
     }
-    current_process->fs_context.root = rootfs->root();
-    current_process->cwd = rootfs->root();
+    current_process->fs_context.root = d_get(rootfs->root());
+    current_process->cwd = d_get(rootfs->root());
 
     // ------------------------------------------
     // interrupt enabled
@@ -242,17 +248,15 @@ void NORETURN _kernel_init(kernel::mem::paging::pfn_t kernel_stack_pfn)
     // mount fat32 /mnt directory
     // TODO: parse kernel parameters
     if (1) {
-        auto [ mnt, status ] = fs::open(context, context.root, "/mnt");
+        auto [ mnt, status ] = fs::open(context, context.root.get(), "/mnt");
         assert(mnt && status == -ENOENT);
 
-        if (int ret = fs::mkdir(mnt, 0755); 1)
+        if (int ret = fs::mkdir(mnt.get(), 0755); 1)
             assert(ret == 0 && mnt->flags & fs::D_PRESENT);
 
-        int ret = rootfs->mount(mnt, "/dev/sda", "/mnt",
+        int ret = rootfs->mount(mnt.get(), "/dev/sda", "/mnt",
                 "fat32", MS_RDONLY | MS_NOATIME | MS_NODEV | MS_NOSUID, "ro,nodev");
         assert(ret == 0);
-
-        fs::d_put(mnt);
     }
 
     current_process->attr.system = 0;
@@ -265,15 +269,16 @@ void NORETURN _kernel_init(kernel::mem::paging::pfn_t kernel_stack_pfn)
         .ip{}, .sp{}
     };
 
-    int ret;
-    std::tie(d.exec_dent, ret) = fs::open(context, context.root, d.argv[0]);
-    if (!d.exec_dent || ret) {
+    auto [exec, ret] = fs::open(context, context.root.get(), d.argv[0]);
+    if (!exec || ret) {
         kmsg("kernel panic: init not found!");
         freeze();
     }
 
+    d.exec_dent = exec.get();
     if (int ret = types::elf::elf32_load(d); 1)
         assert(ret == 0);
+    exec.reset();
 
     int ds = 0x33, cs = 0x2b;
 

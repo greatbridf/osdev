@@ -30,6 +30,7 @@
 #include <kernel/tty.hpp>
 #include <kernel/user/thread_local.hpp>
 #include <kernel/vfs.hpp>
+#include <kernel/vfs/dentry.hpp>
 #include <kernel/vfs/filearr.hpp>
 
 class process;
@@ -61,7 +62,7 @@ public:
 
     process_attr attr {};
     fs::filearray files;
-    fs::dentry* cwd {};
+    fs::dentry_pointer cwd {};
     mode_t umask { 0022 };
 
     pid_t pid {};

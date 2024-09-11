@@ -1,8 +1,8 @@
 #pragma once
 
-#include <stdint.h>
-
 #include <cstddef>
+
+#include <stdint.h>
 
 namespace kernel::mem {
 
@@ -29,7 +29,7 @@ namespace info {
     inline std::size_t memory_size;
     inline std::size_t e820_entry_count;
     inline std::size_t e820_entry_length;
-    inline e820_mem_map_entry e820_entries[(1024-16)/24];
+    inline e820_mem_map_entry e820_entries[(1024 - 16) / 24];
 
 } // namespace info
 

@@ -3,8 +3,8 @@
 #include <types/types.h>
 
 #define INTERNAL_MODULE(name, func) \
-    SECTION(".kmods") __attribute__((used)) \
-    kernel::module::module_loader const name = (func)
+    SECTION(".kmods")               \
+    __attribute__((used)) kernel::module::module_loader const name = (func)
 
 namespace kernel::module {
 

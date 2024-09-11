@@ -1,6 +1,9 @@
-#include <vector>
-#include <cstddef>
 #include <algorithm>
+#include <cstddef>
+#include <vector>
+
+#include <errno.h>
+#include <stdint.h>
 
 #include <kernel/hw/pci.hpp>
 #include <kernel/irq.hpp>
@@ -10,12 +13,10 @@
 #include <kernel/module.hpp>
 #include <kernel/vfs.hpp>
 
-#include <stdint.h>
-#include <errno.h>
-
-#define SPIN(cond, spin) \
-    (spin) = 0; \
-    while ((cond) && (spin) < MAX_SPINS) ++(spin); \
+#define SPIN(cond, spin)                 \
+    (spin) = 0;                          \
+    while ((cond) && (spin) < MAX_SPINS) \
+        ++(spin);                        \
     if ((spin) == MAX_SPINS)
 
 using namespace kernel::module;
@@ -175,7 +176,7 @@ struct fis_pio_setup {
     uint8_t fis_type;
 
     uint8_t pm_port : 4;
-    uint8_t : 1; // reserved
+    uint8_t : 1;                         // reserved
     uint8_t data_transfer_direction : 1; // device to host if set
     uint8_t interrupt : 1;
     uint8_t : 1; // reserved
@@ -239,23 +240,20 @@ struct command_table {
     prdt_entry prdt[];
 };
 
-static int stop_command(hba_port* port)
-{
-    port->command_status =
-        port->command_status & ~(PORT_CMD_ST | PORT_CMD_FRE);
+static int stop_command(hba_port* port) {
+    port->command_status = port->command_status & ~(PORT_CMD_ST | PORT_CMD_FRE);
 
     uint32_t spins = 0;
     SPIN(port->command_status & (PORT_CMD_CR | PORT_CMD_FR), spins)
-        return -1;
+    return -1;
 
     return 0;
 }
 
-static int start_command(hba_port* port)
-{
+static int start_command(hba_port* port) {
     uint32_t spins = 0;
     SPIN(port->command_status & PORT_CMD_CR, spins)
-        return -1;
+    return -1;
 
     port->command_status = port->command_status | PORT_CMD_FRE;
     port->command_status = port->command_status | PORT_CMD_ST;
@@ -263,19 +261,17 @@ static int start_command(hba_port* port)
     return 0;
 }
 
-static inline hba_port* port_ptr(hba_ghc* ghc, int i)
-{
+static inline hba_port* port_ptr(hba_ghc* ghc, int i) {
     return (hba_port*)((char*)ghc + 0x100 + i * 0x80);
 }
 
 template <std::size_t N>
 struct quick_queue {
-    std::size_t start { };
-    std::size_t end { };
-    uint8_t arr[N] { };
+    std::size_t start{};
+    std::size_t end{};
+    uint8_t arr[N]{};
 
-    quick_queue()
-    {
+    quick_queue() {
         for (std::size_t i = 0; i < N; ++i)
             arr[i] = i;
     }
@@ -286,15 +282,15 @@ struct quick_queue {
 };
 
 struct ahci_port {
-private:
+   private:
     // quick_queue<32> qu;
     physaddr<command_header, false> cmd_header;
     hba_port* port;
-    received_fis* fis { };
-    std::size_t sectors { -1U };
+    received_fis* fis{};
+    std::size_t sectors{-1U};
 
-    int send_command(physaddr<void> buf, uint64_t lba, uint32_t count, uint8_t cmd, bool write)
-    {
+    int send_command(physaddr<void> buf, uint64_t lba, uint32_t count,
+                     uint8_t cmd, bool write) {
         // count must be a multiple of 512
         if (count & (512 - 1))
             return -1;
@@ -346,24 +342,23 @@ private:
         // wait until port is not busy
         uint32_t spins = 0;
         SPIN(port->task_file_data & (ATA_DEV_BSY | ATA_DEV_DRQ), spins)
-            return -1;
+        return -1;
 
         // TODO: use interrupt
         // issue the command
         port->command_issue = 1 << n;
 
         SPIN(port->command_issue & (1 << n), spins)
-            return -1;
+        return -1;
 
         free_page(command_table_pfn);
         return 0;
     }
 
-    int identify()
-    {
+    int identify() {
         pfn_t buffer_page = page_to_pfn(alloc_page());
-        int ret = send_command(physaddr<void>{buffer_page},
-                0, 512, 0xEC, false);
+        int ret =
+            send_command(physaddr<void>{buffer_page}, 0, 512, 0xEC, false);
 
         free_page(buffer_page);
         if (ret != 0)
@@ -371,19 +366,18 @@ private:
         return 0;
     }
 
-public:
+   public:
     explicit ahci_port(hba_port* port)
-        : cmd_header{page_to_pfn(alloc_page())}, port(port) { }
+        : cmd_header{page_to_pfn(alloc_page())}, port(port) {}
 
-    ~ahci_port()
-    {
+    ~ahci_port() {
         if (!cmd_header)
             return;
         free_page(cmd_header.phys());
     }
 
-    ssize_t read(char* buf, std::size_t buf_size, std::size_t offset, std::size_t cnt)
-    {
+    ssize_t read(char* buf, std::size_t buf_size, std::size_t offset,
+                 std::size_t cnt) {
         cnt = std::min(buf_size, cnt);
 
         pfn_t buffer_page = page_to_pfn(alloc_page());
@@ -413,8 +407,7 @@ public:
         return buf - orig_buf;
     }
 
-    int init()
-    {
+    int init() {
         if (stop_command(port) != 0)
             return -1;
 
@@ -440,15 +433,14 @@ public:
 };
 
 class ahci_module : public virtual kernel::module::module {
-private:
-    hba_ghc* ghc { };
-    pci_device* dev { };
+   private:
+    hba_ghc* ghc{};
+    pci_device* dev{};
     std::vector<ahci_port*> ports;
 
-public:
-    ahci_module() : module("ahci") { }
-    ~ahci_module()
-    {
+   public:
+    ahci_module() : module("ahci") {}
+    ~ahci_module() {
         // TODO: release PCI device
         for (auto& item : ports) {
             if (!item)
@@ -459,8 +451,7 @@ public:
         }
     }
 
-    int probe_disks()
-    {
+    int probe_disks() {
         int ports = this->ghc->ports_implemented;
         for (int n = 0; ports; ports >>= 1, ++n) {
             if (!(ports & 1))
@@ -479,11 +470,13 @@ public:
 
             this->ports[n] = port;
 
-            fs::register_block_device(fs::make_device(8, n * 8), {
-                [port](char* buf, std::size_t buf_size, std::size_t offset, std::size_t cnt) {
-                    return port->read(buf, buf_size, offset, cnt);
-                }, nullptr
-            });
+            fs::register_block_device(
+                fs::make_device(8, n * 8),
+                {[port](char* buf, std::size_t buf_size, std::size_t offset,
+                        std::size_t cnt) {
+                     return port->read(buf, buf_size, offset, cnt);
+                 },
+                 nullptr});
 
             fs::partprobe();
         }
@@ -491,12 +484,11 @@ public:
         return 0;
     }
 
-    virtual int init() override
-    {
+    virtual int init() override {
         ports.resize(32);
 
-        auto ret = kernel::hw::pci::register_driver(VENDOR_INTEL, DEVICE_AHCI,
-            [this](pci_device* dev) -> int {
+        auto ret = kernel::hw::pci::register_driver(
+            VENDOR_INTEL, DEVICE_AHCI, [this](pci_device* dev) -> int {
                 this->dev = dev;
 
                 physaddr<hba_ghc, false> pp_base{dev->reg[PCI_REG_ABAR]};
@@ -506,7 +498,7 @@ public:
                     this->ghc->global_host_control | 2; // set interrupt enable
 
                 return this->probe_disks();
-        });
+            });
 
         if (ret != 0)
             return MODULE_FAILED;
@@ -516,6 +508,7 @@ public:
 
 } // namespace ahci
 
-kernel::module::module* ahci_module_init()
-{ return new ahci::ahci_module(); }
+kernel::module::module* ahci_module_init() {
+    return new ahci::ahci_module();
+}
 INTERNAL_MODULE(ahci_module_loader, ahci_module_init);

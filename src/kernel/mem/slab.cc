@@ -12,18 +12,15 @@ using namespace types::list;
 
 constexpr std::size_t SLAB_PAGE_SIZE = 0x1000; // 4K
 
-std::ptrdiff_t _slab_data_start_offset(std::size_t size)
-{
+std::ptrdiff_t _slab_data_start_offset(std::size_t size) {
     return (sizeof(slab_head) + size - 1) & ~(size - 1);
 }
 
-std::size_t _slab_max_count(std::size_t size)
-{
+std::size_t _slab_max_count(std::size_t size) {
     return (SLAB_PAGE_SIZE - _slab_data_start_offset(size)) / size;
 }
 
-void* _slab_head_alloc(slab_head* slab)
-{
+void* _slab_head_alloc(slab_head* slab) {
     if (slab->free_count == 0)
         return nullptr;
 
@@ -34,8 +31,7 @@ void* _slab_head_alloc(slab_head* slab)
     return ptr;
 }
 
-slab_head* _make_slab(uintptr_t start, std::size_t size)
-{
+slab_head* _make_slab(uintptr_t start, std::size_t size) {
     slab_head* slab = physaddr<slab_head>{start};
 
     slab->obj_size = size;
@@ -48,7 +44,7 @@ slab_head* _make_slab(uintptr_t start, std::size_t size)
     std::byte* ptr = (std::byte*)slab->free;
     for (unsigned i = 0; i < slab->free_count; ++i) {
         void* nextptr = ptr + size;
-        if (i == slab->free_count-1)
+        if (i == slab->free_count - 1)
             *(void**)ptr = nullptr;
         else
             *(void**)ptr = nextptr;
@@ -72,7 +68,7 @@ void _slab_add_page(slab_cache* cache) {
 
 void* kernel::mem::slab_alloc(slab_cache* cache) {
     slab_head* slab = cache->slabs_partial;
-    if (!slab) { // no partial slabs, try to get an empty slab
+    if (!slab) {                 // no partial slabs, try to get an empty slab
         if (!cache->slabs_empty) // no empty slabs, create a new one
             _slab_add_page(cache);
 
@@ -92,7 +88,7 @@ void* kernel::mem::slab_alloc(slab_cache* cache) {
 }
 
 void kernel::mem::slab_free(void* ptr) {
-    slab_head* slab = (slab_head*)((uintptr_t)ptr & ~(SLAB_PAGE_SIZE-1));
+    slab_head* slab = (slab_head*)((uintptr_t)ptr & ~(SLAB_PAGE_SIZE - 1));
 
     *(void**)ptr = slab->free;
     slab->free = ptr;
@@ -114,8 +110,7 @@ void kernel::mem::slab_free(void* ptr) {
     }
 }
 
-void kernel::mem::init_slab_cache(slab_cache* cache, std::size_t obj_size)
-{
+void kernel::mem::init_slab_cache(slab_cache* cache, std::size_t obj_size) {
     cache->obj_size = obj_size;
     cache->slabs_empty = nullptr;
     cache->slabs_partial = nullptr;

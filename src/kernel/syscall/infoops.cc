@@ -8,15 +8,15 @@
 
 #define NOT_IMPLEMENTED not_implemented(__FILE__, __LINE__)
 
-static inline void not_implemented(const char* pos, int line)
-{
-    kmsgf("[kernel] the function at %s:%d is not implemented, killing the pid%d...",
-            pos, line, current_process->pid);
+static inline void not_implemented(const char* pos, int line) {
+    kmsgf(
+        "[kernel] the function at %s:%d is not implemented, killing the "
+        "pid%d...",
+        pos, line, current_process->pid);
     current_thread->send_signal(SIGSYS);
 }
 
-int kernel::syscall::do_clock_gettime(clockid_t clk_id, timespec __user* tp)
-{
+int kernel::syscall::do_clock_gettime(clockid_t clk_id, timespec __user* tp) {
     if (clk_id != CLOCK_REALTIME && clk_id != CLOCK_MONOTONIC) {
         NOT_IMPLEMENTED;
         return -EINVAL;
@@ -34,8 +34,7 @@ int kernel::syscall::do_clock_gettime(clockid_t clk_id, timespec __user* tp)
     return 0;
 }
 
-int kernel::syscall::do_gettimeofday(timeval __user* tv, void __user* tz)
-{
+int kernel::syscall::do_gettimeofday(timeval __user* tv, void __user* tz) {
     // TODO: return time of the day, not time from this boot
     if (tz) [[unlikely]]
         return -EINVAL;

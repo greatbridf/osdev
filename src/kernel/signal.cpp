@@ -1,10 +1,10 @@
+#include <signal.h>
+
 #include <kernel/async/lock.hpp>
 #include <kernel/interrupt.hpp>
 #include <kernel/process.hpp>
 #include <kernel/signal.hpp>
 #include <kernel/task/thread.hpp>
-
-#include <signal.h>
 
 #define sigmask(sig) (1ULL << ((sig)-1))
 
@@ -12,35 +12,33 @@
 
 #define sigmask_ignore (sigmask(SIGCHLD) | sigmask(SIGURG) | sigmask(SIGWINCH))
 
-#define sigmask_coredump (\
-    sigmask(SIGQUIT) | sigmask(SIGILL) | sigmask(SIGTRAP) | sigmask(SIGABRT) | \
-    sigmask(SIGFPE) | sigmask(SIGSEGV) | sigmask(SIGBUS) | sigmask(SIGSYS) | \
-    sigmask(SIGXCPU) | sigmask(SIGXFSZ) )
+#define sigmask_coredump                                                       \
+    (sigmask(SIGQUIT) | sigmask(SIGILL) | sigmask(SIGTRAP) |                   \
+     sigmask(SIGABRT) | sigmask(SIGFPE) | sigmask(SIGSEGV) | sigmask(SIGBUS) | \
+     sigmask(SIGSYS) | sigmask(SIGXCPU) | sigmask(SIGXFSZ))
 
-#define sigmask_stop (\
-    sigmask(SIGSTOP) | sigmask(SIGTSTP) | sigmask(SIGTTIN) | sigmask(SIGTTOU))
+#define sigmask_stop \
+    (sigmask(SIGSTOP) | sigmask(SIGTSTP) | sigmask(SIGTTIN) | sigmask(SIGTTOU))
 
 using kernel::signal_list;
 using signo_type = signal_list::signo_type;
 
-static void continue_process(int signal)
-{
+static void continue_process(int signal) {
     auto& parent = procs->find(current_process->ppid);
 
     // signal parent we're running
-    parent.waitprocs.push_back({ current_process->pid, 0xffff });
+    parent.waitprocs.push_back({current_process->pid, 0xffff});
 
     current_thread->signals.after_signal(signal);
 }
 
-static void stop_process(int signal)
-{
+static void stop_process(int signal) {
     auto& parent = procs->find(current_process->ppid);
 
     current_thread->set_attr(kernel::task::thread::STOPPED);
 
     // signal parent we're stopped
-    parent.waitprocs.push_back({ current_process->pid, 0x7f });
+    parent.waitprocs.push_back({current_process->pid, 0x7f});
     parent.waitlist.notify_all();
 
     while (true) {
@@ -51,54 +49,46 @@ static void stop_process(int signal)
     current_thread->signals.after_signal(signal);
 }
 
-static void terminate_process(int signo)
-{
+static void terminate_process(int signo) {
     kill_current(signo);
 }
 
-static void terminate_process_with_core_dump(int signo)
-{
+static void terminate_process_with_core_dump(int signo) {
     terminate_process(signo & 0x80);
 }
 
-void signal_list::set_handler(signo_type signal, const sigaction& action)
-{
+void signal_list::set_handler(signo_type signal, const sigaction& action) {
     if (action.sa_handler == SIG_DFL)
         m_handlers.erase(signal);
     else
         m_handlers[signal] = action;
 }
 
-void signal_list::get_handler(signo_type signal, sigaction& action) const
-{
+void signal_list::get_handler(signo_type signal, sigaction& action) const {
     auto iter = m_handlers.find(signal);
     if (iter == m_handlers.end()) {
         action.sa_handler = SIG_DFL;
         action.sa_flags = 0;
         action.sa_restorer = nullptr;
         action.sa_mask = 0;
-    }
-    else {
+    } else {
         action = iter->second;
     }
 }
 
-void signal_list::on_exec()
-{
-    std::erase_if(m_handlers, [](auto& pair) {
-        return pair.second.sa_handler != SIG_IGN;
-    });
+void signal_list::on_exec() {
+    std::erase_if(m_handlers,
+                  [](auto& pair) { return pair.second.sa_handler != SIG_IGN; });
 }
 
-bool signal_list::raise(signo_type signal)
-{
+bool signal_list::raise(signo_type signal) {
     async::lock_guard lck{m_mtx};
 
     // TODO: clear pending signals
     if (signal == SIGCONT) {
         m_list.remove_if([](signo_type sig) {
-            return sig == SIGSTOP || sig == SIGTSTP
-                || sig == SIGTTIN || sig == SIGTTOU;
+            return sig == SIGSTOP || sig == SIGTSTP || sig == SIGTTIN ||
+                   sig == SIGTTOU;
         });
         return true;
     }
@@ -123,8 +113,7 @@ bool signal_list::raise(signo_type signal)
     return true;
 }
 
-signo_type signal_list::pending_signal()
-{
+signo_type signal_list::pending_signal() {
     async::lock_guard lck{m_mtx};
     for (auto iter = m_list.begin(); iter != m_list.end(); ++iter) {
         auto iter_handler = m_handlers.find(*iter);
@@ -148,8 +137,7 @@ signo_type signal_list::pending_signal()
     return 0;
 }
 
-void signal_list::handle(interrupt_stack* context, mmx_registers* mmxregs)
-{
+void signal_list::handle(interrupt_stack* context, mmx_registers* mmxregs) {
     unsigned int signal;
     if (1) {
         async::lock_guard lck{m_mtx};
@@ -208,12 +196,19 @@ void signal_list::handle(interrupt_stack* context, mmx_registers* mmxregs)
     context->v_rip = (uintptr_t)handler.sa_handler;
 }
 
-void signal_list::after_signal(signo_type signal)
-{
+void signal_list::after_signal(signo_type signal) {
     m_mask &= ~sigmask(signal);
 }
 
-kernel::sigmask_type signal_list::get_mask() const { return m_mask; }
-void signal_list::set_mask(sigmask_type mask) { m_mask = mask & ~sigmask_now; }
-void signal_list::mask(sigmask_type mask) { set_mask(m_mask | mask); }
-void signal_list::unmask(sigmask_type mask) { set_mask(m_mask & ~mask); }
+kernel::sigmask_type signal_list::get_mask() const {
+    return m_mask;
+}
+void signal_list::set_mask(sigmask_type mask) {
+    m_mask = mask & ~sigmask_now;
+}
+void signal_list::mask(sigmask_type mask) {
+    set_mask(m_mask | mask);
+}
+void signal_list::unmask(sigmask_type mask) {
+    set_mask(m_mask & ~mask);
+}

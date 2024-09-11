@@ -20,52 +20,43 @@
 namespace fs::fat {
 
 // buf MUST be larger than 512 bytes
-void fat32::_raw_read_sector(void* buf, uint32_t sector_no)
-{
-    auto nread = _read_sector_range(
-            buf, SECTOR_SIZE,
-            sector_no, 1
-            );
+void fat32::_raw_read_sector(void* buf, uint32_t sector_no) {
+    auto nread = _read_sector_range(buf, SECTOR_SIZE, sector_no, 1);
 
     assert((size_t)nread == SECTOR_SIZE);
 }
 
 // buf MUST be larger than 4096 bytes
-void fat32::_raw_read_cluster(void* buf, cluster_t no)
-{
+void fat32::_raw_read_cluster(void* buf, cluster_t no) {
     // data cluster start from cluster #2
     no -= 2;
 
     auto nread = _read_sector_range(
-            buf, sectors_per_cluster * SECTOR_SIZE,
-            data_region_offset + no * sectors_per_cluster,
-            sectors_per_cluster);
+        buf, sectors_per_cluster * SECTOR_SIZE,
+        data_region_offset + no * sectors_per_cluster, sectors_per_cluster);
 
     assert((size_t)nread == SECTOR_SIZE * sectors_per_cluster);
 }
 
-ssize_t fat32::_read_sector_range(void* _buf, size_t buf_size, uint32_t sector_offset, size_t sector_cnt)
-{
+ssize_t fat32::_read_sector_range(void* _buf, size_t buf_size,
+                                  uint32_t sector_offset, size_t sector_cnt) {
     buf_size &= ~(SECTOR_SIZE - 1);
 
     sector_cnt = std::min(sector_cnt, buf_size / SECTOR_SIZE);
 
     auto* buf = (char*)_buf;
 
-    auto n = block_device_read(m_device,
-            buf, buf_size,
-            sector_offset * SECTOR_SIZE,
-            sector_cnt * SECTOR_SIZE
-        );
+    auto n =
+        block_device_read(m_device, buf, buf_size, sector_offset * SECTOR_SIZE,
+                          sector_cnt * SECTOR_SIZE);
 
     return n;
 }
 
-char* fat32::read_cluster(cluster_t no)
-{
+char* fat32::read_cluster(cluster_t no) {
     auto iter = buf.find(no);
     if (iter) {
-        auto& [ idx, buf ] = *iter;
+        auto& [idx, buf] = *iter;
         ++buf.ref;
         return buf.data;
     }
@@ -76,22 +67,22 @@ char* fat32::read_cluster(cluster_t no)
 
     char* data = physaddr<char>{page_to_pfn(alloc_page())};
     _raw_read_cluster(data, no);
-    buf.emplace(no, buf_object { data, 1 });
+    buf.emplace(no, buf_object{data, 1});
 
     return data;
 }
 
-void fat32::release_cluster(cluster_t no)
-{
+void fat32::release_cluster(cluster_t no) {
     auto iter = buf.find(no);
     if (iter)
         --iter->second.ref;
 }
 
-ssize_t fat32::readdir(inode* dir, size_t offset, const vfs::filldir_func& filldir)
-{
+ssize_t fat32::readdir(inode* dir, size_t offset,
+                       const vfs::filldir_func& filldir) {
     cluster_t next = cl(dir);
-    for (size_t i = 0; i < (offset / (sectors_per_cluster * SECTOR_SIZE)); ++i) {
+    for (size_t i = 0; i < (offset / (sectors_per_cluster * SECTOR_SIZE));
+         ++i) {
         if (next >= EOC)
             return 0;
         next = fat[next];
@@ -99,9 +90,12 @@ ssize_t fat32::readdir(inode* dir, size_t offset, const vfs::filldir_func& filld
     size_t nread = 0;
     do {
         char* buf = read_cluster(next);
-        auto* d = reinterpret_cast<directory_entry*>(buf) + (offset % (sectors_per_cluster * SECTOR_SIZE)) / sizeof(directory_entry);
+        auto* d = reinterpret_cast<directory_entry*>(buf) +
+                  (offset % (sectors_per_cluster * SECTOR_SIZE)) /
+                      sizeof(directory_entry);
         offset = 0;
-        auto* end = d + (sectors_per_cluster * SECTOR_SIZE / sizeof(directory_entry));
+        auto* end =
+            d + (sectors_per_cluster * SECTOR_SIZE / sizeof(directory_entry));
         for (; d < end && d->filename[0]; ++d) {
             if (d->attributes.volume_label) {
                 nread += sizeof(directory_entry);
@@ -157,10 +151,7 @@ ssize_t fat32::readdir(inode* dir, size_t offset, const vfs::filldir_func& filld
     return nread;
 }
 
-fat32::fat32(dev_t _device)
-    : vfs(_device, 4096)
-    , label { }
-{
+fat32::fat32(dev_t _device) : vfs(_device, 4096), label{} {
     auto* buf = new char[SECTOR_SIZE];
     _raw_read_sector(buf, 0);
 
@@ -178,9 +169,8 @@ fat32::fat32(dev_t _device)
 
     // read file allocation table
     fat.resize(SECTOR_SIZE * sectors_per_fat / sizeof(cluster_t));
-    _read_sector_range(
-            fat.data(), SECTOR_SIZE * sectors_per_fat,
-            reserved_sectors, sectors_per_fat);
+    _read_sector_range(fat.data(), SECTOR_SIZE * sectors_per_fat,
+                       reserved_sectors, sectors_per_fat);
 
     int i = 0;
     while (i < 11 && info->label[i] != 0x20) {
@@ -210,8 +200,8 @@ fat32::fat32(dev_t _device)
     register_root_node(n);
 }
 
-ssize_t fat32::read(inode* file, char* buf, size_t buf_size, size_t n, off_t offset)
-{
+ssize_t fat32::read(inode* file, char* buf, size_t buf_size, size_t n,
+                    off_t offset) {
     uint32_t cluster_size = SECTOR_SIZE * sectors_per_cluster;
     size_t orig_n = n;
 
@@ -239,8 +229,7 @@ ssize_t fat32::read(inode* file, char* buf, size_t buf_size, size_t n, off_t off
     return orig_n - n;
 }
 
-static fat32* create_fat32(const char* source, unsigned long, const void*)
-{
+static fat32* create_fat32(const char* source, unsigned long, const void*) {
     // TODO: flags
     // TODO: parse source
     (void)source;
@@ -248,15 +237,13 @@ static fat32* create_fat32(const char* source, unsigned long, const void*)
 }
 
 class fat32_module : public virtual kernel::module::module {
-public:
-    fat32_module() : module("fat32") { }
-    ~fat32_module()
-    {
+   public:
+    fat32_module() : module("fat32") {}
+    ~fat32_module() {
         // TODO: unregister filesystem
     }
 
-    virtual int init() override
-    {
+    virtual int init() override {
         int ret = fs::register_fs("fat32", create_fat32);
 
         if (ret != 0)
@@ -268,7 +255,8 @@ public:
 
 } // namespace fs::fat
 
-static kernel::module::module* fat32_module_init()
-{ return new fs::fat::fat32_module; }
+static kernel::module::module* fat32_module_init() {
+    return new fs::fat::fat32_module;
+}
 
 INTERNAL_MODULE(fat32_module_loader, fat32_module_init);

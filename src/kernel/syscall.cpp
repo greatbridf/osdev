@@ -50,55 +50,62 @@
 #define SYSCALL32_ARG6(type, name) type name = (type)((data)->regs.rbp)
 
 #define _DEFINE_SYSCALL32_ARGS1(type, name, ...) \
-SYSCALL32_ARG1(type, name); \
-__VA_OPT__(_DEFINE_SYSCALL32_ARGS2(__VA_ARGS__))
+    SYSCALL32_ARG1(type, name);                  \
+    __VA_OPT__(_DEFINE_SYSCALL32_ARGS2(__VA_ARGS__))
 
 #define _DEFINE_SYSCALL32_ARGS2(type, name, ...) \
-SYSCALL32_ARG2(type, name); \
-__VA_OPT__(_DEFINE_SYSCALL32_ARGS3(__VA_ARGS__))
+    SYSCALL32_ARG2(type, name);                  \
+    __VA_OPT__(_DEFINE_SYSCALL32_ARGS3(__VA_ARGS__))
 
 #define _DEFINE_SYSCALL32_ARGS3(type, name, ...) \
-SYSCALL32_ARG3(type, name); \
-__VA_OPT__(_DEFINE_SYSCALL32_ARGS4(__VA_ARGS__))
+    SYSCALL32_ARG3(type, name);                  \
+    __VA_OPT__(_DEFINE_SYSCALL32_ARGS4(__VA_ARGS__))
 
 #define _DEFINE_SYSCALL32_ARGS4(type, name, ...) \
-SYSCALL32_ARG4(type, name); \
-__VA_OPT__(_DEFINE_SYSCALL32_ARGS5(__VA_ARGS__))
+    SYSCALL32_ARG4(type, name);                  \
+    __VA_OPT__(_DEFINE_SYSCALL32_ARGS5(__VA_ARGS__))
 
 #define _DEFINE_SYSCALL32_ARGS5(type, name, ...) \
-SYSCALL32_ARG5(type, name); \
-__VA_OPT__(_DEFINE_SYSCALL32_ARGS6(__VA_ARGS__))
+    SYSCALL32_ARG5(type, name);                  \
+    __VA_OPT__(_DEFINE_SYSCALL32_ARGS6(__VA_ARGS__))
 
-#define _DEFINE_SYSCALL32_ARGS6(type, name, ...) \
-SYSCALL32_ARG6(type, name);
+#define _DEFINE_SYSCALL32_ARGS6(type, name, ...) SYSCALL32_ARG6(type, name);
 
-#define _DEFINE_SYSCALL32_END_PARAMS1(type, name, ...) name __VA_OPT__(, _DEFINE_SYSCALL32_END_PARAMS2(__VA_ARGS__))
-#define _DEFINE_SYSCALL32_END_PARAMS2(type, name, ...) name __VA_OPT__(, _DEFINE_SYSCALL32_END_PARAMS3(__VA_ARGS__))
-#define _DEFINE_SYSCALL32_END_PARAMS3(type, name, ...) name __VA_OPT__(, _DEFINE_SYSCALL32_END_PARAMS4(__VA_ARGS__))
-#define _DEFINE_SYSCALL32_END_PARAMS4(type, name, ...) name __VA_OPT__(, _DEFINE_SYSCALL32_END_PARAMS5(__VA_ARGS__))
-#define _DEFINE_SYSCALL32_END_PARAMS5(type, name, ...) name __VA_OPT__(, _DEFINE_SYSCALL32_END_PARAMS6(__VA_ARGS__))
+#define _DEFINE_SYSCALL32_END_PARAMS1(type, name, ...) \
+    name __VA_OPT__(, _DEFINE_SYSCALL32_END_PARAMS2(__VA_ARGS__))
+#define _DEFINE_SYSCALL32_END_PARAMS2(type, name, ...) \
+    name __VA_OPT__(, _DEFINE_SYSCALL32_END_PARAMS3(__VA_ARGS__))
+#define _DEFINE_SYSCALL32_END_PARAMS3(type, name, ...) \
+    name __VA_OPT__(, _DEFINE_SYSCALL32_END_PARAMS4(__VA_ARGS__))
+#define _DEFINE_SYSCALL32_END_PARAMS4(type, name, ...) \
+    name __VA_OPT__(, _DEFINE_SYSCALL32_END_PARAMS5(__VA_ARGS__))
+#define _DEFINE_SYSCALL32_END_PARAMS5(type, name, ...) \
+    name __VA_OPT__(, _DEFINE_SYSCALL32_END_PARAMS6(__VA_ARGS__))
 #define _DEFINE_SYSCALL32_END_PARAMS6(type, name, ...) name __VA_OPT__(, void)
 
 #define _DEFINE_SYSCALL32_END(name, ...) \
-    kernel::syscall::do_ ## name ( __VA_OPT__(_DEFINE_SYSCALL32_END_PARAMS1(__VA_ARGS__)) )
+    kernel::syscall::do_##name(          \
+        __VA_OPT__(_DEFINE_SYSCALL32_END_PARAMS1(__VA_ARGS__)))
 
-#define DEFINE_SYSCALL32_TO(name, to, ...) \
-static uint32_t _syscall32_##name(interrupt_stack* data, mmx_registers* mmxregs) \
-{ \
-    (void)data, (void)mmxregs; \
-    __VA_OPT__(_DEFINE_SYSCALL32_ARGS1(__VA_ARGS__);) \
-    return (uint32_t)(uintptr_t)_DEFINE_SYSCALL32_END(to __VA_OPT__(, __VA_ARGS__)); \
-}
+#define DEFINE_SYSCALL32_TO(name, to, ...)                      \
+    static uint32_t _syscall32_##name(interrupt_stack* data,    \
+                                      mmx_registers* mmxregs) { \
+        (void)data, (void)mmxregs;                              \
+        __VA_OPT__(_DEFINE_SYSCALL32_ARGS1(__VA_ARGS__);)       \
+        return (uint32_t)(uintptr_t)_DEFINE_SYSCALL32_END(      \
+            to __VA_OPT__(, __VA_ARGS__));                      \
+    }
 
-#define DEFINE_SYSCALL32(name, ...) DEFINE_SYSCALL32_TO(name, name __VA_OPT__(,) __VA_ARGS__)
+#define DEFINE_SYSCALL32(name, ...) \
+    DEFINE_SYSCALL32_TO(name, name __VA_OPT__(, ) __VA_ARGS__)
 
-#define DEFINE_SYSCALL32_NORETURN(name, ...) \
-[[noreturn]] static uint32_t _syscall32_##name(interrupt_stack* data, mmx_registers* mmxregs) \
-{ \
-    (void)data, (void)mmxregs; \
-    __VA_OPT__(_DEFINE_SYSCALL32_ARGS1(__VA_ARGS__);) \
-    _DEFINE_SYSCALL32_END(name, __VA_ARGS__); \
-}
+#define DEFINE_SYSCALL32_NORETURN(name, ...)                                 \
+    [[noreturn]] static uint32_t _syscall32_##name(interrupt_stack* data,    \
+                                                   mmx_registers* mmxregs) { \
+        (void)data, (void)mmxregs;                                           \
+        __VA_OPT__(_DEFINE_SYSCALL32_ARGS1(__VA_ARGS__);)                    \
+        _DEFINE_SYSCALL32_END(name, __VA_ARGS__);                            \
+    }
 
 struct syscall_handler_t {
     uint32_t (*handler)(interrupt_stack*, mmx_registers*);
@@ -107,10 +114,11 @@ struct syscall_handler_t {
 
 static syscall_handler_t syscall_handlers[SYSCALL_HANDLERS_SIZE];
 
-static inline void not_implemented(const char* pos, int line)
-{
-    kmsgf("[kernel] the function at %s:%d is not implemented, killing the pid%d...",
-            pos, line, current_process->pid);
+static inline void not_implemented(const char* pos, int line) {
+    kmsgf(
+        "[kernel] the function at %s:%d is not implemented, killing the "
+        "pid%d...",
+        pos, line, current_process->pid);
     current_thread->send_signal(SIGSYS);
 }
 
@@ -124,8 +132,10 @@ DEFINE_SYSCALL32(getdents, int, fd, char __user*, buf, size_t, cnt)
 DEFINE_SYSCALL32(getdents64, int, fd, char __user*, buf, size_t, cnt)
 DEFINE_SYSCALL32(open, const char __user*, path, int, flags, mode_t, mode)
 DEFINE_SYSCALL32(chdir, const char __user*, path)
-DEFINE_SYSCALL32(symlink, const char __user*, target, const char __user*, linkpath)
-DEFINE_SYSCALL32(readlink, const char __user*, pathname, char __user*, buf, size_t, buf_size)
+DEFINE_SYSCALL32(symlink, const char __user*, target, const char __user*,
+                 linkpath)
+DEFINE_SYSCALL32(readlink, const char __user*, pathname, char __user*, buf,
+                 size_t, buf_size)
 DEFINE_SYSCALL32(ioctl, int, fd, unsigned long, request, uintptr_t, arg3)
 DEFINE_SYSCALL32(munmap, uintptr_t, addr, size_t, len)
 DEFINE_SYSCALL32(poll, pollfd __user*, fds, nfds_t, nfds, int, timeout)
@@ -136,22 +146,18 @@ DEFINE_SYSCALL32(truncate, const char __user*, pathname, long, length)
 DEFINE_SYSCALL32(mkdir, const char __user*, pathname, mode_t, mode)
 DEFINE_SYSCALL32_TO(fcntl64, fcntl, int, fd, int, cmd, unsigned long, arg)
 
-DEFINE_SYSCALL32_TO(sendfile64, sendfile,
-        int, out_fd, int, in_fd, off_t __user*, offset, size_t, count)
+DEFINE_SYSCALL32_TO(sendfile64, sendfile, int, out_fd, int, in_fd,
+                    off_t __user*, offset, size_t, count)
 
-DEFINE_SYSCALL32(statx, int, dirfd, const char __user*, path,
-        int, flags, unsigned int, mask, statx __user*, statxbuf)
+DEFINE_SYSCALL32(statx, int, dirfd, const char __user*, path, int, flags,
+                 unsigned int, mask, statx __user*, statxbuf)
 
-DEFINE_SYSCALL32(mmap_pgoff,
-        uintptr_t, addr,
-        size_t, len,
-        int, prot,
-        int, flags,
-        int, fd,
-        off_t, pgoffset)
+DEFINE_SYSCALL32(mmap_pgoff, uintptr_t, addr, size_t, len, int, prot, int,
+                 flags, int, fd, off_t, pgoffset)
 
-DEFINE_SYSCALL32(mount, const char __user*, source, const char __user*,
-        target, const char __user*, fstype, unsigned long, flags, const void __user*, _fsdata)
+DEFINE_SYSCALL32(mount, const char __user*, source, const char __user*, target,
+                 const char __user*, fstype, unsigned long, flags,
+                 const void __user*, _fsdata)
 
 DEFINE_SYSCALL32(waitpid, pid_t, waitpid, int __user*, arg1, int, options)
 DEFINE_SYSCALL32(getsid, pid_t, pid)
@@ -175,25 +181,23 @@ DEFINE_SYSCALL32(brk, uintptr_t, addr)
 DEFINE_SYSCALL32(umask, mode_t, mask)
 DEFINE_SYSCALL32(kill, pid_t, pid, int, sig)
 DEFINE_SYSCALL32(tkill, pid_t, tid, int, sig)
-DEFINE_SYSCALL32(rt_sigprocmask, int, how,
-        const kernel::sigmask_type __user*, set,
-        kernel::sigmask_type __user*, oldset, size_t, sigsetsize)
-DEFINE_SYSCALL32(rt_sigaction, int, signum,
-        const kernel::sigaction __user*, act,
-        kernel::sigaction __user*, oldact, size_t, sigsetsize)
+DEFINE_SYSCALL32(rt_sigprocmask, int, how, const kernel::sigmask_type __user*,
+                 set, kernel::sigmask_type __user*, oldset, size_t, sigsetsize)
+DEFINE_SYSCALL32(rt_sigaction, int, signum, const kernel::sigaction __user*,
+                 act, kernel::sigaction __user*, oldact, size_t, sigsetsize)
 DEFINE_SYSCALL32(newuname, new_utsname __user*, buf)
 
 DEFINE_SYSCALL32_NORETURN(exit, int, status)
 
 DEFINE_SYSCALL32(gettimeofday, timeval __user*, tv, void __user*, tz)
-DEFINE_SYSCALL32_TO(clock_gettime64, clock_gettime,
-        clockid_t, clk_id, timespec __user*, tp)
+DEFINE_SYSCALL32_TO(clock_gettime64, clock_gettime, clockid_t, clk_id,
+                    timespec __user*, tp)
 
 extern "C" void NORETURN ISR_stub_restore();
-static uint32_t _syscall32_fork(interrupt_stack* data, mmx_registers* mmxregs)
-{
+static uint32_t _syscall32_fork(interrupt_stack* data, mmx_registers* mmxregs) {
     auto& newproc = procs->copy_from(*current_process);
-    auto [ iter_newthd, inserted ] = newproc.thds.emplace(*current_thread, newproc.pid);
+    auto [iter_newthd, inserted] =
+        newproc.thds.emplace(*current_thread, newproc.pid);
     assert(inserted);
     auto* newthd = &*iter_newthd;
 
@@ -229,8 +233,7 @@ static uint32_t _syscall32_fork(interrupt_stack* data, mmx_registers* mmxregs)
     return newproc.pid;
 }
 
-static uint32_t _syscall32_llseek(interrupt_stack* data, mmx_registers*)
-{
+static uint32_t _syscall32_llseek(interrupt_stack* data, mmx_registers*) {
     SYSCALL32_ARG1(unsigned int, fd);
     SYSCALL32_ARG2(unsigned long, offset_high);
     SYSCALL32_ARG3(unsigned long, offset_low);
@@ -252,8 +255,7 @@ static uint32_t _syscall32_llseek(interrupt_stack* data, mmx_registers*)
     return 0;
 }
 
-static uint32_t _syscall32_readv(interrupt_stack* data, mmx_registers*)
-{
+static uint32_t _syscall32_readv(interrupt_stack* data, mmx_registers*) {
     SYSCALL32_ARG1(int, fd);
     SYSCALL32_ARG2(const types::iovec32 __user*, _iov);
     SYSCALL32_ARG3(int, iovcnt);
@@ -273,8 +275,7 @@ static uint32_t _syscall32_readv(interrupt_stack* data, mmx_registers*)
     return kernel::syscall::do_readv(fd, iov.data(), iovcnt);
 }
 
-static uint32_t _syscall32_writev(interrupt_stack* data, mmx_registers*)
-{
+static uint32_t _syscall32_writev(interrupt_stack* data, mmx_registers*) {
     SYSCALL32_ARG1(int, fd);
     SYSCALL32_ARG2(const types::iovec32 __user*, _iov);
     SYSCALL32_ARG3(int, iovcnt);
@@ -294,15 +295,13 @@ static uint32_t _syscall32_writev(interrupt_stack* data, mmx_registers*)
     return kernel::syscall::do_writev(fd, iov.data(), iovcnt);
 }
 
-[[noreturn]] static uint32_t _syscall32_exit_group(
-        interrupt_stack* data, mmx_registers* mmxregs)
-{
+[[noreturn]] static uint32_t _syscall32_exit_group(interrupt_stack* data,
+                                                   mmx_registers* mmxregs) {
     // we implement exit_group as exit for now
     _syscall32_exit(data, mmxregs);
 }
 
-static uint32_t _syscall32_execve(interrupt_stack* data, mmx_registers*)
-{
+static uint32_t _syscall32_execve(interrupt_stack* data, mmx_registers*) {
     SYSCALL32_ARG1(const char __user*, exec);
     SYSCALL32_ARG2(const uint32_t __user*, argv);
     SYSCALL32_ARG3(const uint32_t __user*, envp);
@@ -334,8 +333,8 @@ static uint32_t _syscall32_execve(interrupt_stack* data, mmx_registers*)
     return retval.status;
 }
 
-static uint32_t _syscall32_wait4(interrupt_stack* data, mmx_registers* mmxregs)
-{
+static uint32_t _syscall32_wait4(interrupt_stack* data,
+                                 mmx_registers* mmxregs) {
     SYSCALL32_ARG4(void __user*, rusage);
 
     // TODO: getrusage
@@ -345,8 +344,8 @@ static uint32_t _syscall32_wait4(interrupt_stack* data, mmx_registers* mmxregs)
     return _syscall32_waitpid(data, mmxregs);
 }
 
-void kernel::handle_syscall32(int no, interrupt_stack* data, mmx_registers* mmxregs)
-{
+void kernel::handle_syscall32(int no, interrupt_stack* data,
+                              mmx_registers* mmxregs) {
     if (no >= SYSCALL_HANDLERS_SIZE || !syscall_handlers[no].handler) {
         kmsgf("[kernel] syscall %d(%x) isn't implemented", no, no);
         NOT_IMPLEMENTED;
@@ -356,7 +355,8 @@ void kernel::handle_syscall32(int no, interrupt_stack* data, mmx_registers* mmxr
         return;
     }
 
-    // kmsgf_debug("[kernel:debug] (pid\t%d) %s()", current_process->pid, syscall_handlers[no].name);
+    // kmsgf_debug("[kernel:debug] (pid\t%d) %s()", current_process->pid,
+    // syscall_handlers[no].name);
 
     asm volatile("sti");
     data->regs.rax = syscall_handlers[no].handler(data, mmxregs);
@@ -373,13 +373,12 @@ void kernel::handle_syscall32(int no, interrupt_stack* data, mmx_registers* mmxr
         current_thread->signals.handle(data, mmxregs);
 }
 
-#define REGISTER_SYSCALL_HANDLER(no, _name) \
-    syscall_handlers[(no)].handler = _syscall32_ ## _name; \
-    syscall_handlers[(no)].name = #_name; \
+#define REGISTER_SYSCALL_HANDLER(no, _name)              \
+    syscall_handlers[(no)].handler = _syscall32_##_name; \
+    syscall_handlers[(no)].name = #_name;
 
 SECTION(".text.kinit")
-void kernel::init_syscall_table()
-{
+void kernel::init_syscall_table() {
     // 32bit syscalls
     REGISTER_SYSCALL_HANDLER(0x01, exit);
     REGISTER_SYSCALL_HANDLER(0x02, fork);

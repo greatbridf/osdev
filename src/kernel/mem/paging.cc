@@ -16,14 +16,12 @@ using namespace types::list;
 using namespace kernel::async;
 using namespace kernel::mem::paging;
 
-static inline void __page_fault_die(uintptr_t vaddr)
-{
+static inline void __page_fault_die(uintptr_t vaddr) {
     kmsgf("[kernel] kernel panic: invalid memory access to %p", vaddr);
     freeze();
 }
 
-static inline PSE __parse_pse(PSE pse, bool priv)
-{
+static inline PSE __parse_pse(PSE pse, bool priv) {
     auto attr = priv ? PA_KERNEL_PAGE_TABLE : PA_USER_PAGE_TABLE;
     if (!(pse.attributes() & PA_P))
         pse.set(attr, alloc_page_table());
@@ -38,27 +36,23 @@ static struct zone_info {
 
 static mutex zone_lock;
 
-constexpr unsigned _msb(std::size_t x)
-{
+constexpr unsigned _msb(std::size_t x) {
     unsigned n = 0;
     while (x >>= 1)
         n++;
     return n;
 }
 
-constexpr pfn_t buddy(pfn_t pfn, unsigned order)
-{
+constexpr pfn_t buddy(pfn_t pfn, unsigned order) {
     return pfn ^ (1 << (order + 12));
 }
 
-constexpr pfn_t parent(pfn_t pfn, unsigned order)
-{
+constexpr pfn_t parent(pfn_t pfn, unsigned order) {
     return pfn & ~(1 << (order + 12));
 }
 
 // call with zone_lock held
-static inline void _zone_list_insert(unsigned order, page* zone)
-{
+static inline void _zone_list_insert(unsigned order, page* zone) {
     assert(zone->flags & PAGE_PRESENT && zone->flags & PAGE_BUDDY);
     assert((zone->flags & 0xff) == 0);
     zone->flags |= order;
@@ -68,8 +62,7 @@ static inline void _zone_list_insert(unsigned order, page* zone)
 }
 
 // call with zone_lock held
-static inline void _zone_list_remove(unsigned order, page* zone)
-{
+static inline void _zone_list_remove(unsigned order, page* zone) {
     assert(zone->flags & PAGE_PRESENT && zone->flags & PAGE_BUDDY);
     assert(zones[order].count > 0 && (zone->flags & 0xff) == order);
     zone->flags &= ~0xff;
@@ -79,8 +72,7 @@ static inline void _zone_list_remove(unsigned order, page* zone)
 }
 
 // call with zone_lock held
-static inline page* _zone_list_get(unsigned order)
-{
+static inline page* _zone_list_get(unsigned order) {
     if (zones[order].count == 0)
         return nullptr;
 
@@ -93,8 +85,7 @@ static inline page* _zone_list_get(unsigned order)
 
 // where order represents power of 2
 // call with zone_lock held
-static inline page* _create_zone(pfn_t pfn, unsigned order)
-{
+static inline page* _create_zone(pfn_t pfn, unsigned order) {
     page* zone = pfn_to_page(pfn);
 
     assert(zone->flags & PAGE_PRESENT);
@@ -105,8 +96,8 @@ static inline page* _create_zone(pfn_t pfn, unsigned order)
 }
 
 // call with zone_lock held
-static inline void _split_zone(page* zone, unsigned order, unsigned target_order)
-{
+static inline void _split_zone(page* zone, unsigned order,
+                               unsigned target_order) {
     while (order > target_order) {
         pfn_t pfn = page_to_pfn(zone);
         _create_zone(buddy(pfn, order - 1), order - 1);
@@ -119,8 +110,7 @@ static inline void _split_zone(page* zone, unsigned order, unsigned target_order
 }
 
 // call with zone_lock held
-static inline page* _alloc_zone(unsigned order)
-{
+static inline page* _alloc_zone(unsigned order) {
     for (unsigned i = order; i < 52; ++i) {
         auto zone = _zone_list_get(i);
         if (!zone)
@@ -138,8 +128,7 @@ static inline page* _alloc_zone(unsigned order)
     return nullptr;
 }
 
-void kernel::mem::paging::create_zone(uintptr_t start, uintptr_t end)
-{
+void kernel::mem::paging::create_zone(uintptr_t start, uintptr_t end) {
     start += (4096 - 1);
     start >>= 12;
     end >>= 12;
@@ -153,7 +142,7 @@ void kernel::mem::paging::create_zone(uintptr_t start, uintptr_t end)
     for (unsigned i = 0; i < _msb(end); ++i, low >>= 1) {
         if (!(low & 1))
             continue;
-        _create_zone(low << (12+i), i);
+        _create_zone(low << (12 + i), i);
         low++;
     }
 
@@ -165,8 +154,7 @@ void kernel::mem::paging::create_zone(uintptr_t start, uintptr_t end)
     }
 }
 
-void kernel::mem::paging::mark_present(uintptr_t start, uintptr_t end)
-{
+void kernel::mem::paging::mark_present(uintptr_t start, uintptr_t end) {
     start >>= 12;
 
     end += (4096 - 1);
@@ -176,8 +164,7 @@ void kernel::mem::paging::mark_present(uintptr_t start, uintptr_t end)
         PAGE_ARRAY[start++].flags |= PAGE_PRESENT;
 }
 
-page* kernel::mem::paging::alloc_pages(unsigned order)
-{
+page* kernel::mem::paging::alloc_pages(unsigned order) {
     lock_guard_irq lock{zone_lock};
     auto* zone = _alloc_zone(order);
     if (!zone)
@@ -186,13 +173,11 @@ page* kernel::mem::paging::alloc_pages(unsigned order)
     return zone;
 }
 
-page* kernel::mem::paging::alloc_page()
-{
+page* kernel::mem::paging::alloc_page() {
     return alloc_pages(0);
 }
 
-pfn_t kernel::mem::paging::alloc_page_table()
-{
+pfn_t kernel::mem::paging::alloc_page_table() {
     page* zone = alloc_page();
     pfn_t pfn = page_to_pfn(zone);
 
@@ -201,8 +186,7 @@ pfn_t kernel::mem::paging::alloc_page_table()
     return pfn;
 }
 
-void kernel::mem::paging::free_pages(page* pg, unsigned order)
-{
+void kernel::mem::paging::free_pages(page* pg, unsigned order) {
     assert((pg->flags & 0xff) == order);
 
     // TODO: atomic
@@ -237,48 +221,41 @@ void kernel::mem::paging::free_pages(page* pg, unsigned order)
     _zone_list_insert(order, pg);
 }
 
-void kernel::mem::paging::free_page(page* page)
-{
+void kernel::mem::paging::free_page(page* page) {
     return free_pages(page, 0);
 }
 
-void kernel::mem::paging::free_pages(pfn_t pfn, unsigned order)
-{
+void kernel::mem::paging::free_pages(pfn_t pfn, unsigned order) {
     return free_pages(pfn_to_page(pfn), order);
 }
 
-void kernel::mem::paging::free_page(pfn_t pfn)
-{
+void kernel::mem::paging::free_page(pfn_t pfn) {
     return free_page(pfn_to_page(pfn));
 }
 
-pfn_t kernel::mem::paging::page_to_pfn(page* _page)
-{
+pfn_t kernel::mem::paging::page_to_pfn(page* _page) {
     return (pfn_t)(_page - PAGE_ARRAY) * 0x1000;
 }
 
-page* kernel::mem::paging::pfn_to_page(pfn_t pfn)
-{
+page* kernel::mem::paging::pfn_to_page(pfn_t pfn) {
     return PAGE_ARRAY + pfn / 0x1000;
 }
 
-void kernel::mem::paging::increase_refcount(page* pg)
-{
+void kernel::mem::paging::increase_refcount(page* pg) {
     pg->refcount++;
 }
 
-void kernel::mem::paging::handle_page_fault(unsigned long err)
-{
+void kernel::mem::paging::handle_page_fault(unsigned long err) {
     using namespace kernel::mem;
     using namespace paging;
 
     uintptr_t vaddr;
-    asm volatile("mov %%cr2, %0": "=g"(vaddr): : );
+    asm volatile("mov %%cr2, %0" : "=g"(vaddr) : :);
     auto& mms = current_process->mms;
 
     auto* mm_area = mms.find(vaddr);
     if (!mm_area) [[unlikely]] {
-        // user access of address that does not exist
+        // user access to address that does not exist
         if (err & PAGE_FAULT_U)
             kill_current(SIGSEGV);
 
@@ -355,12 +332,8 @@ void kernel::mem::paging::handle_page_fault(unsigned long err)
         size_t offset = (vaddr & ~0xfff) - mm_area->start;
         char* data = physaddr<char>{pfn};
 
-        int n = fs::read(
-            mm_area->mapped_file,
-            data,
-            4096,
-            mm_area->file_offset + offset,
-            4096);
+        int n = fs::read(mm_area->mapped_file, data, 4096,
+                         mm_area->file_offset + offset, 4096);
 
         // TODO: send SIGBUS if offset is greater than real size
         if (n != 4096)
@@ -374,7 +347,7 @@ void kernel::mem::paging::handle_page_fault(unsigned long err)
 }
 
 vaddr_range::vaddr_range(pfn_t pt, uintptr_t start, uintptr_t end, bool priv)
-    : n {start >= end ? 0 : ((end - start) >> 12)}
+    : n{start >= end ? 0 : ((end - start) >> 12)}
     , idx4{!n ? 0 : idx_p4(start)}
     , idx3{!n ? 0 : idx_p3(start)}
     , idx2{!n ? 0 : idx_p2(start)}
@@ -383,46 +356,50 @@ vaddr_range::vaddr_range(pfn_t pt, uintptr_t start, uintptr_t end, bool priv)
     , pdpt{!n ? PSE{0} : __parse_pse(pml4[idx4], priv)}
     , pd{!n ? PSE{0} : __parse_pse(pdpt[idx3], priv)}
     , pt{!n ? PSE{0} : __parse_pse(pd[idx2], priv)}
-    , m_start{!n ? 0 : start}, m_end{!n ? 0 : end}
-    , is_privilege{!n ? false : priv} { }
+    , m_start{!n ? 0 : start}
+    , m_end{!n ? 0 : end}
+    , is_privilege{!n ? false : priv} {}
 
 vaddr_range::vaddr_range(std::nullptr_t)
     : n{}
-    , idx4{}, idx3{}, idx2{}, idx1{}
-    , pml4{0}, pdpt{0}
-    , pd{0}, pt{0}
-    , m_start{}, m_end{}, is_privilege{} { }
+    , idx4{}
+    , idx3{}
+    , idx2{}
+    , idx1{}
+    , pml4{0}
+    , pdpt{0}
+    , pd{0}
+    , pt{0}
+    , m_start{}
+    , m_end{}
+    , is_privilege{} {}
 
-vaddr_range vaddr_range::begin() const noexcept
-{
+vaddr_range vaddr_range::begin() const noexcept {
     return *this;
 }
 
-vaddr_range vaddr_range::end() const noexcept
-{
-    return vaddr_range {nullptr};
+vaddr_range vaddr_range::end() const noexcept {
+    return vaddr_range{nullptr};
 }
 
-PSE vaddr_range::operator*() const noexcept
-{
+PSE vaddr_range::operator*() const noexcept {
     return pt[idx1];
 }
 
-vaddr_range& vaddr_range::operator++()
-{
+vaddr_range& vaddr_range::operator++() {
     --n;
 
-    if ((idx1 = (idx1+1)%512) != 0)
+    if ((idx1 = (idx1 + 1) % 512) != 0)
         return *this;
 
     do {
-        if ((idx2 = (idx2+1)%512) != 0)
+        if ((idx2 = (idx2 + 1) % 512) != 0)
             break;
         do {
-            if ((idx3 = (idx3+1)%512) != 0)
+            if ((idx3 = (idx3 + 1) % 512) != 0)
                 break;
 
-            idx4 = (idx4+1) % 512;
+            idx4 = (idx4 + 1) % 512;
 
             // if idx4 is 0 after update, we have an overflow
             assert(idx4 != 0);
@@ -437,12 +414,10 @@ vaddr_range& vaddr_range::operator++()
     return *this;
 }
 
-vaddr_range::operator bool() const noexcept
-{
+vaddr_range::operator bool() const noexcept {
     return n;
 }
 
-bool vaddr_range::operator==(const vaddr_range& other) const noexcept
-{
+bool vaddr_range::operator==(const vaddr_range& other) const noexcept {
     return n == other.n;
 }

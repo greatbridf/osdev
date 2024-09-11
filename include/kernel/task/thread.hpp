@@ -17,16 +17,16 @@ namespace kernel::task {
 using tid_t = std::size_t;
 
 struct thread {
-public:
+   public:
     using thd_attr_t = uint32_t;
-    static constexpr thd_attr_t SYSTEM  = 0x01;
-    static constexpr thd_attr_t READY   = 0x02;
+    static constexpr thd_attr_t SYSTEM = 0x01;
+    static constexpr thd_attr_t READY = 0x02;
     static constexpr thd_attr_t STOPPED = 0x04;
-    static constexpr thd_attr_t ZOMBIE  = 0x08;
-    static constexpr thd_attr_t ISLEEP  = 0x10;
-    static constexpr thd_attr_t USLEEP  = 0x20;
+    static constexpr thd_attr_t ZOMBIE = 0x08;
+    static constexpr thd_attr_t ISLEEP = 0x10;
+    static constexpr thd_attr_t USLEEP = 0x20;
 
-private:
+   private:
     struct kernel_stack {
         mem::paging::pfn_t pfn;
         uintptr_t sp;
@@ -42,18 +42,18 @@ private:
         void load_interrupt_stack() const;
     };
 
-public:
+   public:
     kernel_stack kstack;
     pid_t owner;
     thd_attr_t attr;
     signal_list signals;
 
-    int* __user set_child_tid {};
-    int* __user clear_child_tid {};
+    int* __user set_child_tid{};
+    int* __user clear_child_tid{};
 
-    std::string name {};
-    uint64_t tls_desc32 {};
-    std::size_t elected_times {};
+    std::string name{};
+    uint64_t tls_desc32{};
+    std::size_t elected_times{};
 
     explicit thread(std::string name, pid_t owner);
     thread(const thread& val, pid_t owner);

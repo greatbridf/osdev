@@ -10,22 +10,22 @@
 #include <types/buffer.hpp>
 #include <types/cplusplus.hpp>
 
-#include <kernel/async/waitlist.hpp>
 #include <kernel/async/lock.hpp>
+#include <kernel/async/waitlist.hpp>
 
 namespace kernel::tty {
 
 class tty : public types::non_copyable {
-public:
+   public:
     static constexpr size_t BUFFER_SIZE = 4096;
 
-private:
+   private:
     void _real_commit_char(int c);
     void _echo_char(int c);
 
     int _do_erase(bool should_echo);
 
-public:
+   public:
     explicit tty(std::string name);
     virtual void putchar(char c) = 0;
     void print(const char* str);
@@ -45,20 +45,14 @@ public:
     // TODO: formal poll support
     int poll();
 
-    constexpr void set_pgrp(pid_t pgid)
-    {
-        fg_pgroup = pgid;
-    }
+    constexpr void set_pgrp(pid_t pgid) { fg_pgroup = pgid; }
 
-    constexpr pid_t get_pgrp(void) const
-    {
-        return fg_pgroup;
-    }
+    constexpr pid_t get_pgrp(void) const { return fg_pgroup; }
 
     termios termio;
     std::string name;
 
-protected:
+   protected:
     async::mutex mtx_buf;
     types::buffer buf;
     async::wait_list waitlist;
@@ -67,7 +61,7 @@ protected:
 };
 
 class vga_tty : public virtual tty {
-public:
+   public:
     vga_tty();
     virtual void putchar(char c) override;
 };

@@ -16,35 +16,31 @@ struct tmpfs_file_entry {
 };
 
 class tmpfs : public virtual vfs {
-private:
+   private:
     using fe_t = tmpfs_file_entry;
     using vfe_t = std::vector<fe_t>;
     using fdata_t = std::vector<char>;
 
-private:
+   private:
     ino_t m_next_ino;
 
-private:
-    ino_t assign_ino()
-    {
-        return m_next_ino++;
-    }
+   private:
+    ino_t assign_ino() { return m_next_ino++; }
 
-protected:
+   protected:
     inline vfe_t* make_vfe() { return new vfe_t{}; }
     inline fdata_t* make_fdata() { return new fdata_t{}; }
 
-    void mklink(inode* dir, inode* ind, std::string filename)
-    {
+    void mklink(inode* dir, inode* ind, std::string filename) {
         auto& fes = *(vfe_t*)dir->fs_data;
-        fes.emplace_back(fe_t { ind->ino, std::move(filename) });
+        fes.emplace_back(fe_t{ind->ino, std::move(filename)});
 
         dir->size += sizeof(fe_t);
         ++ind->nlink;
     }
 
-    virtual ssize_t readdir(inode* dir, size_t offset, const vfs::filldir_func& filldir) override
-    {
+    virtual ssize_t readdir(inode* dir, size_t offset,
+                            const vfs::filldir_func& filldir) override {
         if (!S_ISDIR(dir->mode))
             return -ENOTDIR;
 
@@ -66,11 +62,8 @@ protected:
         return nread;
     }
 
-public:
-    explicit tmpfs()
-        : vfs(make_device(0, 2), 4096)
-        , m_next_ino{1}
-    {
+   public:
+    explicit tmpfs() : vfs(make_device(0, 2), 4096), m_next_ino{1} {
         auto* in = alloc_inode(assign_ino());
 
         in->fs_data = make_vfe();
@@ -82,8 +75,8 @@ public:
         register_root_node(in);
     }
 
-    virtual ssize_t read(struct inode* file, char* buf, size_t buf_size, size_t count, off_t offset) override
-    {
+    virtual ssize_t read(struct inode* file, char* buf, size_t buf_size,
+                         size_t count, off_t offset) override {
         if (!S_ISREG(file->mode))
             return -EINVAL;
 
@@ -102,15 +95,15 @@ public:
         return count;
     }
 
-    virtual ssize_t write(struct inode* file, const char* buf, size_t count, off_t offset) override
-    {
+    virtual ssize_t write(struct inode* file, const char* buf, size_t count,
+                          off_t offset) override {
         if (!S_ISREG(file->mode))
             return -EINVAL;
 
         auto* data = (fdata_t*)file->fs_data;
 
         if (data->size() < offset + count)
-            data->resize(offset+count);
+            data->resize(offset + count);
         memcpy(data->data() + offset, buf, count);
 
         file->size = data->size();
@@ -118,8 +111,8 @@ public:
         return count;
     }
 
-    virtual int creat(struct inode* dir, struct dentry* at, mode_t mode) override
-    {
+    virtual int creat(struct inode* dir, struct dentry* at,
+                      mode_t mode) override {
         if (!S_ISDIR(dir->mode))
             return -ENOTDIR;
         assert(at->parent && at->parent->inode == dir);
@@ -135,8 +128,8 @@ public:
         return 0;
     }
 
-    virtual int mknod(struct inode* dir, struct dentry* at, mode_t mode, dev_t dev) override
-    {
+    virtual int mknod(struct inode* dir, struct dentry* at, mode_t mode,
+                      dev_t dev) override {
         if (!S_ISDIR(dir->mode))
             return -ENOTDIR;
         assert(at->parent && at->parent->inode == dir);
@@ -158,8 +151,8 @@ public:
         return 0;
     }
 
-    virtual int mkdir(struct inode* dir, struct dentry* at, mode_t mode) override
-    {
+    virtual int mkdir(struct inode* dir, struct dentry* at,
+                      mode_t mode) override {
         if (!S_ISDIR(dir->mode))
             return -ENOTDIR;
         assert(at->parent && at->parent->inode == dir);
@@ -178,8 +171,8 @@ public:
         return 0;
     }
 
-    virtual int symlink(struct inode* dir, struct dentry* at, const char* target) override
-    {
+    virtual int symlink(struct inode* dir, struct dentry* at,
+                        const char* target) override {
         if (!S_ISDIR(dir->mode))
             return -ENOTDIR;
         assert(at->parent && at->parent->inode == dir);
@@ -200,8 +193,8 @@ public:
         return 0;
     }
 
-    virtual int readlink(struct inode* file, char* buf, size_t buf_size) override
-    {
+    virtual int readlink(struct inode* file, char* buf,
+                         size_t buf_size) override {
         if (!S_ISLNK(file->mode))
             return -EINVAL;
 
@@ -215,8 +208,7 @@ public:
         return size;
     }
 
-    virtual int unlink(struct inode* dir, struct dentry* at) override
-    {
+    virtual int unlink(struct inode* dir, struct dentry* at) override {
         if (!S_ISDIR(dir->mode))
             return -ENOTDIR;
         assert(at->parent && at->parent->inode == dir);
@@ -224,7 +216,7 @@ public:
         auto* vfe = (vfe_t*)dir->fs_data;
         assert(vfe);
 
-        for (auto iter = vfe->begin(); iter != vfe->end(); ) {
+        for (auto iter = vfe->begin(); iter != vfe->end();) {
             if (iter->ino != at->inode->ino) {
                 ++iter;
                 continue;
@@ -254,15 +246,13 @@ public:
         return -EIO;
     }
 
-    virtual dev_t i_device(inode* file) override
-    {
+    virtual dev_t i_device(inode* file) override {
         if (file->mode & S_IFMT & (S_IFBLK | S_IFCHR))
             return (dev_t)(uintptr_t)file->fs_data;
         return -ENODEV;
     }
 
-    virtual int truncate(inode* file, size_t size) override
-    {
+    virtual int truncate(inode* file, size_t size) override {
         if (!S_ISREG(file->mode))
             return -EINVAL;
 
@@ -273,14 +263,12 @@ public:
     }
 };
 
-static tmpfs* create_tmpfs(const char*, unsigned long, const void*)
-{
+static tmpfs* create_tmpfs(const char*, unsigned long, const void*) {
     // TODO: flags
     return new tmpfs;
 }
 
-int fs::register_tmpfs()
-{
+int fs::register_tmpfs() {
     fs::register_fs("tmpfs", {create_tmpfs});
     return 0;
 }

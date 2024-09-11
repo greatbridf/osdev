@@ -42,9 +42,8 @@ static struct IDT_entry IDT[256];
 extern "C" uintptr_t ISR_START_ADDR;
 
 SECTION(".text.kinit")
-static inline void set_idt_entry(IDT_entry (&idt)[256], int n,
-    uintptr_t offset, uint16_t selector, uint8_t type)
-{
+static inline void set_idt_entry(IDT_entry (&idt)[256], int n, uintptr_t offset,
+                                 uint16_t selector, uint8_t type) {
     idt[n].offset_low = offset & 0xffff;
     idt[n].segment = selector;
     idt[n].IST = 0;
@@ -58,18 +57,19 @@ using kernel::irq::irq_handler_t;
 static std::vector<std::list<irq_handler_t>> s_irq_handlers;
 
 SECTION(".text.kinit")
-void kernel::kinit::init_interrupt()
-{
+void kernel::kinit::init_interrupt() {
     for (int i = 0; i < 0x30; ++i)
-        set_idt_entry(IDT, i, ISR_START_ADDR+8*i, 0x08, KERNEL_INTERRUPT_GATE_TYPE);
-    set_idt_entry(IDT, 0x80, ISR_START_ADDR+8*0x80, 0x08, USER_INTERRUPT_GATE_TYPE);
+        set_idt_entry(IDT, i, ISR_START_ADDR + 8 * i, 0x08,
+                      KERNEL_INTERRUPT_GATE_TYPE);
+    set_idt_entry(IDT, 0x80, ISR_START_ADDR + 8 * 0x80, 0x08,
+                  USER_INTERRUPT_GATE_TYPE);
 
     uint64_t idt_descriptor[2];
     idt_descriptor[0] = (sizeof(IDT_entry) * 256) << 48;
     idt_descriptor[1] = (uintptr_t)IDT;
 
     // initialize PIC
-    asm volatile("lidt (%0)": :"r"((uintptr_t)idt_descriptor + 6): );
+    asm volatile("lidt (%0)" : : "r"((uintptr_t)idt_descriptor + 6) :);
     s_irq_handlers.resize(16);
 
     // TODO: move this to timer driver
@@ -93,35 +93,32 @@ void kernel::kinit::init_interrupt()
     port_pic2_data = 0x00;
 }
 
-void kernel::irq::register_handler(int irqno, irq_handler_t handler)
-{
+void kernel::irq::register_handler(int irqno, irq_handler_t handler) {
     s_irq_handlers[irqno].emplace_back(std::move(handler));
 }
 
-static inline void fault_handler(interrupt_stack* context, mmx_registers*)
-{
+static inline void fault_handler(interrupt_stack* context, mmx_registers*) {
     switch (context->int_no) {
-    case 6:
-    case 8: {
-        if (!current_process->attr.system)
-            kill_current(SIGSEGV); // noreturn
-    } break;
-    case 13: {
-        if (!current_process->attr.system)
-            kill_current(SIGILL); // noreturn
-    } break;
-    case 14: {
-        kernel::mem::paging::handle_page_fault(context->error_code);
-        return;
-    } break;
+        case 6:
+        case 8: {
+            if (!current_process->attr.system)
+                kill_current(SIGSEGV); // noreturn
+        } break;
+        case 13: {
+            if (!current_process->attr.system)
+                kill_current(SIGILL); // noreturn
+        } break;
+        case 14: {
+            kernel::mem::paging::handle_page_fault(context->error_code);
+            return;
+        } break;
     }
 
     // fault can not be resolved
     freeze();
 }
 
-static inline void irq_handler(interrupt_stack* context, mmx_registers*)
-{
+static inline void irq_handler(interrupt_stack* context, mmx_registers*) {
     int irqno = context->int_no - 0x20;
 
     constexpr uint8_t PIC_EOI = 0x20;
@@ -134,8 +131,8 @@ static inline void irq_handler(interrupt_stack* context, mmx_registers*)
         handler();
 }
 
-extern "C" void interrupt_handler(interrupt_stack* context, mmx_registers* mmxregs)
-{
+extern "C" void interrupt_handler(interrupt_stack* context,
+                                  mmx_registers* mmxregs) {
     if (context->int_no < 0x20) // interrupt is a fault
         fault_handler(context, mmxregs);
     else if (context->int_no == 0x80) // syscall by int 0x80

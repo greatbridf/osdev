@@ -1,31 +1,37 @@
 #pragma once
 
+#include "paging.hpp"
+#include "vm_area.hpp"
+
 #include <set>
 
 #include <stdint.h>
 
-#include "vm_area.hpp"
-#include "paging.hpp"
-
 namespace kernel::mem {
 
-constexpr uintptr_t KERNEL_SPACE_START    = 0x8000000000000000ULL;
+constexpr uintptr_t KERNEL_SPACE_START = 0x8000000000000000ULL;
 constexpr uintptr_t USER_SPACE_MEMORY_TOP = 0x0000800000000000ULL;
-constexpr uintptr_t MMAP_MIN_ADDR         = 0x0000000000001000ULL;
-constexpr uintptr_t STACK_MIN_ADDR        = 0x0000700000000000ULL;
+constexpr uintptr_t MMAP_MIN_ADDR = 0x0000000000001000ULL;
+constexpr uintptr_t STACK_MIN_ADDR = 0x0000700000000000ULL;
 
 class mm_list {
-private:
+   private:
     struct comparator {
-        constexpr bool operator()(const vm_area& lhs, const vm_area& rhs) const noexcept
-        { return lhs < rhs; }
-        constexpr bool operator()(const vm_area& lhs, uintptr_t rhs) const noexcept
-        { return lhs < rhs; }
-        constexpr bool operator()(uintptr_t lhs, const vm_area& rhs) const noexcept
-        { return lhs < rhs; }
+        constexpr bool operator()(const vm_area& lhs,
+                                  const vm_area& rhs) const noexcept {
+            return lhs < rhs;
+        }
+        constexpr bool operator()(const vm_area& lhs,
+                                  uintptr_t rhs) const noexcept {
+            return lhs < rhs;
+        }
+        constexpr bool operator()(uintptr_t lhs,
+                                  const vm_area& rhs) const noexcept {
+            return lhs < rhs;
+        }
     };
 
-public:
+   public:
     using list_type = std::set<vm_area, comparator>;
     using iterator = list_type::iterator;
     using const_iterator = list_type::const_iterator;
@@ -43,12 +49,12 @@ public:
         std::size_t file_offset;
     };
 
-private:
+   private:
     list_type m_areas;
     paging::pfn_t m_pt;
-    iterator m_brk {};
+    iterator m_brk{};
 
-public:
+   public:
     // default constructor copies kernel_mms
     explicit mm_list();
     // copies kernel_mms and mirrors user space
@@ -57,7 +63,7 @@ public:
     constexpr mm_list(mm_list&& v)
         : m_areas(std::move(v.m_areas))
         , m_pt(std::exchange(v.m_pt, 0))
-        , m_brk{std::move(v.m_brk)} { }
+        , m_brk{std::move(v.m_brk)} {}
 
     ~mm_list();
 
@@ -82,25 +88,22 @@ public:
 
     int mmap(const map_args& args);
 
-    constexpr vm_area* find(uintptr_t lp)
-    {
+    constexpr vm_area* find(uintptr_t lp) {
         auto iter = m_areas.find(lp);
         if (iter == m_areas.end())
             return nullptr;
         return &iter;
     }
 
-    constexpr const vm_area* find(uintptr_t lp) const
-    {
+    constexpr const vm_area* find(uintptr_t lp) const {
         auto iter = m_areas.find(lp);
         if (iter == m_areas.end())
             return nullptr;
         return &iter;
     }
 
-    constexpr paging::PSE get_page_table() const noexcept
-    {
-        return paging::PSE {m_pt};
+    constexpr paging::PSE get_page_table() const noexcept {
+        return paging::PSE{m_pt};
     }
 };
 

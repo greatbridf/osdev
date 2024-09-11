@@ -10,9 +10,9 @@
 #include <kernel/vfs/inode.hpp>
 
 namespace fs {
-static constexpr unsigned long D_PRESENT    = 1 << 0;
-static constexpr unsigned long D_DIRECTORY  = 1 << 1;
-static constexpr unsigned long D_LOADED     = 1 << 2;
+static constexpr unsigned long D_PRESENT = 1 << 0;
+static constexpr unsigned long D_DIRECTORY = 1 << 1;
+static constexpr unsigned long D_LOADED = 1 << 2;
 static constexpr unsigned long D_MOUNTPOINT = 1 << 3;
 
 struct dentry {
@@ -48,7 +48,8 @@ struct dcache {
     std::size_t size;
 };
 
-std::pair<struct dentry*, int> d_find(struct dentry* parent, types::string_view name);
+std::pair<struct dentry*, int> d_find(struct dentry* parent,
+                                      types::string_view name);
 std::string d_path(const struct dentry* dentry, const struct dentry* root);
 
 dentry_pointer d_get(const dentry_pointer& dp);

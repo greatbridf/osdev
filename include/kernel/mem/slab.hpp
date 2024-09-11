@@ -5,9 +5,6 @@
 
 #include <stdint.h>
 
-#include "paging.hpp"
-#include "phys.hpp"
-
 namespace kernel::mem {
 
 struct slab_cache;

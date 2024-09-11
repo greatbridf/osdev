@@ -23,11 +23,11 @@ lock_context_t spin_lock_irqsave(spinlock_t& lock);
 void spin_unlock_irqrestore(spinlock_t& lock, lock_context_t context);
 
 class mutex {
-private:
+   private:
     spinlock_t m_lock;
 
-public:
-    constexpr mutex() : m_lock {0} { }
+   public:
+    constexpr mutex() : m_lock{0} {}
     mutex(const mutex&) = delete;
     ~mutex();
 
@@ -39,25 +39,25 @@ public:
 };
 
 class lock_guard {
-private:
+   private:
     mutex& m_mtx;
 
-public:
-    explicit inline lock_guard(mutex& mtx)
-        : m_mtx {mtx} { m_mtx.lock(); }
+   public:
+    explicit inline lock_guard(mutex& mtx) : m_mtx{mtx} { m_mtx.lock(); }
     lock_guard(const lock_guard&) = delete;
 
     inline ~lock_guard() { m_mtx.unlock(); }
 };
 
 class lock_guard_irq {
-private:
+   private:
     mutex& m_mtx;
     lock_context_t state;
 
-public:
-    explicit inline lock_guard_irq(mutex& mtx)
-        : m_mtx {mtx} { state = m_mtx.lock_irq(); }
+   public:
+    explicit inline lock_guard_irq(mutex& mtx) : m_mtx{mtx} {
+        state = m_mtx.lock_irq();
+    }
     lock_guard_irq(const lock_guard_irq&) = delete;
 
     inline ~lock_guard_irq() { m_mtx.unlock_irq(state); }

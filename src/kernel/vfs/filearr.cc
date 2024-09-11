@@ -18,18 +18,15 @@ struct fditem {
 };
 
 struct fditem_comparator {
-    constexpr bool operator()(const fditem& lhs, const fditem& rhs) const
-    {
+    constexpr bool operator()(const fditem& lhs, const fditem& rhs) const {
         return lhs.fd < rhs.fd;
     }
 
-    constexpr bool operator()(int fd, const fditem& rhs) const
-    {
+    constexpr bool operator()(int fd, const fditem& rhs) const {
         return fd < rhs.fd;
     }
 
-    constexpr bool operator()(const fditem& lhs, int fd) const
-    {
+    constexpr bool operator()(const fditem& lhs, int fd) const {
         return lhs.fd < fd;
     }
 };
@@ -50,8 +47,7 @@ struct filearray::impl {
     int place_new_file(std::shared_ptr<file> pfile, int flags);
 };
 
-int filearray::impl::allocate_fd(int from)
-{
+int filearray::impl::allocate_fd(int from) {
     if (from < min_avail)
         from = min_avail;
 
@@ -74,19 +70,16 @@ int filearray::impl::allocate_fd(int from)
     return fd;
 }
 
-void filearray::impl::release_fd(int fd)
-{
+void filearray::impl::release_fd(int fd) {
     if (fd < min_avail)
         min_avail = fd;
 }
 
-int filearray::impl::next_fd()
-{
+int filearray::impl::next_fd() {
     return allocate_fd(min_avail);
 }
 
-int filearray::impl::do_dup(const fditem& oldfile, int new_fd, int flags)
-{
+int filearray::impl::do_dup(const fditem& oldfile, int new_fd, int flags) {
     bool inserted;
     std::tie(std::ignore, inserted) = arr.emplace(new_fd, flags, oldfile.pfile);
     assert(inserted);
@@ -94,8 +87,7 @@ int filearray::impl::do_dup(const fditem& oldfile, int new_fd, int flags)
     return new_fd;
 }
 
-int filearray::impl::place_new_file(std::shared_ptr<file> pfile, int flags)
-{
+int filearray::impl::place_new_file(std::shared_ptr<file> pfile, int flags) {
     int fd = next_fd();
 
     bool inserted;
@@ -105,8 +97,7 @@ int filearray::impl::place_new_file(std::shared_ptr<file> pfile, int flags)
     return fd;
 }
 
-int filearray::dup(int old_fd)
-{
+int filearray::dup(int old_fd) {
     lock_guard lck{pimpl->mtx};
 
     auto iter = pimpl->arr.find(old_fd);
@@ -117,8 +108,7 @@ int filearray::dup(int old_fd)
     return pimpl->do_dup(*iter, fd, 0);
 }
 
-int filearray::dup(int old_fd, int new_fd, int flags)
-{
+int filearray::dup(int old_fd, int new_fd, int flags) {
     lock_guard lck{pimpl->mtx};
 
     auto iter_old = pimpl->arr.find(old_fd);
@@ -138,8 +128,7 @@ int filearray::dup(int old_fd, int new_fd, int flags)
     return pimpl->do_dup(*iter_old, fd, flags);
 }
 
-int filearray::dupfd(int fd, int min_fd, int flags)
-{
+int filearray::dupfd(int fd, int min_fd, int flags) {
     lock_guard lck{pimpl->mtx};
 
     auto iter = pimpl->arr.find(fd);
@@ -150,8 +139,7 @@ int filearray::dupfd(int fd, int min_fd, int flags)
     return pimpl->do_dup(*iter, new_fd, flags);
 }
 
-int filearray::set_flags(int fd, int flags)
-{
+int filearray::set_flags(int fd, int flags) {
     lock_guard lck{pimpl->mtx};
 
     auto iter = pimpl->arr.find(fd);
@@ -162,8 +150,7 @@ int filearray::set_flags(int fd, int flags)
     return 0;
 }
 
-int filearray::close(int fd)
-{
+int filearray::close(int fd) {
     lock_guard lck{pimpl->mtx};
 
     auto iter = pimpl->arr.find(fd);
@@ -176,10 +163,10 @@ int filearray::close(int fd)
     return 0;
 }
 
-static inline std::pair<dentry_pointer, int>
-_open_file(const fs_context& context, dentry* cwd, types::path_iterator filepath, int flags, mode_t mode)
-{
-    auto [ dent, ret ] = fs::open(context, cwd, filepath);
+static inline std::pair<dentry_pointer, int> _open_file(
+    const fs_context& context, dentry* cwd, types::path_iterator filepath,
+    int flags, mode_t mode) {
+    auto [dent, ret] = fs::open(context, cwd, filepath);
     if (!dent)
         return {nullptr, ret};
 
@@ -200,8 +187,8 @@ _open_file(const fs_context& context, dentry* cwd, types::path_iterator filepath
 }
 
 // TODO: file opening permissions check
-int filearray::open(dentry* cwd, types::path_iterator filepath, int flags, mode_t mode)
-{
+int filearray::open(dentry* cwd, types::path_iterator filepath, int flags,
+                    mode_t mode) {
     lock_guard lck{pimpl->mtx};
 
     auto [dent, ret] = _open_file(*pimpl->context, cwd, filepath, flags, mode);
@@ -238,46 +225,35 @@ int filearray::open(dentry* cwd, types::path_iterator filepath, int flags, mode_
     }
 
     return pimpl->place_new_file(
-        std::make_shared<regular_file>(fflags, 0, dent->inode),
-        fdflag);
+        std::make_shared<regular_file>(fflags, 0, dent->inode), fdflag);
 }
 
-int filearray::pipe(int (&pipefd)[2])
-{
+int filearray::pipe(int (&pipefd)[2]) {
     lock_guard lck{pimpl->mtx};
 
     if (1) {
-        std::shared_ptr<fs::pipe> ppipe { new fs::pipe };
+        std::shared_ptr<fs::pipe> ppipe{new fs::pipe};
 
         pipefd[0] = pimpl->place_new_file(
-            std::make_shared<fifo_file>(
-                file::file_flags { 1, 0, 0 }, ppipe),
-            0);
+            std::make_shared<fifo_file>(file::file_flags{1, 0, 0}, ppipe), 0);
 
         pipefd[1] = pimpl->place_new_file(
-            std::make_shared<fifo_file>(
-                file::file_flags { 0, 1, 0 }, ppipe),
-            0);
+            std::make_shared<fifo_file>(file::file_flags{0, 1, 0}, ppipe), 0);
     }
 
     return 0;
 }
 
-filearray::filearray(std::shared_ptr<impl> ptr)
-    : pimpl { ptr }
-{
-}
+filearray::filearray(std::shared_ptr<impl> ptr) : pimpl{ptr} {}
 
 filearray::filearray(const fs_context* context)
-    : filearray { std::make_shared<impl>() }
-{
+    : filearray{std::make_shared<impl>()} {
     pimpl->context = context;
 }
 
-filearray filearray::copy() const
-{
-    lock_guard lck { pimpl->mtx };
-    filearray ret { pimpl->context };
+filearray filearray::copy() const {
+    lock_guard lck{pimpl->mtx};
+    filearray ret{pimpl->context};
 
     ret.pimpl->min_avail = pimpl->min_avail;
     ret.pimpl->arr = pimpl->arr;
@@ -285,18 +261,15 @@ filearray filearray::copy() const
     return ret;
 }
 
-filearray filearray::share() const
-{
-    return filearray { pimpl };
+filearray filearray::share() const {
+    return filearray{pimpl};
 }
 
-void filearray::clear()
-{
+void filearray::clear() {
     pimpl.reset();
 }
 
-void filearray::onexec()
-{
+void filearray::onexec() {
     lock_guard lck{pimpl->mtx};
 
     for (auto iter = pimpl->arr.begin(); iter;) {
@@ -309,8 +282,7 @@ void filearray::onexec()
     }
 }
 
-file* filearray::operator[](int i) const
-{
+file* filearray::operator[](int i) const {
     lock_guard lck{pimpl->mtx};
 
     auto iter = pimpl->arr.find(i);

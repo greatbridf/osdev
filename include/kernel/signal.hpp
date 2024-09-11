@@ -1,13 +1,13 @@
 #pragma once
 
-#include <map>
 #include <list>
+#include <map>
 
 #include <signal.h>
 #include <stdint.h>
-#include <types/types.h>
 
 #include <types/cplusplus.hpp>
+#include <types/types.h>
 
 #include <kernel/async/lock.hpp>
 #include <kernel/interrupt.hpp>
@@ -24,31 +24,34 @@ struct sigaction {
 };
 
 class signal_list {
-public:
+   public:
     using signo_type = uint32_t;
     using list_type = std::list<signo_type>;
 
-private:
+   private:
     list_type m_list;
-    sigmask_type m_mask { };
+    sigmask_type m_mask{};
     std::map<signo_type, sigaction> m_handlers;
     async::mutex m_mtx;
 
-public:
-    static constexpr bool check_valid(signo_type sig)
-    {
+   public:
+    static constexpr bool check_valid(signo_type sig) {
         return sig >= 1 && sig <= 64;
     }
 
-public:
+   public:
     constexpr signal_list() = default;
     constexpr signal_list(const signal_list& val)
-        : m_list{val.m_list}, m_mask{val.m_mask}
-        , m_handlers{val.m_handlers}, m_mtx{} { }
+        : m_list{val.m_list}
+        , m_mask{val.m_mask}
+        , m_handlers{val.m_handlers}
+        , m_mtx{} {}
 
     constexpr signal_list(signal_list&& val)
-        : m_list{std::move(val.m_list)}, m_mask{std::move(val.m_mask)}
-        , m_handlers{std::move(val.m_handlers)}, m_mtx{} { }
+        : m_list{std::move(val.m_list)}
+        , m_mask{std::move(val.m_mask)}
+        , m_handlers{std::move(val.m_handlers)}
+        , m_mtx{} {}
 
     void on_exec();
 

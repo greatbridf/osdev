@@ -107,11 +107,11 @@ struct PACKED directory_entry {
 
 // TODO: deallocate inodes when dentry is destroyed
 class fat32 : public virtual fs::vfs {
-private:
+   private:
     constexpr static size_t SECTOR_SIZE = 512;
     constexpr static cluster_t EOC = 0xffffff8;
 
-private:
+   private:
     uint32_t sector_cnt;
     uint32_t sectors_per_fat;
     uint32_t serial_number;
@@ -138,24 +138,21 @@ private:
     // buf MUST be larger than 4096 bytes
     void _raw_read_cluster(void* buf, cluster_t no);
 
-    ssize_t _read_sector_range(void* buf, size_t buf_size, uint32_t sector_offset, size_t sector_cnt);
+    ssize_t _read_sector_range(void* buf, size_t buf_size,
+                               uint32_t sector_offset, size_t sector_cnt);
 
     // buffered version, release_cluster(cluster_no) after used
     char* read_cluster(cluster_t no);
     void release_cluster(cluster_t no);
 
-    static constexpr cluster_t cl(const inode* ind)
-    {
-        return ind->ino;
-    }
+    static constexpr cluster_t cl(const inode* ind) { return ind->ino; }
 
-    static inline cluster_t _rearrange(directory_entry* d)
-    {
+    static inline cluster_t _rearrange(directory_entry* d) {
         return (((cluster_t)d->cluster_hi) << 16) + d->cluster_lo;
     }
 
-    static inline size_t _write_buf_n(char* buf, size_t buf_size, const char* src, size_t n)
-    {
+    static inline size_t _write_buf_n(char* buf, size_t buf_size,
+                                      const char* src, size_t n) {
         if (n <= buf_size) {
             memcpy(buf, src, n);
             return n;
@@ -165,11 +162,13 @@ private:
         }
     }
 
-public:
+   public:
     explicit fat32(dev_t device);
 
-    virtual ssize_t read(inode* file, char* buf, size_t buf_size, size_t count, off_t offset) override;
-    virtual ssize_t readdir(fs::inode* dir, size_t offset, const vfs::filldir_func& callback) override;
+    virtual ssize_t read(inode* file, char* buf, size_t buf_size, size_t count,
+                         off_t offset) override;
+    virtual ssize_t readdir(fs::inode* dir, size_t offset,
+                            const vfs::filldir_func& callback) override;
 };
 
 }; // namespace fs::fat

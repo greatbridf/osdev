@@ -13,4 +13,4 @@ void setup_idle(thread* idle_thd);
 
 thread* next();
 
-} // namespace kernel::task
+} // namespace kernel::task::dispatcher

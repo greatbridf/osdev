@@ -2,19 +2,19 @@
 
 #include <set>
 
-#include <kernel/task/forward.hpp>
 #include <kernel/async/lock.hpp>
+#include <kernel/task/forward.hpp>
 
 namespace kernel::async {
 
 class wait_list {
-private:
+   private:
     mutex m_mtx;
     std::set<task::thread*> m_subscribers;
 
     wait_list(const wait_list&) = delete;
 
-public:
+   public:
     explicit wait_list() = default;
 
     // @return whether the wait is interrupted
@@ -26,4 +26,4 @@ public:
     void notify_all();
 };
 
-} // namespace kernel
+} // namespace kernel::async

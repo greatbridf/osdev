@@ -14,9 +14,6 @@
 #include <stdint.h>
 #include <sys/types.h>
 
-#include <kernel/task/current.hpp>
-#include <kernel/task/thread.hpp>
-
 #include <types/allocator.hpp>
 #include <types/cplusplus.hpp>
 #include <types/path.hpp>
@@ -27,6 +24,8 @@
 #include <kernel/mem/mm_list.hpp>
 #include <kernel/mem/paging.hpp>
 #include <kernel/signal.hpp>
+#include <kernel/task/current.hpp>
+#include <kernel/task/thread.hpp>
 #include <kernel/tty.hpp>
 #include <kernel/user/thread_local.hpp>
 #include <kernel/vfs.hpp>
@@ -46,35 +45,35 @@ struct process_attr {
 };
 
 class process {
-public:
+   public:
     struct wait_obj {
         pid_t pid;
         int code;
     };
 
-public:
-    kernel::mem::mm_list mms {};
+   public:
+    kernel::mem::mm_list mms{};
     std::set<kernel::task::thread> thds;
     kernel::async::wait_list waitlist;
 
     kernel::async::mutex mtx_waitprocs;
     std::list<wait_obj> waitprocs;
 
-    process_attr attr {};
+    process_attr attr{};
     fs::filearray files;
-    fs::dentry_pointer cwd {};
-    mode_t umask { 0022 };
+    fs::dentry_pointer cwd{};
+    mode_t umask{0022};
 
-    pid_t pid {};
-    pid_t ppid {};
-    pid_t pgid {};
-    pid_t sid {};
+    pid_t pid{};
+    pid_t ppid{};
+    pid_t pgid{};
+    pid_t sid{};
 
-    kernel::tty::tty* control_tty {};
+    kernel::tty::tty* control_tty{};
     struct fs::fs_context fs_context;
     std::set<pid_t> children;
 
-public:
+   public:
     process(const process&) = delete;
     explicit process(const process& parent, pid_t pid);
 
@@ -82,37 +81,33 @@ public:
     // DO NOT use this after the system is on
     explicit process(pid_t pid, pid_t ppid);
 
-    constexpr bool is_system(void) const
-    { return attr.system; }
-    constexpr bool is_zombie(void) const
-    { return attr.zombie; }
+    constexpr bool is_system(void) const { return attr.system; }
+    constexpr bool is_zombie(void) const { return attr.zombie; }
 
     void send_signal(kernel::signal_list::signo_type signal);
 };
 
 class proclist final {
-private:
+   private:
     std::map<pid_t, process> m_procs;
     pid_t m_nextpid = 2;
 
     constexpr pid_t next_pid() { return m_nextpid++; }
     process& real_emplace(pid_t pid, pid_t ppid);
 
-public:
+   public:
     proclist();
 
-    constexpr process& copy_from(process& proc)
-    {
+    constexpr process& copy_from(process& proc) {
         pid_t pid = next_pid();
-        auto [ iter, inserted ] = m_procs.try_emplace(pid, proc, pid);
+        auto [iter, inserted] = m_procs.try_emplace(pid, proc, pid);
         assert(inserted);
 
         proc.children.insert(pid);
         return iter->second;
     }
 
-    constexpr void remove(pid_t pid)
-    {
+    constexpr void remove(pid_t pid) {
         make_children_orphans(pid);
 
         auto proc_iter = m_procs.find(pid);
@@ -123,25 +118,22 @@ public:
         m_procs.erase(proc_iter);
     }
 
-    constexpr std::pair<process*, bool> try_find(pid_t pid) const
-    {
+    constexpr std::pair<process*, bool> try_find(pid_t pid) const {
         auto iter = m_procs.find(pid);
         if (iter)
-            return { (process*)&iter->second, true };
+            return {(process*)&iter->second, true};
         else
-            return { nullptr, false };
+            return {nullptr, false};
     }
 
     // if process doesn't exist, the behavior is undefined
-    constexpr process& find(pid_t pid)
-    {
-        auto [ ptr, found] = try_find(pid);
+    constexpr process& find(pid_t pid) {
+        auto [ptr, found] = try_find(pid);
         assert(found);
         return *ptr;
     }
 
-    constexpr void make_children_orphans(pid_t pid)
-    {
+    constexpr void make_children_orphans(pid_t pid) {
         auto& children = find(pid).children;
         auto& init_children = find(1).children;
 
@@ -154,15 +146,13 @@ public:
     }
 
     // the process MUST exist, or the behavior is undefined
-    void send_signal(pid_t pid, kernel::signal_list::signo_type signal)
-    {
+    void send_signal(pid_t pid, kernel::signal_list::signo_type signal) {
         auto& proc = find(pid);
         proc.send_signal(signal);
     }
-    void send_signal_grp(pid_t pgid, kernel::signal_list::signo_type signal)
-    {
+    void send_signal_grp(pid_t pgid, kernel::signal_list::signo_type signal) {
         // TODO: find processes that are in the same session quickly
-        for (auto& [ pid, proc ] : m_procs) {
+        for (auto& [pid, proc] : m_procs) {
             if (proc.pgid != pgid)
                 continue;
             proc.send_signal(signal);

@@ -33,10 +33,8 @@ union bar {
 struct config_reg {
     uint32_t addr_base;
 
-    explicit constexpr config_reg(
-        uint32_t bus, uint32_t dev, uint32_t func)
-        : addr_base(0x80000000U | (bus << 16) | (dev << 11) | (func << 8))
-    { }
+    explicit constexpr config_reg(uint32_t bus, uint32_t dev, uint32_t func)
+        : addr_base(0x80000000U | (bus << 16) | (dev << 11) | (func << 8)) {}
 
     // offset is in range from 0x00 to 0xff
     uint32_t read32(uint32_t offset) const;
@@ -76,7 +74,7 @@ struct device_header_type0 {
 };
 
 class pci_device {
-public:
+   public:
     config_reg reg;
 
     uint16_t vendor;

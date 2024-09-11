@@ -14,15 +14,15 @@
 
 #define NOT_IMPLEMENTED not_implemented(__FILE__, __LINE__)
 
-static inline void not_implemented(const char* pos, int line)
-{
-    kmsgf("[kernel] the function at %s:%d is not implemented, killing the pid%d...",
-            pos, line, current_process->pid);
+static inline void not_implemented(const char* pos, int line) {
+    kmsgf(
+        "[kernel] the function at %s:%d is not implemented, killing the "
+        "pid%d...",
+        pos, line, current_process->pid);
     current_thread->send_signal(SIGSYS);
 }
 
-ssize_t kernel::syscall::do_write(int fd, const char __user* buf, size_t n)
-{
+ssize_t kernel::syscall::do_write(int fd, const char __user* buf, size_t n) {
     auto* file = current_process->files[fd];
     if (!file)
         return -EBADF;
@@ -30,8 +30,7 @@ ssize_t kernel::syscall::do_write(int fd, const char __user* buf, size_t n)
     return file->write(buf, n);
 }
 
-ssize_t kernel::syscall::do_read(int fd, char __user* buf, size_t n)
-{
+ssize_t kernel::syscall::do_read(int fd, char __user* buf, size_t n) {
     auto* file = current_process->files[fd];
     if (!file)
         return -EBADF;
@@ -39,30 +38,25 @@ ssize_t kernel::syscall::do_read(int fd, char __user* buf, size_t n)
     return file->read(buf, n);
 }
 
-int kernel::syscall::do_close(int fd)
-{
+int kernel::syscall::do_close(int fd) {
     current_process->files.close(fd);
     return 0;
 }
 
-int kernel::syscall::do_dup(int old_fd)
-{
+int kernel::syscall::do_dup(int old_fd) {
     return current_process->files.dup(old_fd);
 }
 
-int kernel::syscall::do_dup2(int old_fd, int new_fd)
-{
+int kernel::syscall::do_dup2(int old_fd, int new_fd) {
     return current_process->files.dup(old_fd, new_fd, 0);
 }
 
-int kernel::syscall::do_pipe(int __user* pipefd)
-{
+int kernel::syscall::do_pipe(int __user* pipefd) {
     // TODO: use copy_from_user and copy_to_user
     return current_process->files.pipe(*(int(*)[2])pipefd);
 }
 
-ssize_t kernel::syscall::do_getdents(int fd, char __user* buf, size_t cnt)
-{
+ssize_t kernel::syscall::do_getdents(int fd, char __user* buf, size_t cnt) {
     auto* dir = current_process->files[fd];
     if (!dir)
         return -EBADF;
@@ -70,8 +64,7 @@ ssize_t kernel::syscall::do_getdents(int fd, char __user* buf, size_t cnt)
     return dir->getdents(buf, cnt);
 }
 
-ssize_t kernel::syscall::do_getdents64(int fd, char __user* buf, size_t cnt)
-{
+ssize_t kernel::syscall::do_getdents64(int fd, char __user* buf, size_t cnt) {
     auto* dir = current_process->files[fd];
     if (!dir)
         return -EBADF;
@@ -79,28 +72,28 @@ ssize_t kernel::syscall::do_getdents64(int fd, char __user* buf, size_t cnt)
     return dir->getdents64(buf, cnt);
 }
 
-int kernel::syscall::do_open(const char __user* path, int flags, mode_t mode)
-{
+int kernel::syscall::do_open(const char __user* path, int flags, mode_t mode) {
     mode &= ~current_process->umask;
 
     // TODO: use copy_from_user
-    return current_process->files.open(current_process->cwd.get(), path, flags, mode);
+    return current_process->files.open(current_process->cwd.get(), path, flags,
+                                       mode);
 }
 
-int kernel::syscall::do_symlink(const char __user* target, const char __user* linkpath)
-{
+int kernel::syscall::do_symlink(const char __user* target,
+                                const char __user* linkpath) {
     // TODO: use copy_from_user
-    auto [ dent, status ] = current_open(linkpath);
+    auto [dent, status] = current_open(linkpath);
     if (!dent || status != -ENOENT)
         return status;
 
     return fs::symlink(dent.get(), target);
 }
 
-int kernel::syscall::do_readlink(const char __user* pathname, char __user* buf, size_t buf_size)
-{
+int kernel::syscall::do_readlink(const char __user* pathname, char __user* buf,
+                                 size_t buf_size) {
     // TODO: use copy_from_user
-    auto [ dent, status ] = current_open(pathname, false);
+    auto [dent, status] = current_open(pathname, false);
 
     if (!dent || status)
         return status;
@@ -112,8 +105,7 @@ int kernel::syscall::do_readlink(const char __user* pathname, char __user* buf, 
     return fs::readlink(dent->inode, buf, buf_size);
 }
 
-int kernel::syscall::do_ioctl(int fd, unsigned long request, uintptr_t arg3)
-{
+int kernel::syscall::do_ioctl(int fd, unsigned long request, uintptr_t arg3) {
     // TODO: check fd type and get tty* from fd
     //
     //       we use a trick for now, check whether
@@ -125,69 +117,69 @@ int kernel::syscall::do_ioctl(int fd, unsigned long request, uintptr_t arg3)
         return -ENOTTY;
 
     switch (request) {
-    case TIOCGPGRP: {
-        auto* pgid = (pid_t __user*)arg3;
-        auto* ctrl_tty = current_process->control_tty;
+        case TIOCGPGRP: {
+            auto* pgid = (pid_t __user*)arg3;
+            auto* ctrl_tty = current_process->control_tty;
 
-        if (!ctrl_tty)
-            return -ENOTTY;
+            if (!ctrl_tty)
+                return -ENOTTY;
 
-        // TODO: copy_to_user
-        *pgid = ctrl_tty->get_pgrp();
-        break;
-    }
-    case TIOCSPGRP: {
-        // TODO: copy_from_user
-        auto pgid = *(const pid_t __user*)arg3;
-        auto* ctrl_tty = current_process->control_tty;
+            // TODO: copy_to_user
+            *pgid = ctrl_tty->get_pgrp();
+            break;
+        }
+        case TIOCSPGRP: {
+            // TODO: copy_from_user
+            auto pgid = *(const pid_t __user*)arg3;
+            auto* ctrl_tty = current_process->control_tty;
 
-        if (!ctrl_tty)
-            return -ENOTTY;
+            if (!ctrl_tty)
+                return -ENOTTY;
 
-        ctrl_tty->set_pgrp(pgid);
-        break;
-    }
-    case TIOCGWINSZ: {
-        auto* ws = (winsize __user*)arg3;
-        // TODO: copy_to_user
-        ws->ws_col = 80;
-        ws->ws_row = 10;
-        break;
-    }
-    case TCGETS: {
-        auto* argp = (struct termios __user*)arg3;
+            ctrl_tty->set_pgrp(pgid);
+            break;
+        }
+        case TIOCGWINSZ: {
+            auto* ws = (winsize __user*)arg3;
+            // TODO: copy_to_user
+            ws->ws_col = 80;
+            ws->ws_row = 10;
+            break;
+        }
+        case TCGETS: {
+            auto* argp = (struct termios __user*)arg3;
 
-        auto* ctrl_tty = current_process->control_tty;
-        if (!ctrl_tty)
+            auto* ctrl_tty = current_process->control_tty;
+            if (!ctrl_tty)
+                return -EINVAL;
+
+            // TODO: use copy_to_user
+            memcpy(argp, &ctrl_tty->termio, sizeof(ctrl_tty->termio));
+
+            break;
+        }
+        case TCSETS: {
+            auto* argp = (const struct termios __user*)arg3;
+
+            auto* ctrl_tty = current_process->control_tty;
+            if (!ctrl_tty)
+                return -EINVAL;
+
+            // TODO: use copy_from_user
+            memcpy(&ctrl_tty->termio, argp, sizeof(ctrl_tty->termio));
+
+            break;
+        }
+        default:
+            kmsgf("[error] the ioctl() function %x is not implemented",
+                  request);
             return -EINVAL;
-
-        // TODO: use copy_to_user
-        memcpy(argp, &ctrl_tty->termio, sizeof(ctrl_tty->termio));
-
-        break;
-    }
-    case TCSETS: {
-        auto* argp = (const struct termios __user*)arg3;
-
-        auto* ctrl_tty = current_process->control_tty;
-        if (!ctrl_tty)
-            return -EINVAL;
-
-        // TODO: use copy_from_user
-        memcpy(&ctrl_tty->termio, argp, sizeof(ctrl_tty->termio));
-
-        break;
-    }
-    default:
-        kmsgf("[error] the ioctl() function %x is not implemented", request);
-        return -EINVAL;
     }
 
     return 0;
 }
 
-ssize_t kernel::syscall::do_readv(int fd, const iovec* iov, int iovcnt)
-{
+ssize_t kernel::syscall::do_readv(int fd, const iovec* iov, int iovcnt) {
     auto* file = current_process->files[fd];
 
     if (!file)
@@ -196,8 +188,7 @@ ssize_t kernel::syscall::do_readv(int fd, const iovec* iov, int iovcnt)
     // TODO: fix fake EOF
     ssize_t totn = 0;
     for (int i = 0; i < iovcnt; ++i) {
-        ssize_t ret = file->read(
-            (char*)iov[i].iov_base, iov[i].iov_len);
+        ssize_t ret = file->read((char*)iov[i].iov_base, iov[i].iov_len);
 
         if (ret < 0)
             return ret;
@@ -215,8 +206,7 @@ ssize_t kernel::syscall::do_readv(int fd, const iovec* iov, int iovcnt)
 }
 
 // TODO: this operation SHOULD be atomic
-ssize_t kernel::syscall::do_writev(int fd, const iovec* iov, int iovcnt)
-{
+ssize_t kernel::syscall::do_writev(int fd, const iovec* iov, int iovcnt) {
     auto* file = current_process->files[fd];
 
     if (!file)
@@ -224,8 +214,7 @@ ssize_t kernel::syscall::do_writev(int fd, const iovec* iov, int iovcnt)
 
     ssize_t totn = 0;
     for (int i = 0; i < iovcnt; ++i) {
-        ssize_t ret = file->write(
-            (const char*)iov[i].iov_base, iov[i].iov_len);
+        ssize_t ret = file->write((const char*)iov[i].iov_base, iov[i].iov_len);
 
         if (ret < 0)
             return ret;
@@ -235,8 +224,7 @@ ssize_t kernel::syscall::do_writev(int fd, const iovec* iov, int iovcnt)
     return totn;
 }
 
-off_t kernel::syscall::do_lseek(int fd, off_t offset, int whence)
-{
+off_t kernel::syscall::do_lseek(int fd, off_t offset, int whence) {
     auto* file = current_process->files[fd];
     if (!file)
         return -EBADF;
@@ -244,9 +232,8 @@ off_t kernel::syscall::do_lseek(int fd, off_t offset, int whence)
     return file->seek(offset, whence);
 }
 
-uintptr_t kernel::syscall::do_mmap_pgoff(uintptr_t addr, size_t len,
-        int prot, int flags, int fd, off_t pgoffset)
-{
+uintptr_t kernel::syscall::do_mmap_pgoff(uintptr_t addr, size_t len, int prot,
+                                         int flags, int fd, off_t pgoffset) {
     if (addr & 0xfff)
         return -EINVAL;
     if (len == 0)
@@ -274,8 +261,7 @@ uintptr_t kernel::syscall::do_mmap_pgoff(uintptr_t addr, size_t len,
         if (prot == PROT_NONE) {
             if (int ret = mms.unmap(addr, len, true); ret != 0)
                 return ret;
-        }
-        else {
+        } else {
             // TODO: add NULL check in mm_list
             if (!addr || !mms.is_avail(addr, len)) {
                 if (flags & MAP_FIXED)
@@ -306,8 +292,7 @@ uintptr_t kernel::syscall::do_mmap_pgoff(uintptr_t addr, size_t len,
     return addr;
 }
 
-int kernel::syscall::do_munmap(uintptr_t addr, size_t len)
-{
+int kernel::syscall::do_munmap(uintptr_t addr, size_t len) {
     if (addr & 0xfff)
         return -EINVAL;
 
@@ -315,8 +300,7 @@ int kernel::syscall::do_munmap(uintptr_t addr, size_t len)
 }
 
 ssize_t kernel::syscall::do_sendfile(int out_fd, int in_fd,
-        off_t __user* offset, size_t count)
-{
+                                     off_t __user* offset, size_t count) {
     auto* out_file = current_process->files[out_fd];
     auto* in_file = current_process->files[in_fd];
 
@@ -354,9 +338,8 @@ ssize_t kernel::syscall::do_sendfile(int out_fd, int in_fd,
     return totn;
 }
 
-int kernel::syscall::do_statx(int dirfd, const char __user* path,
-        int flags, unsigned int mask, statx __user* statxbuf)
-{
+int kernel::syscall::do_statx(int dirfd, const char __user* path, int flags,
+                              unsigned int mask, statx __user* statxbuf) {
     // AT_STATX_SYNC_AS_STAT is the default value
     if ((flags & AT_STATX_SYNC_TYPE) != AT_STATX_SYNC_AS_STAT) {
         NOT_IMPLEMENTED;
@@ -368,7 +351,7 @@ int kernel::syscall::do_statx(int dirfd, const char __user* path,
         return -EINVAL;
     }
 
-    auto [ dent, status ] = current_open(path, !(flags & AT_SYMLINK_NOFOLLOW));
+    auto [dent, status] = current_open(path, !(flags & AT_SYMLINK_NOFOLLOW));
     if (!dent || status)
         return status;
 
@@ -376,40 +359,37 @@ int kernel::syscall::do_statx(int dirfd, const char __user* path,
     return fs::statx(dent->inode, statxbuf, mask);
 }
 
-int kernel::syscall::do_fcntl(int fd, int cmd, unsigned long arg)
-{
+int kernel::syscall::do_fcntl(int fd, int cmd, unsigned long arg) {
     auto* file = current_process->files[fd];
     if (!file)
         return -EBADF;
 
     switch (cmd) {
-    case F_SETFD:
-        return current_process->files.set_flags(fd, arg);
-    case F_DUPFD:
-    case F_DUPFD_CLOEXEC: {
-        return current_process->files.dupfd(fd, arg, FD_CLOEXEC);
-    }
-    default:
-        NOT_IMPLEMENTED;
-        return -EINVAL;
+        case F_SETFD:
+            return current_process->files.set_flags(fd, arg);
+        case F_DUPFD:
+        case F_DUPFD_CLOEXEC: {
+            return current_process->files.dupfd(fd, arg, FD_CLOEXEC);
+        }
+        default:
+            NOT_IMPLEMENTED;
+            return -EINVAL;
     }
 }
 
-int kernel::syscall::do_mkdir(const char __user* pathname, mode_t mode)
-{
+int kernel::syscall::do_mkdir(const char __user* pathname, mode_t mode) {
     mode &= (~current_process->umask & 0777);
 
     // TODO: use copy_from_user
-    auto [ dent, status ] = current_open(pathname);
+    auto [dent, status] = current_open(pathname);
     if (!dent || status != -ENOENT)
         return status;
 
     return fs::mkdir(dent.get(), mode);
 }
 
-int kernel::syscall::do_truncate(const char __user* pathname, long length)
-{
-    auto [ dent, status ] = current_open(pathname);
+int kernel::syscall::do_truncate(const char __user* pathname, long length) {
+    auto [dent, status] = current_open(pathname);
     if (!dent || status)
         return status;
 
@@ -419,9 +399,8 @@ int kernel::syscall::do_truncate(const char __user* pathname, long length)
     return fs::truncate(dent->inode, length);
 }
 
-int kernel::syscall::do_unlink(const char __user* pathname)
-{
-    auto [ dent, status ] = current_open(pathname, false);
+int kernel::syscall::do_unlink(const char __user* pathname) {
+    auto [dent, status] = current_open(pathname, false);
 
     if (!dent || status)
         return status;
@@ -432,37 +411,35 @@ int kernel::syscall::do_unlink(const char __user* pathname)
     return fs::unlink(dent.get());
 }
 
-int kernel::syscall::do_access(const char __user* pathname, int mode)
-{
-    auto [ dent, status ] = current_open(pathname);
+int kernel::syscall::do_access(const char __user* pathname, int mode) {
+    auto [dent, status] = current_open(pathname);
     if (!dent || status)
         return status;
 
     switch (mode) {
-    case F_OK:
-        return 0;
-    case R_OK:
-    case W_OK:
-    case X_OK:
-        // TODO: check privilege
-        return 0;
-    default:
-        return -EINVAL;
+        case F_OK:
+            return 0;
+        case R_OK:
+        case W_OK:
+        case X_OK:
+            // TODO: check privilege
+            return 0;
+        default:
+            return -EINVAL;
     }
 }
 
-int kernel::syscall::do_mknod(const char __user* pathname, mode_t mode, dev_t dev)
-{
+int kernel::syscall::do_mknod(const char __user* pathname, mode_t mode,
+                              dev_t dev) {
     mode &= S_IFMT | (~current_process->umask & 0777);
-    auto [ dent, status ] = current_open(pathname);
+    auto [dent, status] = current_open(pathname);
     if (!dent || status != -ENOENT)
         return status;
 
     return fs::mknod(dent.get(), mode, dev);
 }
 
-int kernel::syscall::do_poll(pollfd __user* fds, nfds_t nfds, int timeout)
-{
+int kernel::syscall::do_poll(pollfd __user* fds, nfds_t nfds, int timeout) {
     if (nfds == 0)
         return 0;
 

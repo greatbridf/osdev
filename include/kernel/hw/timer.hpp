@@ -8,4 +8,4 @@ void inc_tick(void);
 
 std::size_t current_ticks(void);
 
-}
+} // namespace kernel::hw::timer

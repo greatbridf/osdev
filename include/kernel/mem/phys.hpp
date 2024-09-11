@@ -18,31 +18,21 @@ class physaddr {
 
     uintptr_t m_ptr;
 
-public:
+   public:
     explicit constexpr physaddr(uintptr_t ptr) : m_ptr{ptr} {}
     explicit constexpr physaddr(std::nullptr_t) : m_ptr{} {}
 
     // cast to non-pointer types is prohibited
     template <typename U, typename = std::enable_if_t<std::is_pointer_v<U>>>
-    constexpr U cast_to() const noexcept
-    {
+    constexpr U cast_to() const noexcept {
         return std::bit_cast<U>(m_ptr + PHYS_OFFSET);
     }
 
-    constexpr operator T*() const noexcept
-    {
-        return cast_to<T*>();
-    }
+    constexpr operator T*() const noexcept { return cast_to<T*>(); }
 
-    constexpr T* operator->() const noexcept
-    {
-        return *this;
-    }
+    constexpr T* operator->() const noexcept { return *this; }
 
-    constexpr uintptr_t phys() const noexcept
-    {
-        return m_ptr;
-    }
+    constexpr uintptr_t phys() const noexcept { return m_ptr; }
 };
 
 //  gdt[0]:  null

@@ -5,19 +5,24 @@
 #include <termios.h>
 
 #include <kernel/async/lock.hpp>
+#include <kernel/log.hpp>
 #include <kernel/process.hpp>
 #include <kernel/tty.hpp>
 #include <kernel/vga.hpp>
-#include <kernel/log.hpp>
 
 #define CTRL(key) ((key)-0x40)
 
-#define TERMIOS_ISET(termios, option) ((option) == ((termios).c_iflag & (option)))
-#define TERMIOS_OSET(termios, option) ((option) == ((termios).c_oflag & (option)))
-#define TERMIOS_CSET(termios, option) ((option) == ((termios).c_cflag & (option)))
-#define TERMIOS_LSET(termios, option) ((option) == ((termios).c_lflag & (option)))
+#define TERMIOS_ISET(termios, option) \
+    ((option) == ((termios).c_iflag & (option)))
+#define TERMIOS_OSET(termios, option) \
+    ((option) == ((termios).c_oflag & (option)))
+#define TERMIOS_CSET(termios, option) \
+    ((option) == ((termios).c_cflag & (option)))
+#define TERMIOS_LSET(termios, option) \
+    ((option) == ((termios).c_lflag & (option)))
 
-#define TERMIOS_TESTCC(c, termios, cc) ((c != 0xff) && (c == ((termios).c_cc[cc])))
+#define TERMIOS_TESTCC(c, termios, cc) \
+    ((c != 0xff) && (c == ((termios).c_cc[cc])))
 
 using namespace kernel::tty;
 
@@ -49,14 +54,12 @@ tty::tty(std::string name)
     this->termio.c_cc[VMIN] = 1;
 }
 
-void tty::print(const char* str)
-{
+void tty::print(const char* str) {
     while (*str != '\0')
         this->putchar(*(str++));
 }
 
-int tty::poll()
-{
+int tty::poll() {
     async::lock_guard_irq lck(this->mtx_buf);
     if (this->buf.empty()) {
         bool interrupted = this->waitlist.wait(this->mtx_buf);
@@ -68,8 +71,7 @@ int tty::poll()
     return 1;
 }
 
-ssize_t tty::read(char* buf, size_t buf_size, size_t n)
-{
+ssize_t tty::read(char* buf, size_t buf_size, size_t n) {
     n = std::max(buf_size, n);
     size_t orig_n = n;
 
@@ -94,7 +96,7 @@ ssize_t tty::read(char* buf, size_t buf_size, size_t n)
             break;
         }
 
-        while (n &&!this->buf.empty()) {
+        while (n && !this->buf.empty()) {
             int c = this->buf.get();
 
             --n, *(buf++) = c;
@@ -108,8 +110,7 @@ ssize_t tty::read(char* buf, size_t buf_size, size_t n)
     return orig_n - n;
 }
 
-int tty::_do_erase(bool should_echo)
-{
+int tty::_do_erase(bool should_echo) {
     if (buf.empty())
         return -1;
 
@@ -125,7 +126,7 @@ int tty::_do_erase(bool should_echo)
 
     if (should_echo && TERMIOS_LSET(this->termio, ECHO | ECHOE)) {
         this->show_char('\b'); // backspace
-        this->show_char(' '); // space
+        this->show_char(' ');  // space
         this->show_char('\b'); // backspace
 
         // xterm's way to show backspace
@@ -138,39 +139,40 @@ int tty::_do_erase(bool should_echo)
     return back;
 }
 
-void tty::_real_commit_char(int c)
-{
+void tty::_real_commit_char(int c) {
     switch (c) {
-    case '\n':
-        buf.put(c);
+        case '\n':
+            buf.put(c);
 
-        if (TERMIOS_LSET(this->termio, ECHONL) || TERMIOS_LSET(this->termio, ECHO))
-            this->_echo_char(c);
+            if (TERMIOS_LSET(this->termio, ECHONL) ||
+                TERMIOS_LSET(this->termio, ECHO))
+                this->_echo_char(c);
 
-        // if ICANON is set, we notify all waiting processes
-        // if ICANON is not set, since there are data ready, we notify as well
-        this->waitlist.notify_all();
-
-        break;
-
-    default:
-        buf.put(c);
-
-        if (TERMIOS_LSET(this->termio, ECHO))
-            this->_echo_char(c);
-
-        if (!TERMIOS_LSET(this->termio, ICANON))
+            // if ICANON is set, we notify all waiting processes
+            // if ICANON is not set, since there are data ready, we notify as
+            // well
             this->waitlist.notify_all();
 
-        break;
+            break;
+
+        default:
+            buf.put(c);
+
+            if (TERMIOS_LSET(this->termio, ECHO))
+                this->_echo_char(c);
+
+            if (!TERMIOS_LSET(this->termio, ICANON))
+                this->waitlist.notify_all();
+
+            break;
     }
 }
 
-void tty::_echo_char(int c)
-{
+void tty::_echo_char(int c) {
     // ECHOCTL
     do {
-        if (c < 0 || c >= 32 || !TERMIOS_LSET(this->termio, ECHO | ECHOCTL | IEXTEN))
+        if (c < 0 || c >= 32 ||
+            !TERMIOS_LSET(this->termio, ECHO | ECHOCTL | IEXTEN))
             break;
 
         if (c == '\t' || c == '\n' || c == CTRL('Q') || c == CTRL('S'))
@@ -187,8 +189,7 @@ void tty::_echo_char(int c)
 
 // do some ignore and remapping work
 // real commit operation is in _real_commit_char()
-void tty::commit_char(int c)
-{
+void tty::commit_char(int c) {
     // check special control characters
     // if handled, the character is discarded
     if (TERMIOS_LSET(this->termio, ISIG)) {
@@ -234,8 +235,7 @@ void tty::commit_char(int c)
             if (TERMIOS_LSET(this->termio, ECHOKE | IEXTEN)) {
                 while (this->_do_erase(true) != -1)
                     ;
-            }
-            else if (TERMIOS_LSET(this->termio, ECHOK)) {
+            } else if (TERMIOS_LSET(this->termio, ECHOK)) {
                 while (this->_do_erase(false) != -1)
                     ;
                 this->show_char('\n');
@@ -250,54 +250,50 @@ void tty::commit_char(int c)
     }
 
     switch (c) {
-    case '\r':
-        if (TERMIOS_ISET(this->termio, IGNCR))
-            break;
+        case '\r':
+            if (TERMIOS_ISET(this->termio, IGNCR))
+                break;
 
-        if (TERMIOS_ISET(this->termio, ICRNL)) {
-            this->_real_commit_char('\n');
-            break;
-        }
+            if (TERMIOS_ISET(this->termio, ICRNL)) {
+                this->_real_commit_char('\n');
+                break;
+            }
 
-        this->_real_commit_char('\r');
-        break;
-
-    case '\n':
-        if (TERMIOS_ISET(this->termio, INLCR)) {
             this->_real_commit_char('\r');
             break;
-        }
 
-        this->_real_commit_char('\n');
-        break;
+        case '\n':
+            if (TERMIOS_ISET(this->termio, INLCR)) {
+                this->_real_commit_char('\r');
+                break;
+            }
 
-    default:
-        this->_real_commit_char(c);
-        break;
+            this->_real_commit_char('\n');
+            break;
+
+        default:
+            this->_real_commit_char(c);
+            break;
     }
 }
 
-void tty::show_char(int c)
-{
+void tty::show_char(int c) {
     this->putchar(c);
 }
 
-vga_tty::vga_tty(): tty{"ttyVGA"} { }
+vga_tty::vga_tty() : tty{"ttyVGA"} {}
 
-void vga_tty::putchar(char c)
-{
-    static struct vga_char vc = { .c = '\0', .color = VGA_CHAR_COLOR_WHITE };
+void vga_tty::putchar(char c) {
+    static struct vga_char vc = {.c = '\0', .color = VGA_CHAR_COLOR_WHITE};
     vc.c = c;
     vga_put_char(&vc);
 }
 
-void tty::clear_read_buf(void)
-{
+void tty::clear_read_buf(void) {
     this->buf.clear();
 }
 
-int kernel::tty::register_tty(tty* tty_dev)
-{
+int kernel::tty::register_tty(tty* tty_dev) {
     // TODO: manage all ttys
     if (!console)
         console = tty_dev;

@@ -8,8 +8,7 @@
 
 using namespace kernel::user;
 
-void kernel::user::load_thread_area32(uint64_t desc)
-{
+void kernel::user::load_thread_area32(uint64_t desc) {
     if (!desc)
         return;
 
@@ -18,6 +17,7 @@ void kernel::user::load_thread_area32(uint64_t desc)
     asm volatile(
         "mov %%gs, %%ax\n\t"
         "mov %%ax, %%gs\n\t"
-        : : : "ax"
-    );
+        :
+        :
+        : "ax");
 }

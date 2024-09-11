@@ -1,8 +1,7 @@
-#include <kernel/task/readyqueue.hpp>
-
 #include <list>
 
 #include <kernel/async/lock.hpp>
+#include <kernel/task/readyqueue.hpp>
 #include <kernel/task/thread.hpp>
 
 using namespace kernel::task;
@@ -12,27 +11,23 @@ static mutex dispatcher_mtx;
 static std::list<thread*> dispatcher_thds;
 static thread* idle_task;
 
-void dispatcher::setup_idle(thread* _idle)
-{
+void dispatcher::setup_idle(thread* _idle) {
     idle_task = _idle;
 }
 
-void dispatcher::enqueue(thread* thd)
-{
+void dispatcher::enqueue(thread* thd) {
     lock_guard_irq lck(dispatcher_mtx);
 
     dispatcher_thds.push_back(thd);
 }
 
-void dispatcher::dequeue(thread* thd)
-{
+void dispatcher::dequeue(thread* thd) {
     lock_guard_irq lck(dispatcher_mtx);
 
     dispatcher_thds.remove(thd);
 }
 
-thread* dispatcher::next()
-{
+thread* dispatcher::next() {
     lock_guard_irq lck(dispatcher_mtx);
 
     if (dispatcher_thds.empty()) {

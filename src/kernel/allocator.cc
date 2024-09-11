@@ -1,23 +1,23 @@
-#include <types/allocator.hpp>
-
 #include <bit>
 #include <cstddef>
 
 #include <assert.h>
 #include <stdint.h>
 
+#include <types/allocator.hpp>
+
 #include <kernel/async/lock.hpp>
 #include <kernel/mem/paging.hpp>
 #include <kernel/mem/slab.hpp>
 
 constexpr uintptr_t KERNEL_HEAP_START = 0xffff'ff81'8000'0000;
-constexpr uintptr_t KERNEL_HEAP_END   = 0xffff'ffbf'ffff'ffff;
-constexpr uintptr_t KERNEL_HEAP_SIZE  = KERNEL_HEAP_END - KERNEL_HEAP_START;
+constexpr uintptr_t KERNEL_HEAP_END = 0xffff'ffbf'ffff'ffff;
+constexpr uintptr_t KERNEL_HEAP_SIZE = KERNEL_HEAP_END - KERNEL_HEAP_START;
 
 namespace types::memory {
 
 struct mem_blk_flags {
-    unsigned long is_free  : 8;
+    unsigned long is_free : 8;
     unsigned long has_next : 8;
 };
 
@@ -29,14 +29,15 @@ struct mem_blk {
     std::byte data[];
 };
 
-constexpr std::byte* aspbyte(void* pblk)
-{ return std::bit_cast<std::byte*>(pblk);}
+constexpr std::byte* aspbyte(void* pblk) {
+    return std::bit_cast<std::byte*>(pblk);
+}
 
-constexpr mem_blk* aspblk(void* pbyte)
-{ return std::bit_cast<mem_blk*>(pbyte);}
+constexpr mem_blk* aspblk(void* pbyte) {
+    return std::bit_cast<mem_blk*>(pbyte);
+}
 
-constexpr mem_blk* next(mem_blk* blk, std::size_t blk_size)
-{
+constexpr mem_blk* next(mem_blk* blk, std::size_t blk_size) {
     auto* p = aspbyte(blk);
     p += sizeof(mem_blk);
     p += blk_size;
@@ -44,8 +45,7 @@ constexpr mem_blk* next(mem_blk* blk, std::size_t blk_size)
 }
 
 // blk MUST be free
-constexpr void unite_afterwards(mem_blk* blk)
-{
+constexpr void unite_afterwards(mem_blk* blk) {
     while (blk->flags.has_next) {
         auto* blk_next = next(blk, blk->size);
         if (!blk_next->flags.is_free)
@@ -58,8 +58,7 @@ constexpr void unite_afterwards(mem_blk* blk)
 // @param start_pos position where to start finding
 // @param size the size of the block we're looking for
 // @return found block if suitable block exists, if not, the last block
-constexpr mem_blk* find_blk(std::byte** p_start, std::size_t size)
-{
+constexpr mem_blk* find_blk(std::byte** p_start, std::size_t size) {
     mem_blk* start_pos = aspblk(*p_start);
     bool no_free_so_far = true;
 
@@ -83,8 +82,7 @@ constexpr mem_blk* find_blk(std::byte** p_start, std::size_t size)
     return start_pos;
 }
 
-constexpr void split_block(mem_blk* blk, std::size_t this_size)
-{
+constexpr void split_block(mem_blk* blk, std::size_t this_size) {
     // block is too small to get split
     // that is, the block to be split should have enough room
     // for "this_size" bytes and also could contain a new block
@@ -93,9 +91,7 @@ constexpr void split_block(mem_blk* blk, std::size_t this_size)
 
     mem_blk* blk_next = next(blk, this_size);
 
-    blk_next->size = blk->size
-        - this_size
-        - sizeof(mem_blk);
+    blk_next->size = blk->size - this_size - sizeof(mem_blk);
 
     blk_next->flags.has_next = blk->flags.has_next;
     blk_next->flags.is_free = 1;
@@ -104,16 +100,15 @@ constexpr void split_block(mem_blk* blk, std::size_t this_size)
     blk->size = this_size;
 }
 
-std::byte* brk_memory_allocator::brk(byte* addr)
-{
+std::byte* brk_memory_allocator::brk(byte* addr) {
     if (addr >= p_limit)
         return nullptr;
 
     uintptr_t current_allocated = reinterpret_cast<uintptr_t>(p_allocated);
     uintptr_t new_brk = reinterpret_cast<uintptr_t>(addr);
 
-    current_allocated &= ~(0x200000-1);
-    new_brk &= ~(0x200000-1);
+    current_allocated &= ~(0x200000 - 1);
+    new_brk &= ~(0x200000 - 1);
 
     using namespace kernel::mem::paging;
     while (current_allocated <= new_brk) {
@@ -135,8 +130,7 @@ std::byte* brk_memory_allocator::brk(byte* addr)
     return p_break = addr;
 }
 
-std::byte* brk_memory_allocator::sbrk(size_type increment)
-{
+std::byte* brk_memory_allocator::sbrk(size_type increment) {
     return brk(p_break + increment);
 }
 
@@ -144,8 +138,7 @@ brk_memory_allocator::brk_memory_allocator(byte* start, size_type size)
     : p_start(start)
     , p_limit(start + size)
     , p_break(start)
-    , p_allocated(start)
-{
+    , p_allocated(start) {
     auto* p_blk = aspblk(brk(p_start));
     sbrk(sizeof(mem_blk) + 1024); // 1024 bytes (minimum size for a block)
 
@@ -154,15 +147,14 @@ brk_memory_allocator::brk_memory_allocator(byte* start, size_type size)
     p_blk->flags.is_free = 1;
 }
 
-void* brk_memory_allocator::allocate(size_type size)
-{
+void* brk_memory_allocator::allocate(size_type size) {
     kernel::async::lock_guard_irq lck(mtx);
     // align to 1024 bytes boundary
-    size = (size + 1024-1) & ~(1024-1);
+    size = (size + 1024 - 1) & ~(1024 - 1);
 
     auto* block_allocated = find_blk(&p_start, size);
-    if (!block_allocated->flags.has_next
-        && (!block_allocated->flags.is_free || block_allocated->size < size)) {
+    if (!block_allocated->flags.has_next &&
+        (!block_allocated->flags.is_free || block_allocated->size < size)) {
         // 'block_allocated' in the argument list is the pointer
         // pointing to the last block
 
@@ -185,8 +177,7 @@ void* brk_memory_allocator::allocate(size_type size)
     return block_allocated->data;
 }
 
-void brk_memory_allocator::deallocate(void* ptr)
-{
+void brk_memory_allocator::deallocate(void* ptr) {
     kernel::async::lock_guard_irq lck(mtx);
     auto* blk = aspblk(aspbyte(ptr) - sizeof(mem_blk));
 
@@ -199,8 +190,7 @@ void brk_memory_allocator::deallocate(void* ptr)
     unite_afterwards(blk);
 }
 
-bool brk_memory_allocator::allocated(void* ptr) const noexcept
-{
+bool brk_memory_allocator::allocated(void* ptr) const noexcept {
     return (void*)KERNEL_HEAP_START <= aspbyte(ptr) && aspbyte(ptr) < sbrk();
 }
 
@@ -210,8 +200,7 @@ static brk_memory_allocator* k_alloc;
 
 static kernel::mem::slab_cache caches[7];
 
-static constexpr int __cache_index(std::size_t size)
-{
+static constexpr int __cache_index(std::size_t size) {
     if (size <= 32)
         return 0;
     if (size <= 64)
@@ -230,22 +219,20 @@ static constexpr int __cache_index(std::size_t size)
 }
 
 SECTION(".text.kinit")
-void kernel::kinit::init_allocator()
-{
-    mem::init_slab_cache(caches+0, 32);
-    mem::init_slab_cache(caches+1, 64);
-    mem::init_slab_cache(caches+2, 96);
-    mem::init_slab_cache(caches+3, 128);
-    mem::init_slab_cache(caches+4, 192);
-    mem::init_slab_cache(caches+5, 256);
-    mem::init_slab_cache(caches+6, 512);
+void kernel::kinit::init_allocator() {
+    mem::init_slab_cache(caches + 0, 32);
+    mem::init_slab_cache(caches + 1, 64);
+    mem::init_slab_cache(caches + 2, 96);
+    mem::init_slab_cache(caches + 3, 128);
+    mem::init_slab_cache(caches + 4, 192);
+    mem::init_slab_cache(caches + 5, 256);
+    mem::init_slab_cache(caches + 6, 512);
 
     types::memory::k_alloc = new types::memory::brk_memory_allocator(
         (std::byte*)KERNEL_HEAP_START, KERNEL_HEAP_SIZE);
 }
 
-void* operator new(size_t size)
-{
+void* operator new(size_t size) {
     int idx = __cache_index(size);
     void* ptr = nullptr;
     if (idx < 0)
@@ -257,8 +244,7 @@ void* operator new(size_t size)
     return ptr;
 }
 
-void operator delete(void* ptr)
-{
+void operator delete(void* ptr) {
     if (!ptr)
         return;
 
@@ -268,8 +254,7 @@ void operator delete(void* ptr)
         kernel::mem::slab_free(ptr);
 }
 
-void operator delete(void* ptr, std::size_t size)
-{
+void operator delete(void* ptr, std::size_t size) {
     if (!ptr)
         return;
 
@@ -283,17 +268,14 @@ void operator delete(void* ptr, std::size_t size)
     kernel::mem::slab_free(ptr);
 }
 
-void* operator new[](size_t sz)
-{
+void* operator new[](size_t sz) {
     return ::operator new(sz);
 }
 
-void operator delete[](void* ptr)
-{
+void operator delete[](void* ptr) {
     ::operator delete(ptr);
 }
 
-void operator delete[](void* ptr, std::size_t size)
-{
+void operator delete[](void* ptr, std::size_t size) {
     ::operator delete(ptr, size);
 }

@@ -17,16 +17,12 @@ struct mount_flags_opt {
 };
 
 static struct mount_flags_opt mount_opts[] = {
-    {MS_NOSUID, ",nosuid"},
-    {MS_NODEV, ",nodev"},
-    {MS_NOEXEC, ",noexec"},
-    {MS_NOATIME, ",noatime"},
-    {MS_RELATIME, ",relatime"},
-    {MS_LAZYTIME, ",lazytime"},
+    {MS_NOSUID, ",nosuid"},     {MS_NODEV, ",nodev"},
+    {MS_NOEXEC, ",noexec"},     {MS_NOATIME, ",noatime"},
+    {MS_RELATIME, ",relatime"}, {MS_LAZYTIME, ",lazytime"},
 };
 
-static std::string get_mount_opts(unsigned long mnt_flags)
-{
+static std::string get_mount_opts(unsigned long mnt_flags) {
     std::string retval;
 
     if (mnt_flags & MS_RDONLY)
@@ -42,11 +38,10 @@ static std::string get_mount_opts(unsigned long mnt_flags)
     return retval;
 }
 
-static ssize_t mounts_read(char* page, size_t n)
-{
+static ssize_t mounts_read(char* page, size_t n) {
     auto orig_n = n;
 
-    for (const auto& [ _, mdata ] : fs::mounts) {
+    for (const auto& [_, mdata] : fs::mounts) {
         if (n == 0)
             break;
 
@@ -54,8 +49,8 @@ static ssize_t mounts_read(char* page, size_t n)
         auto mount_flags = get_mount_opts(mdata.flags);
 
         int nwrote = snprintf(page, n, "%s %s %s %s 0 0\n",
-                mdata.source.c_str(), mdata.mount_point.c_str(),
-                mdata.fstype.c_str(), mount_flags.c_str());
+                              mdata.source.c_str(), mdata.mount_point.c_str(),
+                              mdata.fstype.c_str(), mount_flags.c_str());
 
         n -= nwrote;
         page += nwrote;
@@ -64,8 +59,7 @@ static ssize_t mounts_read(char* page, size_t n)
     return orig_n - n;
 }
 
-static ssize_t schedstat_read(char* page, size_t n)
-{
+static ssize_t schedstat_read(char* page, size_t n) {
     auto orig_n = n;
 
     if (n == 0)
@@ -76,7 +70,8 @@ static ssize_t schedstat_read(char* page, size_t n)
 
     for (const auto& proc : *procs) {
         for (const auto& thd : proc.second.thds) {
-            int nwrote = snprintf(page, n, "%d %x %d\n", proc.first, thd.tid(), thd.elected_times);
+            int nwrote = snprintf(page, n, "%d %x %d\n", proc.first, thd.tid(),
+                                  thd.elected_times);
 
             n -= nwrote;
             page += nwrote;
@@ -96,27 +91,24 @@ struct proc_file {
 };
 
 class procfs : public virtual fs::vfs {
-private:
+   private:
     std::string source;
     std::map<ino_t, proc_file> files;
 
     ino_t free_ino = 1;
 
-public:
-    static procfs* create(const char* source, unsigned long, const void*)
-    {
+   public:
+    static procfs* create(const char* source, unsigned long, const void*) {
         // TODO: flags
         return new procfs(source);
     }
 
-    int create_file(std::string name,
-            ssize_t (*read_func)(char*, size_t),
-            ssize_t (*write_func)(const char*, size_t))
-    {
+    int create_file(std::string name, ssize_t (*read_func)(char*, size_t),
+                    ssize_t (*write_func)(const char*, size_t)) {
         auto ino = free_ino++;
 
-        auto [ _, inserted ] =
-            files.insert({ino, proc_file {name, read_func, write_func}});
+        auto [_, inserted] =
+            files.insert({ino, proc_file{name, read_func, write_func}});
 
         auto* ind = alloc_inode(ino);
         ind->mode = S_IFREG | 0666;
@@ -125,9 +117,7 @@ public:
     }
 
     procfs(const char* _source)
-        : vfs(make_device(0, 10), 4096)
-        , source{_source}
-    {
+        : vfs(make_device(0, 10), 4096), source{_source} {
         auto* ind = alloc_inode(0);
         ind->mode = S_IFDIR | 0777;
 
@@ -137,8 +127,8 @@ public:
         register_root_node(ind);
     }
 
-    ssize_t read(inode* file, char* buf, size_t buf_size, size_t n, off_t offset) override
-    {
+    ssize_t read(inode* file, char* buf, size_t buf_size, size_t n,
+                 off_t offset) override {
         if (file->ino == 0)
             return -EISDIR;
 
@@ -146,7 +136,7 @@ public:
         if (!iter)
             return -EIO;
 
-        auto& [ ino, pf ] = *iter;
+        auto& [ino, pf] = *iter;
 
         if (!pf.read)
             return -EINVAL;
@@ -173,8 +163,8 @@ public:
         return n;
     }
 
-    ssize_t readdir(inode *dir, size_t offset, const filldir_func &callback) override
-    {
+    ssize_t readdir(inode* dir, size_t offset,
+                    const filldir_func& callback) override {
         if (dir->ino != 0)
             return -ENOTDIR;
 
@@ -183,7 +173,7 @@ public:
             return 0;
 
         int nread = 0;
-        for (const auto& [ ino, pf ] : files) {
+        for (const auto& [ino, pf] : files) {
             auto* ind = get_inode(ino);
             int ret = callback(pf.name.c_str(), ind, ind->mode);
             if (ret != 0)
@@ -196,11 +186,10 @@ public:
 };
 
 class procfs_module : public virtual kernel::module::module {
-public:
-    procfs_module() : module("procfs") { }
+   public:
+    procfs_module() : module("procfs") {}
 
-    virtual int init() override
-    {
+    virtual int init() override {
         int ret = fs::register_fs("procfs", procfs::create);
         if (ret != 0)
             return kernel::module::MODULE_FAILED;
@@ -208,8 +197,7 @@ public:
     }
 };
 
-static kernel::module::module* procfs_init()
-{
+static kernel::module::module* procfs_init() {
     return new procfs_module;
 }
 

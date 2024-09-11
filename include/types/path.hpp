@@ -7,11 +7,11 @@
 namespace types {
 
 class string_view {
-private:
+   private:
     const char* m_str;
     std::size_t m_len;
 
-public:
+   public:
     constexpr string_view() : m_str(nullptr), m_len(0) {}
     constexpr string_view(const char* str, std::size_t len)
         : m_str(str), m_len(len) {}
@@ -27,11 +27,9 @@ public:
     constexpr const char* begin() const { return m_str; }
     constexpr const char* end() const { return m_str + m_len; }
 
-    constexpr char operator[](std::size_t pos) const
-    { return m_str[pos]; }
+    constexpr char operator[](std::size_t pos) const { return m_str[pos]; }
 
-    constexpr bool operator==(const string_view& val) const
-    {
+    constexpr bool operator==(const string_view& val) const {
         if (m_len != val.m_len)
             return false;
         for (std::size_t i = 0; i < m_len; ++i) {
@@ -41,8 +39,7 @@ public:
         return true;
     }
 
-    constexpr bool operator==(const char* str) const
-    {
+    constexpr bool operator==(const char* str) const {
         for (std::size_t i = 0; i < m_len; ++i) {
             if (m_str[i] != str[i])
                 return false;
@@ -50,8 +47,7 @@ public:
         return str[m_len] == '\0';
     }
 
-    constexpr bool operator==(const std::string& str) const
-    {
+    constexpr bool operator==(const std::string& str) const {
         if (m_len != str.size())
             return false;
         return operator==(str.c_str());
@@ -59,29 +55,30 @@ public:
 };
 
 class path_iterator {
-private:
+   private:
     string_view m_all;
     unsigned m_curlen = 0;
     int m_is_absolute;
 
-public:
+   public:
     constexpr path_iterator() = default;
-    constexpr path_iterator(string_view str): m_all{str}
-    {
+    constexpr path_iterator(string_view str) : m_all{str} {
         m_is_absolute = !m_all.empty() && m_all[0] == '/';
         this->operator++();
     }
 
-    constexpr path_iterator(const std::string& str): path_iterator{string_view{str}} { }
-    inline path_iterator(const char* str): path_iterator{string_view{str}} { }
+    constexpr path_iterator(const std::string& str)
+        : path_iterator{string_view{str}} {}
+    inline path_iterator(const char* str) : path_iterator{string_view{str}} {}
 
     constexpr operator bool() const { return !m_all.empty(); }
     constexpr bool is_absolute() const { return m_is_absolute; }
 
-    constexpr string_view operator*() const { return string_view{m_all.data(), m_curlen}; }
+    constexpr string_view operator*() const {
+        return string_view{m_all.data(), m_curlen};
+    }
 
-    constexpr path_iterator& operator++()
-    {
+    constexpr path_iterator& operator++() {
         std::size_t start = m_curlen;
         while (start < m_all.size() && m_all[start] == '/')
             ++start;

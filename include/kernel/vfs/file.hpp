@@ -4,22 +4,22 @@
 #include <fcntl.h>
 #include <sys/types.h>
 
-#include <types/types.h>
 #include <types/buffer.hpp>
+#include <types/types.h>
 
-#include <kernel/async/waitlist.hpp>
 #include <kernel/async/lock.hpp>
+#include <kernel/async/waitlist.hpp>
 #include <kernel/vfs/dentry.hpp>
 
 namespace fs {
 
 class pipe : public types::non_copyable {
-private:
+   private:
     static constexpr size_t PIPE_SIZE = 4096;
     static constexpr uint32_t READABLE = 1;
     static constexpr uint32_t WRITABLE = 2;
 
-private:
+   private:
     types::buffer buf;
     uint32_t flags;
     kernel::async::mutex mtx;
@@ -27,7 +27,7 @@ private:
     kernel::async::wait_list waitlist_r;
     kernel::async::wait_list waitlist_w;
 
-public:
+   public:
     pipe();
 
     void close_read();
@@ -36,15 +36,9 @@ public:
     int write(const char* buf, size_t n);
     int read(char* buf, size_t n);
 
-    constexpr bool is_readable() const
-    {
-        return flags & READABLE;
-    }
+    constexpr bool is_readable() const { return flags & READABLE; }
 
-    constexpr bool is_writeable() const
-    {
-        return flags & WRITABLE;
-    }
+    constexpr bool is_writeable() const { return flags & WRITABLE; }
 };
 
 struct file {
@@ -53,21 +47,20 @@ struct file {
         uint32_t read : 1;
         uint32_t write : 1;
         uint32_t append : 1;
-    } flags {};
+    } flags{};
 
-    file(mode_t mode, file_flags flags)
-        : mode(mode), flags(flags) { }
+    file(mode_t mode, file_flags flags) : mode(mode), flags(flags) {}
 
     virtual ~file() = default;
 
     virtual ssize_t read(char* __user buf, size_t n) = 0;
     virtual ssize_t do_write(const char* __user buf, size_t n) = 0;
 
-    virtual off_t seek(off_t n, int whence)
-    { return (void)n, (void)whence, -ESPIPE; }
+    virtual off_t seek(off_t n, int whence) {
+        return (void)n, (void)whence, -ESPIPE;
+    }
 
-    ssize_t write(const char* __user buf, size_t n)
-    {
+    ssize_t write(const char* __user buf, size_t n) {
         if (!flags.write)
             return -EBADF;
 
@@ -79,16 +72,18 @@ struct file {
     }
 
     // regular files should override this method
-    virtual int getdents(char* __user buf, size_t cnt)
-    { return (void)buf, (void)cnt, -ENOTDIR; }
-    virtual int getdents64(char* __user buf, size_t cnt)
-    { return (void)buf, (void)cnt, -ENOTDIR; }
+    virtual int getdents(char* __user buf, size_t cnt) {
+        return (void)buf, (void)cnt, -ENOTDIR;
+    }
+    virtual int getdents64(char* __user buf, size_t cnt) {
+        return (void)buf, (void)cnt, -ENOTDIR;
+    }
 };
 
 struct regular_file : public virtual file {
     virtual ~regular_file() = default;
-    std::size_t cursor { };
-    inode* ind { };
+    std::size_t cursor{};
+    inode* ind{};
 
     regular_file(file_flags flags, size_t cursor, inode* ind);
 

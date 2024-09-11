@@ -27,10 +27,15 @@
 #include <kernel/vfs/dentry.hpp>
 
 process::process(const process& parent, pid_t pid)
-    : mms{parent.mms}, attr{parent.attr}, files{parent.files.copy()}, umask{parent.umask}
-    , pid{pid}, ppid{parent.pid}, pgid{parent.pgid}, sid{parent.sid}
-    , control_tty{parent.control_tty}
-{
+    : mms{parent.mms}
+    , attr{parent.attr}
+    , files{parent.files.copy()}
+    , umask{parent.umask}
+    , pid{pid}
+    , ppid{parent.pid}
+    , pgid{parent.pgid}
+    , sid{parent.sid}
+    , control_tty{parent.control_tty} {
     if (parent.cwd)
         cwd = fs::d_get(parent.cwd);
 
@@ -39,9 +44,7 @@ process::process(const process& parent, pid_t pid)
 }
 
 process::process(pid_t pid, pid_t ppid)
-    : attr { .system = true }, files{&fs_context}
-    , pid { pid } , ppid { ppid }
-{
+    : attr{.system = true}, files{&fs_context}, pid{pid}, ppid{ppid} {
     bool inserted;
     std::tie(std::ignore, inserted) = thds.emplace("", pid);
     assert(inserted);
@@ -49,14 +52,12 @@ process::process(pid_t pid, pid_t ppid)
 
 using signo_type = kernel::signal_list::signo_type;
 
-void process::send_signal(signo_type signal)
-{
+void process::send_signal(signo_type signal) {
     for (auto& thd : thds)
         thd.send_signal(signal);
 }
 
-void kernel_threadd_main(void)
-{
+void kernel_threadd_main(void) {
     kmsg("[kernel] kthread daemon started");
 
     // TODO: create new kthread
@@ -64,26 +65,24 @@ void kernel_threadd_main(void)
         asm volatile("hlt");
 }
 
-static inline void __spawn(kernel::task::thread& thd, uintptr_t entry)
-{
+static inline void __spawn(kernel::task::thread& thd, uintptr_t entry) {
     auto prev_sp = thd.kstack.sp;
 
     // return(start) address
     thd.kstack.pushq(entry);
-    thd.kstack.pushq(0x200);       // flags
-    thd.kstack.pushq(0);           // r15
-    thd.kstack.pushq(0);           // r14
-    thd.kstack.pushq(0);           // r13
-    thd.kstack.pushq(0);           // r12
-    thd.kstack.pushq(0);           // rbp
-    thd.kstack.pushq(0);           // rbx
-    thd.kstack.pushq(0);           // 0 for alignment
-    thd.kstack.pushq(prev_sp);     // previous sp
+    thd.kstack.pushq(0x200);   // flags
+    thd.kstack.pushq(0);       // r15
+    thd.kstack.pushq(0);       // r14
+    thd.kstack.pushq(0);       // r13
+    thd.kstack.pushq(0);       // r12
+    thd.kstack.pushq(0);       // rbp
+    thd.kstack.pushq(0);       // rbx
+    thd.kstack.pushq(0);       // 0 for alignment
+    thd.kstack.pushq(prev_sp); // previous sp
 }
 
 SECTION(".text.kinit")
-proclist::proclist()
-{
+proclist::proclist() {
     // init process has no parent
     auto& init = real_emplace(1, 0);
     assert(init.pid == 1 && init.ppid == 0);
@@ -114,16 +113,14 @@ proclist::proclist()
     }
 }
 
-process& proclist::real_emplace(pid_t pid, pid_t ppid)
-{
-    auto [ iter, inserted ] = m_procs.try_emplace(pid, pid, ppid);
+process& proclist::real_emplace(pid_t pid, pid_t ppid) {
+    auto [iter, inserted] = m_procs.try_emplace(pid, pid, ppid);
     assert(inserted);
 
     return iter->second;
 }
 
-void proclist::kill(pid_t pid, int exit_code)
-{
+void proclist::kill(pid_t pid, int exit_code) {
     auto& proc = this->find(pid);
 
     // init should never exit
@@ -185,7 +182,7 @@ void proclist::kill(pid_t pid, int exit_code)
 
     if (1) {
         lock_guard lck(parent.mtx_waitprocs);
-        parent.waitprocs.push_back({ pid, exit_code });
+        parent.waitprocs.push_back({pid, exit_code});
     }
 
     parent.waitlist.notify_all();
@@ -193,23 +190,21 @@ void proclist::kill(pid_t pid, int exit_code)
     kernel::async::preempt_enable();
 }
 
-static void release_kinit()
-{
+static void release_kinit() {
     // free .kinit
     using namespace kernel::mem::paging;
     extern uintptr_t volatile KINIT_START_ADDR, KINIT_END_ADDR, KINIT_PAGES;
 
     std::size_t pages = KINIT_PAGES;
-    auto range = vaddr_range{KERNEL_PAGE_TABLE_ADDR,
-        KINIT_START_ADDR, KINIT_END_ADDR, true};
+    auto range = vaddr_range{KERNEL_PAGE_TABLE_ADDR, KINIT_START_ADDR,
+                             KINIT_END_ADDR, true};
     for (auto pte : range)
         pte.clear();
 
     create_zone(0x2000, 0x2000 + 0x1000 * pages);
 }
 
-void NORETURN _kernel_init(kernel::mem::paging::pfn_t kernel_stack_pfn)
-{
+void NORETURN _kernel_init(kernel::mem::paging::pfn_t kernel_stack_pfn) {
     kernel::mem::paging::free_pages(kernel_stack_pfn, 9);
     release_kinit();
 
@@ -220,8 +215,8 @@ void NORETURN _kernel_init(kernel::mem::paging::pfn_t kernel_stack_pfn)
     fs::vfs* rootfs;
     if (1) {
         int ret;
-        std::tie(rootfs, ret) = fs::vfs::create("none",
-                "tmpfs", MS_NOATIME, nullptr);
+        std::tie(rootfs, ret) =
+            fs::vfs::create("none", "tmpfs", MS_NOATIME, nullptr);
         assert(ret == 0);
     }
     current_process->fs_context.root = d_get(rootfs->root());
@@ -248,14 +243,15 @@ void NORETURN _kernel_init(kernel::mem::paging::pfn_t kernel_stack_pfn)
     // mount fat32 /mnt directory
     // TODO: parse kernel parameters
     if (1) {
-        auto [ mnt, status ] = fs::open(context, context.root.get(), "/mnt");
+        auto [mnt, status] = fs::open(context, context.root.get(), "/mnt");
         assert(mnt && status == -ENOENT);
 
         if (int ret = fs::mkdir(mnt.get(), 0755); 1)
             assert(ret == 0 && mnt->flags & fs::D_PRESENT);
 
-        int ret = rootfs->mount(mnt.get(), "/dev/sda", "/mnt",
-                "fat32", MS_RDONLY | MS_NOATIME | MS_NODEV | MS_NOSUID, "ro,nodev");
+        int ret = rootfs->mount(mnt.get(), "/dev/sda", "/mnt", "fat32",
+                                MS_RDONLY | MS_NOATIME | MS_NODEV | MS_NOSUID,
+                                "ro,nodev");
         assert(ret == 0);
     }
 
@@ -264,10 +260,10 @@ void NORETURN _kernel_init(kernel::mem::paging::pfn_t kernel_stack_pfn)
 
     types::elf::elf32_load_data d{
         .exec_dent{},
-        .argv{ "/mnt/busybox", "sh", "/mnt/initsh" },
-        .envp{ "LANG=C", "HOME=/root", "PATH=/mnt", "PWD=/" },
-        .ip{}, .sp{}
-    };
+        .argv{"/mnt/busybox", "sh", "/mnt/initsh"},
+        .envp{"LANG=C", "HOME=/root", "PATH=/mnt", "PWD=/"},
+        .ip{},
+        .sp{}};
 
     auto [exec, ret] = fs::open(context, context.root.get(), d.argv[0]);
     if (!exec || ret) {
@@ -296,15 +292,15 @@ void NORETURN _kernel_init(kernel::mem::paging::pfn_t kernel_stack_pfn)
         "push %3\n"
 
         "iretq\n"
-        : : "g"(ds), "g"(cs), "g"(d.sp),
-            "g"(d.ip) : "eax", "memory");
+        :
+        : "g"(ds), "g"(cs), "g"(d.sp), "g"(d.ip)
+        : "eax", "memory");
 
     freeze();
 }
 
 SECTION(".text.kinit")
-void NORETURN init_scheduler(kernel::mem::paging::pfn_t kernel_stack_pfn)
-{
+void NORETURN init_scheduler(kernel::mem::paging::pfn_t kernel_stack_pfn) {
     procs = new proclist;
 
     asm volatile(
@@ -315,8 +311,8 @@ void NORETURN init_scheduler(kernel::mem::paging::pfn_t kernel_stack_pfn)
         "mov %%rbx, (%%rsp)\n"   // return address
         "mov %%rbx, 16(%%rsp)\n" // previous frame return address
         "xor %%rbx, %%rbx\n"
-        "mov %%rbx, 8(%%rsp)\n"  // previous frame rbp
-        "mov %%rsp, %%rbp\n"     // current frame rbp
+        "mov %%rbx, 8(%%rsp)\n" // previous frame rbp
+        "mov %%rsp, %%rbp\n"    // current frame rbp
 
         "push %1\n"
 
@@ -335,7 +331,8 @@ void NORETURN init_scheduler(kernel::mem::paging::pfn_t kernel_stack_pfn)
         "%=:\n"
         "ud2"
         :
-        : "a"(current_thread->kstack.sp), "c"(_kernel_init), "g"(kernel_stack_pfn)
+        : "a"(current_thread->kstack.sp), "c"(_kernel_init),
+          "g"(kernel_stack_pfn)
         : "memory");
 
     freeze();
@@ -343,14 +340,12 @@ void NORETURN init_scheduler(kernel::mem::paging::pfn_t kernel_stack_pfn)
 
 extern "C" void asm_ctx_switch(uintptr_t* curr_sp, uintptr_t* next_sp);
 
-extern "C" void after_ctx_switch()
-{
+extern "C" void after_ctx_switch() {
     current_thread->kstack.load_interrupt_stack();
     current_thread->load_thread_area32();
 }
 
-bool _schedule()
-{
+bool _schedule() {
     auto* next_thd = kernel::task::dispatcher::next();
 
     if (current_thread != next_thd) {
@@ -369,29 +364,24 @@ bool _schedule()
     return current_thread->signals.pending_signal() == 0;
 }
 
-bool schedule()
-{
+bool schedule() {
     if (kernel::async::preempt_count() != 0)
         return true;
 
     return _schedule();
 }
 
-void NORETURN schedule_noreturn(void)
-{
+void NORETURN schedule_noreturn(void) {
     _schedule();
     freeze();
 }
 
-void NORETURN freeze(void)
-{
+void NORETURN freeze(void) {
     for (;;)
         asm volatile("cli\n\thlt");
 }
 
-void NORETURN kill_current(int signo)
-{
-    procs->kill(current_process->pid,
-        (signo + 128) << 8 | (signo & 0xff));
+void NORETURN kill_current(int signo) {
+    procs->kill(current_process->pid, (signo + 128) << 8 | (signo & 0xff));
     schedule_noreturn();
 }

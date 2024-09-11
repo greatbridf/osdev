@@ -19,15 +19,15 @@ using namespace kernel::syscall;
 
 #define NOT_IMPLEMENTED not_implemented(__FILE__, __LINE__)
 
-static inline void not_implemented(const char* pos, int line)
-{
-    kmsgf("[kernel] the function at %s:%d is not implemented, killing the pid%d...",
-            pos, line, current_process->pid);
+static inline void not_implemented(const char* pos, int line) {
+    kmsgf(
+        "[kernel] the function at %s:%d is not implemented, killing the "
+        "pid%d...",
+        pos, line, current_process->pid);
     current_thread->send_signal(SIGSYS);
 }
 
-int kernel::syscall::do_chdir(const char __user* path)
-{
+int kernel::syscall::do_chdir(const char __user* path) {
     // TODO: use copy_from_user
     auto [dir, ret] = current_open(path);
     if (!dir || ret)
@@ -40,16 +40,15 @@ int kernel::syscall::do_chdir(const char __user* path)
     return 0;
 }
 
-execve_retval kernel::syscall::do_execve(
-        const std::string& exec,
-        const std::vector<std::string>& args,
-        const std::vector<std::string>& envs)
-{
+execve_retval kernel::syscall::do_execve(const std::string& exec,
+                                         const std::vector<std::string>& args,
+                                         const std::vector<std::string>& envs) {
     types::elf::elf32_load_data d{
         .exec_dent{},
         .argv{args},
         .envp{envs},
-        .ip{}, .sp{},
+        .ip{},
+        .sp{},
     };
 
     fs::dentry_pointer dent;
@@ -58,7 +57,7 @@ execve_retval kernel::syscall::do_execve(
         std::tie(dent, ret) = current_open(exec);
 
         if (!dent || ret)
-            return { 0, 0, ret };
+            return {0, 0, ret};
 
         d.exec_dent = dent.get();
     }
@@ -75,18 +74,16 @@ execve_retval kernel::syscall::do_execve(
         if (ret == types::elf::ELF_LOAD_FAIL_NORETURN)
             kill_current(SIGSEGV);
 
-        return { 0, 0, ret };
+        return {0, 0, ret};
     }
 
     current_thread->signals.on_exec();
     async::preempt_enable();
 
-    return { d.ip, d.sp, 0 };
+    return {d.ip, d.sp, 0};
 }
 
-
-int kernel::syscall::do_exit(int status)
-{
+int kernel::syscall::do_exit(int status) {
     // TODO: terminating a thread only
     assert(current_process->thds.size() == 1);
 
@@ -97,8 +94,7 @@ int kernel::syscall::do_exit(int status)
     schedule_noreturn();
 }
 
-int kernel::syscall::do_waitpid(pid_t waitpid, int __user* arg1, int options)
-{
+int kernel::syscall::do_waitpid(pid_t waitpid, int __user* arg1, int options) {
     if (waitpid != -1)
         return -EINVAL;
 
@@ -145,11 +141,11 @@ int kernel::syscall::do_waitpid(pid_t waitpid, int __user* arg1, int options)
     return -EINVAL;
 }
 
-int kernel::syscall::do_getcwd(char __user* buf, size_t buf_size)
-{
-    auto path = fs::d_path(current_process->cwd.get(), current_process->fs_context.root.get());
+int kernel::syscall::do_getcwd(char __user* buf, size_t buf_size) {
+    auto path = fs::d_path(current_process->cwd.get(),
+                           current_process->fs_context.root.get());
 
-    int len = std::min(buf_size-1, path.size());
+    int len = std::min(buf_size - 1, path.size());
 
     // TODO: use copy_to_user
     strncpy(buf, path.c_str(), len);
@@ -158,8 +154,7 @@ int kernel::syscall::do_getcwd(char __user* buf, size_t buf_size)
     return len;
 }
 
-pid_t kernel::syscall::do_setsid()
-{
+pid_t kernel::syscall::do_setsid() {
     if (current_process->pid == current_process->pgid)
         return -EPERM;
 
@@ -173,9 +168,8 @@ pid_t kernel::syscall::do_setsid()
     return current_process->pid;
 }
 
-pid_t kernel::syscall::do_getsid(pid_t pid)
-{
-    auto [ pproc, found ] = procs->try_find(pid);
+pid_t kernel::syscall::do_getsid(pid_t pid) {
+    auto [pproc, found] = procs->try_find(pid);
     if (!found)
         return -ESRCH;
     if (pproc->sid != current_process->sid)
@@ -184,8 +178,7 @@ pid_t kernel::syscall::do_getsid(pid_t pid)
     return pproc->sid;
 }
 
-int kernel::syscall::do_setpgid(pid_t pid, pid_t pgid)
-{
+int kernel::syscall::do_setpgid(pid_t pid, pid_t pgid) {
     if (pgid < 0)
         return -EINVAL;
 
@@ -195,7 +188,7 @@ int kernel::syscall::do_setpgid(pid_t pid, pid_t pgid)
     if (pgid == 0)
         pgid = pid;
 
-    auto [ pproc, found ] = procs->try_find(pid);
+    auto [pproc, found] = procs->try_find(pid);
     if (!found)
         return -ESRCH;
 
@@ -207,8 +200,7 @@ int kernel::syscall::do_setpgid(pid_t pid, pid_t pgid)
     return 0;
 }
 
-int kernel::syscall::do_set_thread_area(kernel::user::user_desc __user* ptr)
-{
+int kernel::syscall::do_set_thread_area(kernel::user::user_desc __user* ptr) {
     auto ret = current_thread->set_thread_area(ptr);
     if (ret != 0)
         return ret;
@@ -217,70 +209,65 @@ int kernel::syscall::do_set_thread_area(kernel::user::user_desc __user* ptr)
     return 0;
 }
 
-pid_t kernel::syscall::do_set_tid_address(int __user* tidptr)
-{
+pid_t kernel::syscall::do_set_tid_address(int __user* tidptr) {
     // TODO: copy_from_user
     current_thread->set_child_tid = tidptr;
     return current_thread->tid();
 }
 
-int kernel::syscall::do_prctl(int option, uintptr_t arg2)
-{
+int kernel::syscall::do_prctl(int option, uintptr_t arg2) {
     switch (option) {
-    case PR_SET_NAME: {
-        // TODO: copy_from_user
-        auto* name = (const char __user*)arg2;
-        current_thread->name.assign(name, 15);
-        break;
-    }
-    case PR_GET_NAME: {
-        auto* name = (char __user*)arg2;
-        // TODO: copy_to_user
-        strncpy(name, current_thread->name.c_str(), 16);
-        name[15] = 0;
-        break;
-    }
-    default:
-        return -EINVAL;
+        case PR_SET_NAME: {
+            // TODO: copy_from_user
+            auto* name = (const char __user*)arg2;
+            current_thread->name.assign(name, 15);
+            break;
+        }
+        case PR_GET_NAME: {
+            auto* name = (char __user*)arg2;
+            // TODO: copy_to_user
+            strncpy(name, current_thread->name.c_str(), 16);
+            name[15] = 0;
+            break;
+        }
+        default:
+            return -EINVAL;
     }
 
     return 0;
 }
 
-int kernel::syscall::do_arch_prctl(int option, uintptr_t arg2)
-{
+int kernel::syscall::do_arch_prctl(int option, uintptr_t arg2) {
     switch (option) {
-    case PR_SET_NAME: {
-        // TODO: copy_from_user
-        auto* name = (const char __user*)arg2;
-        current_thread->name.assign(name, 15);
-        break;
-    }
-    case PR_GET_NAME: {
-        auto* name = (char __user*)arg2;
-        // TODO: copy_to_user
-        strncpy(name, current_thread->name.c_str(), 16);
-        name[15] = 0;
-        break;
-    }
-    default:
-        return -EINVAL;
+        case PR_SET_NAME: {
+            // TODO: copy_from_user
+            auto* name = (const char __user*)arg2;
+            current_thread->name.assign(name, 15);
+            break;
+        }
+        case PR_GET_NAME: {
+            auto* name = (char __user*)arg2;
+            // TODO: copy_to_user
+            strncpy(name, current_thread->name.c_str(), 16);
+            name[15] = 0;
+            break;
+        }
+        default:
+            return -EINVAL;
     }
 
     return 0;
 }
 
-int kernel::syscall::do_umask(mode_t mask)
-{
+int kernel::syscall::do_umask(mode_t mask) {
     mode_t old = current_process->umask;
     current_process->umask = mask;
 
     return old;
 }
 
-int kernel::syscall::do_kill(pid_t pid, int sig)
-{
-    auto [ pproc, found ] = procs->try_find(pid);
+int kernel::syscall::do_kill(pid_t pid, int sig) {
+    auto [pproc, found] = procs->try_find(pid);
     if (!found)
         return -ESRCH;
 
@@ -296,12 +283,11 @@ int kernel::syscall::do_kill(pid_t pid, int sig)
     return 0;
 }
 
-int kernel::syscall::do_tkill(pid_t tid, int sig)
-{
+int kernel::syscall::do_tkill(pid_t tid, int sig) {
     NOT_IMPLEMENTED;
     return -EINVAL;
 
-    auto [ pproc, found ] = procs->try_find(tid);
+    auto [pproc, found] = procs->try_find(tid);
     if (!found)
         return -ESRCH;
 
@@ -318,8 +304,8 @@ int kernel::syscall::do_tkill(pid_t tid, int sig)
 }
 
 int kernel::syscall::do_rt_sigprocmask(int how, const sigmask_type __user* set,
-        sigmask_type __user* oldset, size_t sigsetsize)
-{
+                                       sigmask_type __user* oldset,
+                                       size_t sigsetsize) {
     if (sigsetsize != sizeof(sigmask_type))
         return -EINVAL;
 
@@ -334,28 +320,28 @@ int kernel::syscall::do_rt_sigprocmask(int how, const sigmask_type __user* set,
 
     // TODO: use copy_from_user
     switch (how) {
-    case SIG_BLOCK:
-        current_thread->signals.mask(*set);
-        break;
-    case SIG_UNBLOCK:
-        current_thread->signals.unmask(*set);
-        break;
-    case SIG_SETMASK:
-        current_thread->signals.set_mask(*set);
-        break;
+        case SIG_BLOCK:
+            current_thread->signals.mask(*set);
+            break;
+        case SIG_UNBLOCK:
+            current_thread->signals.unmask(*set);
+            break;
+        case SIG_SETMASK:
+            current_thread->signals.set_mask(*set);
+            break;
     }
 
     return 0;
 }
 
 int kernel::syscall::do_rt_sigaction(int signum, const sigaction __user* act,
-        sigaction __user* oldact, size_t sigsetsize)
-{
+                                     sigaction __user* oldact,
+                                     size_t sigsetsize) {
     if (sigsetsize != sizeof(sigmask_type))
         return -EINVAL;
 
-    if (!kernel::signal_list::check_valid(signum)
-        || signum == SIGKILL || signum == SIGSTOP)
+    if (!kernel::signal_list::check_valid(signum) || signum == SIGKILL ||
+        signum == SIGSTOP)
         return -EINVAL;
 
     // TODO: use copy_to_user
@@ -371,8 +357,7 @@ int kernel::syscall::do_rt_sigaction(int signum, const sigaction __user* act,
     return 0;
 }
 
-int kernel::syscall::do_newuname(new_utsname __user* buf)
-{
+int kernel::syscall::do_newuname(new_utsname __user* buf) {
     if (!buf)
         return -EFAULT;
 
@@ -382,49 +367,41 @@ int kernel::syscall::do_newuname(new_utsname __user* buf)
     return 0;
 }
 
-pid_t kernel::syscall::do_getpgid(pid_t pid)
-{
+pid_t kernel::syscall::do_getpgid(pid_t pid) {
     if (pid == 0)
         return current_process->pgid;
 
-    auto [ pproc, found ] = procs->try_find(pid);
+    auto [pproc, found] = procs->try_find(pid);
     if (!found)
         return -ESRCH;
 
     return pproc->pgid;
 }
 
-pid_t kernel::syscall::do_getpid()
-{
+pid_t kernel::syscall::do_getpid() {
     return current_process->pid;
 }
 
-pid_t kernel::syscall::do_getppid()
-{
+pid_t kernel::syscall::do_getppid() {
     return current_process->ppid;
 }
 
-uid_t kernel::syscall::do_getuid()
-{
+uid_t kernel::syscall::do_getuid() {
     return 0; // all users are root for now
 }
 
-uid_t kernel::syscall::do_geteuid()
-{
+uid_t kernel::syscall::do_geteuid() {
     return 0; // all users are root for now
 }
 
-gid_t kernel::syscall::do_getgid()
-{
+gid_t kernel::syscall::do_getgid() {
     return 0; // all users are root for now
 }
 
-pid_t kernel::syscall::do_gettid()
-{
+pid_t kernel::syscall::do_gettid() {
     return current_thread->tid();
 }
 
-uintptr_t kernel::syscall::do_brk(uintptr_t addr)
-{
+uintptr_t kernel::syscall::do_brk(uintptr_t addr) {
     return current_process->mms.set_brk(addr);
 }

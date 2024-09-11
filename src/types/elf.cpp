@@ -14,14 +14,12 @@
 #include <kernel/process.hpp>
 #include <kernel/vfs.hpp>
 
-static inline void __user_push32(uintptr_t* sp, uint32_t d)
-{
+static inline void __user_push32(uintptr_t* sp, uint32_t d) {
     // TODO: use copy_to_user
     *(--*(uint32_t**)sp) = d;
 }
 
-static inline void __user_push_string32(uintptr_t* sp, const char* str)
-{
+static inline void __user_push_string32(uintptr_t* sp, const char* str) {
     size_t len = strlen(str);
 
     *sp -= (len + 1);
@@ -30,45 +28,36 @@ static inline void __user_push_string32(uintptr_t* sp, const char* str)
     memcpy((void*)*sp, str, len + 1);
 }
 
-int types::elf::elf32_load(types::elf::elf32_load_data& d)
-{
+int types::elf::elf32_load(types::elf::elf32_load_data& d) {
     auto& exec = d.exec_dent;
     if (!exec)
         return -ENOENT;
 
-    types::elf::elf32_header hdr {};
-    auto n_read = fs::read(
-        exec->inode,
-        (char*)&hdr,
-        sizeof(types::elf::elf32_header),
-        0, sizeof(types::elf::elf32_header));
+    types::elf::elf32_header hdr{};
+    auto n_read =
+        fs::read(exec->inode, (char*)&hdr, sizeof(types::elf::elf32_header), 0,
+                 sizeof(types::elf::elf32_header));
 
     if (n_read != sizeof(types::elf::elf32_header))
         return -EINVAL;
 
-    if (hdr.magic[0] != 0x7f || hdr.magic[1] != 'E'
-            || hdr.magic[2] != 'L' || hdr.magic[3] != 'F')
+    if (hdr.magic[0] != 0x7f || hdr.magic[1] != 'E' || hdr.magic[2] != 'L' ||
+        hdr.magic[3] != 'F')
         return -EINVAL;
 
     size_t phents_size = hdr.phentsize * hdr.phnum;
     size_t shents_size = hdr.shentsize * hdr.shnum;
     std::vector<types::elf::elf32_program_header_entry> phents(hdr.phnum);
-    n_read = fs::read(
-        exec->inode,
-        (char*)phents.data(),
-        phents_size,
-        hdr.phoff, phents_size);
+    n_read = fs::read(exec->inode, (char*)phents.data(), phents_size, hdr.phoff,
+                      phents_size);
 
     // broken file or I/O error
     if (n_read != phents_size)
         return -EINVAL;
 
     std::vector<types::elf::elf32_section_header_entry> shents(hdr.shnum);
-    n_read = fs::read(
-        exec->inode,
-        (char*)shents.data(),
-        shents_size,
-        hdr.shoff, shents_size);
+    n_read = fs::read(exec->inode, (char*)shents.data(), shents_size, hdr.shoff,
+                      shents_size);
 
     // broken file or I/O error
     if (n_read != shents_size)
@@ -182,7 +171,7 @@ int types::elf::elf32_load(types::elf::elf32_load_data& d)
     __user_push32(sp, 0);
 
     // push argv
-    for (int i = args.size()-1; i >= 0; --i)
+    for (int i = args.size() - 1; i >= 0; --i)
         __user_push32(sp, args[i]);
 
     // push argc

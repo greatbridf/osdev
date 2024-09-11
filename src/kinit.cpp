@@ -29,8 +29,7 @@ struct PACKED bootloader_data {
     uint32_t meminfo_64k_blocks;
 
     // meminfo entries
-    kernel::mem::e820_mem_map_entry
-        meminfo_entries[(1024-4*4)/24];
+    kernel::mem::e820_mem_map_entry meminfo_entries[(1024 - 4 * 4) / 24];
 };
 
 extern void init_vfs();
@@ -38,25 +37,22 @@ extern void init_vfs();
 namespace kernel::kinit {
 
 SECTION(".text.kinit")
-static inline void enable_sse()
-{
+static inline void enable_sse() {
     asm volatile(
-            "mov %%cr0, %%rax\n\t"
-            "and $(~0xc), %%rax\n\t"
-            "or $0x22, %%rax\n\t"
-            "mov %%rax, %%cr0\n\t"
-            "\n\t"
-            "mov %%cr4, %%rax\n\t"
-            "or $0x600, %%rax\n\t"
-            "mov %%rax, %%cr4\n\t"
-            "fninit\n\t"
-            ::: "rax"
-            );
+        "mov %%cr0, %%rax\n\t"
+        "and $(~0xc), %%rax\n\t"
+        "or $0x22, %%rax\n\t"
+        "mov %%rax, %%cr0\n\t"
+        "\n\t"
+        "mov %%cr4, %%rax\n\t"
+        "or $0x600, %%rax\n\t"
+        "mov %%rax, %%cr4\n\t"
+        "fninit\n\t" ::
+            : "rax");
 }
 
 SECTION(".text.kinit")
-static inline void set_uname()
-{
+static inline void set_uname() {
     kernel::sys_utsname = new new_utsname;
     strcpy(kernel::sys_utsname->sysname, "Linux"); // linux compatible
     strcpy(kernel::sys_utsname->nodename, "(none)");
@@ -67,8 +63,7 @@ static inline void set_uname()
 }
 
 SECTION(".text.kinit")
-void NORETURN real_kernel_init(mem::paging::pfn_t kernel_stack_pfn)
-{
+void NORETURN real_kernel_init(mem::paging::pfn_t kernel_stack_pfn) {
     // call global constructors
     // NOTE: the initializer of global objects MUST NOT contain
     // all kinds of memory allocations
@@ -90,8 +85,7 @@ void NORETURN real_kernel_init(mem::paging::pfn_t kernel_stack_pfn)
 }
 
 SECTION(".text.kinit")
-static inline void setup_early_kernel_page_table()
-{
+static inline void setup_early_kernel_page_table() {
     using namespace kernel::mem::paging;
 
     // remove temporary mapping
@@ -113,8 +107,7 @@ static inline void setup_early_kernel_page_table()
 }
 
 SECTION(".text.kinit")
-static inline void setup_buddy(uintptr_t addr_max)
-{
+static inline void setup_buddy(uintptr_t addr_max) {
     using namespace kernel::mem;
     using namespace kernel::mem::paging;
     constexpr auto idx = idx_all(0xffffff8040000000ULL);
@@ -132,7 +125,7 @@ static inline void setup_buddy(uintptr_t addr_max)
 
     auto pd = pdpte.parse();
     for (int i = 0; i < count; ++i, start_pfn += 0x200000)
-        pd[std::get<3>(idx)+i].set(PA_KERNEL_DATA_HUGE, start_pfn);
+        pd[std::get<3>(idx) + i].set(PA_KERNEL_DATA_HUGE, start_pfn);
 
     PAGE_ARRAY = (page*)0xffffff8040000000ULL;
     memset(PAGE_ARRAY, 0x00, addr_max * sizeof(page));
@@ -165,34 +158,33 @@ static inline void setup_buddy(uintptr_t addr_max)
 }
 
 SECTION(".text.kinit")
-static inline void save_memory_info(bootloader_data* data)
-{
+static inline void save_memory_info(bootloader_data* data) {
     kernel::mem::info::memory_size = 1ULL * 1024ULL * 1024ULL + // initial 1M
-        1024ULL * data->meminfo_1k_blocks + 64ULL * 1024ULL * data->meminfo_64k_blocks;
+                                     1024ULL * data->meminfo_1k_blocks +
+                                     64ULL * 1024ULL * data->meminfo_64k_blocks;
     kernel::mem::info::e820_entry_count = data->meminfo_entry_count;
     kernel::mem::info::e820_entry_length = data->meminfo_entry_length;
 
     memcpy(kernel::mem::info::e820_entries, data->meminfo_entries,
-        sizeof(kernel::mem::info::e820_entries));
+           sizeof(kernel::mem::info::e820_entries));
 }
 
 SECTION(".text.kinit")
-void setup_gdt()
-{
+void setup_gdt() {
     // user code
-    mem::gdt[3]  = 0x0020'fa00'0000'0000;
+    mem::gdt[3] = 0x0020'fa00'0000'0000;
     // user data
-    mem::gdt[4]  = 0x0000'f200'0000'0000;
+    mem::gdt[4] = 0x0000'f200'0000'0000;
     // user code32
-    mem::gdt[5]  = 0x00cf'fa00'0000'ffff;
+    mem::gdt[5] = 0x00cf'fa00'0000'ffff;
     // user data32
-    mem::gdt[6]  = 0x00cf'f200'0000'ffff;
+    mem::gdt[6] = 0x00cf'f200'0000'ffff;
     // thread load 32bit
-    mem::gdt[7]  = 0x0000'0000'0000'0000;
+    mem::gdt[7] = 0x0000'0000'0000'0000;
 
     // TSS descriptor
-    mem::gdt[8]  = 0x0000'8900'0070'0067;
-    mem::gdt[9]  = 0x0000'0000'ffff'ff00;
+    mem::gdt[8] = 0x0000'8900'0070'0067;
+    mem::gdt[9] = 0x0000'0000'ffff'ff00;
 
     // LDT descriptor
     mem::gdt[10] = 0x0000'8200'0060'001f;
@@ -203,23 +195,22 @@ void setup_gdt()
     // thread local 64bit
     mem::gdt[13] = 0x0000'0000'0000'0000;
 
-    uint64_t descriptor[] = {
-        0x005f'0000'0000'0000, (uintptr_t)(uint64_t*)mem::gdt
-    };
+    uint64_t descriptor[] = {0x005f'0000'0000'0000,
+                             (uintptr_t)(uint64_t*)mem::gdt};
 
     asm volatile(
-            "lgdt (%0)\n\t"
-            "mov $0x50, %%ax\n\t"
-            "lldt %%ax\n\t"
-            "mov $0x40, %%ax\n\t"
-            "ltr %%ax\n\t"
-            : : "r"((uintptr_t)descriptor+6): "ax", "memory"
-    );
+        "lgdt (%0)\n\t"
+        "mov $0x50, %%ax\n\t"
+        "lldt %%ax\n\t"
+        "mov $0x40, %%ax\n\t"
+        "ltr %%ax\n\t"
+        :
+        : "r"((uintptr_t)descriptor + 6)
+        : "ax", "memory");
 }
 
-extern "C" SECTION(".text.kinit")
-void NORETURN kernel_init(bootloader_data* data)
-{
+extern "C" SECTION(".text.kinit") void NORETURN
+    kernel_init(bootloader_data* data) {
     enable_sse();
 
     setup_early_kernel_page_table();
@@ -240,15 +231,16 @@ void NORETURN kernel_init(bootloader_data* data)
     using namespace mem::paging;
     auto kernel_stack_pfn = page_to_pfn(alloc_pages(9));
     auto kernel_stack_ptr =
-        mem::physaddr<std::byte>{kernel_stack_pfn} + (1<<9) * 0x1000;
+        mem::physaddr<std::byte>{kernel_stack_pfn} + (1 << 9) * 0x1000;
 
     asm volatile(
-            "mov %1, %%rdi\n\t"
-            "mov %2, %%rsp\n\t"
-            "xor %%rbp, %%rbp\n\t"
-            "call *%0\n\t"
-            : : "r"(real_kernel_init), "g"(kernel_stack_pfn), "g"(kernel_stack_ptr):
-    );
+        "mov %1, %%rdi\n\t"
+        "mov %2, %%rsp\n\t"
+        "xor %%rbp, %%rbp\n\t"
+        "call *%0\n\t"
+        :
+        : "r"(real_kernel_init), "g"(kernel_stack_pfn), "g"(kernel_stack_ptr)
+        :);
 
     freeze();
 }

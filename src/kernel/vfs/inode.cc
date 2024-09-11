@@ -5,8 +5,7 @@
 
 using namespace fs;
 
-int vfs::statx(inode* ind, struct statx* st, unsigned int mask)
-{
+int vfs::statx(inode* ind, struct statx* st, unsigned int mask) {
     st->stx_mask = 0;
 
     if (mask & STATX_NLINK) {
@@ -64,7 +63,7 @@ int vfs::statx(inode* ind, struct statx* st, unsigned int mask)
     }
 
     if (mask & STATX_BLOCKS) {
-        st->stx_blocks = (ind->size + 512-1) / 512;
+        st->stx_blocks = (ind->size + 512 - 1) / 512;
         st->stx_blksize = io_blksize();
         st->stx_mask |= STATX_BLOCKS;
     }
@@ -88,7 +87,6 @@ int vfs::statx(inode* ind, struct statx* st, unsigned int mask)
     return 0;
 }
 
-dev_t vfs::i_device(inode*)
-{
+dev_t vfs::i_device(inode*) {
     return -ENODEV;
 }

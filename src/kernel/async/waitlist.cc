@@ -1,15 +1,13 @@
-#include <kernel/async/waitlist.hpp>
-
 #include <assert.h>
 
 #include <kernel/async/lock.hpp>
+#include <kernel/async/waitlist.hpp>
 #include <kernel/process.hpp>
 #include <kernel/task/thread.hpp>
 
 using namespace kernel::async;
 
-bool wait_list::wait(mutex& lock)
-{
+bool wait_list::wait(mutex& lock) {
     this->subscribe();
 
     auto* curthd = current_thread;
@@ -23,8 +21,7 @@ bool wait_list::wait(mutex& lock)
     return !has_signals;
 }
 
-void wait_list::subscribe()
-{
+void wait_list::subscribe() {
     lock_guard lck(m_mtx);
 
     auto* thd = current_thread;
@@ -35,8 +32,7 @@ void wait_list::subscribe()
     assert(inserted);
 }
 
-void wait_list::notify_one()
-{
+void wait_list::notify_one() {
     lock_guard lck(m_mtx);
 
     if (m_subscribers.empty())
@@ -48,8 +44,7 @@ void wait_list::notify_one()
     m_subscribers.erase(iter);
 }
 
-void wait_list::notify_all()
-{
+void wait_list::notify_all() {
     lock_guard lck(m_mtx);
 
     if (m_subscribers.empty())

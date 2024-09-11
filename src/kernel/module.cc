@@ -2,7 +2,7 @@
 
 namespace kernel::module {
 
-module::module(const char* name) : name(name) { }
+module::module(const char* name) :name(name) {}
 
 int insmod(module* mod) {
     int ret = mod->init();

@@ -25,16 +25,11 @@
 
 using fs::dentry;
 
-fs::regular_file::regular_file(
-    file_flags flags, size_t cursor, struct inode* ind)
-    : file(ind->mode, flags)
-    , cursor(cursor)
-    , ind(ind)
-{
-}
+fs::regular_file::regular_file(file_flags flags, size_t cursor,
+                               struct inode* ind)
+    : file(ind->mode, flags), cursor(cursor), ind(ind) {}
 
-ssize_t fs::regular_file::read(char* __user buf, size_t n)
-{
+ssize_t fs::regular_file::read(char* __user buf, size_t n) {
     if (!flags.read)
         return -EBADF;
 
@@ -49,8 +44,7 @@ ssize_t fs::regular_file::read(char* __user buf, size_t n)
     return n_wrote;
 }
 
-ssize_t fs::regular_file::do_write(const char* __user buf, size_t n)
-{
+ssize_t fs::regular_file::do_write(const char* __user buf, size_t n) {
     if (S_ISDIR(mode))
         return -EISDIR;
 
@@ -62,24 +56,23 @@ ssize_t fs::regular_file::do_write(const char* __user buf, size_t n)
     return n_wrote;
 }
 
-off_t fs::regular_file::seek(off_t n, int whence)
-{
+off_t fs::regular_file::seek(off_t n, int whence) {
     if (!S_ISREG(mode))
         return -ESPIPE;
 
     size_t pos;
     switch (whence) {
-    case SEEK_SET:
-        pos = n;
-        break;
-    case SEEK_CUR:
-        pos = cursor + n;
-        break;
-    case SEEK_END:
-        pos = ind->size + n;
-        break;
-    default:
-        return -EINVAL;
+        case SEEK_SET:
+            pos = n;
+            break;
+        case SEEK_CUR:
+            pos = cursor + n;
+            break;
+        case SEEK_END:
+            pos = ind->size + n;
+            break;
+        default:
+            return -EINVAL;
     }
 
     if (pos > ind->size)
@@ -90,13 +83,13 @@ off_t fs::regular_file::seek(off_t n, int whence)
     return cursor;
 }
 
-int fs::regular_file::getdents(char* __user buf, size_t cnt)
-{
+int fs::regular_file::getdents(char* __user buf, size_t cnt) {
     if (!S_ISDIR(ind->mode))
         return -ENOTDIR;
 
     size_t orig_cnt = cnt;
-    int nread = ind->fs->readdir(ind, cursor,
+    int nread = ind->fs->readdir(
+        ind, cursor,
         [&buf, &cnt](const char* fn, struct inode* ind, uint8_t type) {
             size_t filename_len = strlen(fn);
 
@@ -125,13 +118,13 @@ int fs::regular_file::getdents(char* __user buf, size_t cnt)
     return orig_cnt - cnt;
 }
 
-int fs::regular_file::getdents64(char* __user buf, size_t cnt)
-{
+int fs::regular_file::getdents64(char* __user buf, size_t cnt) {
     if (!S_ISDIR(ind->mode))
         return -ENOTDIR;
 
     size_t orig_cnt = cnt;
-    int nread = ind->fs->readdir(ind, cursor,
+    int nread = ind->fs->readdir(
+        ind, cursor,
         [&buf, &cnt](const char* fn, struct inode* ind, uint8_t type) {
             size_t filename_len = strlen(fn);
 
@@ -159,28 +152,21 @@ int fs::regular_file::getdents64(char* __user buf, size_t cnt)
     return orig_cnt - cnt;
 }
 
-fs::fifo_file::fifo_file(file_flags flags,
-    std::shared_ptr<fs::pipe> ppipe)
-    : file(S_IFIFO, flags)
-    , ppipe(ppipe)
-{
-}
+fs::fifo_file::fifo_file(file_flags flags, std::shared_ptr<fs::pipe> ppipe)
+    : file(S_IFIFO, flags), ppipe(ppipe) {}
 
-ssize_t fs::fifo_file::read(char* __user buf, size_t n)
-{
+ssize_t fs::fifo_file::read(char* __user buf, size_t n) {
     if (!flags.read)
         return -EBADF;
 
     return ppipe->read(buf, n);
 }
 
-ssize_t fs::fifo_file::do_write(const char* __user buf, size_t n)
-{
+ssize_t fs::fifo_file::do_write(const char* __user buf, size_t n) {
     return ppipe->write(buf, n);
 }
 
-fs::fifo_file::~fifo_file()
-{
+fs::fifo_file::~fifo_file() {
     assert(flags.read ^ flags.write);
     if (flags.read)
         ppipe->close_read();
@@ -191,8 +177,8 @@ fs::fifo_file::~fifo_file()
 static fs::blkdev_ops** blkdevs[256];
 static fs::chrdev_ops** chrdevs[256];
 
-size_t fs::read(struct fs::inode* file, char* buf, size_t buf_size, size_t offset, size_t n)
-{
+size_t fs::read(struct fs::inode* file, char* buf, size_t buf_size,
+                size_t offset, size_t n) {
     if (S_ISDIR(file->mode)) {
         errno = EISDIR;
         return -1U;
@@ -225,8 +211,8 @@ size_t fs::read(struct fs::inode* file, char* buf, size_t buf_size, size_t offse
     errno = EINVAL;
     return -1U;
 }
-size_t fs::write(struct fs::inode* file, const char* buf, size_t offset, size_t n)
-{
+size_t fs::write(struct fs::inode* file, const char* buf, size_t offset,
+                 size_t n) {
     if (S_ISDIR(file->mode)) {
         errno = EISDIR;
         return -1U;
@@ -260,9 +246,10 @@ size_t fs::write(struct fs::inode* file, const char* buf, size_t offset, size_t 
     return -1U;
 }
 
-std::pair<fs::dentry_pointer, int> fs::open(const fs_context& context, dentry* _cwd,
-    types::path_iterator path, bool follow, int recurs_no)
-{
+std::pair<fs::dentry_pointer, int> fs::open(const fs_context& context,
+                                            dentry* _cwd,
+                                            types::path_iterator path,
+                                            bool follow, int recurs_no) {
     // too many recursive search layers will cause stack overflow
     // so we use 16 for now
     if (recurs_no >= 16)
@@ -270,7 +257,7 @@ std::pair<fs::dentry_pointer, int> fs::open(const fs_context& context, dentry* _
 
     dentry_pointer cwd{path.is_absolute() ? d_get(context.root) : d_get(_cwd)};
 
-    for ( ; path; ++path) {
+    for (; path; ++path) {
         auto item = *path;
         if (item.empty())
             continue;
@@ -286,7 +273,8 @@ std::pair<fs::dentry_pointer, int> fs::open(const fs_context& context, dentry* _
                 return {nullptr, ret};
             linkpath[ret] = 0;
 
-            std::tie(cwd, ret) = fs::open(context, cwd->parent, linkpath, true, recurs_no + 1);
+            std::tie(cwd, ret) =
+                fs::open(context, cwd->parent, linkpath, true, recurs_no + 1);
             if (!cwd || ret)
                 return {nullptr, ret};
         }
@@ -319,101 +307,89 @@ std::pair<fs::dentry_pointer, int> fs::open(const fs_context& context, dentry* _
             return {nullptr, ret};
         linkpath[ret] = 0;
 
-        return fs::open(context, cwd->parent, linkpath, true, recurs_no+1);
+        return fs::open(context, cwd->parent, linkpath, true, recurs_no + 1);
     }
 
     return {std::move(cwd), 0};
 }
 
-int fs::statx(struct inode* inode, struct statx* stat, unsigned int mask)
-{
+int fs::statx(struct inode* inode, struct statx* stat, unsigned int mask) {
     assert(inode && inode->fs);
     return inode->fs->statx(inode, stat, mask);
 }
 
-int fs::truncate(struct inode *file, size_t size)
-{
+int fs::truncate(struct inode* file, size_t size) {
     assert(file && file->fs);
     return file->fs->truncate(file, size);
 }
 
-int fs::readlink(struct inode* inode, char* buf, size_t size)
-{
+int fs::readlink(struct inode* inode, char* buf, size_t size) {
     assert(inode && inode->fs);
     return inode->fs->readlink(inode, buf, size);
 }
 
-int fs::symlink(struct dentry* at, const char* target)
-{
+int fs::symlink(struct dentry* at, const char* target) {
     assert(at && at->parent && at->parent->fs);
     return at->parent->fs->symlink(at->parent->inode, at, target);
 }
 
-int fs::unlink(struct dentry* at)
-{
+int fs::unlink(struct dentry* at) {
     assert(at && at->parent && at->parent->fs);
     return at->parent->fs->unlink(at->parent->inode, at);
 }
 
-int fs::mknod(struct dentry* at, mode_t mode, dev_t dev)
-{
+int fs::mknod(struct dentry* at, mode_t mode, dev_t dev) {
     assert(at && at->parent && at->parent->fs);
     return at->parent->fs->mknod(at->parent->inode, at, mode, dev);
 }
 
-int fs::creat(struct dentry* at, mode_t mode)
-{
+int fs::creat(struct dentry* at, mode_t mode) {
     assert(at && at->parent && at->parent->fs);
     return at->parent->fs->creat(at->parent->inode, at, mode);
 }
 
 int fs::mount(struct dentry* mnt, const char* source, const char* mount_point,
-        const char* fstype, unsigned long flags, const void *data)
-{
+              const char* fstype, unsigned long flags, const void* data) {
     assert(mnt && mnt->fs);
     return mnt->fs->mount(mnt, source, mount_point, fstype, flags, data);
 }
 
-int fs::mkdir(struct dentry* at, mode_t mode)
-{
+int fs::mkdir(struct dentry* at, mode_t mode) {
     assert(at && at->parent && at->parent->fs);
     return at->parent->fs->mkdir(at->parent->inode, at, mode);
 }
 
 int mount(dentry* mnt, const char* source, const char* mount_point,
-        const char* fstype, unsigned long flags, const void *data)
-{
+          const char* fstype, unsigned long flags, const void* data) {
     assert(mnt && mnt->fs);
     return mnt->fs->mount(mnt, source, mount_point, fstype, flags, data);
 }
 
-int fs::register_block_device(dev_t node, const fs::blkdev_ops& ops)
-{
+int fs::register_block_device(dev_t node, const fs::blkdev_ops& ops) {
     int major = NODE_MAJOR(node);
     int minor = NODE_MINOR(node);
 
     if (!blkdevs[major])
-        blkdevs[major] = new blkdev_ops*[256] {};
+        blkdevs[major] = new blkdev_ops* [256] {};
 
     if (blkdevs[major][minor])
         return -EEXIST;
 
-    blkdevs[major][minor] = new blkdev_ops { ops };
+    blkdevs[major][minor] = new blkdev_ops{ops};
     return 0;
 }
 
-int fs::register_char_device(dev_t node, const fs::chrdev_ops& ops)
-{
+int fs::register_char_device(dev_t node, const fs::chrdev_ops& ops) {
     int major = NODE_MAJOR(node);
     int minor = NODE_MINOR(node);
 
     if (!chrdevs[major])
-        chrdevs[major] = new chrdev_ops*[256] {};
+        chrdevs[major] = new chrdev_ops* [256] {};
 
     if (chrdevs[major][minor])
         return -EEXIST;
 
-    chrdevs[major][minor] = new chrdev_ops { ops };
+    chrdevs[major][minor] = new chrdev_ops{ops};
     return 0;
 }
 
@@ -437,8 +413,7 @@ struct PACKED mbr {
 };
 
 // TODO: devtmpfs
-static int mbr_part_probe(dev_t node)
-{
+static int mbr_part_probe(dev_t node) {
     mbr buf_mbr;
 
     int ret = fs::block_device_read(node, (char*)&buf_mbr, sizeof(mbr), 0, 512);
@@ -456,16 +431,17 @@ static int mbr_part_probe(dev_t node)
         std::size_t part_offset = part.lba_start * 512;
 
         // TODO: add partition offset limit
-        fs::register_block_device(node + n, {
-            [=](char* buf, size_t buf_size, size_t offset, size_t n) -> ssize_t {
-                offset += part_offset;
-                return fs::block_device_read(node, buf, buf_size, offset, n);
-            },
-            [=](const char* buf, size_t offset, size_t n) -> ssize_t {
-                offset += part_offset;
-                return fs::block_device_write(node, buf, offset, n);
-            }
-        });
+        fs::register_block_device(
+            node + n,
+            {[=](char* buf, size_t buf_size, size_t offset,
+                 size_t n) -> ssize_t {
+                 offset += part_offset;
+                 return fs::block_device_read(node, buf, buf_size, offset, n);
+             },
+             [=](const char* buf, size_t offset, size_t n) -> ssize_t {
+                 offset += part_offset;
+                 return fs::block_device_write(node, buf, offset, n);
+             }});
 
         ++n;
     }
@@ -473,8 +449,7 @@ static int mbr_part_probe(dev_t node)
     return 0;
 }
 
-void fs::partprobe()
-{
+void fs::partprobe() {
     for (int i = 0; i < 256; i += 16) {
         int ret = mbr_part_probe(make_device(8, i));
 
@@ -485,8 +460,8 @@ void fs::partprobe()
     }
 }
 
-ssize_t fs::block_device_read(dev_t node, char* buf, size_t buf_size, size_t offset, size_t n)
-{
+ssize_t fs::block_device_read(dev_t node, char* buf, size_t buf_size,
+                              size_t offset, size_t n) {
     int major = NODE_MAJOR(node);
     int minor = NODE_MINOR(node);
 
@@ -500,8 +475,8 @@ ssize_t fs::block_device_read(dev_t node, char* buf, size_t buf_size, size_t off
     return read(buf, buf_size, offset, n);
 }
 
-ssize_t fs::block_device_write(dev_t node, const char* buf, size_t offset, size_t n)
-{
+ssize_t fs::block_device_write(dev_t node, const char* buf, size_t offset,
+                               size_t n) {
     int major = NODE_MAJOR(node);
     int minor = NODE_MINOR(node);
 
@@ -515,8 +490,7 @@ ssize_t fs::block_device_write(dev_t node, const char* buf, size_t offset, size_
     return write(buf, offset, n);
 }
 
-ssize_t fs::char_device_read(dev_t node, char* buf, size_t buf_size, size_t n)
-{
+ssize_t fs::char_device_read(dev_t node, char* buf, size_t buf_size, size_t n) {
     int major = NODE_MAJOR(node);
     int minor = NODE_MINOR(node);
 
@@ -530,8 +504,7 @@ ssize_t fs::char_device_read(dev_t node, char* buf, size_t buf_size, size_t n)
     return read(buf, buf_size, n);
 }
 
-ssize_t fs::char_device_write(dev_t node, const char* buf, size_t n)
-{
+ssize_t fs::char_device_write(dev_t node, const char* buf, size_t n) {
     int major = NODE_MAJOR(node);
     int minor = NODE_MINOR(node);
 
@@ -545,23 +518,19 @@ ssize_t fs::char_device_write(dev_t node, const char* buf, size_t n)
     return write(buf, n);
 }
 
-ssize_t b_null_read(char*, size_t, size_t)
-{
+ssize_t b_null_read(char*, size_t, size_t) {
     return 0;
 }
 
-ssize_t b_null_write(const char*, size_t n)
-{
+ssize_t b_null_write(const char*, size_t n) {
     return n;
 }
 
-static ssize_t console_read(char* buf, size_t buf_size, size_t n)
-{
+static ssize_t console_read(char* buf, size_t buf_size, size_t n) {
     return kernel::tty::console->read(buf, buf_size, n);
 }
 
-static ssize_t console_write(const char* buf, size_t n)
-{
+static ssize_t console_write(const char* buf, size_t n) {
     size_t orig_n = n;
     while (n--)
         kernel::tty::console->putchar(*(buf++));
@@ -569,28 +538,21 @@ static ssize_t console_write(const char* buf, size_t n)
     return orig_n;
 }
 
-fs::pipe::pipe(void)
-    : buf { PIPE_SIZE }
-    , flags { READABLE | WRITABLE }
-{
-}
+fs::pipe::pipe(void) : buf{PIPE_SIZE}, flags{READABLE | WRITABLE} {}
 
-void fs::pipe::close_read(void)
-{
+void fs::pipe::close_read(void) {
     kernel::async::lock_guard lck{mtx};
     flags &= (~READABLE);
     waitlist_w.notify_all();
 }
 
-void fs::pipe::close_write(void)
-{
+void fs::pipe::close_write(void) {
     kernel::async::lock_guard lck{mtx};
     flags &= (~WRITABLE);
     waitlist_r.notify_all();
 }
 
-int fs::pipe::write(const char* buf, size_t n)
-{
+int fs::pipe::write(const char* buf, size_t n) {
     // TODO: check privilege
     // TODO: check EPIPE
     kernel::async::lock_guard lck{mtx};
@@ -647,8 +609,7 @@ int fs::pipe::write(const char* buf, size_t n)
     return orig_n - n;
 }
 
-int fs::pipe::read(char* buf, size_t n)
-{
+int fs::pipe::read(char* buf, size_t n) {
     // TODO: check privilege
     kernel::async::lock_guard lck{mtx};
     size_t orig_n = n;
@@ -672,14 +633,13 @@ int fs::pipe::read(char* buf, size_t n)
 }
 
 SECTION(".text.kinit")
-void init_vfs(void)
-{
+void init_vfs(void) {
     using namespace fs;
     // null
-    register_char_device(make_device(1, 0), { b_null_read, b_null_write });
+    register_char_device(make_device(1, 0), {b_null_read, b_null_write});
     // console (supports serial console only for now)
     // TODO: add interface to bind console device to other devices
-    register_char_device(make_device(2, 0), { console_read, console_write });
+    register_char_device(make_device(2, 0), {console_read, console_write});
 
     // register tmpfs
     fs::register_tmpfs();

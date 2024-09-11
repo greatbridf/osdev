@@ -1,11 +1,12 @@
 #pragma once
+#include <cstddef>
 #include <memory>
 #include <new>
-#include <utility>
 #include <type_traits>
-#include <cstddef>
+#include <utility>
 
 #include <stdint.h>
+
 #include <types/cplusplus.hpp>
 #include <types/types.h>
 
@@ -14,11 +15,11 @@
 namespace types::memory {
 
 class brk_memory_allocator {
-public:
+   public:
     using byte = std::byte;
     using size_type = std::size_t;
 
-private:
+   private:
     byte* p_start;
     byte* p_limit;
     byte* p_break;
@@ -28,10 +29,9 @@ private:
     byte* brk(byte* addr);
     byte* sbrk(size_type increment);
 
-    constexpr byte* sbrk() const noexcept
-    { return p_break; }
+    constexpr byte* sbrk() const noexcept { return p_break; }
 
-public:
+   public:
     explicit brk_memory_allocator(byte* start, size_type size);
     brk_memory_allocator(const brk_memory_allocator&) = delete;
 

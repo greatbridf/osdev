@@ -259,7 +259,7 @@ std::pair<fs::dentry_pointer, int> fs::open(const fs_context& context,
 
     for (; path; ++path) {
         auto item = *path;
-        if (item.empty())
+        if (item.empty() || item == ".")
             continue;
 
         if (!(cwd->flags & D_PRESENT))
@@ -286,7 +286,7 @@ std::pair<fs::dentry_pointer, int> fs::open(const fs_context& context,
                 return {nullptr, status};
         }
 
-        if (cwd->flags & D_MOUNTPOINT) {
+        while (cwd->flags & D_MOUNTPOINT) {
             auto iter = mounts.find(cwd.get());
             assert(iter);
 
@@ -518,26 +518,6 @@ ssize_t fs::char_device_write(dev_t node, const char* buf, size_t n) {
     return write(buf, n);
 }
 
-ssize_t b_null_read(char*, size_t, size_t) {
-    return 0;
-}
-
-ssize_t b_null_write(const char*, size_t n) {
-    return n;
-}
-
-static ssize_t console_read(char* buf, size_t buf_size, size_t n) {
-    return kernel::tty::console->read(buf, buf_size, n);
-}
-
-static ssize_t console_write(const char* buf, size_t n) {
-    size_t orig_n = n;
-    while (n--)
-        kernel::tty::console->putchar(*(buf++));
-
-    return orig_n;
-}
-
 fs::pipe::pipe(void) : buf{PIPE_SIZE}, flags{READABLE | WRITABLE} {}
 
 void fs::pipe::close_read(void) {
@@ -630,17 +610,4 @@ int fs::pipe::read(char* buf, size_t n) {
 
     waitlist_w.notify_all();
     return orig_n - n;
-}
-
-SECTION(".text.kinit")
-void init_vfs(void) {
-    using namespace fs;
-    // null
-    register_char_device(make_device(1, 0), {b_null_read, b_null_write});
-    // console (supports serial console only for now)
-    // TODO: add interface to bind console device to other devices
-    register_char_device(make_device(2, 0), {console_read, console_write});
-
-    // register tmpfs
-    fs::register_tmpfs();
 }

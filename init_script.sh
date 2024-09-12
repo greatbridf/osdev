@@ -4,8 +4,9 @@ BUSYBOX=/mnt/busybox
 
 $BUSYBOX mkdir -p /dev
 
-$BUSYBOX mknod -m 666 /dev/console c 2 0
-$BUSYBOX mknod -m 666 /dev/null c 1 0
+$BUSYBOX mknod -m 666 /dev/console c 5 1
+$BUSYBOX mknod -m 666 /dev/null c 1 3
+$BUSYBOX mknod -m 666 /dev/zero c 1 5
 $BUSYBOX mknod -m 666 /dev/sda b 8 0
 $BUSYBOX mknod -m 666 /dev/sda1 b 8 1
 

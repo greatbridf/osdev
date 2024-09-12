@@ -7,5 +7,5 @@ symbol-file build/kernel.out
 target remote:1234
 
 # layout src
-b process.cpp:271
+b tmpfs::mkdir
 c

@@ -208,6 +208,8 @@ void NORETURN _kernel_init(kernel::mem::paging::pfn_t kernel_stack_pfn) {
     kernel::mem::paging::free_pages(kernel_stack_pfn, 9);
     release_kinit();
 
+    kernel::kmod::load_internal_modules();
+
     asm volatile("sti");
 
     // mount rootfs
@@ -225,18 +227,6 @@ void NORETURN _kernel_init(kernel::mem::paging::pfn_t kernel_stack_pfn) {
     // ------------------------------------------
     // interrupt enabled
     // ------------------------------------------
-
-    // load kmods
-    for (auto loader = kernel::module::KMOD_LOADERS_START; *loader; ++loader) {
-        auto* mod = (*loader)();
-        if (!mod)
-            continue;
-
-        if (auto ret = insmod(mod); ret == kernel::module::MODULE_SUCCESS)
-            continue;
-
-        kmsgf("[kernel] An error occured while loading \"%s\"", mod->name);
-    }
 
     const auto& context = current_process->fs_context;
 

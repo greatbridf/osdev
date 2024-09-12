@@ -27,6 +27,7 @@ extern int* __errno_location(void);
 #define EINVAL 22
 #define ENOTTY 25
 #define ESPIPE 29
+#define EROFS 30
 #define EPIPE 32
 #define ELOOP 40
 

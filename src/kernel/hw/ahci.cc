@@ -19,7 +19,7 @@
         ++(spin);                        \
     if ((spin) == MAX_SPINS)
 
-using namespace kernel::module;
+using namespace kernel::kmod;
 using namespace kernel::hw::pci;
 using namespace kernel::mem::paging;
 
@@ -432,14 +432,14 @@ struct ahci_port {
     }
 };
 
-class ahci_module : public virtual kernel::module::module {
+class ahci_module : public virtual kmod {
    private:
     hba_ghc* ghc{};
     pci_device* dev{};
     std::vector<ahci_port*> ports;
 
    public:
-    ahci_module() : module("ahci") {}
+    ahci_module() : kmod("ahci") {}
     ~ahci_module() {
         // TODO: release PCI device
         for (auto& item : ports) {
@@ -501,14 +501,11 @@ class ahci_module : public virtual kernel::module::module {
             });
 
         if (ret != 0)
-            return MODULE_FAILED;
-        return MODULE_SUCCESS;
+            return ret;
+        return 0;
     }
 };
 
 } // namespace ahci
 
-kernel::module::module* ahci_module_init() {
-    return new ahci::ahci_module();
-}
-INTERNAL_MODULE(ahci_module_loader, ahci_module_init);
+INTERNAL_MODULE(ahci, ahci::ahci_module);

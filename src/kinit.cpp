@@ -32,8 +32,6 @@ struct PACKED bootloader_data {
     kernel::mem::e820_mem_map_entry meminfo_entries[(1024 - 4 * 4) / 24];
 };
 
-extern void init_vfs();
-
 namespace kernel::kinit {
 
 SECTION(".text.kinit")
@@ -77,8 +75,6 @@ void NORETURN real_kernel_init(mem::paging::pfn_t kernel_stack_pfn) {
 
     init_pci();
 
-    // TODO: remove this
-    init_vfs();
     init_syscall_table();
 
     init_scheduler(kernel_stack_pfn);

@@ -34,7 +34,9 @@ set(BOOTLOADER_SOURCES src/boot.s
                        src/asm/interrupt.s
                        )
 
-set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
+set(KERNEL_MAIN_SOURCES src/dev/builtin-chardev.cc
+                        src/fs/fat.cpp
+                        src/fs/tmpfs.cc
                         src/fs/procfs.cc
                         src/kinit.cpp
                         src/kernel/async/waitlist.cc
@@ -64,7 +66,6 @@ set(KERNEL_MAIN_SOURCES src/fs/fat.cpp
                         src/kernel/vfs/dentry.cc
                         src/kernel/vfs/filearr.cc
                         src/kernel/vfs/inode.cc
-                        src/kernel/vfs/tmpfs.cc
                         src/kernel/vfs/vfs.cc
                         src/kernel/signal.cpp
                         src/types/elf.cpp

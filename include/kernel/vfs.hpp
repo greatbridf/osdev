@@ -89,9 +89,6 @@ using create_fs_func_t =
 
 int register_fs(const char* name, create_fs_func_t);
 
-// in tmpfs.cc
-int register_tmpfs();
-
 void partprobe();
 
 ssize_t block_device_read(dev_t node, char* buf, size_t buf_size, size_t offset,
@@ -127,5 +124,3 @@ std::pair<dentry_pointer, int> open(const fs_context& context, dentry* cwd,
                                     int recurs_no = 0);
 
 } // namespace fs
-
-extern "C" void init_vfs(void);

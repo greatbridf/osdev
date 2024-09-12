@@ -4,8 +4,10 @@
 
 #include <assert.h>
 #include <stdint.h>
+#include <sys/mount.h>
 
 #include <kernel/log.hpp>
+#include <kernel/module.hpp>
 #include <kernel/vfs.hpp>
 
 using namespace fs;
@@ -23,6 +25,7 @@ class tmpfs : public virtual vfs {
 
    private:
     ino_t m_next_ino;
+    bool m_readonly;
 
    private:
     ino_t assign_ino() { return m_next_ino++; }
@@ -62,8 +65,10 @@ class tmpfs : public virtual vfs {
         return nread;
     }
 
-   public:
-    explicit tmpfs() : vfs(make_device(0, 2), 4096), m_next_ino{1} {
+    explicit tmpfs(unsigned long flags)
+        : vfs(make_device(0, 2), 4096)
+        , m_next_ino{1}
+        , m_readonly(flags & MS_RDONLY) {
         auto* in = alloc_inode(assign_ino());
 
         in->fs_data = make_vfe();
@@ -73,6 +78,11 @@ class tmpfs : public virtual vfs {
         mklink(in, in, "..");
 
         register_root_node(in);
+    }
+
+   public:
+    static tmpfs* create(const char*, unsigned long flags, const void*) {
+        return new tmpfs(flags);
     }
 
     virtual ssize_t read(struct inode* file, char* buf, size_t buf_size,
@@ -97,6 +107,8 @@ class tmpfs : public virtual vfs {
 
     virtual ssize_t write(struct inode* file, const char* buf, size_t count,
                           off_t offset) override {
+        if (m_readonly)
+            return -EROFS;
         if (!S_ISREG(file->mode))
             return -EINVAL;
 
@@ -113,6 +125,8 @@ class tmpfs : public virtual vfs {
 
     virtual int creat(struct inode* dir, struct dentry* at,
                       mode_t mode) override {
+        if (m_readonly)
+            return -EROFS;
         if (!S_ISDIR(dir->mode))
             return -ENOTDIR;
         assert(at->parent && at->parent->inode == dir);
@@ -130,6 +144,8 @@ class tmpfs : public virtual vfs {
 
     virtual int mknod(struct inode* dir, struct dentry* at, mode_t mode,
                       dev_t dev) override {
+        if (m_readonly)
+            return -EROFS;
         if (!S_ISDIR(dir->mode))
             return -ENOTDIR;
         assert(at->parent && at->parent->inode == dir);
@@ -153,6 +169,8 @@ class tmpfs : public virtual vfs {
 
     virtual int mkdir(struct inode* dir, struct dentry* at,
                       mode_t mode) override {
+        if (m_readonly)
+            return -EROFS;
         if (!S_ISDIR(dir->mode))
             return -ENOTDIR;
         assert(at->parent && at->parent->inode == dir);
@@ -173,6 +191,8 @@ class tmpfs : public virtual vfs {
 
     virtual int symlink(struct inode* dir, struct dentry* at,
                         const char* target) override {
+        if (m_readonly)
+            return -EROFS;
         if (!S_ISDIR(dir->mode))
             return -ENOTDIR;
         assert(at->parent && at->parent->inode == dir);
@@ -209,6 +229,8 @@ class tmpfs : public virtual vfs {
     }
 
     virtual int unlink(struct inode* dir, struct dentry* at) override {
+        if (m_readonly)
+            return -EROFS;
         if (!S_ISDIR(dir->mode))
             return -ENOTDIR;
         assert(at->parent && at->parent->inode == dir);
@@ -253,6 +275,8 @@ class tmpfs : public virtual vfs {
     }
 
     virtual int truncate(inode* file, size_t size) override {
+        if (m_readonly)
+            return -EROFS;
         if (!S_ISREG(file->mode))
             return -EINVAL;
 
@@ -263,12 +287,11 @@ class tmpfs : public virtual vfs {
     }
 };
 
-static tmpfs* create_tmpfs(const char*, unsigned long, const void*) {
-    // TODO: flags
-    return new tmpfs;
-}
+class tmpfs_module : public virtual kernel::kmod::kmod {
+   public:
+    tmpfs_module() : kmod{"tmpfs"} {}
 
-int fs::register_tmpfs() {
-    fs::register_fs("tmpfs", {create_tmpfs});
-    return 0;
-}
+    int init() override { return fs::register_fs("tmpfs", tmpfs::create); }
+};
+
+INTERNAL_MODULE(tmpfs, tmpfs_module);

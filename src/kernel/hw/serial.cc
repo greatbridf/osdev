@@ -9,6 +9,8 @@
 
 using namespace kernel::tty;
 using namespace kernel::hw;
+using namespace kernel::irq;
+using namespace kernel::kmod;
 
 constexpr int PORT0 = 0x3f8;
 constexpr int PORT1 = 0x2f8;
@@ -79,14 +81,14 @@ class serial_tty : public virtual tty {
     }
 };
 
-class serial_module : public virtual kernel::module::module {
+class serial_module : public virtual kmod {
    public:
-    serial_module() : module("serial-tty") {}
+    serial_module() : kmod("serial-tty") {}
 
     virtual int init() override {
         if (int ret = _init_port(port0); ret == 0) {
             auto* dev = new serial_tty(port0, 0);
-            kernel::irq::register_handler(4, _serial0_receive_data_interrupt);
+            register_handler(4, _serial0_receive_data_interrupt);
 
             if (int ret = register_tty(dev); ret != 0)
                 kmsg("[serial] cannot register ttyS0");
@@ -94,17 +96,14 @@ class serial_module : public virtual kernel::module::module {
 
         if (int ret = _init_port(port1); ret == 0) {
             auto* dev = new serial_tty(port1, 0);
-            kernel::irq::register_handler(3, _serial1_receive_data_interrupt);
+            register_handler(3, _serial1_receive_data_interrupt);
 
             if (int ret = register_tty(dev); ret != 0)
                 kmsg("[serial] cannot register ttyS1");
         }
 
-        return kernel::module::MODULE_SUCCESS;
+        return 0;
     }
 };
 
-kernel::module::module* serial_module_init() {
-    return new serial_module();
-}
-INTERNAL_MODULE(serial_module_loader, serial_module_init);
+INTERNAL_MODULE(serial, serial_module);

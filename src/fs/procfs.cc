@@ -11,6 +11,8 @@
 #include <kernel/vfs.hpp>
 #include <kernel/vfs/vfs.hpp>
 
+using namespace kernel::kmod;
+
 struct mount_flags_opt {
     unsigned long flag;
     const char* name;
@@ -97,6 +99,17 @@ class procfs : public virtual fs::vfs {
 
     ino_t free_ino = 1;
 
+    procfs(const char* _source)
+        : vfs(make_device(0, 10), 4096), source{_source} {
+        auto* ind = alloc_inode(0);
+        ind->mode = S_IFDIR | 0777;
+
+        create_file("mounts", mounts_read, nullptr);
+        create_file("schedstat", schedstat_read, nullptr);
+
+        register_root_node(ind);
+    }
+
    public:
     static procfs* create(const char* source, unsigned long, const void*) {
         // TODO: flags
@@ -114,17 +127,6 @@ class procfs : public virtual fs::vfs {
         ind->mode = S_IFREG | 0666;
 
         return inserted ? 0 : -EEXIST;
-    }
-
-    procfs(const char* _source)
-        : vfs(make_device(0, 10), 4096), source{_source} {
-        auto* ind = alloc_inode(0);
-        ind->mode = S_IFDIR | 0777;
-
-        create_file("mounts", mounts_read, nullptr);
-        create_file("schedstat", schedstat_read, nullptr);
-
-        register_root_node(ind);
     }
 
     ssize_t read(inode* file, char* buf, size_t buf_size, size_t n,
@@ -185,22 +187,15 @@ class procfs : public virtual fs::vfs {
     }
 };
 
-class procfs_module : public virtual kernel::module::module {
+class procfs_module : public virtual kmod {
    public:
-    procfs_module() : module("procfs") {}
+    procfs_module() : kmod("procfs") {}
 
     virtual int init() override {
-        int ret = fs::register_fs("procfs", procfs::create);
-        if (ret != 0)
-            return kernel::module::MODULE_FAILED;
-        return kernel::module::MODULE_SUCCESS;
+        return fs::register_fs("procfs", procfs::create);
     }
 };
 
-static kernel::module::module* procfs_init() {
-    return new procfs_module;
-}
-
-INTERNAL_MODULE(procfs, procfs_init);
-
 } // namespace fs::proc
+
+INTERNAL_MODULE(procfs, fs::proc::procfs_module);

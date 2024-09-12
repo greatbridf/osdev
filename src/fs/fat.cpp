@@ -17,6 +17,8 @@
 #define VFAT_FILENAME_LOWERCASE (0x08)
 #define VFAT_EXTENSION_LOWERCASE (0x10)
 
+using namespace kernel::kmod;
+
 namespace fs::fat {
 
 // buf MUST be larger than 512 bytes
@@ -236,9 +238,9 @@ static fat32* create_fat32(const char* source, unsigned long, const void*) {
     return new fat32(fs::make_device(8, 1));
 }
 
-class fat32_module : public virtual kernel::module::module {
+class fat32_module : public virtual kmod {
    public:
-    fat32_module() : module("fat32") {}
+    fat32_module() : kmod("fat32") {}
     ~fat32_module() {
         // TODO: unregister filesystem
     }
@@ -247,16 +249,12 @@ class fat32_module : public virtual kernel::module::module {
         int ret = fs::register_fs("fat32", create_fat32);
 
         if (ret != 0)
-            return kernel::module::MODULE_FAILED;
+            return ret;
 
-        return kernel::module::MODULE_SUCCESS;
+        return 0;
     }
 };
 
 } // namespace fs::fat
 
-static kernel::module::module* fat32_module_init() {
-    return new fs::fat::fat32_module;
-}
-
-INTERNAL_MODULE(fat32_module_loader, fat32_module_init);
+INTERNAL_MODULE(fat32, fs::fat::fat32_module);

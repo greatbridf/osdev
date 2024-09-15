@@ -144,6 +144,7 @@ DEFINE_SYSCALL32(access, const char __user*, pathname, int, mode)
 DEFINE_SYSCALL32(unlink, const char __user*, pathname)
 DEFINE_SYSCALL32(truncate, const char __user*, pathname, long, length)
 DEFINE_SYSCALL32(mkdir, const char __user*, pathname, mode_t, mode)
+DEFINE_SYSCALL32(socket, int, domain, int, type, int, protocol)
 DEFINE_SYSCALL32_TO(fcntl64, fcntl, int, fd, int, cmd, unsigned long, arg)
 
 DEFINE_SYSCALL32_TO(sendfile64, sendfile, int, out_fd, int, in_fd,
@@ -437,6 +438,7 @@ void kernel::init_syscall_table() {
     REGISTER_SYSCALL_HANDLER(0xf3, set_thread_area);
     REGISTER_SYSCALL_HANDLER(0xfc, exit_group);
     REGISTER_SYSCALL_HANDLER(0x102, set_tid_address);
+    REGISTER_SYSCALL_HANDLER(0x167, socket);
     REGISTER_SYSCALL_HANDLER(0x17f, statx);
     REGISTER_SYSCALL_HANDLER(0x180, arch_prctl);
     REGISTER_SYSCALL_HANDLER(0x193, clock_gettime64);

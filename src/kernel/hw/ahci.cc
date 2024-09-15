@@ -2,6 +2,7 @@
 #include <cstddef>
 #include <vector>
 
+#include <assert.h>
 #include <errno.h>
 #include <stdint.h>
 
@@ -488,10 +489,13 @@ class ahci_module : public virtual kmod {
         ports.resize(32);
 
         auto ret = kernel::hw::pci::register_driver(
-            VENDOR_INTEL, DEVICE_AHCI, [this](pci_device* dev) -> int {
-                this->dev = dev;
+            VENDOR_INTEL, DEVICE_AHCI, [this](pci_device& dev) -> int {
+                this->dev = &dev;
 
-                physaddr<hba_ghc, false> pp_base{dev->reg[PCI_REG_ABAR]};
+                auto pointerBase = dev.header_type0().bars[5];
+                assert((pointerBase & 0xf) == 0);
+
+                physaddr<hba_ghc, false> pp_base{pointerBase & ~0xf};
                 this->ghc = pp_base;
 
                 this->ghc->global_host_control =

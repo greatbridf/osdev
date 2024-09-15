@@ -5,6 +5,7 @@
 #include <types/allocator.hpp>
 #include <types/types.h>
 
+#include <kernel/hw/acpi.hpp>
 #include <kernel/hw/pci.hpp>
 #include <kernel/hw/timer.hpp>
 #include <kernel/interrupt.hpp>
@@ -72,6 +73,8 @@ void NORETURN real_kernel_init(mem::paging::pfn_t kernel_stack_pfn) {
 
     init_interrupt();
     hw::timer::init_pit();
+
+    hw::acpi::parse_acpi_tables();
 
     init_pci();
 

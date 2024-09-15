@@ -111,7 +111,7 @@ class rbtreePrinter:
                 break
 
 class stringPrinter:
-    def __init__(self, val):
+    def __init__(self, val: gdb.Value):
         self.val = val
 
     def to_string(self):
@@ -121,6 +121,18 @@ class stringPrinter:
         if data['stackdata']['end'] == 0:
             return data['stackdata']['str'].string()
         return data['heapdata']['m_ptr'].string()
+
+    def display_hint(self):
+        return 'string'
+
+class stringViewPrinter:
+    def __init__(self, val: gdb.Value):
+        self.val = val
+        self.string = val['m_str']
+        self.length = val['m_len']
+
+    def to_string(self):
+        return self.string.string(length=self.length)
 
     def display_hint(self):
         return 'string'
@@ -334,6 +346,9 @@ def build_pretty_printer(val: gdb.Value):
 
     if re.compile(r"^std::basic_string<.*>$").match(typename):
         return stringPrinter(val)
+
+    if re.compile(r"^types::string_view$").match(typename):
+        return stringViewPrinter(val)
 
     if re.compile(r"^std::shared_ptr<.*>$").match(typename):
         return sharedPointerPrinter(val)

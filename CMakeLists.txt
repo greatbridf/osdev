@@ -38,6 +38,7 @@ set(KERNEL_MAIN_SOURCES src/dev/builtin-chardev.cc
                         src/fs/fat.cpp
                         src/fs/tmpfs.cc
                         src/fs/procfs.cc
+                        src/driver/e1000e.cc
                         src/kinit.cpp
                         src/kernel/async/waitlist.cc
                         src/kernel/async/lock.cc
@@ -56,6 +57,7 @@ set(KERNEL_MAIN_SOURCES src/dev/builtin-chardev.cc
                         src/kernel/module.cc
                         src/kernel/vfs.cpp
                         src/kernel/vga.cpp
+                        src/kernel/hw/acpi.cc
                         src/kernel/hw/ahci.cc
                         src/kernel/hw/pci.cc
                         src/kernel/hw/serial.cc
@@ -68,8 +70,13 @@ set(KERNEL_MAIN_SOURCES src/dev/builtin-chardev.cc
                         src/kernel/vfs/inode.cc
                         src/kernel/vfs/vfs.cc
                         src/kernel/signal.cpp
+                        src/net/ethernet.cc
+                        src/net/netdev.cc
+                        src/types/crc.cc
                         src/types/elf.cpp
                         src/types/libstdcpp.cpp
+                        include/defs.hpp
+                        include/driver/e1000e.hpp
                         include/fs/fat.hpp
                         include/kernel/async/waitlist.hpp
                         include/kernel/async/lock.hpp
@@ -96,12 +103,16 @@ set(KERNEL_MAIN_SOURCES src/dev/builtin-chardev.cc
                         include/kernel/task/forward.hpp
                         include/kernel/task/thread.hpp
                         include/kernel/task/readyqueue.hpp
+                        include/kernel/hw/acpi.hpp
                         include/kernel/hw/pci.hpp
                         include/kernel/hw/port.hpp
                         include/kernel/hw/serial.hpp
                         include/kernel/hw/timer.hpp
                         include/kernel/input/keycodes.h
                         include/kernel/user/thread_local.hpp
+                        include/net/arp.hpp
+                        include/net/ethernet.hpp
+                        include/net/netdev.hpp
                         include/types/bitmap.hpp
                         include/types/buffer.hpp
                         include/types/elf.hpp

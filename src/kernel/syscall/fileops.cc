@@ -476,6 +476,10 @@ int kernel::syscall::do_poll(pollfd __user* fds, nfds_t nfds, int timeout) {
     // return 0;
 }
 
+int kernel::syscall::do_socket(int domain, int type, int protocol) {
+    return -EINVAL;
+}
+
 /* TODO: implement vfs_stat(stat*)
 int do_stat(const char __user* pathname, stat __user* buf)
 {

@@ -16,7 +16,7 @@ Standard: Cpp11
 IncludeCategories:
   - Regex: '^<types/'
     Priority: '4'
-  - Regex: '^<(kernel|fs)/'
+  - Regex: '^<(kernel|fs|net|driver)/'
     Priority: '5'
   - Regex: '^<.*\.h>'
     Priority: '3'

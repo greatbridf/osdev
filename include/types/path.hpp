@@ -52,6 +52,16 @@ class string_view {
             return false;
         return operator==(str.c_str());
     }
+
+    constexpr bool operator<(const string_view& val) const {
+        for (std::size_t i = 0; i < m_len && i < val.m_len; ++i) {
+            if (m_str[i] < val.m_str[i])
+                return true;
+            if (m_str[i] > val.m_str[i])
+                return false;
+        }
+        return m_len < val.m_len;
+    }
 };
 
 class path_iterator {

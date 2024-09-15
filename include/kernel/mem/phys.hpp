@@ -29,9 +29,7 @@ class physaddr {
     }
 
     constexpr operator T*() const noexcept { return cast_to<T*>(); }
-
     constexpr T* operator->() const noexcept { return *this; }
-
     constexpr uintptr_t phys() const noexcept { return m_ptr; }
 };
 

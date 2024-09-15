@@ -62,6 +62,7 @@ namespace syscall {
     int do_unlink(const char __user* pathname);
     int do_truncate(const char __user* pathname, long length);
     int do_mkdir(const char __user* pathname, mode_t mode);
+    int do_socket(int domain, int type, int protocol);
 
     // in procops.cc
     int do_chdir(const char __user* path);

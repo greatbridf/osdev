@@ -56,8 +56,7 @@ class tmpfs : public virtual vfs {
             const auto& entry = entries[off];
             auto* ind = get_inode(entry.ino);
 
-            // inode mode filetype is compatible with user dentry filetype
-            auto ret = filldir(entry.filename.c_str(), ind, ind->mode & S_IFMT);
+            auto ret = filldir(entry.filename.c_str(), ind, 0);
             if (ret != 0)
                 break;
         }

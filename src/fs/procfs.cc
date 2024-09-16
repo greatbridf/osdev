@@ -177,7 +177,7 @@ class procfs : public virtual fs::vfs {
         int nread = 0;
         for (const auto& [ino, pf] : files) {
             auto* ind = get_inode(ino);
-            int ret = callback(pf.name.c_str(), ind, ind->mode);
+            int ret = callback(pf.name.c_str(), ind);
             if (ret != 0)
                 return -EIO;
             ++nread;

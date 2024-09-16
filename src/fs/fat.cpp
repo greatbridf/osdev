@@ -138,7 +138,7 @@ ssize_t fat32::readdir(inode* dir, size_t offset,
                 else
                     fname += toupper(d->extension[i]);
             }
-            auto ret = filldir(fname.c_str(), ind, ind->mode & S_IFMT);
+            auto ret = filldir(fname.c_str(), ind, 0);
 
             if (ret != 0) {
                 release_cluster(next);

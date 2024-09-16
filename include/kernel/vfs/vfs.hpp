@@ -1,5 +1,6 @@
 #pragma once
 
+#include <defs.hpp>
 #include <functional>
 #include <map>
 
@@ -14,7 +15,7 @@ namespace fs {
 
 class vfs {
    public:
-    using filldir_func = std::function<ssize_t(const char*, inode*, uint8_t)>;
+    using filldir_func = std::function<ssize_t(const char*, inode*, u8)>;
 
    private:
     struct dcache m_dcache;

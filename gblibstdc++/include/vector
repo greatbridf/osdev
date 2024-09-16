@@ -440,8 +440,8 @@ public:
     constexpr void push_back(T&& val) { insert(cend(), std::move(val)); }
 
     template <typename... Args>
-    constexpr void emplace_back(Args&&... args)
-    { emplace(cend(), std::forward<Args>(args)...); }
+    constexpr reference emplace_back(Args&&... args)
+    { return *emplace(cend(), std::forward<Args>(args)...); }
 
     constexpr void pop_back() { erase(--cend()); }
 

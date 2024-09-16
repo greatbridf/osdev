@@ -17,3 +17,5 @@ cross-compile.cmake
 .DS_Store
 .Spotlight-V100
 .Trashes
+
+.gdbinit

@@ -8,11 +8,11 @@ using u32 = uint32_t;
 using u64 = uint64_t;
 using usize = size_t;
 
-using i8 = int8_t;
-using i16 = int16_t;
-using i32 = int32_t;
-using i64 = int64_t;
-using isize = ssize_t;
+using i8 = char;
+using i16 = short;
+using i32 = int;
+using i64 = long long;
+using isize = long;
 
 template <typename T>
 constexpr bool test(T x, T y) {

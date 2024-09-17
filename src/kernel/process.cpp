@@ -204,6 +204,8 @@ static void release_kinit() {
     create_zone(0x2000, 0x2000 + 0x1000 * pages);
 }
 
+extern "C" void (*const late_init_start[])();
+
 void NORETURN _kernel_init(kernel::mem::paging::pfn_t kernel_stack_pfn) {
     kernel::mem::paging::free_pages(kernel_stack_pfn, 9);
     release_kinit();
@@ -227,6 +229,9 @@ void NORETURN _kernel_init(kernel::mem::paging::pfn_t kernel_stack_pfn) {
     // ------------------------------------------
     // interrupt enabled
     // ------------------------------------------
+
+    for (auto* init = late_init_start; *init; ++init)
+        (*init)();
 
     const auto& context = current_process->fs_context;
 

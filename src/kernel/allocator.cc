@@ -232,7 +232,7 @@ void kernel::kinit::init_allocator() {
         (std::byte*)KERNEL_HEAP_START, KERNEL_HEAP_SIZE);
 }
 
-void* operator new(size_t size) {
+extern "C" void* _do_allocate(uintptr_t size) {
     int idx = __cache_index(size);
     void* ptr = nullptr;
     if (idx < 0)
@@ -240,8 +240,35 @@ void* operator new(size_t size) {
     else
         ptr = kernel::mem::slab_alloc(&caches[idx]);
 
-    assert(ptr);
     return ptr;
+}
+
+// return 0 if deallocate successfully
+// return -1 if ptr is nullptr
+// return -2 if size is not correct for slab allocated memory
+extern "C" int32_t _do_deallocate(void* ptr, uintptr_t size) {
+    if (!ptr)
+        return -1;
+
+    if (types::memory::k_alloc->allocated(ptr)) {
+        types::memory::k_alloc->deallocate(ptr);
+        return 0;
+    }
+
+    int idx = __cache_index(size);
+    if (idx < 0)
+        return -2;
+
+    kernel::mem::slab_free(ptr);
+
+    return 0;
+}
+
+void* operator new(size_t size) {
+    auto* ret = _do_allocate(size);
+    assert(ret);
+
+    return ret;
 }
 
 void operator delete(void* ptr) {
@@ -258,14 +285,9 @@ void operator delete(void* ptr, std::size_t size) {
     if (!ptr)
         return;
 
-    if (types::memory::k_alloc->allocated(ptr)) {
-        types::memory::k_alloc->deallocate(ptr);
-        return;
-    }
-    int idx = __cache_index(size);
-    assert(idx >= 0);
+    int ret = _do_deallocate(ptr, size);
 
-    kernel::mem::slab_free(ptr);
+    assert(ret == 0);
 }
 
 void* operator new[](size_t sz) {

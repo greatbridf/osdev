@@ -1,0 +1,16 @@
+[package]
+name = "gbos-rust-part"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["staticlib"]
+
+[dependencies]
+spin = "0.9.8"
+
+[build-dependencies]
+bindgen = "0.70.1"
+
+[profile.dev]
+panic = "abort"

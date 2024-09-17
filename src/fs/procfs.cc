@@ -3,15 +3,23 @@
 #include <errno.h>
 #include <stdint.h>
 #include <sys/mount.h>
+#include <sys/types.h>
 #include <unistd.h>
 
+#include <kernel/async/lock.hpp>
 #include <kernel/hw/timer.hpp>
+#include <kernel/mem/paging.hpp>
+#include <kernel/mem/phys.hpp>
 #include <kernel/module.hpp>
 #include <kernel/process.hpp>
+#include <kernel/procfs.hpp>
 #include <kernel/vfs.hpp>
+#include <kernel/vfs/inode.hpp>
 #include <kernel/vfs/vfs.hpp>
 
 using namespace kernel::kmod;
+using namespace kernel::procfs;
+using fs::inode, fs::make_device;
 
 struct mount_flags_opt {
     unsigned long flag;
@@ -40,162 +48,212 @@ static std::string get_mount_opts(unsigned long mnt_flags) {
     return retval;
 }
 
-static ssize_t mounts_read(char* page, size_t n) {
-    auto orig_n = n;
+static isize mounts_read(u8* page, usize bufsize) {
+    auto orig_bufsize = bufsize;
 
     for (const auto& [_, mdata] : fs::mounts) {
-        if (n == 0)
-            break;
-
         // TODO: get vfs options
         auto mount_flags = get_mount_opts(mdata.flags);
 
-        int nwrote = snprintf(page, n, "%s %s %s %s 0 0\n",
+        isize nwrote = snprintf((char*)page, bufsize, "%s %s %s %s 0 0\n",
                               mdata.source.c_str(), mdata.mount_point.c_str(),
                               mdata.fstype.c_str(), mount_flags.c_str());
+        if (nwrote < 0)
+            return nwrote;
 
-        n -= nwrote;
+        assert((usize)nwrote < bufsize);
+
+        bufsize -= nwrote;
         page += nwrote;
     }
 
-    return orig_n - n;
+    return orig_bufsize - bufsize;
 }
 
-static ssize_t schedstat_read(char* page, size_t n) {
-    auto orig_n = n;
+static isize schedstat_read(u8* page, usize bufsize) {
+    auto orig_bufsize = bufsize;
 
-    if (n == 0)
-        return n;
+    int nw = snprintf((char*)page, bufsize, "%d\n",
+                      kernel::hw::timer::current_ticks());
+    if (nw < 0)
+        return nw;
 
-    int nw = snprintf(page, n, "%d\n", kernel::hw::timer::current_ticks());
-    n -= nw, page += nw;
+    assert((usize)nw < bufsize);
+    bufsize -= nw, page += nw;
 
     for (const auto& proc : *procs) {
         for (const auto& thd : proc.second.thds) {
-            int nwrote = snprintf(page, n, "%d %x %d\n", proc.first, thd.tid(),
-                                  thd.elected_times);
+            int nwrote = snprintf((char*)page, bufsize, "%d %x %d\n",
+                                  proc.first, thd.tid(), thd.elected_times);
+            if (nwrote < 0)
+                return nwrote;
 
-            n -= nwrote;
+            assert((usize)nwrote < bufsize);
+
+            bufsize -= nwrote;
             page += nwrote;
         }
     }
 
-    return orig_n - n;
+    return orig_bufsize - bufsize;
 }
 
-namespace fs::proc {
+namespace kernel::procfs {
 
-struct proc_file {
-    std::string name;
+static procfs_file* s_root;
+static ino_t s_next_ino = 1;
 
-    ssize_t (*read)(char* page_buffer, size_t n);
-    ssize_t (*write)(const char* data, size_t n);
-};
+static mode_t _get_mode(const procfs_file& file) {
+    if (file.children)
+        return S_IFDIR | 0755;
+
+    mode_t mode = S_IFREG;
+    if (file.read)
+        mode |= 0444;
+    if (file.write)
+        mode |= 0200;
+
+    return mode;
+}
 
 class procfs : public virtual fs::vfs {
    private:
     std::string source;
-    std::map<ino_t, proc_file> files;
-
-    ino_t free_ino = 1;
 
     procfs(const char* _source)
         : vfs(make_device(0, 10), 4096), source{_source} {
-        auto* ind = alloc_inode(0);
-        ind->mode = S_IFDIR | 0777;
+        assert(s_root);
 
-        create_file("mounts", mounts_read, nullptr);
-        create_file("schedstat", schedstat_read, nullptr);
+        auto* ind = alloc_inode(s_root->ino);
+        ind->fs_data = s_root;
+        ind->mode = _get_mode(*s_root);
 
         register_root_node(ind);
     }
 
    public:
-    static procfs* create(const char* source, unsigned long, const void*) {
-        // TODO: flags
-        return new procfs(source);
+    static int init() {
+        auto children = std::make_unique<std::vector<procfs_file>>();
+        auto procfsFile = std::make_unique<procfs_file>();
+
+        procfsFile->name = "[root]";
+        procfsFile->ino = 0;
+        procfsFile->read = [](u8*, usize) { return -EISDIR; };
+        procfsFile->write = [](const u8*, usize) { return -EISDIR; };
+        procfsFile->children = children.release();
+        s_root = procfsFile.release();
+
+        kernel::procfs::create(s_root, "mounts", mounts_read, nullptr);
+        kernel::procfs::create(s_root, "schedstat", schedstat_read, nullptr);
+
+        return 0;
     }
 
-    int create_file(std::string name, ssize_t (*read_func)(char*, size_t),
-                    ssize_t (*write_func)(const char*, size_t)) {
-        auto ino = free_ino++;
-
-        auto [_, inserted] =
-            files.insert({ino, proc_file{name, read_func, write_func}});
-
-        auto* ind = alloc_inode(ino);
-        ind->mode = S_IFREG | 0666;
-
-        return inserted ? 0 : -EEXIST;
+    static procfs* create(const char* source, unsigned long, const void*) {
+        return new procfs(source);
     }
 
     ssize_t read(inode* file, char* buf, size_t buf_size, size_t n,
                  off_t offset) override {
-        if (file->ino == 0)
-            return -EISDIR;
-
-        auto iter = files.find(file->ino);
-        if (!iter)
-            return -EIO;
-
-        auto& [ino, pf] = *iter;
-
-        if (!pf.read)
+        if (offset < 0)
             return -EINVAL;
 
-        // TODO: fix it
-        if (offset)
-            return 0;
+        n = std::min(n, buf_size);
 
-        // TODO: allocate page buffer
-        char* page_buffer = new char[4096];
+        auto pFile = (procfs_file*)file->fs_data;
 
-        ssize_t nread = pf.read(page_buffer, 4096);
-        if (nread < 0) {
-            delete[] page_buffer;
-            return nread;
+        if (!pFile->read)
+            return -EACCES;
+        if (pFile->children)
+            return -EISDIR;
+
+        using namespace kernel::mem;
+        using namespace kernel::mem::paging;
+        auto* page = alloc_page();
+        auto pPageBuffer = physaddr<u8>(page_to_pfn(page));
+
+        ssize_t nread = pFile->read(pPageBuffer, 4096);
+        if (nread < offset) {
+            free_page(page);
+
+            return nread < 0 ? nread : 0;
         }
 
-        n = std::min(n, buf_size);
-        n = std::min(n, (size_t)nread);
+        n = std::min(n, (usize)nread - offset);
+        memcpy(buf, pPageBuffer + offset, n);
 
-        strncpy(buf, page_buffer, n);
-
-        delete[] page_buffer;
+        free_page(page);
         return n;
     }
 
     ssize_t readdir(inode* dir, size_t offset,
                     const filldir_func& callback) override {
-        if (dir->ino != 0)
+        auto* pFile = (procfs_file*)dir->fs_data;
+        if (!pFile->children)
             return -ENOTDIR;
 
-        // TODO: fix it
-        if (offset)
-            return 0;
+        const auto& children = *pFile->children;
 
-        int nread = 0;
-        for (const auto& [ino, pf] : files) {
-            auto* ind = get_inode(ino);
-            int ret = callback(pf.name.c_str(), ind);
+        usize cur = offset;
+        for (; cur < pFile->children->size(); ++cur) {
+            auto& file = children[cur];
+            auto* inode = get_inode(file.ino);
+            if (!inode) {
+                inode = alloc_inode(file.ino);
+
+                inode->fs_data = (void*)&file;
+                inode->mode = _get_mode(file);
+            }
+
+            int ret = callback(file.name.c_str(), inode, 0);
             if (ret != 0)
-                return -EIO;
-            ++nread;
+                break;
         }
 
-        return nread;
+        return cur - offset;
     }
 };
 
-class procfs_module : public virtual kmod {
+const procfs_file* root() { return s_root; }
+
+const procfs_file* create(const procfs_file* parent, std::string name,
+                          read_fn read, write_fn write) {
+    auto& file = parent->children->emplace_back();
+
+    file.name = std::move(name);
+    file.ino = s_next_ino++;
+    file.read = std::move(read);
+    file.write = std::move(write);
+    file.children = nullptr;
+
+    return 0;
+}
+
+const procfs_file* mkdir(const procfs_file* parent, std::string name) {
+    auto& file = parent->children->emplace_back();
+
+    file.name = std::move(name);
+    file.ino = s_next_ino++;
+    file.read = nullptr;
+    file.write = nullptr;
+    file.children = new std::vector<procfs_file>();
+
+    return &file;
+}
+
+class procfs_module : public virtual kernel::kmod::kmod {
    public:
     procfs_module() : kmod("procfs") {}
 
     virtual int init() override {
+        int ret = procfs::init();
+        if (ret < 0)
+            return ret;
+
         return fs::register_fs("procfs", procfs::create);
     }
 };
 
-} // namespace fs::proc
+} // namespace kernel::procfs
 
-INTERNAL_MODULE(procfs, fs::proc::procfs_module);
+INTERNAL_MODULE(procfs, procfs_module);

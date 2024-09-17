@@ -93,14 +93,14 @@ static inline int __d_load(struct dentry* parent) {
     while (true) {
         ssize_t off = fs->readdir(
             inode, offset,
-            [parent](const char* fn, struct inode* inode, uint8_t mode) -> int {
+            [parent](const char* fn, struct inode* inode, u8) -> int {
                 struct dentry* dentry = dcache_alloc(parent->cache);
 
                 dentry->fs = inode->fs;
                 dentry->inode = inode;
                 dentry->name = fn;
 
-                if (S_ISDIR(mode))
+                if (S_ISDIR(inode->mode))
                     dentry->flags = D_PRESENT | D_DIRECTORY;
                 else
                     dentry->flags = D_PRESENT;

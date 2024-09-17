@@ -14,7 +14,7 @@ SECTIONS
 {
     .mbr : AT(0)
     {
-        *(.mbr)
+        KEEP(*(.mbr));
 
         . = 510;
         BYTE(0x55);
@@ -89,8 +89,14 @@ SECTIONS
         . = ALIGN(16);
         KMOD_LOADERS_START = .;
 
-        *(.kmods)
+        KEEP(*(.kmods));
         QUAD(0);
+
+        . = ALIGN(16);
+        late_init_start = .;
+        KEEP(*(.late_init));
+        QUAD(0);
+        late_init_end = .;
 
         . = ALIGN(16);
 
@@ -174,11 +180,13 @@ SECTIONS
     .debug_funcnames 0 : { *(.debug_funcnames) }
     .debug_typenames 0 : { *(.debug_typenames) }
     .debug_varnames  0 : { *(.debug_varnames) }
+    /* Rust stuff */
 
     /DISCARD/ :
     {
         *(.fini_array*)
         *(.note*)
         *(.dtors*)
+        *(.debug_gdb_scripts*)
     }
 }

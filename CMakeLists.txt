@@ -9,16 +9,20 @@ set(CMAKE_CXX_LINK_EXECUTABLE
 set(C_CXX_FLAGS "-nostdinc -nostdlib -W -Wall -Wextra -Wno-stringop-overflow -Wno-builtin-declaration-mismatch -Wno-format -fverbose-asm -fno-exceptions -ffreestanding -fno-pic -mno-red-zone -mstack-protector-guard=global -mcmodel=kernel")
 set(CMAKE_C_FLAGS "${C_CXX_FLAGS} -Werror=implicit-int -Werror=implicit-function-declaration -Werror=strict-aliasing")
 set(CMAKE_CXX_FLAGS "${C_CXX_FLAGS} -fno-use-cxa-atexit -fno-rtti")
-set(CMAKE_CXX_LINK_FLAGS "")
+set(CMAKE_CXX_LINK_FLAGS "-z noexecstack --gc-sections")
 SET(CMAKE_ASM_FLAGS "${CFLAGS} -x assembler-with-cpp")
 set(CMAKE_CXX_STANDARD 20)
 
 if (CMAKE_BUILD_TYPE STREQUAL "Debug")
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DDEBUG -O0 -g")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DDEBUG -O0 -g")
+    set(CARGO_BUILD_TYPE "debug")
+    set(CARGO_BUILD_FLAGS "")
 elseif(CMAKE_BUILD_TYPE STREQUAL "Release")
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O2 -g -DNDEBUG")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O2 -g -DNDEBUG")
+    set(CARGO_BUILD_TYPE "release")
+    set(CARGO_BUILD_FLAGS "--release")
 endif()
 
 if (NOT DEFINED FDISK_BIN)
@@ -125,11 +129,21 @@ set(KERNEL_MAIN_SOURCES src/dev/builtin-chardev.cc
                         )
 
 add_executable(kernel.out ${KERNEL_MAIN_SOURCES} ${BOOTLOADER_SOURCES})
-target_link_libraries(kernel.out gblibc gblibstdc++)
+add_dependencies(kernel.out rustpart)
+target_link_libraries(kernel.out gblibc gblibstdc++ gbos_rust_part)
 target_include_directories(kernel.out PRIVATE ${PROJECT_SOURCE_DIR}/include)
 target_link_options(kernel.out PRIVATE
-    -T ${CMAKE_SOURCE_DIR}/src/kernel.ld -lgblibc -L${CMAKE_BINARY_DIR}/gblibc)
-set_target_properties(kernel.out PROPERTIES LINK_DEPENDS ${CMAKE_SOURCE_DIR}/src/kernel.ld)
+    -T "${CMAKE_SOURCE_DIR}/src/kernel.ld"
+    -L "${CMAKE_BINARY_DIR}/x86_64-unknown-none/${CARGO_BUILD_TYPE}"
+    )
+set_target_properties(kernel.out PROPERTIES LINK_DEPENDS "${CMAKE_SOURCE_DIR}/src/kernel.ld")
+set_source_files_properties(src/mbr.S PROPERTIES OBJECT_DEPENDS
+    "${CMAKE_BINARY_DIR}/x86_64-unknown-none/${CARGO_BUILD_TYPE}/libgbos_rust_part.a"
+    )
+
+add_custom_target(rustpart
+    COMMAND cargo build ${CARGO_BUILD_FLAGS}
+)
 
 add_custom_command(OUTPUT mbr_hole.bin
     DEPENDS kernel.out

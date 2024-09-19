@@ -14,3 +14,4 @@ bindgen = "0.70.1"
 
 [profile.dev]
 panic = "abort"
+opt-level = "s"

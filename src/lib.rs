@@ -7,8 +7,10 @@ extern crate alloc;
 #[allow(warnings)]
 mod bindings;
 
+mod driver;
 mod io;
 mod kernel;
+mod net;
 
 macro_rules! dont_check {
     ($arg:expr) => {
@@ -61,24 +63,30 @@ unsafe impl GlobalAlloc for Allocator {
 #[global_allocator]
 static ALLOCATOR: Allocator = Allocator {};
 
-#[repr(C)]
-#[allow(dead_code)]
-struct Fp {
-    fp: *const core::ffi::c_void,
+#[no_mangle]
+pub extern "C" fn late_init_rust() {
+    driver::e1000e::register_e1000e_driver();
 }
 
-unsafe impl Sync for Fp {}
-
-#[allow(unused_macros)]
-macro_rules! late_init {
-    ($name:ident, $func:ident) => {
-        #[used]
-        #[link_section = ".late_init"]
-        static $name: $crate::Fp = $crate::Fp {
-            fp: $func as *const core::ffi::c_void,
-        };
-    };
-}
-
-#[allow(unused_imports)]
-pub(crate) use late_init;
+//
+// #[repr(C)]
+// #[allow(dead_code)]
+// struct Fp {
+//     fp: *const core::ffi::c_void,
+// }
+//
+// unsafe impl Sync for Fp {}
+//
+// #[allow(unused_macros)]
+// macro_rules! late_init {
+//     ($name:ident, $func:ident) => {
+//         #[used]
+//         #[link_section = ".late_init"]
+//         static $name: $crate::Fp = $crate::Fp {
+//             fp: $func as *const core::ffi::c_void,
+//         };
+//     };
+// }
+//
+// #[allow(unused_imports)]
+// pub(crate) use late_init;

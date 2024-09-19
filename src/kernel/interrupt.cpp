@@ -118,17 +118,21 @@ static inline void fault_handler(interrupt_stack* context, mmx_registers*) {
     freeze();
 }
 
+extern "C" void irq_handler_rust(int irqno);
+
 static inline void irq_handler(interrupt_stack* context, mmx_registers*) {
     int irqno = context->int_no - 0x20;
 
     constexpr uint8_t PIC_EOI = 0x20;
 
+    for (const auto& handler : s_irq_handlers[irqno])
+        handler();
+
+    irq_handler_rust(irqno);
+
     port_pic1_command = PIC_EOI;
     if (irqno >= 8)
         port_pic2_command = PIC_EOI;
-
-    for (const auto& handler : s_irq_handlers[irqno])
-        handler();
 }
 
 extern "C" void interrupt_handler(interrupt_stack* context,

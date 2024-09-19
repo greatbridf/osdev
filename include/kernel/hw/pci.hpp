@@ -83,5 +83,6 @@ class pci_device {
 using driver_t = std::function<int(pci_device&)>;
 
 int register_driver(uint16_t vendor, uint16_t device, driver_t drv);
+int register_driver_r(uint16_t vendor, uint16_t device, int (*drv)(pci_device*));
 
 } // namespace kernel::hw::pci

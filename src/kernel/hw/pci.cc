@@ -75,6 +75,12 @@ int register_driver(uint16_t vendor, uint16_t device, driver_t drv) {
     return 0;
 }
 
+int register_driver_r(uint16_t vendor, uint16_t device,
+                      int (*drv)(pci_device*)) {
+    return register_driver(vendor, device,
+                           [=](pci_device& dev) -> int { return drv(&dev); });
+}
+
 } // namespace kernel::hw::pci
 
 namespace kernel::kinit {

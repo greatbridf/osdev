@@ -205,12 +205,15 @@ static void release_kinit() {
 }
 
 extern "C" void (*const late_init_start[])();
+extern "C" void late_init_rust();
 
 void NORETURN _kernel_init(kernel::mem::paging::pfn_t kernel_stack_pfn) {
     kernel::mem::paging::free_pages(kernel_stack_pfn, 9);
     release_kinit();
 
     kernel::kmod::load_internal_modules();
+
+    late_init_rust();
 
     asm volatile("sti");
 

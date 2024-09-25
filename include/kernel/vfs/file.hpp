@@ -42,14 +42,13 @@ class pipe : public types::non_copyable {
 };
 
 struct file {
-    mode_t mode; // stores the file type in the same format as inode::mode
     struct file_flags {
         uint32_t read : 1;
         uint32_t write : 1;
         uint32_t append : 1;
     } flags{};
 
-    file(mode_t mode, file_flags flags) : mode(mode), flags(flags) {}
+    file(file_flags flags) : flags(flags) {}
 
     virtual ~file() = default;
 
@@ -83,9 +82,9 @@ struct file {
 struct regular_file : public virtual file {
     virtual ~regular_file() = default;
     std::size_t cursor{};
-    inode* ind{};
+    const rust_inode_handle* ind{};
 
-    regular_file(file_flags flags, size_t cursor, inode* ind);
+    regular_file(file_flags flags, size_t cursor, const rust_inode_handle* ind);
 
     virtual ssize_t read(char* __user buf, size_t n) override;
     virtual ssize_t do_write(const char* __user buf, size_t n) override;

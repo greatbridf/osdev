@@ -87,7 +87,7 @@ int kernel::syscall::do_symlink(const char __user* target,
     if (!dent || status != -ENOENT)
         return status;
 
-    return fs::symlink(dent.get(), target);
+    return fs_symlink(dent.get(), target);
 }
 
 int kernel::syscall::do_readlink(const char __user* pathname, char __user* buf,
@@ -98,11 +98,11 @@ int kernel::syscall::do_readlink(const char __user* pathname, char __user* buf,
     if (!dent || status)
         return status;
 
-    if (buf_size <= 0 || !S_ISLNK(dent->inode->mode))
+    if (buf_size <= 0)
         return -EINVAL;
 
     // TODO: use copy_to_user
-    return fs::readlink(dent->inode, buf, buf_size);
+    return fs_readlink(&dent->inode, buf, buf_size);
 }
 
 int kernel::syscall::do_ioctl(int fd, unsigned long request, uintptr_t arg3) {
@@ -113,7 +113,8 @@ int kernel::syscall::do_ioctl(int fd, unsigned long request, uintptr_t arg3) {
     //       not. and we suppose that stdin will be
     //       either a tty or a pipe.
     auto* file = current_process->files[fd];
-    if (!file || !S_ISCHR(file->mode))
+    // TODO!!!: check whether the file is a tty or not
+    if (!file) // || !S_ISCHR(file->mode))
         return -ENOTTY;
 
     switch (request) {
@@ -188,7 +189,19 @@ ssize_t kernel::syscall::do_readv(int fd, const iovec* iov, int iovcnt) {
     // TODO: fix fake EOF
     ssize_t totn = 0;
     for (int i = 0; i < iovcnt; ++i) {
-        ssize_t ret = file->read((char*)iov[i].iov_base, iov[i].iov_len);
+        auto* base = (char*)iov[i].iov_base;
+        auto len = iov[i].iov_len;
+
+        if (len == 0)
+            break;
+
+        if (len < 0)
+            return -EINVAL;
+
+        if (!base)
+            return -EFAULT;
+
+        ssize_t ret = file->read(base, len);
 
         if (ret < 0)
             return ret;
@@ -214,7 +227,19 @@ ssize_t kernel::syscall::do_writev(int fd, const iovec* iov, int iovcnt) {
 
     ssize_t totn = 0;
     for (int i = 0; i < iovcnt; ++i) {
-        ssize_t ret = file->write((const char*)iov[i].iov_base, iov[i].iov_len);
+        auto* base = (const char*)iov[i].iov_base;
+        auto len = iov[i].iov_len;
+
+        if (len == 0)
+            continue;
+
+        if (len < 0)
+            return -EINVAL;
+
+        if (!base)
+            return -EFAULT;
+
+        ssize_t ret = file->write(base, len);
 
         if (ret < 0)
             return ret;
@@ -308,8 +333,9 @@ ssize_t kernel::syscall::do_sendfile(int out_fd, int in_fd,
         return -EBADF;
 
     // TODO: check whether in_fd supports mmapping
-    if (!S_ISREG(in_file->mode) && !S_ISBLK(in_file->mode))
-        return -EINVAL;
+    // TODO!!!: figure a way to recover this
+    // if (!S_ISREG(in_file->mode) && !S_ISBLK(in_file->mode))
+    return -EINVAL;
 
     if (offset) {
         NOT_IMPLEMENTED;
@@ -356,7 +382,7 @@ int kernel::syscall::do_statx(int dirfd, const char __user* path, int flags,
         return status;
 
     // TODO: copy to user
-    return fs::statx(dent->inode, statxbuf, mask);
+    return fs_statx(&dent->inode, statxbuf, mask);
 }
 
 int kernel::syscall::do_fcntl(int fd, int cmd, unsigned long arg) {
@@ -385,7 +411,7 @@ int kernel::syscall::do_mkdir(const char __user* pathname, mode_t mode) {
     if (!dent || status != -ENOENT)
         return status;
 
-    return fs::mkdir(dent.get(), mode);
+    return fs_mkdir(dent.get(), mode);
 }
 
 int kernel::syscall::do_truncate(const char __user* pathname, long length) {
@@ -393,10 +419,7 @@ int kernel::syscall::do_truncate(const char __user* pathname, long length) {
     if (!dent || status)
         return status;
 
-    if (S_ISDIR(dent->inode->mode))
-        return -EISDIR;
-
-    return fs::truncate(dent->inode, length);
+    return fs_truncate(&dent->inode, length);
 }
 
 int kernel::syscall::do_unlink(const char __user* pathname) {
@@ -405,10 +428,7 @@ int kernel::syscall::do_unlink(const char __user* pathname) {
     if (!dent || status)
         return status;
 
-    if (S_ISDIR(dent->inode->mode))
-        return -EISDIR;
-
-    return fs::unlink(dent.get());
+    return fs_unlink(dent.get());
 }
 
 int kernel::syscall::do_access(const char __user* pathname, int mode) {
@@ -436,7 +456,7 @@ int kernel::syscall::do_mknod(const char __user* pathname, mode_t mode,
     if (!dent || status != -ENOENT)
         return status;
 
-    return fs::mknod(dent.get(), mode, dev);
+    return fs_mknod(dent.get(), mode, dev);
 }
 
 int kernel::syscall::do_poll(pollfd __user* fds, nfds_t nfds, int timeout) {

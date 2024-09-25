@@ -1,11 +1,9 @@
 #include <memory>
-#include <queue>
 #include <utility>
 
 #include <assert.h>
 #include <bits/alltypes.h>
 #include <stdint.h>
-#include <stdio.h>
 #include <sys/mount.h>
 #include <sys/wait.h>
 
@@ -217,17 +215,8 @@ void NORETURN _kernel_init(kernel::mem::paging::pfn_t kernel_stack_pfn) {
 
     asm volatile("sti");
 
-    // mount rootfs
-
-    fs::vfs* rootfs;
-    if (1) {
-        int ret;
-        std::tie(rootfs, ret) =
-            fs::vfs::create("none", "tmpfs", MS_NOATIME, nullptr);
-        assert(ret == 0);
-    }
-    current_process->fs_context.root = d_get(rootfs->root());
-    current_process->cwd = d_get(rootfs->root());
+    current_process->fs_context.root = fs::r_get_root_dentry();
+    current_process->cwd = fs::r_get_root_dentry();
 
     // ------------------------------------------
     // interrupt enabled
@@ -244,12 +233,13 @@ void NORETURN _kernel_init(kernel::mem::paging::pfn_t kernel_stack_pfn) {
         auto [mnt, status] = fs::open(context, context.root.get(), "/mnt");
         assert(mnt && status == -ENOENT);
 
-        if (int ret = fs::mkdir(mnt.get(), 0755); 1)
+        if (int ret = fs_mkdir(mnt.get(), 0755); 1)
             assert(ret == 0 && mnt->flags & fs::D_PRESENT);
 
-        int ret = rootfs->mount(mnt.get(), "/dev/sda", "/mnt", "fat32",
-                                MS_RDONLY | MS_NOATIME | MS_NODEV | MS_NOSUID,
-                                "ro,nodev");
+        int ret = fs_mount(mnt.get(), "/dev/sda", "/mnt", "fat32",
+                            MS_RDONLY | MS_NOATIME | MS_NODEV | MS_NOSUID,
+                            "ro,nodev");
+
         assert(ret == 0);
     }
 

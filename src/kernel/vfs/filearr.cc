@@ -180,7 +180,7 @@ static inline std::pair<dentry_pointer, int> _open_file(
         return {nullptr, -ENOENT};
 
     // create file
-    if (int ret = fs::creat(dent.get(), mode); ret != 0)
+    if (int ret = fs_creat(dent.get(), mode); ret != 0)
         return {nullptr, ret};
 
     return {std::move(dent), 0};
@@ -197,7 +197,7 @@ int filearray::open(dentry* cwd, types::path_iterator filepath, int flags,
     if (ret != 0)
         return ret;
 
-    auto filemode = dent->inode->mode;
+    auto filemode = r_get_inode_mode(&dent->inode);
 
     int fdflag = (flags & O_CLOEXEC) ? FD_CLOEXEC : 0;
 
@@ -218,14 +218,14 @@ int filearray::open(dentry* cwd, types::path_iterator filepath, int flags,
     // truncate file
     if (flags & O_TRUNC) {
         if (fflags.write && S_ISREG(filemode)) {
-            auto ret = fs::truncate(dent->inode, 0);
+            auto ret = fs_truncate(&dent->inode, 0);
             if (ret != 0)
                 return ret;
         }
     }
 
     return pimpl->place_new_file(
-        std::make_shared<regular_file>(fflags, 0, dent->inode), fdflag);
+        std::make_shared<regular_file>(fflags, 0, &dent->inode), fdflag);
 }
 
 int filearray::pipe(int (&pipefd)[2]) {

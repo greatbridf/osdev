@@ -2,14 +2,11 @@
 
 #include <list>
 #include <map>
-#include <memory>
-#include <queue>
 #include <set>
 #include <tuple>
 #include <utility>
 
 #include <assert.h>
-#include <errno.h>
 #include <fcntl.h>
 #include <stdint.h>
 #include <sys/types.h>

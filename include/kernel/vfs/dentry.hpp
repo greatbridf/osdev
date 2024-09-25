@@ -1,25 +1,48 @@
 #pragma once
 
-#include <list>
 #include <string>
+
+#include <bits/alltypes.h>
 
 #include <types/hash.hpp>
 #include <types/path.hpp>
 
 #include <kernel/async/lock.hpp>
-#include <kernel/vfs/inode.hpp>
 
 namespace fs {
 static constexpr unsigned long D_PRESENT = 1 << 0;
 static constexpr unsigned long D_DIRECTORY = 1 << 1;
 static constexpr unsigned long D_LOADED = 1 << 2;
 static constexpr unsigned long D_MOUNTPOINT = 1 << 3;
+static constexpr unsigned long D_SYMLINK = 1 << 4;
+
+struct rust_vfs_handle {
+    void* data[2];
+};
+
+struct rust_inode_handle {
+    void* data[2];
+};
+
+struct inode_data {
+    uint64_t ino;
+    uint64_t size;
+    uint64_t nlink;
+
+    struct timespec atime;
+    struct timespec mtime;
+    struct timespec ctime;
+
+    uint32_t uid;
+    uint32_t gid;
+    uint32_t mode;
+};
 
 struct dentry {
-    struct dcache* cache;
-    vfs* fs;
+    struct rust_vfs_handle fs;
+    struct rust_inode_handle inode;
 
-    struct inode* inode;
+    struct dcache* cache;
     struct dentry* parent;
 
     // list head
@@ -63,3 +86,12 @@ struct dentry* dcache_alloc(struct dcache* cache);
 void dcache_init_root(struct dcache* cache, struct dentry* root);
 
 } // namespace fs
+
+struct rust_get_cxx_string_result {
+    const char* data;
+    size_t len;
+};
+
+void rust_get_cxx_string(const std::string* str,
+                         rust_get_cxx_string_result* out_result);
+void rust_operator_eql_cxx_string(const std::string* str, std::string* dst);

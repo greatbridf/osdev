@@ -1,9 +1,5 @@
-#include <bit>
 #include <cstddef>
-#include <map>
-#include <string>
 #include <utility>
-#include <vector>
 
 #include <assert.h>
 #include <bits/alltypes.h>
@@ -21,23 +17,17 @@
 #include <kernel/tty.hpp>
 #include <kernel/vfs.hpp>
 #include <kernel/vfs/dentry.hpp>
-#include <kernel/vfs/vfs.hpp>
-
-using fs::dentry;
 
 fs::regular_file::regular_file(file_flags flags, size_t cursor,
-                               struct inode* ind)
-    : file(ind->mode, flags), cursor(cursor), ind(ind) {}
+                               const struct rust_inode_handle* ind)
+    : file(flags), cursor(cursor), ind(ind) {}
 
 ssize_t fs::regular_file::read(char* __user buf, size_t n) {
     if (!flags.read)
         return -EBADF;
 
-    if (S_ISDIR(ind->mode))
-        return -EISDIR;
-
     // TODO: copy to user function !IMPORTANT
-    ssize_t n_wrote = fs::read(ind, buf, n, cursor, n);
+    ssize_t n_wrote = fs_read(ind, buf, n, cursor, n);
     if (n_wrote >= 0)
         cursor += n_wrote;
 
@@ -45,11 +35,8 @@ ssize_t fs::regular_file::read(char* __user buf, size_t n) {
 }
 
 ssize_t fs::regular_file::do_write(const char* __user buf, size_t n) {
-    if (S_ISDIR(mode))
-        return -EISDIR;
-
     // TODO: check privilege of user ptr
-    ssize_t n_wrote = fs::write(ind, buf, cursor, n);
+    ssize_t n_wrote = fs_write(ind, buf, cursor, n);
     if (n_wrote >= 0)
         cursor += n_wrote;
 
@@ -57,9 +44,7 @@ ssize_t fs::regular_file::do_write(const char* __user buf, size_t n) {
 }
 
 off_t fs::regular_file::seek(off_t n, int whence) {
-    if (!S_ISREG(mode))
-        return -ESPIPE;
-
+    size_t ind_size = r_get_inode_size(ind);
     size_t pos;
     switch (whence) {
         case SEEK_SET:
@@ -69,13 +54,13 @@ off_t fs::regular_file::seek(off_t n, int whence) {
             pos = cursor + n;
             break;
         case SEEK_END:
-            pos = ind->size + n;
+            pos = ind_size + n;
             break;
         default:
             return -EINVAL;
     }
 
-    if (pos > ind->size)
+    if (pos > ind_size)
         return -EINVAL;
 
     cursor = pos;
@@ -84,16 +69,12 @@ off_t fs::regular_file::seek(off_t n, int whence) {
 }
 
 int fs::regular_file::getdents(char* __user buf, size_t cnt) {
-    if (!S_ISDIR(ind->mode))
-        return -ENOTDIR;
-
     size_t orig_cnt = cnt;
-    int nread = ind->fs->readdir(
-        ind, cursor,
-        [&buf, &cnt](const char* fn, struct inode* ind, uint8_t type) {
-            size_t filename_len = strlen(fn);
-
-            size_t reclen = sizeof(fs::user_dirent) + 1 + filename_len;
+    auto callback = readdir_callback_fn(
+        [&buf, &cnt](const char* fn, size_t fnlen,
+                     const struct rust_inode_handle*,
+                     const struct inode_data* ind, uint8_t type) {
+            size_t reclen = sizeof(fs::user_dirent) + 1 + fnlen;
             if (cnt < reclen)
                 return -EFAULT;
 
@@ -103,7 +84,7 @@ int fs::regular_file::getdents(char* __user buf, size_t cnt) {
             // TODO: show offset
             // dirp->d_off = 0;
             // TODO: use copy_to_user
-            memcpy(dirp->d_name, fn, filename_len);
+            memcpy(dirp->d_name, fn, fnlen);
             buf[reclen - 2] = 0;
             buf[reclen - 1] = type;
 
@@ -112,6 +93,8 @@ int fs::regular_file::getdents(char* __user buf, size_t cnt) {
             return 0;
         });
 
+    int nread = fs_readdir(ind, cursor, &callback);
+
     if (nread > 0)
         cursor += nread;
 
@@ -119,16 +102,12 @@ int fs::regular_file::getdents(char* __user buf, size_t cnt) {
 }
 
 int fs::regular_file::getdents64(char* __user buf, size_t cnt) {
-    if (!S_ISDIR(ind->mode))
-        return -ENOTDIR;
-
     size_t orig_cnt = cnt;
-    int nread = ind->fs->readdir(
-        ind, cursor,
-        [&buf, &cnt](const char* fn, struct inode* ind, uint8_t type) {
-            size_t filename_len = strlen(fn);
-
-            size_t reclen = sizeof(fs::user_dirent64) + filename_len;
+    auto callback = readdir_callback_fn(
+        [&buf, &cnt](const char* fn, size_t fnlen,
+                     const struct rust_inode_handle*,
+                     const struct inode_data* ind, uint8_t type) {
+            size_t reclen = sizeof(fs::user_dirent64) + fnlen;
             if (cnt < reclen)
                 return -EFAULT;
 
@@ -138,13 +117,15 @@ int fs::regular_file::getdents64(char* __user buf, size_t cnt) {
             dirp->d_reclen = reclen;
             dirp->d_type = type;
             // TODO: use copy_to_user
-            memcpy(dirp->d_name, fn, filename_len);
+            memcpy(dirp->d_name, fn, fnlen);
             buf[reclen - 1] = 0;
 
             buf += reclen;
             cnt -= reclen;
             return 0;
         });
+
+    int nread = fs_readdir(ind, cursor, &callback);
 
     if (nread > 0)
         cursor += nread;
@@ -153,7 +134,7 @@ int fs::regular_file::getdents64(char* __user buf, size_t cnt) {
 }
 
 fs::fifo_file::fifo_file(file_flags flags, std::shared_ptr<fs::pipe> ppipe)
-    : file(S_IFIFO, flags), ppipe(ppipe) {}
+    : file(flags), ppipe(ppipe) {}
 
 ssize_t fs::fifo_file::read(char* __user buf, size_t n) {
     if (!flags.read)
@@ -177,75 +158,6 @@ fs::fifo_file::~fifo_file() {
 static fs::blkdev_ops** blkdevs[256];
 static fs::chrdev_ops** chrdevs[256];
 
-size_t fs::read(struct fs::inode* file, char* buf, size_t buf_size,
-                size_t offset, size_t n) {
-    if (S_ISDIR(file->mode)) {
-        errno = EISDIR;
-        return -1U;
-    }
-
-    if (S_ISREG(file->mode))
-        return file->fs->read(file, buf, buf_size, n, offset);
-
-    if (S_ISBLK(file->mode) || S_ISCHR(file->mode)) {
-        dev_t dev = file->fs->i_device(file);
-        if (dev & 0x80000000) {
-            errno = EINVAL;
-            return -1U;
-        }
-
-        ssize_t ret;
-        if (S_ISBLK(file->mode))
-            ret = block_device_read(dev, buf, buf_size, offset, n);
-        else
-            ret = char_device_read(dev, buf, buf_size, n);
-
-        if (ret < 0) {
-            errno = -ret;
-            return -1U;
-        }
-
-        return ret;
-    }
-
-    errno = EINVAL;
-    return -1U;
-}
-size_t fs::write(struct fs::inode* file, const char* buf, size_t offset,
-                 size_t n) {
-    if (S_ISDIR(file->mode)) {
-        errno = EISDIR;
-        return -1U;
-    }
-
-    if (S_ISREG(file->mode))
-        return file->fs->write(file, buf, n, offset);
-
-    if (S_ISBLK(file->mode) || S_ISCHR(file->mode)) {
-        dev_t dev = file->fs->i_device(file);
-        if (dev & 0x80000000) {
-            errno = EINVAL;
-            return -1U;
-        }
-
-        ssize_t ret;
-        if (S_ISBLK(file->mode))
-            ret = block_device_write(dev, buf, offset, n);
-        else
-            ret = char_device_write(dev, buf, n);
-
-        if (ret < 0) {
-            errno = -ret;
-            return -1U;
-        }
-
-        return ret;
-    }
-
-    errno = EINVAL;
-    return -1U;
-}
-
 std::pair<fs::dentry_pointer, int> fs::open(const fs_context& context,
                                             dentry* _cwd,
                                             types::path_iterator path,
@@ -265,10 +177,9 @@ std::pair<fs::dentry_pointer, int> fs::open(const fs_context& context,
         if (!(cwd->flags & D_PRESENT))
             return {nullptr, -ENOENT};
 
-        assert(cwd->inode);
-        if (S_ISLNK(cwd->inode->mode)) {
+        if (cwd->flags & D_SYMLINK) {
             char linkpath[256];
-            int ret = fs::readlink(cwd->inode, linkpath, sizeof(linkpath));
+            int ret = fs_readlink(&cwd->inode, linkpath, sizeof(linkpath));
             if (ret < 0)
                 return {nullptr, ret};
             linkpath[ret] = 0;
@@ -279,6 +190,9 @@ std::pair<fs::dentry_pointer, int> fs::open(const fs_context& context,
                 return {nullptr, ret};
         }
 
+        if (item == ".." && cwd.get() == context.root.get())
+            continue;
+
         if (1) {
             int status;
             std::tie(cwd, status) = d_find(cwd.get(), item);
@@ -286,23 +200,16 @@ std::pair<fs::dentry_pointer, int> fs::open(const fs_context& context,
                 return {nullptr, status};
         }
 
-        while (cwd->flags & D_MOUNTPOINT) {
-            auto iter = mounts.find(cwd.get());
-            assert(iter);
-
-            auto* fs = iter->second.fs;
-            assert(fs);
-
-            cwd = d_get(fs->root());
-        }
+        while (cwd->flags & D_MOUNTPOINT)
+            cwd = r_get_mountpoint(cwd.get());
     }
 
     if (!(cwd->flags & D_PRESENT))
         return {std::move(cwd), -ENOENT};
 
-    if (follow && S_ISLNK(cwd->inode->mode)) {
+    if (follow && cwd->flags & D_SYMLINK) {
         char linkpath[256];
-        int ret = fs::readlink(cwd->inode, linkpath, sizeof(linkpath));
+        int ret = fs_readlink(&cwd->inode, linkpath, sizeof(linkpath));
         if (ret < 0)
             return {nullptr, ret};
         linkpath[ret] = 0;
@@ -311,58 +218,6 @@ std::pair<fs::dentry_pointer, int> fs::open(const fs_context& context,
     }
 
     return {std::move(cwd), 0};
-}
-
-int fs::statx(struct inode* inode, struct statx* stat, unsigned int mask) {
-    assert(inode && inode->fs);
-    return inode->fs->statx(inode, stat, mask);
-}
-
-int fs::truncate(struct inode* file, size_t size) {
-    assert(file && file->fs);
-    return file->fs->truncate(file, size);
-}
-
-int fs::readlink(struct inode* inode, char* buf, size_t size) {
-    assert(inode && inode->fs);
-    return inode->fs->readlink(inode, buf, size);
-}
-
-int fs::symlink(struct dentry* at, const char* target) {
-    assert(at && at->parent && at->parent->fs);
-    return at->parent->fs->symlink(at->parent->inode, at, target);
-}
-
-int fs::unlink(struct dentry* at) {
-    assert(at && at->parent && at->parent->fs);
-    return at->parent->fs->unlink(at->parent->inode, at);
-}
-
-int fs::mknod(struct dentry* at, mode_t mode, dev_t dev) {
-    assert(at && at->parent && at->parent->fs);
-    return at->parent->fs->mknod(at->parent->inode, at, mode, dev);
-}
-
-int fs::creat(struct dentry* at, mode_t mode) {
-    assert(at && at->parent && at->parent->fs);
-    return at->parent->fs->creat(at->parent->inode, at, mode);
-}
-
-int fs::mount(struct dentry* mnt, const char* source, const char* mount_point,
-              const char* fstype, unsigned long flags, const void* data) {
-    assert(mnt && mnt->fs);
-    return mnt->fs->mount(mnt, source, mount_point, fstype, flags, data);
-}
-
-int fs::mkdir(struct dentry* at, mode_t mode) {
-    assert(at && at->parent && at->parent->fs);
-    return at->parent->fs->mkdir(at->parent->inode, at, mode);
-}
-
-int mount(dentry* mnt, const char* source, const char* mount_point,
-          const char* fstype, unsigned long flags, const void* data) {
-    assert(mnt && mnt->fs);
-    return mnt->fs->mount(mnt, source, mount_point, fstype, flags, data);
 }
 
 int fs::register_block_device(dev_t node, const fs::blkdev_ops& ops) {
@@ -610,4 +465,11 @@ int fs::pipe::read(char* buf, size_t n) {
 
     waitlist_w.notify_all();
     return orig_n - n;
+}
+
+extern "C" int call_callback(const fs::readdir_callback_fn* func,
+                             const char* filename, size_t fnlen,
+                             const struct fs::rust_inode_handle* inode,
+                             const struct fs::inode_data* idata, uint8_t type) {
+    return (*func)(filename, fnlen, inode, idata, type);
 }

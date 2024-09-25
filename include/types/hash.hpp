@@ -19,7 +19,7 @@ constexpr hash_t hash(uint64_t val, int bits) {
     return (val * GOLDEN_RATIO_64) >> (64 - bits);
 }
 
-inline hash_t hash_ptr(void* p, int bits) {
+inline hash_t hash_ptr(const void* p, int bits) {
     return hash(std::bit_cast<uintptr_t>(p), bits);
 }
 

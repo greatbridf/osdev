@@ -8,6 +8,15 @@ int* __errno_location(void)
     return &__errno;
 }
 
+static size_t _strlen(const char* str)
+{
+    size_t len = 0;
+    while (str[len] != '\0') {
+        len++;
+    }
+    return len;
+}
+
 void
 __attribute__((noreturn))
 __attribute__((weak))
@@ -15,7 +24,7 @@ __stack_chk_fail(void)
 {
     const char* msg = "***** stack overflow detected *****\n"
                       "quiting...\n";
-    write(STDERR_FILENO, msg, strlen(msg));
+    write(STDERR_FILENO, msg, _strlen(msg));
     exit(-1);
 }
 

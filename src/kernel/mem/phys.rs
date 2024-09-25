@@ -10,6 +10,14 @@ pub trait PhysPtr {
     fn as_mut<'lifetime, T>(&self) -> &'lifetime mut T {
         unsafe { &mut *(self.as_ptr()) }
     }
+
+    fn as_slice<'lifetime, T>(&self, len: usize) -> &'lifetime [T] {
+        unsafe { core::slice::from_raw_parts(self.as_ptr(), len) }
+    }
+
+    fn as_mut_slice<'lifetime, T>(&self, len: usize) -> &'lifetime mut [T] {
+        unsafe { core::slice::from_raw_parts_mut(self.as_ptr(), len) }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]

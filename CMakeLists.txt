@@ -39,9 +39,6 @@ set(BOOTLOADER_SOURCES src/boot.s
                        )
 
 set(KERNEL_MAIN_SOURCES src/dev/builtin-chardev.cc
-                        src/fs/fat.cpp
-                        src/fs/tmpfs.cc
-                        src/fs/procfs.cc
                         src/kinit.cpp
                         src/kernel/async/waitlist.cc
                         src/kernel/async/lock.cc
@@ -70,15 +67,12 @@ set(KERNEL_MAIN_SOURCES src/dev/builtin-chardev.cc
                         src/kernel/user/thread_local.cc
                         src/kernel/vfs/dentry.cc
                         src/kernel/vfs/filearr.cc
-                        src/kernel/vfs/inode.cc
-                        src/kernel/vfs/vfs.cc
                         src/kernel/signal.cpp
                         src/net/ethernet.cc
                         src/types/crc.cc
                         src/types/elf.cpp
                         src/types/libstdcpp.cpp
                         include/defs.hpp
-                        include/fs/fat.hpp
                         include/kernel/async/waitlist.hpp
                         include/kernel/async/lock.hpp
                         include/kernel/tty.hpp
@@ -97,8 +91,6 @@ set(KERNEL_MAIN_SOURCES src/dev/builtin-chardev.cc
                         include/kernel/vfs/dentry.hpp
                         include/kernel/vfs/file.hpp
                         include/kernel/vfs/filearr.hpp
-                        include/kernel/vfs/inode.hpp
-                        include/kernel/vfs/vfs.hpp
                         include/kernel/vga.hpp
                         include/kernel/signal.hpp
                         include/kernel/task/forward.hpp
@@ -158,10 +150,7 @@ add_custom_target(boot.img
     COMMAND mcopy -i boot.img@@1M ${CMAKE_BINARY_DIR}/user-space-program/interrupt-test.out ::int
     COMMAND mcopy -i boot.img@@1M ${CMAKE_BINARY_DIR}/user-space-program/stack-test.out ::stack
     COMMAND mcopy -i boot.img@@1M ${CMAKE_BINARY_DIR}/user-space-program/init.out ::init
-    COMMAND mcopy -i boot.img@@1M ${CMAKE_BINARY_DIR}/user-space-program/sh.out ::sh
     COMMAND mcopy -i boot.img@@1M ${CMAKE_BINARY_DIR}/user-space-program/priv-test.out ::priv
-    COMMAND mcopy -i boot.img@@1M ${CMAKE_BINARY_DIR}/user-space-program/lazybox.out ::lazybox
-    COMMAND mcopy -i boot.img@@1M ${CMAKE_BINARY_DIR}/user-space-program/lazybox.out ::pwd
     COMMAND mcopy -i boot.img@@1M ${CMAKE_SOURCE_DIR}/busybox-minimal ::busybox_
     COMMAND mcopy -i boot.img@@1M ${CMAKE_SOURCE_DIR}/busybox ::busybox
     COMMAND mcopy -i boot.img@@1M ${CMAKE_SOURCE_DIR}/init_script.sh ::initsh

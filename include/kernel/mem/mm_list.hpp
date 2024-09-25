@@ -7,6 +7,8 @@
 
 #include <stdint.h>
 
+#include <kernel/vfs/dentry.hpp>
+
 namespace kernel::mem {
 
 constexpr uintptr_t KERNEL_SPACE_START = 0x8000000000000000ULL;
@@ -44,7 +46,7 @@ class mm_list {
 
         unsigned long flags;
 
-        fs::inode* file_inode;
+        const fs::rust_inode_handle* file_inode;
         // MUSE BE aligned to 4kb boundary
         std::size_t file_offset;
     };

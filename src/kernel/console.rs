@@ -1,6 +1,7 @@
+use crate::prelude::*;
+
 pub struct Console {}
 
-use core::fmt::Write;
 impl Write for Console {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
         use crate::bindings::root::kernel::tty::console as _console;
@@ -24,14 +25,12 @@ pub fn _print(args: core::fmt::Arguments) -> core::fmt::Result {
 
 pub static CONSOLE: spin::Mutex<Console> = spin::Mutex::new(Console {});
 
-#[macro_export]
 macro_rules! print {
     ($($arg:tt)*) => {
         $crate::kernel::console::_print(format_args!($($arg)*))
     };
 }
 
-#[macro_export]
 macro_rules! println {
     () => {
         $crate::print!("\n")
@@ -40,3 +39,5 @@ macro_rules! println {
         $crate::print!("{}\n", format_args!($($arg)*))
     };
 }
+
+pub(crate) use {print, println};

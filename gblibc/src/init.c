@@ -2,7 +2,6 @@
 #include <priv-vars.h>
 #include <stdlib.h>
 #include <syscall.h>
-#include <string.h>
 #include <stdio.h>
 #include <unistd.h>
 #include <list.h>
@@ -10,6 +9,32 @@
 FILE* stdout;
 FILE* stdin;
 FILE* stderr;
+
+#define BYTES_PER_MAX_COPY_UNIT (sizeof(uint32_t) / sizeof(uint8_t))
+static void* _memset(void* _dst, int c, size_t n)
+{
+    uint8_t* dst = (uint8_t*)_dst;
+    c &= 0xff;
+    int cc = (c + (c << 8) + (c << 16) + (c << 24));
+    for (size_t i = 0; i < n / BYTES_PER_MAX_COPY_UNIT; ++i) {
+        *(uint32_t*)dst = cc;
+        dst += BYTES_PER_MAX_COPY_UNIT;
+    }
+    for (size_t i = 0; i < (n % BYTES_PER_MAX_COPY_UNIT); ++i) {
+        *((char*)dst++) = c;
+    }
+    return dst;
+}
+
+static char* strchr(const char* s, int c)
+{
+    while (*s) {
+        if (*s == c)
+            return (char*)s;
+        ++s;
+    }
+    return NULL;
+}
 
 list_head* __io_files_location(void)
 {
@@ -58,7 +83,7 @@ void __init_gblibc(int argc, char** argv, char** envp)
     // stdout
     node = NEWNODE(FILE);
     stdout = &NDDATA(*node, FILE);
-    memset(stdout, 0x00, sizeof(FILE));
+    _memset(stdout, 0x00, sizeof(FILE));
 
     stdout->fd = STDOUT_FILENO;
     stdout->flags = FILE_WRITE;
@@ -70,7 +95,7 @@ void __init_gblibc(int argc, char** argv, char** envp)
     // stdin
     node = NEWNODE(FILE);
     stdin = &NDDATA(*node, FILE);
-    memset(stdin, 0x00, sizeof(FILE));
+    _memset(stdin, 0x00, sizeof(FILE));
 
     stdin->fd = STDIN_FILENO;
     stdin->flags = FILE_READ;
@@ -82,7 +107,7 @@ void __init_gblibc(int argc, char** argv, char** envp)
     // stderr
     node = NEWNODE(FILE);
     stderr = &NDDATA(*node, FILE);
-    memset(stderr, 0x00, sizeof(FILE));
+    _memset(stderr, 0x00, sizeof(FILE));
 
     stderr->fd = STDERR_FILENO;
     stderr->flags = FILE_WRITE;

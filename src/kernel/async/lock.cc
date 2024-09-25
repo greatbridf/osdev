@@ -64,6 +64,14 @@ void preempt_enable() {
     --_preempt_count();
 }
 
+extern "C" void r_preempt_disable() {
+    ++_preempt_count();
+}
+
+extern "C" void r_preempt_enable() {
+    --_preempt_count();
+}
+
 preempt_count_t preempt_count() {
     return _preempt_count();
 }

@@ -10,7 +10,6 @@
 #include <kernel/mem/slab.hpp>
 #include <kernel/mem/vm_area.hpp>
 #include <kernel/process.hpp>
-#include <kernel/procfs.hpp>
 
 using namespace types::list;
 
@@ -333,8 +332,8 @@ void kernel::mem::paging::handle_page_fault(unsigned long err) {
         size_t offset = (vaddr & ~0xfff) - mm_area->start;
         char* data = physaddr<char>{pfn};
 
-        int n = fs::read(mm_area->mapped_file, data, 4096,
-                         mm_area->file_offset + offset, 4096);
+        int n = fs_read(mm_area->mapped_file, data, 4096,
+                        mm_area->file_offset + offset, 4096);
 
         // TODO: send SIGBUS if offset is greater than real size
         if (n != 4096)
@@ -422,19 +421,3 @@ vaddr_range::operator bool() const noexcept {
 bool vaddr_range::operator==(const vaddr_range& other) const noexcept {
     return n == other.n;
 }
-
-extern "C" isize real_dump_buddy(const zone_info* zones, u8* buf,
-                                 usize buf_size);
-
-static isize _dump_buddy(u8* buf, usize buf_size) {
-    return real_dump_buddy(zones, buf, buf_size);
-}
-
-static void _init_procfs_files() {
-    auto* root = kernel::procfs::root();
-
-    kernel::procfs::create(root, "buddyinfo", _dump_buddy, nullptr);
-}
-
-__attribute__((used))
-SECTION(".late_init") void (*const _paging_late_init)() = _init_procfs_files;

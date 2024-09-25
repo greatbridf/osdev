@@ -1,19 +1,41 @@
 #include <assert.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
-#include <fcntl.h>
 #include <sys/wait.h>
+#include <unistd.h>
 
-#define print(str) write(STDERR_FILENO, str, strlen(str))
+#define print(str) write(STDERR_FILENO, str, _strlen(str))
 
-int main(int argc, char** argv)
-{
+static size_t _strlen(const char* str) {
+    size_t len = 0;
+    while (str[len] != '\0') {
+        len++;
+    }
+    return len;
+}
+
+static __attribute__((used)) size_t strlen(const char* s) {
+    size_t len = 0;
+    while (*s++)
+        ++len;
+    return len;
+}
+
+static __attribute__((used)) void* memcpy(void* dst, const void* src,
+                                          size_t n) {
+    uint8_t* d = (uint8_t*)dst;
+    const uint8_t* s = (const uint8_t*)src;
+    for (size_t i = 0; i < n; ++i)
+        d[i] = s[i];
+    return dst;
+}
+
+int main(int argc, char** argv) {
     int fd = 0;
     // Assumes three file descriptors open.
-    while((fd = open("/dev/console", 0)) >= 0){
-        if(fd >= 3){
+    while ((fd = open("/dev/console", 0)) >= 0) {
+        if (fd >= 3) {
             close(fd);
             break;
         }
@@ -56,7 +78,8 @@ _run_sh:;
     for (;;) {
         pid = wait(&ret);
         char* buf = NULL;
-        assert(asprintf(&buf, "[init] pid%d has exited with code %d\n", pid, ret) >= 0);
+        assert(asprintf(&buf, "[init] pid%d has exited with code %d\n", pid,
+                        ret) >= 0);
         print(buf);
         free(buf);
         // sh

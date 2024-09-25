@@ -3,6 +3,7 @@
 #include <stdint.h>
 
 #include <kernel/vfs.hpp>
+#include <kernel/vfs/dentry.hpp>
 
 namespace kernel::mem {
 
@@ -19,7 +20,7 @@ struct vm_area {
 
     unsigned long flags;
 
-    fs::inode* mapped_file;
+    const fs::rust_inode_handle* mapped_file;
     std::size_t file_offset;
 
     constexpr bool is_avail(uintptr_t ostart, uintptr_t oend) const noexcept {
@@ -38,7 +39,8 @@ struct vm_area {
     }
 
     constexpr vm_area(uintptr_t start, unsigned long flags, uintptr_t end,
-                      fs::inode* mapped_file = nullptr, std::size_t offset = 0)
+                      const fs::rust_inode_handle* mapped_file = nullptr,
+                      std::size_t offset = 0)
         : start{start}
         , end{end}
         , flags{flags}
@@ -46,7 +48,8 @@ struct vm_area {
         , file_offset{offset} {}
 
     constexpr vm_area(uintptr_t start, unsigned long flags,
-                      fs::inode* mapped_file = nullptr, std::size_t offset = 0)
+                      const fs::rust_inode_handle* mapped_file = nullptr,
+                      std::size_t offset = 0)
         : start{start}
         , end{start}
         , flags{flags}

@@ -1,7 +1,6 @@
 #include <string>
 #include <vector>
 
-#include <assert.h>
 #include <errno.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -35,7 +34,7 @@ int types::elf::elf32_load(types::elf::elf32_load_data& d) {
 
     types::elf::elf32_header hdr{};
     auto n_read =
-        fs::read(exec->inode, (char*)&hdr, sizeof(types::elf::elf32_header), 0,
+        fs_read(&exec->inode, (char*)&hdr, sizeof(types::elf::elf32_header), 0,
                  sizeof(types::elf::elf32_header));
 
     if (n_read != sizeof(types::elf::elf32_header))
@@ -48,7 +47,7 @@ int types::elf::elf32_load(types::elf::elf32_load_data& d) {
     size_t phents_size = hdr.phentsize * hdr.phnum;
     size_t shents_size = hdr.shentsize * hdr.shnum;
     std::vector<types::elf::elf32_program_header_entry> phents(hdr.phnum);
-    n_read = fs::read(exec->inode, (char*)phents.data(), phents_size, hdr.phoff,
+    n_read = fs_read(&exec->inode, (char*)phents.data(), phents_size, hdr.phoff,
                       phents_size);
 
     // broken file or I/O error
@@ -56,7 +55,7 @@ int types::elf::elf32_load(types::elf::elf32_load_data& d) {
         return -EINVAL;
 
     std::vector<types::elf::elf32_section_header_entry> shents(hdr.shnum);
-    n_read = fs::read(exec->inode, (char*)shents.data(), shents_size, hdr.shoff,
+    n_read = fs_read(&exec->inode, (char*)shents.data(), shents_size, hdr.shoff,
                       shents_size);
 
     // broken file or I/O error
@@ -85,7 +84,7 @@ int types::elf::elf32_load(types::elf::elf32_load_data& d) {
 
             args.vaddr = vaddr;
             args.length = flen;
-            args.file_inode = exec->inode;
+            args.file_inode = &exec->inode;
             args.file_offset = fileoff;
 
             args.flags = MM_MAPPED;

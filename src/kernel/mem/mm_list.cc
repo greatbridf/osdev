@@ -299,7 +299,6 @@ int mm_list::mmap(const map_args& args) {
 
     if (flags & MM_MAPPED) {
         assert(finode);
-        assert(S_ISREG(finode->mode) || S_ISBLK(finode->mode));
 
         auto [area, inserted] = m_areas.emplace(
             vaddr, flags & ~MM_INTERNAL_MASK, vaddr + length, finode, foff);

@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 // Register names
 // Control register
 pub const REG_CTRL: u32 = 0x00000;

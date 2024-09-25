@@ -8,20 +8,13 @@ extern crate alloc;
 mod bindings;
 
 mod driver;
+mod fs;
 mod io;
 mod kernel;
 mod net;
+mod prelude;
 
-macro_rules! dont_check {
-    ($arg:expr) => {
-        match $arg {
-            Ok(_) => (),
-            Err(_) => (),
-        }
-    };
-}
-
-pub(crate) use dont_check;
+use prelude::*;
 
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
@@ -66,6 +59,12 @@ static ALLOCATOR: Allocator = Allocator {};
 #[no_mangle]
 pub extern "C" fn late_init_rust() {
     driver::e1000e::register_e1000e_driver();
+
+    fs::tmpfs::init();
+    fs::procfs::init();
+    fs::fat32::init();
+
+    kernel::vfs::mount::create_rootfs();
 }
 
 //

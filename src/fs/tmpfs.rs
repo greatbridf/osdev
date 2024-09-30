@@ -140,18 +140,16 @@ impl Inode for TmpFsInode {
         }
     }
 
-    fn read(
-        &self,
-        buffer: &mut [u8],
-        count: usize,
-        offset: usize,
-    ) -> KResult<usize> {
+    fn read(&self, buffer: &mut [u8], offset: usize) -> KResult<usize> {
         self.vfs()?;
 
         match *self.fsdata.lock() {
-            TmpFsData::File(ref file) => {
-                Ok(copy_offset_count(file, buffer, offset as usize, count))
-            }
+            TmpFsData::File(ref file) => Ok(copy_offset_count(
+                file,
+                buffer,
+                offset as usize,
+                buffer.len(),
+            )),
 
             _ => Err(EINVAL),
         }

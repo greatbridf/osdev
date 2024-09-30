@@ -38,6 +38,7 @@ pub fn s_isblk(mode: Mode) -> bool {
     (mode & S_IFMT) == S_IFBLK
 }
 
+#[derive(Clone, Copy, Default)]
 #[repr(C)]
 pub struct TimeSpec {
     pub sec: u64,

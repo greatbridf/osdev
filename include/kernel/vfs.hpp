@@ -20,19 +20,6 @@ constexpr dev_t make_device(uint32_t major, uint32_t minor) {
     return ((major << 8) & 0xFF00U) | (minor & 0xFFU);
 }
 
-// buf, buf_size, offset, cnt
-using blkdev_read =
-    std::function<ssize_t(char*, std::size_t, std::size_t, std::size_t)>;
-
-// buf, offset, cnt
-using blkdev_write =
-    std::function<ssize_t(const char*, std::size_t, std::size_t)>;
-
-struct blkdev_ops {
-    blkdev_read read;
-    blkdev_write write;
-};
-
 // buf, buf_size, cnt
 using chrdev_read = std::function<ssize_t(char*, std::size_t, std::size_t)>;
 
@@ -64,16 +51,7 @@ struct fs_context {
     dentry_pointer root;
 };
 
-int register_block_device(dev_t node, const blkdev_ops& ops);
 int register_char_device(dev_t node, const chrdev_ops& ops);
-
-void partprobe();
-
-ssize_t block_device_read(dev_t node, char* buf, size_t buf_size, size_t offset,
-                          size_t n);
-ssize_t block_device_write(dev_t node, const char* buf, size_t offset,
-                           size_t n);
-
 ssize_t char_device_read(dev_t node, char* buf, size_t buf_size, size_t n);
 ssize_t char_device_write(dev_t node, const char* buf, size_t n);
 

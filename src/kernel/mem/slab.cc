@@ -101,7 +101,6 @@ void kernel::mem::slab_free(void* ptr) {
         if (cache->slabs_full == slab) {
             head = &cache->slabs_full;
         } else {
-            assert(cache->slabs_partial == slab);
             head = &cache->slabs_partial;
         }
 

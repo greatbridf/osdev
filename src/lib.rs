@@ -59,6 +59,7 @@ static ALLOCATOR: Allocator = Allocator {};
 #[no_mangle]
 pub extern "C" fn late_init_rust() {
     driver::e1000e::register_e1000e_driver();
+    driver::ahci::register_ahci_driver();
 
     fs::tmpfs::init();
     fs::procfs::init();

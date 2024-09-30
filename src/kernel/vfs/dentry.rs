@@ -92,8 +92,8 @@ impl Dentry {
         unsafe { Arc::from_raw(self.inode) }
     }
 
-    pub fn take_fs(&self) -> Arc<Mutex<dyn Vfs>> {
-        unsafe { Arc::from_raw(self.fs) }
+    pub fn take_fs(&self) -> Weak<Mutex<dyn Vfs>> {
+        unsafe { Weak::from_raw(self.fs) }
     }
 }
 

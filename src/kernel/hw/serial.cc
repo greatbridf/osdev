@@ -75,8 +75,14 @@ class serial_tty : public virtual tty {
     }
 
     virtual void putchar(char c) override {
-        while (!(*ports[5] & 0x20))
-            ; // nop
+        while (true) {
+            auto status = *ports[5];
+            if (status & 0x1)
+                this->commit_char(*ports[0]);
+            if (status & 0x20)
+                break;
+        }
+
         ports[0] = c;
     }
 };

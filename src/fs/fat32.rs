@@ -5,7 +5,7 @@ use alloc::{
 use bindings::{EINVAL, EIO, S_IFDIR, S_IFREG};
 
 use crate::{
-    io::copy_offset_count,
+    io::{RawBuffer, UninitBuffer},
     kernel::{
         block::{make_device, BlockDevice, BlockDeviceRequest},
         mem::{paging::Page, phys::PhysPtr},
@@ -19,27 +19,6 @@ use crate::{
     prelude::*,
     KResult,
 };
-
-const EOC: ClusterNo = 0x0FFFFFF8;
-
-/// Convert a mutable reference to a slice of bytes
-/// This is a safe wrapper around `core::slice::from_raw_parts_mut`
-///
-fn as_slice<T>(object: &mut [T]) -> &mut [u8] {
-    unsafe {
-        core::slice::from_raw_parts_mut(
-            object.as_mut_ptr() as *mut u8,
-            object.len() * core::mem::size_of::<T>(),
-        )
-    }
-}
-
-/// Convert a slice of bytes to a mutable reference
-///
-fn as_object<T>(slice: &[u8]) -> &T {
-    assert_eq!(slice.len(), core::mem::size_of::<T>());
-    unsafe { &*(slice.as_ptr() as *const T) }
-}
 
 type ClusterNo = u32;
 
@@ -69,6 +48,63 @@ struct FatDirectoryEntry {
     size: u32,
 }
 
+impl FatDirectoryEntry {
+    pub fn filename(&self) -> KResult<String> {
+        let basename = str::from_utf8(&self.name)
+            .map_err(|_| EINVAL)?
+            .trim_end_matches(char::from(' '));
+
+        let extension = if self.extension[0] != ' ' as u8 {
+            Some(
+                str::from_utf8(&self.extension)
+                    .map_err(|_| EINVAL)?
+                    .trim_end_matches(char::from(' ')),
+            )
+        } else {
+            None
+        };
+
+        let mut name = String::from(basename);
+
+        if let Some(extension) = extension {
+            name.push('.');
+            name += extension;
+        }
+
+        if self.reserved & RESERVED_FILENAME_LOWERCASE != 0 {
+            name.make_ascii_lowercase();
+        }
+
+        Ok(name)
+    }
+
+    pub fn ino(&self) -> Ino {
+        let cluster_high = (self.cluster_high as u32) << 16;
+        (self.cluster_low as u32 | cluster_high) as Ino
+    }
+
+    fn is_volume_id(&self) -> bool {
+        self.attr & ATTR_VOLUME_ID != 0
+    }
+
+    fn is_free(&self) -> bool {
+        self.name[0] == 0x00
+    }
+
+    fn is_deleted(&self) -> bool {
+        self.name[0] == 0xE5
+    }
+
+    fn is_invalid(&self) -> bool {
+        self.is_volume_id() || self.is_free() || self.is_deleted()
+    }
+
+    fn is_directory(&self) -> bool {
+        self.attr & ATTR_DIRECTORY != 0
+    }
+}
+
+#[derive(Clone, Copy)]
 #[repr(C, packed)]
 struct Bootsector {
     jmp: [u8; 3],
@@ -108,7 +144,7 @@ struct Bootsector {
 /// 3. Inodes
 ///
 struct FatFs {
-    device: BlockDevice,
+    device: Arc<BlockDevice>,
     icache: Mutex<InodeCache<FatFs>>,
     sectors_per_cluster: u8,
     rootdir_cluster: ClusterNo,
@@ -118,31 +154,16 @@ struct FatFs {
 }
 
 impl FatFs {
-    // /// Read a sector
-    // fn read_sector(&self, sector: u64, buf: &mut [u8]) -> KResult<()> {
-    //     assert_eq!(buf.len(), 512);
-    //     let mut rq = BlockDeviceRequest {
-    //         sector,
-    //         count: 1,
-    //         buffer: Page::alloc_one(),
-    //     };
-    //     self.read(&mut rq)?;
-
-    //     buf.copy_from_slice(rq.buffer.as_cached().as_slice(512));
-
-    //     Ok(())
-    // }
-
-    fn read_cluster(&self, cluster: ClusterNo, buf: &mut [u8]) -> KResult<()> {
+    fn read_cluster(&self, cluster: ClusterNo, buf: &Page) -> KResult<()> {
         let cluster = cluster - 2;
 
-        let mut rq = BlockDeviceRequest {
+        let rq = BlockDeviceRequest {
             sector: self.data_start as u64
                 + cluster as u64 * self.sectors_per_cluster as u64,
             count: self.sectors_per_cluster as u64,
-            buffer: buf,
+            buffer: core::slice::from_ref(buf),
         };
-        self.device.read(&mut rq)?;
+        self.device.read_raw(rq)?;
 
         Ok(())
     }
@@ -153,7 +174,7 @@ impl FatFs {
         device: DevId,
     ) -> KResult<(Arc<Mutex<Self>>, Arc<dyn Inode>)> {
         let mut fatfs = Self {
-            device: BlockDevice::new(device),
+            device: BlockDevice::get(device)?,
             icache: Mutex::new(InodeCache::new()),
             sectors_per_cluster: 0,
             rootdir_cluster: 0,
@@ -162,19 +183,9 @@ impl FatFs {
             volume_label: String::new(),
         };
 
-        let mut info = [0u8; 512];
-
-        let info = {
-            let mut rq = BlockDeviceRequest {
-                sector: 0,
-                count: 1,
-                // buffer: Page::alloc_one(),
-                buffer: &mut info,
-            };
-            fatfs.device.read(&mut rq)?;
-
-            as_object::<Bootsector>(&info)
-        };
+        let mut info: UninitBuffer<Bootsector> = UninitBuffer::new();
+        fatfs.device.read_some(0, &mut info)?.ok_or(EIO)?;
+        let info = info.assume_filled_ref()?;
 
         fatfs.sectors_per_cluster = info.sectors_per_cluster;
         fatfs.rootdir_cluster = info.root_cluster;
@@ -189,17 +200,14 @@ impl FatFs {
                 0,
             );
 
-            let mut rq = BlockDeviceRequest {
-                sector: info.reserved_sectors as u64,
-                count: info.sectors_per_fat as u64,
-                buffer: unsafe {
-                    core::slice::from_raw_parts_mut(
-                        fat.as_mut_ptr() as *mut _,
-                        fat.len() * core::mem::size_of::<ClusterNo>(),
-                    )
-                },
-            };
-            fatfs.device.read(&mut rq)?;
+            let mut buffer = RawBuffer::new_from_slice(fat.as_mut_slice());
+
+            fatfs
+                .device
+                .read_some(info.reserved_sectors as usize * 512, &mut buffer)?
+                .ok_or(EIO)?;
+
+            assert!(buffer.filled());
         }
 
         fatfs.volume_label = String::from(
@@ -210,17 +218,8 @@ impl FatFs {
 
         let root_dir_cluster_count = {
             let fat = fatfs.fat.lock();
-            let mut next = fatfs.rootdir_cluster;
-            let mut count = 1;
-            loop {
-                next = fat[next as usize];
-                if next >= EOC {
-                    break;
-                }
-                count += 1;
-            }
 
-            count
+            ClusterIterator::new(&fat, fatfs.rootdir_cluster).count()
         };
 
         let fatfs = Arc::new(Mutex::new(fatfs));
@@ -272,6 +271,33 @@ struct FatInode {
     vfs: Weak<Mutex<FatFs>>,
 }
 
+struct ClusterIterator<'lt> {
+    fat: &'lt [ClusterNo],
+    cur: ClusterNo,
+}
+
+impl<'lt> ClusterIterator<'lt> {
+    fn new(fat: &'lt [ClusterNo], start: ClusterNo) -> Self {
+        Self { fat, cur: start }
+    }
+}
+
+impl<'lt> Iterator for ClusterIterator<'lt> {
+    type Item = ClusterNo;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        const EOC: ClusterNo = 0x0FFFFFF8;
+        let next = self.cur;
+
+        if next >= EOC {
+            None
+        } else {
+            self.cur = self.fat[next as usize];
+            Some(next)
+        }
+    }
+}
+
 impl Inode for FatInode {
     fn idata(&self) -> &Mutex<InodeData> {
         &self.idata
@@ -281,57 +307,60 @@ impl Inode for FatInode {
         self
     }
 
-    fn read(
-        &self,
-        mut buffer: &mut [u8],
-        mut count: usize,
-        mut offset: usize,
-    ) -> KResult<usize> {
+    fn read(&self, buffer: &mut [u8], offset: usize) -> KResult<usize> {
         let vfs = self.vfs.upgrade().ok_or(EIO)?;
         let vfs = vfs.lock();
         let fat = vfs.fat.lock();
 
         let cluster_size = vfs.sectors_per_cluster as usize * 512;
-        let mut cno = {
-            let idata = self.idata.lock();
-            idata.ino as ClusterNo
-        };
 
-        while offset >= cluster_size {
-            cno = fat[cno as usize];
-            offset -= cluster_size;
+        let buffer_len = buffer.len();
+        let skip_count = offset / cluster_size;
+        let inner_offset = offset % cluster_size;
+        let cluster_count =
+            (inner_offset + buffer.len() + cluster_size - 1) / cluster_size;
 
-            if cno >= EOC {
-                return Ok(0);
-            }
-        }
+        let mut cluster_iter =
+            ClusterIterator::new(&fat, self.idata.lock().ino as ClusterNo)
+                .skip(skip_count)
+                .take(cluster_count);
 
         let page_buffer = Page::alloc_one();
-        let page_buffer = page_buffer
-            .as_cached()
-            .as_mut_slice::<u8>(page_buffer.len());
 
-        let orig_count = count;
-        while count != 0 {
-            vfs.read_cluster(cno, page_buffer)?;
+        let mut nread = 0;
+        if let Some(cluster) = cluster_iter.next() {
+            vfs.read_cluster(cluster, &page_buffer)?;
 
-            let ncopied = copy_offset_count(page_buffer, buffer, offset, count);
-            offset = 0;
+            let (_, data) = page_buffer
+                .as_cached()
+                .as_slice::<u8>(page_buffer.len())
+                .split_at(inner_offset);
 
-            if ncopied == 0 {
-                break;
-            }
-
-            count -= ncopied;
-            buffer = &mut buffer[ncopied..];
-
-            cno = fat[cno as usize];
-            if cno >= EOC {
-                break;
+            if data.len() > buffer_len - nread {
+                buffer[nread..].copy_from_slice(&data[..buffer_len - nread]);
+                return Ok(buffer_len);
+            } else {
+                buffer[nread..nread + data.len()].copy_from_slice(data);
+                nread += data.len();
             }
         }
 
-        Ok(orig_count - count)
+        for cluster in cluster_iter {
+            vfs.read_cluster(cluster, &page_buffer)?;
+
+            let data =
+                page_buffer.as_cached().as_slice::<u8>(page_buffer.len());
+
+            if data.len() > buffer_len - nread {
+                buffer[nread..].copy_from_slice(&data[..buffer_len - nread]);
+                return Ok(buffer_len);
+            } else {
+                buffer[nread..nread + data.len()].copy_from_slice(data);
+                nread += data.len();
+            }
+        }
+
+        Ok(nread)
     }
 
     fn readdir(
@@ -344,62 +373,44 @@ impl Inode for FatInode {
 
         let fat = vfs.fat.lock();
 
-        let idata = self.idata.lock();
-        let mut next = idata.ino as ClusterNo;
+        let cluster_size = vfs.sectors_per_cluster as usize * 512;
+        let skip_count = offset / cluster_size;
+        let inner_offset = offset % cluster_size;
 
-        let skip = offset / 512 / vfs.sectors_per_cluster as usize;
-        let mut offset = offset % (512 * vfs.sectors_per_cluster as usize);
-        for _ in 0..skip {
-            if next >= EOC {
-                return Ok(0);
-            }
-            next = fat[next as usize];
-        }
-        if next >= EOC {
-            return Ok(0);
-        }
+        let cluster_iter =
+            ClusterIterator::new(&fat, self.idata.lock().ino as ClusterNo)
+                .skip(skip_count)
+                .enumerate();
 
         let mut nread = 0;
         let buffer = Page::alloc_one();
-        let buffer = buffer.as_cached().as_mut_slice::<FatDirectoryEntry>(
-            vfs.sectors_per_cluster as usize * 512
-                / core::mem::size_of::<FatDirectoryEntry>(),
-        );
-        loop {
-            vfs.read_cluster(next, as_slice(buffer))?;
-            let start = offset / core::mem::size_of::<FatDirectoryEntry>();
-            let end = vfs.sectors_per_cluster as usize * 512
-                / core::mem::size_of::<FatDirectoryEntry>();
-            offset = 0;
+        for (idx, cluster) in cluster_iter {
+            vfs.read_cluster(cluster, &buffer)?;
 
-            for entry in buffer.iter().skip(start).take(end - start) {
-                if entry.attr & ATTR_VOLUME_ID != 0 {
-                    nread += core::mem::size_of::<FatDirectoryEntry>();
+            const ENTRY_SIZE: usize = core::mem::size_of::<FatDirectoryEntry>();
+            let count = cluster_size / ENTRY_SIZE;
+
+            let entries = {
+                let entries = buffer
+                    .as_cached()
+                    .as_slice::<FatDirectoryEntry>(count)
+                    .iter();
+
+                entries.skip(if idx == 0 {
+                    inner_offset / ENTRY_SIZE
+                } else {
+                    0
+                })
+            };
+
+            for entry in entries {
+                if entry.is_invalid() {
+                    nread += ENTRY_SIZE;
                     continue;
                 }
 
-                let cluster_high = (entry.cluster_high as u32) << 16;
-                let ino = (entry.cluster_low as u32 | cluster_high) as Ino;
-
-                let name = {
-                    let mut name = String::new();
-                    name += str::from_utf8(&entry.name)
-                        .map_err(|_| EINVAL)?
-                        .trim_end_matches(char::from(' '));
-
-                    if entry.extension[0] != ' ' as u8 {
-                        name.push('.');
-                    }
-
-                    name += str::from_utf8(&entry.extension)
-                        .map_err(|_| EINVAL)?
-                        .trim_end_matches(char::from(' '));
-
-                    if entry.reserved & RESERVED_FILENAME_LOWERCASE != 0 {
-                        name.make_ascii_lowercase();
-                    }
-                    name
-                };
+                let ino = entry.ino();
+                let name = entry.filename()?;
 
                 let inode = {
                     let mut icache = vfs.icache.lock();
@@ -407,21 +418,26 @@ impl Inode for FatInode {
                     match icache.get(ino) {
                         Some(inode) => inode,
                         None => {
-                            let is_directory = entry.attr & ATTR_DIRECTORY != 0;
+                            let nlink;
+                            let mut mode = 0o777;
+
+                            if entry.is_directory() {
+                                nlink = 2;
+                                mode |= S_IFDIR;
+                            } else {
+                                nlink = 1;
+                                mode |= S_IFREG;
+                            }
+
                             let inode = Arc::new(FatInode {
                                 idata: Mutex::new(InodeData {
                                     ino,
-                                    mode: 0o777
-                                        | if is_directory {
-                                            S_IFDIR
-                                        } else {
-                                            S_IFREG
-                                        },
-                                    nlink: if is_directory { 2 } else { 1 },
+                                    mode,
+                                    nlink,
                                     size: entry.size as u64,
-                                    atime: TimeSpec { sec: 0, nsec: 0 },
-                                    mtime: TimeSpec { sec: 0, nsec: 0 },
-                                    ctime: TimeSpec { sec: 0, nsec: 0 },
+                                    atime: TimeSpec::default(),
+                                    mtime: TimeSpec::default(),
+                                    ctime: TimeSpec::default(),
                                     uid: 0,
                                     gid: 0,
                                 }),
@@ -439,13 +455,11 @@ impl Inode for FatInode {
                     return Ok(nread);
                 }
 
-                nread += core::mem::size_of::<FatDirectoryEntry>();
-            }
-            next = fat[next as usize];
-            if next >= EOC {
-                return Ok(nread);
+                nread += ENTRY_SIZE;
             }
         }
+
+        Ok(nread)
     }
 
     fn vfs_weak(&self) -> Weak<Mutex<dyn Vfs>> {

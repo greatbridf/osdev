@@ -69,8 +69,10 @@ int register_driver(uint16_t vendor, uint16_t device, driver_t drv) {
     auto deviter = s_pci_devices.find(dev);
 
     // TODO: check status or print log
-    if (deviter != s_pci_devices.end())
-        drv(*deviter->second);
+    if (deviter != s_pci_devices.end()) {
+        int ret = drv(*deviter->second);
+        assert(ret == 0);
+    }
 
     return 0;
 }

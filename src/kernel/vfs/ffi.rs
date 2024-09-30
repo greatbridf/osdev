@@ -1,4 +1,4 @@
-use crate::prelude::*;
+use crate::{io::ByteBuffer, kernel::block::BlockDevice, prelude::*};
 
 use core::ffi::{c_char, c_void};
 
@@ -56,32 +56,18 @@ pub extern "C" fn fs_mount(
 fn do_read(
     file: Arc<dyn Inode>,
     buffer: &mut [u8],
-    count: usize,
     offset: usize,
 ) -> KResult<usize> {
     let mode = { file.idata().lock().mode };
 
     match mode {
         mode if s_isdir(mode) => Err(EISDIR),
-        mode if s_isreg(mode) => file.read(buffer, count, offset),
+        mode if s_isreg(mode) => file.read(buffer, offset),
         mode if s_isblk(mode) => {
-            let devid = file.devid()?;
+            let device = BlockDevice::get(file.devid()?)?;
+            let mut buffer = ByteBuffer::new(buffer);
 
-            let ret = unsafe {
-                fs::block_device_read(
-                    devid,
-                    buffer.as_mut_ptr() as *mut _,
-                    buffer.len(),
-                    offset,
-                    count,
-                )
-            };
-
-            if ret < 0 {
-                Err(-ret as u32)
-            } else {
-                Ok(ret as usize)
-            }
+            Ok(device.read_some(offset, &mut buffer)?.allow_partial())
         }
         mode if s_ischr(mode) => {
             let devid = file.devid()?;
@@ -91,7 +77,7 @@ fn do_read(
                     devid,
                     buffer.as_mut_ptr() as *mut _,
                     buffer.len(),
-                    count,
+                    buffer.len(),
                 )
             };
 
@@ -115,24 +101,7 @@ fn do_write(
     match mode {
         mode if s_isdir(mode) => Err(EISDIR),
         mode if s_isreg(mode) => file.write(buffer, offset),
-        mode if s_isblk(mode) => {
-            let devid = file.devid()?;
-
-            let ret = unsafe {
-                fs::block_device_write(
-                    devid,
-                    buffer.as_ptr() as *const _,
-                    offset,
-                    buffer.len(),
-                )
-            };
-
-            if ret < 0 {
-                Err(-ret as u32)
-            } else {
-                Ok(ret as usize)
-            }
-        }
+        mode if s_isblk(mode) => Err(EINVAL), // TODO
         mode if s_ischr(mode) => {
             let devid = file.devid()?;
 
@@ -163,9 +132,11 @@ pub extern "C" fn fs_read(
     n: usize,
 ) -> isize {
     let file = raw_inode_clone(file);
+
+    let bufsize = bufsize.min(n);
     let buffer = into_mut_slice(buf, &bufsize);
 
-    match do_read(file, buffer, n, offset) {
+    match do_read(file, buffer, offset) {
         Ok(n) => n as isize,
         Err(e) => -(e as isize),
     }

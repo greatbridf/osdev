@@ -29,14 +29,10 @@ template <typename ListNode>
 void list_remove(ListNode** head, ListNode* node) {
     if (node == *head) {
         assert(!node->prev);
-
         *head = node->next;
-        if (*head)
-            (*head)->prev = nullptr;
     }
     else {
         assert(node->prev);
-
         node->prev->next = node->next;
     }
 

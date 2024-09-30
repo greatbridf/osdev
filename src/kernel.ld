@@ -116,6 +116,9 @@ SECTIONS
         *(.data)
         *(.data*)
 
+        *(.got)
+        *(.got.plt)
+
         . = ALIGN(0x1000);
         DATA_END = .;
         KIMAGE_END = .;

@@ -58,7 +58,6 @@ set(KERNEL_MAIN_SOURCES src/dev/builtin-chardev.cc
                         src/kernel/vfs.cpp
                         src/kernel/vga.cpp
                         src/kernel/hw/acpi.cc
-                        src/kernel/hw/ahci.cc
                         src/kernel/hw/pci.cc
                         src/kernel/hw/serial.cc
                         src/kernel/hw/timer.cc

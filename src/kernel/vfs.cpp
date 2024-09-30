@@ -155,7 +155,6 @@ fs::fifo_file::~fifo_file() {
         ppipe->close_write();
 }
 
-static fs::blkdev_ops** blkdevs[256];
 static fs::chrdev_ops** chrdevs[256];
 
 std::pair<fs::dentry_pointer, int> fs::open(const fs_context& context,
@@ -220,20 +219,6 @@ std::pair<fs::dentry_pointer, int> fs::open(const fs_context& context,
     return {std::move(cwd), 0};
 }
 
-int fs::register_block_device(dev_t node, const fs::blkdev_ops& ops) {
-    int major = NODE_MAJOR(node);
-    int minor = NODE_MINOR(node);
-
-    if (!blkdevs[major])
-        blkdevs[major] = new blkdev_ops* [256] {};
-
-    if (blkdevs[major][minor])
-        return -EEXIST;
-
-    blkdevs[major][minor] = new blkdev_ops{ops};
-    return 0;
-}
-
 int fs::register_char_device(dev_t node, const fs::chrdev_ops& ops) {
     int major = NODE_MAJOR(node);
     int minor = NODE_MINOR(node);
@@ -266,84 +251,6 @@ struct PACKED mbr {
     mbr_part_entry parts[4];
     uint16_t magic;
 };
-
-// TODO: devtmpfs
-static int mbr_part_probe(dev_t node) {
-    mbr buf_mbr;
-
-    int ret = fs::block_device_read(node, (char*)&buf_mbr, sizeof(mbr), 0, 512);
-    if (ret < 0)
-        return -EIO;
-
-    int n = 1;
-    for (const auto& part : buf_mbr.parts) {
-        if (n >= 16)
-            break;
-
-        if (!part.type)
-            continue;
-
-        std::size_t part_offset = part.lba_start * 512;
-
-        // TODO: add partition offset limit
-        fs::register_block_device(
-            node + n,
-            {[=](char* buf, size_t buf_size, size_t offset,
-                 size_t n) -> ssize_t {
-                 offset += part_offset;
-                 return fs::block_device_read(node, buf, buf_size, offset, n);
-             },
-             [=](const char* buf, size_t offset, size_t n) -> ssize_t {
-                 offset += part_offset;
-                 return fs::block_device_write(node, buf, offset, n);
-             }});
-
-        ++n;
-    }
-
-    return 0;
-}
-
-void fs::partprobe() {
-    for (int i = 0; i < 256; i += 16) {
-        int ret = mbr_part_probe(make_device(8, i));
-
-        if (ret != 0)
-            continue;
-
-        kmsgf("[info] found disk drive sd%c\n", 'a' + (i / 16));
-    }
-}
-
-ssize_t fs::block_device_read(dev_t node, char* buf, size_t buf_size,
-                              size_t offset, size_t n) {
-    int major = NODE_MAJOR(node);
-    int minor = NODE_MINOR(node);
-
-    if (!blkdevs[major] || !blkdevs[major][minor])
-        return -EINVAL;
-
-    auto& read = blkdevs[major][minor]->read;
-    if (!read)
-        return -EINVAL;
-
-    return read(buf, buf_size, offset, n);
-}
-
-ssize_t fs::block_device_write(dev_t node, const char* buf, size_t offset,
-                               size_t n) {
-    int major = NODE_MAJOR(node);
-    int minor = NODE_MINOR(node);
-
-    if (!blkdevs[major] || !blkdevs[major][minor])
-        return -EINVAL;
-
-    auto& write = blkdevs[major][minor]->write;
-    if (!write)
-        return -EINVAL;
-
-    return write(buf, offset, n);
-}
 
 ssize_t fs::char_device_read(dev_t node, char* buf, size_t buf_size, size_t n) {
     int major = NODE_MAJOR(node);

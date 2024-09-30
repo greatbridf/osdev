@@ -102,12 +102,7 @@ impl Inode for ProcFsNode {
         }
     }
 
-    fn read(
-        &self,
-        buffer: &mut [u8],
-        count: usize,
-        offset: usize,
-    ) -> KResult<usize> {
+    fn read(&self, buffer: &mut [u8], offset: usize) -> KResult<usize> {
         match self.data {
             ProcFsData::File(ref file) => {
                 if !file.can_read() {
@@ -123,7 +118,7 @@ impl Inode for ProcFsNode {
                     Some((data, _)) => data,
                 };
 
-                Ok(copy_offset_count(data, buffer, offset, count))
+                Ok(copy_offset_count(data, buffer, offset, buffer.len()))
             }
             _ => Err(EISDIR),
         }

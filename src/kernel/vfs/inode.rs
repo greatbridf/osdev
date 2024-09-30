@@ -170,12 +170,7 @@ pub trait Inode {
         Err(EINVAL)
     }
 
-    fn read(
-        &self,
-        buffer: &mut [u8],
-        count: usize,
-        offset: usize,
-    ) -> KResult<usize> {
+    fn read(&self, buffer: &mut [u8], offset: usize) -> KResult<usize> {
         Err(EINVAL)
     }
 

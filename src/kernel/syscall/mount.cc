@@ -18,5 +18,5 @@ int kernel::syscall::do_mount(const char __user* source,
     if (!mountpoint || status)
         return status;
 
-    return fs_mount(mountpoint.get(), source, target, fstype, flags, _fsdata);
+    return fs::fs_mount(mountpoint.get(), source, target, fstype, flags, _fsdata);
 }

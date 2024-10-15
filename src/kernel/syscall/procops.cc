@@ -13,6 +13,7 @@
 #include <kernel/signal.hpp>
 #include <kernel/syscall.hpp>
 #include <kernel/utsname.hpp>
+#include <kernel/vfs.hpp>
 #include <kernel/vfs/dentry.hpp>
 
 using namespace kernel::syscall;
@@ -33,7 +34,7 @@ int kernel::syscall::do_chdir(const char __user* path) {
     if (!dir || ret)
         return ret;
 
-    if (!(dir->flags & fs::D_DIRECTORY))
+    if (!fs::r_dentry_is_directory(dir.get()))
         return -ENOTDIR;
 
     current_process->cwd = std::move(dir);
@@ -43,24 +44,18 @@ int kernel::syscall::do_chdir(const char __user* path) {
 execve_retval kernel::syscall::do_execve(const std::string& exec,
                                          const std::vector<std::string>& args,
                                          const std::vector<std::string>& envs) {
+    auto [dent, ret] = current_open(exec);
+
+    if (ret)
+        return {0, 0, ret};
+
     types::elf::elf32_load_data d{
-        .exec_dent{},
+        .exec_dent{std::move(dent)},
         .argv{args},
         .envp{envs},
         .ip{},
         .sp{},
     };
-
-    fs::dentry_pointer dent;
-    if (1) {
-        int ret;
-        std::tie(dent, ret) = current_open(exec);
-
-        if (!dent || ret)
-            return {0, 0, ret};
-
-        d.exec_dent = dent.get();
-    }
 
     current_process->files.onexec();
 
@@ -68,7 +63,6 @@ execve_retval kernel::syscall::do_execve(const std::string& exec,
 
     // TODO: set cs and ss to compatibility mode
     if (int ret = types::elf::elf32_load(d); ret != 0) {
-        dent.reset();
         async::preempt_enable();
 
         if (ret == types::elf::ELF_LOAD_FAIL_NORETURN)
@@ -142,16 +136,9 @@ int kernel::syscall::do_waitpid(pid_t waitpid, int __user* arg1, int options) {
 }
 
 int kernel::syscall::do_getcwd(char __user* buf, size_t buf_size) {
-    auto path = fs::d_path(current_process->cwd.get(),
-                           current_process->fs_context.root.get());
-
-    int len = std::min(buf_size - 1, path.size());
-
     // TODO: use copy_to_user
-    strncpy(buf, path.c_str(), len);
-    buf[len] = 0;
-
-    return len;
+    return fs::d_path(current_process->cwd.get(),
+                      current_process->fs_context.root.get(), buf, buf_size);
 }
 
 pid_t kernel::syscall::do_setsid() {

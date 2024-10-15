@@ -64,7 +64,6 @@ set(KERNEL_MAIN_SOURCES src/dev/builtin-chardev.cc
                         src/kernel/task/thread.cc
                         src/kernel/task/readyqueue.cc
                         src/kernel/user/thread_local.cc
-                        src/kernel/vfs/dentry.cc
                         src/kernel/vfs/filearr.cc
                         src/kernel/signal.cpp
                         src/net/ethernet.cc
@@ -108,7 +107,6 @@ set(KERNEL_MAIN_SOURCES src/dev/builtin-chardev.cc
                         include/types/bitmap.hpp
                         include/types/buffer.hpp
                         include/types/elf.hpp
-                        include/types/hash.hpp
                         include/types/list.hpp
                         include/types/types.h
                         include/types/allocator.hpp

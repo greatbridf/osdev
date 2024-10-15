@@ -76,18 +76,22 @@ int kernel::syscall::do_open(const char __user* path, int flags, mode_t mode) {
     mode &= ~current_process->umask;
 
     // TODO: use copy_from_user
-    return current_process->files.open(current_process->cwd.get(), path, flags,
+    return current_process->files.open(current_process->cwd, path, flags,
                                        mode);
 }
 
 int kernel::syscall::do_symlink(const char __user* target,
                                 const char __user* linkpath) {
     // TODO: use copy_from_user
-    auto [dent, status] = current_open(linkpath);
-    if (!dent || status != -ENOENT)
+    auto [dent, status] = current_open(linkpath, false);
+    if (!dent)
         return status;
 
-    return fs_symlink(dent.get(), target);
+    if (status == 0)
+        return -EEXIST;
+
+    assert(status == -ENOENT);
+    return fs::fs_symlink(dent.get(), target);
 }
 
 int kernel::syscall::do_readlink(const char __user* pathname, char __user* buf,
@@ -98,11 +102,11 @@ int kernel::syscall::do_readlink(const char __user* pathname, char __user* buf,
     if (!dent || status)
         return status;
 
-    if (buf_size <= 0)
+    if (buf_size & (1ull << 63))
         return -EINVAL;
 
     // TODO: use copy_to_user
-    return fs_readlink(&dent->inode, buf, buf_size);
+    return fs_readlink(fs::r_dentry_get_inode(dent.get()), buf, buf_size);
 }
 
 int kernel::syscall::do_ioctl(int fd, unsigned long request, uintptr_t arg3) {
@@ -382,7 +386,7 @@ int kernel::syscall::do_statx(int dirfd, const char __user* path, int flags,
         return status;
 
     // TODO: copy to user
-    return fs_statx(&dent->inode, statxbuf, mask);
+    return fs_statx(fs::r_dentry_get_inode(dent.get()), statxbuf, mask);
 }
 
 int kernel::syscall::do_fcntl(int fd, int cmd, unsigned long arg) {
@@ -408,10 +412,14 @@ int kernel::syscall::do_mkdir(const char __user* pathname, mode_t mode) {
 
     // TODO: use copy_from_user
     auto [dent, status] = current_open(pathname);
-    if (!dent || status != -ENOENT)
+    if (!dent)
         return status;
 
-    return fs_mkdir(dent.get(), mode);
+    if (status == 0)
+        return -EEXIST;
+
+    assert(status == -ENOENT);
+    return fs::fs_mkdir(dent.get(), mode);
 }
 
 int kernel::syscall::do_truncate(const char __user* pathname, long length) {
@@ -419,7 +427,7 @@ int kernel::syscall::do_truncate(const char __user* pathname, long length) {
     if (!dent || status)
         return status;
 
-    return fs_truncate(&dent->inode, length);
+    return fs_truncate(fs::r_dentry_get_inode(dent.get()), length);
 }
 
 int kernel::syscall::do_unlink(const char __user* pathname) {
@@ -428,7 +436,7 @@ int kernel::syscall::do_unlink(const char __user* pathname) {
     if (!dent || status)
         return status;
 
-    return fs_unlink(dent.get());
+    return fs::fs_unlink(dent.get());
 }
 
 int kernel::syscall::do_access(const char __user* pathname, int mode) {
@@ -453,10 +461,14 @@ int kernel::syscall::do_mknod(const char __user* pathname, mode_t mode,
                               dev_t dev) {
     mode &= S_IFMT | (~current_process->umask & 0777);
     auto [dent, status] = current_open(pathname);
-    if (!dent || status != -ENOENT)
+    if (!dent)
         return status;
 
-    return fs_mknod(dent.get(), mode, dev);
+    if (status == 0)
+        return -EEXIST;
+
+    assert(status == -ENOENT);
+    return fs::fs_mknod(dent.get(), mode, dev);
 }
 
 int kernel::syscall::do_poll(pollfd __user* fds, nfds_t nfds, int timeout) {

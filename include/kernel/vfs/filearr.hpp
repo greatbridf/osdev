@@ -37,9 +37,9 @@ class filearray {
     int set_flags(int fd, int flags);
 
     int pipe(int (&pipefd)[2]);
-    int open(dentry* cwd, types::path_iterator filepath, int flags,
+    int open(const dentry_pointer& cwd, types::string_view filepath, int flags,
              mode_t mode);
-    int open(types::path_iterator filepath, int flags, mode_t mode);
+    int open(types::string_view filepath, int flags, mode_t mode);
 
     int close(int fd);
 

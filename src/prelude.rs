@@ -10,6 +10,7 @@ macro_rules! dont_check {
     };
 }
 
+use alloc::sync::Arc;
 #[allow(unused_imports)]
 pub(crate) use dont_check;
 
@@ -24,6 +25,7 @@ pub(crate) use alloc::{boxed::Box, string::String, vec, vec::Vec};
 
 #[allow(unused_imports)]
 pub(crate) use core::{any::Any, fmt::Write, marker::PhantomData, str};
+use core::{mem::ManuallyDrop, ops::Deref};
 
 pub struct Yield;
 
@@ -106,6 +108,20 @@ impl<'a, T: ?Sized> core::ops::DerefMut for MutexNoPreemptionGuard<'a, T> {
     }
 }
 
+impl<'a, T: ?Sized> AsRef<T> for MutexNoPreemptionGuard<'a, T> {
+    #[inline(always)]
+    fn as_ref(&self) -> &T {
+        &*self.data_guard
+    }
+}
+
+impl<'a, T: ?Sized> AsMut<T> for MutexNoPreemptionGuard<'a, T> {
+    #[inline(always)]
+    fn as_mut(&mut self) -> &mut T {
+        &mut *self.data_guard
+    }
+}
+
 #[repr(transparent)]
 pub struct MutexNoPreemption<T: ?Sized> {
     lock: spin::mutex::Mutex<T, spin::Spin>,
@@ -153,4 +169,42 @@ impl<T: ?Sized> MutexNoPreemption<T> {
 
 #[allow(dead_code)]
 pub type RwLock<T> = spin::rwlock::RwLock<T, Yield>;
+pub type RwLockReadGuard<'a, T> = spin::rwlock::RwLockReadGuard<'a, T>;
 pub type Mutex<T> = MutexNoPreemption<T>;
+
+pub struct BorrowedArc<'lt, T: ?Sized> {
+    arc: ManuallyDrop<Arc<T>>,
+    _phantom: PhantomData<&'lt ()>,
+}
+
+impl<'lt, T: ?Sized> BorrowedArc<'lt, T> {
+    pub fn from_raw(ptr: *const T) -> Self {
+        assert!(!ptr.is_null());
+        Self {
+            arc: ManuallyDrop::new(unsafe { Arc::from_raw(ptr) }),
+            _phantom: PhantomData,
+        }
+    }
+
+    pub fn new(ptr: &'lt *const T) -> Self {
+        assert!(!ptr.is_null());
+        Self {
+            arc: ManuallyDrop::new(unsafe { Arc::from_raw(*ptr) }),
+            _phantom: PhantomData,
+        }
+    }
+}
+
+impl<'lt, T: ?Sized> Deref for BorrowedArc<'lt, T> {
+    type Target = Arc<T>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.arc
+    }
+}
+
+impl<'lt, T: ?Sized> AsRef<Arc<T>> for BorrowedArc<'lt, T> {
+    fn as_ref(&self) -> &Arc<T> {
+        &self.arc
+    }
+}

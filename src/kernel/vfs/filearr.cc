@@ -2,6 +2,8 @@
 
 #include <assert.h>
 
+#include <types/path.hpp>
+
 #include <kernel/async/lock.hpp>
 #include <kernel/vfs.hpp>
 #include <kernel/vfs/dentry.hpp>
@@ -164,13 +166,13 @@ int filearray::close(int fd) {
 }
 
 static inline std::pair<dentry_pointer, int> _open_file(
-    const fs_context& context, dentry* cwd, types::path_iterator filepath,
-    int flags, mode_t mode) {
+    const fs_context& context, const dentry_pointer& cwd,
+    types::string_view filepath, int flags, mode_t mode) {
     auto [dent, ret] = fs::open(context, cwd, filepath);
     if (!dent)
         return {nullptr, ret};
 
-    if (dent->flags & D_PRESENT) {
+    if (!(r_dentry_is_invalid(dent.get()))) {
         if ((flags & O_CREAT) && (flags & O_EXCL))
             return {nullptr, -EEXIST};
         return {std::move(dent), 0};
@@ -187,8 +189,8 @@ static inline std::pair<dentry_pointer, int> _open_file(
 }
 
 // TODO: file opening permissions check
-int filearray::open(dentry* cwd, types::path_iterator filepath, int flags,
-                    mode_t mode) {
+int filearray::open(const dentry_pointer& cwd, types::string_view filepath,
+                    int flags, mode_t mode) {
     lock_guard lck{pimpl->mtx};
 
     auto [dent, ret] = _open_file(*pimpl->context, cwd, filepath, flags, mode);
@@ -197,7 +199,8 @@ int filearray::open(dentry* cwd, types::path_iterator filepath, int flags,
     if (ret != 0)
         return ret;
 
-    auto filemode = r_get_inode_mode(&dent->inode);
+    auto inode = r_dentry_get_inode(dent.get());
+    auto filemode = r_get_inode_mode(inode);
 
     int fdflag = (flags & O_CLOEXEC) ? FD_CLOEXEC : 0;
 
@@ -218,14 +221,14 @@ int filearray::open(dentry* cwd, types::path_iterator filepath, int flags,
     // truncate file
     if (flags & O_TRUNC) {
         if (fflags.write && S_ISREG(filemode)) {
-            auto ret = fs_truncate(&dent->inode, 0);
+            auto ret = fs_truncate(inode, 0);
             if (ret != 0)
                 return ret;
         }
     }
 
     return pimpl->place_new_file(
-        std::make_shared<regular_file>(fflags, 0, &dent->inode), fdflag);
+        std::make_shared<regular_file>(fflags, 0, inode), fdflag);
 }
 
 int filearray::pipe(int (&pipefd)[2]) {

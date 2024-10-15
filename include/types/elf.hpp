@@ -1,11 +1,13 @@
 #pragma once
 
-#include <errno.h>
+#include <vector>
+
 #include <stdint.h>
 
 #include <kernel/interrupt.hpp>
 #include <kernel/process.hpp>
 #include <kernel/vfs.hpp>
+#include <kernel/vfs/dentry.hpp>
 
 namespace types::elf {
 
@@ -146,7 +148,7 @@ struct PACKED elf32_section_header_entry {
 };
 
 struct elf32_load_data {
-    const fs::dentry* exec_dent;
+    fs::dentry_pointer exec_dent;
     const std::vector<std::string>& argv;
     const std::vector<std::string>& envp;
     uintptr_t ip;
@@ -281,7 +283,7 @@ struct PACKED elf64_section_header_entry {
 };
 
 struct elf64_load_data {
-    const fs::dentry* exec_dent;
+    fs::dentry_pointer exec_dent;
     std::vector<std::string> argv;
     std::vector<std::string> envp;
     unsigned long ip;

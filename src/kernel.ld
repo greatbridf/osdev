@@ -145,7 +145,7 @@ SECTIONS
         AT(LOADADDR(.sentry) + SIZEOF(.sentry))
     {
         __eh_frame_start = .;
-        *(.eh_frame*)
+        KEEP(*(.eh_frame*))
         . = ALIGN(0x1000);
         __eh_frame_end = .;
     } > KIMAGE
@@ -171,7 +171,7 @@ SECTIONS
     .debug_aranges  0 : { *(.debug_aranges) }
     .debug_pubnames 0 : { *(.debug_pubnames) }
     /* DWARF 2 */
-    .debug_info     0 : { *(.debug_info .gnu.linkonce.wi.*) }
+    .debug_info     0 : { *(.debug_info) }
     .debug_abbrev   0 : { *(.debug_abbrev) }
     .debug_line     0 : { *(.debug_line) }
     .debug_frame    0 : { *(.debug_frame) }
@@ -183,6 +183,10 @@ SECTIONS
     .debug_funcnames 0 : { *(.debug_funcnames) }
     .debug_typenames 0 : { *(.debug_typenames) }
     .debug_varnames  0 : { *(.debug_varnames) }
+
+    /* DWARF Other */
+    .debug_ranges  0 : { *(.debug_ranges) }
+    .debug_line_str 0 : { *(.debug_line_str) }
     /* Rust stuff */
 
     /DISCARD/ :

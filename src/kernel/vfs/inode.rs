@@ -1,22 +1,23 @@
-use core::any::Any;
+use core::{ops::Deref, sync::atomic::AtomicU64};
 
 use alloc::{
     collections::btree_map::{BTreeMap, Entry},
     sync::{Arc, Weak},
 };
 use bindings::{
-    statx, EEXIST, EINVAL, EIO, STATX_ATIME, STATX_BLOCKS, STATX_CTIME,
-    STATX_GID, STATX_INO, STATX_MODE, STATX_MTIME, STATX_NLINK, STATX_SIZE,
-    STATX_TYPE, STATX_UID, S_IFMT,
+    statx, EEXIST, EINVAL, EIO, EISDIR, ENOTDIR, EPERM, STATX_ATIME,
+    STATX_BLOCKS, STATX_CTIME, STATX_GID, STATX_INO, STATX_MODE, STATX_MTIME,
+    STATX_NLINK, STATX_SIZE, STATX_TYPE, STATX_UID, S_IFDIR, S_IFMT,
 };
 
 use super::{
     dentry::Dentry, s_isblk, s_ischr, vfs::Vfs, DevId, ReadDirCallback,
     TimeSpec,
 };
-use crate::prelude::*;
+use crate::{io::Buffer, prelude::*};
 
 pub type Ino = u64;
+pub type AtomicIno = AtomicU64;
 pub type ISize = u64;
 pub type Nlink = u64;
 pub type Uid = u32;
@@ -24,58 +25,174 @@ pub type Gid = u32;
 pub type Mode = u32;
 
 #[repr(C)]
+#[derive(Default)]
 pub struct InodeData {
-    pub ino: Ino,
     pub size: ISize,
     pub nlink: Nlink,
-
-    pub atime: TimeSpec,
-    pub mtime: TimeSpec,
-    pub ctime: TimeSpec,
 
     pub uid: Uid,
     pub gid: Gid,
     pub mode: Mode,
+
+    pub atime: TimeSpec,
+    pub mtime: TimeSpec,
+    pub ctime: TimeSpec,
 }
 
-impl InodeData {
-    pub fn new(ino: Ino) -> Self {
-        Self {
-            ino,
-            size: 0,
-            nlink: 0,
-            atime: TimeSpec::new(),
-            mtime: TimeSpec::new(),
-            ctime: TimeSpec::new(),
-            uid: 0,
-            gid: 0,
-            mode: 0,
-        }
+pub struct Inode {
+    pub ino: Ino,
+    pub vfs: Weak<dyn Vfs>,
+
+    pub idata: Mutex<InodeData>,
+    pub ops: Box<dyn InodeOps>,
+}
+
+impl Deref for Inode {
+    type Target = dyn InodeOps;
+
+    fn deref(&self) -> &Self::Target {
+        self.ops.as_ref()
     }
 }
 
 #[allow(unused_variables)]
-pub trait Inode {
-    fn idata(&self) -> &Mutex<InodeData>;
-    fn vfs_weak(&self) -> Weak<Mutex<dyn Vfs>>;
-    fn vfs_strong(&self) -> Option<Arc<Mutex<dyn Vfs>>>;
+pub trait InodeOps: Send + Sync {
     fn as_any(&self) -> &dyn Any;
 
-    fn readdir(
+    fn lookup(
         &self,
-        offset: usize,
-        callback: &mut ReadDirCallback,
-    ) -> KResult<usize>;
+        dir: &Inode,
+        dentry: &Arc<Dentry>,
+    ) -> KResult<Option<Arc<Inode>>> {
+        if dir.idata.lock().mode & S_IFDIR == 0 {
+            Err(ENOTDIR)
+        } else {
+            Err(EPERM)
+        }
+    }
 
-    fn statx(&self, stat: &mut statx, mask: u32) -> KResult<()> {
+    fn creat(&self, dir: &Inode, at: &Arc<Dentry>, mode: Mode) -> KResult<()> {
+        if dir.idata.lock().mode & S_IFDIR == 0 {
+            Err(ENOTDIR)
+        } else {
+            Err(EPERM)
+        }
+    }
+
+    fn mkdir(&self, dir: &Inode, at: &Arc<Dentry>, mode: Mode) -> KResult<()> {
+        if dir.idata.lock().mode & S_IFDIR == 0 {
+            Err(ENOTDIR)
+        } else {
+            Err(EPERM)
+        }
+    }
+
+    fn mknod(
+        &self,
+        dir: &Inode,
+        at: &Arc<Dentry>,
+        mode: Mode,
+        dev: DevId,
+    ) -> KResult<()> {
+        if dir.idata.lock().mode & S_IFDIR == 0 {
+            Err(ENOTDIR)
+        } else {
+            Err(EPERM)
+        }
+    }
+
+    fn unlink(&self, dir: &Inode, at: &Arc<Dentry>) -> KResult<()> {
+        if dir.idata.lock().mode & S_IFDIR == 0 {
+            Err(ENOTDIR)
+        } else {
+            Err(EPERM)
+        }
+    }
+
+    fn symlink(
+        &self,
+        dir: &Inode,
+        at: &Arc<Dentry>,
+        target: &[u8],
+    ) -> KResult<()> {
+        if dir.idata.lock().mode & S_IFDIR == 0 {
+            Err(ENOTDIR)
+        } else {
+            Err(EPERM)
+        }
+    }
+
+    fn read(
+        &self,
+        inode: &Inode,
+        buffer: &mut dyn Buffer,
+        offset: usize,
+    ) -> KResult<usize> {
+        if inode.idata.lock().mode & S_IFDIR != 0 {
+            Err(EISDIR)
+        } else {
+            Err(EINVAL)
+        }
+    }
+
+    fn write(
+        &self,
+        inode: &Inode,
+        buffer: &[u8],
+        offset: usize,
+    ) -> KResult<usize> {
+        if inode.idata.lock().mode & S_IFDIR != 0 {
+            Err(EISDIR)
+        } else {
+            Err(EINVAL)
+        }
+    }
+
+    fn devid(&self, inode: &Inode) -> KResult<DevId> {
+        if inode.idata.lock().mode & S_IFDIR != 0 {
+            Err(EISDIR)
+        } else {
+            Err(EINVAL)
+        }
+    }
+
+    fn readlink(
+        &self,
+        inode: &Inode,
+        buffer: &mut dyn Buffer,
+    ) -> KResult<usize> {
+        Err(EINVAL)
+    }
+
+    fn truncate(&self, inode: &Inode, length: usize) -> KResult<()> {
+        if inode.idata.lock().mode & S_IFDIR != 0 {
+            Err(EISDIR)
+        } else {
+            Err(EPERM)
+        }
+    }
+
+    fn readdir<'cb, 'r: 'cb>(
+        &'r self,
+        inode: &'r Inode,
+        offset: usize,
+        callback: &ReadDirCallback<'cb>,
+    ) -> KResult<usize> {
+        if inode.idata.lock().mode & S_IFDIR == 0 {
+            Err(ENOTDIR)
+        } else {
+            Err(EPERM)
+        }
+    }
+
+    fn statx(&self, inode: &Inode, stat: &mut statx, mask: u32) -> KResult<()> {
         let (fsdev, io_blksize) = {
-            let vfs = self.vfs_strong().ok_or(EIO)?;
-            let vfs = vfs.lock();
+            let vfs = inode.vfs.upgrade().ok_or(EIO)?;
             (vfs.fs_devid(), vfs.io_blksize())
         };
-        let devid = self.devid();
+        let devid = self.devid(inode);
 
-        let idata = self.idata().lock();
+        let idata = inode.idata.lock();
 
         if mask & STATX_NLINK != 0 {
             stat.stx_nlink = idata.nlink as _;
@@ -121,7 +238,7 @@ pub trait Inode {
         }
 
         if mask & STATX_INO != 0 {
-            stat.stx_ino = idata.ino as _;
+            stat.stx_ino = inode.ino as _;
             stat.stx_mask |= STATX_INO;
         }
 
@@ -149,83 +266,45 @@ pub trait Inode {
 
         Ok(())
     }
-
-    fn creat(&self, at: &mut Dentry, mode: Mode) -> KResult<()> {
-        Err(EINVAL)
-    }
-
-    fn mkdir(&self, at: &mut Dentry, mode: Mode) -> KResult<()> {
-        Err(EINVAL)
-    }
-
-    fn mknod(&self, at: &mut Dentry, mode: Mode, dev: DevId) -> KResult<()> {
-        Err(EINVAL)
-    }
-
-    fn unlink(&self, at: &mut Dentry) -> KResult<()> {
-        Err(EINVAL)
-    }
-
-    fn symlink(&self, at: &mut Dentry, target: &str) -> KResult<()> {
-        Err(EINVAL)
-    }
-
-    fn read(&self, buffer: &mut [u8], offset: usize) -> KResult<usize> {
-        Err(EINVAL)
-    }
-
-    fn write(&self, buffer: &[u8], offset: usize) -> KResult<usize> {
-        Err(EINVAL)
-    }
-
-    fn devid(&self) -> KResult<DevId> {
-        Err(EINVAL)
-    }
-
-    fn readlink(&self, buffer: &mut [u8]) -> KResult<usize> {
-        Err(EINVAL)
-    }
-
-    fn truncate(&self, length: usize) -> KResult<()> {
-        Err(EINVAL)
-    }
 }
 
-pub struct InodeCache<Fs: Vfs> {
-    cache: BTreeMap<Ino, Arc<dyn Inode>>,
-    vfs: Weak<Mutex<Fs>>,
+pub struct InodeCache<Fs: Vfs + 'static> {
+    cache: BTreeMap<Ino, Arc<Inode>>,
+    vfs: Weak<Fs>,
 }
 
 impl<Fs: Vfs> InodeCache<Fs> {
-    pub fn new() -> Self {
+    pub fn new(vfs: Weak<Fs>) -> Self {
         Self {
             cache: BTreeMap::new(),
-            vfs: Weak::new(),
+            vfs,
         }
     }
 
-    pub fn get_vfs(&self) -> Weak<Mutex<Fs>> {
+    pub fn vfs(&self) -> Weak<Fs> {
         self.vfs.clone()
     }
 
-    pub fn set_vfs(&mut self, vfs: Weak<Mutex<Fs>>) {
-        assert_eq!(self.vfs.upgrade().is_some(), false);
-
-        self.vfs = vfs;
+    pub fn alloc(&self, ino: Ino, ops: Box<dyn InodeOps>) -> Arc<Inode> {
+        Arc::new(Inode {
+            ino,
+            vfs: self.vfs.clone(),
+            idata: Mutex::new(InodeData::default()),
+            ops,
+        })
     }
 
-    pub fn submit(
-        &mut self,
-        ino: Ino,
-        inode: Arc<impl Inode + 'static>,
-    ) -> KResult<Arc<dyn Inode>> {
-        match self.cache.entry(ino) {
-            Entry::Occupied(_) => Err(EEXIST), // TODO: log error to console
-            Entry::Vacant(entry) => Ok(entry.insert(inode).clone()),
+    pub fn submit(&mut self, inode: &Arc<Inode>) -> KResult<()> {
+        match self.cache.entry(inode.ino) {
+            Entry::Occupied(_) => Err(EEXIST),
+            Entry::Vacant(entry) => {
+                entry.insert(inode.clone());
+                Ok(())
+            }
         }
     }
 
-    pub fn get(&self, ino: Ino) -> Option<Arc<dyn Inode>> {
+    pub fn get(&self, ino: Ino) -> Option<Arc<Inode>> {
         self.cache.get(&ino).cloned()
     }
 

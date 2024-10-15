@@ -101,6 +101,7 @@ static inline void fault_handler(interrupt_stack* context, mmx_registers*) {
     switch (context->int_no) {
         case 6:
         case 8: {
+            assert(false);
             if (!current_process->attr.system)
                 kill_current(SIGSEGV); // noreturn
         } break;

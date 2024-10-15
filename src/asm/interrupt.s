@@ -38,7 +38,9 @@
 
 ISR_stub:
 	.cfi_startproc
-	.cfi_def_cfa %rsp, 0x18
+	.cfi_signal_frame
+	.cfi_def_cfa_offset 0x18
+	.cfi_offset %rsp, 0x10
 
 	sub $0x78, %rsp
 	.cfi_def_cfa_offset 0x90
@@ -161,7 +163,9 @@ asm_ctx_switch:
 	.type  ISR\name @function
 	ISR\name:
 		.cfi_startproc
+		.cfi_signal_frame
 		.cfi_def_cfa_offset 0x08
+		.cfi_offset %rsp, 0x10
 
 		.cfi_same_value %rax
 		.cfi_same_value %rbx
@@ -193,7 +197,9 @@ asm_ctx_switch:
 	.type  ISR\name @function
 	ISR\name:
 		.cfi_startproc
+		.cfi_signal_frame
 		.cfi_def_cfa_offset 0x10
+		.cfi_offset %rsp, 0x10
 
 		.cfi_same_value %rax
 		.cfi_same_value %rbx

@@ -1,5 +1,4 @@
 #include <cstddef>
-#include <utility>
 
 #include <assert.h>
 #include <bits/alltypes.h>
@@ -19,7 +18,7 @@
 #include <kernel/vfs/dentry.hpp>
 
 fs::regular_file::regular_file(file_flags flags, size_t cursor,
-                               const struct rust_inode_handle* ind)
+                               struct rust_inode_handle* ind)
     : file(flags), cursor(cursor), ind(ind) {}
 
 ssize_t fs::regular_file::read(char* __user buf, size_t n) {
@@ -71,22 +70,20 @@ off_t fs::regular_file::seek(off_t n, int whence) {
 int fs::regular_file::getdents(char* __user buf, size_t cnt) {
     size_t orig_cnt = cnt;
     auto callback = readdir_callback_fn(
-        [&buf, &cnt](const char* fn, size_t fnlen,
-                     const struct rust_inode_handle*,
-                     const struct inode_data* ind, uint8_t type) {
+        [&buf, &cnt](const char* fn, size_t fnlen, ino_t ino) {
             size_t reclen = sizeof(fs::user_dirent) + 1 + fnlen;
             if (cnt < reclen)
                 return -EFAULT;
 
             auto* dirp = (fs::user_dirent*)buf;
-            dirp->d_ino = ind->ino;
+            dirp->d_ino = ino;
             dirp->d_reclen = reclen;
             // TODO: show offset
             // dirp->d_off = 0;
             // TODO: use copy_to_user
             memcpy(dirp->d_name, fn, fnlen);
             buf[reclen - 2] = 0;
-            buf[reclen - 1] = type;
+            buf[reclen - 1] = 0;
 
             buf += reclen;
             cnt -= reclen;
@@ -104,18 +101,16 @@ int fs::regular_file::getdents(char* __user buf, size_t cnt) {
 int fs::regular_file::getdents64(char* __user buf, size_t cnt) {
     size_t orig_cnt = cnt;
     auto callback = readdir_callback_fn(
-        [&buf, &cnt](const char* fn, size_t fnlen,
-                     const struct rust_inode_handle*,
-                     const struct inode_data* ind, uint8_t type) {
+        [&buf, &cnt](const char* fn, size_t fnlen, ino_t ino) {
             size_t reclen = sizeof(fs::user_dirent64) + fnlen;
             if (cnt < reclen)
                 return -EFAULT;
 
             auto* dirp = (fs::user_dirent64*)buf;
-            dirp->d_ino = ind->ino;
+            dirp->d_ino = ino;
             dirp->d_off = 114514;
             dirp->d_reclen = reclen;
-            dirp->d_type = type;
+            dirp->d_type = 0;
             // TODO: use copy_to_user
             memcpy(dirp->d_name, fn, fnlen);
             buf[reclen - 1] = 0;
@@ -157,68 +152,6 @@ fs::fifo_file::~fifo_file() {
 
 static fs::chrdev_ops** chrdevs[256];
 
-std::pair<fs::dentry_pointer, int> fs::open(const fs_context& context,
-                                            dentry* _cwd,
-                                            types::path_iterator path,
-                                            bool follow, int recurs_no) {
-    // too many recursive search layers will cause stack overflow
-    // so we use 16 for now
-    if (recurs_no >= 16)
-        return {nullptr, -ELOOP};
-
-    dentry_pointer cwd{path.is_absolute() ? d_get(context.root) : d_get(_cwd)};
-
-    for (; path; ++path) {
-        auto item = *path;
-        if (item.empty() || item == ".")
-            continue;
-
-        if (!(cwd->flags & D_PRESENT))
-            return {nullptr, -ENOENT};
-
-        if (cwd->flags & D_SYMLINK) {
-            char linkpath[256];
-            int ret = fs_readlink(&cwd->inode, linkpath, sizeof(linkpath));
-            if (ret < 0)
-                return {nullptr, ret};
-            linkpath[ret] = 0;
-
-            std::tie(cwd, ret) =
-                fs::open(context, cwd->parent, linkpath, true, recurs_no + 1);
-            if (!cwd || ret)
-                return {nullptr, ret};
-        }
-
-        if (item == ".." && cwd.get() == context.root.get())
-            continue;
-
-        if (1) {
-            int status;
-            std::tie(cwd, status) = d_find(cwd.get(), item);
-            if (!cwd)
-                return {nullptr, status};
-        }
-
-        while (cwd->flags & D_MOUNTPOINT)
-            cwd = r_get_mountpoint(cwd.get());
-    }
-
-    if (!(cwd->flags & D_PRESENT))
-        return {std::move(cwd), -ENOENT};
-
-    if (follow && cwd->flags & D_SYMLINK) {
-        char linkpath[256];
-        int ret = fs_readlink(&cwd->inode, linkpath, sizeof(linkpath));
-        if (ret < 0)
-            return {nullptr, ret};
-        linkpath[ret] = 0;
-
-        return fs::open(context, cwd->parent, linkpath, true, recurs_no + 1);
-    }
-
-    return {std::move(cwd), 0};
-}
-
 int fs::register_char_device(dev_t node, const fs::chrdev_ops& ops) {
     int major = NODE_MAJOR(node);
     int minor = NODE_MINOR(node);
@@ -232,25 +165,6 @@ int fs::register_char_device(dev_t node, const fs::chrdev_ops& ops) {
     chrdevs[major][minor] = new chrdev_ops{ops};
     return 0;
 }
-
-// MBR partition table, used by partprobe()
-
-struct PACKED mbr_part_entry {
-    uint8_t attr;
-    uint8_t chs_start[3];
-    uint8_t type;
-    uint8_t chs_end[3];
-    uint32_t lba_start;
-    uint32_t cnt;
-};
-
-struct PACKED mbr {
-    uint8_t code[440];
-    uint32_t signature;
-    uint16_t reserved;
-    mbr_part_entry parts[4];
-    uint16_t magic;
-};
 
 ssize_t fs::char_device_read(dev_t node, char* buf, size_t buf_size, size_t n) {
     int major = NODE_MAJOR(node);
@@ -375,8 +289,39 @@ int fs::pipe::read(char* buf, size_t n) {
 }
 
 extern "C" int call_callback(const fs::readdir_callback_fn* func,
-                             const char* filename, size_t fnlen,
-                             const struct fs::rust_inode_handle* inode,
-                             const struct fs::inode_data* idata, uint8_t type) {
-    return (*func)(filename, fnlen, inode, idata, type);
+                             const char* filename, size_t fnlen, ino_t ino) {
+    return (*func)(filename, fnlen, ino);
+}
+
+extern "C" struct dentry* dentry_open(struct dentry* context_root,
+                                      struct dentry* cwd, const char* path,
+                                      size_t path_length, bool follow);
+
+std::pair<fs::dentry_pointer, int> fs::open(const fs::fs_context& context,
+                                            const fs::dentry_pointer& cwd,
+                                            types::string_view path,
+                                            bool follow_symlinks) {
+    auto result = dentry_open(context.root.get(), cwd.get(), path.data(),
+                              path.size(), follow_symlinks);
+    auto result_int = reinterpret_cast<intptr_t>(result);
+
+    if (result_int > -128)
+        return {nullptr, result_int};
+
+    if (fs::r_dentry_is_invalid(result))
+        return {result, -ENOENT};
+
+    return {result, 0};
+}
+
+extern "C" void r_dput(struct dentry* dentry);
+extern "C" struct dentry* r_dget(struct dentry* dentry);
+
+void fs::dentry_deleter::operator()(struct dentry* dentry) const {
+    if (dentry)
+        r_dput(dentry);
+}
+
+fs::dentry_pointer fs::d_get(const dentry_pointer& dp) {
+    return dentry_pointer{r_dget(dp.get())};
 }

@@ -2,7 +2,6 @@
 
 #include <cstddef>
 #include <string>
-#include <vector>
 
 namespace types {
 
@@ -61,47 +60,6 @@ class string_view {
                 return false;
         }
         return m_len < val.m_len;
-    }
-};
-
-class path_iterator {
-   private:
-    string_view m_all;
-    unsigned m_curlen = 0;
-    int m_is_absolute;
-
-   public:
-    constexpr path_iterator() = default;
-    constexpr path_iterator(string_view str) : m_all{str} {
-        m_is_absolute = !m_all.empty() && m_all[0] == '/';
-        this->operator++();
-    }
-
-    constexpr path_iterator(const std::string& str)
-        : path_iterator{string_view{str}} {}
-    inline path_iterator(const char* str) : path_iterator{string_view{str}} {}
-
-    constexpr operator bool() const { return !m_all.empty(); }
-    constexpr bool is_absolute() const { return m_is_absolute; }
-
-    constexpr string_view operator*() const {
-        return string_view{m_all.data(), m_curlen};
-    }
-
-    constexpr path_iterator& operator++() {
-        std::size_t start = m_curlen;
-        while (start < m_all.size() && m_all[start] == '/')
-            ++start;
-
-        m_all = string_view{m_all.data() + start, m_all.size() - start};
-        if (m_all.empty())
-            return *this;
-
-        m_curlen = 0;
-        while (m_curlen < m_all.size() && m_all[m_curlen] != '/')
-            ++m_curlen;
-
-        return *this;
     }
 };
 

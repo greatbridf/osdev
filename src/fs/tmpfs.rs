@@ -1,244 +1,115 @@
+use core::sync::atomic::Ordering;
+
 use crate::{
-    io::copy_offset_count,
+    io::Buffer,
     kernel::vfs::{
         dentry::Dentry,
-        inode::{Ino, Inode, InodeCache, InodeData, Mode},
+        inode::{AtomicIno, Ino, Inode, InodeCache, InodeOps, Mode},
         mount::{register_filesystem, Mount, MountCreator, MS_RDONLY},
         s_isblk, s_ischr,
         vfs::Vfs,
-        DevId, ReadDirCallback, TimeSpec,
+        DevId, ReadDirCallback,
     },
     prelude::*,
 };
 
-use alloc::sync::{Arc, Weak};
+use alloc::sync::Arc;
 
 use bindings::{
-    fs::{D_DIRECTORY, D_LOADED, D_PRESENT, D_SYMLINK},
-    EINVAL, EIO, EISDIR, ENODEV, ENOTDIR, EROFS, S_IFBLK, S_IFCHR, S_IFDIR,
-    S_IFLNK, S_IFREG,
+    EINVAL, EIO, EISDIR, EROFS, S_IFBLK, S_IFCHR, S_IFDIR, S_IFLNK, S_IFREG,
 };
 
-type TmpFsFile = Vec<u8>;
-type TmpFsDirectory = Vec<(Ino, String)>;
-
-enum TmpFsData {
-    File(TmpFsFile),
-    Device(DevId),
-    Directory(TmpFsDirectory),
-    Symlink(String),
+struct FileOps {
+    data: Mutex<Vec<u8>>,
 }
 
-struct TmpFsInode {
-    idata: Mutex<InodeData>,
-    fsdata: Mutex<TmpFsData>,
-    vfs: Weak<Mutex<TmpFs>>,
+struct NodeOps {
+    devid: DevId,
 }
 
-impl TmpFsInode {
-    pub fn new(
-        idata: InodeData,
-        fsdata: TmpFsData,
-        vfs: Weak<Mutex<TmpFs>>,
-    ) -> Arc<Self> {
-        Arc::new(Self {
-            idata: Mutex::new(idata),
-            fsdata: Mutex::new(fsdata),
-            vfs,
-        })
-    }
-
-    fn vfs(&self) -> KResult<Arc<Mutex<TmpFs>>> {
-        self.vfs.upgrade().ok_or(EIO)
-    }
-
-    /// Link a child inode to the parent inode
-    ///
-    /// # Safety
-    /// If parent is not a directory, this function will panic
-    ///
-    fn link_unchecked(
-        parent_fsdata: &mut TmpFsData,
-        parent_idata: &mut InodeData,
-        name: &str,
-        child_idata: &mut InodeData,
-    ) {
-        match parent_fsdata {
-            TmpFsData::Directory(dir) => {
-                dir.push((child_idata.ino, String::from(name)));
-
-                parent_idata.size += size_of::<TmpFsData>() as u64;
-                child_idata.nlink += 1;
-            }
-
-            _ => panic!("Parent is not a directory"),
-        }
-    }
-
-    /// Link a inode to itself
-    ///
-    /// # Safety
-    /// If the inode is not a directory, this function will panic
-    ///
-    fn self_link_unchecked(
-        fsdata: &mut TmpFsData,
-        idata: &mut InodeData,
-        name: &str,
-    ) {
-        match fsdata {
-            TmpFsData::Directory(dir) => {
-                dir.push((idata.ino, String::from(name)));
-
-                idata.size += size_of::<TmpFsData>() as u64;
-                idata.nlink += 1;
-            }
-
-            _ => panic!("parent is not a directory"),
-        }
+impl NodeOps {
+    fn new(devid: DevId) -> Self {
+        Self { devid }
     }
 }
 
-impl Inode for TmpFsInode {
-    fn idata(&self) -> &Mutex<InodeData> {
-        &self.idata
-    }
-
+impl InodeOps for NodeOps {
     fn as_any(&self) -> &dyn Any {
         self
     }
 
-    fn readdir(
+    fn devid(&self, _: &Inode) -> KResult<DevId> {
+        Ok(self.devid)
+    }
+}
+
+struct DirectoryOps {
+    entries: Mutex<Vec<(Arc<[u8]>, Ino)>>,
+}
+
+impl DirectoryOps {
+    fn new() -> Self {
+        Self {
+            entries: Mutex::new(vec![]),
+        }
+    }
+
+    /// Locks the `inode.idata`
+    fn link(&self, dir: &Inode, file: &Inode, name: Arc<[u8]>) -> KResult<()> {
+        dir.idata.lock().size += 1;
+        self.entries.lock().push((name, file.ino));
+
+        file.idata.lock().nlink += 1;
+
+        Ok(())
+    }
+}
+
+impl InodeOps for DirectoryOps {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn readdir<'cb, 'r: 'cb>(
         &self,
+        _: &Inode,
         offset: usize,
-        callback: &mut ReadDirCallback,
+        callback: &ReadDirCallback<'cb>,
     ) -> KResult<usize> {
-        let _vfs = self.vfs.upgrade().ok_or(EIO)?;
-        let vfs = _vfs.lock();
-
-        match *self.fsdata.lock() {
-            TmpFsData::Directory(ref dir) => {
-                let icache = vfs.icache.lock();
-
-                let mut nread = 0;
-
-                for (ino, filename) in dir.iter().skip(offset) {
-                    let inode = icache.get(*ino).unwrap();
-
-                    let ret =
-                        callback(filename, &inode, &inode.idata().lock(), 0)?;
-                    if ret != 0 {
-                        break;
-                    }
-
-                    nread += 1;
-                }
-
-                Ok(nread)
-            }
-
-            _ => Err(ENOTDIR),
-        }
+        Ok(self
+            .entries
+            .lock()
+            .iter()
+            .skip(offset)
+            .take_while(|(name, ino)| callback(name, *ino).is_ok())
+            .count())
     }
 
-    fn read(&self, buffer: &mut [u8], offset: usize) -> KResult<usize> {
-        self.vfs()?;
+    fn creat(&self, dir: &Inode, at: &Arc<Dentry>, mode: Mode) -> KResult<()> {
+        let vfs = dir.vfs.upgrade().ok_or(EIO)?;
+        let vfs = vfs.as_any().downcast_ref::<TmpFs>().unwrap();
 
-        match *self.fsdata.lock() {
-            TmpFsData::File(ref file) => Ok(copy_offset_count(
-                file,
-                buffer,
-                offset as usize,
-                buffer.len(),
-            )),
-
-            _ => Err(EINVAL),
-        }
-    }
-
-    fn write(&self, buffer: &[u8], offset: usize) -> KResult<usize> {
-        if self.vfs()?.lock().readonly {
-            return Err(EROFS);
-        }
-
-        match *self.fsdata.lock() {
-            TmpFsData::File(ref mut file) => {
-                if file.len() < offset + buffer.len() {
-                    file.resize(offset + buffer.len(), 0);
-                }
-
-                file[offset..offset + buffer.len()].copy_from_slice(&buffer);
-
-                self.idata.lock().size = file.len() as u64;
-
-                Ok(buffer.len())
-            }
-
-            _ => Err(EINVAL),
-        }
-    }
-
-    fn creat(&self, at: &mut Dentry, mode: Mode) -> KResult<()> {
-        let _vfs = self.vfs()?;
-        let mut vfs = _vfs.lock();
         if vfs.readonly {
             return Err(EROFS);
         }
 
-        {
-            let self_fsdata = self.fsdata.lock();
-            match *self_fsdata {
-                TmpFsData::Directory(_) => {}
-                _ => return Err(ENOTDIR),
-            }
-        }
-
         let ino = vfs.assign_ino();
+        let file = vfs.icache.lock().alloc_file(ino, mode)?;
 
-        let file = {
-            let mut locked_icache = vfs.icache.lock();
-            let file = TmpFsInode::new(
-                InodeData {
-                    ino,
-                    nlink: 0,
-                    size: 0,
-                    mode: S_IFREG | (mode & 0o777),
-                    atime: TimeSpec::new(),
-                    mtime: TimeSpec::new(),
-                    ctime: TimeSpec::new(),
-                    uid: 0,
-                    gid: 0,
-                },
-                TmpFsData::File(vec![]),
-                locked_icache.get_vfs(),
-            );
-
-            locked_icache.submit(ino, file.clone())?;
-
-            file
-        };
-
-        {
-            let mut self_fsdata = self.fsdata.lock();
-            let mut self_idata = self.idata.lock();
-            let mut child_idata = file.idata.lock();
-
-            TmpFsInode::link_unchecked(
-                &mut self_fsdata,
-                &mut self_idata,
-                at.get_name(),
-                &mut child_idata,
-            );
-        }
-
-        at.save_inode(file);
-        at.flags |= D_PRESENT;
-
-        Ok(())
+        self.link(dir, file.as_ref(), at.name().clone())?;
+        at.save_reg(file)
     }
 
-    fn mknod(&self, at: &mut Dentry, mode: Mode, dev: DevId) -> KResult<()> {
-        let _vfs = self.vfs()?;
-        let mut vfs = _vfs.lock();
+    fn mknod(
+        &self,
+        dir: &Inode,
+        at: &Arc<Dentry>,
+        mode: Mode,
+        dev: DevId,
+    ) -> KResult<()> {
+        let vfs = dir.vfs.upgrade().ok_or(EIO)?;
+        let vfs = vfs.as_any().downcast_ref::<TmpFs>().unwrap();
+
         if vfs.readonly {
             return Err(EROFS);
         }
@@ -247,351 +118,239 @@ impl Inode for TmpFsInode {
             return Err(EINVAL);
         }
 
-        {
-            let self_fsdata = self.fsdata.lock();
-
-            match *self_fsdata {
-                TmpFsData::Directory(_) => {}
-                _ => return Err(ENOTDIR),
-            }
-        }
-
         let ino = vfs.assign_ino();
+        let mut icache = vfs.icache.lock();
+        let file = icache.alloc(ino, Box::new(NodeOps::new(dev)));
+        file.idata.lock().mode = mode & (0o777 | S_IFBLK | S_IFCHR);
+        icache.submit(&file)?;
 
-        let file = {
-            let mut locked_icache = vfs.icache.lock();
-            let file = TmpFsInode::new(
-                InodeData {
-                    ino,
-                    nlink: 0,
-                    size: 0,
-                    mode: mode & (0o777 | S_IFBLK | S_IFCHR),
-                    atime: TimeSpec::new(),
-                    mtime: TimeSpec::new(),
-                    ctime: TimeSpec::new(),
-                    uid: 0,
-                    gid: 0,
-                },
-                TmpFsData::Device(dev),
-                locked_icache.get_vfs(),
-            );
-
-            locked_icache.submit(ino, file.clone())?;
-
-            file
-        };
-
-        {
-            let mut self_fsdata = self.fsdata.lock();
-            let mut self_idata = self.idata.lock();
-            let mut child_idata = file.idata.lock();
-
-            TmpFsInode::link_unchecked(
-                &mut self_fsdata,
-                &mut self_idata,
-                at.get_name(),
-                &mut child_idata,
-            );
-        }
-
-        at.save_inode(file);
-        at.flags |= D_PRESENT;
-
-        Ok(())
+        self.link(dir, file.as_ref(), at.name().clone())?;
+        at.save_reg(file)
     }
 
-    fn mkdir(&self, at: &mut Dentry, mode: Mode) -> KResult<()> {
-        let _vfs = self.vfs()?;
-        let mut vfs = _vfs.lock();
+    fn symlink(
+        &self,
+        dir: &Inode,
+        at: &Arc<Dentry>,
+        target: &[u8],
+    ) -> KResult<()> {
+        let vfs = dir.vfs.upgrade().ok_or(EIO)?;
+        let vfs = vfs.as_any().downcast_ref::<TmpFs>().unwrap();
+
         if vfs.readonly {
             return Err(EROFS);
         }
 
-        {
-            let self_fsdata = self.fsdata.lock();
-
-            match *self_fsdata {
-                TmpFsData::Directory(_) => {}
-                _ => return Err(ENOTDIR),
-            }
-        }
-
         let ino = vfs.assign_ino();
+        let mut icache = vfs.icache.lock();
 
-        let dir = {
-            let mut locked_icache = vfs.icache.lock();
-            let file = TmpFsInode::new(
-                InodeData {
-                    ino,
-                    nlink: 0,
-                    size: 0,
-                    mode: S_IFDIR | (mode & 0o777),
-                    atime: TimeSpec::new(),
-                    mtime: TimeSpec::new(),
-                    ctime: TimeSpec::new(),
-                    uid: 0,
-                    gid: 0,
-                },
-                TmpFsData::Directory(vec![]),
-                locked_icache.get_vfs(),
-            );
+        let target_len = target.len() as u64;
 
-            locked_icache.submit(ino, file.clone())?;
-
-            file
-        };
-
+        let file =
+            icache.alloc(ino, Box::new(SymlinkOps::new(Arc::from(target))));
         {
-            let mut self_fsdata = self.fsdata.lock();
-            let mut self_idata = self.idata.lock();
-            let mut child_fsdata = dir.fsdata.lock();
-            let mut child_idata = dir.idata.lock();
-
-            TmpFsInode::link_unchecked(
-                &mut child_fsdata,
-                &mut child_idata,
-                "..",
-                &mut self_idata,
-            );
-
-            TmpFsInode::self_link_unchecked(
-                &mut child_fsdata,
-                &mut child_idata,
-                ".",
-            );
-
-            TmpFsInode::link_unchecked(
-                &mut self_fsdata,
-                &mut self_idata,
-                at.get_name(),
-                &mut child_idata,
-            );
+            let mut idata = file.idata.lock();
+            idata.mode = S_IFLNK | 0o777;
+            idata.size = target_len;
         }
+        icache.submit(&file)?;
 
-        at.save_inode(dir);
-        // TODO: try remove D_LOADED and check if it works
-        at.flags |= D_PRESENT | D_DIRECTORY | D_LOADED;
-
-        Ok(())
+        self.link(dir, file.as_ref(), at.name().clone())?;
+        at.save_symlink(file)
     }
 
-    fn symlink(&self, at: &mut Dentry, target: &str) -> KResult<()> {
-        let _vfs = self.vfs()?;
-        let mut vfs = _vfs.lock();
+    fn mkdir(&self, dir: &Inode, at: &Arc<Dentry>, mode: Mode) -> KResult<()> {
+        let vfs = dir.vfs.upgrade().ok_or(EIO)?;
+        let vfs = vfs.as_any().downcast_ref::<TmpFs>().unwrap();
+
         if vfs.readonly {
             return Err(EROFS);
         }
 
-        {
-            let self_fsdata = self.fsdata.lock();
-
-            match *self_fsdata {
-                TmpFsData::Directory(_) => {}
-                _ => return Err(ENOTDIR),
-            }
-        }
-
         let ino = vfs.assign_ino();
+        let mut icache = vfs.icache.lock();
 
-        let file = {
-            let mut locked_icache = vfs.icache.lock();
-            let file = TmpFsInode::new(
-                InodeData {
-                    ino,
-                    nlink: 0,
-                    size: target.len() as u64,
-                    mode: S_IFLNK | 0o777,
-                    atime: TimeSpec::new(),
-                    mtime: TimeSpec::new(),
-                    ctime: TimeSpec::new(),
-                    uid: 0,
-                    gid: 0,
-                },
-                TmpFsData::Symlink(String::from(target)),
-                locked_icache.get_vfs(),
-            );
+        let mut newdir_ops = DirectoryOps::new();
+        let entries = newdir_ops.entries.get_mut();
+        entries.push((Arc::from(b".".as_slice()), ino));
+        entries.push((Arc::from(b"..".as_slice()), dir.ino));
 
-            locked_icache.submit(ino, file.clone())?;
-
-            file
-        };
-
+        let newdir = icache.alloc(ino, Box::new(newdir_ops));
         {
-            let mut self_fsdata = self.fsdata.lock();
-            let mut self_idata = self.idata.lock();
-            let mut child_idata = file.idata.lock();
-
-            TmpFsInode::link_unchecked(
-                &mut self_fsdata,
-                &mut self_idata,
-                at.get_name(),
-                &mut child_idata,
-            );
+            let mut newdir_idata = newdir.idata.lock();
+            newdir_idata.mode = S_IFDIR | (mode & 0o777);
+            newdir_idata.nlink = 1;
+            newdir_idata.size = 2;
         }
 
-        at.save_inode(file);
-        at.flags |= D_PRESENT | D_SYMLINK;
+        icache.submit(&newdir)?;
+        dir.idata.lock().nlink += 1; // link from `newdir` to `dir`, (or parent)
+
+        self.link(dir, newdir.as_ref(), at.name().clone())?;
+        at.save_dir(newdir)
+    }
+
+    fn unlink(&self, dir: &Inode, at: &Arc<Dentry>) -> KResult<()> {
+        let vfs = dir.vfs.upgrade().ok_or(EIO)?;
+        let vfs = vfs.as_any().downcast_ref::<TmpFs>().unwrap();
+
+        if vfs.readonly {
+            return Err(EROFS);
+        }
+
+        let file = at.get_inode()?;
+
+        let mut file_idata = file.idata.lock();
+
+        if file_idata.mode & S_IFDIR != 0 {
+            return Err(EISDIR);
+        }
+
+        let mut self_idata = dir.idata.lock();
+        let mut entries = self.entries.lock();
+
+        let idx = entries
+            .iter()
+            .position(|(_, ino)| *ino == file.ino)
+            .expect("file not found in directory");
+
+        self_idata.size -= 1;
+        file_idata.nlink -= 1;
+        entries.remove(idx);
+
+        at.invalidate()
+    }
+}
+
+struct SymlinkOps {
+    target: Arc<[u8]>,
+}
+
+impl SymlinkOps {
+    fn new(target: Arc<[u8]>) -> Self {
+        Self { target }
+    }
+}
+
+impl InodeOps for SymlinkOps {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn readlink(&self, _: &Inode, buffer: &mut dyn Buffer) -> KResult<usize> {
+        buffer
+            .fill(self.target.as_ref())
+            .map(|result| result.allow_partial())
+    }
+}
+
+impl FileOps {
+    fn new() -> Self {
+        Self {
+            data: Mutex::new(vec![]),
+        }
+    }
+}
+
+impl InodeOps for FileOps {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn read(
+        &self,
+        _: &Inode,
+        buffer: &mut dyn Buffer,
+        offset: usize,
+    ) -> KResult<usize> {
+        let data = self.data.lock();
+        let data = data.split_at_checked(offset).ok_or(EINVAL)?.1;
+
+        buffer.fill(data).map(|result| result.allow_partial())
+    }
+
+    fn write(
+        &self,
+        inode: &Inode,
+        buffer: &[u8],
+        offset: usize,
+    ) -> KResult<usize> {
+        let mut idata = inode.idata.lock();
+        let mut data = self.data.lock();
+
+        if data.len() < offset + buffer.len() {
+            data.resize(offset + buffer.len(), 0);
+        }
+
+        data[offset..offset + buffer.len()].copy_from_slice(&buffer);
+        idata.size = data.len() as u64;
+
+        Ok(buffer.len())
+    }
+
+    fn truncate(&self, inode: &Inode, length: usize) -> KResult<()> {
+        let mut idata = inode.idata.lock();
+
+        idata.size = length as u64;
+        self.data.lock().resize(length, 0);
 
         Ok(())
-    }
-
-    fn readlink(&self, buffer: &mut [u8]) -> KResult<usize> {
-        match *self.fsdata.lock() {
-            TmpFsData::Symlink(ref target) => {
-                let len = target.len().min(buffer.len());
-
-                buffer[..len].copy_from_slice(target.as_bytes());
-
-                Ok(len)
-            }
-
-            _ => Err(EINVAL),
-        }
-    }
-
-    fn devid(&self) -> KResult<DevId> {
-        match *self.fsdata.lock() {
-            TmpFsData::Device(dev) => Ok(dev),
-            _ => Err(ENODEV),
-        }
-    }
-
-    fn truncate(&self, length: usize) -> KResult<()> {
-        if self.vfs()?.lock().readonly {
-            return Err(EROFS);
-        }
-
-        match *self.fsdata.lock() {
-            TmpFsData::File(ref mut file) => {
-                file.resize(length, 0);
-                self.idata.lock().size = length as u64;
-
-                Ok(())
-            }
-
-            _ => Err(EINVAL),
-        }
-    }
-
-    fn unlink(&self, at: &mut Dentry) -> KResult<()> {
-        if self.vfs()?.lock().readonly {
-            return Err(EROFS);
-        }
-
-        let file = at.get_inode_clone();
-        let file = file.as_any().downcast_ref::<TmpFsInode>().unwrap();
-
-        match *file.fsdata.lock() {
-            TmpFsData::Directory(_) => return Err(EISDIR),
-            _ => {}
-        }
-        let file_data = file.idata.lock();
-
-        let mut self_fsdata = self.fsdata.lock();
-
-        match *self_fsdata {
-            TmpFsData::Directory(ref mut dirs) => {
-                let idx = 'label: {
-                    for (idx, (ino, _)) in dirs.iter().enumerate() {
-                        if *ino != file_data.ino {
-                            continue;
-                        }
-                        break 'label idx;
-                    }
-                    panic!("file not found in directory");
-                };
-
-                drop(file_data);
-                {
-                    self.idata.lock().size -= size_of::<TmpFsData>() as u64;
-                    file.idata.lock().nlink -= 1;
-                }
-                dirs.remove(idx);
-
-                // TODO!!!: CHANGE THIS SINCE IT WILL CAUSE MEMORY LEAK
-                // AND WILL CREATE A RACE CONDITION
-                at.flags &= !D_PRESENT;
-                at.take_inode();
-                at.take_fs();
-
-                Ok(())
-            }
-            _ => return Err(ENOTDIR),
-        }
-    }
-
-    fn vfs_weak(&self) -> Weak<Mutex<dyn Vfs>> {
-        self.vfs.clone()
-    }
-
-    fn vfs_strong(&self) -> Option<Arc<Mutex<dyn Vfs>>> {
-        match self.vfs.upgrade() {
-            Some(vfs) => Some(vfs),
-            None => None,
-        }
     }
 }
 
 /// # Lock order
-/// vfs -> icache -> fsdata -> data
+/// `vfs` -> `icache` -> `idata` -> `*ops`.`*data`
 struct TmpFs {
     icache: Mutex<InodeCache<TmpFs>>,
-    next_ino: Ino,
+    next_ino: AtomicIno,
     readonly: bool,
 }
 
-impl TmpFs {
-    fn assign_ino(&mut self) -> Ino {
-        let ino = self.next_ino;
-        self.next_ino += 1;
+impl InodeCache<TmpFs> {
+    fn alloc_file(&mut self, ino: Ino, mode: Mode) -> KResult<Arc<Inode>> {
+        let file = self.alloc(ino, Box::new(FileOps::new()));
+        file.idata.lock().mode = S_IFREG | (mode & 0o777);
 
-        ino
+        self.submit(&file)?;
+
+        Ok(file)
+    }
+}
+
+impl TmpFs {
+    fn assign_ino(&self) -> Ino {
+        self.next_ino.fetch_add(1, Ordering::SeqCst)
     }
 
-    pub fn create(
-        readonly: bool,
-    ) -> KResult<(Arc<Mutex<TmpFs>>, Arc<TmpFsInode>)> {
-        let tmpfs = Arc::new(Mutex::new(Self {
-            icache: Mutex::new(InodeCache::new()),
-            next_ino: 1,
+    pub fn create(readonly: bool) -> KResult<(Arc<TmpFs>, Arc<Inode>)> {
+        let tmpfs = Arc::new_cyclic(|weak| Self {
+            icache: Mutex::new(InodeCache::new(weak.clone())),
+            next_ino: AtomicIno::new(1),
             readonly,
-        }));
+        });
 
-        let root_inode = {
-            let locked_tmpfs = tmpfs.lock();
-            let mut locked_icache = locked_tmpfs.icache.lock();
-            locked_icache.set_vfs(Arc::downgrade(&tmpfs));
+        let mut dir = DirectoryOps::new();
+        let entries = dir.entries.get_mut();
+        entries.push((Arc::from(b".".as_slice()), 0));
+        entries.push((Arc::from(b"..".as_slice()), 0));
 
-            let file = TmpFsInode::new(
-                InodeData {
-                    ino: 0,
-                    nlink: 0,
-                    size: 0,
-                    mode: S_IFDIR | 0o755,
-                    atime: TimeSpec::new(),
-                    mtime: TimeSpec::new(),
-                    ctime: TimeSpec::new(),
-                    uid: 0,
-                    gid: 0,
-                },
-                TmpFsData::Directory(vec![]),
-                locked_icache.get_vfs(),
-            );
+        let root_dir = {
+            let mut icache = tmpfs.icache.lock();
+            let root_dir = icache.alloc(0, Box::new(dir));
+            {
+                let mut idata = root_dir.idata.lock();
 
-            locked_icache.submit(0, file.clone())?;
+                idata.mode = S_IFDIR | 0o755;
+                idata.nlink = 2;
+                idata.size = 2;
+            }
 
-            file
+            icache.submit(&root_dir)?;
+
+            root_dir
         };
 
-        {
-            let mut fsdata = root_inode.fsdata.lock();
-            let mut idata = root_inode.idata.lock();
-
-            TmpFsInode::self_link_unchecked(&mut fsdata, &mut idata, ".");
-            TmpFsInode::self_link_unchecked(&mut fsdata, &mut idata, "..");
-        }
-
-        Ok((tmpfs, root_inode))
+        Ok((tmpfs, root_dir))
     }
 }
 
@@ -617,10 +376,11 @@ impl MountCreator for TmpFsMountCreator {
         _source: &str,
         flags: u64,
         _data: &[u8],
+        mp: &Arc<Dentry>,
     ) -> KResult<Mount> {
         let (fs, root_inode) = TmpFs::create(flags & MS_RDONLY != 0)?;
 
-        Ok(Mount::new(fs, root_inode))
+        Mount::new(mp, fs, root_inode)
     }
 }
 

@@ -82,9 +82,9 @@ struct file {
 struct regular_file : public virtual file {
     virtual ~regular_file() = default;
     std::size_t cursor{};
-    const rust_inode_handle* ind{};
+    struct rust_inode_handle* ind{};
 
-    regular_file(file_flags flags, size_t cursor, const rust_inode_handle* ind);
+    regular_file(file_flags flags, size_t cursor, rust_inode_handle* ind);
 
     virtual ssize_t read(char* __user buf, size_t n) override;
     virtual ssize_t do_write(const char* __user buf, size_t n) override;

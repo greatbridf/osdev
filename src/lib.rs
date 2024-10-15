@@ -2,6 +2,8 @@
 #![no_main]
 #![feature(c_size_t)]
 #![feature(concat_idents)]
+#![feature(arbitrary_self_types)]
+#![feature(get_mut_unchecked)]
 extern crate alloc;
 
 #[allow(warnings)]
@@ -9,10 +11,14 @@ mod bindings;
 
 mod driver;
 mod fs;
+mod hash;
 mod io;
 mod kernel;
 mod net;
+mod path;
 mod prelude;
+mod rcu;
+mod sync;
 
 use prelude::*;
 

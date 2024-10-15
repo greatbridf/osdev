@@ -2,7 +2,7 @@ use bindings::EFAULT;
 
 use crate::prelude::*;
 
-use core::{ffi::c_char, fmt::Write, mem::MaybeUninit, pin::Pin};
+use core::{ffi::c_char, fmt::Write, mem::MaybeUninit};
 
 pub enum FillResult {
     Done(usize),
@@ -18,6 +18,10 @@ impl FillResult {
         }
     }
 
+    pub fn should_stop(self) -> bool {
+        return !matches!(self, FillResult::Done(_));
+    }
+
     pub fn allow_partial(self) -> usize {
         match self {
             FillResult::Done(n) | FillResult::Partial(n) => n,
@@ -28,6 +32,7 @@ impl FillResult {
 
 pub trait Buffer {
     fn total(&self) -> usize;
+    fn wrote(&self) -> usize;
     fn fill(&mut self, data: &[u8]) -> KResult<FillResult>;
 }
 
@@ -66,6 +71,10 @@ impl<'lt, T: Copy + Sized> Buffer for UninitBuffer<'lt, T> {
         self.buffer.total()
     }
 
+    fn wrote(&self) -> usize {
+        self.buffer.wrote()
+    }
+
     fn fill(&mut self, data: &[u8]) -> KResult<FillResult> {
         self.buffer.fill(data)
     }
@@ -92,6 +101,15 @@ impl<'lt> RawBuffer<'lt> {
         Self {
             buf: buf.as_mut_ptr() as *mut u8,
             tot: core::mem::size_of::<T>() * buf.len(),
+            cur: 0,
+            _phantom: core::marker::PhantomData,
+        }
+    }
+
+    pub fn new_from_raw(buf: &'lt mut *mut u8, tot: usize) -> Self {
+        Self {
+            buf: *buf,
+            tot,
             cur: 0,
             _phantom: core::marker::PhantomData,
         }
@@ -147,6 +165,10 @@ impl Buffer for RawBuffer<'_> {
         RawBuffer::total(self)
     }
 
+    fn wrote(&self) -> usize {
+        self.count()
+    }
+
     fn fill(&mut self, data: &[u8]) -> KResult<FillResult> {
         RawBuffer::fill(self, data)
     }
@@ -164,6 +186,10 @@ impl<'lt> ByteBuffer<'lt> {
 
     pub fn available(&self) -> usize {
         self.buf.len() - self.cur
+    }
+
+    pub fn data(&self) -> &[u8] {
+        &self.buf[..self.cur]
     }
 }
 
@@ -187,6 +213,10 @@ impl Buffer for ByteBuffer<'_> {
             }
         }
     }
+
+    fn wrote(&self) -> usize {
+        self.cur
+    }
 }
 
 impl Write for RawBuffer<'_> {
@@ -205,38 +235,6 @@ pub fn get_str_from_cstr<'a>(cstr: *const c_char) -> KResult<&'a str> {
 
     let cstr = unsafe { core::ffi::CStr::from_ptr::<'a>(cstr) };
     cstr.to_str().map_err(|_| EFAULT)
-}
-
-pub fn get_cxx_std_string<'a>(
-    cxx_string: &'a bindings::std::string,
-) -> KResult<&'a str> {
-    let arr: &'a [u8] = unsafe {
-        let mut result = bindings::rust_get_cxx_string_result {
-            data: core::ptr::null(),
-            len: 0,
-        };
-
-        bindings::rust_get_cxx_string(
-            cxx_string.as_ptr() as _,
-            &raw mut result,
-        );
-
-        core::slice::from_raw_parts(result.data as *const u8, result.len)
-    };
-
-    core::str::from_utf8(arr).map_err(|_| EFAULT)
-}
-
-pub fn operator_eql_cxx_std_string(
-    lhs: &mut bindings::std::string,
-    rhs: &bindings::std::string,
-) {
-    unsafe {
-        bindings::rust_operator_eql_cxx_string(
-            rhs.as_ptr() as _,
-            lhs.as_ptr() as _,
-        )
-    };
 }
 
 /// Copy data from src to dst, starting from offset, and copy at most count bytes.

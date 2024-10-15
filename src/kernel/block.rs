@@ -217,7 +217,7 @@ impl BlockDevice {
     pub fn read_some(
         &self,
         offset: usize,
-        buffer: &mut impl Buffer,
+        buffer: &mut dyn Buffer,
     ) -> KResult<FillResult> {
         let mut sector_start = offset as u64 / 512;
         let mut first_sector_offset = offset as u64 % 512;

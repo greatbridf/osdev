@@ -1,6 +1,3 @@
-#include <memory>
-#include <utility>
-
 #include <assert.h>
 #include <bits/alltypes.h>
 #include <stdint.h>
@@ -34,11 +31,11 @@ process::process(const process& parent, pid_t pid)
     , pgid{parent.pgid}
     , sid{parent.sid}
     , control_tty{parent.control_tty} {
-    if (parent.cwd)
-        cwd = fs::d_get(parent.cwd);
+    assert(parent.cwd);
+    cwd = fs::d_get(parent.cwd);
 
-    if (parent.fs_context.root)
-        fs_context.root = fs::d_get(parent.fs_context.root);
+    assert(parent.fs_context.root);
+    fs_context.root = fs::d_get(parent.fs_context.root);
 }
 
 process::process(pid_t pid, pid_t ppid)
@@ -230,15 +227,15 @@ void NORETURN _kernel_init(kernel::mem::paging::pfn_t kernel_stack_pfn) {
     // mount fat32 /mnt directory
     // TODO: parse kernel parameters
     if (1) {
-        auto [mnt, status] = fs::open(context, context.root.get(), "/mnt");
+        auto [mnt, status] = fs::open(context, context.root, "/mnt");
         assert(mnt && status == -ENOENT);
 
-        if (int ret = fs_mkdir(mnt.get(), 0755); 1)
-            assert(ret == 0 && mnt->flags & fs::D_PRESENT);
+        if (int ret = fs::fs_mkdir(mnt.get(), 0755); 1)
+            assert(ret == 0);
 
-        int ret = fs_mount(mnt.get(), "/dev/sda", "/mnt", "fat32",
-                            MS_RDONLY | MS_NOATIME | MS_NODEV | MS_NOSUID,
-                            "ro,nodev");
+        int ret = fs::fs_mount(mnt.get(), "/dev/sda", "/mnt", "fat32",
+                               MS_RDONLY | MS_NOATIME | MS_NODEV | MS_NOSUID,
+                               "ro,nodev");
 
         assert(ret == 0);
     }
@@ -259,10 +256,9 @@ void NORETURN _kernel_init(kernel::mem::paging::pfn_t kernel_stack_pfn) {
         freeze();
     }
 
-    d.exec_dent = exec.get();
+    d.exec_dent = std::move(exec);
     if (int ret = types::elf::elf32_load(d); 1)
         assert(ret == 0);
-    exec.reset();
 
     int ds = 0x33, cs = 0x2b;
 

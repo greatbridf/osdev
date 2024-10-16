@@ -128,6 +128,45 @@ static inline page* _alloc_zone(unsigned order) {
     return nullptr;
 }
 
+constexpr uintptr_t _find_mid(uintptr_t l, uintptr_t r) {
+    if (l == r)
+        return l;
+    uintptr_t bit = 1 << _msb(l ^ r);
+
+    return (l & r & ~(bit - 1)) | bit;
+}
+
+static void _recur_create_zone(uintptr_t l, uintptr_t r) {
+    auto mid = _find_mid(l, r);
+    assert(l <= mid);
+
+    // empty zone
+    if (l == mid) {
+        assert(l == r);
+        return;
+    }
+
+    // create [l, r) directly
+    if (r == mid) {
+        auto diff = r - l;
+        int order = 0;
+        while ((1u << order) <= diff) {
+            while (!(diff & (1 << order)))
+                order++;
+            _create_zone(l << 12, order);
+
+            l += (1 << order);
+            diff &= ~(1 << order);
+        }
+
+        return;
+    }
+
+    // split into halves
+    _recur_create_zone(l, mid);
+    _recur_create_zone(mid, r);
+}
+
 void kernel::mem::paging::create_zone(uintptr_t start, uintptr_t end) {
     start += (4096 - 1);
     start >>= 12;
@@ -138,20 +177,7 @@ void kernel::mem::paging::create_zone(uintptr_t start, uintptr_t end) {
 
     lock_guard_irq lock{zone_lock};
 
-    unsigned long low = start;
-    for (unsigned i = 0; i < _msb(end); ++i, low >>= 1) {
-        if (!(low & 1))
-            continue;
-        _create_zone(low << (12 + i), i);
-        low++;
-    }
-
-    low = 1 << _msb(end);
-    while (low < end) {
-        unsigned order = _msb(end - low);
-        _create_zone(low << 12, order);
-        low |= (1 << order);
-    }
+    _recur_create_zone(start, end);
 }
 
 void kernel::mem::paging::mark_present(uintptr_t start, uintptr_t end) {

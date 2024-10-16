@@ -6,6 +6,7 @@
 
 #include <stdint.h>
 
+#include <kernel/mem/paging_asm.h>
 #include <kernel/mem/phys.hpp>
 
 namespace kernel::mem::paging {
@@ -38,21 +39,6 @@ using pfn_t = uintptr_t;
 
 // paging structure attributes
 using psattr_t = uintptr_t;
-
-constexpr psattr_t PA_P = 0x0000000000000001ULL;
-constexpr psattr_t PA_RW = 0x0000000000000002ULL;
-constexpr psattr_t PA_US = 0x0000000000000004ULL;
-constexpr psattr_t PA_PWT = 0x0000000000000008ULL;
-constexpr psattr_t PA_PCD = 0x0000000000000010ULL;
-constexpr psattr_t PA_A = 0x0000000000000020ULL;
-constexpr psattr_t PA_D = 0x0000000000000040ULL;
-constexpr psattr_t PA_PS = 0x0000000000000080ULL;
-constexpr psattr_t PA_G = 0x0000000000000100ULL;
-constexpr psattr_t PA_COW = 0x0000000000000200ULL;  // copy on write
-constexpr psattr_t PA_MMAP = 0x0000000000000400ULL; // memory mapped
-constexpr psattr_t PA_ANON = 0x0000000000000800ULL; // anonymous map
-constexpr psattr_t PA_NXE = 0x8000000000000000ULL;
-constexpr psattr_t PA_MASK = 0xfff0000000000fffULL;
 
 constexpr psattr_t PA_DATA = PA_P | PA_RW | PA_NXE;
 constexpr psattr_t PA_KERNEL_DATA = PA_DATA | PA_G;
@@ -99,11 +85,8 @@ class PSE {
     constexpr PSE parse() const noexcept { return PSE{*m_ptrbase & ~PA_MASK}; }
 };
 
-constexpr pfn_t EMPTY_PAGE_PFN = 0x7f000;
-
-constexpr uintptr_t KERNEL_PAGE_TABLE_ADDR = 0x100000;
-constexpr physaddr<void> KERNEL_PAGE_TABLE_PHYS_ADDR{KERNEL_PAGE_TABLE_ADDR};
-constexpr PSE KERNEL_PAGE_TABLE{0x100000};
+constexpr physaddr<void> KERNEL_PAGE_TABLE_PHYS_ADDR{KERNEL_PML4};
+constexpr PSE KERNEL_PAGE_TABLE{KERNEL_PML4};
 
 constexpr unsigned long PAGE_PRESENT = 0x00010000;
 constexpr unsigned long PAGE_BUDDY = 0x00020000;

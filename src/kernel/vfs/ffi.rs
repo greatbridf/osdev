@@ -293,11 +293,11 @@ pub extern "C" fn r_get_inode_mode(mut inode: *const Inode) -> mode_t {
 }
 
 #[no_mangle]
-pub extern "C" fn r_get_inode_size(mut inode: *const Inode) -> mode_t {
+pub extern "C" fn r_get_inode_size(mut inode: *const Inode) -> u64 {
     let inode = inode_from_raw(&mut inode);
     let idata = inode.idata.lock();
 
-    idata.size as _
+    idata.size
 }
 
 extern "C" {

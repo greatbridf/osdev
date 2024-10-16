@@ -96,14 +96,16 @@ static inline void setup_early_kernel_page_table() {
     auto pd = pdpt[std::get<2>(idx)].parse();
 
     // kernel bss, size 2M
-    pd[std::get<3>(idx)].set(PA_KERNEL_DATA_HUGE, 0x200000);
+    pd[std::get<3>(idx)].set(PA_KERNEL_DATA_HUGE, KERNEL_BSS_HUGE_PAGE);
 
     // clear kernel bss
     memset((void*)BSS_ADDR, 0x00, BSS_LENGTH);
 
     // clear empty page
-    memset(mem::physaddr<void>{EMPTY_PAGE_PFN}, 0x00, 0x1000);
+    memset(mem::physaddr<void>{(uintptr_t)EMPTY_PAGE_PFN}, 0x00, 0x1000);
 }
+
+extern "C" uintptr_t KIMAGE_PAGES_VALUE;
 
 SECTION(".text.kinit")
 static inline void setup_buddy(uintptr_t addr_max) {
@@ -115,16 +117,20 @@ static inline void setup_buddy(uintptr_t addr_max) {
     addr_max >>= 12;
     int count = (addr_max * sizeof(page) + 0x200000 - 1) / 0x200000;
 
-    pfn_t start_pfn = 0x400000;
+    pfn_t real_start_pfn = KERNEL_IMAGE_PADDR + KIMAGE_PAGES_VALUE * 0x1000;
+    pfn_t aligned_start_pfn = real_start_pfn + 0x200000 - 1;
+    aligned_start_pfn &= ~0x1fffff;
 
-    memset(physaddr<void>{0x105000}, 0x00, 4096);
+    pfn_t saved_start_pfn = aligned_start_pfn;
+
+    memset(physaddr<void>{KERNEL_PD_STRUCT_PAGE_ARR}, 0x00, 4096);
 
     auto pdpte = KERNEL_PAGE_TABLE[std::get<1>(idx)].parse()[std::get<2>(idx)];
-    pdpte.set(PA_KERNEL_PAGE_TABLE, 0x105000);
+    pdpte.set(PA_KERNEL_PAGE_TABLE, KERNEL_PD_STRUCT_PAGE_ARR);
 
     auto pd = pdpte.parse();
-    for (int i = 0; i < count; ++i, start_pfn += 0x200000)
-        pd[std::get<3>(idx) + i].set(PA_KERNEL_DATA_HUGE, start_pfn);
+    for (int i = 0; i < count; ++i, aligned_start_pfn += 0x200000)
+        pd[std::get<3>(idx) + i].set(PA_KERNEL_DATA_HUGE, aligned_start_pfn);
 
     PAGE_ARRAY = (page*)0xffffff8040000000ULL;
     memset(PAGE_ARRAY, 0x00, addr_max * sizeof(page));
@@ -138,11 +144,11 @@ static inline void setup_buddy(uintptr_t addr_max) {
 
         auto start = ent.base;
         auto end = start + ent.len;
-        if (end <= start_pfn)
+        if (end <= aligned_start_pfn)
             continue;
 
-        if (start < start_pfn)
-            start = start_pfn;
+        if (start < aligned_start_pfn)
+            start = aligned_start_pfn;
 
         if (start > end)
             continue;
@@ -153,7 +159,9 @@ static inline void setup_buddy(uintptr_t addr_max) {
     // free .stage1
     create_zone(0x1000, 0x2000);
     // unused space
-    create_zone(0x106000, 0x200000);
+    create_zone(0x9000, 0x80000);
+    create_zone(0x100000, 0x200000);
+    create_zone(real_start_pfn, saved_start_pfn);
 }
 
 SECTION(".text.kinit")

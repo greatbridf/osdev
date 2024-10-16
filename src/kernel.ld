@@ -16,6 +16,9 @@ SECTIONS
     {
         KEEP(*(.mbr));
 
+        . = 446;
+        BYTE(0x00);
+
         . = 510;
         BYTE(0x55);
         BYTE(0xaa);
@@ -23,11 +26,8 @@ SECTIONS
 
     .stage1 : AT(LOADADDR(.mbr) + SIZEOF(.mbr))
     {
-        __stage1_start = .;
         *(.stage1)
-
         . = ALIGN(0x1000);
-        __stage1_end = .;
     } > STAGE1
 
     .kinit :
@@ -49,6 +49,9 @@ SECTIONS
 
         KINIT_PAGES = .;
         QUAD((KINIT_END - KINIT_START) / 0x1000);
+
+        KIMAGE_PAGES_VALUE = .;
+        QUAD((KIMAGE_END - KIMAGE_START) / 0x1000);
 
         . = ALIGN(16);
         start_ctors = .;
@@ -119,14 +122,12 @@ SECTIONS
         *(.got)
         *(.got.plt)
 
-        . = ALIGN(0x1000);
+        . = ALIGN(0x1000) - 4;
+        LONG(KERNEL_MAGIC);
+
         DATA_END = .;
         KIMAGE_END = .;
     } > KIMAGE
-
-    .sentry :
-        AT(0x78000 - 0x4)
-    { LONG(0x01145140); } > KIMAGE
 
     .bss :
     {
@@ -140,14 +141,15 @@ SECTIONS
 
     KIMAGE_PAGES = (KIMAGE_END - KIMAGE_START) / 0x1000;
     BSS_PAGES = (BSS_END - BSS_START) / 0x1000;
+    KERNEL_MAGIC = 0x01145140;
+
+    KIMAGE_32K_COUNT = ((KIMAGE_END - KIMAGE_START) + 32 * 1024 - 1) / (32 * 1024);
 
     .eh_frame :
-        AT(LOADADDR(.sentry) + SIZEOF(.sentry))
+        AT(LOADADDR(.data) + SIZEOF(.data))
     {
-        __eh_frame_start = .;
         KEEP(*(.eh_frame*))
         . = ALIGN(0x1000);
-        __eh_frame_end = .;
     } > KIMAGE
 
     /* Stabs debugging sections.  */

@@ -191,12 +191,12 @@ static void release_kinit() {
     extern uintptr_t volatile KINIT_START_ADDR, KINIT_END_ADDR, KINIT_PAGES;
 
     std::size_t pages = KINIT_PAGES;
-    auto range = vaddr_range{KERNEL_PAGE_TABLE_ADDR, KINIT_START_ADDR,
-                             KINIT_END_ADDR, true};
+    auto range =
+        vaddr_range{KERNEL_PML4, KINIT_START_ADDR, KINIT_END_ADDR, true};
     for (auto pte : range)
         pte.clear();
 
-    create_zone(0x2000, 0x2000 + 0x1000 * pages);
+    create_zone(KERNEL_IMAGE_PADDR, KERNEL_IMAGE_PADDR + 0x1000 * pages);
 }
 
 extern "C" void (*const late_init_start[])();

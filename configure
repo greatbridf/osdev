@@ -1,5 +1,5 @@
 #!/bin/sh
-QEMU_EXECUTABLES="qemu-system-i386 qemu-system-x86_64"
+QEMU_EXECUTABLES="qemu-system-x86_64"
 GDB_EXECUTABLES="gdb x86_64-elf-gdb"
 
 event() {
@@ -77,18 +77,13 @@ case "$OS" in
         QEMU_ACCEL='-enable-kvm'
         ;;
     "Darwin")
-        if [ "$QEMU" = "qemu-system-x86_64" ]; then
-            echo "hvf"
-            QEMU_ACCEL='-accel hvf'
-        else
-            echo "tcg"
-            QEMU_ACCEL='-accel tcg'
-        fi
+        echo "tcg"
+        QEMU_ACCEL='-accel tcg'
         ;;
 esac
 
 event "checking util-linux fdisk"
-if [ "$CROSS_COMPILE" = "" -o "$FDISK_BIN" = "" ]; then
+if [ "$FDISK_BIN" = "" -a "$CROSS_COMPILE" = "" ]; then
     if ! which fdisk > /dev/null 2>&1; then
         echo "no"
         exit 1
@@ -97,7 +92,7 @@ if [ "$CROSS_COMPILE" = "" -o "$FDISK_BIN" = "" ]; then
 fi
 
 if ! $FDISK_BIN -v 2>&1 | grep util-linux > /dev/null 2>&1 ; then
-    echo "no"
+    echo "no, fdisk is not from util-linux"
     exit 1
 else
     echo "$FDISK_BIN"

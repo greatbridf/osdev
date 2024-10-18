@@ -7,6 +7,24 @@
 #include <unistd.h>
 #include <string.h>
 
+#define BYTES_PER_MAX_COPY_UNIT (sizeof(uint32_t) / sizeof(uint8_t))
+
+static void* _memcpy(void* _dst, const void* _src, size_t n)
+{
+    void* orig_dst = _dst;
+    uint8_t* dst = (uint8_t*)_dst;
+    const uint8_t* src = (const uint8_t*)_src;
+    for (size_t i = 0; i < n / BYTES_PER_MAX_COPY_UNIT; ++i) {
+        *(uint32_t*)dst = *(uint32_t*)src;
+        dst += BYTES_PER_MAX_COPY_UNIT;
+        src += BYTES_PER_MAX_COPY_UNIT;
+    }
+    for (size_t i = 0; i < (n % BYTES_PER_MAX_COPY_UNIT); ++i) {
+        *((char*)dst++) = *((char*)src++);
+    }
+    return orig_dst;
+}
+
 int atoi(const char* str)
 {
     int ret = 0;
@@ -155,7 +173,7 @@ void* realloc(void* ptr, size_t newsize)
     if (!newptr)
         return NULL;
     
-    memcpy(newptr, ptr, oldsize);
+    _memcpy(newptr, ptr, oldsize);
     free(ptr);
     return newptr;
 }
@@ -170,9 +188,9 @@ void free(void* ptr)
 static inline void _swap(void* a, void* b, size_t sz)
 {
     void* tmp = alloca(sz);
-    memcpy(tmp, a, sz);
-    memcpy(a, b, sz);
-    memcpy(b, tmp, sz);
+    _memcpy(tmp, a, sz);
+    _memcpy(a, b, sz);
+    _memcpy(b, tmp, sz);
 }
 
 void qsort(void* arr, size_t len, size_t sz, comparator_t cmp) {
@@ -180,7 +198,7 @@ void qsort(void* arr, size_t len, size_t sz, comparator_t cmp) {
         return;
 
     char* pivot = alloca(sz);
-    memcpy(pivot, arr + sz * (rand() % len), sz);
+    _memcpy(pivot, arr + sz * (rand() % len), sz);
 
     int i = 0, j = 0, k = len;
     while (i < k) {
@@ -252,7 +270,7 @@ int setenv(const char* name, const char* value, int overwrite)
         if (!newarr)
             return -1;
         
-        memcpy(newarr, environ, sizeof(char*) * environ_size / 2);
+        _memcpy(newarr, environ, sizeof(char*) * environ_size / 2);
         free(environ);
         environ = newarr;
     }

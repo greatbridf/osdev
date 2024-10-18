@@ -17,14 +17,20 @@ extern int* __errno_location(void);
 #define EIO 5
 #define EBADF 9
 #define ECHILD 10
+#define EAGAIN 11
 #define ENOMEM 12
 #define EACCES 13
+#define EFAULT 14
 #define EEXIST 17
+#define ENODEV 19
 #define ENOTDIR 20
 #define EISDIR 21
 #define EINVAL 22
 #define ENOTTY 25
+#define ESPIPE 29
+#define EROFS 30
 #define EPIPE 32
+#define ELOOP 40
 
 #ifdef __cplusplus
 }

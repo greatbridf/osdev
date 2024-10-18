@@ -1,60 +1,73 @@
 #pragma once
-#include <kernel/event/evtqueue.hpp>
+
+#include <string>
+
 #include <stdint.h>
 #include <sys/types.h>
+#include <termios.h>
+
 #include <types/allocator.hpp>
 #include <types/buffer.hpp>
 #include <types/cplusplus.hpp>
 
-class tty : public types::non_copyable {
-public:
-    static constexpr size_t BUFFER_SIZE = 4096;
-    static constexpr size_t NAME_SIZE = 32;
+#include <kernel/async/lock.hpp>
+#include <kernel/async/waitlist.hpp>
 
-public:
-    tty();
+namespace kernel::tty {
+
+class tty : public types::non_copyable {
+   public:
+    static constexpr size_t BUFFER_SIZE = 4096;
+
+   private:
+    void _real_commit_char(int c);
+    void _echo_char(int c);
+
+    int _do_erase(bool should_echo);
+
+   public:
+    explicit tty(std::string name);
     virtual void putchar(char c) = 0;
-    virtual void recvchar(char c) = 0;
     void print(const char* str);
-    size_t read(char* buf, size_t buf_size, size_t n);
+    ssize_t read(char* buf, size_t buf_size, size_t n);
+    ssize_t write(const char* buf, size_t n);
+
+    // characters committed to buffer will be handled
+    // by the input line discipline (N_TTY)
+    void commit_char(int c);
+
+    // print character to the output
+    // characters will be handled by the output line discipline
+    void show_char(int c);
 
     void clear_read_buf(void);
 
-    constexpr void set_pgrp(pid_t pgid)
-    {
-        fg_pgroup = pgid;
-    }
+    // TODO: formal poll support
+    int poll();
 
-    constexpr pid_t get_pgrp(void) const
-    {
-        return fg_pgroup;
-    }
+    constexpr void set_pgrp(pid_t pgid) { fg_pgroup = pgid; }
 
-    char name[NAME_SIZE];
-    bool echo = true;
+    constexpr pid_t get_pgrp(void) const { return fg_pgroup; }
 
-protected:
-    types::buffer<types::kernel_ident_allocator> buf;
-    kernel::cond_var m_cv;
+    termios termio;
+    std::string name;
+
+   protected:
+    async::mutex mtx_buf;
+    types::buffer buf;
+    async::wait_list waitlist;
 
     pid_t fg_pgroup;
 };
 
 class vga_tty : public virtual tty {
-public:
+   public:
     vga_tty();
     virtual void putchar(char c) override;
-    virtual void recvchar(char c) override;
-};
-
-class serial_tty : public virtual tty {
-public:
-    serial_tty(int id);
-    virtual void putchar(char c) override;
-    virtual void recvchar(char c) override;
-
-public:
-    uint16_t id;
 };
 
 inline tty* console;
+
+int register_tty(tty* tty_dev);
+
+} // namespace kernel::tty

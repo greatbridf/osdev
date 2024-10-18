@@ -1,0 +1,70 @@
+#ifndef __GBLIBCPP_BITS_COMPRESSED_PAIR__
+#define __GBLIBCPP_BITS_COMPRESSED_PAIR__
+
+#include <utility>
+
+namespace std::impl {
+
+struct default_construct_t { };
+
+template <typename T, int, bool is_empty = __is_empty(T)>
+struct compressed_pair_element
+{
+    constexpr compressed_pair_element() = default;
+    constexpr compressed_pair_element(const compressed_pair_element&) = default;
+    constexpr compressed_pair_element(compressed_pair_element&&) = default;
+    constexpr compressed_pair_element& operator=(const compressed_pair_element&) = default;
+    constexpr compressed_pair_element& operator=(compressed_pair_element&&) = default;
+
+    constexpr compressed_pair_element(default_construct_t): value{} { }
+    constexpr compressed_pair_element(const T& x): value{x} { }
+    constexpr compressed_pair_element(T&& x): value{std::move(x)} { }
+
+    constexpr T& get() noexcept { return value; }
+    constexpr const T& get() const noexcept { return value; }
+
+    T value;
+};
+
+template <typename T, int N>
+struct compressed_pair_element<T, N, true> : private T
+{
+    constexpr compressed_pair_element() = default;
+    constexpr compressed_pair_element(const compressed_pair_element&) = default;
+    constexpr compressed_pair_element(compressed_pair_element&&) = default;
+    constexpr compressed_pair_element& operator=(const compressed_pair_element&) = default;
+    constexpr compressed_pair_element& operator=(compressed_pair_element&&) = default;
+
+    constexpr compressed_pair_element(default_construct_t): T{} { }
+    constexpr compressed_pair_element(const T& x): T{x} { }
+    constexpr compressed_pair_element(T&& x): T{std::move(x)} { }
+
+    constexpr T& get() noexcept { return *this; }
+    constexpr const T& get() const noexcept { return *this; }
+};
+
+template <typename T1, typename T2>
+struct compressed_pair
+    : private compressed_pair_element<T1, 0>, private compressed_pair_element<T2, 1> {
+    using Base1 = compressed_pair_element<T1, 0>;
+    using Base2 = compressed_pair_element<T2, 1>;
+
+    constexpr compressed_pair() = default;
+    constexpr compressed_pair(const compressed_pair&) = default;
+    constexpr compressed_pair(compressed_pair&&) = default;
+    constexpr compressed_pair& operator=(const compressed_pair&) = default;
+    constexpr compressed_pair& operator=(compressed_pair&&) = default;
+
+    constexpr compressed_pair(default_construct_t): Base1{default_construct_t{}}, Base2{default_construct_t{}} { }
+    constexpr compressed_pair(const T1& x, const T2& y): Base1{x}, Base2{y} { }
+    constexpr compressed_pair(T1&& x, T2&& y): Base1{std::move(x)}, Base2{std::move(y)} { }
+
+    constexpr T1& first() noexcept { return Base1::get(); }
+    constexpr const T1& first() const noexcept { return Base1::get(); }
+    constexpr T2& second() noexcept { return Base2::get(); }
+    constexpr const T2& second() const noexcept { return Base2::get(); }
+};
+
+} // namespace std::impl
+
+#endif

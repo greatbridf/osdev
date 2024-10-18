@@ -1,6 +1,8 @@
 #ifndef __GBLIBCPP_BITS_RBTREE__
 #define __GBLIBCPP_BITS_RBTREE__
 
+#include "compressed_pair"
+
 #include <cstddef>
 #include <functional>
 #include <utility>
@@ -24,7 +26,7 @@ struct rbtree {
         constexpr node(T&& val)
             : parent {}, left {}, right {}
             , value { std::move(val) } , color {node_color::RED} {}
-        
+
         template <typename... Args, std::enable_if_t<
             (sizeof...(Args) > 1)
             || !(... && std::is_same_v<T, std::remove_cvref_t<Args>>)
@@ -237,9 +239,9 @@ struct rbtree {
         { p = p->prev(); return *this; }
         constexpr _iterator operator--(int)
         { _iterator ret(p); (void)this->operator--(); return ret; }
-        constexpr operator bool(void)
+        constexpr operator bool() const
         { return p; }
-        constexpr operator _iterator<true>()
+        constexpr operator _iterator<true>() const
         { return _iterator<true> { p }; }
     };
 
@@ -250,24 +252,34 @@ struct rbtree {
         std::allocator_traits<Allocator>::template rebind_alloc<node>;
     using node_alloc_traits = std::allocator_traits<node_allocator>;
 
-    node* root;
-    node_allocator alloc;
-    std::size_t _size;
-    Compare comp;
+    compressed_pair<node*, node_allocator> root_data;
+    compressed_pair<std::size_t, Compare> size_data;
 
 private:
+    constexpr node*& _root() noexcept { return root_data.first(); }
+    constexpr node* const& _root() const noexcept { return root_data.first(); }
+
+    constexpr std::size_t& _size() noexcept { return size_data.first(); }
+    constexpr const std::size_t& _size() const noexcept { return size_data.first(); }
+
+    constexpr node_allocator& _alloc() noexcept { return root_data.second(); }
+    constexpr const node_allocator& _alloc() const noexcept { return root_data.second(); }
+
+    constexpr Compare& _comp() noexcept { return size_data.second(); }
+    constexpr const Compare& _comp() const noexcept { return size_data.second(); }
+
     template <typename... Args>
     constexpr node* newnode(Args&&... key)
     {
-        node* ptr = node_alloc_traits::allocate(alloc, 1);
-        node_alloc_traits::construct(alloc, ptr, std::forward<Args>(key)...);
+        node* ptr = node_alloc_traits::allocate(_alloc(), 1);
+        node_alloc_traits::construct(_alloc(), ptr, std::forward<Args>(key)...);
         return ptr;
     }
 
     constexpr void delnode(node* nd)
     {
-        node_alloc_traits::destroy(alloc, nd);
-        node_alloc_traits::deallocate(alloc, nd, 1);
+        node_alloc_traits::destroy(_alloc(), nd);
+        node_alloc_traits::deallocate(_alloc(), nd, 1);
     }
 
     constexpr void do_insertion(node* parent,
@@ -276,7 +288,7 @@ private:
         nd->parent = parent;
         child_inserted = nd;
         this->balance(nd);
-        ++_size;
+        ++_size();
     }
 
 public:
@@ -288,11 +300,11 @@ public:
     { return const_iterator(nullptr); }
 
     constexpr iterator begin(void) noexcept
-    { return root ? iterator(root->leftmost()) : end(); }
+    { return _root() ? iterator(_root()->leftmost()) : end(); }
     constexpr const_iterator begin(void) const noexcept
-    { return root ? const_iterator(root->leftmost()) : end(); }
+    { return _root() ? const_iterator(_root()->leftmost()) : end(); }
     constexpr const_iterator cbegin(void) const noexcept
-    { return root ? const_iterator(root->leftmost()) : end(); }
+    { return _root() ? const_iterator(_root()->leftmost()) : end(); }
 
     constexpr void destroy(node* nd)
     {
@@ -303,7 +315,7 @@ public:
         delnode(nd);
     }
 
-    constexpr void destroy() { destroy(root); root = nullptr; _size = 0; }
+    constexpr void destroy() { destroy(_root()); _root() = nullptr; _size() = 0; }
 
     constexpr node* copy(node* nd)
     {
@@ -312,74 +324,75 @@ public:
 
         node* newnd = newnode(nd->value);
         newnd->color = nd->color;
-        ++_size;
+        ++_size();
 
         newnd->left = copy(nd->left);
         if (newnd->left)
-            newnd->left->parent = newnd->left;
+            newnd->left->parent = newnd;
 
         newnd->right = copy(nd->right);
         if (newnd->right)
-            newnd->right->parent = newnd->right;
+            newnd->right->parent = newnd;
 
         return newnd;
     }
 
     explicit constexpr rbtree(const Compare& comp, const node_allocator& alloc)
-        : root(), alloc(alloc), _size(), comp(comp) {}
+        : root_data{nullptr, alloc}, size_data{0, comp} { }
 
     constexpr rbtree(const rbtree& other)
-        : rbtree(other.comp, other.alloc)
+        : rbtree(other._comp(), other._alloc())
     {
-        root = copy(other.root);
-        if (root)
-            root->parent = nullptr;
+        _root() = copy(other._root());
+        if (_root())
+            _root()->parent = nullptr;
     }
 
     constexpr rbtree(const rbtree& other, const node_allocator& alloc)
-        : rbtree(other.comp, alloc)
+        : rbtree(other._comp(), alloc)
     {
-        root = copy(other.root);
-        if (root)
-            root->parent = nullptr;
+        _root() = copy(other._root());
+        if (_root())
+            _root()->parent = nullptr;
     }
-    
+
     constexpr rbtree(rbtree&& other) noexcept
-        : root(std::exchange(other.root, nullptr))
-        , alloc(std::move(other.alloc))
-        , _size(std::exchange(other._size, 0))
-        , comp(std::move(other.comp)) {}
+        : root_data{std::exchange(other._root(), nullptr), std::move(other._alloc())}
+        , size_data{std::exchange(other._size(), 0), std::move(other._comp())} { }
 
     constexpr rbtree(rbtree&& other, const node_allocator& alloc) noexcept
-        : root(std::exchange(other.root, nullptr))
-        , alloc(alloc) , _size(std::exchange(other._size, 0))
-        , comp(std::move(other.comp)) {}
-    
+        : root_data{std::exchange(other._root(), nullptr), alloc}
+        , size_data{std::exchange(other._size(), 0), std::move(other._comp())} { }
+
     constexpr ~rbtree() { destroy(); }
 
     constexpr rbtree& operator=(const rbtree& other)
     {
-        destroy(root);
+        destroy(_root());
 
-        comp = other.comp;
+        _comp() = other._comp();
         if constexpr (node_alloc_traits::
             propagate_on_container_copy_assignment::value)
-            alloc = other.alloc;
+            _alloc() = other._alloc();
 
-        root = copy(other.root);
-        if (root)
-            root->parent = nullptr;
+        _root() = copy(other._root());
+        if (_root())
+            _root()->parent = nullptr;
+
+        return *this;
     }
-    
+
     constexpr rbtree& operator=(rbtree&& other) noexcept
     {
-        destroy(root);
-        root = std::exchange(other.root, nullptr);
-        _size = std::exchange(other._size, 0);
-        comp = std::move(other.comp);
+        destroy(_root());
+        _root() = std::exchange(other._root(), nullptr);
+        _size() = std::exchange(other._size(), 0);
+        _comp() = std::move(other._comp());
         if constexpr (node_alloc_traits::
             propagate_on_container_move_assignment::value)
-            alloc = std::move(other.alloc);
+            _alloc() = std::move(other._alloc());
+
+        return *this;
     }
 
     constexpr void rotateleft(node* rt)
@@ -392,7 +405,7 @@ public:
             else
                 rt->parent->right = nrt;
         } else {
-            this->root = nrt;
+            _root() = nrt;
         }
 
         nrt->parent = rt->parent;
@@ -415,7 +428,7 @@ public:
             else
                 rt->parent->right = nrt;
         } else {
-            this->root = nrt;
+            _root() = nrt;
         }
 
         nrt->parent = rt->parent;
@@ -473,10 +486,10 @@ public:
     template <typename U>
     constexpr node* _find(const U& key) const
     {
-        for (node* cur = root; cur; ) {
-            if (comp(key, cur->value))
+        for (node* cur = _root(); cur; ) {
+            if (_comp()(key, cur->value))
                 cur = cur->left;
-            else if (comp(cur->value, key))
+            else if (_comp()(cur->value, key))
                 cur = cur->right;
             else
                 return cur;
@@ -561,7 +574,7 @@ public:
     constexpr node* erase(node* nd)
     {
         if (nd->is_root() && nd->is_leaf()) {
-            root = nullptr;
+            _root() = nullptr;
             return nullptr;
         }
 
@@ -570,7 +583,7 @@ public:
         while (!nd->is_leaf()) {
             node* alt = nd->right ? nd->right->leftmost() : nd->left;
             if (nd->is_root())
-                this->root = alt;
+                _root() = alt;
             node::swap(nd, alt);
         }
 
@@ -588,7 +601,7 @@ public:
     {
         node* nextpos = erase(pos.p);
         delnode(pos.p);
-        --_size;
+        --_size();
         return iterator { nextpos };
     }
 
@@ -596,18 +609,18 @@ public:
     {
         node* nextpos = erase(pos.p);
         delnode(pos.p);
-        --_size;
-        return const_iterator { nextpos };
+        --_size();
+        return iterator { nextpos };
     }
 
     template <typename U>
     constexpr iterator lower_bound(U&& val) const
     {
-        node* cur = root;
+        node* cur = _root();
         node* result = nullptr;
 
         while (cur) {
-            if (!comp(cur->value, val)) {
+            if (!_comp()(cur->value, val)) {
                 result = cur;
                 cur = cur->left;
             }
@@ -623,7 +636,7 @@ public:
     constexpr iterator upper_bound(U&& val) const
     {
         iterator iter = lower_bound(std::forward<U>(val));
-        if (iter && !comp(*iter, val) && !comp(val, *iter))
+        if (iter && !_comp()(*iter, val) && !_comp()(val, *iter))
             return ++iter;
         return iter;
     }
@@ -632,10 +645,10 @@ public:
     // that is, if a < b, then a > b
     constexpr void insert(node* nd)
     {
-        node* cur = root;
+        node* cur = _root();
 
         while (cur) {
-            if (comp(nd->value, cur->value)) {
+            if (_comp()(nd->value, cur->value)) {
                 if (!cur->left) {
                     do_insertion(cur, cur->left, nd);
                     return;
@@ -649,7 +662,7 @@ public:
                 cur = cur->right;
             }
         }
-        do_insertion(cur, root, nd);
+        do_insertion(cur, _root(), nd);
     }
 
     template <typename U>
@@ -678,16 +691,16 @@ public:
         return { iterator { nd }, true };
     }
 
-    constexpr bool empty() const noexcept { return !root; }
-    constexpr std::size_t size() const noexcept { return _size; }
+    constexpr bool empty() const noexcept { return !_root(); }
+    constexpr std::size_t size() const noexcept { return _size(); }
 
     constexpr void swap(rbtree& other)
     {
-        std::swap(root, other.root);
-        std::swap(_size, other._size);
-        std::swap(comp, other.comp);
+        std::swap(_root(), other._root());
+        std::swap(_size(), other._size());
+        std::swap(_comp(), other._comp());
         if constexpr (node_alloc_traits::propagate_on_container_swap::value)
-            std::swap(alloc, other.alloc);
+            std::swap(_alloc(), other._alloc());
     }
 };
 

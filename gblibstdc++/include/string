@@ -1,0 +1,543 @@
+#ifndef __GBLIBCPP_STRING__
+#define __GBLIBCPP_STRING__
+
+#include <bits/compressed_pair>
+#include <bits/iter_ops>
+
+#include <algorithm>
+#include <functional>
+#include <memory>
+#include <initializer_list>
+#include <cstddef>
+
+#include <string.h>
+
+namespace std {
+
+template <typename T>
+class char_traits;
+
+template <>
+class char_traits<char>
+{
+public:
+    static std::size_t length(const char* str) { return strlen(str); }
+
+    static int compare(const char* s1, const char* s2, std::size_t cnt)
+    {
+        return strncmp(s1, s2, cnt);
+    }
+};
+
+template <typename Char,
+         typename Traits = std::char_traits<Char>,
+         typename Allocator = std::allocator<Char>>
+class basic_string {
+public:
+    using traits_type = Traits;
+    using value_type = Char;
+    using allocator_type = Allocator;
+    using size_type = typename std::allocator_traits<Allocator>::size_type;
+    using difference_type = typename std::allocator_traits<Allocator>::difference_type;
+    using reference = value_type&;
+    using const_reference = const value_type&;
+    using pointer = typename std::allocator_traits<Allocator>::pointer;
+    using const_pointer = typename std::allocator_traits<Allocator>::const_pointer;
+
+    template <bool Const>
+    class _iterator {
+    public:
+        // TODO:
+        // using iterator_category = std::random_access_iterator_tag;
+        using _reference = std::conditional_t<Const, const_reference, reference>;
+
+    private:
+        pointer m_ptr;
+
+    public:
+        constexpr _iterator(void) noexcept : m_ptr() {}
+        constexpr explicit _iterator(pointer ptr) noexcept
+            : m_ptr(ptr) {}
+        constexpr _iterator(const _iterator& other) noexcept = default;
+        constexpr _iterator(_iterator&& other) noexcept = default;
+        constexpr _iterator& operator=(const _iterator& other) noexcept = default;
+        constexpr _iterator& operator=(_iterator&& other) noexcept = default;
+        constexpr bool operator==(const _iterator& other) const noexcept = default;
+
+        constexpr _reference operator*() const noexcept { return *m_ptr; }
+        constexpr pointer operator&() const noexcept
+        { return std::addressof(this->operator*()); }
+        constexpr pointer operator->() const noexcept
+        { return this->operator&(); }
+        constexpr _iterator& operator++() noexcept
+        { ++m_ptr; return *this; }
+        constexpr _iterator operator++(int) noexcept
+        { _iterator ret(m_ptr); (void)this->operator++(); return ret; }
+        constexpr _iterator& operator--(void) noexcept
+        { --m_ptr; return *this; }
+        constexpr _iterator operator--(int) noexcept
+        { _iterator ret(m_ptr); (void)this->operator--(); return ret; }
+        constexpr _iterator& operator+=(difference_type n) noexcept
+        { m_ptr += n; return *this; }
+        constexpr _iterator& operator-=(difference_type n) noexcept
+        { m_ptr -= n; return *this; }
+        constexpr _iterator operator+(difference_type n) const noexcept
+        { return _iterator { m_ptr + n }; }
+        constexpr _iterator operator-(difference_type n) const noexcept
+        { return _iterator { m_ptr - n }; }
+        constexpr difference_type operator-(const _iterator& other) const noexcept
+        { return m_ptr - other.m_ptr; }
+        constexpr _reference operator[](difference_type n) const noexcept
+        { return m_ptr[n]; }
+        constexpr operator bool() { return m_ptr; }
+        constexpr operator _iterator<true>() { return _iterator<true> { m_ptr }; }
+        constexpr operator _iterator<false>() { return _iterator<false> { m_ptr }; }
+        constexpr operator pointer() { return m_ptr; }
+    };
+
+private:
+    using alloc_traits = std::allocator_traits<Allocator>;
+
+public:
+    using iterator = _iterator<false>;
+    using const_iterator = _iterator<true>;
+
+private:
+    static constexpr std::size_t STATIC_SIZE = 32;
+    static constexpr std::size_t STATIC_COUNT =
+        STATIC_SIZE / sizeof(Char) - 2;
+
+    struct string_data_type { union {
+        std::byte __data[STATIC_SIZE];
+
+        struct {
+            union {
+                Char __data;
+                unsigned char n;
+            } m_size;
+            Char str[STATIC_COUNT];
+            Char end;
+        } stackdata;
+
+        struct {
+            std::size_t m_size;
+            std::size_t m_capacity;
+            Char* m_ptr;
+        } heapdata;
+
+    } in; };
+    impl::compressed_pair<string_data_type, Allocator> m_data;
+
+    constexpr Allocator& _alloc() noexcept { return m_data.second(); }
+    constexpr const Allocator& _alloc() const noexcept { return m_data.second(); }
+
+    constexpr bool _stack_data() const
+    {
+        return m_data.first().in.stackdata.end == 0;
+    }
+
+    constexpr bool _stack_data(bool val)
+    {
+        return (m_data.first().in.stackdata.end = !val), val;
+    }
+
+    constexpr void _release()
+    {
+        if (_stack_data()) {
+            _size(0);
+            return;
+        }
+
+        alloc_traits::deallocate(m_data.second(), data(), capacity()+1);
+
+        _stack_data(true);
+        _size(0);
+        _data()[0] = 0;
+    }
+
+    constexpr void _reserve(std::size_t cnt)
+    {
+        std::size_t cursize = size();
+        Char* newdata = alloc_traits::allocate(_alloc(), cnt+1);
+
+        memcpy(newdata, data(), size());
+        newdata[cursize] = 0;
+
+        if (_stack_data()) {
+            _stack_data(false);
+            _size(cursize);
+        }
+        else {
+            alloc_traits::deallocate(_alloc(), data(), capacity()+1);
+        }
+
+        _capacity(cnt);
+        _data(newdata);
+    }
+
+    constexpr std::size_t _size() const
+    {
+        if (_stack_data())
+            return m_data.first().in.stackdata.m_size.n;
+        else
+            return m_data.first().in.heapdata.m_size;
+    }
+
+    constexpr std::size_t _size(std::size_t val)
+    {
+        if (_stack_data())
+            return m_data.first().in.stackdata.m_size.n = (Char)val;
+        else
+            return m_data.first().in.heapdata.m_size = val;
+    }
+
+    constexpr std::size_t _capacity() const
+    {
+        if (_stack_data())
+            return STATIC_COUNT;
+        else
+            return m_data.first().in.heapdata.m_capacity;
+    }
+
+    constexpr std::size_t _capacity(std::size_t val)
+    {
+        if (_stack_data())
+            return STATIC_COUNT;
+        else
+            return m_data.first().in.heapdata.m_capacity = val;
+    }
+
+    constexpr const Char* _data() const
+    {
+        if (_stack_data())
+            return m_data.first().in.stackdata.str;
+        else
+            return m_data.first().in.heapdata.m_ptr;
+    }
+
+    constexpr Char* _data()
+    {
+        if (_stack_data())
+            return m_data.first().in.stackdata.str;
+        else
+            return m_data.first().in.heapdata.m_ptr;
+    }
+
+    constexpr Char* _data(Char* val)
+    {
+        if (_stack_data())
+            return m_data.first().in.stackdata.str;
+        else
+            return m_data.first().in.heapdata.m_ptr = val;
+    }
+
+public:
+    constexpr basic_string() noexcept(noexcept(Allocator()))
+        : basic_string{Allocator{}} { }
+
+    constexpr explicit basic_string(const Allocator& alloc) noexcept
+        : m_data{{}, alloc} { }
+
+    constexpr basic_string(const basic_string& other, const Allocator& alloc)
+        : basic_string{alloc}
+    {
+        append(other.c_str(), other.size());
+    }
+
+    constexpr basic_string(const basic_string& other)
+        : basic_string{other, alloc_traits::
+            select_on_container_copy_construction(other._alloc())} { }
+
+    constexpr basic_string(basic_string&& other) noexcept
+        : m_data{other.m_data.first(), std::move(other._alloc())}
+    {
+        other._stack_data(true);
+        other._size(0);
+        other._data()[0] = 0;
+    }
+
+    constexpr basic_string(basic_string&& other, const Allocator& alloc)
+        : basic_string{alloc}
+    {
+        if (alloc == other._alloc()) {
+            m_data.first() = other.m_data.first();
+            other._stack_data(true);
+            other._size(0);
+            other._data()[0] = 0;
+        }
+        else {
+            append(other.c_str(), other.size());
+        }
+    }
+
+    constexpr basic_string(const basic_string& other, size_type pos,
+            const Allocator& alloc = Allocator{})
+        : basic_string{other.c_str() + pos, alloc} { }
+
+    // constexpr basic_string(std::initializer_list<Char> ilist,
+    //         const Allocator& alloc = Allocator{})
+    //     : basic_string {alloc}
+    // {
+    //     assign(ilist.begin(), ilist.end());
+    // }
+
+    constexpr basic_string(const Char* str, size_type count,
+            const Allocator& alloc = Allocator{})
+        : basic_string{alloc}
+    {
+        assign(str, count);
+    }
+
+    constexpr basic_string(const Char* str, const Allocator& alloc = Allocator{})
+        : basic_string{str, traits_type::length(str), alloc} { }
+
+    constexpr ~basic_string()
+    {
+        _release();
+    }
+
+    constexpr basic_string& operator=(const Char* str)
+    {
+        return assign(str);
+    }
+
+    constexpr basic_string& operator=(const basic_string& other)
+    {
+        return assign(other.c_str(), other.size());
+    }
+
+    constexpr basic_string& operator=(basic_string&& other)
+    {
+        if constexpr (alloc_traits::
+                propagate_on_container_move_assignment::value) {
+            _release();
+            _alloc() = std::move(other._alloc());
+        }
+        else {
+            if (_alloc() != other._alloc()) {
+                assign(other.c_str(), other.size());
+                return *this;
+            }
+            _release();
+        }
+
+        m_data.first() = other.m_data.first();
+        other._stack_data(true);
+        other._size(0);
+        other._data()[0] = 0;
+
+        return *this;
+    }
+
+    constexpr basic_string& operator=(Char ch)
+    {
+        return assign(1, ch);
+    }
+
+    // constexpr basic_string& operator=(std::initializer_list<Char> init)
+    // {
+    //     assign(init.begin(), init.end());
+    //     return *this;
+    // }
+
+    constexpr basic_string& append(std::size_t len, Char ch)
+    {
+        std::size_t cursize = size();
+        std::size_t newsize = cursize + len;
+
+        if (newsize > capacity())
+            _reserve(std::max(capacity() * 2, newsize));
+
+        auto* pdata = data();
+        for (std::size_t i = cursize; i < newsize; ++i)
+            pdata[i] = ch;
+        pdata[newsize] = 0;
+
+        _size(newsize);
+
+        return *this;
+    }
+
+    constexpr basic_string& append(const Char* str, std::size_t count)
+    {
+        std::size_t cursize = size();
+        std::size_t newsize = cursize + count;
+
+        if (newsize > capacity())
+            _reserve(std::max(capacity() * 2, newsize));
+
+        memcpy(data() + cursize, str, count);
+        data()[newsize] = 0;
+
+        _size(newsize);
+
+        return *this;
+    }
+
+    constexpr basic_string& append(const Char* str)
+    {
+        return append(str, traits_type::length(str));
+    }
+
+    constexpr basic_string& assign(size_type n, Char ch)
+    {
+        clear();
+        return append(n, ch);
+    }
+
+    constexpr basic_string& assign(const Char* str, size_type count)
+    {
+        clear();
+        return append(str, count);
+    }
+
+    constexpr basic_string& assign(const Char* str)
+    {
+        return assign(str, traits_type::length(str));
+    }
+
+    // TODO: check whether InputIter satisfies LegacyInputIterator
+    // template <typename InputIter>
+    // constexpr basic_string& assign(InputIter first, InputIter last)
+    // {
+    //     clear();
+    //     insert(cbegin(), first, last);
+    //     return *this;
+    // }
+    // constexpr basic_string& assign(std::initializer_list<T> init)
+    // {
+    //     clear();
+    //     insert(cbegin(), init.begin(), init.end());
+    //     return *this;
+    // }
+
+    constexpr basic_string& operator+=(Char ch)
+    {
+        return append(1, ch);
+    }
+
+    constexpr basic_string& operator+=(const Char* str)
+    {
+        return append(str);
+    }
+
+    constexpr basic_string& operator+=(const basic_string& str)
+    {
+        return append(str.c_str(), str.size());
+    }
+
+    constexpr bool empty() const noexcept
+    { return size() == 0; }
+    constexpr size_type size() const noexcept
+    { return _size(); }
+    constexpr size_type capacity() const noexcept
+    { return _capacity(); }
+
+    constexpr Char* data() noexcept { return _data(); }
+    constexpr const Char* data() const noexcept { return _data(); }
+    constexpr const Char* c_str() const noexcept { return data(); }
+
+    constexpr reference operator[](size_type pos)
+    { return data()[pos]; }
+    constexpr const_reference operator[](size_type pos) const
+    { return data()[pos]; }
+
+    // constexpr reference at(size_type pos)
+    // {
+    //     // TODO: exceptions
+    //     // if (pos >= size())
+    //     //     throw std::out_of_range("basic_string::at");
+    //     return operator[](pos);
+    // }
+    // constexpr const_reference at(size_type pos) const
+    // {
+    //     // TODO: exceptions
+    //     // if (pos >= size())
+    //     //     throw std::out_of_range("basic_string::at");
+    //     return operator[](pos);
+    // }
+
+    constexpr reference front() noexcept
+    { return operator[](0); }
+    constexpr const_reference front() const noexcept
+    { return operator[](0); }
+    constexpr reference back() noexcept
+    { return operator[](size() - 1); }
+    constexpr const_reference back() const noexcept
+    { return operator[](size() - 1); }
+
+    // TODO: std::reverse_iterator
+    constexpr iterator begin() noexcept
+    { return iterator { data() }; }
+    constexpr const_iterator begin() const noexcept
+    { return const_iterator { data() }; }
+    constexpr const_iterator cbegin() const noexcept
+    { return const_iterator { data() }; }
+    constexpr iterator end() noexcept
+    { return iterator { data() + size() }; }
+    constexpr const_iterator end() const noexcept
+    { return const_iterator { data() + size() }; }
+    constexpr const_iterator cend() const noexcept
+    { return const_iterator { data() + size() }; }
+
+    constexpr void clear() noexcept{ _size(0); }
+
+    constexpr void push_back(Char ch) { append(1, ch); }
+    constexpr void pop_back() { erase(cend()-1); }
+
+    constexpr void swap(basic_string& other) noexcept(
+        alloc_traits::propagate_on_container_swap::value
+        || alloc_traits::is_always_equal::value)
+    {
+        if (alloc_traits::propagate_on_container_swap::value)
+            std::swap(_alloc(), other._alloc());
+        std::swap(m_data.first(), other.m_data.first());
+    }
+
+    constexpr int compare(const basic_string& str) const noexcept
+    {
+        return traits_type::compare(c_str(), str.c_str(), size()+1);
+    }
+
+    constexpr int compare(const Char* str) const
+    {
+        return traits_type::compare(c_str(), str, size()+1);
+    }
+};
+
+template <typename Char, typename Traits, typename Allocator>
+constexpr bool operator==(
+    const std::basic_string<Char, Traits, Allocator>& lhs,
+    const std::basic_string<Char, Traits, Allocator>& rhs) noexcept
+{
+    return lhs.compare(rhs) == 0;
+}
+
+template <typename Char, typename Traits, typename Allocator>
+constexpr bool operator==(
+    const std::basic_string<Char, Traits, Allocator>& lhs, const Char* rhs)
+{
+    return lhs.compare(rhs) == 0;
+}
+
+template <typename Char, typename Traits, typename Allocator>
+constexpr bool operator<(
+    const std::basic_string<Char, Traits, Allocator>& lhs,
+    const std::basic_string<Char, Traits, Allocator>& rhs) noexcept
+{
+    return lhs.compare(rhs) < 0;
+}
+
+template <typename Char, typename Traits, typename Allocator>
+constexpr void swap(
+    std::basic_string<Char, Traits, Allocator>& lhs,
+    std::basic_string<Char, Traits, Allocator>& rhs) noexcept(noexcept(lhs.swap(rhs)))
+{
+    lhs.swap(rhs);
+}
+
+using string = basic_string<char>;
+
+} // namespace std
+
+#endif

@@ -1,0 +1,220 @@
+use core::{
+    ops::Deref,
+    sync::atomic::{AtomicPtr, Ordering},
+};
+
+use crate::prelude::*;
+
+use alloc::sync::Arc;
+
+pub struct RCUReadGuard<'data, T: 'data> {
+    value: T,
+    guard: RwLockReadGuard<'static, ()>,
+    _phantom: PhantomData<&'data T>,
+}
+
+static READ_GUARD: RwLock<()> = RwLock::new(());
+
+impl<'data, T: 'data> RCUReadGuard<'data, T> {
+    fn lock(value: T) -> Self {
+        Self {
+            value,
+            guard: READ_GUARD.read(),
+            _phantom: PhantomData,
+        }
+    }
+}
+
+impl<'data, T: 'data> Deref for RCUReadGuard<'data, T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.value
+    }
+}
+
+fn rcu_sync() {
+    READ_GUARD.write();
+}
+
+pub trait RCUNode<MySelf> {
+    fn rcu_prev(&self) -> &AtomicPtr<MySelf>;
+    fn rcu_next(&self) -> &AtomicPtr<MySelf>;
+}
+
+pub struct RCUList<T: RCUNode<T>> {
+    head: AtomicPtr<T>,
+
+    reader_lock: RwLock<()>,
+    update_lock: Mutex<()>,
+}
+
+impl<T: RCUNode<T>> RCUList<T> {
+    pub const fn new() -> Self {
+        Self {
+            head: AtomicPtr::new(core::ptr::null_mut()),
+            reader_lock: RwLock::new(()),
+            update_lock: Mutex::new(()),
+        }
+    }
+
+    pub fn insert(&self, new_node: Arc<T>) {
+        let _lck = self.update_lock.lock();
+
+        let old_head = self.head.load(Ordering::Acquire);
+        new_node
+            .rcu_prev()
+            .store(core::ptr::null_mut(), Ordering::Release);
+        new_node.rcu_next().store(old_head, Ordering::Release);
+
+        if let Some(old_head) = unsafe { old_head.as_ref() } {
+            old_head.rcu_prev().store(
+                Arc::into_raw(new_node.clone()) as *mut _,
+                Ordering::Release,
+            );
+        }
+
+        self.head
+            .store(Arc::into_raw(new_node) as *mut _, Ordering::Release);
+    }
+
+    pub fn remove(&self, node: Arc<T>) {
+        let _lck = self.update_lock.lock();
+
+        let prev = node.rcu_prev().load(Ordering::Acquire);
+        let next = node.rcu_next().load(Ordering::Acquire);
+
+        if let Some(next) = unsafe { next.as_ref() } {
+            let me = next.rcu_prev().swap(prev, Ordering::AcqRel);
+            debug_assert!(me == Arc::as_ptr(&node) as *mut _);
+            unsafe { Arc::from_raw(me) };
+        }
+
+        {
+            let prev_next = unsafe { prev.as_ref().map(|rcu| rcu.rcu_next()) }
+                .unwrap_or(&self.head);
+
+            let me = prev_next.swap(next, Ordering::AcqRel);
+            debug_assert!(me == Arc::as_ptr(&node) as *mut _);
+            unsafe { Arc::from_raw(me) };
+        }
+
+        let _lck = self.reader_lock.write();
+        node.rcu_prev()
+            .store(core::ptr::null_mut(), Ordering::Release);
+        node.rcu_next()
+            .store(core::ptr::null_mut(), Ordering::Release);
+
+        drop(node);
+    }
+
+    pub fn replace(&self, old_node: &Arc<T>, new_node: Arc<T>) {
+        let _lck = self.update_lock.lock();
+
+        let prev = old_node.rcu_prev().load(Ordering::Acquire);
+        let next = old_node.rcu_next().load(Ordering::Acquire);
+
+        new_node.rcu_prev().store(prev, Ordering::Release);
+        new_node.rcu_next().store(next, Ordering::Release);
+
+        {
+            let prev_next = unsafe { prev.as_ref().map(|rcu| rcu.rcu_next()) }
+                .unwrap_or(&self.head);
+
+            let old = prev_next.swap(
+                Arc::into_raw(new_node.clone()) as *mut _,
+                Ordering::AcqRel,
+            );
+
+            debug_assert!(old == Arc::as_ptr(&old_node) as *mut _);
+            unsafe { Arc::from_raw(old) };
+        }
+
+        if let Some(next) = unsafe { next.as_ref() } {
+            let old = next.rcu_prev().swap(
+                Arc::into_raw(new_node.clone()) as *mut _,
+                Ordering::AcqRel,
+            );
+
+            debug_assert!(old == Arc::as_ptr(&old_node) as *mut _);
+            unsafe { Arc::from_raw(old) };
+        }
+
+        let _lck = self.reader_lock.write();
+        old_node
+            .rcu_prev()
+            .store(core::ptr::null_mut(), Ordering::Release);
+        old_node
+            .rcu_next()
+            .store(core::ptr::null_mut(), Ordering::Release);
+    }
+
+    pub fn iter(&self) -> RCUIterator<T> {
+        let _lck = self.reader_lock.read();
+
+        RCUIterator {
+            // SAFETY: We have a read lock, so the node is still alive.
+            cur: self.head.load(Ordering::SeqCst),
+            _lock: _lck,
+        }
+    }
+}
+
+pub struct RCUIterator<'lt, T: RCUNode<T>> {
+    cur: *const T,
+    _lock: RwLockReadGuard<'lt, ()>,
+}
+
+impl<'lt, T: RCUNode<T>> Iterator for RCUIterator<'lt, T> {
+    type Item = BorrowedArc<'lt, T>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match unsafe { self.cur.as_ref() } {
+            None => None,
+            Some(real) => {
+                // SAFETY: We have a read lock, so the node is still alive.
+                let ret = self.cur;
+                self.cur = real.rcu_next().load(Ordering::SeqCst);
+
+                Some(BorrowedArc::from_raw(ret))
+            }
+        }
+    }
+}
+
+pub struct RCUPointer<T>(AtomicPtr<T>);
+
+impl<T> RCUPointer<T> {
+    pub fn new_with(value: Arc<T>) -> Self {
+        Self(AtomicPtr::new(Arc::into_raw(value) as *mut _))
+    }
+
+    pub fn empty() -> Self {
+        Self(AtomicPtr::new(core::ptr::null_mut()))
+    }
+
+    pub fn load<'lt>(&self) -> Option<RCUReadGuard<'lt, BorrowedArc<'lt, T>>> {
+        let ptr = self.0.load(Ordering::Acquire);
+
+        if ptr.is_null() {
+            None
+        } else {
+            Some(RCUReadGuard::lock(BorrowedArc::from_raw(ptr)))
+        }
+    }
+
+    pub fn swap(&self, new: Option<Arc<T>>) -> Option<Arc<T>> {
+        let new = new
+            .map(|arc| Arc::into_raw(arc) as *mut T)
+            .unwrap_or(core::ptr::null_mut());
+
+        let old = self.0.swap(new, Ordering::AcqRel);
+
+        if old.is_null() {
+            None
+        } else {
+            rcu_sync();
+            Some(unsafe { Arc::from_raw(old) })
+        }
+    }
+}

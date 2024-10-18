@@ -16,6 +16,6 @@ struct user_desc {
     uint32_t useable : 1;
 };
 
-int set_thread_area(user_desc* ptr);
+void load_thread_area32(uint64_t desc);
 
 } // namespace kernel::user

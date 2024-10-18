@@ -13,3 +13,11 @@ compile_commands.json
 
 Makefile
 cross-compile.cmake
+
+.DS_Store
+.Spotlight-V100
+.Trashes
+
+.gdbinit
+
+src/bindings.rs

@@ -1,85 +1,74 @@
 #pragma once
 
 #include <list>
+#include <map>
 
+#include <signal.h>
 #include <stdint.h>
+
 #include <types/cplusplus.hpp>
+#include <types/types.h>
+
+#include <kernel/async/lock.hpp>
+#include <kernel/interrupt.hpp>
 
 namespace kernel {
 
-using sig_t = uint32_t;
+using sigmask_type = uint64_t;
 
-constexpr sig_t SIGINT = 2;
-constexpr sig_t SIGQUIT = 3;
-constexpr sig_t SIGSTOP = 13;
-constexpr sig_t SIGPIPE = 19;
+struct sigaction {
+    sighandler_t sa_handler;
+    unsigned long sa_flags;
+    sigrestorer_t sa_restorer;
+    sigmask_type sa_mask;
+};
 
 class signal_list {
-public:
-    using list_type = std::list<sig_t>;
+   public:
+    using signo_type = uint32_t;
+    using list_type = std::list<signo_type>;
 
-private:
+   private:
     list_type m_list;
-    sig_t m_mask;
+    sigmask_type m_mask{};
+    std::map<signo_type, sigaction> m_handlers;
+    async::mutex m_mtx;
 
-public:
-    static constexpr bool check_valid(sig_t sig)
-    {
-        switch (sig) {
-        case SIGINT:
-        case SIGQUIT:
-        case SIGSTOP:
-        case SIGPIPE:
-            return true;
-        default:
-            return false;
-        }
+   public:
+    static constexpr bool check_valid(signo_type sig) {
+        return sig >= 1 && sig <= 64;
     }
 
-public:
-    constexpr signal_list(void)
-        : m_mask(0)
-    {
-    }
+   public:
+    constexpr signal_list() = default;
     constexpr signal_list(const signal_list& val)
-        : m_list(val.m_list)
-        , m_mask(val.m_mask)
-    {
-    }
+        : m_list{val.m_list}
+        , m_mask{val.m_mask}
+        , m_handlers{val.m_handlers}
+        , m_mtx{} {}
 
     constexpr signal_list(signal_list&& val)
-        : m_list(std::move(val.m_list))
-        , m_mask(val.m_mask)
-    {
-    }
+        : m_list{std::move(val.m_list)}
+        , m_mask{std::move(val.m_mask)}
+        , m_handlers{std::move(val.m_handlers)}
+        , m_mtx{} {}
 
-    constexpr bool empty(void) const
-    {
-        return this->m_list.empty();
-    }
+    void on_exec();
 
-    constexpr void set(sig_t signal)
-    {
-        if (this->m_mask && signal)
-            return;
+    sigmask_type get_mask() const;
+    void set_mask(sigmask_type mask);
+    void mask(sigmask_type mask);
+    void unmask(sigmask_type mask);
 
-        this->m_list.push_back(signal);
-        this->m_mask |= signal;
-    }
+    void set_handler(signo_type signal, const sigaction& action);
+    void get_handler(signo_type signal, sigaction& action) const;
 
-    constexpr sig_t pop(void)
-    {
-        if (this->empty())
-            return 0;
+    signo_type pending_signal();
 
-        auto iter = this->m_list.begin();
-        sig_t signal = *iter;
-        this->m_list.erase(iter);
-
-        this->m_mask &= ~signal;
-
-        return signal;
-    }
+    // return value: whether the thread should wake up
+    bool raise(signo_type signal);
+    void handle(interrupt_stack* context, mmx_registers* mmxregs);
+    void after_signal(signo_type signal);
 };
 
 } // namespace kernel

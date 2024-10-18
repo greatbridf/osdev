@@ -1,36 +1,59 @@
-OUTPUT_FORMAT(elf32-i386)
-OUTPUT_ARCH(i386:i386)
+OUTPUT_FORMAT(elf64-x86-64)
 
 MEMORY
 {
-    MEM : org = 0x00000000, l = 4096M
+    MBR    (wx) : org = 0x0e00, l = 512
+    STAGE1 (wx) : org = 0x1000, l = 4K
+    PHYMEM (w)  : org = 0xffffff0000000000, len = 512 * 1024M
+    PARRAY (w)  : org = 0xffffff8000000000, len = 128 * 1024M
+    KBSS   (w)  : org = 0xffffffffc0200000, len = 2M
+    KIMAGE (wx) : org = 0xffffffffffc00000, len = 2M
 }
 
 SECTIONS
 {
-    .stage1 0x8000 : AT(0x00000000)
+    .mbr : AT(0)
     {
-        __stage1_start = .;
-        *(.stage1)
+        KEEP(*(.mbr));
 
+        . = 446;
+        BYTE(0x00);
+
+        . = 510;
+        BYTE(0x55);
+        BYTE(0xaa);
+    } > MBR
+
+    .stage1 : AT(LOADADDR(.mbr) + SIZEOF(.mbr))
+    {
+        *(.stage1)
         . = ALIGN(0x1000);
-        __stage1_end = .;
-    } > MEM
+    } > STAGE1
 
     .kinit :
         AT(LOADADDR(.stage1) + SIZEOF(.stage1))
     {
-        __kinit_start = .;
+        KIMAGE_START = .;
+        KINIT_START = .;
+
         *(.text.kinit)
 
-        LONG(0x00000000)
-        LONG(0x19191919)
-        LONG(0x00000000)
-
+        . = ALIGN(16);
         *(.rodata.kinit)
 
-        . = ALIGN(16);
+        KINIT_START_ADDR = .;
+        QUAD(ABSOLUTE(KINIT_START));
 
+        KINIT_END_ADDR = .;
+        QUAD(ABSOLUTE(KINIT_END));
+
+        KINIT_PAGES = .;
+        QUAD((KINIT_END - KINIT_START) / 0x1000);
+
+        KIMAGE_PAGES_VALUE = .;
+        QUAD((KIMAGE_END - KIMAGE_START) / 0x1000);
+
+        . = ALIGN(16);
         start_ctors = .;
         KEEP(*(.init_array));
         KEEP(*(SORT_BY_INIT_PRIORITY(.init_array*)));
@@ -38,97 +61,96 @@ SECTIONS
         KEEP(*(SORT_BY_INIT_PRIORITY(.ctors*)));
         end_ctors = .;
 
-        LONG(0x00000000)
-        LONG(0x19191919)
-        LONG(0x00000000)
-
+        . = ALIGN(16);
         *(.data.kinit)
 
-        LONG(0x00000000)
-        LONG(0x19191919)
-        LONG(0x00000000)
-
+        . = ALIGN(16);
         *(.bss.kinit)
 
-        LONG(0x00000000)
-        LONG(0x19191919)
-        LONG(0x00000000)
-
         . = ALIGN(0x1000);
-        __kinit_end = .;
-    } > MEM
+        KINIT_END = .;
+    } > KIMAGE
 
-    .text 0xc0000000 :
+    .text :
         AT(LOADADDR(.kinit) + SIZEOF(.kinit))
     {
-        __text_start = .;
+        TEXT_START = .;
         *(.text)
         *(.text*)
 
         . = ALIGN(0x1000);
-        __text_end = .;
-    } > MEM
+        TEXT_END = .;
+    } > KIMAGE
 
     .rodata :
         AT(LOADADDR(.text) + SIZEOF(.text))
     {
-        __rodata_start = .;
+        RODATA_START = .;
         *(.rodata)
         *(.rodata*)
 
-        kmod_loaders_start = .;
+        . = ALIGN(16);
+        KMOD_LOADERS_START = .;
 
-        *(.kmods)
+        KEEP(*(.kmods));
+        QUAD(0);
 
-        __kmod_loaders_end = .;
-        LONG(0);
+        . = ALIGN(16);
+        late_init_start = .;
+        KEEP(*(.late_init));
+        QUAD(0);
+        late_init_end = .;
 
         . = ALIGN(16);
 
-        bss_addr = .;
-        LONG(ABSOLUTE(__bss_start));
-        bss_len = .;
-        LONG(__bss_end - __bss_start);
-        kernel_size = .;
-        LONG(__data_end - __kinit_start);
+        BSS_ADDR = .;
+        QUAD(ABSOLUTE(BSS_START));
+        BSS_LENGTH = .;
+        QUAD(BSS_END - BSS_START);
 
         . = ALIGN(0x1000);
-        __rodata_end = .;
-    } > MEM
+        RODATA_END = .;
+    } > KIMAGE
 
     .data :
         AT(LOADADDR(.rodata) + SIZEOF(.rodata))
     {
-        __data_start = .;
+        DATA_START = .;
         *(.data)
         *(.data*)
 
-        . = ALIGN(0x1000);
-        __data_end = .;
-    } > MEM
+        *(.got)
+        *(.got.plt)
+
+        . = ALIGN(0x1000) - 4;
+        LONG(KERNEL_MAGIC);
+
+        DATA_END = .;
+        KIMAGE_END = .;
+    } > KIMAGE
 
     .bss :
     {
-        __bss_start = .;
+        BSS_START = .;
         *(.bss)
         *(.bss*)
 
         . = ALIGN(0x1000);
-        __bss_end = .;
-    } > MEM
+        BSS_END = .;
+    } > KBSS
 
-    .sentry :
-        AT(0x50000)
-    { LONG(0x01145140); } > MEM
+    KIMAGE_PAGES = (KIMAGE_END - KIMAGE_START) / 0x1000;
+    BSS_PAGES = (BSS_END - BSS_START) / 0x1000;
+    KERNEL_MAGIC = 0x01145140;
+
+    KIMAGE_32K_COUNT = ((KIMAGE_END - KIMAGE_START) + 32 * 1024 - 1) / (32 * 1024);
 
     .eh_frame :
-        AT(LOADADDR(.sentry) + SIZEOF(.sentry))
+        AT(LOADADDR(.data) + SIZEOF(.data))
     {
-        __eh_frame_start = .;
-        *(.eh_frame*)
+        KEEP(*(.eh_frame*))
         . = ALIGN(0x1000);
-        __eh_frame_end = .;
-    } > MEM
+    } > KIMAGE
 
     /* Stabs debugging sections.  */
     .stab          0 : { *(.stab) }
@@ -151,7 +173,7 @@ SECTIONS
     .debug_aranges  0 : { *(.debug_aranges) }
     .debug_pubnames 0 : { *(.debug_pubnames) }
     /* DWARF 2 */
-    .debug_info     0 : { *(.debug_info .gnu.linkonce.wi.*) }
+    .debug_info     0 : { *(.debug_info) }
     .debug_abbrev   0 : { *(.debug_abbrev) }
     .debug_line     0 : { *(.debug_line) }
     .debug_frame    0 : { *(.debug_frame) }
@@ -164,10 +186,16 @@ SECTIONS
     .debug_typenames 0 : { *(.debug_typenames) }
     .debug_varnames  0 : { *(.debug_varnames) }
 
+    /* DWARF Other */
+    .debug_ranges  0 : { *(.debug_ranges) }
+    .debug_line_str 0 : { *(.debug_line_str) }
+    /* Rust stuff */
+
     /DISCARD/ :
     {
         *(.fini_array*)
         *(.note*)
         *(.dtors*)
+        *(.debug_gdb_scripts*)
     }
 }

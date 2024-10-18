@@ -1,244 +1,269 @@
-.code32
-
 .text
 
-# TODO: stack alignment
-.globl int6
-.type  int6 @function
-int6:
-    pushal
-    call int6_handler
-    popal
+#define RAX     0x00
+#define RBX     0x08
+#define RCX     0x10
+#define RDX     0x18
+#define RDI     0x20
+#define RSI     0x28
+#define R8      0x30
+#define R9      0x38
+#define R10     0x40
+#define R11     0x48
+#define R12     0x50
+#define R13     0x58
+#define R14     0x60
+#define R15     0x68
+#define RBP     0x70
+#define INT_NO  0x78
+#define ERRCODE 0x80
+#define RIP     0x88
+#define CS      0x90
+#define FLAGS   0x98
+#define RSP     0xa0
+#define SS      0xa8
 
-    iret
+.macro movcfi reg, offset
+	mov \reg, \offset(%rsp)
+	.cfi_rel_offset \reg, \offset
+.endm
 
-# TODO: stack alignment
-.globl int8
-.type  int8 @function
-int8:
-    nop
-    iret
+.macro movrst reg, offset
+	mov \offset(%rsp), \reg
+	.cfi_restore \reg
+.endm
 
-# TODO: stack alignment
-.globl int13
-.type  int13 @function
-int13:
-    pushal
-    call int13_handler
-    popal
+.extern after_ctx_switch
+.globl ISR_stub_restore
 
-# remove the 32bit error code from stack
-    addl $4, %esp
-    iret
+ISR_stub:
+	.cfi_startproc
+	.cfi_signal_frame
+	.cfi_def_cfa_offset 0x18
+	.cfi_offset %rsp, 0x10
 
-.globl int14
-.type  int14 @function
-int14:
-    # push general purpose registers
-    pushal
+	sub $0x78, %rsp
+	.cfi_def_cfa_offset 0x90
 
-    # save %cr2
-    movl %cr2, %eax
-    pushl %eax
+	movcfi %rax, RAX
+	movcfi %rbx, RBX
+	movcfi %rcx, RCX
+	movcfi %rdx, RDX
+	movcfi %rdi, RDI
+	movcfi %rsi, RSI
+	movcfi %r8,  R8
+	movcfi %r9,  R9
+	movcfi %r10, R10
+	movcfi %r11, R11
+	movcfi %r12, R12
+	movcfi %r13, R13
+	movcfi %r14, R14
+	movcfi %r15, R15
+	movcfi %rbp, RBP
 
-    # save current esp (also pointer to struct int14_data)
-    mov %esp, %ebx
+	mov INT_NO(%rsp), %rax
+	sub $ISR0, %rax
+	shr $3, %rax
+	mov %rax, INT_NO(%rsp)
 
-    # allocate space for mmx registers and argument
-    subl $0x210, %esp
+	mov %rsp, %rbx
+	.cfi_def_cfa_register %rbx
 
-    # align stack to 16byte boundary
-    and $0xfffffff0, %esp
+	and $~0xf, %rsp
+	sub $512, %rsp
+	fxsave (%rsp)
 
-    # save mmx registers
-    fxsave 16(%esp)
+	mov %rbx, %rdi
+	mov %rsp, %rsi
+	call interrupt_handler
 
-    # push (interrupt_stack*)data
-    mov %ebx, (%esp)
+ISR_stub_restore:
+	fxrstor (%rsp)
+	mov %rbx, %rsp
+	.cfi_def_cfa_register %rsp
 
-    call int14_handler
+	movrst %rax, RAX
+	movrst %rbx, RBX
+	movrst %rcx, RCX
+	movrst %rdx, RDX
+	movrst %rdi, RDI
+	movrst %rsi, RSI
+	movrst %r8,  R8
+	movrst %r9,  R9
+	movrst %r10, R10
+	movrst %r11, R11
+	movrst %r12, R12
+	movrst %r13, R13
+	movrst %r14, R14
+	movrst %r15, R15
+	movrst %rbp, RBP
 
-    # restore mmx registers
-    fxrstor 16(%esp)
+	add $0x88, %rsp
+	.cfi_def_cfa_offset 0x08
 
-    # restore stack and general purpose registers
-    leal 4(%ebx), %esp
-    popal
-
-# remove the 32bit error code from stack
-    addl $4, %esp
-    iret
-
-.globl irq0
-irq0:
-    pushal
-    mov $0, %eax
-    jmp irqstub
-.globl irq1
-irq1:
-    pushal
-    mov $1, %eax
-    jmp irqstub
-.globl irq2
-irq2:
-    pushal
-    mov $2, %eax
-    jmp irqstub
-.globl irq3
-irq3:
-    pushal
-    mov $3, %eax
-    jmp irqstub
-.globl irq4
-irq4:
-    pushal
-    mov $4, %eax
-    jmp irqstub
-.globl irq5
-irq5:
-    pushal
-    mov $5, %eax
-    jmp irqstub
-.globl irq6
-irq6:
-    pushal
-    mov $6, %eax
-    jmp irqstub
-.globl irq7
-irq7:
-    pushal
-    mov $7, %eax
-    jmp irqstub
-.globl irq8
-irq8:
-    pushal
-    mov $8, %eax
-    jmp irqstub
-.globl irq9
-irq9:
-    pushal
-    mov $9, %eax
-    jmp irqstub
-.globl irq10
-irq10:
-    pushal
-    mov $10, %eax
-    jmp irqstub
-.globl irq11
-irq11:
-    pushal
-    mov $11, %eax
-    jmp irqstub
-.globl irq12
-irq12:
-    pushal
-    mov $12, %eax
-    jmp irqstub
-.globl irq13
-irq13:
-    pushal
-    mov $13, %eax
-    jmp irqstub
-.globl irq14
-irq14:
-    pushal
-    mov $14, %eax
-    jmp irqstub
-.globl irq15
-irq15:
-    pushal
-    mov $15, %eax
-    jmp irqstub
-
-.globl irqstub
-irqstub:
-    # save current esp
-    mov %esp, %ebx
-
-    # align stack to 16byte boundary
-    and $0xfffffff0, %esp
-
-    # save mmx registers
-    subl $512, %esp
-    fxsave (%esp)
-
-    # push irq number
-    sub $16, %esp
-    mov %eax, (%esp)
-
-    call irq_handler
-
-    # restore mmx registers
-    fxrstor 16(%esp)
-
-    # restore stack and general purpose registers
-    mov %ebx, %esp
-    popal
-
-    iret
-
-.globl syscall_stub
-.type  syscall_stub @function
-syscall_stub:
-    pushal
-
-    # stack alignment and push *data
-    movl %esp, %eax
-    subl $0x4, %esp
-    andl $0xfffffff0, %esp
-    movl %eax, (%esp)
-
-    call syscall_entry
-
-    # restore stack
-    popl %esp
-
-.globl _syscall_stub_fork_return
-.type  _syscall_stub_fork_return @function
-_syscall_stub_fork_return:
-    popal
-    iret
+	iretq
+	.cfi_endproc
 
 # parameters
-# #1: uint32_t* curr_esp
-# #2: uint32_t next_esp
+# #1: sp* current_task_sp
+# #2: sp* target_task_sp
 .globl asm_ctx_switch
 .type  asm_ctx_switch @function
 asm_ctx_switch:
-    movl 4(%esp), %ecx
-    movl 8(%esp), %eax
+	.cfi_startproc
+    pushf
+	.cfi_def_cfa_offset 0x10
 
-    push $_ctx_switch_return
-    push %ebx
-    push %edi
-    push %esi
-    push %ebp
-    pushfl
+	sub $0x38, %rsp  # extra 8 bytes to align to 16 bytes
+	.cfi_def_cfa_offset 0x48
 
-    movl %esp, (%ecx)
-    movl %eax, %esp
+	movcfi %rbx, 0x08
+	movcfi %rbp, 0x10
+	movcfi %r12, 0x18
+	movcfi %r13, 0x20
+	movcfi %r14, 0x28
+	movcfi %r15, 0x30
 
-    popfl
-    pop %ebp
-    pop %esi
-    pop %edi
-    pop %ebx
+    push (%rdi) 	 # save sp of previous stack frame of current
+	                 # acts as saving bp
+	.cfi_def_cfa_offset 0x50
+
+    mov %rsp, (%rdi) # save sp of current stack
+    mov (%rsi), %rsp # load sp of target stack
+
+    pop (%rsi)       # load sp of previous stack frame of target
+	                 # acts as restoring previous bp
+	.cfi_def_cfa_offset 0x48
+
+	pop %rax         # align to 16 bytes
+	.cfi_def_cfa_offset 0x40
+
+	call after_ctx_switch
+
+	mov 0x28(%rsp), %r15
+	mov 0x20(%rsp), %r14
+	mov 0x18(%rsp), %r13
+	mov 0x10(%rsp), %r12
+	mov 0x08(%rsp), %rbp
+    mov 0x00(%rsp), %rbx
+
+	add $0x30, %rsp
+	.cfi_def_cfa_offset 0x10
+
+    popf
+	.cfi_def_cfa_offset 0x08
 
     ret
+	.cfi_endproc
 
-_ctx_switch_return:
-    ret
+.altmacro
+.macro build_isr_no_err name
+	.align 8
+	.globl ISR\name
+	.type  ISR\name @function
+	ISR\name:
+		.cfi_startproc
+		.cfi_signal_frame
+		.cfi_def_cfa_offset 0x08
+		.cfi_offset %rsp, 0x10
 
-.section .text.kinit
+		.cfi_same_value %rax
+		.cfi_same_value %rbx
+		.cfi_same_value %rcx
+		.cfi_same_value %rdx
+		.cfi_same_value %rdi
+		.cfi_same_value %rsi
+		.cfi_same_value %r8
+		.cfi_same_value %r9
+		.cfi_same_value %r10
+		.cfi_same_value %r11
+		.cfi_same_value %r12
+		.cfi_same_value %r13
+		.cfi_same_value %r14
+		.cfi_same_value %r15
+		.cfi_same_value %rbp
 
-.globl asm_load_idt
-.type  asm_load_idt @function
-asm_load_idt:
-    movl 4(%esp), %edx
-    lidt (%edx)
-    movl 8(%esp), %edx
-    cmpl $0, %edx
-    je asm_load_idt_skip
-    sti
-asm_load_idt_skip:
-    ret
+		push %rbp # push placeholder for error code
+		.cfi_def_cfa_offset 0x10
+
+		call ISR_stub
+		.cfi_endproc
+.endm
+
+.altmacro
+.macro build_isr_err name
+	.align 8
+	.globl ISR\name
+	.type  ISR\name @function
+	ISR\name:
+		.cfi_startproc
+		.cfi_signal_frame
+		.cfi_def_cfa_offset 0x10
+		.cfi_offset %rsp, 0x10
+
+		.cfi_same_value %rax
+		.cfi_same_value %rbx
+		.cfi_same_value %rcx
+		.cfi_same_value %rdx
+		.cfi_same_value %rdi
+		.cfi_same_value %rsi
+		.cfi_same_value %r8
+		.cfi_same_value %r9
+		.cfi_same_value %r10
+		.cfi_same_value %r11
+		.cfi_same_value %r12
+		.cfi_same_value %r13
+		.cfi_same_value %r14
+		.cfi_same_value %r15
+		.cfi_same_value %rbp
+
+		call ISR_stub
+		.cfi_endproc
+.endm
+
+build_isr_no_err 0
+build_isr_no_err 1
+build_isr_no_err 2
+build_isr_no_err 3
+build_isr_no_err 4
+build_isr_no_err 5
+build_isr_no_err 6
+build_isr_no_err 7
+build_isr_err    8
+build_isr_no_err 9
+build_isr_err    10
+build_isr_err    11
+build_isr_err    12
+build_isr_err    13
+build_isr_err    14
+build_isr_no_err 15
+build_isr_no_err 16
+build_isr_err    17
+build_isr_no_err 18
+build_isr_no_err 19
+build_isr_no_err 20
+build_isr_err    21
+build_isr_no_err 22
+build_isr_no_err 23
+build_isr_no_err 24
+build_isr_no_err 25
+build_isr_no_err 26
+build_isr_no_err 27
+build_isr_no_err 28
+build_isr_err    29
+build_isr_err    30
+build_isr_no_err 31
+
+.set i, 32
+.rept 0x80+1
+	build_isr_no_err %i
+	.set i, i+1
+.endr
+
+.section .rodata
+
+.align 8
+.globl ISR_START_ADDR
+.type  ISR_START_ADDR @object
+ISR_START_ADDR:
+	.quad ISR0

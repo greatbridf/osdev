@@ -1,34 +1,37 @@
 #pragma once
 
+#include <memory>
+
 #include <types/types.h>
 
-#define INTERNAL_MODULE(name, func) \
-    SECTION(".kmods") __attribute__((used)) \
-    kernel::module::module_loader const name = (func)
+#define MODULE_LOADER(name) \
+    static std::unique_ptr<kernel::kmod::kmod> __module##name##_loader()
 
-namespace kernel::module {
+#define INTERNAL_MODULE(name, type)                                         \
+    MODULE_LOADER(name);                                                    \
+    SECTION(".kmods")                                                       \
+    __attribute__((used))                                                   \
+    std::unique_ptr<kernel::kmod::kmod> (*const __module##name##_entry)() = \
+        __module##name##_loader;                                            \
+    MODULE_LOADER(name) {                                                   \
+        return std::make_unique<type>();                                    \
+    }
 
-struct module {
+namespace kernel::kmod {
+
+struct kmod {
     const char* const name;
 
-    explicit module(const char* name);
+    explicit kmod(const char* name);
 
-    virtual ~module() = default;
-    module(const module&) = delete;
-    module& operator=(const module&) = delete;
+    virtual ~kmod() = default;
+    kmod(const kmod&) = delete;
+    kmod& operator=(const kmod&) = delete;
 
     virtual int init() = 0;
 };
 
-using module_loader = module* (*)();
+extern "C" std::unique_ptr<kmod> (*const KMOD_LOADERS_START[])();
+void load_internal_modules();
 
-constexpr int MODULE_SUCCESS = 0;
-constexpr int MODULE_FAILED = 1;
-constexpr int MODULE_DELAYED = 2;
-
-// TODO: unique_ptr and Deleter
-int insmod(module* mod);
-
-extern "C" module_loader kmod_loaders_start[];
-
-} // namespace kernel::module
+} // namespace kernel::kmod

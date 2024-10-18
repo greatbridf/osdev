@@ -1,114 +1,66 @@
 #pragma once
 
-#include <types/string.hpp>
-#include <vector>
 #include <cstddef>
+#include <string>
 
 namespace types {
 
-class path {
-public:
-    using item_string = types::string<>;
-    using item_vector = std::vector<item_string>;
-    using string_type = types::string<>;
-    using size_type = std::size_t;
-    using iterator = item_vector::const_iterator;
+class string_view {
+   private:
+    const char* m_str;
+    std::size_t m_len;
 
-private:
-    item_vector m_vec;
+   public:
+    constexpr string_view() : m_str(nullptr), m_len(0) {}
+    constexpr string_view(const char* str, std::size_t len)
+        : m_str(str), m_len(len) {}
+    constexpr string_view(const std::string& str)
+        : m_str(str.c_str()), m_len(str.size()) {}
+    inline string_view(const char* str)
+        : m_str(str), m_len(std::char_traits<char>::length(str)) {}
 
-public:
-    constexpr path() = default;
-    constexpr path(const path& val) = default;
-    constexpr path(path&& val) = default;
-    constexpr path(const char* str, size_type len = -1U)
-    { append(str, len); }
+    constexpr const char* data() const { return m_str; }
+    constexpr std::size_t size() const { return m_len; }
+    constexpr bool empty() const { return m_len == 0; }
 
-    constexpr path& operator=(const path& val) = default;
-    constexpr path& operator=(path&& val) = default;
-    constexpr path& operator=(const char* str)
-    {
-        m_vec.clear();
-        append(str);
-        return *this;
-    }
+    constexpr const char* begin() const { return m_str; }
+    constexpr const char* end() const { return m_str + m_len; }
 
-    constexpr string_type full_path() const
-    {
-        string_type str;
-        for (auto iter = m_vec.begin(); iter != m_vec.end(); ++iter) {
-            if (iter != m_vec.begin()
-                || (m_vec.front().empty() && m_vec.size() == 1))
-                str += '/';
-            str += *iter;
+    constexpr char operator[](std::size_t pos) const { return m_str[pos]; }
+
+    constexpr bool operator==(const string_view& val) const {
+        if (m_len != val.m_len)
+            return false;
+        for (std::size_t i = 0; i < m_len; ++i) {
+            if (m_str[i] != val.m_str[i])
+                return false;
         }
-        return str;
+        return true;
     }
-    constexpr item_string last_name() const
-    { return m_vec.empty() ? item_string {} : m_vec.back(); }
-    constexpr bool empty() const
-    { return m_vec.empty(); }
 
-    constexpr bool is_absolute() const { return !empty() && !m_vec[0][0]; }
-    constexpr bool is_relative() const { return !empty() && !is_absolute(); }
-
-    constexpr path& append(const char* str, size_type len = -1U)
-    {
-        const char* start = str;
-        while (len-- && *str) {
-            if (*str == '/') {
-                if (m_vec.empty() || str != start)
-                    m_vec.emplace_back(start, str - start);
-                start = str + 1;
-            }
-            ++str;
+    constexpr bool operator==(const char* str) const {
+        for (std::size_t i = 0; i < m_len; ++i) {
+            if (m_str[i] != str[i])
+                return false;
         }
-        if (str != start || m_vec.size() != 1 || !m_vec.front().empty())
-            m_vec.emplace_back(start, str - start);
-
-        return *this;
-    }
-    constexpr path& append(const path& val)
-    {
-        m_vec.insert(m_vec.end(), val.m_vec.begin(), val.m_vec.end());
-        return *this;
+        return str[m_len] == '\0';
     }
 
-    constexpr void clear() { m_vec.clear(); }
-    constexpr void remove_last()
-    {
-        if (m_vec.size() > 1)
-            m_vec.pop_back();
+    constexpr bool operator==(const std::string& str) const {
+        if (m_len != str.size())
+            return false;
+        return operator==(str.c_str());
     }
 
-    constexpr path& operator+=(const char* str)
-    { return append(str); }
-    constexpr path& operator+=(const path& val)
-    { return append(val); }
-
-    constexpr bool operator==(const char* str) const
-    {
-        return full_path() == str;
+    constexpr bool operator<(const string_view& val) const {
+        for (std::size_t i = 0; i < m_len && i < val.m_len; ++i) {
+            if (m_str[i] < val.m_str[i])
+                return true;
+            if (m_str[i] > val.m_str[i])
+                return false;
+        }
+        return m_len < val.m_len;
     }
-
-    constexpr iterator begin() const { return m_vec.cbegin(); }
-    constexpr iterator end() const { return m_vec.cend(); }
 };
-
-constexpr path make_path(const char* pathstr, const char* pwd)
-{
-    if (*pathstr && pathstr[0] == '/')
-        return pathstr;
-    else
-        return path { pwd }.append(pathstr);
-}
-
-constexpr path make_path(const char* pathstr, const path& pwd)
-{
-    if (*pathstr && pathstr[0] == '/')
-        return pathstr;
-    else
-        return path{pwd}.append(pathstr);
-}
 
 } // namespace types

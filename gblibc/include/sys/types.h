@@ -8,16 +8,18 @@ extern "C" {
 #endif
 
 typedef int pid_t;
-typedef uint32_t ino_t;
-typedef int32_t off_t;
-typedef uint32_t dev_t;
+typedef unsigned long ino_t;
+typedef long off_t;
+typedef unsigned dev_t;
 typedef unsigned uid_t;
 typedef unsigned gid_t;
-typedef unsigned mode_t;
+typedef unsigned short mode_t;
 typedef unsigned long nlink_t;
 
-typedef uint64_t ino64_t;
-typedef int64_t off64_t;
+typedef unsigned long long ino64_t;
+typedef long long off64_t;
+
+typedef off64_t loff_t;
 
 #ifdef __cplusplus
 }

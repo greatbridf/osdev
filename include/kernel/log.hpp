@@ -1,8 +1,23 @@
 #pragma once
 
+#include <stdio.h>
+
 #include <kernel/tty.hpp>
 
-inline void kmsg(const char* msg)
-{
-    console->print(msg);
-}
+#define kmsgf(fmt, ...)                                                  \
+    if (1) {                                                             \
+        char buf[512];                                                   \
+        snprintf(buf, sizeof(buf), fmt "\n" __VA_OPT__(, ) __VA_ARGS__); \
+        if (kernel::tty::console)                                        \
+            kernel::tty::console->print(buf);                            \
+    }
+
+#define kmsg(msg)             \
+    if (kernel::tty::console) \
+    kernel::tty::console->print(msg "\n")
+
+#ifdef NDEBUG
+#define kmsgf_debug(...)
+#else
+#define kmsgf_debug(...) kmsgf(__VA_ARGS__)
+#endif

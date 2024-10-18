@@ -1,18 +1,31 @@
+#include <map>
+
+#include <assert.h>
+
+#include <kernel/log.hpp>
 #include <kernel/module.hpp>
 
-namespace kernel::module {
+namespace kernel::kmod {
 
-module::module(const char* name) : name(name) { }
+kmod::kmod(const char* name) : name(name) {}
 
-int insmod(module* mod) {
-    int ret = mod->init();
+static std::map<std::string, std::unique_ptr<kmod>> modules;
 
-    if (ret == MODULE_FAILED) {
-        delete mod;
-        return MODULE_FAILED;
+void load_internal_modules() {
+    for (auto loader = KMOD_LOADERS_START; *loader; ++loader) {
+        auto mod = (*loader)();
+        if (!mod)
+            continue;
+
+        if (int ret = mod->init(); ret != 0) {
+            kmsgf("[kernel] An error(%x) occured while loading \"%s\"", ret,
+                  mod->name);
+            continue;
+        }
+
+        auto [_, inserted] = modules.try_emplace(mod->name, std::move(mod));
+        assert(inserted);
     }
-
-    return MODULE_SUCCESS;
 }
 
-} // namespace kernel::module
+} // namespace kernel::kmod

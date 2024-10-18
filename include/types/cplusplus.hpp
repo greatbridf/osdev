@@ -6,7 +6,7 @@
 namespace types {
 
 class non_copyable {
-public:
+   public:
     virtual ~non_copyable() = default;
     non_copyable() = default;
     non_copyable(const non_copyable&) = delete;

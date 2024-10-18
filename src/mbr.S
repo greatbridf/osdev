@@ -1,74 +1,122 @@
-.section .text.bootsect
+.section .mbr
 .code16
 
-.globl mbr_start
-mbr_start:
-    movw %cs, %ax
-    movw %ax, %ds
-    movw %ax, %es
-    movw %ax, %ss
+move_mbr:
+    xor %ax, %ax
+    mov %ax, %ds
+    mov %ax, %es
+    mov %ax, %ss
 
-# perform a temporary stack
-    movw $stack_base, %ax
-    movw %ax, %bp
-    movw %ax, %sp
+    # build a temporary stack
+    xor %esp, %esp
+    mov $0x0e00, %sp
 
-# read the first 64k
-    call read_data
+    mov $128, %cx # 512 bytes
+    mov $0x7c00, %si
+    mov $0x0e00, %di
+    rep movsl
 
-# read the following 128k
-    addw $(0x100 * 16), read_data_segment
-    addl $(8 * 16), read_data_lba
-    call read_data
+    lgdt .Learly_gdt_descriptor
 
-    addw $(0x100 * 16), read_data_segment
-    addl $(8 * 16), read_data_lba
-    call read_data
-
-# read the 128k more
-    addw $(0x100 * 16), read_data_segment
-    addl $(8 * 16), read_data_lba
-    call read_data
-
-    addw $(0x100 * 16), read_data_segment
-    addl $(8 * 16), read_data_lba
-    call read_data
-
-# loader start
-    jmp 0x8000
-
-read_data:
-    movw $read_data_pack, %si
+    mov $.Lread_data_packet, %si
     mov $0x42, %ah
     mov $0x80, %dl
     int $0x13
-    jc read_data_error
-    ret
+    jc .Lhalt
 
-read_data_error:
+    # get memory size info and storage it
+    mov $0xe801, %ax
+    int $0x15
+    jc .Lhalt
+
+    cmp $0x86, %ah # unsupported function
+    je .Lhalt
+    cmp $0x80, %ah # invalid command
+    je .Lhalt
+
+    jcxz .Lax
+    mov %cx, %ax
+    mov %dx, %bx
+
+.Lax:
+    sub $1024, %esp
+    movzw %ax, %eax
+    mov %eax, 8(%esp)  # 1k blocks
+    movzw %bx, %ebx
+    mov %ebx, 12(%esp) # 64k blocks
+
+    # save the destination address to es:di
+    mov %sp, %di
+    add $16, %di # buffer is 1024 - 16 bytes
+
+    # set default entry size
+    movl $20, 4(%esp)
+
+    # clear %ebx, len
+    xor %ebx, %ebx
+    mov %ebx, (%esp)
+
+.Le820_read_mem_map:
+    # set the magic number to edx
+    mov $0x534D4150, %edx
+
+    # set function number to eax
+    mov $0xe820, %eax
+
+    # set default entry size
+    mov $24, %ecx
+
+    int $0x15
+
+    incl (%esp)
+    add $24, %edi
+
+    jc .Lsave_mem_fin
+    cmp $0, %ebx
+    jz .Lsave_mem_fin
+
+    cmp $24, %ecx
+    cmovnz 4(%esp), %ecx
+    mov %ecx, 4(%esp)
+
+    jmp .Le820_read_mem_map
+
+.Lsave_mem_fin:
+    cli
+    lidt .Lnull_idt_descriptor
+
+    mov %cr0, %eax
+    or $1, %eax
+    mov %eax, %cr0
+
+    ljmp $0x08, $start_32bit
+
+.Lhalt:
     hlt
-    jmp read_data_error
-
-.align 4
-read_data_pack:
-    .byte 0x10, 0
-read_data_count:
-    .word 128    # sector count (read 64k)
-read_data_offset:
-    .word 0x0000 # offset address
-read_data_segment:
-    .word 0x0800 # segment address
-read_data_lba:
-    .long 1      # lower 4 bytes of the LBA to read
-    .long 0      # higher 2 bytes of the LBA to read
-
-__mbr_code_border__:
-    .long 0xffffffff
+    jmp .Lhalt
 
 .align 16
-stack_edge:
-.space 128
-stack_base:
+.Learly_gdt:
+    .8byte 0x0                # null selector
+    .8byte 0x00cf9a000000ffff # code selector
+    .8byte 0x00cf92000000ffff # data selector
+    .8byte 0x000f9a000000ffff # 16 bit code selector
+    .8byte 0x000f92000000ffff # 16 bit data selector
 
-. = 510
-.byte 0x55, 0xaa
+# null IDT descriptor
+# so that exceptions will cause the system to reset
+.align 4
+.Lnull_idt_descriptor:
+    .word 0 # size
+    .long 0 # base
+
+.align 4
+.Learly_gdt_descriptor:
+    .word 0x27 # size
+    .long .Learly_gdt  # address
+
+.align 16
+.Lread_data_packet:
+    .long  0x00080010 # .stage1 takes up 4K, or 8 sectors
+    .long  0x00001000 # read to 0000:1000
+    .8byte 1          # read from LBA 1

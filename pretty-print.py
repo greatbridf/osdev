@@ -1,8 +1,23 @@
 import gdb.printing
 import re
 
-def create_iter(item, end, idx):
-    return vectorPrinter._iterator(item, end, idx)
+def parseCompressedPairElement(elem: gdb.Value) -> gdb.Value:
+    return elem[elem.type.fields()[0]]
+
+def parseCompressedPair(cpair: gdb.Value) -> tuple[gdb.Value, gdb.Value]:
+    fields = cpair.type.fields()
+
+    first = cpair[fields[0]]
+    second = cpair[fields[1]]
+
+    return parseCompressedPairElement(first), parseCompressedPairElement(second)
+
+def delegateChildren(val: gdb.Value):
+    try:
+        for field in val.type.fields():
+            yield field.name, val[field]
+    except TypeError:
+        yield '[value]', val
 
 class vectorPrinter:
     class _iterator:
@@ -18,7 +33,7 @@ class vectorPrinter:
         def __next__(self):
             if self.item >= self.end:
                 raise StopIteration
-            key = '[%d]' % self.idx
+            key = str(self.idx)
             iter = self.item.dereference()
             self.item += 1
             self.idx += 1
@@ -35,8 +50,9 @@ class vectorPrinter:
 
     def children(self):
         if self.val['m_size'] == 0:
-            return [ ('<vector of size 0>', '') ]
-        return self._iterator(self.val['m_data'], self.val['m_data'] + self.val['m_size'], 0)
+            return []
+        data, alloc = parseCompressedPair(self.val['m_data'])
+        return self._iterator(data, data + self.val['m_size'], 0)
 
 def _leftmost(node):
     ret = node
@@ -64,119 +80,142 @@ def _next(node):
 
 class rbtreePrinter:
     def __init__(self, type, val):
-        self.type = type
-        self.val = val['tree']
+        self.type: gdb.Type = type
+        self.val: gdb.Value = val['tree']
 
     def to_string(self):
-        return "%s of size %d" % (self.type, self.val['_size'])
+        return "%s of size %d" % (self.type, self.num_children())
 
     def display_hint(self):
         return 'array'
 
+    def num_children(self):
+        size, _ = parseCompressedPair(self.val['size_data'])
+        return size
+
     def children(self):
-        yield 'root', self.val['root']
-        if self.val['root'] == 0:
+        root, alloc = parseCompressedPair(self.val['root_data'])
+        size, comp = parseCompressedPair(self.val['size_data'])
+
+        # yield '[alloc]', alloc
+        # yield '[comp]', comp
+        # yield '[root]', root
+        if root == 0:
             return
 
-        yield 'size', self.val['_size']
-
-        nd = _leftmost(self.val['root'].dereference())
-        i = 0
-        while True:
-            yield "[%d]" % i, nd['value']
+        nd = _leftmost(root.dereference())
+        for i in range(size):
+            yield str(i), nd['value']
             nd = _next(nd)
-            i += 1
             if nd == None:
                 break
 
 class stringPrinter:
-    def __init__(self, val):
+    def __init__(self, val: gdb.Value):
         self.val = val
-    
+
     def to_string(self):
-        return self.val['m_data']
-    
-    def children(self):
-        yield 'str', self.val['m_data']
+        data, alloc = parseCompressedPair(self.val['m_data'])
+        data = data['in']
 
-        if self.val['m_data'] == 0:
-            return
+        if data['stackdata']['end'] == 0:
+            return data['stackdata']['str'].string()
+        return data['heapdata']['m_ptr'].string()
 
-        yield 'length', self.val['m_size'] - 1
+    def display_hint(self):
+        return 'string'
 
-        ptr = self.val['m_data']
-        i = 0
+class stringViewPrinter:
+    def __init__(self, val: gdb.Value):
+        self.val = val
+        self.string = val['m_str']
+        self.length = val['m_len']
 
-        while ptr.dereference() != 0:
-            yield '[%d]' % i, ptr.dereference()
-            ptr += 1
-            i += 1
+    def to_string(self):
+        return self.string.string(length=self.length)
 
-        yield '[%d]' % i, 0
+    def display_hint(self):
+        return 'string'
 
 class listPrinter:
     def __init__(self, val):
-        self.val = val
-    
+        self.val: gdb.Value = val
+        self.type: gdb.Type = val.type
+
+        this_type = self.type.unqualified().strip_typedefs()
+        if this_type.tag == None:
+            this_type = this_type.target()
+
+        self.value_node_type = gdb.lookup_type(this_type.tag + '::node').pointer()
+
     def to_string(self):
-        return "std::list of size %d" % self.val['m_size']
+        size, alloc = parseCompressedPair(self.val['m_pair'])
+        return 'std::list of size %d' % size
 
     def display_hint(self):
         return 'array'
 
+    def num_children(self):
+        size, alloc = parseCompressedPair(self.val['m_pair'])
+        return size
+
     def children(self):
         head = self.val['m_head']
-
-        yield 'head', head.address
 
         node = head['next']
         idx = 0
         while node != head.address:
-            nodeval = node.reinterpret_cast(
-                gdb.lookup_type(self.val.type.unqualified().strip_typedefs().tag + '::node').pointer()
-                )
-            yield '[%d]' % idx, nodeval['value']
+            nodeval = node.reinterpret_cast(self.value_node_type)
+            yield str(idx), nodeval['value']
             idx += 1
             node = node['next']
 
 class listIteratorPrinter:
     def __init__(self, val):
         self.val = val
-    
+
+        this_type: gdb.Type = val.type
+        this_type = this_type.unqualified().strip_typedefs()
+
+        if this_type.tag == None:
+            this_type = this_type.target()
+
+        type_tag: str = this_type.tag
+        type_tag = type_tag[:type_tag.rfind('::')]
+
+        self.value_node_type = gdb.lookup_type(type_tag + '::node').pointer()
+
     def children(self):
         yield 'addr', self.val['p']
         if self.val['p'] == 0:
             return
-        
-        nodeptr = self.val['p']
-        iter_type = self.val.type.unqualified().strip_typedefs().tag
-        iter_type = iter_type[:iter_type.rfind('::')]
-        nodeptr = nodeptr.cast(gdb.lookup_type(iter_type + '::node').pointer())
-        
+
+        nodeptr = self.val['p'].cast(self.value_node_type)
+
         yield 'value', nodeptr['value']
 
 class rbtreeIteratorPrinter:
     def __init__(self, val):
         self.val = val
-    
+
     def children(self):
         yield 'addr', self.val['p']
         if self.val['p'] == 0:
             return
-        
+
         yield 'value', self.val['p']['value']
 
 class vectorIteratorPrinter:
     def __init__(self, val):
         self.val = val
-    
+
     def children(self):
         yield 'value', self.val['m_ptr'].dereference()
 
 class pairPrinter:
     def __init__(self, val):
         self.val = val
-    
+
     def children(self):
         yield 'first', self.val['first']
         yield 'second', self.val['second']
@@ -184,7 +223,7 @@ class pairPrinter:
 class tuplePrinter:
     def __init__(self, val):
         self.val = val
-    
+
     def children(self):
         i = 0
         try:
@@ -198,56 +237,92 @@ class tuplePrinter:
                 yield 'tuple of size 0', ''
 
 class functionPrinter:
-    def __init__(self, val):
+    def __init__(self, val: gdb.Value):
         self.val = val
-    
+
     def to_string(self):
-        return self.val.type.tag
-    
-    def children(self):
-        print(self.val['_data'].type)
-        yield 'function data', self.val['_data']
+        return self.val.type.name
 
 class referenceWrapperPrinter:
     def __init__(self, val):
         self.val = val
-    
+
     def to_string(self):
         return "std::reference_wrapper to %x" % self.val['_ptr']
-    
+
     def children(self):
         yield 'addr', self.val['_ptr'].cast(gdb.lookup_type('void').pointer())
         yield 'reference', self.val['_ptr']
 
-def build_pretty_printer(val):
-    type = val.type
+class sharedPointerPrinter:
+    def __init__(self, val: gdb.Value):
+        self.val = val
+        self.pointer = val['ptr']
+        self.controlBlock = val['cb']
 
-    if type.code == gdb.TYPE_CODE_REF:
-        type = type.target()
-    if type.code == gdb.TYPE_CODE_PTR:
-        type = type.target()
-    
-    type = type.unqualified().strip_typedefs()
+    def to_string(self):
+        if self.pointer == 0:
+            return 'nullptr of %s' % self.val.type.name
+
+        refCount = self.controlBlock['ref_count']
+        weakCount = self.controlBlock['weak_count']
+        realPointer = self.controlBlock['ptr']
+        return '%s to 0x%x, ref(%d), wref(%d), cb(0x%x), memp(0x%x)' % (
+                self.val.type.name,
+                self.pointer,
+                refCount,
+                weakCount,
+                self.controlBlock,
+                realPointer)
+
+    def children(self):
+        if self.pointer == 0:
+            return []
+
+        content = self.pointer.dereference()
+        return delegateChildren(content)
+
+class uniquePointerPrinter:
+    def __init__(self, val: gdb.Value):
+        self.val = val
+        self.data = val['data']
+
+    def to_string(self):
+        pointer, deleter = parseCompressedPair(self.data)
+        if pointer == 0:
+            return 'nullptr of %s' % self.val.type.name
+
+        return "%s to 0x%x" % (self.val.type.name, pointer)
+
+    def children(self):
+        pointer, deleter = parseCompressedPair(self.data)
+        yield '[deleter]', deleter
+
+        if pointer == 0:
+            return
+
+        for item in delegateChildren(pointer.dereference()):
+            yield item
+
+def build_pretty_printer(val: gdb.Value):
+    type: gdb.Type = val.type.unqualified().strip_typedefs()
     typename = type.tag
 
     if typename == None:
         return None
-    
+
     if re.compile(r"^std::pair<.*, .*>$").match(typename):
         return pairPrinter(val)
-    
+
     if re.compile(r"^std::tuple<.*>$").match(typename):
         return tuplePrinter(val)
 
     if re.compile(r"^std::function<.*>$").match(typename):
         return functionPrinter(val)
-    
+
     if re.compile(r"^std::reference_wrapper<.*>$").match(typename):
         return referenceWrapperPrinter(val)
 
-    # if re.compile(r"^std::list<.*, .*>::node$").match(typename):
-    #     return None
-    
     if re.compile(r"^std::list<.*, .*>::_iterator<.*?>$").match(typename):
         return listIteratorPrinter(val)
 
@@ -269,9 +344,18 @@ def build_pretty_printer(val):
     if re.compile(r"^std::impl::rbtree<.*, .*, .*>::_iterator<.*?>$").match(typename):
         return rbtreeIteratorPrinter(val)
 
-    if re.compile(r"^types::string<.*>$").match(typename):
+    if re.compile(r"^std::basic_string<.*>$").match(typename):
         return stringPrinter(val)
-    
+
+    if re.compile(r"^types::string_view$").match(typename):
+        return stringViewPrinter(val)
+
+    if re.compile(r"^std::shared_ptr<.*>$").match(typename):
+        return sharedPointerPrinter(val)
+
+    if re.compile(r"^std::unique_ptr<.*>$").match(typename):
+        return uniquePointerPrinter(val)
+
     return None
 
 gdb.pretty_printers.append(build_pretty_printer)

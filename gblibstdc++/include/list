@@ -1,6 +1,7 @@
 #ifndef __GBLIBCPP_LIST__
 #define __GBLIBCPP_LIST__
 
+#include <bits/compressed_pair>
 #include <bits/iter_ops>
 
 #include <memory>
@@ -11,8 +12,7 @@
 
 namespace std {
 
-template <typename T,
-    typename Allocator = std::allocator<T>>
+template <typename T, typename Allocator = std::allocator<T>>
 class list {
 private:
     struct node_base {
@@ -75,7 +75,7 @@ public:
         using reference = std::add_lvalue_reference_t<value_type>;
 
         friend class list;
-    
+
     private:
         node_pointer p;
 
@@ -104,25 +104,30 @@ public:
         { p = p->prev; return *this; }
         constexpr _iterator operator--(int) noexcept
         { _iterator ret(p); (void)this->operator--(); return ret; }
-        constexpr operator bool() { return p; }
-        constexpr operator _iterator<true>() { return _iterator<true> { p }; }
+        constexpr operator bool() const { return p; }
+        constexpr operator _iterator<true>() const { return _iterator<true> { p }; }
     };
 
 private:
     node_base m_head;
-    size_type m_size;
-    node_alloc_type m_alloc;
+    impl::compressed_pair<size_type, node_alloc_type> m_pair;
 
 private:
     // move m_head and m_size of other to *this
     // other MUST NOT be empty, *this MUST be empty
     constexpr void _move_from(list&& other) noexcept
     {
-        std::swap(m_size, other.m_size);
+        std::swap(_size(), other._size());
         other.m_head.prev->connect(&m_head);
         m_head.connect(other.m_head.next);
         other.m_head.next = other.m_head.prev = &other.m_head;
     }
+
+    constexpr size_type& _size() noexcept { return m_pair.first(); }
+    constexpr const size_type& _size() const noexcept { return m_pair.first(); }
+
+    constexpr node_alloc_type& _alloc() noexcept { return m_pair.second(); }
+    constexpr const node_alloc_type& _alloc() const noexcept { return m_pair.second(); }
 
 public:
     __GBLIBCPP_CONSTEXPR
@@ -144,38 +149,33 @@ public:
     __GBLIBCPP_CONSTEXPR
     iterator emplace(const_iterator pos, Args&&... args)
     {
-        node* nd = node_alloc_traits::allocate(m_alloc, 1);
-        node_alloc_traits::construct(m_alloc, nd, std::forward<Args>(args)...);
+        node* nd = node_alloc_traits::allocate(_alloc(), 1);
+        node_alloc_traits::construct(_alloc(), nd, std::forward<Args>(args)...);
 
         nd->next = pos.p;
         nd->prev = pos.p->prev;
         nd->next->prev = nd;
         nd->prev->next = nd;
 
-        ++m_size;
+        ++_size();
         return iterator { nd };
     }
-    
+
     explicit __GBLIBCPP_CONSTEXPR
-    list(const Allocator& alloc)
-        : m_head { }, m_size { }, m_alloc(alloc) { }
+    list(const Allocator& alloc): m_head{}, m_pair{0, alloc} { }
 
     __GBLIBCPP_CONSTEXPR
-    list() : list(Allocator()) {}
+    list(): list(Allocator()) {}
 
     __GBLIBCPP_CONSTEXPR
-    explicit list(size_type count,
-        const Allocator& alloc = Allocator())
-        : list(alloc)
+    explicit list(size_type count, const Allocator& alloc = Allocator()): list(alloc)
     {
         while (count--)
             emplace_back();
     }
 
     __GBLIBCPP_CONSTEXPR
-    list(size_type count, const T& value,
-        const Allocator& alloc = Allocator())
-        : list(alloc)
+    list(size_type count, const T& value, const Allocator& alloc = Allocator()): list(alloc)
     {
         while (count--)
             emplace_back(value);
@@ -183,28 +183,22 @@ public:
 
     template <typename InputIter>
     __GBLIBCPP_CONSTEXPR
-    list(InputIter first, InputIter last,
-        const Allocator& alloc = Allocator())
+    list(InputIter first, InputIter last, const Allocator& alloc = Allocator())
         : list(alloc) { insert(first, last); }
 
     __GBLIBCPP_CONSTEXPR
-    list(const list& other, const Allocator& alloc)
-        : list(alloc)
+    list(const list& other, const Allocator& alloc): list(alloc)
     {
         // TODO: select_on_container_copy_construction
         for (const auto& item : other)
             emplace_back(item);
     }
     __GBLIBCPP_CONSTEXPR
-    list(const list& other)
-        : list(other,
-            alloc_traits::select_on_container_copy_construction(m_alloc))
-    { }
+    list(const list& other): list(other,
+            alloc_traits::select_on_container_copy_construction(_alloc())) { }
 
     __GBLIBCPP_CONSTEXPR
-    list(list&& other)
-        : m_head { }, m_size { }
-        , m_alloc(std::move(other.m_alloc))
+    list(list&& other): m_head{}, m_pair{0, std::move(other._alloc())}
     {
         if (other.empty())
             return;
@@ -212,16 +206,15 @@ public:
     }
 
     __GBLIBCPP_CONSTEXPR
-    list(list&& other, const Allocator& alloc)
-        : m_head { }, m_size { }, m_alloc(alloc)
+    list(list&& other, const Allocator& alloc): m_head{}, m_pair{0, alloc}
     {
-        if (other.m_alloc != alloc) {
+        if (other._alloc() != alloc) {
             for (auto iter = other.begin(); iter != other.end(); ++iter)
                 emplace(cend(), std::move(*iter));
             other.clear();
             return;
         }
-        // other.m_alloc == alloc
+        // other._alloc() == alloc
         if (other.empty())
             return;
 
@@ -236,23 +229,23 @@ public:
         for (const auto& item : ilist)
             emplace_back(item);
     }
-    
+
     __GBLIBCPP_CONSTEXPR
     ~list()
     {
         clear();
         m_head.next = m_head.prev = nullptr;
     }
-    
+
     __GBLIBCPP_CONSTEXPR
     list& operator=(const list& other)
     {
-        // TODO: reuse memory if m_alloc == other.m_alloc
+        // TODO: reuse memory if _alloc() == other._alloc()
         clear();
 
         if constexpr (alloc_traits::
             propagate_on_container_copy_assignment::value)
-            m_alloc = other.m_alloc;
+            _alloc() = other._alloc();
 
         for (const auto& item : other)
             emplace_back(item);
@@ -265,7 +258,7 @@ public:
         if (alloc_traits::
             propagate_on_container_move_assignment::value) {
             clear();
-            m_alloc = std::move(other.m_alloc);
+            _alloc() = std::move(other._alloc());
 
             if (other.empty())
                 return *this;
@@ -274,10 +267,10 @@ public:
             return *this;
         }
 
-        // TODO: reuse memory if m_alloc == other.m_alloc
+        // TODO: reuse memory if _alloc() == other._alloc()
         clear();
 
-        if (m_alloc != other.m_alloc) {
+        if (_alloc() != other._alloc()) {
             for (auto iter = other.begin(); iter != other.end(); ++iter)
                 emplace(cend(), std::move(*iter));
             other.clear();
@@ -323,7 +316,7 @@ public:
     }
 
     __GBLIBCPP_CONSTEXPR
-    allocator_type get_allocator() const noexcept { return m_alloc; }
+    allocator_type get_allocator() const noexcept { return _alloc(); }
 
     __GBLIBCPP_CONSTEXPR
     reference front() { return *begin(); }
@@ -398,10 +391,10 @@ public:
         pos.p->next->prev = pos.p->prev;
         pos.p->prev->next = pos.p->next;
 
-        node_alloc_traits::destroy(m_alloc, (node*)pos.p);
-        node_alloc_traits::deallocate(m_alloc, (node*)pos.p, 1);
+        node_alloc_traits::destroy(_alloc(), (node*)pos.p);
+        node_alloc_traits::deallocate(_alloc(), (node*)pos.p, 1);
 
-        --m_size;
+        --_size();
         return ret;
     }
 
@@ -421,7 +414,7 @@ public:
     }
 
     __GBLIBCPP_CONSTEXPR
-    size_type size() const noexcept { return m_size; }
+    size_type size() const noexcept { return _size(); }
 
     __GBLIBCPP_CONSTEXPR
     bool empty() const noexcept { return size() == 0; }
@@ -430,9 +423,9 @@ public:
     void swap(list& other)
     {
         if constexpr (alloc_traits::propagate_on_container_swap::value)
-            std::swap(m_alloc, other.m_alloc);
+            std::swap(_alloc(), other._alloc());
 
-        std::swap(m_size, other.m_size);
+        std::swap(_size(), other.m_size);
         std::swap(m_head, other.m_head);
         std::swap(m_head.next->prev, other.m_head.next->prev);
         std::swap(m_head.prev->next, other.m_head.prev->next);

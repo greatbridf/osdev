@@ -6,26 +6,7 @@
 
 #define BYTES_PER_MAX_COPY_UNIT (sizeof(uint32_t) / sizeof(uint8_t))
 
-int memcmp(const void* ptr1, const void* ptr2, size_t num)
-{
-    while (num--) {
-        if (*(const char*)ptr1 < *(const char*)ptr2)
-            return -1;
-        else if (*(const char*)ptr1 > *(const char*)ptr2)
-            return 1;
-    }
-    return 0;
-}
-
-void* memmove(void* dst, const void* src, size_t n)
-{
-    void* orig_dst = dst;
-    while (n--)
-        *(char*)(dst++) = *(const char*)(src++);
-    return orig_dst;
-}
-
-void* memcpy(void* _dst, const void* _src, size_t n)
+static void* _memcpy(void* _dst, const void* _src, size_t n)
 {
     void* orig_dst = _dst;
     uint8_t* dst = (uint8_t*)_dst;
@@ -41,12 +22,7 @@ void* memcpy(void* _dst, const void* _src, size_t n)
     return orig_dst;
 }
 
-void* mempcpy(void* dst, const void* src, size_t n)
-{
-    return memcpy(dst, src, n) + n;
-}
-
-void* memset(void* _dst, int c, size_t n)
+static void* _memset(void* _dst, int c, size_t n)
 {
     uint8_t* dst = (uint8_t*)_dst;
     c &= 0xff;
@@ -61,7 +37,7 @@ void* memset(void* _dst, int c, size_t n)
     return dst;
 }
 
-size_t strlen(const char* str)
+static size_t _strlen(const char* str)
 {
     size_t n = 0;
     while (*(str++) != '\0')
@@ -82,7 +58,7 @@ char* strchr(const char* str, int c)
 
 char* strrchr(const char* str, int c)
 {
-    const char* p = str + strlen(str) - 1;
+    const char* p = str + _strlen(str) - 1;
     while (p >= str) {
         if (*p == c)
             return (char*)p;
@@ -96,23 +72,23 @@ char* strchrnul(const char* str, int c)
     char* ret = strchr(str, c);
     if (ret)
         return ret;
-    return (char*)str + strlen(str);
+    return (char*)str + _strlen(str);
 }
 
 char* strcpy(char* dst, const char* src)
 {
-    return memcpy(dst, src, strlen(src) + 1);
+    return _memcpy(dst, src, _strlen(src) + 1);
 }
 
 char* strncpy(char* dst, const char* src, size_t n)
 {
-    size_t len = strlen(src);
+    size_t len = _strlen(src);
 
     if (len < n) {
-        memset(dst + len, 0x00, n - len);
-        memcpy(dst, src, len);
+        _memset(dst + len, 0x00, n - len);
+        _memcpy(dst, src, len);
     } else {
-        memcpy(dst, src, n);
+        _memcpy(dst, src, n);
     }
 
     return dst;
@@ -120,18 +96,18 @@ char* strncpy(char* dst, const char* src, size_t n)
 
 char* stpcpy(char* restrict dst, const char* restrict src)
 {
-    return memcpy(dst, src, strlen(src) + 1) + strlen(src);
+    return _memcpy(dst, src, _strlen(src) + 1) + _strlen(src);
 }
 
 char* stpncpy(char* restrict dst, const char* restrict src, size_t n)
 {
-    size_t len = strlen(src);
+    size_t len = _strlen(src);
 
     if (len < n) {
-        memset(dst + len, 0x00, n - len);
-        memcpy(dst, src, len);
+        _memset(dst + len, 0x00, n - len);
+        _memcpy(dst, src, len);
     } else {
-        memcpy(dst, src, n);
+        _memcpy(dst, src, n);
     }
 
     return dst + len;
@@ -259,14 +235,14 @@ char* strerror(int errnum)
 
 char* strndup(const char* str, size_t n)
 {
-    size_t len = strlen(str);
+    size_t len = _strlen(str);
     if (len > n)
         len = n;
     char* ret = malloc(len + 1);
     if (!ret)
         return NULL;
     
-    memcpy(ret, str, len);
+    _memcpy(ret, str, len);
     ret[len] = 0;
     return ret;
 }

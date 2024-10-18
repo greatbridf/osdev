@@ -6,7 +6,7 @@ QEMU_DEBUG_FLAG=#-d cpu_reset,int
 QEMU_ARGS=-machine q35 -drive id=disk,file=build/boot.img,format=raw,if=none \
 	-device ahci,id=ahci -device ide-hd,drive=disk,bus=ahci.0 \
 	-no-reboot -no-shutdown $(QEMU_ACCELERATION_FLAG) $(QEMU_DEBUG_FLAG)
-	
+
 CROSS_COMPILE=##PLACEHOLDER_4##
 .PHONY: run
 run: build
@@ -42,7 +42,8 @@ clean-all: clean
 
 .PHONY: debug
 debug:
-	$(GDB_BIN) --symbols=build/kernel.out --init-eval-command 'set pagination off' --init-eval-command 'target remote:1234' --eval-command 'hbr kernel_main' --eval-command 'c'
+	-$(GDB_BIN) --symbols=build/kernel.out --init-eval-command 'source pretty-print.py' --init-eval-command 'set pagination off' --init-eval-command 'set output-radix 16' --init-eval-command 'set print pretty on' --init-eval-command 'target remote:1234'
+	-killall $(QEMU_BIN)
 
 build/boot.vdi: build/boot.img
 	-rm build/boot.vdi

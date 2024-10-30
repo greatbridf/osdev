@@ -8,7 +8,7 @@ namespace kernel::async {
 
 using spinlock_t = unsigned long volatile;
 using lock_context_t = unsigned long;
-using preempt_count_t = std::size_t;
+using preempt_count_t = ssize_t;
 
 void preempt_disable();
 void preempt_enable();

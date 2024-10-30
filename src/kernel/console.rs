@@ -1,6 +1,8 @@
 use crate::prelude::*;
 
-pub struct Console {}
+use lazy_static::lazy_static;
+
+pub struct Console;
 
 impl Write for Console {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
@@ -19,11 +21,13 @@ impl Write for Console {
 }
 
 #[doc(hidden)]
-pub fn _print(args: core::fmt::Arguments) -> core::fmt::Result {
-    CONSOLE.lock().write_fmt(args)
+pub fn _print(args: core::fmt::Arguments) {
+    dont_check!(CONSOLE.lock_irq().write_fmt(args))
 }
 
-pub static CONSOLE: spin::Mutex<Console> = spin::Mutex::new(Console {});
+lazy_static! {
+    pub static ref CONSOLE: Spin<Console> = Spin::new(Console {});
+}
 
 macro_rules! print {
     ($($arg:tt)*) => {
@@ -40,4 +44,30 @@ macro_rules! println {
     };
 }
 
-pub(crate) use {print, println};
+macro_rules! println_warn {
+    ($($arg:tt)*) => {
+        $crate::println!("[kernel: warn] {}", format_args!($($arg)*))
+    };
+}
+
+macro_rules! println_debug {
+    ($($arg:tt)*) => {
+        $crate::println!("[kernel:debug] {}", format_args!($($arg)*))
+    };
+}
+
+macro_rules! println_info {
+    ($($arg:tt)*) => {
+        $crate::println!("[kernel: info] {}", format_args!($($arg)*))
+    };
+}
+
+macro_rules! println_fatal {
+    ($($arg:tt)*) => {
+        $crate::println!("[kernel:fatal] {}", format_args!($($arg)*))
+    };
+}
+
+pub(crate) use {
+    print, println, println_debug, println_fatal, println_info, println_warn,
+};

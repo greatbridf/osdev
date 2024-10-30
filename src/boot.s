@@ -128,8 +128,8 @@ start_32bit:
     # read kimage into memory
 	lea -16(%esp), %esp
     mov $KIMAGE_32K_COUNT, %ecx
-    mov $KERNEL_IMAGE_PADDR, 4(%esp) # destination address
-	mov $9, (%esp) # LBA
+    movl $KERNEL_IMAGE_PADDR, 4(%esp) # destination address
+	movl $9, (%esp) # LBA
 
 .Lread_kimage:
 	mov (%esp), %edi
@@ -139,8 +139,8 @@ start_32bit:
     call read_disk
 	mov %ebx, %ecx
 
-    add $0x8000, 4(%esp)
-	add $64, (%esp)
+    addl $0x8000, 4(%esp)
+	addl $64, (%esp)
 
     loop .Lread_kimage
 

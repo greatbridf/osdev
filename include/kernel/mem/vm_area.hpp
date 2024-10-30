@@ -20,41 +20,41 @@ struct vm_area {
 
     unsigned long flags;
 
-    const fs::rust_inode_handle* mapped_file;
+    fs::dentry_pointer mapped_file;
     std::size_t file_offset;
 
     constexpr bool is_avail(uintptr_t ostart, uintptr_t oend) const noexcept {
         return (ostart >= end || oend <= start);
     }
 
-    constexpr bool operator<(const vm_area& rhs) const noexcept {
-        return end <= rhs.start;
-    }
-    constexpr bool operator<(uintptr_t rhs) const noexcept {
-        return end <= rhs;
-    }
-    friend constexpr bool operator<(uintptr_t lhs,
-                                    const vm_area& rhs) noexcept {
+    constexpr bool operator<(const vm_area& rhs) const noexcept { return end <= rhs.start; }
+    constexpr bool operator<(uintptr_t rhs) const noexcept { return end <= rhs; }
+    friend constexpr bool operator<(uintptr_t lhs, const vm_area& rhs) noexcept {
         return lhs < rhs.start;
     }
 
     constexpr vm_area(uintptr_t start, unsigned long flags, uintptr_t end,
-                      const fs::rust_inode_handle* mapped_file = nullptr,
-                      std::size_t offset = 0)
+                      fs::dentry_pointer mapped_file = nullptr, std::size_t offset = 0)
         : start{start}
         , end{end}
         , flags{flags}
-        , mapped_file{mapped_file}
+        , mapped_file{std::move(mapped_file)}
         , file_offset{offset} {}
 
     constexpr vm_area(uintptr_t start, unsigned long flags,
-                      const fs::rust_inode_handle* mapped_file = nullptr,
-                      std::size_t offset = 0)
+                      fs::dentry_pointer mapped_file = nullptr, std::size_t offset = 0)
         : start{start}
         , end{start}
         , flags{flags}
-        , mapped_file{mapped_file}
+        , mapped_file{std::move(mapped_file)}
         , file_offset{offset} {}
+
+    inline vm_area(const vm_area& other)
+        : start{other.start}
+        , end{other.end}
+        , flags{other.flags}
+        , mapped_file{d_get(other.mapped_file)}
+        , file_offset{other.file_offset} {}
 };
 
 } // namespace kernel::mem

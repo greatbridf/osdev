@@ -76,12 +76,10 @@ int kernel::syscall::do_open(const char __user* path, int flags, mode_t mode) {
     mode &= ~current_process->umask;
 
     // TODO: use copy_from_user
-    return current_process->files.open(current_process->cwd, path, flags,
-                                       mode);
+    return current_process->files.open(current_process->cwd, path, flags, mode);
 }
 
-int kernel::syscall::do_symlink(const char __user* target,
-                                const char __user* linkpath) {
+int kernel::syscall::do_symlink(const char __user* target, const char __user* linkpath) {
     // TODO: use copy_from_user
     auto [dent, status] = current_open(linkpath, false);
     if (!dent)
@@ -94,8 +92,7 @@ int kernel::syscall::do_symlink(const char __user* target,
     return fs::fs_symlink(dent.get(), target);
 }
 
-int kernel::syscall::do_readlink(const char __user* pathname, char __user* buf,
-                                 size_t buf_size) {
+int kernel::syscall::do_readlink(const char __user* pathname, char __user* buf, size_t buf_size) {
     // TODO: use copy_from_user
     auto [dent, status] = current_open(pathname, false);
 
@@ -106,7 +103,7 @@ int kernel::syscall::do_readlink(const char __user* pathname, char __user* buf,
         return -EINVAL;
 
     // TODO: use copy_to_user
-    return fs_readlink(fs::r_dentry_get_inode(dent.get()), buf, buf_size);
+    return fs::fs_readlink(dent.get(), buf, buf_size);
 }
 
 int kernel::syscall::do_ioctl(int fd, unsigned long request, uintptr_t arg3) {
@@ -176,8 +173,7 @@ int kernel::syscall::do_ioctl(int fd, unsigned long request, uintptr_t arg3) {
             break;
         }
         default:
-            kmsgf("[error] the ioctl() function %x is not implemented",
-                  request);
+            kmsgf("[error] the ioctl() function %x is not implemented", request);
             return -EINVAL;
     }
 
@@ -261,8 +257,8 @@ off_t kernel::syscall::do_lseek(int fd, off_t offset, int whence) {
     return file->seek(offset, whence);
 }
 
-uintptr_t kernel::syscall::do_mmap_pgoff(uintptr_t addr, size_t len, int prot,
-                                         int flags, int fd, off_t pgoffset) {
+uintptr_t kernel::syscall::do_mmap_pgoff(uintptr_t addr, size_t len, int prot, int flags, int fd,
+                                         off_t pgoffset) {
     if (addr & 0xfff)
         return -EINVAL;
     if (len == 0)
@@ -328,8 +324,7 @@ int kernel::syscall::do_munmap(uintptr_t addr, size_t len) {
     return current_process->mms.unmap(addr, len, true);
 }
 
-ssize_t kernel::syscall::do_sendfile(int out_fd, int in_fd,
-                                     off_t __user* offset, size_t count) {
+ssize_t kernel::syscall::do_sendfile(int out_fd, int in_fd, off_t __user* offset, size_t count) {
     auto* out_file = current_process->files[out_fd];
     auto* in_file = current_process->files[in_fd];
 
@@ -368,8 +363,8 @@ ssize_t kernel::syscall::do_sendfile(int out_fd, int in_fd,
     return totn;
 }
 
-int kernel::syscall::do_statx(int dirfd, const char __user* path, int flags,
-                              unsigned int mask, statx __user* statxbuf) {
+int kernel::syscall::do_statx(int dirfd, const char __user* path, int flags, unsigned int mask,
+                              statx __user* statxbuf) {
     // AT_STATX_SYNC_AS_STAT is the default value
     if ((flags & AT_STATX_SYNC_TYPE) != AT_STATX_SYNC_AS_STAT) {
         NOT_IMPLEMENTED;
@@ -386,7 +381,7 @@ int kernel::syscall::do_statx(int dirfd, const char __user* path, int flags,
         return status;
 
     // TODO: copy to user
-    return fs_statx(fs::r_dentry_get_inode(dent.get()), statxbuf, mask);
+    return fs::fs_statx(dent.get(), statxbuf, mask);
 }
 
 int kernel::syscall::do_fcntl(int fd, int cmd, unsigned long arg) {
@@ -427,7 +422,7 @@ int kernel::syscall::do_truncate(const char __user* pathname, long length) {
     if (!dent || status)
         return status;
 
-    return fs_truncate(fs::r_dentry_get_inode(dent.get()), length);
+    return fs::fs_truncate(dent.get(), length);
 }
 
 int kernel::syscall::do_unlink(const char __user* pathname) {
@@ -457,8 +452,7 @@ int kernel::syscall::do_access(const char __user* pathname, int mode) {
     }
 }
 
-int kernel::syscall::do_mknod(const char __user* pathname, mode_t mode,
-                              dev_t dev) {
+int kernel::syscall::do_mknod(const char __user* pathname, mode_t mode, dev_t dev) {
     mode &= S_IFMT | (~current_process->umask & 0777);
     auto [dent, status] = current_open(pathname);
     if (!dent)

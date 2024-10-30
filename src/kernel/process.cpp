@@ -327,9 +327,14 @@ extern "C" void asm_ctx_switch(uintptr_t* curr_sp, uintptr_t* next_sp);
 extern "C" void after_ctx_switch() {
     current_thread->kstack.load_interrupt_stack();
     current_thread->load_thread_area32();
+
+    kernel::async::preempt_enable();
 }
 
-bool _schedule() {
+// call this with preempt_count == 1
+// after this function returns, preempt_count will be 0
+static bool do_schedule() {
+    asm volatile("" : : : "memory");
     auto* next_thd = kernel::task::dispatcher::next();
 
     if (current_thread != next_thd) {
@@ -342,21 +347,41 @@ bool _schedule() {
         auto* curr_thd = current_thread;
         current_thread = next_thd;
 
+        // this implies preempt_enable()
         asm_ctx_switch(&curr_thd->kstack.sp, &next_thd->kstack.sp);
+    } else {
+        kernel::async::preempt_enable();
     }
 
     return current_thread->signals.pending_signal() == 0;
 }
 
-bool schedule() {
-    if (kernel::async::preempt_count() != 0)
-        return true;
+static inline void check_preempt_count(kernel::async::preempt_count_t n) {
+    if (kernel::async::preempt_count() != n) [[unlikely]] {
+        kmsgf(
+            "[kernel:fatal] trying to call schedule_now() with preempt count "
+            "%d, expected %d",
+            kernel::async::preempt_count(), n);
+        assert(kernel::async::preempt_count() == n);
+    }
+}
 
-    return _schedule();
+bool schedule_now() {
+    check_preempt_count(0);
+    kernel::async::preempt_disable();
+    bool result = do_schedule();
+    return result;
+}
+
+// call this with preempt_count == 1
+bool schedule_now_preempt_disabled() {
+    check_preempt_count(1);
+    return do_schedule();
 }
 
 void NORETURN schedule_noreturn(void) {
-    _schedule();
+    schedule_now();
+    kmsgf("[kernel:fatal] an schedule_noreturn() DOES return");
     freeze();
 }
 
@@ -365,6 +390,7 @@ void NORETURN freeze(void) {
         asm volatile("cli\n\thlt");
 }
 
+// TODO!!!: make sure we call this after having done all clean up works
 void NORETURN kill_current(int signo) {
     procs->kill(current_process->pid, (signo + 128) << 8 | (signo & 0xff));
     schedule_noreturn();

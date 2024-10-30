@@ -24,7 +24,7 @@ use prelude::*;
 
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
-    dont_check!(println!("[kernel] panic: {:?}", info));
+    println_fatal!("panicked at {:?}\n\t\t{}", info.location(), info.message());
 
     unsafe { bindings::root::freeze() };
 }

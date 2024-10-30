@@ -187,6 +187,9 @@ void tty::_echo_char(int c) {
     this->show_char(c);
 }
 
+// TODO!!!: this function is racy as it acesses this->buf without
+//          acquiring this->mtx_buf or doing any synchronization
+//
 // do some ignore and remapping work
 // real commit operation is in _real_commit_char()
 void tty::commit_char(int c) {

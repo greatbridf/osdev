@@ -61,41 +61,30 @@ extern "C" int fs_mknod(struct dentry* at, mode_t mode, dev_t sn);
 extern "C" int fs_unlink(struct dentry* at);
 extern "C" int fs_symlink(struct dentry* at, const char* target);
 
-extern "C" int fs_statx(const struct rust_inode_handle* inode,
-                        struct statx* stat, unsigned int mask);
-extern "C" int fs_readlink(const struct rust_inode_handle* inode, char* buf,
-                           size_t buf_size);
-extern "C" int fs_truncate(const struct rust_inode_handle* file, size_t size);
-extern "C" size_t fs_read(const struct rust_inode_handle* file, char* buf,
-                          size_t buf_size, size_t offset, size_t n);
-extern "C" size_t fs_write(const struct rust_inode_handle* file,
-                           const char* buf, size_t offset, size_t n);
+extern "C" int fs_statx(struct dentry* file, struct statx* stat, unsigned int mask);
+extern "C" int fs_readlink(struct dentry* file, char* buf, size_t buf_size);
+extern "C" int fs_truncate(struct dentry* file, size_t size);
+extern "C" size_t fs_read(struct dentry* file, char* buf, size_t buf_size, size_t offset, size_t n);
+extern "C" size_t fs_write(struct dentry* file, const char* buf, size_t offset, size_t n);
 
 using readdir_callback_fn = std::function<int(const char*, size_t, ino_t)>;
 
-extern "C" ssize_t fs_readdir(const struct rust_inode_handle* file,
-                              size_t offset,
+extern "C" ssize_t fs_readdir(struct dentry* dir, size_t offset,
                               const readdir_callback_fn* callback);
 
-extern "C" int fs_mount(dentry* mnt, const char* source,
-                        const char* mount_point, const char* fstype,
-                        unsigned long flags, const void* data);
+extern "C" int fs_mount(dentry* mnt, const char* source, const char* mount_point,
+                        const char* fstype, unsigned long flags, const void* data);
 
-extern "C" mode_t r_get_inode_mode(struct rust_inode_handle* inode);
-extern "C" size_t r_get_inode_size(struct rust_inode_handle* inode);
+extern "C" mode_t r_dentry_get_mode(struct dentry* dentry);
+extern "C" size_t r_dentry_get_size(struct dentry* dentry);
 extern "C" bool r_dentry_is_directory(struct dentry* dentry);
 extern "C" bool r_dentry_is_invalid(struct dentry* dentry);
 
-// borrow from dentry->inode
-extern "C" struct rust_inode_handle* r_dentry_get_inode(struct dentry* dentry);
 extern "C" struct dentry* r_get_root_dentry();
 
-#define current_open(...) \
-    fs::open(current_process->fs_context, current_process->cwd, __VA_ARGS__)
+#define current_open(...) fs::open(current_process->fs_context, current_process->cwd, __VA_ARGS__)
 
-std::pair<dentry_pointer, int> open(const fs_context& context,
-                                    const dentry_pointer& cwd,
-                                    types::string_view path,
-                                    bool follow_symlinks = true);
+std::pair<dentry_pointer, int> open(const fs_context& context, const dentry_pointer& cwd,
+                                    types::string_view path, bool follow_symlinks = true);
 
 } // namespace fs

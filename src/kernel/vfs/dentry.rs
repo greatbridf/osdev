@@ -19,7 +19,7 @@ use bindings::{EINVAL, ELOOP, ENOENT, ENOTDIR};
 use super::inode::Inode;
 
 struct DentryData {
-    inode: Arc<Inode>,
+    inode: Arc<dyn Inode>,
     flags: u64,
 }
 
@@ -125,35 +125,29 @@ impl Dentry {
         Arc::as_ptr(&self.parent)
     }
 
-    fn save_data(&self, inode: Arc<Inode>, flags: u64) -> KResult<()> {
+    fn save_data(&self, inode: Arc<dyn Inode>, flags: u64) -> KResult<()> {
         let new = DentryData { inode, flags };
 
         let old = self.data.swap(Some(Arc::new(new)));
+        // Safety: old data is `None`, so it's safe to emit the `drop` call
         assert!(old.is_none());
 
         Ok(())
     }
 
-    pub fn save_reg(&self, file: Arc<Inode>) -> KResult<()> {
+    pub fn save_reg(&self, file: Arc<dyn Inode>) -> KResult<()> {
         self.save_data(file, D_REGULAR)
     }
 
-    pub fn save_symlink(&self, link: Arc<Inode>) -> KResult<()> {
+    pub fn save_symlink(&self, link: Arc<dyn Inode>) -> KResult<()> {
         self.save_data(link, D_SYMLINK)
     }
 
-    pub fn save_dir(&self, dir: Arc<Inode>) -> KResult<()> {
+    pub fn save_dir(&self, dir: Arc<dyn Inode>) -> KResult<()> {
         self.save_data(dir, D_DIRECTORY)
     }
 
-    pub fn invalidate(&self) -> KResult<()> {
-        let old = self.data.swap(None);
-        assert!(old.is_some());
-
-        Ok(())
-    }
-
-    pub fn get_inode(&self) -> KResult<Arc<Inode>> {
+    pub fn get_inode(&self) -> KResult<Arc<dyn Inode>> {
         self.data
             .load()
             .as_ref()
@@ -200,16 +194,10 @@ impl Dentry {
                 let mut buffer = [0u8; 256];
                 let mut buffer = ByteBuffer::new(&mut buffer);
 
-                data.inode.readlink(&data.inode, &mut buffer)?;
+                data.inode.readlink(&mut buffer)?;
                 let path = Path::new(buffer.data())?;
 
-                let dentry = Self::open_recursive(
-                    context,
-                    &dentry.parent,
-                    path,
-                    true,
-                    nrecur + 1,
-                )?;
+                let dentry = Self::open_recursive(context, &dentry.parent, path, true, nrecur + 1)?;
 
                 Self::resolve_directory(context, dentry, nrecur + 1)
             }
@@ -251,11 +239,7 @@ impl Dentry {
                 PathComponent::TrailingEmpty | PathComponent::Current => {} // pass
                 PathComponent::Parent => {
                     if !cwd.hash_eq(root_dentry.as_ref()) {
-                        cwd = Self::resolve_directory(
-                            context,
-                            cwd.parent.clone(),
-                            nrecur,
-                        )?;
+                        cwd = Self::resolve_directory(context, cwd.parent.clone(), nrecur)?;
                     }
                     continue;
                 }
@@ -275,16 +259,10 @@ impl Dentry {
                     let mut buffer = [0u8; 256];
                     let mut buffer = ByteBuffer::new(&mut buffer);
 
-                    data.inode.readlink(&data.inode, &mut buffer)?;
+                    data.inode.readlink(&mut buffer)?;
                     let path = Path::new(buffer.data())?;
 
-                    cwd = Self::open_recursive(
-                        context,
-                        &cwd.parent,
-                        path,
-                        true,
-                        nrecur + 1,
-                    )?;
+                    cwd = Self::open_recursive(context, &cwd.parent, path, true, nrecur + 1)?;
                 }
             }
         }
@@ -302,18 +280,11 @@ pub extern "C" fn dentry_open(
     follow: bool,
 ) -> *const Dentry {
     match (|| -> KResult<Arc<Dentry>> {
-        let path =
-            Path::new(unsafe { core::slice::from_raw_parts(path, path_len) })?;
+        let path = Path::new(unsafe { core::slice::from_raw_parts(path, path_len) })?;
 
         let context = FsContext { root: context_root };
 
-        Dentry::open_recursive(
-            &context,
-            Dentry::from_raw(&cwd).as_ref(),
-            path,
-            follow,
-            0,
-        )
+        Dentry::open_recursive(&context, Dentry::from_raw(&cwd).as_ref(), path, follow, 0)
     })() {
         Ok(dentry) => Arc::into_raw(dentry),
         Err(err) => (-(err as i32) as usize) as *const Dentry,
@@ -373,22 +344,6 @@ pub extern "C" fn r_dput(dentry: *const Dentry) {
     debug_assert!(!dentry.is_null());
 
     unsafe { Arc::from_raw(dentry) };
-}
-
-#[no_mangle]
-pub extern "C" fn r_dentry_get_inode(dentry: *const Dentry) -> *const Inode {
-    let dentry = Dentry::from_raw(&dentry);
-
-    match dentry.get_inode() {
-        Ok(inode) => Arc::into_raw(inode),
-        Err(err) => {
-            dont_check!(println!(
-                "[kernel:warn] r_dentry_get_inode: {:?}",
-                err
-            ));
-            core::ptr::null()
-        }
-    }
 }
 
 #[no_mangle]

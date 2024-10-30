@@ -1,3 +1,5 @@
+use crate::prelude::*;
+
 use crate::bindings::root::kernel::hw::pci;
 use crate::kernel::interrupt::register_irq_handler;
 use crate::kernel::mem::paging::copy_to_page;
@@ -54,6 +56,23 @@ struct E1000eDev {
 
 fn test(val: u32, bit: u32) -> bool {
     (val & bit) == bit
+}
+
+struct PrintableBytes<'a>(&'a [u8]);
+
+impl core::fmt::Debug for PrintableBytes<'_> {
+    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+        write!(f, "PrintableBytes {{")?;
+        for chunk in self.0.chunks(16) {
+            for &byte in chunk {
+                write!(f, "{byte} ")?;
+            }
+            write!(f, "\n")?;
+        }
+        write!(f, "}}")?;
+
+        Ok(())
+    }
 }
 
 impl netdev::Netdev for E1000eDev {
@@ -151,17 +170,10 @@ impl netdev::Netdev for E1000eDev {
                 )
             };
 
-            use crate::{dont_check, print, println};
-            dont_check!(println!("==== e1000e: received packet ===="));
-
-            for i in 0..len {
-                if i % 16 == 0 {
-                    dont_check!(println!());
-                }
-                dont_check!(print!("{:02x} ", data[i]));
-            }
-
-            dont_check!(println!("\n\n====  e1000e: end of packet  ===="));
+            println_debug!(
+                "e1000e: received {len} bytes, {:?}",
+                PrintableBytes(data)
+            );
             self.rx_tail = Some(next_tail);
         }
 

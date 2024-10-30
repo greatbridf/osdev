@@ -202,9 +202,6 @@ static uint32_t _syscall32_fork(interrupt_stack* data, mmx_registers* mmxregs) {
     assert(inserted);
     auto* newthd = &*iter_newthd;
 
-    kernel::async::preempt_disable();
-    kernel::task::dispatcher::enqueue(newthd);
-
     auto newthd_prev_sp = newthd->kstack.sp;
     assert(!(newthd_prev_sp & 0xf));
 
@@ -230,7 +227,7 @@ static uint32_t _syscall32_fork(interrupt_stack* data, mmx_registers* mmxregs) {
     newthd->kstack.pushq(0);              // 0 for alignment
     newthd->kstack.pushq(newthd_prev_sp); // previous sp
 
-    kernel::async::preempt_enable();
+    kernel::task::dispatcher::enqueue(newthd);
     return newproc.pid;
 }
 

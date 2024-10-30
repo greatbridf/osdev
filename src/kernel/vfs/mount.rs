@@ -6,11 +6,12 @@ use alloc::{
 };
 use bindings::{EEXIST, ENODEV, ENOTDIR};
 
+use lazy_static::lazy_static;
+
 use super::{
     dentry::{dcache, Dentry},
     inode::Inode,
     vfs::Vfs,
-    Mutex,
 };
 
 pub const MS_RDONLY: u64 = 1 << 0;
@@ -31,10 +32,12 @@ const MOUNT_FLAGS: [(u64, &str); 6] = [
     (MS_LAZYTIME, ",lazytime"),
 ];
 
-static MOUNT_CREATORS: Mutex<BTreeMap<String, Box<dyn MountCreator>>> =
-    Mutex::new(BTreeMap::new());
-
-static MOUNTS: Mutex<Vec<(Arc<Dentry>, MountPointData)>> = Mutex::new(vec![]);
+lazy_static! {
+    static ref MOUNT_CREATORS: Spin<BTreeMap<String, Arc<dyn MountCreator>>> =
+        Spin::new(BTreeMap::new());
+    static ref MOUNTS: Spin<Vec<(Arc<Dentry>, MountPointData)>> =
+        Spin::new(vec![]);
+}
 
 static mut ROOTFS: Option<Arc<Dentry>> = None;
 
@@ -47,7 +50,7 @@ impl Mount {
     pub fn new(
         mp: &Dentry,
         vfs: Arc<dyn Vfs>,
-        root_inode: Arc<Inode>,
+        root_inode: Arc<dyn Inode>,
     ) -> KResult<Self> {
         let root_dentry = Dentry::create(mp.parent().clone(), mp.name());
         root_dentry.save_dir(root_inode)?;
@@ -78,7 +81,7 @@ pub trait MountCreator: Send + Sync {
 
 pub fn register_filesystem(
     fstype: &str,
-    creator: Box<dyn MountCreator>,
+    creator: Arc<dyn MountCreator>,
 ) -> KResult<()> {
     let mut creators = MOUNT_CREATORS.lock();
     match creators.entry(String::from(fstype)) {
@@ -119,11 +122,11 @@ pub fn do_mount(
         return Err(ENOTDIR);
     }
 
-    let mount = {
+    let creator = {
         let creators = { MOUNT_CREATORS.lock() };
-        let creator = creators.get(fstype).ok_or(ENODEV)?;
-        creator.create_mount(source, flags, data, mountpoint)?
+        creators.get(fstype).ok_or(ENODEV)?.clone()
     };
+    let mount = creator.create_mount(source, flags, data, mountpoint)?;
 
     let root_dentry = mount.root().clone();
 

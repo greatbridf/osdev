@@ -12,6 +12,7 @@
 #include <kernel/mem/vm_area.hpp>
 #include <kernel/process.hpp>
 #include <kernel/vfs.hpp>
+#include <kernel/vfs/dentry.hpp>
 
 static inline void __user_push32(uintptr_t* sp, uint32_t d) {
     // TODO: use copy_to_user
@@ -32,33 +33,27 @@ int types::elf::elf32_load(types::elf::elf32_load_data& d) {
     if (!exec)
         return -ENOENT;
 
-    auto* inode = fs::r_dentry_get_inode(exec.get());
-
     types::elf::elf32_header hdr{};
-    auto n_read =
-        fs::fs_read(inode, (char*)&hdr, sizeof(types::elf::elf32_header), 0,
-                 sizeof(types::elf::elf32_header));
+    auto n_read = fs::fs_read(exec.get(), (char*)&hdr, sizeof(types::elf::elf32_header), 0,
+                              sizeof(types::elf::elf32_header));
 
     if (n_read != sizeof(types::elf::elf32_header))
         return -EINVAL;
 
-    if (hdr.magic[0] != 0x7f || hdr.magic[1] != 'E' || hdr.magic[2] != 'L' ||
-        hdr.magic[3] != 'F')
+    if (hdr.magic[0] != 0x7f || hdr.magic[1] != 'E' || hdr.magic[2] != 'L' || hdr.magic[3] != 'F')
         return -EINVAL;
 
     size_t phents_size = hdr.phentsize * hdr.phnum;
     size_t shents_size = hdr.shentsize * hdr.shnum;
     std::vector<types::elf::elf32_program_header_entry> phents(hdr.phnum);
-    n_read = fs_read(inode, (char*)phents.data(), phents_size, hdr.phoff,
-                      phents_size);
+    n_read = fs::fs_read(exec.get(), (char*)phents.data(), phents_size, hdr.phoff, phents_size);
 
     // broken file or I/O error
     if (n_read != phents_size)
         return -EINVAL;
 
     std::vector<types::elf::elf32_section_header_entry> shents(hdr.shnum);
-    n_read = fs_read(inode, (char*)shents.data(), shents_size, hdr.shoff,
-                      shents_size);
+    n_read = fs::fs_read(exec.get(), (char*)shents.data(), shents_size, hdr.shoff, shents_size);
 
     // broken file or I/O error
     if (n_read != shents_size)
@@ -86,8 +81,7 @@ int types::elf::elf32_load(types::elf::elf32_load_data& d) {
 
             args.vaddr = vaddr;
             args.length = flen;
-            // TODO!!!!!!!: get ownership
-            args.file_inode = inode;
+            args.file = fs::d_get(exec);
             args.file_offset = fileoff;
 
             args.flags = MM_MAPPED;

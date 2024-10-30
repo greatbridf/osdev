@@ -4,7 +4,10 @@ use crate::{
     prelude::*,
 };
 
-use core::ffi::{c_char, c_void};
+use core::{
+    ffi::{c_char, c_void},
+    sync::atomic::Ordering,
+};
 
 use alloc::sync::Arc;
 use bindings::{dev_t, ino_t, mode_t, statx};
@@ -51,40 +54,28 @@ pub extern "C" fn fs_mount(
     let fstype = get_str_from_cstr(fstype).unwrap();
 
     // TODO: data
-    match super::mount::do_mount(
-        &mountpoint,
-        source,
-        mountpoint_str,
-        fstype,
-        flags,
-        &[],
-    ) {
+    match super::mount::do_mount(&mountpoint, source, mountpoint_str, fstype, flags, &[]) {
         Ok(_) => 0,
         Err(e) => -(e as i32),
     }
 }
 
-fn do_read(
-    file: &Arc<Inode>,
-    buffer: &mut [u8],
-    offset: usize,
-) -> KResult<usize> {
-    let mode = { file.idata.lock().mode };
-
-    match mode {
+fn do_read(file: &Arc<dyn Inode>, buffer: &mut [u8], offset: usize) -> KResult<usize> {
+    // Safety: Changing mode alone will have no effect on the file's contents
+    match file.mode.load(Ordering::Relaxed) {
         mode if s_isdir(mode) => Err(EISDIR),
         mode if s_isreg(mode) => {
             let mut buffer = ByteBuffer::new(buffer);
-            file.read(file, &mut buffer, offset)
+            file.read(&mut buffer, offset)
         }
         mode if s_isblk(mode) => {
             let mut buffer = ByteBuffer::new(buffer);
-            let device = BlockDevice::get(file.devid(file)?)?;
+            let device = BlockDevice::get(file.devid()?)?;
 
             Ok(device.read_some(offset, &mut buffer)?.allow_partial())
         }
         mode if s_ischr(mode) => {
-            let devid = file.devid(file)?;
+            let devid = file.devid()?;
 
             let ret = unsafe {
                 fs::char_device_read(
@@ -105,23 +96,17 @@ fn do_read(
     }
 }
 
-fn do_write(file: &Arc<Inode>, buffer: &[u8], offset: usize) -> KResult<usize> {
-    let mode = file.idata.lock().mode;
-
-    match mode {
+fn do_write(file: &Arc<dyn Inode>, buffer: &[u8], offset: usize) -> KResult<usize> {
+    // Safety: Changing mode alone will have no effect on the file's contents
+    match file.mode.load(Ordering::Relaxed) {
         mode if s_isdir(mode) => Err(EISDIR),
-        mode if s_isreg(mode) => file.write(file, buffer, offset),
+        mode if s_isreg(mode) => file.write(buffer, offset),
         mode if s_isblk(mode) => Err(EINVAL), // TODO
         mode if s_ischr(mode) => {
-            let devid = file.devid(file)?;
+            let devid = file.devid()?;
 
-            let ret = unsafe {
-                fs::char_device_write(
-                    devid,
-                    buffer.as_ptr() as *const _,
-                    buffer.len(),
-                )
-            };
+            let ret =
+                unsafe { fs::char_device_write(devid, buffer.as_ptr() as *const _, buffer.len()) };
 
             if ret < 0 {
                 Err(-ret as u32)
@@ -133,19 +118,16 @@ fn do_write(file: &Arc<Inode>, buffer: &[u8], offset: usize) -> KResult<usize> {
     }
 }
 
-fn inode_from_raw<'lt>(file: &'lt mut *const Inode) -> BorrowedArc<'lt, Inode> {
-    BorrowedArc::new(file)
-}
-
 #[no_mangle]
 pub extern "C" fn fs_read(
-    mut file: *const Inode, // borrowed
+    file: *const Dentry, // borrowed
     buf: *mut u8,
     bufsize: usize,
     offset: usize,
     n: usize,
 ) -> isize {
-    let file = inode_from_raw(&mut file);
+    let file = Dentry::from_raw(&file);
+    let file = file.get_inode().unwrap();
 
     let bufsize = bufsize.min(n);
     let buffer = into_mut_slice(buf, &bufsize);
@@ -158,12 +140,13 @@ pub extern "C" fn fs_read(
 
 #[no_mangle]
 pub extern "C" fn fs_write(
-    mut file: *const Inode, // borrowed
+    file: *const Dentry, // borrowed
     buf: *const u8,
     offset: usize,
     n: usize,
 ) -> isize {
-    let file = inode_from_raw(&mut file);
+    let file = Dentry::from_raw(&file);
+    let file = file.get_inode().unwrap();
     let buffer = into_slice(buf, &n);
 
     match do_write(&file, buffer, offset) {
@@ -174,39 +157,42 @@ pub extern "C" fn fs_write(
 
 #[no_mangle]
 pub extern "C" fn fs_statx(
-    mut file: *const Inode, // borrowed
+    file: *const Dentry, // borrowed
     stat: *mut statx,
     mask: u32,
 ) -> i32 {
     map_err_ffi!((|| {
-        let file = inode_from_raw(&mut file);
+        let file = Dentry::from_raw(&file);
+        let file = file.get_inode().unwrap();
         let statx = unsafe { stat.as_mut() }.unwrap();
 
-        file.statx(file.as_ref(), statx, mask)
+        file.statx(statx, mask)
     })())
 }
 
 #[no_mangle]
 pub extern "C" fn fs_truncate(
-    mut file: *const Inode, // borrowed
+    file: *const Dentry, // borrowed
     size: usize,
 ) -> i32 {
     map_err_ffi!((|| {
-        let file = inode_from_raw(&mut file);
-        file.truncate(file.as_ref(), size)
+        let file = Dentry::from_raw(&file);
+        let file = file.get_inode().unwrap();
+        file.truncate(size)
     })())
 }
 
 #[no_mangle]
 pub extern "C" fn fs_readlink(
-    mut file: *const Inode, // borrowed
+    file: *const Dentry, // borrowed
     mut buf: *mut u8,
     bufsize: usize,
 ) -> i32 {
-    let file = inode_from_raw(&mut file);
+    let file = Dentry::from_raw(&file);
+    let file = file.get_inode().unwrap();
     let mut buffer = RawBuffer::new_from_raw(&mut buf, bufsize);
 
-    match file.readlink(file.as_ref(), &mut buffer) {
+    match file.readlink(&mut buffer) {
         Ok(n) => n as i32,
         Err(e) => -(e as i32),
     }
@@ -222,7 +208,7 @@ pub extern "C" fn fs_creat(
         let parent = at.parent();
         let inode = parent.get_inode()?;
 
-        inode.creat(inode.as_ref(), &at, mode as u32)
+        inode.creat(&at, mode as u32)
     })())
 }
 
@@ -236,7 +222,7 @@ pub extern "C" fn fs_mkdir(
         let parent = at.parent();
         let inode = parent.get_inode()?;
 
-        inode.mkdir(inode.as_ref(), &at, mode as u32)
+        inode.mkdir(&at, mode as u32)
     })())
 }
 
@@ -251,7 +237,7 @@ pub extern "C" fn fs_mknod(
         let parent = at.parent();
         let inode = parent.get_inode()?;
 
-        inode.mknod(inode.as_ref(), &at, mode as u32, dev as DevId)
+        inode.mknod(&at, mode as u32, dev as DevId)
     })())
 }
 
@@ -265,11 +251,7 @@ pub extern "C" fn fs_symlink(
         let parent = at.parent();
         let inode = parent.get_inode()?;
 
-        inode.symlink(
-            inode.as_ref(),
-            &at,
-            get_str_from_cstr(target)?.as_bytes(),
-        )
+        inode.symlink(&at, get_str_from_cstr(target)?.as_bytes())
     })())
 }
 
@@ -280,24 +262,20 @@ pub extern "C" fn fs_unlink(at: *const Dentry) -> i32 {
         let parent = at.parent();
         let inode = parent.get_inode()?;
 
-        inode.unlink(inode.as_ref(), &at)
+        inode.unlink(&at)
     })())
 }
 
 #[no_mangle]
-pub extern "C" fn r_get_inode_mode(mut inode: *const Inode) -> mode_t {
-    let inode = inode_from_raw(&mut inode);
-    let idata = inode.idata.lock();
-
-    idata.mode as _
+pub extern "C" fn r_dentry_get_mode(dentry: *const Dentry) -> mode_t {
+    let dentry = Dentry::from_raw(&dentry);
+    dentry.get_inode().unwrap().mode.load(Ordering::Relaxed) as _
 }
 
 #[no_mangle]
-pub extern "C" fn r_get_inode_size(mut inode: *const Inode) -> u64 {
-    let inode = inode_from_raw(&mut inode);
-    let idata = inode.idata.lock();
-
-    idata.size
+pub extern "C" fn r_dentry_get_size(dentry: *const Dentry) -> u64 {
+    let dentry = Dentry::from_raw(&dentry);
+    dentry.get_inode().unwrap().size.load(Ordering::Relaxed) as _
 }
 
 extern "C" {
@@ -311,13 +289,14 @@ extern "C" {
 
 #[no_mangle]
 pub extern "C" fn fs_readdir(
-    mut file: *const Inode, // borrowed
+    dentry: *const Dentry, // borrowed
     offset: usize,
     callback: *const c_void,
 ) -> i64 {
-    let inode = inode_from_raw(&mut file);
+    let dentry = Dentry::from_raw(&dentry);
+    let dir = dentry.get_inode().unwrap();
 
-    let ret = inode.readdir(inode.as_ref(), offset, &|filename, ino| {
+    let ret = dir.readdir(offset, &|filename, ino| {
         let ret = unsafe {
             call_callback(
                 callback,

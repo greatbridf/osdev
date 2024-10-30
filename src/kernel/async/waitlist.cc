@@ -8,13 +8,14 @@
 using namespace kernel::async;
 
 bool wait_list::wait(mutex& lock) {
+    preempt_disable();
     this->subscribe();
 
     auto* curthd = current_thread;
     curthd->set_attr(kernel::task::thread::ISLEEP);
 
     lock.unlock();
-    bool has_signals = schedule();
+    bool has_signals = schedule_now_preempt_disabled();
     lock.lock();
 
     m_subscribers.erase(curthd);

@@ -1,7 +1,10 @@
-use core::sync::atomic::Ordering;
-
-use alloc::sync::{Arc, Weak};
+use alloc::{
+    collections::btree_map::BTreeMap,
+    sync::{Arc, Weak},
+};
 use bindings::{EACCES, ENOTDIR, S_IFDIR, S_IFREG};
+use core::sync::atomic::Ordering;
+use lazy_static::lazy_static;
 
 use crate::{
     io::Buffer,
@@ -9,13 +12,14 @@ use crate::{
         mem::paging::{Page, PageBuffer},
         vfs::{
             dentry::Dentry,
-            inode::{AtomicIno, Inode, InodeCache, InodeData, InodeOps},
+            inode::{define_struct_inode, AtomicIno, Ino, Inode, InodeData},
             mount::{dump_mounts, register_filesystem, Mount, MountCreator},
             vfs::Vfs,
             DevId, ReadDirCallback,
         },
     },
     prelude::*,
+    sync::Locked,
 };
 
 fn split_len_offset(data: &[u8], len: usize, offset: usize) -> Option<&[u8]> {
@@ -23,8 +27,6 @@ fn split_len_offset(data: &[u8], len: usize, offset: usize) -> Option<&[u8]> {
 
     real_data.split_at_checked(offset).map(|(_, data)| data)
 }
-
-pub struct ProcFsNode(Arc<Inode>);
 
 pub trait ProcFsFile: Send + Sync {
     fn can_read(&self) -> bool {
@@ -44,21 +46,57 @@ pub trait ProcFsFile: Send + Sync {
     }
 }
 
-struct ProcFsFileOps {
-    file: Box<dyn ProcFsFile>,
+pub enum ProcFsNode {
+    File(Arc<FileInode>),
+    Dir(Arc<DirInode>),
 }
 
-impl InodeOps for ProcFsFileOps {
-    fn as_any(&self) -> &dyn Any {
-        self
+impl ProcFsNode {
+    fn unwrap(&self) -> Arc<dyn Inode> {
+        match self {
+            ProcFsNode::File(inode) => inode.clone(),
+            ProcFsNode::Dir(inode) => inode.clone(),
+        }
     }
 
-    fn read(
-        &self,
-        _: &Inode,
-        buffer: &mut dyn Buffer,
-        offset: usize,
-    ) -> KResult<usize> {
+    fn ino(&self) -> Ino {
+        match self {
+            ProcFsNode::File(inode) => inode.ino,
+            ProcFsNode::Dir(inode) => inode.ino,
+        }
+    }
+}
+
+define_struct_inode! {
+    struct FileInode {
+        file: Box<dyn ProcFsFile>,
+    }
+}
+
+impl FileInode {
+    pub fn new(ino: Ino, vfs: Weak<ProcFs>, file: Box<dyn ProcFsFile>) -> Arc<Self> {
+        let mut mode = S_IFREG;
+        if file.can_read() {
+            mode |= 0o444;
+        }
+        if file.can_write() {
+            mode |= 0o200;
+        }
+
+        let inode = Self {
+            idata: InodeData::new(ino, vfs),
+            file,
+        };
+
+        inode.idata.mode.store(mode, Ordering::Relaxed);
+        inode.idata.nlink.store(1, Ordering::Relaxed);
+
+        Arc::new(inode)
+    }
+}
+
+impl Inode for FileInode {
+    fn read(&self, buffer: &mut dyn Buffer, offset: usize) -> KResult<usize> {
         if !self.file.can_read() {
             return Err(EACCES);
         }
@@ -75,47 +113,55 @@ impl InodeOps for ProcFsFileOps {
     }
 }
 
-struct ProcFsDirectory {
-    entries: Mutex<Vec<(Arc<[u8]>, ProcFsNode)>>,
+define_struct_inode! {
+    struct DirInode {
+        entries: Locked<Vec<(Arc<[u8]>, ProcFsNode)>, ()>,
+    }
 }
 
-impl InodeOps for ProcFsDirectory {
-    fn as_any(&self) -> &dyn Any {
-        self
+impl DirInode {
+    pub fn new(ino: Ino, vfs: Weak<ProcFs>) -> Arc<Self> {
+        Self::new_locked(ino, vfs, |inode, rwsem| unsafe {
+            addr_of_mut_field!(inode, entries).write(Locked::new(vec![], rwsem));
+            addr_of_mut_field!(inode, mode).write((S_IFDIR | 0o755).into());
+            addr_of_mut_field!(inode, nlink).write(1.into());
+        })
     }
+}
 
-    fn lookup(
-        &self,
-        _: &Inode,
-        dentry: &Arc<Dentry>,
-    ) -> KResult<Option<Arc<Inode>>> {
-        Ok(self.entries.lock().iter().find_map(|(name, node)| {
-            name.as_ref()
-                .eq(dentry.name().as_ref())
-                .then(|| node.0.clone())
-        }))
+impl Inode for DirInode {
+    fn lookup(&self, dentry: &Arc<Dentry>) -> KResult<Option<Arc<dyn Inode>>> {
+        let lock = self.rwsem.lock_shared();
+        Ok(self
+            .entries
+            .access(lock.as_ref())
+            .iter()
+            .find_map(|(name, node)| {
+                name.as_ref()
+                    .eq(dentry.name().as_ref())
+                    .then(|| node.unwrap())
+            }))
     }
 
     fn readdir<'cb, 'r: 'cb>(
-        &self,
-        _: &Inode,
+        &'r self,
         offset: usize,
         callback: &ReadDirCallback<'cb>,
     ) -> KResult<usize> {
+        let lock = self.rwsem.lock_shared();
         Ok(self
             .entries
-            .lock()
+            .access(lock.as_ref())
             .iter()
             .skip(offset)
-            .take_while(|(name, ProcFsNode(inode))| {
-                callback(name, inode.ino).is_ok()
-            })
+            .take_while(|(name, node)| callback(name, node.ino()).is_ok())
             .count())
     }
 }
 
+impl_any!(ProcFs);
 pub struct ProcFs {
-    root_node: Arc<Inode>,
+    root_node: Arc<DirInode>,
     next_ino: AtomicIno,
 }
 
@@ -128,27 +174,32 @@ impl Vfs for ProcFs {
         10
     }
 
-    fn as_any(&self) -> &dyn Any {
-        self
+    fn is_read_only(&self) -> bool {
+        false
     }
 }
 
-static mut GLOBAL_PROCFS: Option<Arc<ProcFs>> = None;
-static mut ICACHE: Option<InodeCache<ProcFs>> = None;
+lazy_static! {
+    static ref ICACHE: Spin<BTreeMap<Ino, ProcFsNode>> = Spin::new(BTreeMap::new());
+    static ref GLOBAL_PROCFS: Arc<ProcFs> = {
+        let fs: Arc<ProcFs> = Arc::new_cyclic(|weak: &Weak<ProcFs>| ProcFs {
+            root_node: DirInode::new(0, weak.clone()),
+            next_ino: AtomicIno::new(1),
+        });
 
-fn get_icache() -> &'static InodeCache<ProcFs> {
-    unsafe { ICACHE.as_ref().unwrap() }
+        fs
+    };
 }
 
 struct ProcFsMountCreator;
 
 impl ProcFsMountCreator {
     pub fn get() -> Arc<ProcFs> {
-        unsafe { GLOBAL_PROCFS.as_ref().cloned().unwrap() }
+        GLOBAL_PROCFS.clone()
     }
 
     pub fn get_weak() -> Weak<ProcFs> {
-        unsafe { GLOBAL_PROCFS.as_ref().map(Arc::downgrade).unwrap() }
+        Arc::downgrade(&GLOBAL_PROCFS)
     }
 }
 
@@ -170,7 +221,7 @@ pub fn root() -> ProcFsNode {
     let vfs = ProcFsMountCreator::get();
     let root = vfs.root_node.clone();
 
-    ProcFsNode(root)
+    ProcFsNode::Dir(root)
 }
 
 pub fn creat(
@@ -178,69 +229,47 @@ pub fn creat(
     name: &Arc<[u8]>,
     file: Box<dyn ProcFsFile>,
 ) -> KResult<ProcFsNode> {
-    let mut mode = S_IFREG;
-    if file.can_read() {
-        mode |= 0o444;
-    }
-    if file.can_write() {
-        mode |= 0o200;
-    }
-
-    let dir = parent
-        .0
-        .ops
-        .as_any()
-        .downcast_ref::<ProcFsDirectory>()
-        .ok_or(ENOTDIR)?;
+    let parent = match parent {
+        ProcFsNode::File(_) => return Err(ENOTDIR),
+        ProcFsNode::Dir(parent) => parent,
+    };
 
     let fs = ProcFsMountCreator::get();
-    let ino = fs.next_ino.fetch_add(1, Ordering::SeqCst);
+    let ino = fs.next_ino.fetch_add(1, Ordering::Relaxed);
 
-    let inode = get_icache().alloc(ino, Box::new(ProcFsFileOps { file }));
+    let inode = FileInode::new(ino, Arc::downgrade(&fs), file);
 
-    inode.idata.lock().mode = mode;
-    inode.idata.lock().nlink = 1;
+    {
+        let mut lock = parent.idata.rwsem.lock();
+        parent
+            .entries
+            .access_mut(lock.as_mut())
+            .push((name.clone(), ProcFsNode::File(inode.clone())));
+    }
 
-    dir.entries
-        .lock()
-        .push((name.clone(), ProcFsNode(inode.clone())));
-
-    Ok(ProcFsNode(inode))
+    Ok(ProcFsNode::File(inode))
 }
 
 pub fn mkdir(parent: &ProcFsNode, name: &[u8]) -> KResult<ProcFsNode> {
-    let dir = parent
-        .0
-        .ops
-        .as_any()
-        .downcast_ref::<ProcFsDirectory>()
-        .ok_or(ENOTDIR)?;
+    let parent = match parent {
+        ProcFsNode::File(_) => return Err(ENOTDIR),
+        ProcFsNode::Dir(parent) => parent,
+    };
 
-    let ino = ProcFsMountCreator::get()
-        .next_ino
-        .fetch_add(1, Ordering::SeqCst);
+    let fs = ProcFsMountCreator::get();
+    let ino = fs.next_ino.fetch_add(1, Ordering::Relaxed);
 
-    let inode = get_icache().alloc(
-        ino,
-        Box::new(ProcFsDirectory {
-            entries: Mutex::new(vec![]),
-        }),
-    );
+    let inode = DirInode::new(ino, Arc::downgrade(&fs));
 
-    {
-        let mut idata = inode.idata.lock();
-        idata.nlink = 2;
-        idata.mode = S_IFDIR | 0o755;
-    }
+    parent
+        .entries
+        .access_mut(inode.rwsem.lock().as_mut())
+        .push((Arc::from(name), ProcFsNode::Dir(inode.clone())));
 
-    dir.entries
-        .lock()
-        .push((Arc::from(name), ProcFsNode(inode.clone())));
-
-    Ok(ProcFsNode(inode))
+    Ok(ProcFsNode::Dir(inode))
 }
 
-struct DumpMountsFile {}
+struct DumpMountsFile;
 impl ProcFsFile for DumpMountsFile {
     fn can_read(&self) -> bool {
         true
@@ -254,43 +283,12 @@ impl ProcFsFile for DumpMountsFile {
 }
 
 pub fn init() {
-    let dir = ProcFsDirectory {
-        entries: Mutex::new(vec![]),
-    };
-
-    let fs: Arc<ProcFs> = Arc::new_cyclic(|weak: &Weak<ProcFs>| {
-        let root_node = Arc::new(Inode {
-            ino: 0,
-            vfs: weak.clone(),
-            idata: Mutex::new(InodeData::default()),
-            ops: Box::new(dir),
-        });
-
-        ProcFs {
-            root_node,
-            next_ino: AtomicIno::new(1),
-        }
-    });
-
-    {
-        let mut indata = fs.root_node.idata.lock();
-        indata.mode = S_IFDIR | 0o755;
-        indata.nlink = 1;
-    };
-
-    unsafe {
-        GLOBAL_PROCFS = Some(fs);
-        ICACHE = Some(InodeCache::new(ProcFsMountCreator::get_weak()));
-    };
-
-    register_filesystem("procfs", Box::new(ProcFsMountCreator)).unwrap();
-
-    let root = root();
+    register_filesystem("procfs", Arc::new(ProcFsMountCreator)).unwrap();
 
     creat(
-        &root,
+        &root(),
         &Arc::from(b"mounts".as_slice()),
-        Box::new(DumpMountsFile {}),
+        Box::new(DumpMountsFile),
     )
     .unwrap();
 }

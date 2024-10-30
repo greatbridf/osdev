@@ -1,9 +1,6 @@
-use crate::{
-    kernel::mem::phys::{NoCachePP, PhysPtr},
-    prelude::*,
-};
+use crate::kernel::mem::phys::{NoCachePP, PhysPtr};
 
-use super::{vread, vwrite, GHC_IE};
+use super::{BitsIterator, GHC_IE};
 
 /// An `AdapterControl` is an HBA device Global Host Control block
 ///
@@ -12,7 +9,7 @@ use super::{vread, vwrite, GHC_IE};
 /// All reads and writes to this struct is volatile
 ///
 #[repr(C)]
-pub struct AdapterControl {
+struct AdapterControlData {
     capabilities: u32,
     global_host_control: u32,
     interrupt_status: u32,
@@ -29,50 +26,50 @@ pub struct AdapterControl {
     vendor: [u8; 96],
 }
 
+const CONTROL_CAP: usize = 0;
+const CONTROL_GHC: usize = 1;
+const CONTROL_IS: usize = 2;
+const CONTROL_PI: usize = 3;
+
+pub struct AdapterControl {
+    inner: *mut u32,
+}
+
+/// # Safety
+/// At the same time, exactly one instance of this struct may exist.
+unsafe impl Send for AdapterControl {}
+
 impl AdapterControl {
-    pub fn new<'lt>(addr: usize) -> &'lt mut Self {
-        NoCachePP::new(addr).as_mut()
+    pub fn new(addr: usize) -> Self {
+        Self {
+            inner: NoCachePP::new(addr).as_ptr(),
+        }
     }
 }
 
 impl AdapterControl {
-    pub fn enable_interrupts(&mut self) {
-        let ghc = vread(&self.global_host_control);
-        vwrite(&mut self.global_host_control, ghc | GHC_IE);
+    fn read(&self, off: usize) -> u32 {
+        unsafe { self.inner.offset(off as isize).read_volatile() }
     }
 
-    pub fn implemented_ports(&self) -> ImplementedPortsIter {
-        ImplementedPortsIter::new(vread(&self.ports_implemented))
+    fn write(&self, off: usize, value: u32) {
+        unsafe { self.inner.offset(off as isize).write_volatile(value) }
     }
-}
 
-pub struct ImplementedPortsIter {
-    ports: u32,
-    n: u32,
-}
-
-impl ImplementedPortsIter {
-    fn new(ports: u32) -> Self {
-        Self { ports, n: 0 }
+    pub fn enable_interrupts(&self) {
+        let ghc = self.read(CONTROL_GHC);
+        self.write(CONTROL_GHC, ghc | GHC_IE);
     }
-}
 
-impl Iterator for ImplementedPortsIter {
-    type Item = u32;
+    pub fn implemented_ports(&self) -> BitsIterator {
+        BitsIterator::new(self.read(CONTROL_PI))
+    }
 
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.n == 32 {
-            return None;
-        }
+    pub fn pending_interrupts(&self) -> BitsIterator {
+        BitsIterator::new(self.read(CONTROL_IS))
+    }
 
-        let have: bool = self.ports & 1 != 0;
-        self.ports >>= 1;
-        self.n += 1;
-
-        if have {
-            Some(self.n - 1)
-        } else {
-            self.next()
-        }
+    pub fn clear_interrupt(&self, no: u32) {
+        self.write(CONTROL_IS, 1 << no)
     }
 }

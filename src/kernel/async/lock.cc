@@ -52,24 +52,26 @@ static inline void _restore_interrupt_state(lock_context_t context) {
 // TODO: mark as _per_cpu
 static inline preempt_count_t& _preempt_count() {
     static preempt_count_t _preempt_count;
-    assert(!(_preempt_count & 0x80000000));
+    assert(_preempt_count >= 0);
     return _preempt_count;
 }
 
 void preempt_disable() {
     ++_preempt_count();
+    asm volatile("" : : : "memory");
 }
 
 void preempt_enable() {
+    asm volatile("" : : : "memory");
     --_preempt_count();
 }
 
 extern "C" void r_preempt_disable() {
-    ++_preempt_count();
+    preempt_disable();
 }
 
 extern "C" void r_preempt_enable() {
-    --_preempt_count();
+    preempt_enable();
 }
 
 preempt_count_t preempt_count() {

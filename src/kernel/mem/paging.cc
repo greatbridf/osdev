@@ -96,8 +96,7 @@ static inline page* _create_zone(pfn_t pfn, unsigned order) {
 }
 
 // call with zone_lock held
-static inline void _split_zone(page* zone, unsigned order,
-                               unsigned target_order) {
+static inline void _split_zone(page* zone, unsigned order, unsigned target_order) {
     while (order > target_order) {
         pfn_t pfn = page_to_pfn(zone);
         _create_zone(buddy(pfn, order - 1), order - 1);
@@ -358,8 +357,13 @@ void kernel::mem::paging::handle_page_fault(unsigned long err) {
         size_t offset = (vaddr & ~0xfff) - mm_area->start;
         char* data = physaddr<char>{pfn};
 
-        int n = fs_read(mm_area->mapped_file, data, 4096,
-                        mm_area->file_offset + offset, 4096);
+        int n = fs::fs_read(mm_area->mapped_file.get(), data, 4096, mm_area->file_offset + offset,
+                            4096);
+
+        if (n < 0) {
+            kill_current(SIGBUS);
+            return;
+        }
 
         // TODO: send SIGBUS if offset is greater than real size
         if (n != 4096)

@@ -61,7 +61,7 @@ struct thread {
     int set_thread_area(user::user_desc* ptr);
     int load_thread_area32() const;
 
-    void set_attr(thd_attr_t new_attr);
+    void set_attr(thd_attr_t new_attr, bool forced = false);
 
     void send_signal(signal_list::signo_type signal);
 

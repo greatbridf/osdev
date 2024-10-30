@@ -24,13 +24,9 @@ struct fditem_comparator {
         return lhs.fd < rhs.fd;
     }
 
-    constexpr bool operator()(int fd, const fditem& rhs) const {
-        return fd < rhs.fd;
-    }
+    constexpr bool operator()(int fd, const fditem& rhs) const { return fd < rhs.fd; }
 
-    constexpr bool operator()(const fditem& lhs, int fd) const {
-        return lhs.fd < fd;
-    }
+    constexpr bool operator()(const fditem& lhs, int fd) const { return lhs.fd < fd; }
 };
 
 // ALL METHODS SHOULD BE CALLED WITH LOCK HELD
@@ -165,9 +161,10 @@ int filearray::close(int fd) {
     return 0;
 }
 
-static inline std::pair<dentry_pointer, int> _open_file(
-    const fs_context& context, const dentry_pointer& cwd,
-    types::string_view filepath, int flags, mode_t mode) {
+static inline std::pair<dentry_pointer, int> _open_file(const fs_context& context,
+                                                        const dentry_pointer& cwd,
+                                                        types::string_view filepath, int flags,
+                                                        mode_t mode) {
     auto [dent, ret] = fs::open(context, cwd, filepath);
     if (!dent)
         return {nullptr, ret};
@@ -189,8 +186,8 @@ static inline std::pair<dentry_pointer, int> _open_file(
 }
 
 // TODO: file opening permissions check
-int filearray::open(const dentry_pointer& cwd, types::string_view filepath,
-                    int flags, mode_t mode) {
+int filearray::open(const dentry_pointer& cwd, types::string_view filepath, int flags,
+                    mode_t mode) {
     lock_guard lck{pimpl->mtx};
 
     auto [dent, ret] = _open_file(*pimpl->context, cwd, filepath, flags, mode);
@@ -199,8 +196,7 @@ int filearray::open(const dentry_pointer& cwd, types::string_view filepath,
     if (ret != 0)
         return ret;
 
-    auto inode = r_dentry_get_inode(dent.get());
-    auto filemode = r_get_inode_mode(inode);
+    auto filemode = r_dentry_get_mode(dent.get());
 
     int fdflag = (flags & O_CLOEXEC) ? FD_CLOEXEC : 0;
 
@@ -221,14 +217,13 @@ int filearray::open(const dentry_pointer& cwd, types::string_view filepath,
     // truncate file
     if (flags & O_TRUNC) {
         if (fflags.write && S_ISREG(filemode)) {
-            auto ret = fs_truncate(inode, 0);
+            auto ret = fs_truncate(dent.get(), 0);
             if (ret != 0)
                 return ret;
         }
     }
 
-    return pimpl->place_new_file(
-        std::make_shared<regular_file>(fflags, 0, inode), fdflag);
+    return pimpl->place_new_file(std::make_shared<regular_file>(fflags, 0, d_get(dent)), fdflag);
 }
 
 int filearray::pipe(int (&pipefd)[2]) {
@@ -237,11 +232,11 @@ int filearray::pipe(int (&pipefd)[2]) {
     if (1) {
         std::shared_ptr<fs::pipe> ppipe{new fs::pipe};
 
-        pipefd[0] = pimpl->place_new_file(
-            std::make_shared<fifo_file>(file::file_flags{1, 0, 0}, ppipe), 0);
+        pipefd[0] =
+            pimpl->place_new_file(std::make_shared<fifo_file>(file::file_flags{1, 0, 0}, ppipe), 0);
 
-        pipefd[1] = pimpl->place_new_file(
-            std::make_shared<fifo_file>(file::file_flags{0, 1, 0}, ppipe), 0);
+        pipefd[1] =
+            pimpl->place_new_file(std::make_shared<fifo_file>(file::file_flags{0, 1, 0}, ppipe), 0);
     }
 
     return 0;
@@ -249,8 +244,7 @@ int filearray::pipe(int (&pipefd)[2]) {
 
 filearray::filearray(std::shared_ptr<impl> ptr) : pimpl{ptr} {}
 
-filearray::filearray(const fs_context* context)
-    : filearray{std::make_shared<impl>()} {
+filearray::filearray(const fs_context* context) : filearray{std::make_shared<impl>()} {
     pimpl->context = context;
 }
 

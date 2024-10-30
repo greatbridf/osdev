@@ -164,7 +164,8 @@ class proclist final {
 
 void NORETURN init_scheduler(kernel::mem::paging::pfn_t kernel_stack_pfn);
 /// @return true if returned normally, false if being interrupted
-bool schedule(void);
+bool schedule_now(void);
+bool schedule_now_preempt_disabled();
 void NORETURN schedule_noreturn(void);
 
 void NORETURN freeze(void);

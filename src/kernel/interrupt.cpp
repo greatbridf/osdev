@@ -1,3 +1,4 @@
+#include "kernel/async/lock.hpp"
 #include <list>
 #include <vector>
 
@@ -75,7 +76,8 @@ void kernel::kinit::init_interrupt() {
     // TODO: move this to timer driver
     kernel::irq::register_handler(0, []() {
         kernel::hw::timer::inc_tick();
-        schedule();
+        if (async::preempt_count() == 0)
+            schedule_now();
     });
 
     port_pic1_command = 0x11; // edge trigger mode

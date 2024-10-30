@@ -12,7 +12,7 @@
 #include <kernel/task/readyqueue.hpp>
 #include <kernel/task/thread.hpp>
 
-constexpr std::size_t KERNEL_STACK_ORDER = 3; // 2^3 * 4096 = 32KB
+constexpr std::size_t KERNEL_STACK_ORDER = 7; // 2^7 * 4096 = 512KB
 
 using namespace kernel::task;
 using namespace kernel::mem;
@@ -91,7 +91,21 @@ void thread::kernel_stack::load_interrupt_stack() const {
     tss->rsp[0] = sp;
 }
 
-void thread::set_attr(thd_attr_t new_attr) {
+// TODO!!!: change of attribute should acquire dispatcher lock
+//          to prevent inconsistency of tasks in ready queue
+void thread::set_attr(thd_attr_t new_attr, bool forced) {
+    // TODO!!!: rewrite this with state machine based method to prevent
+    // inconsistency and random transition among states
+    if (attr & USLEEP && (new_attr != READY) && (new_attr != USLEEP)) {
+        kmsgf(
+            "[kernel:warn] trying to change thread state of %d from USLEEP to "
+            "%x, might be "
+            "doing something dumb.",
+            this->owner, new_attr);
+
+        return;
+    }
+
     switch (new_attr) {
         case SYSTEM:
             attr |= SYSTEM;
@@ -103,7 +117,14 @@ void thread::set_attr(thd_attr_t new_attr) {
                 break;
             }
 
-            if (attr & READY)
+            if (attr & READY) {
+                kmsgf("[kernel:warn] trying to wake up %d from USLEEP",
+                      this->owner);
+
+                break;
+            }
+
+            if (!forced && attr & USLEEP)
                 break;
 
             attr &= SYSTEM;
@@ -114,6 +135,12 @@ void thread::set_attr(thd_attr_t new_attr) {
         case ISLEEP:
             attr &= SYSTEM;
             attr |= ISLEEP;
+
+            dispatcher::dequeue(this);
+            break;
+        case USLEEP:
+            attr &= SYSTEM;
+            attr |= USLEEP;
 
             dispatcher::dequeue(this);
             break;

@@ -42,7 +42,7 @@ static void stop_process(int signal) {
     parent.waitlist.notify_all();
 
     while (true) {
-        if (schedule())
+        if (schedule_now())
             break;
     }
 

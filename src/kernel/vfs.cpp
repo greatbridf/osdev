@@ -17,16 +17,15 @@
 #include <kernel/vfs.hpp>
 #include <kernel/vfs/dentry.hpp>
 
-fs::regular_file::regular_file(file_flags flags, size_t cursor,
-                               struct rust_inode_handle* ind)
-    : file(flags), cursor(cursor), ind(ind) {}
+fs::regular_file::regular_file(file_flags flags, size_t cursor, dentry_pointer dentry)
+    : file(flags), cursor(cursor), dentry(std::move(dentry)) {}
 
 ssize_t fs::regular_file::read(char* __user buf, size_t n) {
     if (!flags.read)
         return -EBADF;
 
     // TODO: copy to user function !IMPORTANT
-    ssize_t n_wrote = fs_read(ind, buf, n, cursor, n);
+    ssize_t n_wrote = fs_read(dentry.get(), buf, n, cursor, n);
     if (n_wrote >= 0)
         cursor += n_wrote;
 
@@ -35,7 +34,7 @@ ssize_t fs::regular_file::read(char* __user buf, size_t n) {
 
 ssize_t fs::regular_file::do_write(const char* __user buf, size_t n) {
     // TODO: check privilege of user ptr
-    ssize_t n_wrote = fs_write(ind, buf, cursor, n);
+    ssize_t n_wrote = fs_write(dentry.get(), buf, cursor, n);
     if (n_wrote >= 0)
         cursor += n_wrote;
 
@@ -43,7 +42,7 @@ ssize_t fs::regular_file::do_write(const char* __user buf, size_t n) {
 }
 
 off_t fs::regular_file::seek(off_t n, int whence) {
-    size_t ind_size = r_get_inode_size(ind);
+    size_t ind_size = r_dentry_get_size(dentry.get());
     size_t pos;
     switch (whence) {
         case SEEK_SET:
@@ -69,28 +68,27 @@ off_t fs::regular_file::seek(off_t n, int whence) {
 
 int fs::regular_file::getdents(char* __user buf, size_t cnt) {
     size_t orig_cnt = cnt;
-    auto callback = readdir_callback_fn(
-        [&buf, &cnt](const char* fn, size_t fnlen, ino_t ino) {
-            size_t reclen = sizeof(fs::user_dirent) + 1 + fnlen;
-            if (cnt < reclen)
-                return -EFAULT;
+    auto callback = readdir_callback_fn([&buf, &cnt](const char* fn, size_t fnlen, ino_t ino) {
+        size_t reclen = sizeof(fs::user_dirent) + 1 + fnlen;
+        if (cnt < reclen)
+            return -EFAULT;
 
-            auto* dirp = (fs::user_dirent*)buf;
-            dirp->d_ino = ino;
-            dirp->d_reclen = reclen;
-            // TODO: show offset
-            // dirp->d_off = 0;
-            // TODO: use copy_to_user
-            memcpy(dirp->d_name, fn, fnlen);
-            buf[reclen - 2] = 0;
-            buf[reclen - 1] = 0;
+        auto* dirp = (fs::user_dirent*)buf;
+        dirp->d_ino = ino;
+        dirp->d_reclen = reclen;
+        // TODO: show offset
+        // dirp->d_off = 0;
+        // TODO: use copy_to_user
+        memcpy(dirp->d_name, fn, fnlen);
+        buf[reclen - 2] = 0;
+        buf[reclen - 1] = 0;
 
-            buf += reclen;
-            cnt -= reclen;
-            return 0;
-        });
+        buf += reclen;
+        cnt -= reclen;
+        return 0;
+    });
 
-    int nread = fs_readdir(ind, cursor, &callback);
+    int nread = fs_readdir(dentry.get(), cursor, &callback);
 
     if (nread > 0)
         cursor += nread;
@@ -100,27 +98,26 @@ int fs::regular_file::getdents(char* __user buf, size_t cnt) {
 
 int fs::regular_file::getdents64(char* __user buf, size_t cnt) {
     size_t orig_cnt = cnt;
-    auto callback = readdir_callback_fn(
-        [&buf, &cnt](const char* fn, size_t fnlen, ino_t ino) {
-            size_t reclen = sizeof(fs::user_dirent64) + fnlen;
-            if (cnt < reclen)
-                return -EFAULT;
+    auto callback = readdir_callback_fn([&buf, &cnt](const char* fn, size_t fnlen, ino_t ino) {
+        size_t reclen = sizeof(fs::user_dirent64) + fnlen;
+        if (cnt < reclen)
+            return -EFAULT;
 
-            auto* dirp = (fs::user_dirent64*)buf;
-            dirp->d_ino = ino;
-            dirp->d_off = 114514;
-            dirp->d_reclen = reclen;
-            dirp->d_type = 0;
-            // TODO: use copy_to_user
-            memcpy(dirp->d_name, fn, fnlen);
-            buf[reclen - 1] = 0;
+        auto* dirp = (fs::user_dirent64*)buf;
+        dirp->d_ino = ino;
+        dirp->d_off = 114514;
+        dirp->d_reclen = reclen;
+        dirp->d_type = 0;
+        // TODO: use copy_to_user
+        memcpy(dirp->d_name, fn, fnlen);
+        buf[reclen - 1] = 0;
 
-            buf += reclen;
-            cnt -= reclen;
-            return 0;
-        });
+        buf += reclen;
+        cnt -= reclen;
+        return 0;
+    });
 
-    int nread = fs_readdir(ind, cursor, &callback);
+    int nread = fs_readdir(dentry.get(), cursor, &callback);
 
     if (nread > 0)
         cursor += nread;
@@ -288,21 +285,19 @@ int fs::pipe::read(char* buf, size_t n) {
     return orig_n - n;
 }
 
-extern "C" int call_callback(const fs::readdir_callback_fn* func,
-                             const char* filename, size_t fnlen, ino_t ino) {
+extern "C" int call_callback(const fs::readdir_callback_fn* func, const char* filename,
+                             size_t fnlen, ino_t ino) {
     return (*func)(filename, fnlen, ino);
 }
 
-extern "C" struct dentry* dentry_open(struct dentry* context_root,
-                                      struct dentry* cwd, const char* path,
-                                      size_t path_length, bool follow);
+extern "C" struct dentry* dentry_open(struct dentry* context_root, struct dentry* cwd,
+                                      const char* path, size_t path_length, bool follow);
 
 std::pair<fs::dentry_pointer, int> fs::open(const fs::fs_context& context,
-                                            const fs::dentry_pointer& cwd,
-                                            types::string_view path,
+                                            const fs::dentry_pointer& cwd, types::string_view path,
                                             bool follow_symlinks) {
-    auto result = dentry_open(context.root.get(), cwd.get(), path.data(),
-                              path.size(), follow_symlinks);
+    auto result =
+        dentry_open(context.root.get(), cwd.get(), path.data(), path.size(), follow_symlinks);
     auto result_int = reinterpret_cast<intptr_t>(result);
 
     if (result_int > -128)
@@ -323,5 +318,8 @@ void fs::dentry_deleter::operator()(struct dentry* dentry) const {
 }
 
 fs::dentry_pointer fs::d_get(const dentry_pointer& dp) {
+    if (!dp)
+        return nullptr;
+
     return dentry_pointer{r_dget(dp.get())};
 }

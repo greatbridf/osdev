@@ -6,6 +6,7 @@ AllowShortFunctionsOnASingleLine: Inline
 AllowShortIfStatementsOnASingleLine: Never
 AllowShortLoopsOnASingleLine: 'false'
 BreakConstructorInitializers: BeforeComma
+ColumnLimit: '100'
 FixNamespaceComments: 'true'
 IncludeBlocks: Regroup
 IndentWidth: '4'

@@ -46,7 +46,7 @@ class mm_list {
 
         unsigned long flags;
 
-        const fs::rust_inode_handle* file_inode;
+        fs::dentry_pointer file;
         // MUSE BE aligned to 4kb boundary
         std::size_t file_offset;
     };

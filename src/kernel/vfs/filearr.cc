@@ -188,8 +188,6 @@ static inline std::pair<dentry_pointer, int> _open_file(const fs_context& contex
 // TODO: file opening permissions check
 int filearray::open(const dentry_pointer& cwd, types::string_view filepath, int flags,
                     mode_t mode) {
-    lock_guard lck{pimpl->mtx};
-
     auto [dent, ret] = _open_file(*pimpl->context, cwd, filepath, flags, mode);
 
     assert(dent || ret != 0);
@@ -222,6 +220,8 @@ int filearray::open(const dentry_pointer& cwd, types::string_view filepath, int 
                 return ret;
         }
     }
+
+    lock_guard lck{pimpl->mtx};
 
     return pimpl->place_new_file(std::make_shared<regular_file>(fflags, 0, d_get(dent)), fdflag);
 }

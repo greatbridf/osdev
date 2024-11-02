@@ -267,15 +267,10 @@ int fs::pipe::read(char* buf, size_t n) {
     kernel::async::lock_guard lck{mtx};
     size_t orig_n = n;
 
-    if (n <= PIPE_SIZE || this->buf.empty()) {
-        while (is_writeable() && this->buf.size() < n) {
-            bool interrupted = waitlist_r.wait(mtx);
-            if (interrupted)
-                return -EINTR;
-
-            if (n > PIPE_SIZE)
-                break;
-        }
+    while (is_writeable() && this->buf.size() == 0) {
+        bool interrupted = waitlist_r.wait(mtx);
+        if (interrupted)
+            return -EINTR;
     }
 
     while (!this->buf.empty() && n)

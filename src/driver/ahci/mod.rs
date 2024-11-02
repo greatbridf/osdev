@@ -1,12 +1,14 @@
 use crate::{
+    fs::procfs,
     kernel::{
         block::{make_device, BlockDevice},
         interrupt::register_irq_handler,
+        mem::paging::PageBuffer,
     },
     prelude::*,
 };
 
-use alloc::sync::Arc;
+use alloc::{format, sync::Arc};
 use bindings::{
     kernel::hw::pci::{self, pci_device},
     EIO,
@@ -87,6 +89,14 @@ impl Device {
             if let Err(e) = (|| -> KResult<()> {
                 port.init()?;
 
+                {
+                    let port = port.clone();
+                    let name = format!("ahci-p{}-stats", port.nport);
+                    procfs::populate_root(name.into_bytes().into(), move |buffer| {
+                        writeln!(buffer, "{:?}", port.stats.lock().as_ref()).map_err(|_| EIO)
+                    })?;
+                }
+
                 let port = BlockDevice::register_disk(
                     make_device(8, nport * 16),
                     2147483647, // TODO: get size from device
@@ -106,13 +116,10 @@ impl Device {
     }
 
     fn handle_interrupt(&self) {
-        println_debug!("ahci interrupt fired");
-
         // Safety
         // `self.ports` is accessed inside irq handler
         let ports = self.ports.lock();
         for nport in self.control.pending_interrupts() {
-            println_debug!("processing port {nport}");
             if let None = ports[nport as usize] {
                 println_warn!("port {nport} not found");
                 continue;
@@ -130,7 +137,6 @@ impl Device {
             vwrite(port.interrupt_status(), PORT_IS_DHRS);
 
             self.control.clear_interrupt(nport);
-            println_debug!("clear port {nport} interrupt flags");
 
             port.handle_interrupt();
         }
@@ -157,9 +163,7 @@ impl Device {
         device.control.enable_interrupts();
 
         let device_irq = device.clone();
-        register_irq_handler(irqno as i32, move || {
-            device_irq.handle_interrupt()
-        })?;
+        register_irq_handler(irqno as i32, move || device_irq.handle_interrupt())?;
 
         device.probe_ports()?;
 
@@ -179,9 +183,7 @@ unsafe extern "C" fn probe_device(pcidev: *mut pci_device) -> i32 {
 }
 
 pub fn register_ahci_driver() {
-    let ret = unsafe {
-        pci::register_driver_r(VENDOR_INTEL, DEVICE_AHCI, Some(probe_device))
-    };
+    let ret = unsafe { pci::register_driver_r(VENDOR_INTEL, DEVICE_AHCI, Some(probe_device)) };
 
     assert_eq!(ret, 0);
 }

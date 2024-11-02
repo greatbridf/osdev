@@ -28,14 +28,10 @@ struct PACKED tss64_t {
 };
 constexpr physaddr<tss64_t> tss{0x00000070};
 
-thread::thread(std::string name, pid_t owner)
-    : owner{owner}, attr{READY | SYSTEM}, name{name} {}
+thread::thread(std::string name, pid_t owner) : owner{owner}, attr{READY | SYSTEM}, name{name} {}
 
 thread::thread(const thread& val, pid_t owner)
-    : owner{owner}
-    , attr{val.attr}
-    , name{val.name}
-    , tls_desc32{val.tls_desc32} {}
+    : owner{owner}, attr{val.attr}, name{val.name}, tls_desc32{val.tls_desc32} {}
 
 tid_t thread::tid() const {
     return (tid_t)kstack.pfn;
@@ -50,8 +46,7 @@ bool thread::operator==(const thread& rhs) const {
 }
 
 static inline uintptr_t __stack_bottom(pfn_t pfn) {
-    return (uintptr_t)(void*)kernel::mem::physaddr<void>{
-        pfn + (1 << KERNEL_STACK_ORDER) * 0x1000};
+    return (uintptr_t)(void*)kernel::mem::physaddr<void>{pfn + (1 << KERNEL_STACK_ORDER) * 0x1000};
 }
 
 thread::kernel_stack::kernel_stack() {
@@ -112,20 +107,17 @@ void thread::set_attr(thd_attr_t new_attr, bool forced) {
             break;
         case READY:
             if (attr & ZOMBIE) {
-                kmsgf("[kernel:warn] zombie process pid%d tries to wake up",
-                      owner);
+                kmsgf("[kernel:warn] zombie process pid%d tries to wake up", owner);
                 break;
             }
 
-            if (attr & READY) {
-                kmsgf("[kernel:warn] trying to wake up %d from USLEEP",
-                      this->owner);
+            if (attr & READY)
+                break;
 
+            if (!forced && attr & USLEEP) {
+                kmsgf("[kernel:warn] trying to wake up %d from USLEEP", this->owner);
                 break;
             }
-
-            if (!forced && attr & USLEEP)
-                break;
 
             attr &= SYSTEM;
             attr |= READY;

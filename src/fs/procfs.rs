@@ -226,7 +226,7 @@ pub fn root() -> ProcFsNode {
 
 pub fn creat(
     parent: &ProcFsNode,
-    name: &Arc<[u8]>,
+    name: Arc<[u8]>,
     file: Box<dyn ProcFsFile>,
 ) -> KResult<ProcFsNode> {
     let parent = match parent {
@@ -244,7 +244,7 @@ pub fn creat(
         parent
             .entries
             .access_mut(lock.as_mut())
-            .push((name.clone(), ProcFsNode::File(inode.clone())));
+            .push((name, ProcFsNode::File(inode.clone())));
     }
 
     Ok(ProcFsNode::File(inode))
@@ -287,8 +287,44 @@ pub fn init() {
 
     creat(
         &root(),
-        &Arc::from(b"mounts".as_slice()),
+        Arc::from(b"mounts".as_slice()),
         Box::new(DumpMountsFile),
     )
     .unwrap();
+}
+
+pub struct GenericProcFsFile<ReadFn>
+where
+    ReadFn: Send + Sync + Fn(&mut PageBuffer) -> KResult<()>,
+{
+    read_fn: Option<ReadFn>,
+}
+
+impl<ReadFn> ProcFsFile for GenericProcFsFile<ReadFn>
+where
+    ReadFn: Send + Sync + Fn(&mut PageBuffer) -> KResult<()>,
+{
+    fn can_read(&self) -> bool {
+        self.read_fn.is_some()
+    }
+
+    fn read(&self, buffer: &mut PageBuffer) -> KResult<usize> {
+        self.read_fn.as_ref().ok_or(EACCES)?(buffer).map(|_| buffer.len())
+    }
+}
+
+pub fn populate_root<F>(name: Arc<[u8]>, read_fn: F) -> KResult<()>
+where
+    F: Send + Sync + Fn(&mut PageBuffer) -> KResult<()> + 'static,
+{
+    let root = root();
+
+    creat(
+        &root,
+        name,
+        Box::new(GenericProcFsFile {
+            read_fn: Some(read_fn),
+        }),
+    )
+    .map(|_| ())
 }

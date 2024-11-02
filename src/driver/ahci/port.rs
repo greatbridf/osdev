@@ -11,8 +11,8 @@ use crate::sync::condvar::CondVar;
 
 use super::command::{Command, IdentifyCommand, ReadLBACommand};
 use super::{
-    vread, vwrite, CommandHeader, PRDTEntry, FISH2D, PORT_CMD_CR, PORT_CMD_FR,
-    PORT_CMD_FRE, PORT_CMD_ST, PORT_IE_DEFAULT,
+    vread, vwrite, CommandHeader, PRDTEntry, FISH2D, PORT_CMD_CR, PORT_CMD_FR, PORT_CMD_FRE,
+    PORT_CMD_ST, PORT_IE_DEFAULT,
 };
 
 fn spinwait_clear(refval: *const u32, mask: u32) -> KResult<()> {
@@ -135,13 +135,28 @@ impl FreeList {
     }
 }
 
+#[derive(Default, Debug)]
+pub struct AdapterPortStats {
+    /// Number of commands sent
+    cmd_sent: u64,
+
+    /// Number of transmission errors
+    cmd_error: u64,
+
+    /// Number of interrupts fired
+    int_fired: u64,
+}
+
 pub struct AdapterPort {
-    nport: u32,
+    pub nport: u32,
     regs: *mut (),
     page: Page,
     slots: [CommandSlot; 32],
     free_list: Spin<FreeList>,
     free_list_cv: CondVar,
+
+    /// Statistics for this port
+    pub stats: Spin<AdapterPortStats>,
 }
 
 /// # Safety
@@ -158,13 +173,12 @@ impl AdapterPort {
             nport,
             regs: NoCachePP::new(base + 0x100 + 0x80 * nport as usize).as_ptr(),
             slots: core::array::from_fn(|index| {
-                CommandSlot::new(unsafe {
-                    cmdheaders_start.offset(index as isize)
-                })
+                CommandSlot::new(unsafe { cmdheaders_start.offset(index as isize) })
             }),
             free_list: Spin::new(FreeList::new()),
             free_list_cv: CondVar::new(),
             page,
+            stats: Spin::default(),
         }
     }
 }
@@ -202,20 +216,21 @@ impl AdapterPort {
         vread(self.sata_status()) & 0xf == 0x3
     }
 
-    fn get_free_slot(&self) -> usize {
+    fn get_free_slot(&self) -> u32 {
         let mut free_list = self.free_list.lock_irq();
 
         loop {
             match free_list.free.pop_front() {
-                Some(slot) => {
-                    free_list.working.push_back(slot);
-                    break slot as usize;
-                }
+                Some(slot) => break slot,
                 None => {
                     self.free_list_cv.wait(&mut free_list, false);
                 }
             }
         }
+    }
+
+    fn save_working(&self, slot: u32) {
+        self.free_list.lock().working.push_back(slot);
     }
 
     fn release_free_slot(&self, slot: u32) {
@@ -236,11 +251,12 @@ impl AdapterPort {
 
             let slot = &self.slots[n as usize];
 
-            println_debug!("slot{n} finished");
-
             // TODO: check error
-            slot.inner.lock().state = SlotState::Finished;
+            let mut slot_inner = slot.inner.lock();
+            debug_assert_eq!(slot_inner.state, SlotState::Working);
+            slot_inner.state = SlotState::Finished;
             slot.cv.notify_all();
+            self.stats.lock().int_fired += 1;
 
             false
         });
@@ -278,15 +294,15 @@ impl AdapterPort {
         let command_fis: &mut FISH2D = cmdtable_page.as_cached().as_mut();
         command_fis.setup(cmd.cmd(), cmd.lba(), cmd.count());
 
-        let prdt: &mut [PRDTEntry; 248] =
-            cmdtable_page.as_cached().offset(0x80).as_mut();
+        let prdt: &mut [PRDTEntry; 248] = cmdtable_page.as_cached().offset(0x80).as_mut();
 
         for (idx, page) in pages.iter().enumerate() {
             prdt[idx].setup(page);
         }
 
-        let slot_index = self.get_free_slot();
+        let slot_index = self.get_free_slot() as usize;
         let slot_object = &self.slots[slot_index];
+
         let mut slot = slot_object.inner.lock_irq();
 
         slot.setup(
@@ -298,25 +314,37 @@ impl AdapterPort {
 
         // should we clear received fis here?
         debug_assert!(vread(self.command_issue()) & (1 << slot_index) == 0);
-
-        println_debug!("slot{slot_index} working");
         vwrite(self.command_issue(), 1 << slot_index);
 
-        while slot.state == SlotState::Working {
-            slot_object.cv.wait(&mut slot, false);
+        if spinwait_clear(self.command_issue(), 1 << slot_index).is_err() {
+            let mut saved = false;
+            while slot.state == SlotState::Working {
+                if !saved {
+                    saved = true;
+                    self.save_working(slot_index as u32);
+                }
+                slot_object.cv.wait(&mut slot, false);
+            }
+        } else {
+            // TODO: check error
+            slot.state = SlotState::Finished;
         }
 
         let state = slot.state;
         slot.state = SlotState::Idle;
 
+        debug_assert_ne!(state, SlotState::Working);
         self.release_free_slot(slot_index as u32);
 
-        drop(slot);
-        println_debug!("slot{slot_index} released");
-
         match state {
-            SlotState::Finished => Ok(()),
-            SlotState::Error => Err(EIO),
+            SlotState::Finished => {
+                self.stats.lock().cmd_sent += 1;
+                Ok(())
+            }
+            SlotState::Error => {
+                self.stats.lock().cmd_error += 1;
+                Err(EIO)
+            }
             _ => panic!("Invalid slot state"),
         }
     }
@@ -343,7 +371,7 @@ impl AdapterPort {
         match self.identify() {
             Err(err) => {
                 self.stop_command()?;
-                return Err(err);
+                Err(err)
             }
             Ok(_) => Ok(()),
         }
@@ -361,8 +389,7 @@ impl BlockRequestQueue for AdapterPort {
             return Err(EINVAL);
         }
 
-        let command =
-            ReadLBACommand::new(req.buffer, req.sector, req.count as u16)?;
+        let command = ReadLBACommand::new(req.buffer, req.sector, req.count as u16)?;
 
         self.send_command(&command)
     }

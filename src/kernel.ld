@@ -122,6 +122,7 @@ SECTIONS
         *(.got)
         *(.got.plt)
 
+        . = . + 4;
         . = ALIGN(0x1000) - 4;
         LONG(KERNEL_MAGIC);
 

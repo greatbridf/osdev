@@ -23,6 +23,15 @@ impl<Value, Strategy: LockStrategy> Lock<Value, Strategy> {
     }
 }
 
+impl<Value: Sized + Default, Strategy: LockStrategy> Default for Lock<Value, Strategy> {
+    fn default() -> Self {
+        Self {
+            strategy_data: Strategy::data(),
+            value: Default::default(),
+        }
+    }
+}
+
 impl<Value: ?Sized, Strategy: LockStrategy> Lock<Value, Strategy> {
     #[inline(always)]
     pub fn lock<'lt>(&'lt self) -> Guard<'lt, Value, Strategy> {

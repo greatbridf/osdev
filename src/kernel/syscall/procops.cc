@@ -59,12 +59,8 @@ execve_retval kernel::syscall::do_execve(const std::string& exec,
 
     current_process->files.onexec();
 
-    async::preempt_disable();
-
     // TODO: set cs and ss to compatibility mode
     if (int ret = types::elf::elf32_load(d); ret != 0) {
-        async::preempt_enable();
-
         if (ret == types::elf::ELF_LOAD_FAIL_NORETURN)
             kill_current(SIGSEGV);
 
@@ -72,8 +68,6 @@ execve_retval kernel::syscall::do_execve(const std::string& exec,
     }
 
     current_thread->signals.on_exec();
-    async::preempt_enable();
-
     return {d.ip, d.sp, 0};
 }
 

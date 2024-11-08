@@ -2,27 +2,38 @@ pub mod dcache;
 
 use core::{
     hash::{BuildHasher, BuildHasherDefault, Hasher},
-    sync::atomic::AtomicPtr,
+    ops::ControlFlow,
+    sync::atomic::{AtomicPtr, Ordering},
 };
 
 use crate::{
     hash::KernelHasher,
-    io::{ByteBuffer, RawBuffer},
+    io::{Buffer, ByteBuffer},
+    kernel::block::BlockDevice,
     path::{Path, PathComponent},
     prelude::*,
     rcu::{RCUNode, RCUPointer},
 };
 
 use alloc::sync::Arc;
-use bindings::{EINVAL, ELOOP, ENOENT, ENOTDIR};
+use bindings::{statx, EEXIST, EINVAL, EISDIR, ELOOP, ENOENT, ENOTDIR, ERANGE, O_CREAT, O_EXCL};
 
-use super::inode::Inode;
+use super::{
+    inode::{Ino, Inode, Mode, WriteOffset},
+    s_isblk, s_ischr, s_isdir, s_isreg, DevId, FsContext,
+};
 
 struct DentryData {
     inode: Arc<dyn Inode>,
     flags: u64,
 }
 
+/// # Safety
+///
+/// We wrap `Dentry` in `Arc` to ensure that the `Dentry` is not dropped while it is still in use.
+///
+/// Since a `Dentry` is created and marked as live(some data is saved to it), it keeps alive until
+/// the last reference is dropped.
 pub struct Dentry {
     // Const after insertion into dcache
     parent: Arc<Dentry>,
@@ -128,8 +139,11 @@ impl Dentry {
     fn save_data(&self, inode: Arc<dyn Inode>, flags: u64) -> KResult<()> {
         let new = DentryData { inode, flags };
 
-        let old = self.data.swap(Some(Arc::new(new)));
-        // Safety: old data is `None`, so it's safe to emit the `drop` call
+        // TODO!!!: We don't actually need to use `RCUPointer` here
+        // Safety: this function may only be called from `create`-like functions which requires the
+        // superblock's write locks to be held, so only one creation can happen at a time and we
+        // can't get a reference to the old data.
+        let old = unsafe { self.data.swap(Some(Arc::new(new))) };
         assert!(old.is_none());
 
         Ok(())
@@ -151,7 +165,7 @@ impl Dentry {
         self.data
             .load()
             .as_ref()
-            .ok_or(EINVAL)
+            .ok_or(ENOENT)
             .map(|data| data.inode.clone())
     }
 
@@ -167,11 +181,30 @@ impl Dentry {
         data.as_ref()
             .map_or(false, |data| data.flags & D_DIRECTORY != 0)
     }
-}
 
-#[repr(C)]
-pub struct FsContext {
-    root: *const Dentry,
+    pub fn is_valid(&self) -> bool {
+        self.data.load().is_some()
+    }
+
+    pub fn open_check(self: &Arc<Self>, flags: u32, mode: Mode) -> KResult<()> {
+        let data = self.data.load();
+        let create = flags & O_CREAT != 0;
+        let excl = flags & O_EXCL != 0;
+
+        if data.is_some() {
+            if create && excl {
+                return Err(EEXIST);
+            }
+            return Ok(());
+        } else {
+            if !create {
+                return Err(ENOENT);
+            }
+
+            let parent = self.parent().get_inode()?;
+            parent.creat(self, mode as u32)
+        }
+    }
 }
 
 impl Dentry {
@@ -205,7 +238,7 @@ impl Dentry {
         }
     }
 
-    fn open_recursive(
+    pub fn open_recursive(
         context: &FsContext,
         cwd: &Arc<Self>,
         path: Path,
@@ -219,12 +252,10 @@ impl Dentry {
         }
 
         let mut cwd = if path.is_absolute() {
-            Dentry::from_raw(&context.root).clone()
+            context.fsroot.clone()
         } else {
             cwd.clone()
         };
-
-        let root_dentry = Dentry::from_raw(&context.root);
 
         for item in path.iter() {
             if let PathComponent::TrailingEmpty = item {
@@ -238,7 +269,7 @@ impl Dentry {
             match item {
                 PathComponent::TrailingEmpty | PathComponent::Current => {} // pass
                 PathComponent::Parent => {
-                    if !cwd.hash_eq(root_dentry.as_ref()) {
+                    if !cwd.hash_eq(&context.fsroot) {
                         cwd = Self::resolve_directory(context, cwd.parent.clone(), nrecur)?;
                     }
                     continue;
@@ -269,53 +300,31 @@ impl Dentry {
 
         Ok(cwd)
     }
-}
 
-#[no_mangle]
-pub extern "C" fn dentry_open(
-    context_root: *const Dentry,
-    cwd: *const Dentry, // borrowed
-    path: *const u8,
-    path_len: usize,
-    follow: bool,
-) -> *const Dentry {
-    match (|| -> KResult<Arc<Dentry>> {
-        let path = Path::new(unsafe { core::slice::from_raw_parts(path, path_len) })?;
-
-        let context = FsContext { root: context_root };
-
-        Dentry::open_recursive(&context, Dentry::from_raw(&cwd).as_ref(), path, follow, 0)
-    })() {
-        Ok(dentry) => Arc::into_raw(dentry),
-        Err(err) => (-(err as i32) as usize) as *const Dentry,
+    pub fn open(context: &FsContext, path: Path, follow_symlinks: bool) -> KResult<Arc<Self>> {
+        let cwd = context.cwd.lock().clone();
+        Dentry::open_recursive(context, &cwd, path, follow_symlinks, 0)
     }
-}
 
-#[no_mangle]
-pub extern "C" fn d_path(
-    dentry: *const Dentry,
-    root: *const Dentry,
-    mut buffer: *mut u8,
-    bufsize: usize,
-) -> i32 {
-    let mut buffer = RawBuffer::new_from_raw(&mut buffer, bufsize);
-
-    match (|| {
-        let mut dentry = Dentry::from_raw(&dentry).clone();
-        let root = Dentry::from_raw(&root);
+    pub fn get_path(
+        self: &Arc<Dentry>,
+        context: &FsContext,
+        buffer: &mut dyn Buffer,
+    ) -> KResult<()> {
+        let mut dentry = self;
+        let root = &context.fsroot;
 
         let mut path = vec![];
 
-        while Arc::as_ptr(&dentry) != Arc::as_ptr(root.as_ref()) {
+        while Arc::as_ptr(dentry) != Arc::as_ptr(root) {
             if path.len() > 32 {
                 return Err(ELOOP);
             }
 
             path.push(dentry.name().clone());
-            dentry = dentry.parent().clone();
+            dentry = dentry.parent();
         }
 
-        const ERANGE: u32 = 34;
         buffer.fill(b"/")?.ok_or(ERANGE)?;
         for item in path.iter().rev().map(|name| name.as_ref()) {
             buffer.fill(item)?.ok_or(ERANGE)?;
@@ -325,9 +334,125 @@ pub extern "C" fn d_path(
         buffer.fill(&[0])?.ok_or(ERANGE)?;
 
         Ok(())
-    })() {
-        Ok(_) => 0,
-        Err(err) => -(err as i32),
+    }
+}
+
+impl Dentry {
+    pub fn read(&self, buffer: &mut dyn Buffer, offset: usize) -> KResult<usize> {
+        let inode = self.get_inode()?;
+
+        // Safety: Changing mode alone will have no effect on the file's contents
+        match inode.mode.load(Ordering::Relaxed) {
+            mode if s_isdir(mode) => Err(EISDIR),
+            mode if s_isreg(mode) => inode.read(buffer, offset),
+            mode if s_isblk(mode) => {
+                let device = BlockDevice::get(inode.devid()?)?;
+                Ok(device.read_some(offset, buffer)?.allow_partial())
+            }
+            mode if s_ischr(mode) => {
+                let devid = inode.devid()?;
+
+                // TODO!!!!!: change this
+                let mut temporary_buffer = [0u8; 256];
+
+                let ret = unsafe {
+                    bindings::fs::char_device_read(
+                        devid,
+                        temporary_buffer.as_mut_ptr() as *mut _,
+                        temporary_buffer.len(),
+                        temporary_buffer.len(),
+                    )
+                };
+
+                if ret < 0 {
+                    Err(-ret as u32)
+                } else {
+                    Ok(buffer
+                        .fill(&temporary_buffer[..ret as usize])?
+                        .allow_partial())
+                }
+            }
+            _ => Err(EINVAL),
+        }
+    }
+
+    pub fn write(&self, buffer: &[u8], offset: WriteOffset) -> KResult<usize> {
+        let inode = self.get_inode()?;
+        // Safety: Changing mode alone will have no effect on the file's contents
+        match inode.mode.load(Ordering::Relaxed) {
+            mode if s_isdir(mode) => Err(EISDIR),
+            mode if s_isreg(mode) => inode.write(buffer, offset),
+            mode if s_isblk(mode) => Err(EINVAL), // TODO
+            mode if s_ischr(mode) => {
+                let devid = inode.devid()?;
+
+                let ret = unsafe {
+                    bindings::fs::char_device_write(
+                        devid,
+                        buffer.as_ptr() as *const _,
+                        buffer.len(),
+                    )
+                };
+
+                if ret < 0 {
+                    Err(-ret as u32)
+                } else {
+                    Ok(ret as usize)
+                }
+            }
+            _ => Err(EINVAL),
+        }
+    }
+
+    pub fn readdir<F>(&self, offset: usize, mut callback: F) -> KResult<usize>
+    where
+        F: FnMut(&[u8], Ino) -> KResult<ControlFlow<(), ()>>,
+    {
+        self.get_inode()?.do_readdir(offset, &mut callback)
+    }
+
+    pub fn mkdir(&self, mode: Mode) -> KResult<()> {
+        if self.get_inode().is_ok() {
+            Err(EEXIST)
+        } else {
+            self.parent.get_inode().unwrap().mkdir(self, mode)
+        }
+    }
+
+    pub fn statx(&self, stat: &mut statx, mask: u32) -> KResult<()> {
+        self.get_inode()?.statx(stat, mask)
+    }
+
+    pub fn truncate(&self, size: usize) -> KResult<()> {
+        self.get_inode()?.truncate(size)
+    }
+
+    pub fn unlink(self: &Arc<Self>) -> KResult<()> {
+        if self.get_inode().is_err() {
+            Err(ENOENT)
+        } else {
+            self.parent.get_inode().unwrap().unlink(self)
+        }
+    }
+
+    pub fn symlink(self: &Arc<Self>, link: &[u8]) -> KResult<()> {
+        if self.get_inode().is_ok() {
+            Err(EEXIST)
+        } else {
+            self.parent.get_inode().unwrap().symlink(self, link)
+        }
+    }
+
+    pub fn readlink(&self, buffer: &mut dyn Buffer) -> KResult<usize> {
+        self.get_inode()?.readlink(buffer)
+    }
+
+    pub fn mknod(&self, mode: Mode, devid: DevId) -> KResult<()> {
+        if self.get_inode().is_ok() {
+            Err(EEXIST)
+        } else {
+            self.parent.get_inode().unwrap().mknod(self, mode, devid)
+        }
     }
 }
 

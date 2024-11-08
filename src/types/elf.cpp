@@ -29,7 +29,7 @@ static inline void __user_push_string32(uintptr_t* sp, const char* str) {
 }
 
 int types::elf::elf32_load(types::elf::elf32_load_data& d) {
-    auto& exec = d.exec_dent;
+    auto exec = fs::dentry_pointer{d.exec_dent};
     if (!exec)
         return -ENOENT;
 
@@ -143,12 +143,12 @@ int types::elf::elf32_load(types::elf::elf32_load_data& d) {
 
     // fill information block area
     std::vector<elf32_addr_t> args, envs;
-    for (const auto& env : d.envp) {
-        __user_push_string32(sp, env.c_str());
+    for (size_t i = 0; i < d.envp_count; ++i) {
+        __user_push_string32(sp, d.envp[i]);
         envs.push_back((uintptr_t)*sp);
     }
-    for (const auto& arg : d.argv) {
-        __user_push_string32(sp, arg.c_str());
+    for (size_t i = 0; i < d.argv_count; ++i) {
+        __user_push_string32(sp, d.argv[i]);
         args.push_back((uintptr_t)*sp);
     }
 

@@ -49,7 +49,6 @@ set(KERNEL_MAIN_SOURCES src/dev/builtin-chardev.cc
                         src/kernel/syscall.cpp
                         src/kernel/syscall/fileops.cc
                         src/kernel/syscall/infoops.cc
-                        src/kernel/syscall/mount.cc
                         src/kernel/syscall/procops.cc
                         src/kernel/mem/mm_list.cc
                         src/kernel/mem/paging.cc
@@ -64,7 +63,6 @@ set(KERNEL_MAIN_SOURCES src/dev/builtin-chardev.cc
                         src/kernel/task/thread.cc
                         src/kernel/task/readyqueue.cc
                         src/kernel/user/thread_local.cc
-                        src/kernel/vfs/filearr.cc
                         src/kernel/signal.cpp
                         src/net/ethernet.cc
                         src/types/crc.cc
@@ -87,8 +85,6 @@ set(KERNEL_MAIN_SOURCES src/dev/builtin-chardev.cc
                         include/kernel/utsname.hpp
                         include/kernel/vfs.hpp
                         include/kernel/vfs/dentry.hpp
-                        include/kernel/vfs/file.hpp
-                        include/kernel/vfs/filearr.hpp
                         include/kernel/vga.hpp
                         include/kernel/signal.hpp
                         include/kernel/task/forward.hpp

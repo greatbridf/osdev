@@ -203,7 +203,9 @@ impl<T> RCUPointer<T> {
         }
     }
 
-    pub fn swap(&self, new: Option<Arc<T>>) -> Option<Arc<T>> {
+    /// # Safety
+    /// Caller must ensure that the pointer is freed after all readers are done.
+    pub unsafe fn swap(&self, new: Option<Arc<T>>) -> Option<Arc<T>> {
         let new = new
             .map(|arc| Arc::into_raw(arc) as *mut T)
             .unwrap_or(core::ptr::null_mut());

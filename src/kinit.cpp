@@ -61,6 +61,8 @@ static inline void set_uname() {
     strcpy(kernel::sys_utsname->domainname, "(none)");
 }
 
+extern "C" void r_init_vfs();
+
 SECTION(".text.kinit")
 void NORETURN real_kernel_init(mem::paging::pfn_t kernel_stack_pfn) {
     // call global constructors
@@ -79,6 +81,8 @@ void NORETURN real_kernel_init(mem::paging::pfn_t kernel_stack_pfn) {
     init_pci();
 
     init_syscall_table();
+
+    r_init_vfs();
 
     init_scheduler(kernel_stack_pfn);
 }

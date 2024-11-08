@@ -5,12 +5,10 @@ use bindings::{
     S_IFMT,
 };
 use core::{
-    mem::MaybeUninit,
-    ptr::addr_of_mut,
-    sync::atomic::{AtomicU32, AtomicU64, Ordering},
+    mem::MaybeUninit, ops::ControlFlow, ptr::addr_of_mut, sync::atomic::{AtomicU32, AtomicU64, Ordering}
 };
 
-use super::{dentry::Dentry, s_isblk, s_ischr, vfs::Vfs, DevId, ReadDirCallback, TimeSpec};
+use super::{dentry::Dentry, s_isblk, s_ischr, vfs::Vfs, DevId, TimeSpec};
 use crate::{io::Buffer, prelude::*};
 
 pub type Ino = u64;
@@ -74,6 +72,11 @@ pub trait InodeInner:
     fn data_mut(&mut self) -> &mut InodeData;
 }
 
+pub enum WriteOffset<'end> {
+    Position(usize),
+    End(&'end mut usize),
+}
+
 #[allow(unused_variables)]
 pub trait Inode: Send + Sync + InodeInner {
     fn is_dir(&self) -> bool {
@@ -88,11 +91,11 @@ pub trait Inode: Send + Sync + InodeInner {
         Err(if !self.is_dir() { ENOTDIR } else { EPERM })
     }
 
-    fn mkdir(&self, at: &Arc<Dentry>, mode: Mode) -> KResult<()> {
+    fn mkdir(&self, at: &Dentry, mode: Mode) -> KResult<()> {
         Err(if !self.is_dir() { ENOTDIR } else { EPERM })
     }
 
-    fn mknod(&self, at: &Arc<Dentry>, mode: Mode, dev: DevId) -> KResult<()> {
+    fn mknod(&self, at: &Dentry, mode: Mode, dev: DevId) -> KResult<()> {
         Err(if !self.is_dir() { ENOTDIR } else { EPERM })
     }
 
@@ -108,7 +111,7 @@ pub trait Inode: Send + Sync + InodeInner {
         Err(if self.is_dir() { EISDIR } else { EINVAL })
     }
 
-    fn write(&self, buffer: &[u8], offset: usize) -> KResult<usize> {
+    fn write(&self, buffer: &[u8], offset: WriteOffset) -> KResult<usize> {
         Err(if self.is_dir() { EISDIR } else { EINVAL })
     }
 
@@ -124,10 +127,10 @@ pub trait Inode: Send + Sync + InodeInner {
         Err(if self.is_dir() { EISDIR } else { EPERM })
     }
 
-    fn readdir<'cb, 'r: 'cb>(
-        &'r self,
+    fn do_readdir(
+        &self,
         offset: usize,
-        callback: &ReadDirCallback<'cb>,
+        callback: &mut dyn FnMut(&[u8], Ino) -> KResult<ControlFlow<(), ()>>,
     ) -> KResult<usize> {
         Err(if !self.is_dir() { ENOTDIR } else { EPERM })
     }

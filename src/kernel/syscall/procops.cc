@@ -28,49 +28,6 @@ static inline void not_implemented(const char* pos, int line) {
     current_thread->send_signal(SIGSYS);
 }
 
-int kernel::syscall::do_chdir(const char __user* path) {
-    // TODO: use copy_from_user
-    auto [dir, ret] = current_open(path);
-    if (!dir || ret)
-        return ret;
-
-    if (!fs::r_dentry_is_directory(dir.get()))
-        return -ENOTDIR;
-
-    current_process->cwd = std::move(dir);
-    return 0;
-}
-
-execve_retval kernel::syscall::do_execve(const std::string& exec,
-                                         const std::vector<std::string>& args,
-                                         const std::vector<std::string>& envs) {
-    auto [dent, ret] = current_open(exec);
-
-    if (ret)
-        return {0, 0, ret};
-
-    types::elf::elf32_load_data d{
-        .exec_dent{std::move(dent)},
-        .argv{args},
-        .envp{envs},
-        .ip{},
-        .sp{},
-    };
-
-    current_process->files.onexec();
-
-    // TODO: set cs and ss to compatibility mode
-    if (int ret = types::elf::elf32_load(d); ret != 0) {
-        if (ret == types::elf::ELF_LOAD_FAIL_NORETURN)
-            kill_current(SIGSEGV);
-
-        return {0, 0, ret};
-    }
-
-    current_thread->signals.on_exec();
-    return {d.ip, d.sp, 0};
-}
-
 int kernel::syscall::do_exit(int status) {
     // TODO: terminating a thread only
     assert(current_process->thds.size() == 1);
@@ -127,12 +84,6 @@ int kernel::syscall::do_waitpid(pid_t waitpid, int __user* arg1, int options) {
     // we should never reach here
     freeze();
     return -EINVAL;
-}
-
-int kernel::syscall::do_getcwd(char __user* buf, size_t buf_size) {
-    // TODO: use copy_to_user
-    return fs::d_path(current_process->cwd.get(),
-                      current_process->fs_context.root.get(), buf, buf_size);
 }
 
 pid_t kernel::syscall::do_setsid() {
@@ -240,13 +191,6 @@ int kernel::syscall::do_arch_prctl(int option, uintptr_t arg2) {
     return 0;
 }
 
-int kernel::syscall::do_umask(mode_t mask) {
-    mode_t old = current_process->umask;
-    current_process->umask = mask;
-
-    return old;
-}
-
 int kernel::syscall::do_kill(pid_t pid, int sig) {
     auto [pproc, found] = procs->try_find(pid);
     if (!found)
@@ -285,8 +229,7 @@ int kernel::syscall::do_tkill(pid_t tid, int sig) {
 }
 
 int kernel::syscall::do_rt_sigprocmask(int how, const sigmask_type __user* set,
-                                       sigmask_type __user* oldset,
-                                       size_t sigsetsize) {
+                                       sigmask_type __user* oldset, size_t sigsetsize) {
     if (sigsetsize != sizeof(sigmask_type))
         return -EINVAL;
 
@@ -316,13 +259,11 @@ int kernel::syscall::do_rt_sigprocmask(int how, const sigmask_type __user* set,
 }
 
 int kernel::syscall::do_rt_sigaction(int signum, const sigaction __user* act,
-                                     sigaction __user* oldact,
-                                     size_t sigsetsize) {
+                                     sigaction __user* oldact, size_t sigsetsize) {
     if (sigsetsize != sizeof(sigmask_type))
         return -EINVAL;
 
-    if (!kernel::signal_list::check_valid(signum) || signum == SIGKILL ||
-        signum == SIGSTOP)
+    if (!kernel::signal_list::check_valid(signum) || signum == SIGKILL || signum == SIGSTOP)
         return -EINVAL;
 
     // TODO: use copy_to_user

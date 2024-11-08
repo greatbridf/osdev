@@ -62,6 +62,11 @@ SECTIONS
         end_ctors = .;
 
         . = ALIGN(16);
+        START_SYSCALL_HANDLERS = .;
+        KEEP(*(.syscall_handlers));
+        END_SYSCALL_HANDLERS = .;
+
+        . = ALIGN(16);
         *(.data.kinit)
 
         . = ALIGN(16);
@@ -91,15 +96,13 @@ SECTIONS
 
         . = ALIGN(16);
         KMOD_LOADERS_START = .;
-
         KEEP(*(.kmods));
         QUAD(0);
 
         . = ALIGN(16);
-        late_init_start = .;
-        KEEP(*(.late_init));
-        QUAD(0);
-        late_init_end = .;
+        FIX_START = .;
+        KEEP(*(.fix));
+        FIX_END = .;
 
         . = ALIGN(16);
 

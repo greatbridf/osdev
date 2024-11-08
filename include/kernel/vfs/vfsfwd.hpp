@@ -6,13 +6,6 @@ namespace fs {
 struct dcache;
 struct dentry;
 
-// in file.hpp
-struct file;
-struct regular_file;
-struct fifo_file;
-
-class pipe;
-
 // in filearray.hpp
 class file_array;
 

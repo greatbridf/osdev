@@ -1,4 +1,4 @@
-use core::sync::atomic::Ordering;
+use core::{ops::ControlFlow, sync::atomic::Ordering};
 
 use alloc::{
     collections::btree_map::BTreeMap,
@@ -19,7 +19,7 @@ use crate::{
             inode::{define_struct_inode, Ino, Inode, InodeData},
             mount::{register_filesystem, Mount, MountCreator},
             vfs::Vfs,
-            DevId, ReadDirCallback,
+            DevId,
         },
     },
     prelude::*,
@@ -447,10 +447,10 @@ impl Inode for DirInode {
         }
     }
 
-    fn readdir<'cb, 'r: 'cb>(
-        &'r self,
+    fn do_readdir(
+        &self,
         offset: usize,
-        callback: &ReadDirCallback<'cb>,
+        callback: &mut dyn FnMut(&[u8], Ino) -> KResult<ControlFlow<(), ()>>,
     ) -> KResult<usize> {
         let vfs = self.vfs.upgrade().ok_or(EIO)?;
         let vfs = vfs.as_any().downcast_ref::<FatFs>().unwrap();
@@ -474,7 +474,7 @@ impl Inode for DirInode {
 
             vfs.get_or_alloc_inode(ino, entry.is_directory(), entry.size);
 
-            if callback(name.as_ref(), ino).is_err() {
+            if callback(name.as_ref(), ino)?.is_break() {
                 break;
             }
 
@@ -488,13 +488,7 @@ impl Inode for DirInode {
 struct FatMountCreator;
 
 impl MountCreator for FatMountCreator {
-    fn create_mount(
-        &self,
-        _source: &str,
-        _flags: u64,
-        _data: &[u8],
-        mp: &Arc<Dentry>,
-    ) -> KResult<Mount> {
+    fn create_mount(&self, _source: &str, _flags: u64, mp: &Arc<Dentry>) -> KResult<Mount> {
         let (fatfs, root_inode) = FatFs::create(make_device(8, 1))?;
 
         Mount::new(mp, fatfs, root_inode)

@@ -3,7 +3,6 @@ use crate::{
     kernel::{
         block::{make_device, BlockDevice},
         interrupt::register_irq_handler,
-        mem::paging::PageBuffer,
     },
     prelude::*,
 };

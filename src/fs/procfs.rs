@@ -3,7 +3,8 @@ use alloc::{
     sync::{Arc, Weak},
 };
 use bindings::{EACCES, ENOTDIR, S_IFDIR, S_IFREG};
-use core::sync::atomic::Ordering;
+use core::{ops::ControlFlow, sync::atomic::Ordering};
+use itertools::Itertools;
 use lazy_static::lazy_static;
 
 use crate::{
@@ -15,7 +16,7 @@ use crate::{
             inode::{define_struct_inode, AtomicIno, Ino, Inode, InodeData},
             mount::{dump_mounts, register_filesystem, Mount, MountCreator},
             vfs::Vfs,
-            DevId, ReadDirCallback,
+            DevId,
         },
     },
     prelude::*,
@@ -143,19 +144,20 @@ impl Inode for DirInode {
             }))
     }
 
-    fn readdir<'cb, 'r: 'cb>(
-        &'r self,
+    fn do_readdir(
+        &self,
         offset: usize,
-        callback: &ReadDirCallback<'cb>,
+        callback: &mut dyn FnMut(&[u8], Ino) -> KResult<ControlFlow<(), ()>>,
     ) -> KResult<usize> {
         let lock = self.rwsem.lock_shared();
-        Ok(self
-            .entries
+        self.entries
             .access(lock.as_ref())
             .iter()
             .skip(offset)
-            .take_while(|(name, node)| callback(name, node.ino()).is_ok())
-            .count())
+            .map(|(name, node)| callback(name.as_ref(), node.ino()))
+            .take_while(|result| result.map_or(true, |flow| flow.is_continue()))
+            .take_while_inclusive(|result| result.is_ok())
+            .fold_ok(0, |acc, _| acc + 1)
     }
 }
 
@@ -204,13 +206,7 @@ impl ProcFsMountCreator {
 }
 
 impl MountCreator for ProcFsMountCreator {
-    fn create_mount(
-        &self,
-        _source: &str,
-        _flags: u64,
-        _data: &[u8],
-        mp: &Arc<Dentry>,
-    ) -> KResult<Mount> {
+    fn create_mount(&self, _source: &str, _flags: u64, mp: &Arc<Dentry>) -> KResult<Mount> {
         let vfs = ProcFsMountCreator::get();
         let root_inode = vfs.root_node.clone();
         Mount::new(mp, vfs, root_inode)

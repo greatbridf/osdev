@@ -21,8 +21,6 @@ struct dentry_deleter {
 };
 
 using dentry_pointer = std::unique_ptr<struct dentry, dentry_deleter>;
-extern "C" int d_path(struct dentry* dentry, struct dentry* root,
-                      char* out_path, size_t buflen);
 dentry_pointer d_get(const dentry_pointer& dp);
 
 } // namespace fs

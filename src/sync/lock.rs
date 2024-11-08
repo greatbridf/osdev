@@ -23,7 +23,16 @@ impl<Value, Strategy: LockStrategy> Lock<Value, Strategy> {
     }
 }
 
-impl<Value: Sized + Default, Strategy: LockStrategy> Default for Lock<Value, Strategy> {
+impl<Value: Clone, Strategy: LockStrategy> Clone for Lock<Value, Strategy> {
+    fn clone(&self) -> Self {
+        Self {
+            strategy_data: Strategy::data(),
+            value: UnsafeCell::new(self.lock_shared().clone()),
+        }
+    }
+}
+
+impl<Value: Default, Strategy: LockStrategy> Default for Lock<Value, Strategy> {
     fn default() -> Self {
         Self {
             strategy_data: Strategy::data(),

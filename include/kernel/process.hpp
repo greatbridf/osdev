@@ -7,6 +7,7 @@
 #include <utility>
 
 #include <assert.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <stdint.h>
 #include <sys/types.h>
@@ -27,7 +28,6 @@
 #include <kernel/user/thread_local.hpp>
 #include <kernel/vfs.hpp>
 #include <kernel/vfs/dentry.hpp>
-#include <kernel/vfs/filearr.hpp>
 
 class process;
 
@@ -57,9 +57,8 @@ class process {
     std::list<wait_obj> waitprocs;
 
     process_attr attr{};
-    fs::filearray files;
-    fs::dentry_pointer cwd{};
-    mode_t umask{0022};
+    fs::rust_file_array files;
+    fs::rust_fs_context fs_context;
 
     pid_t pid{};
     pid_t ppid{};
@@ -67,7 +66,6 @@ class process {
     pid_t sid{};
 
     kernel::tty::tty* control_tty{};
-    struct fs::fs_context fs_context;
     std::set<pid_t> children;
 
    public:

@@ -112,7 +112,7 @@ static inline void fault_handler(interrupt_stack* context, mmx_registers*) {
                 kill_current(SIGILL); // noreturn
         } break;
         case 14: {
-            kernel::mem::paging::handle_page_fault(context->error_code);
+            kernel::mem::paging::handle_page_fault(context);
             return;
         } break;
     }

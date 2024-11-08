@@ -1,16 +1,17 @@
 use alloc::sync::{Arc, Weak};
 use bindings::{EINVAL, EIO, EISDIR, S_IFBLK, S_IFCHR, S_IFDIR, S_IFLNK, S_IFREG};
-use core::sync::atomic::Ordering;
+use core::{ops::ControlFlow, sync::atomic::Ordering};
+use itertools::Itertools;
 
 use crate::{
     io::Buffer,
     kernel::vfs::{
         dentry::{dcache, Dentry},
-        inode::{define_struct_inode, AtomicIno, Ino, Inode, Mode},
+        inode::{define_struct_inode, AtomicIno, Ino, Inode, Mode, WriteOffset},
         mount::{register_filesystem, Mount, MountCreator, MS_RDONLY},
         s_isblk, s_ischr,
         vfs::Vfs,
-        DevId, ReadDirCallback,
+        DevId,
     },
     prelude::*,
     sync::Locked,
@@ -68,11 +69,11 @@ impl DirectoryInode {
     }
 
     fn link(&self, name: Arc<[u8]>, file: &dyn Inode, dlock: &mut ()) {
-        // Safety: Only `unlink` will do something based on `nlink` count
+        // SAFETY: Only `unlink` will do something based on `nlink` count
         //         No need to synchronize here
         file.nlink.fetch_add(1, Ordering::Relaxed);
 
-        // Safety: `rwsem` has done the synchronization
+        // SAFETY: `rwsem` has done the synchronization
         self.size.fetch_add(1, Ordering::Relaxed);
 
         self.entries.access_mut(dlock).push((name, file.ino));
@@ -80,19 +81,20 @@ impl DirectoryInode {
 }
 
 impl Inode for DirectoryInode {
-    fn readdir<'cb, 'r: 'cb>(
-        &'r self,
+    fn do_readdir(
+        &self,
         offset: usize,
-        callback: &ReadDirCallback<'cb>,
+        callback: &mut dyn FnMut(&[u8], Ino) -> KResult<ControlFlow<(), ()>>,
     ) -> KResult<usize> {
         let lock = self.rwsem.lock_shared();
-        Ok(self
-            .entries
+        self.entries
             .access(lock.as_ref())
             .iter()
             .skip(offset)
-            .take_while(|(name, ino)| callback(name, *ino).is_ok())
-            .count())
+            .map(|(name, ino)| callback(&name, *ino))
+            .take_while(|result| result.map_or(true, |flow| flow.is_continue()))
+            .take_while_inclusive(|result| result.is_ok())
+            .fold_ok(0, |acc, _| acc + 1)
     }
 
     fn creat(&self, at: &Arc<Dentry>, mode: Mode) -> KResult<()> {
@@ -108,7 +110,7 @@ impl Inode for DirectoryInode {
         at.save_reg(file)
     }
 
-    fn mknod(&self, at: &Arc<Dentry>, mode: Mode, dev: DevId) -> KResult<()> {
+    fn mknod(&self, at: &Dentry, mode: Mode, dev: DevId) -> KResult<()> {
         if !s_ischr(mode) && !s_isblk(mode) {
             return Err(EINVAL);
         }
@@ -143,7 +145,7 @@ impl Inode for DirectoryInode {
         at.save_symlink(file)
     }
 
-    fn mkdir(&self, at: &Arc<Dentry>, mode: Mode) -> KResult<()> {
+    fn mkdir(&self, at: &Dentry, mode: Mode) -> KResult<()> {
         let vfs = acquire(&self.vfs)?;
         let vfs = astmp(&vfs);
 
@@ -165,7 +167,7 @@ impl Inode for DirectoryInode {
         let file = at.get_inode()?;
         let _flock = file.rwsem.lock();
 
-        // Safety: `flock` has done the synchronization
+        // SAFETY: `flock` has done the synchronization
         if file.mode.load(Ordering::Relaxed) & S_IFDIR != 0 {
             return Err(EISDIR);
         }
@@ -175,11 +177,11 @@ impl Inode for DirectoryInode {
 
         assert_eq!(
             entries.len() as u64,
-            // Safety: `dlock` has done the synchronization
+            // SAFETY: `dlock` has done the synchronization
             self.size.fetch_sub(1, Ordering::Relaxed) - 1
         );
 
-        // Safety: `flock` has done the synchronization
+        // SAFETY: `flock` has done the synchronization
         let file_nlink = file.nlink.fetch_sub(1, Ordering::Relaxed) - 1;
 
         if file_nlink == 0 {
@@ -251,19 +253,27 @@ impl Inode for FileInode {
         // TODO: We don't need that strong guarantee, find some way to avoid locks
         let lock = self.rwsem.lock_shared();
 
-        let (_, data) = self
-            .filedata
-            .access(lock.as_ref())
-            .split_at_checked(offset)
-            .ok_or(EINVAL)?;
-
-        buffer.fill(data).map(|result| result.allow_partial())
+        match self.filedata.access(lock.as_ref()).split_at_checked(offset) {
+            Some((_, data)) => buffer.fill(data).map(|result| result.allow_partial()),
+            None => Ok(0),
+        }
     }
 
-    fn write(&self, buffer: &[u8], offset: usize) -> KResult<usize> {
+    fn write(&self, buffer: &[u8], offset: WriteOffset) -> KResult<usize> {
         // TODO: We don't need that strong guarantee, find some way to avoid locks
         let mut lock = self.rwsem.lock();
         let filedata = self.filedata.access_mut(lock.as_mut());
+
+        let offset = match offset {
+            WriteOffset::Position(offset) => offset,
+            // SAFETY: `lock` has done the synchronization
+            WriteOffset::End(end) => {
+                let size = self.size.load(Ordering::Relaxed) as usize;
+                *end = size + buffer.len();
+
+                size
+            }
+        };
 
         if filedata.len() < offset + buffer.len() {
             filedata.resize(offset + buffer.len(), 0);
@@ -271,7 +281,7 @@ impl Inode for FileInode {
 
         filedata[offset..offset + buffer.len()].copy_from_slice(&buffer);
 
-        // Safety: `lock` has done the synchronization
+        // SAFETY: `lock` has done the synchronization
         self.size.store(filedata.len() as u64, Ordering::Relaxed);
 
         Ok(buffer.len())
@@ -282,7 +292,7 @@ impl Inode for FileInode {
         let mut lock = self.rwsem.lock();
         let filedata = self.filedata.access_mut(lock.as_mut());
 
-        // Safety: `lock` has done the synchronization
+        // SAFETY: `lock` has done the synchronization
         self.size.store(length as u64, Ordering::Relaxed);
         filedata.resize(length, 0);
 
@@ -331,13 +341,7 @@ impl TmpFs {
 struct TmpFsMountCreator;
 
 impl MountCreator for TmpFsMountCreator {
-    fn create_mount(
-        &self,
-        _source: &str,
-        flags: u64,
-        _data: &[u8],
-        mp: &Arc<Dentry>,
-    ) -> KResult<Mount> {
+    fn create_mount(&self, _source: &str, flags: u64, mp: &Arc<Dentry>) -> KResult<Mount> {
         let (fs, root_inode) = TmpFs::create(flags & MS_RDONLY != 0)?;
 
         Mount::new(mp, fs, root_inode)

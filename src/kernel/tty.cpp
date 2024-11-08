@@ -1,5 +1,6 @@
 #include <algorithm>
 
+#include <bits/ioctl.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <termios.h>
@@ -12,17 +13,12 @@
 
 #define CTRL(key) ((key)-0x40)
 
-#define TERMIOS_ISET(termios, option) \
-    ((option) == ((termios).c_iflag & (option)))
-#define TERMIOS_OSET(termios, option) \
-    ((option) == ((termios).c_oflag & (option)))
-#define TERMIOS_CSET(termios, option) \
-    ((option) == ((termios).c_cflag & (option)))
-#define TERMIOS_LSET(termios, option) \
-    ((option) == ((termios).c_lflag & (option)))
+#define TERMIOS_ISET(termios, option) ((option) == ((termios).c_iflag & (option)))
+#define TERMIOS_OSET(termios, option) ((option) == ((termios).c_oflag & (option)))
+#define TERMIOS_CSET(termios, option) ((option) == ((termios).c_cflag & (option)))
+#define TERMIOS_LSET(termios, option) ((option) == ((termios).c_lflag & (option)))
 
-#define TERMIOS_TESTCC(c, termios, cc) \
-    ((c != 0xff) && (c == ((termios).c_cc[cc])))
+#define TERMIOS_TESTCC(c, termios, cc) ((c != 0xff) && (c == ((termios).c_cc[cc])))
 
 using namespace kernel::tty;
 
@@ -69,6 +65,48 @@ int tty::poll() {
     }
 
     return 1;
+}
+
+int tty::ioctl(int request, unsigned long arg3) {
+    switch (request) {
+        case TIOCGPGRP: {
+            auto* pgid = (pid_t __user*)arg3;
+            // TODO: copy_to_user
+            *pgid = this->get_pgrp();
+            break;
+        }
+        case TIOCSPGRP: {
+            // TODO: copy_from_user
+            auto pgid = *(const pid_t __user*)arg3;
+            this->set_pgrp(pgid);
+            break;
+        }
+        case TIOCGWINSZ: {
+            auto* ws = (winsize __user*)arg3;
+            // TODO: copy_to_user
+            ws->ws_col = 80;
+            ws->ws_row = 40;
+            break;
+        }
+        case TCGETS: {
+            auto* argp = (struct termios __user*)arg3;
+            // TODO: use copy_to_user
+            memcpy(argp, &this->termio, sizeof(this->termio));
+            break;
+        }
+        case TCSETS: {
+            auto* argp = (const struct termios __user*)arg3;
+            // TODO: use copy_from_user
+            memcpy(&this->termio, argp, sizeof(this->termio));
+            break;
+        }
+        default: {
+            kmsgf("[kernel:error] ioctl(%x, %x) is not implemented", request, arg3);
+            return -EINVAL;
+        }
+    }
+
+    return 0;
 }
 
 ssize_t tty::read(char* buf, size_t buf_size, size_t n) {
@@ -144,8 +182,7 @@ void tty::_real_commit_char(int c) {
         case '\n':
             buf.put(c);
 
-            if (TERMIOS_LSET(this->termio, ECHONL) ||
-                TERMIOS_LSET(this->termio, ECHO))
+            if (TERMIOS_LSET(this->termio, ECHONL) || TERMIOS_LSET(this->termio, ECHO))
                 this->_echo_char(c);
 
             // if ICANON is set, we notify all waiting processes
@@ -171,8 +208,7 @@ void tty::_real_commit_char(int c) {
 void tty::_echo_char(int c) {
     // ECHOCTL
     do {
-        if (c < 0 || c >= 32 ||
-            !TERMIOS_LSET(this->termio, ECHO | ECHOCTL | IEXTEN))
+        if (c < 0 || c >= 32 || !TERMIOS_LSET(this->termio, ECHO | ECHOCTL | IEXTEN))
             break;
 
         if (c == '\t' || c == '\n' || c == CTRL('Q') || c == CTRL('S'))

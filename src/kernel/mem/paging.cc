@@ -270,9 +270,33 @@ void kernel::mem::paging::increase_refcount(page* pg) {
     pg->refcount++;
 }
 
-void kernel::mem::paging::handle_page_fault(unsigned long err) {
+struct fix_entry {
+    uint64_t start;
+    uint64_t length;
+    uint64_t jump_address;
+    uint64_t type;
+};
+
+extern "C" fix_entry FIX_START[], FIX_END[];
+bool page_fault_fix(interrupt_stack* int_stack) {
+    // TODO: type load
+
+    // type store
+    for (fix_entry* fix = FIX_START; fix < FIX_END; fix++) {
+        if (int_stack->v_rip >= fix->start && int_stack->v_rip < fix->start + fix->length) {
+            int_stack->v_rip = fix->jump_address;
+            return true;
+        }
+    }
+
+    return false;
+}
+
+void kernel::mem::paging::handle_page_fault(interrupt_stack* int_stack) {
     using namespace kernel::mem;
     using namespace paging;
+
+    auto err = int_stack->error_code;
 
     uintptr_t vaddr;
     asm volatile("mov %%cr2, %0" : "=g"(vaddr) : :);
@@ -284,7 +308,11 @@ void kernel::mem::paging::handle_page_fault(unsigned long err) {
         if (err & PAGE_FAULT_U)
             kill_current(SIGSEGV);
 
-        __page_fault_die(vaddr);
+        if (!page_fault_fix(int_stack)) {
+            __page_fault_die(vaddr);
+        } else {
+            return;
+        }
     }
 
     // user access to a present page caused the fault
@@ -312,8 +340,13 @@ void kernel::mem::paging::handle_page_fault(unsigned long err) {
     bool mmapped = mm_area->flags & MM_MAPPED;
     assert(!mmapped || mm_area->mapped_file);
 
-    if (!(err & PAGE_FAULT_P) && !mmapped) [[unlikely]]
-        __page_fault_die(vaddr);
+    if (!(err & PAGE_FAULT_P) && !mmapped) [[unlikely]] {
+        if (!page_fault_fix(int_stack)) {
+            __page_fault_die(vaddr);
+        } else {
+            return;
+        }
+    }
 
     pfn_t pfn = pe.pfn();
     auto attr = pe.attributes();

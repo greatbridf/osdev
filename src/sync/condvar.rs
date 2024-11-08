@@ -102,7 +102,7 @@ impl CondVar {
 
         might_sleep!(1);
 
-        let has_signals = unsafe { schedule_now_preempt_disabled() };
+        let has_signals = unsafe { !schedule_now_preempt_disabled() };
 
         unsafe {
             guard.force_relock();

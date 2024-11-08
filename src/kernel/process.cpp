@@ -21,25 +21,67 @@
 #include <kernel/vfs.hpp>
 #include <kernel/vfs/dentry.hpp>
 
+extern "C" fs::rust_file_array::handle* r_filearray_new_for_init();
+extern "C" fs::rust_fs_context::handle* r_fs_context_new_for_init();
+extern "C" fs::rust_file_array::handle* r_filearray_new_cloned(
+    struct fs::rust_file_array::handle* other);
+extern "C" fs::rust_fs_context::handle* r_fs_context_new_cloned(
+    struct fs::rust_fs_context::handle* other);
+extern "C" void r_filearray_drop(struct fs::rust_file_array::handle* other);
+extern "C" void r_fs_context_drop(struct fs::rust_fs_context::handle* other);
+
+fs::rust_fs_context::rust_fs_context(rust_fs_context::handle* handle) : m_handle(handle) {}
+fs::rust_file_array::rust_file_array(rust_file_array::handle* handle) : m_handle(handle) {}
+
+fs::rust_fs_context::~rust_fs_context() {
+    drop();
+}
+
+fs::rust_file_array::~rust_file_array() {
+    drop();
+}
+
+void fs::rust_fs_context::drop() {
+    if (m_handle) {
+        r_fs_context_drop(m_handle);
+        m_handle = nullptr;
+    }
+}
+
+void fs::rust_file_array::drop() {
+    if (m_handle) {
+        r_filearray_drop(m_handle);
+        m_handle = nullptr;
+    }
+}
+
+fs::rust_fs_context::handle* fs::rust_fs_context::get() const {
+    assert(m_handle);
+    return m_handle;
+}
+
+fs::rust_file_array::handle* fs::rust_file_array::get() const {
+    assert(m_handle);
+    return m_handle;
+}
+
 process::process(const process& parent, pid_t pid)
     : mms{parent.mms}
     , attr{parent.attr}
-    , files{parent.files.copy()}
-    , umask{parent.umask}
+    , files{r_filearray_new_cloned(parent.files.get())}
+    , fs_context{r_fs_context_new_cloned(parent.fs_context.get())}
     , pid{pid}
     , ppid{parent.pid}
     , pgid{parent.pgid}
     , sid{parent.sid}
-    , control_tty{parent.control_tty} {
-    assert(parent.cwd);
-    cwd = fs::d_get(parent.cwd);
-
-    assert(parent.fs_context.root);
-    fs_context.root = fs::d_get(parent.fs_context.root);
-}
+    , control_tty{parent.control_tty} {}
 
 process::process(pid_t pid, pid_t ppid)
-    : attr{.system = true}, files{&fs_context}, pid{pid}, ppid{ppid} {
+    : attr{.system = true}
+    , files{r_filearray_new_for_init()}
+    , fs_context{r_fs_context_new_for_init()}
+    , pid{pid}
+    , ppid{ppid} {
     bool inserted;
     std::tie(std::ignore, inserted) = thds.emplace("", pid);
     assert(inserted);
@@ -84,6 +126,9 @@ proclist::proclist() {
 
     auto thd = init.thds.begin();
     thd->name.assign("[kernel init]");
+
+    init.attr.system = 0;
+    thd->attr &= ~kernel::task::thread::SYSTEM;
 
     current_process = &init;
     current_thread = &thd;
@@ -134,14 +179,13 @@ void proclist::kill(pid_t pid, int exit_code) {
     //       files should only be closed when this is the last thread
     //
     // write back mmap'ped files and close them
-    proc.files.clear();
+    proc.files.drop();
+
+    // free fs_context
+    proc.fs_context.drop();
 
     // unmap all user memory areas
     proc.mms.clear();
-
-    // free cwd and fs_context dentry
-    proc.cwd.reset();
-    proc.fs_context.root.reset();
 
     // make child processes orphans (children of init)
     this->make_children_orphans(pid);
@@ -191,16 +235,14 @@ static void release_kinit() {
     extern uintptr_t volatile KINIT_START_ADDR, KINIT_END_ADDR, KINIT_PAGES;
 
     std::size_t pages = KINIT_PAGES;
-    auto range =
-        vaddr_range{KERNEL_PML4, KINIT_START_ADDR, KINIT_END_ADDR, true};
+    auto range = vaddr_range{KERNEL_PML4, KINIT_START_ADDR, KINIT_END_ADDR, true};
     for (auto pte : range)
         pte.clear();
 
     create_zone(KERNEL_IMAGE_PADDR, KERNEL_IMAGE_PADDR + 0x1000 * pages);
 }
 
-extern "C" void (*const late_init_start[])();
-extern "C" void late_init_rust();
+extern "C" void late_init_rust(uintptr_t* out_sp, uintptr_t* out_ip);
 
 void NORETURN _kernel_init(kernel::mem::paging::pfn_t kernel_stack_pfn) {
     kernel::mem::paging::free_pages(kernel_stack_pfn, 9);
@@ -208,57 +250,14 @@ void NORETURN _kernel_init(kernel::mem::paging::pfn_t kernel_stack_pfn) {
 
     kernel::kmod::load_internal_modules();
 
-    late_init_rust();
+    uintptr_t sp, ip;
+    late_init_rust(&sp, &ip);
 
     asm volatile("sti");
-
-    current_process->fs_context.root = fs::r_get_root_dentry();
-    current_process->cwd = fs::r_get_root_dentry();
 
     // ------------------------------------------
     // interrupt enabled
     // ------------------------------------------
-
-    for (auto* init = late_init_start; *init; ++init)
-        (*init)();
-
-    const auto& context = current_process->fs_context;
-
-    // mount fat32 /mnt directory
-    // TODO: parse kernel parameters
-    if (1) {
-        auto [mnt, status] = fs::open(context, context.root, "/mnt");
-        assert(mnt && status == -ENOENT);
-
-        if (int ret = fs::fs_mkdir(mnt.get(), 0755); 1)
-            assert(ret == 0);
-
-        int ret = fs::fs_mount(mnt.get(), "/dev/sda", "/mnt", "fat32",
-                               MS_RDONLY | MS_NOATIME | MS_NODEV | MS_NOSUID,
-                               "ro,nodev");
-
-        assert(ret == 0);
-    }
-
-    current_process->attr.system = 0;
-    current_thread->attr &= ~kernel::task::thread::SYSTEM;
-
-    types::elf::elf32_load_data d{
-        .exec_dent{},
-        .argv{"/mnt/busybox", "sh", "/mnt/initsh"},
-        .envp{"LANG=C", "HOME=/root", "PATH=/mnt", "PWD=/"},
-        .ip{},
-        .sp{}};
-
-    auto [exec, ret] = fs::open(context, context.root.get(), d.argv[0]);
-    if (!exec || ret) {
-        kmsg("kernel panic: init not found!");
-        freeze();
-    }
-
-    d.exec_dent = std::move(exec);
-    if (int ret = types::elf::elf32_load(d); 1)
-        assert(ret == 0);
 
     int ds = 0x33, cs = 0x2b;
 
@@ -277,7 +276,7 @@ void NORETURN _kernel_init(kernel::mem::paging::pfn_t kernel_stack_pfn) {
 
         "iretq\n"
         :
-        : "g"(ds), "g"(cs), "g"(d.sp), "g"(d.ip)
+        : "g"(ds), "g"(cs), "g"(sp), "g"(ip)
         : "eax", "memory");
 
     freeze();
@@ -315,8 +314,7 @@ void NORETURN init_scheduler(kernel::mem::paging::pfn_t kernel_stack_pfn) {
         "%=:\n"
         "ud2"
         :
-        : "a"(current_thread->kstack.sp), "c"(_kernel_init),
-          "g"(kernel_stack_pfn)
+        : "a"(current_thread->kstack.sp), "c"(_kernel_init), "g"(kernel_stack_pfn)
         : "memory");
 
     freeze();

@@ -45,6 +45,8 @@ class tty : public types::non_copyable {
     // TODO: formal poll support
     int poll();
 
+    int ioctl(int request, unsigned long arg3);
+
     constexpr void set_pgrp(pid_t pgid) { fg_pgroup = pgid; }
 
     constexpr pid_t get_pgrp(void) const { return fg_pgroup; }

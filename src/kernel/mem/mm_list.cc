@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <errno.h>
 #include <stdint.h>
 
 #include <kernel/mem/mm_list.hpp>

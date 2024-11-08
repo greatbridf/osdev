@@ -6,6 +6,7 @@
 
 #include <stdint.h>
 
+#include <kernel/interrupt.hpp>
 #include <kernel/mem/paging_asm.h>
 #include <kernel/mem/phys.hpp>
 
@@ -27,10 +28,8 @@ constexpr int idx_p1(uintptr_t vaddr) noexcept {
     return (vaddr >> 12) & 0x1ff;
 }
 
-constexpr std::tuple<int, int, int, int, int> idx_all(
-    uintptr_t vaddr) noexcept {
-    return {idx_p5(vaddr), idx_p4(vaddr), idx_p3(vaddr), idx_p2(vaddr),
-            idx_p1(vaddr)};
+constexpr std::tuple<int, int, int, int, int> idx_all(uintptr_t vaddr) noexcept {
+    return {idx_p5(vaddr), idx_p4(vaddr), idx_p3(vaddr), idx_p2(vaddr), idx_p1(vaddr)};
 }
 
 // page frame number
@@ -74,9 +73,7 @@ class PSE {
 
     constexpr pfn_t pfn() const noexcept { return *m_ptrbase & ~PA_MASK; }
 
-    constexpr psattr_t attributes() const noexcept {
-        return *m_ptrbase & PA_MASK;
-    }
+    constexpr psattr_t attributes() const noexcept { return *m_ptrbase & PA_MASK; }
 
     constexpr PSE operator[](std::size_t nth) const noexcept {
         return PSE{m_ptrbase.phys() + 8 * nth};
@@ -135,7 +132,7 @@ constexpr unsigned long PAGE_FAULT_PK = 0x00000020;
 constexpr unsigned long PAGE_FAULT_SS = 0x00000040;
 constexpr unsigned long PAGE_FAULT_SGX = 0x00008000;
 
-void handle_page_fault(unsigned long err);
+void handle_page_fault(interrupt_stack* int_stack);
 
 class vaddr_range {
     std::size_t n;
@@ -156,8 +153,7 @@ class vaddr_range {
     bool is_privilege;
 
    public:
-    explicit vaddr_range(pfn_t pt, uintptr_t start, uintptr_t end,
-                         bool is_privilege = false);
+    explicit vaddr_range(pfn_t pt, uintptr_t start, uintptr_t end, bool is_privilege = false);
     explicit vaddr_range(std::nullptr_t);
 
     vaddr_range begin() const noexcept;

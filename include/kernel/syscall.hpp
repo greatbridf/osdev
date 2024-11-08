@@ -33,7 +33,6 @@ void handle_syscall64(int no, interrupt_stack* data, mmx_registers* mmxregs);
 namespace syscall {
     // in fileops.cc
     ssize_t do_write(int fd, const char __user* buf, size_t n);
-    ssize_t do_read(int fd, char __user* buf, size_t n);
     int do_close(int fd);
     int do_dup(int old_fd);
     int do_dup2(int old_fd, int new_fd);
@@ -42,19 +41,17 @@ namespace syscall {
     ssize_t do_getdents64(int fd, char __user* buf, size_t cnt);
     int do_open(const char __user* path, int flags, mode_t mode);
     int do_symlink(const char __user* target, const char __user* linkpath);
-    int do_readlink(const char __user* pathname, char __user* buf,
-                    size_t buf_size);
+    int do_readlink(const char __user* pathname, char __user* buf, size_t buf_size);
     int do_ioctl(int fd, unsigned long request, uintptr_t arg3);
     ssize_t do_readv(int fd, const iovec* iov, int iovcnt);
     ssize_t do_writev(int fd, const iovec* iov, int iovcnt);
     off_t do_lseek(int fd, off_t offset, int whence);
-    uintptr_t do_mmap_pgoff(uintptr_t addr, size_t len, int prot, int flags,
-                            int fd, off_t pgoffset);
+    uintptr_t do_mmap_pgoff(uintptr_t addr, size_t len, int prot, int flags, int fd,
+                            off_t pgoffset);
     int do_munmap(uintptr_t addr, size_t len);
-    ssize_t do_sendfile(int out_fd, int in_fd, off_t __user* offset,
-                        size_t count);
-    int do_statx(int dirfd, const char __user* path, int flags,
-                 unsigned int mask, statx __user* statxbuf);
+    ssize_t do_sendfile(int out_fd, int in_fd, off_t __user* offset, size_t count);
+    int do_statx(int dirfd, const char __user* path, int flags, unsigned int mask,
+                 statx __user* statxbuf);
     int do_fcntl(int fd, int cmd, unsigned long arg);
     int do_poll(pollfd __user* fds, nfds_t nfds, int timeout);
     int do_mknod(const char __user* pathname, mode_t mode, dev_t dev);
@@ -88,10 +85,9 @@ namespace syscall {
     int do_kill(pid_t pid, int sig);
     int do_tkill(pid_t pid, int sig);
     int do_rt_sigprocmask(int how, const kernel::sigmask_type __user* set,
-                          kernel::sigmask_type __user* oldset,
-                          size_t sigsetsize);
-    int do_rt_sigaction(int signum, const sigaction __user* act,
-                        sigaction __user* oldact, size_t sigsetsize);
+                          kernel::sigmask_type __user* oldset, size_t sigsetsize);
+    int do_rt_sigaction(int signum, const sigaction __user* act, sigaction __user* oldact,
+                        size_t sigsetsize);
     int do_newuname(new_utsname __user* buf);
 
     struct execve_retval {
@@ -100,14 +96,12 @@ namespace syscall {
         int status;
     };
 
-    execve_retval do_execve(const std::string& exec,
-                            const std::vector<std::string>& args,
+    execve_retval do_execve(const std::string& exec, const std::vector<std::string>& args,
                             const std::vector<std::string>& envs);
 
     // in mount.cc
-    int do_mount(const char __user* source, const char __user* target,
-                 const char __user* fstype, unsigned long flags,
-                 const void __user* _fsdata);
+    int do_mount(const char __user* source, const char __user* target, const char __user* fstype,
+                 unsigned long flags, const void __user* _fsdata);
 
     // in infoops.cc
     int do_clock_gettime(clockid_t clk_id, timespec __user* tp);

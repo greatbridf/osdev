@@ -1,22 +1,21 @@
-use core::{
-    ffi::{c_int, c_ulong},
-    ops::ControlFlow,
-    ptr::NonNull,
-    sync::atomic::Ordering,
-};
+use core::{ops::ControlFlow, sync::atomic::Ordering};
 
 use crate::{
     io::{Buffer, BufferFill, RawBuffer},
-    kernel::mem::{paging::Page, phys::PhysPtr},
+    kernel::{
+        constants::{TCGETS, TCSETS, TIOCGPGRP, TIOCGWINSZ, TIOCSPGRP},
+        mem::{paging::Page, phys::PhysPtr},
+        task::{Signal, Thread},
+        terminal::{Terminal, TerminalIORequest},
+        user::{UserPointer, UserPointerMut},
+    },
     prelude::*,
-    sync::condvar::CondVar,
+    sync::CondVar,
 };
 
 use alloc::{collections::vec_deque::VecDeque, sync::Arc};
-use bindings::{
-    current_thread, kernel::tty::tty as TTY, EBADF, EFAULT, EINTR, EINVAL, ENOTDIR, ENOTTY,
-    EOVERFLOW, EPIPE, ESPIPE, SIGPIPE, S_IFMT,
-};
+use bindings::{EBADF, EFAULT, EINTR, EINVAL, ENOTDIR, ENOTTY, EOVERFLOW, EPIPE, ESPIPE, S_IFMT};
+use bitflags::bitflags;
 
 use super::{
     dentry::Dentry,
@@ -55,21 +54,27 @@ pub struct PipeWriteEnd {
     pipe: Arc<Pipe>,
 }
 
-pub struct TTYFile {
-    tty: NonNull<TTY>,
+pub struct TerminalFile {
+    terminal: Arc<Terminal>,
 }
 
 pub enum File {
     Inode(InodeFile),
     PipeRead(PipeReadEnd),
     PipeWrite(PipeWriteEnd),
-    TTY(TTYFile),
+    TTY(TerminalFile),
 }
 
 pub enum SeekOption {
     Set(usize),
     Current(isize),
     End(isize),
+}
+
+bitflags! {
+    pub struct PollEvent: u16 {
+        const Readable = 0x0001;
+    }
 }
 
 impl Drop for PipeReadEnd {
@@ -85,11 +90,9 @@ impl Drop for PipeWriteEnd {
 }
 
 fn send_sigpipe_to_current() {
-    // Safety: current_thread is always valid.
-    let current = unsafe { current_thread.as_mut().unwrap() };
-
-    // Safety: `signal_list` is `Sync`
-    unsafe { current.send_signal(SIGPIPE) };
+    // SAFETY: current_thread is always valid.
+    let current = Thread::current();
+    current.raise(Signal::SIGPIPE);
 }
 
 impl Pipe {
@@ -140,8 +143,8 @@ impl Pipe {
         let mut inner = self.inner.lock();
 
         while !inner.write_closed && inner.buffer.is_empty() {
-            let interrupted = self.cv_read.wait(&mut inner, true);
-            if interrupted {
+            self.cv_read.wait(&mut inner);
+            if Thread::current().signal_list.has_pending_signal() {
                 return Err(EINTR);
             }
         }
@@ -163,8 +166,8 @@ impl Pipe {
         }
 
         while inner.buffer.len() + data.len() > Self::PIPE_SIZE {
-            let interrupted = self.cv_write.wait(&mut inner, true);
-            if interrupted {
+            self.cv_write.wait(&mut inner);
+            if Thread::current().signal_list.has_pending_signal() {
                 return Err(EINTR);
             }
 
@@ -204,8 +207,8 @@ impl Pipe {
                 break;
             }
 
-            let interrupted = self.cv_write.wait(&mut inner, true);
-            if interrupted {
+            self.cv_write.wait(&mut inner);
+            if Thread::current().signal_list.has_pending_signal() {
                 if data.len() != remaining.len() {
                     break;
                 }
@@ -258,10 +261,6 @@ struct UserDirent {
     d_reclen: u16,
     /// Filename with a padding '\0'
     d_name: [u8; 0],
-}
-
-fn has_pending_signal() -> bool {
-    unsafe { current_thread.as_mut().unwrap().signals.pending_signal() != 0 }
 }
 
 impl InodeFile {
@@ -397,58 +396,40 @@ impl InodeFile {
     }
 }
 
-impl TTYFile {
-    pub fn new(tty: *mut TTY) -> Arc<File> {
-        Arc::new(File::TTY(TTYFile {
-            tty: NonNull::new(tty).expect("`tty` is null"),
-        }))
+impl TerminalFile {
+    pub fn new(tty: Arc<Terminal>) -> Arc<File> {
+        Arc::new(File::TTY(TerminalFile { terminal: tty }))
     }
 
     fn read(&self, buffer: &mut dyn Buffer) -> KResult<usize> {
-        // SAFETY: `tty` should always valid.
-        let tty = unsafe { self.tty.as_ptr().as_mut().unwrap() };
-
-        let mut c_buffer: Vec<u8> = vec![0; buffer.total()];
-
-        // SAFETY: `tty` points to a valid `TTY` instance.
-        let nread = unsafe {
-            tty.read(
-                c_buffer.as_mut_ptr() as *mut _,
-                c_buffer.len(),
-                c_buffer.len(),
-            )
-        };
-
-        match nread {
-            n if n < 0 => Err((-n) as u32),
-            0 => Ok(0),
-            n => Ok(buffer.fill(&c_buffer[..n as usize])?.allow_partial()),
-        }
+        self.terminal.read(buffer)
     }
 
     fn write(&self, buffer: &[u8]) -> KResult<usize> {
-        // SAFETY: `tty` should always valid.
-        let tty = unsafe { self.tty.as_ptr().as_mut().unwrap() };
-
         for &ch in buffer.iter() {
-            // SAFETY: `tty` points to a valid `TTY` instance.
-            unsafe { tty.show_char(ch as i32) };
+            self.terminal.show_char(ch);
         }
 
         Ok(buffer.len())
     }
 
-    fn ioctl(&self, request: usize, arg3: usize) -> KResult<usize> {
-        // SAFETY: `tty` should always valid.
-        let tty = unsafe { self.tty.as_ptr().as_mut().unwrap() };
-
-        // SAFETY: `tty` points to a valid `TTY` instance.
-        let result = unsafe { tty.ioctl(request as c_int, arg3 as c_ulong) };
-
-        match result {
-            0 => Ok(0),
-            _ => Err((-result) as u32),
+    fn poll(&self, event: PollEvent) -> KResult<PollEvent> {
+        if !event.contains(PollEvent::Readable) {
+            unimplemented!("Poll event not supported.")
         }
+
+        self.terminal.poll_in().map(|_| PollEvent::Readable)
+    }
+
+    fn ioctl(&self, request: usize, arg3: usize) -> KResult<()> {
+        self.terminal.ioctl(match request as u32 {
+            TCGETS => TerminalIORequest::GetTermios(UserPointerMut::new_vaddr(arg3)?),
+            TCSETS => TerminalIORequest::SetTermios(UserPointer::new_vaddr(arg3)?),
+            TIOCGPGRP => TerminalIORequest::GetProcessGroup(UserPointerMut::new_vaddr(arg3)?),
+            TIOCSPGRP => TerminalIORequest::SetProcessGroup(UserPointer::new_vaddr(arg3)?),
+            TIOCGWINSZ => TerminalIORequest::GetWindowSize(UserPointerMut::new_vaddr(arg3)?),
+            _ => return Err(EINVAL),
+        })
     }
 }
 
@@ -518,7 +499,7 @@ impl File {
         // TODO!!!: zero copy implementation with mmap
         let mut tot = 0usize;
         while tot < count {
-            if has_pending_signal() {
+            if Thread::current().signal_list.has_pending_signal() {
                 if tot == 0 {
                     return Err(EINTR);
                 } else {
@@ -544,8 +525,16 @@ impl File {
 
     pub fn ioctl(&self, request: usize, arg3: usize) -> KResult<usize> {
         match self {
-            File::TTY(tty) => tty.ioctl(request, arg3),
+            File::TTY(tty) => tty.ioctl(request, arg3).map(|_| 0),
             _ => Err(ENOTTY),
+        }
+    }
+
+    pub fn poll(&self, event: PollEvent) -> KResult<PollEvent> {
+        match self {
+            File::PipeRead(_) | File::PipeWrite(_) => unimplemented!("Poll event not supported."),
+            File::Inode(_) => Ok(event),
+            File::TTY(tty) => tty.poll(event),
         }
     }
 }

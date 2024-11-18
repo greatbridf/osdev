@@ -4,6 +4,7 @@ use crate::prelude::*;
 
 use core::{fmt::Write, mem::MaybeUninit};
 
+#[must_use]
 pub enum FillResult {
     Done(usize),
     Partial(usize),
@@ -33,6 +34,8 @@ impl FillResult {
 pub trait Buffer {
     fn total(&self) -> usize;
     fn wrote(&self) -> usize;
+
+    #[must_use]
     fn fill(&mut self, data: &[u8]) -> KResult<FillResult>;
 
     fn available(&self) -> usize {

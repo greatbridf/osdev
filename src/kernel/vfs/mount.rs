@@ -162,9 +162,7 @@ pub fn dump_mounts(buffer: &mut dyn core::fmt::Write) {
     }
 }
 
-#[no_mangle]
-#[link_section = ".text.kinit"]
-pub extern "C" fn r_init_vfs() {
+pub fn init_vfs() -> KResult<()> {
     tmpfs::init();
 
     let source = String::from("rootfs");
@@ -173,11 +171,9 @@ pub extern "C" fn r_init_vfs() {
 
     let mount = {
         let creators = MOUNT_CREATORS.lock();
-        let creator = creators.get(&fstype).ok_or(ENODEV).unwrap();
+        let creator = creators.get(&fstype).ok_or(ENODEV)?;
 
-        creator
-            .create_mount(&source, flags, dcache::_looped_droot())
-            .unwrap()
+        creator.create_mount(&source, flags, dcache::_looped_droot())?
     };
 
     let root_dentry = mount.root().clone();
@@ -196,6 +192,8 @@ pub extern "C" fn r_init_vfs() {
     MOUNTS
         .lock()
         .push((dcache::_looped_droot().clone(), mpdata));
+
+    Ok(())
 }
 
 impl Dentry {

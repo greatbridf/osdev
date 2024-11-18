@@ -30,54 +30,8 @@ SECTIONS
         . = ALIGN(0x1000);
     } > STAGE1
 
-    .kinit :
-        AT(LOADADDR(.stage1) + SIZEOF(.stage1))
-    {
-        KIMAGE_START = .;
-        KINIT_START = .;
-
-        *(.text.kinit)
-
-        . = ALIGN(16);
-        *(.rodata.kinit)
-
-        KINIT_START_ADDR = .;
-        QUAD(ABSOLUTE(KINIT_START));
-
-        KINIT_END_ADDR = .;
-        QUAD(ABSOLUTE(KINIT_END));
-
-        KINIT_PAGES = .;
-        QUAD((KINIT_END - KINIT_START) / 0x1000);
-
-        KIMAGE_PAGES_VALUE = .;
-        QUAD((KIMAGE_END - KIMAGE_START) / 0x1000);
-
-        . = ALIGN(16);
-        start_ctors = .;
-        KEEP(*(.init_array));
-        KEEP(*(SORT_BY_INIT_PRIORITY(.init_array*)));
-        KEEP(*(.ctors));
-        KEEP(*(SORT_BY_INIT_PRIORITY(.ctors*)));
-        end_ctors = .;
-
-        . = ALIGN(16);
-        START_SYSCALL_HANDLERS = .;
-        KEEP(*(.syscall_handlers));
-        END_SYSCALL_HANDLERS = .;
-
-        . = ALIGN(16);
-        *(.data.kinit)
-
-        . = ALIGN(16);
-        *(.bss.kinit)
-
-        . = ALIGN(0x1000);
-        KINIT_END = .;
-    } > KIMAGE
-
     .text :
-        AT(LOADADDR(.kinit) + SIZEOF(.kinit))
+        AT(LOADADDR(.stage1) + SIZEOF(.stage1))
     {
         TEXT_START = .;
         *(.text)
@@ -95,9 +49,12 @@ SECTIONS
         *(.rodata*)
 
         . = ALIGN(16);
-        KMOD_LOADERS_START = .;
-        KEEP(*(.kmods));
-        QUAD(0);
+        start_ctors = .;
+        KEEP(*(.init_array));
+        KEEP(*(SORT_BY_INIT_PRIORITY(.init_array*)));
+        KEEP(*(.ctors));
+        KEEP(*(SORT_BY_INIT_PRIORITY(.ctors*)));
+        end_ctors = .;
 
         . = ALIGN(16);
         FIX_START = .;
@@ -105,7 +62,6 @@ SECTIONS
         FIX_END = .;
 
         . = ALIGN(16);
-
         BSS_ADDR = .;
         QUAD(ABSOLUTE(BSS_START));
         BSS_LENGTH = .;

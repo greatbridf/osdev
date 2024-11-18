@@ -45,14 +45,10 @@ constexpr psattr_t PA_USER_DATA = PA_DATA | PA_G | PA_US;
 
 constexpr psattr_t PA_PAGE_TABLE = PA_P | PA_RW;
 constexpr psattr_t PA_KERNEL_PAGE_TABLE = PA_PAGE_TABLE | PA_G;
-constexpr psattr_t PA_USER_PAGE_TABLE = PA_PAGE_TABLE | PA_US;
 
 constexpr psattr_t PA_DATA_HUGE = PA_DATA | PA_PS;
 constexpr psattr_t PA_KERNEL_DATA_HUGE = PA_DATA_HUGE | PA_G;
 constexpr psattr_t PA_USER_DATA_HUGE = PA_DATA_HUGE | PA_US;
-
-constexpr psattr_t PA_ANONYMOUS_PAGE = PA_P | PA_US | PA_COW | PA_ANON;
-constexpr psattr_t PA_MMAPPED_PAGE = PA_US | PA_COW | PA_ANON | PA_MMAP;
 
 namespace __inner {
     using pse_t = uint64_t;
@@ -133,39 +129,5 @@ constexpr unsigned long PAGE_FAULT_SS = 0x00000040;
 constexpr unsigned long PAGE_FAULT_SGX = 0x00008000;
 
 void handle_page_fault(interrupt_stack* int_stack);
-
-class vaddr_range {
-    std::size_t n;
-
-    int idx4;
-    int idx3;
-    int idx2;
-    int idx1;
-
-    PSE pml4;
-    PSE pdpt;
-    PSE pd;
-    PSE pt;
-
-    uintptr_t m_start;
-    uintptr_t m_end;
-
-    bool is_privilege;
-
-   public:
-    explicit vaddr_range(pfn_t pt, uintptr_t start, uintptr_t end, bool is_privilege = false);
-    explicit vaddr_range(std::nullptr_t);
-
-    vaddr_range begin() const noexcept;
-    vaddr_range end() const noexcept;
-
-    PSE operator*() const noexcept;
-
-    vaddr_range& operator++();
-    operator bool() const noexcept;
-
-    // compares remaining pages to iterate
-    bool operator==(const vaddr_range& other) const noexcept;
-};
 
 } // namespace kernel::mem::paging

@@ -13,7 +13,6 @@
 
 #include <kernel/log.hpp>
 #include <kernel/process.hpp>
-#include <kernel/tty.hpp>
 #include <kernel/vfs.hpp>
 #include <kernel/vfs/dentry.hpp>
 

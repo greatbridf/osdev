@@ -1,25 +1,25 @@
-pub mod condvar;
+mod condvar;
 pub mod lock;
 pub mod semaphore;
 pub mod spin;
 pub mod strategy;
 
-extern "C" {
-    fn r_preempt_disable();
-    fn r_preempt_enable();
-}
+pub mod preempt {
+    use core::sync::atomic::{compiler_fence, Ordering};
 
-#[inline(always)]
-fn preempt_disable() {
-    unsafe {
-        r_preempt_disable();
+    /// TODO: This should be per cpu.
+    static mut PREEMPT_COUNT: usize = 0;
+
+    #[inline(always)]
+    pub fn disable() {
+        unsafe { PREEMPT_COUNT += 1 };
+        compiler_fence(Ordering::SeqCst);
     }
-}
 
-#[inline(always)]
-fn preempt_enable() {
-    unsafe {
-        r_preempt_enable();
+    #[inline(always)]
+    pub fn enable() {
+        compiler_fence(Ordering::SeqCst);
+        unsafe { PREEMPT_COUNT -= 1 };
     }
 }
 
@@ -44,8 +44,11 @@ pub type RwSemReadGuard<'lock, T> = lock::Guard<'lock, T, semaphore::RwSemaphore
 #[allow(dead_code)]
 pub type RwSemWriteGuard<'lock, T> = lock::Guard<'lock, T, semaphore::RwSemaphoreStrategy, true>;
 
+pub type CondVar = condvar::CondVar<true>;
+pub type UCondVar = condvar::CondVar<false>;
+
 pub struct Locked<T: Sized, U: ?Sized> {
-    inner: T,
+    inner: UnsafeCell<T>,
     guard: *const U,
 }
 
@@ -55,19 +58,21 @@ unsafe impl<T: Sized + Send + Sync, U: ?Sized> Sync for Locked<T, U> {}
 impl<T: Sized + Sync, U: ?Sized> Locked<T, U> {
     pub fn new(value: T, from: &U) -> Self {
         Self {
-            inner: value,
+            inner: UnsafeCell::new(value),
             guard: from,
         }
     }
 
     pub fn access<'lt>(&'lt self, guard: &'lt U) -> &'lt T {
         assert_eq!(self.guard, guard as *const U, "wrong guard");
-        &self.inner
+        // SAFETY: The guard protects the shared access to the inner value.
+        unsafe { self.inner.get().as_ref() }.unwrap()
     }
 
     pub fn access_mut<'lt>(&'lt self, guard: &'lt mut U) -> &'lt mut T {
         assert_eq!(self.guard, guard as *const U, "wrong guard");
-        unsafe { &mut *(&raw const self.inner as *mut T) }
+        // SAFETY: The guard protects the exclusive access to the inner value.
+        unsafe { self.inner.get().as_mut() }.unwrap()
     }
 }
 
@@ -101,5 +106,7 @@ macro_rules! might_sleep {
         }
     };
 }
+
+use core::cell::UnsafeCell;
 
 pub(crate) use might_sleep;

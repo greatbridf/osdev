@@ -32,7 +32,7 @@ pub(crate) use alloc::{boxed::Box, string::String, vec, vec::Vec};
 pub(crate) use core::{any::Any, fmt::Write, marker::PhantomData, str};
 use core::{mem::ManuallyDrop, ops::Deref};
 
-pub use crate::sync::{Mutex, RwSemaphore, Semaphore, Spin};
+pub use crate::sync::{Mutex, RwSemaphore, Semaphore, Spin, Locked};
 
 pub struct BorrowedArc<'lt, T: ?Sized> {
     arc: ManuallyDrop<Arc<T>>,

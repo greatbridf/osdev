@@ -4,6 +4,7 @@
 #![feature(concat_idents)]
 #![feature(arbitrary_self_types)]
 #![feature(get_mut_unchecked)]
+#![feature(macro_metavar_expr)]
 extern crate alloc;
 
 #[allow(warnings)]
@@ -22,10 +23,13 @@ mod sync;
 
 use alloc::{ffi::CString, sync::Arc};
 use bindings::root::types::elf::{elf32_load, elf32_load_data};
-use kernel::vfs::{
-    dentry::Dentry,
-    mount::{do_mount, MS_NOATIME, MS_NODEV, MS_NOSUID, MS_RDONLY},
-    FsContext,
+use kernel::{
+    vfs::{
+        dentry::Dentry,
+        mount::{do_mount, MS_NOATIME, MS_NODEV, MS_NOSUID, MS_RDONLY},
+        FsContext,
+    },
+    CharDevice,
 };
 use path::Path;
 use prelude::*;
@@ -33,8 +37,7 @@ use prelude::*;
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
     println_fatal!("panicked at {:?}\n\t\t{}", info.location(), info.message());
-
-    unsafe { bindings::root::freeze() };
+    arch::task::freeze()
 }
 
 extern "C" {
@@ -69,6 +72,19 @@ static ALLOCATOR: Allocator = Allocator {};
 
 #[no_mangle]
 pub extern "C" fn late_init_rust(out_sp: *mut usize, out_ip: *mut usize) {
+    kernel::timer::init().unwrap();
+
+    // Use the PIT timer for now.
+    driver::timer::init();
+
+    kernel::syscall::register_syscalls();
+    CharDevice::init().unwrap();
+
+    // We might want the serial initialized as soon as possible.
+    driver::serial::init().unwrap();
+
+    kernel::vfs::mount::init_vfs().unwrap();
+
     driver::e1000e::register_e1000e_driver();
     driver::ahci::register_ahci_driver();
 

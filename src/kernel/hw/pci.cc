@@ -87,7 +87,6 @@ int register_driver_r(uint16_t vendor, uint16_t device,
 
 namespace kernel::kinit {
 
-SECTION(".text.kinit")
 void init_pci() {
     using namespace hw::acpi;
     using namespace hw::pci;

@@ -48,6 +48,15 @@ pub struct Dentry {
     data: RCUPointer<DentryData>,
 }
 
+impl core::fmt::Debug for Dentry {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("Dentry")
+            .field("name", &String::from_utf8_lossy(&self.name))
+            .field("parent", &String::from_utf8_lossy(&self.parent.name))
+            .finish()
+    }
+}
+
 const D_DIRECTORY: u64 = 1;
 const D_MOUNTPOINT: u64 = 2;
 const D_SYMLINK: u64 = 4;

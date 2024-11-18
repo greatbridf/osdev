@@ -1,21 +1,19 @@
 #include "kernel/async/lock.hpp"
+
 #include <list>
 #include <vector>
 
 #include <assert.h>
 #include <stdint.h>
-#include <stdio.h>
 
 #include <types/types.h>
 
 #include <kernel/hw/port.hpp>
-#include <kernel/hw/timer.hpp>
 #include <kernel/interrupt.hpp>
 #include <kernel/irq.hpp>
 #include <kernel/log.hpp>
 #include <kernel/mem/paging.hpp>
 #include <kernel/process.hpp>
-#include <kernel/syscall.hpp>
 #include <kernel/vfs.hpp>
 
 #define KERNEL_INTERRUPT_GATE_TYPE (0x8e)
@@ -42,9 +40,8 @@ static struct IDT_entry IDT[256];
 
 extern "C" uintptr_t ISR_START_ADDR;
 
-SECTION(".text.kinit")
-static inline void set_idt_entry(IDT_entry (&idt)[256], int n, uintptr_t offset,
-                                 uint16_t selector, uint8_t type) {
+static inline void set_idt_entry(IDT_entry (&idt)[256], int n, uintptr_t offset, uint16_t selector,
+                                 uint8_t type) {
     idt[n].offset_low = offset & 0xffff;
     idt[n].segment = selector;
     idt[n].IST = 0;
@@ -57,13 +54,10 @@ static inline void set_idt_entry(IDT_entry (&idt)[256], int n, uintptr_t offset,
 using kernel::irq::irq_handler_t;
 static std::vector<std::list<irq_handler_t>> s_irq_handlers;
 
-SECTION(".text.kinit")
 void kernel::kinit::init_interrupt() {
     for (int i = 0; i < 0x30; ++i)
-        set_idt_entry(IDT, i, ISR_START_ADDR + 8 * i, 0x08,
-                      KERNEL_INTERRUPT_GATE_TYPE);
-    set_idt_entry(IDT, 0x80, ISR_START_ADDR + 8 * 0x80, 0x08,
-                  USER_INTERRUPT_GATE_TYPE);
+        set_idt_entry(IDT, i, ISR_START_ADDR + 8 * i, 0x08, KERNEL_INTERRUPT_GATE_TYPE);
+    set_idt_entry(IDT, 0x80, ISR_START_ADDR + 8 * 0x80, 0x08, USER_INTERRUPT_GATE_TYPE);
 
     uint64_t idt_descriptor[2];
     idt_descriptor[0] = (sizeof(IDT_entry) * 256) << 48;
@@ -138,8 +132,7 @@ static inline void irq_handler(interrupt_stack* context, mmx_registers*) {
         port_pic2_command = PIC_EOI;
 }
 
-extern "C" void interrupt_handler(interrupt_stack* context,
-                                  mmx_registers* mmxregs) {
+extern "C" void interrupt_handler(interrupt_stack* context, mmx_registers* mmxregs) {
     if (context->int_no < 0x20) // interrupt is a fault
         fault_handler(context, mmxregs);
     else if (context->int_no == 0x80) // syscall by int 0x80

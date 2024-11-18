@@ -3,9 +3,7 @@ use core::{
     sync::atomic::{AtomicBool, Ordering},
 };
 
-use crate::sync::preempt_disable;
-
-use super::{preempt_enable, strategy::LockStrategy};
+use super::{preempt, strategy::LockStrategy};
 
 pub struct SpinStrategy;
 
@@ -28,7 +26,7 @@ unsafe impl LockStrategy for SpinStrategy {
     #[inline(always)]
     unsafe fn do_lock(data: &Self::StrategyData) -> Self::GuardContext {
         use Ordering::{Acquire, Relaxed};
-        preempt_disable();
+        preempt::disable();
 
         while data
             .compare_exchange_weak(false, true, Acquire, Relaxed)
@@ -43,7 +41,7 @@ unsafe impl LockStrategy for SpinStrategy {
     #[inline(always)]
     unsafe fn do_unlock(data: &Self::StrategyData, _: &mut Self::GuardContext) {
         data.store(false, Ordering::Release);
-        preempt_enable();
+        preempt::enable();
     }
 }
 
@@ -74,32 +72,24 @@ unsafe impl<Strategy: LockStrategy> LockStrategy for IrqStrategy<Strategy> {
     }
 
     #[inline(always)]
-    unsafe fn do_unlock(
-        data: &Self::StrategyData,
-        context: &mut Self::GuardContext,
-    ) {
+    unsafe fn do_unlock(data: &Self::StrategyData, context: &mut Self::GuardContext) {
         Strategy::do_unlock(data, &mut context.0);
 
         asm!(
             "push {context}",
             "popf",
             context = in(reg) context.1,
+            options(nomem),
         )
     }
 
     #[inline(always)]
-    unsafe fn do_temporary_unlock(
-        data: &Self::StrategyData,
-        context: &mut Self::GuardContext,
-    ) {
+    unsafe fn do_temporary_unlock(data: &Self::StrategyData, context: &mut Self::GuardContext) {
         Strategy::do_unlock(data, &mut context.0)
     }
 
     #[inline(always)]
-    unsafe fn do_relock(
-        data: &Self::StrategyData,
-        context: &mut Self::GuardContext,
-    ) {
+    unsafe fn do_relock(data: &Self::StrategyData, context: &mut Self::GuardContext) {
         Strategy::do_relock(data, &mut context.0);
     }
 }

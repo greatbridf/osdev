@@ -1,7 +1,11 @@
 use core::sync::atomic::Ordering;
 
 use crate::{
-    kernel::vfs::{dentry::Dentry, file::Pipe, s_isdir, s_isreg},
+    kernel::{
+        console::CONSOLE,
+        task::Thread,
+        vfs::{dentry::Dentry, file::Pipe, s_isdir, s_isreg},
+    },
     path::Path,
     prelude::*,
 };
@@ -11,8 +15,8 @@ use alloc::{
     sync::Arc,
 };
 use bindings::{
-    current_process, kernel::tty::console, EBADF, EINVAL, EISDIR, ENOTDIR, FD_CLOEXEC, F_DUPFD,
-    F_DUPFD_CLOEXEC, F_GETFD, F_SETFD, O_APPEND, O_CLOEXEC, O_DIRECTORY, O_RDWR, O_TRUNC, O_WRONLY,
+    EBADF, EISDIR, ENOTDIR, FD_CLOEXEC, F_DUPFD, F_DUPFD_CLOEXEC, F_GETFD, F_SETFD, O_APPEND,
+    O_CLOEXEC, O_DIRECTORY, O_RDWR, O_TRUNC, O_WRONLY,
 };
 use itertools::{
     FoldWhile::{Continue, Done},
@@ -20,7 +24,7 @@ use itertools::{
 };
 
 use super::{
-    file::{File, InodeFile, TTYFile},
+    file::{File, InodeFile, TerminalFile},
     inode::Mode,
     s_ischr, FsContext, Spin,
 };
@@ -81,17 +85,24 @@ pub extern "C" fn r_filearray_drop(other: *const FileArray) {
 }
 
 impl FileArray {
-    pub fn get_current<'lt>() -> BorrowedArc<'lt, Self> {
-        // SAFETY: `current_process` is always valid.
-        let current = unsafe { current_process.as_mut().unwrap() };
-        BorrowedArc::from_raw(current.files.m_handle as *const _)
+    pub fn get_current<'lt>() -> &'lt Arc<Self> {
+        &Thread::current().files
+    }
+
+    pub fn new_for_init() -> Arc<Self> {
+        Arc::new(FileArray {
+            inner: Spin::new(FileArrayInner {
+                files: BTreeMap::new(),
+                fd_min_avail: 0,
+            }),
+        })
     }
 
     pub fn new_shared(other: &Arc<Self>) -> Arc<Self> {
         other.clone()
     }
 
-    pub fn new_cloned(other: &Arc<Self>) -> Arc<Self> {
+    pub fn new_cloned(other: &Self) -> Arc<Self> {
         Arc::new(Self {
             inner: Spin::clone(&other.inner),
         })
@@ -217,7 +228,12 @@ impl FileArray {
         let fd = inner.next_fd();
 
         if s_ischr(filemode) && inode.devid()? == 0x0501 {
-            inner.do_insert(fd, fdflag as u64, TTYFile::new(unsafe { console }));
+            // TODO!!!: Get terminal from char device.
+            inner.do_insert(
+                fd,
+                fdflag as u64,
+                TerminalFile::new(CONSOLE.lock_irq().get_terminal().unwrap()),
+            );
         } else {
             inner.do_insert(
                 fd,

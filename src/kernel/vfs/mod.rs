@@ -1,9 +1,11 @@
 use crate::prelude::*;
 
 use alloc::sync::Arc;
-use bindings::{current_process, dev_t, S_IFBLK, S_IFCHR, S_IFDIR, S_IFLNK, S_IFMT, S_IFREG};
+use bindings::{dev_t, S_IFBLK, S_IFCHR, S_IFDIR, S_IFLNK, S_IFMT, S_IFREG};
 use dentry::Dentry;
 use inode::Mode;
+
+use super::task::Thread;
 
 pub mod dentry;
 pub mod ffi;
@@ -50,46 +52,28 @@ pub struct FsContext {
 }
 
 impl FsContext {
-    pub fn get_current() -> BorrowedArc<'static, Self> {
-        // SAFETY: There should always be a current process.
-        let current = unsafe { current_process.as_ref().unwrap() };
-        let ptr = current.fs_context.m_handle as *const _ as *const Self;
-
-        BorrowedArc::from_raw(ptr)
+    pub fn get_current<'lt>() -> &'lt Arc<Self> {
+        let current = Thread::current();
+        &current.fs_context
     }
-}
 
-#[no_mangle]
-pub extern "C" fn r_fs_context_drop(other: *const FsContext) {
-    // SAFETY: `other` is a valid pointer from `Arc::into_raw()`.
-    unsafe { Arc::from_raw(other) };
-}
+    pub fn new_for_init() -> Arc<Self> {
+        Arc::new(FsContext {
+            fsroot: Dentry::kernel_root_dentry(),
+            cwd: Spin::new(Dentry::kernel_root_dentry()),
+            umask: Spin::new(0o022),
+        })
+    }
 
-#[no_mangle]
-pub extern "C" fn r_fs_context_new_cloned(other: *const FsContext) -> *const FsContext {
-    // SAFETY: `other` is a valid pointer from `Arc::into_raw()`.
-    let other = BorrowedArc::from_raw(other);
+    pub fn new_cloned(other: &Self) -> Arc<Self> {
+        Arc::new(Self {
+            fsroot: other.fsroot.clone(),
+            cwd: other.cwd.clone(),
+            umask: other.umask.clone(),
+        })
+    }
 
-    Arc::into_raw(Arc::new(FsContext {
-        fsroot: other.fsroot.clone(),
-        cwd: other.cwd.clone(),
-        umask: other.umask.clone(),
-    }))
-}
-
-#[no_mangle]
-pub extern "C" fn r_fs_context_new_shared(other: *const FsContext) -> *const FsContext {
-    // SAFETY: `other` is a valid pointer from `Arc::into_raw()`.
-    let other = BorrowedArc::from_raw(other);
-
-    Arc::into_raw(other.clone())
-}
-
-#[no_mangle]
-pub extern "C" fn r_fs_context_new_for_init() -> *const FsContext {
-    Arc::into_raw(Arc::new(FsContext {
-        fsroot: Dentry::kernel_root_dentry(),
-        cwd: Spin::new(Dentry::kernel_root_dentry()),
-        umask: Spin::new(0o022),
-    }))
+    pub fn new_shared(other: &Arc<Self>) -> Arc<Self> {
+        other.clone()
+    }
 }

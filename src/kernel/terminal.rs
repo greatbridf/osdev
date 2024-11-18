@@ -1,0 +1,703 @@
+use core::iter::repeat;
+
+use alloc::{
+    collections::vec_deque::VecDeque,
+    sync::{Arc, Weak},
+};
+use bindings::{EINTR, ENOTTY};
+use bitflags::bitflags;
+
+use crate::{io::Buffer, prelude::*, sync::CondVar};
+
+use super::{
+    task::{Session, Signal, Thread},
+    user::{UserPointer, UserPointerMut},
+};
+
+const BUFFER_SIZE: usize = 4096;
+
+const NCCS: usize = 32;
+
+// taken from linux kernel code
+
+/* c_cc characters */
+const VINTR: usize = 0;
+const VQUIT: usize = 1;
+const VERASE: usize = 2;
+const VKILL: usize = 3;
+const VEOF: usize = 4;
+const VTIME: usize = 5;
+const VMIN: usize = 6;
+const VSWTC: usize = 7;
+const VSTART: usize = 8;
+const VSTOP: usize = 9;
+const VSUSP: usize = 10;
+const VEOL: usize = 11;
+const VREPRINT: usize = 12;
+const VDISCARD: usize = 13;
+const VWERASE: usize = 14;
+const VLNEXT: usize = 15;
+const VEOL2: usize = 16;
+
+/* c_iflag bits */
+
+bitflags! {
+    pub struct TermioIFlags: u16 {
+        /// Ignore break condition
+        const IGNBRK = 0x0001;
+        /// Signal interrupt on break
+        const BRKINT = 0x0002;
+        /// Ignore characters with parity errors
+        const IGNPAR = 0x0004;
+        /// Mark parity and framing errors
+        const PARMRK = 0x0008;
+        /// Enable input parity check
+        const INPCK = 0x0010;
+        /// Strip 8th bit off characters
+        const ISTRIP = 0x0020;
+        /// Map NL to CR on input
+        const INLCR = 0x0040;
+        /// Ignore CR
+        const IGNCR = 0x0080;
+        /// Map CR to NL on input
+        const ICRNL = 0x0100;
+        const IUCLC = 0x0200;
+        const IXON = 0x0400;
+        /// Any character will restart after stop
+        const IXANY = 0x0800;
+        const IXOFF = 0x1000;
+        const IMAXBEL = 0x2000;
+        const IUTF8 = 0x4000;
+    }
+
+    pub struct TermioOFlags: u16 {
+        /// Perform output processing
+        const OPOST = 0x0001;
+        const OLCUC = 0x0002;
+        const ONLCR = 0x0004;
+        const OCRNL = 0x0008;
+        const ONOCR = 0x0010;
+        const ONLRET = 0x0020;
+        const OFILL = 0x0040;
+        const OFDEL = 0x0080;
+    }
+}
+
+bitflags! {
+    pub struct TermioLFlags: u16 {
+        const ISIG = 0x0001;
+        const ICANON = 0x0002;
+        const XCASE = 0x0004;
+        const ECHO = 0x0008;
+        const ECHOE = 0x0010;
+        const ECHOK = 0x0020;
+        const ECHONL = 0x0040;
+        const NOFLSH = 0x0080;
+        const TOSTOP = 0x0100;
+        const ECHOCTL = 0x0200;
+        const ECHOPRT = 0x0400;
+        const ECHOKE = 0x0800;
+        const FLUSHO = 0x1000;
+        const PENDIN = 0x4000;
+        const IEXTEN = 0x8000;
+    }
+}
+
+/* c_cflag bit meaning */
+/* Common CBAUD rates */
+const B0: u32 = 0x00000000; /* hang up */
+const B50: u32 = 0x00000001;
+const B75: u32 = 0x00000002;
+const B110: u32 = 0x00000003;
+const B134: u32 = 0x00000004;
+const B150: u32 = 0x00000005;
+const B200: u32 = 0x00000006;
+const B300: u32 = 0x00000007;
+const B600: u32 = 0x00000008;
+const B1200: u32 = 0x00000009;
+const B1800: u32 = 0x0000000a;
+const B2400: u32 = 0x0000000b;
+const B4800: u32 = 0x0000000c;
+const B9600: u32 = 0x0000000d;
+const B19200: u32 = 0x0000000e;
+const B38400: u32 = 0x0000000f;
+const EXTA: u32 = B19200;
+const EXTB: u32 = B38400;
+
+const ADDRB: u32 = 0x20000000; /* address bit */
+const CMSPAR: u32 = 0x40000000; /* mark or space (stick) parity */
+const CRTSCTS: u32 = 0x80000000; /* flow control */
+
+const IBSHIFT: u32 = 16; /* Shift from CBAUD to CIBAUD */
+
+const CBAUD: u32 = 0x0000100f;
+const CSIZE: u32 = 0x00000030;
+const CS5: u32 = 0x00000000;
+const CS6: u32 = 0x00000010;
+const CS7: u32 = 0x00000020;
+const CS8: u32 = 0x00000030;
+const CSTOPB: u32 = 0x00000040;
+const CREAD: u32 = 0x00000080;
+const PARENB: u32 = 0x00000100;
+const PARODD: u32 = 0x00000200;
+const HUPCL: u32 = 0x00000400;
+const CLOCAL: u32 = 0x00000800;
+const CBAUDEX: u32 = 0x00001000;
+const BOTHER: u32 = 0x00001000;
+const B57600: u32 = 0x00001001;
+const B115200: u32 = 0x00001002;
+const B230400: u32 = 0x00001003;
+const B460800: u32 = 0x00001004;
+const B500000: u32 = 0x00001005;
+const B576000: u32 = 0x00001006;
+const B921600: u32 = 0x00001007;
+const B1000000: u32 = 0x00001008;
+const B1152000: u32 = 0x00001009;
+const B1500000: u32 = 0x0000100a;
+const B2000000: u32 = 0x0000100b;
+const B2500000: u32 = 0x0000100c;
+const B3000000: u32 = 0x0000100d;
+const B3500000: u32 = 0x0000100e;
+const B4000000: u32 = 0x0000100f;
+const CIBAUD: u32 = 0x100f0000; /* input baud rate */
+
+// line disciplines
+
+const N_TTY: u8 = 0;
+
+pub struct Termios {
+    iflag: TermioIFlags,
+    oflag: TermioOFlags,
+    cflag: u32,
+    lflag: TermioLFlags,
+
+    line: u8,
+    cc: [u8; NCCS],
+}
+
+macro_rules! CTRL {
+    ('A') => {
+        0x01
+    };
+    ('B') => {
+        0x02
+    };
+    ('C') => {
+        0x03
+    };
+    ('D') => {
+        0x04
+    };
+    ('E') => {
+        0x05
+    };
+    ('F') => {
+        0x06
+    };
+    ('G') => {
+        0x07
+    };
+    ('H') => {
+        0x08
+    };
+    ('I') => {
+        0x09
+    };
+    ('J') => {
+        0x0A
+    };
+    ('K') => {
+        0x0B
+    };
+    ('L') => {
+        0x0C
+    };
+    ('M') => {
+        0x0D
+    };
+    ('N') => {
+        0x0E
+    };
+    ('O') => {
+        0x0F
+    };
+    ('P') => {
+        0x10
+    };
+    ('Q') => {
+        0x11
+    };
+    ('R') => {
+        0x12
+    };
+    ('S') => {
+        0x13
+    };
+    ('T') => {
+        0x14
+    };
+    ('U') => {
+        0x15
+    };
+    ('V') => {
+        0x16
+    };
+    ('W') => {
+        0x17
+    };
+    ('X') => {
+        0x18
+    };
+    ('Y') => {
+        0x19
+    };
+    ('Z') => {
+        0x1A
+    };
+    ('\\') => {
+        0x1c
+    };
+}
+
+impl Termios {
+    pub fn ctrl(c: u8) -> u8 {
+        c - 0x40
+    }
+
+    pub fn veof(&self) -> u8 {
+        self.cc[VEOF]
+    }
+
+    pub fn veol(&self) -> u8 {
+        self.cc[VEOL]
+    }
+
+    pub fn veol2(&self) -> u8 {
+        self.cc[VEOL2]
+    }
+
+    pub fn vintr(&self) -> u8 {
+        self.cc[VINTR]
+    }
+
+    pub fn vquit(&self) -> u8 {
+        self.cc[VQUIT]
+    }
+
+    pub fn vsusp(&self) -> u8 {
+        self.cc[VSUSP]
+    }
+
+    pub fn vstart(&self) -> u8 {
+        self.cc[VSTART]
+    }
+
+    pub fn vstop(&self) -> u8 {
+        self.cc[VSTOP]
+    }
+
+    pub fn verase(&self) -> u8 {
+        self.cc[VERASE]
+    }
+
+    pub fn vkill(&self) -> u8 {
+        self.cc[VKILL]
+    }
+
+    pub fn echo(&self) -> bool {
+        self.lflag.contains(TermioLFlags::ECHO)
+    }
+
+    pub fn echoe(&self) -> bool {
+        self.lflag.contains(TermioLFlags::ECHOE)
+    }
+
+    pub fn echoctl(&self) -> bool {
+        self.lflag.contains(TermioLFlags::ECHOCTL)
+    }
+
+    pub fn echoke(&self) -> bool {
+        self.lflag.contains(TermioLFlags::ECHOKE)
+    }
+
+    pub fn echok(&self) -> bool {
+        self.lflag.contains(TermioLFlags::ECHOK)
+    }
+
+    pub fn echonl(&self) -> bool {
+        self.lflag.contains(TermioLFlags::ECHONL)
+    }
+
+    pub fn isig(&self) -> bool {
+        self.lflag.contains(TermioLFlags::ISIG)
+    }
+
+    pub fn icanon(&self) -> bool {
+        self.lflag.contains(TermioLFlags::ICANON)
+    }
+
+    pub fn iexten(&self) -> bool {
+        self.lflag.contains(TermioLFlags::IEXTEN)
+    }
+
+    pub fn igncr(&self) -> bool {
+        self.iflag.contains(TermioIFlags::IGNCR)
+    }
+
+    pub fn icrnl(&self) -> bool {
+        self.iflag.contains(TermioIFlags::ICRNL)
+    }
+
+    pub fn inlcr(&self) -> bool {
+        self.iflag.contains(TermioIFlags::INLCR)
+    }
+
+    pub fn noflsh(&self) -> bool {
+        self.lflag.contains(TermioLFlags::NOFLSH)
+    }
+
+    pub fn new_standard() -> Self {
+        let cc = core::array::from_fn(|idx| match idx {
+            VINTR => CTRL!('C'),
+            VQUIT => CTRL!('\\'),
+            VERASE => 0x7f,
+            VKILL => CTRL!('U'),
+            VEOF => CTRL!('D'),
+            VSUSP => CTRL!('Z'),
+            VMIN => 1,
+            _ => 0,
+        });
+
+        Self {
+            iflag: TermioIFlags::ICRNL | TermioIFlags::IXOFF,
+            oflag: TermioOFlags::OPOST | TermioOFlags::ONLCR,
+            cflag: B38400 | CS8 | CREAD | HUPCL,
+            lflag: TermioLFlags::ISIG
+                | TermioLFlags::ICANON
+                | TermioLFlags::ECHO
+                | TermioLFlags::ECHOE
+                | TermioLFlags::ECHOK
+                | TermioLFlags::ECHOCTL
+                | TermioLFlags::ECHOKE
+                | TermioLFlags::IEXTEN,
+            line: N_TTY,
+            cc,
+        }
+    }
+
+    fn get_user(&self) -> UserTermios {
+        UserTermios {
+            iflag: self.iflag.bits() as u16,
+            oflag: self.oflag.bits() as u16,
+            cflag: self.cflag as u16,
+            lflag: self.lflag.bits() as u16,
+            line: self.line,
+            cc: self.cc,
+        }
+    }
+}
+
+pub trait TerminalDevice: Send + Sync {
+    fn putchar(&self, ch: u8);
+}
+
+struct TerminalInner {
+    termio: Termios,
+    session: Weak<Session>,
+    buffer: VecDeque<u8>,
+}
+
+pub struct Terminal {
+    /// Lock with IRQ disabled. We might use this in IRQ context.
+    inner: Spin<TerminalInner>,
+    device: Arc<dyn TerminalDevice>,
+    cv: CondVar,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct UserWindowSize {
+    row: u16,
+    col: u16,
+    xpixel: u16,
+    ypixel: u16,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct UserTermios {
+    iflag: u16,
+    oflag: u16,
+    cflag: u16,
+    lflag: u16,
+    line: u8,
+    cc: [u8; NCCS],
+}
+
+pub enum TerminalIORequest<'a> {
+    GetProcessGroup(UserPointerMut<'a, u32>),
+    SetProcessGroup(UserPointer<'a, u32>),
+    GetWindowSize(UserPointerMut<'a, UserWindowSize>),
+    GetTermios(UserPointerMut<'a, UserTermios>),
+    SetTermios(UserPointer<'a, UserTermios>),
+}
+
+impl core::fmt::Debug for Terminal {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("Terminal").finish()
+    }
+}
+
+impl Terminal {
+    pub fn new(device: Arc<dyn TerminalDevice>) -> Arc<Self> {
+        Arc::new(Self {
+            inner: Spin::new(TerminalInner {
+                termio: Termios::new_standard(),
+                session: Weak::new(),
+                buffer: repeat(0).take(BUFFER_SIZE).collect(),
+            }),
+            cv: CondVar::new(),
+            device,
+        })
+    }
+
+    /// Clear the read buffer.
+    fn clear_read_buffer(&self, inner: &mut TerminalInner) {
+        inner.buffer.clear();
+    }
+
+    // TODO: Buffer terminal writes.
+    pub fn show_char(&self, ch: u8) {
+        self.device.putchar(ch)
+    }
+
+    fn erase(&self, inner: &mut TerminalInner, echo: bool) -> Option<u8> {
+        let back = inner.buffer.back().copied();
+        match back {
+            None => return None,
+            Some(b'\n') => return None,
+            Some(back) if back == inner.termio.veof() => return None,
+            Some(back) if back == inner.termio.veol() => return None,
+            Some(back) if back == inner.termio.veol2() => return None,
+            _ => {}
+        }
+        let back = inner.buffer.pop_back();
+
+        if echo && inner.termio.echo() && inner.termio.echoe() {
+            self.show_char(CTRL!('H')); // Backspace
+            self.show_char(b' '); // Space
+            self.show_char(CTRL!('H')); // Backspace
+        }
+
+        return back;
+    }
+
+    fn echo_char(&self, inner: &mut TerminalInner, ch: u8) {
+        match ch {
+            b'\t' | b'\n' | CTRL!('Q') | CTRL!('S') => self.show_char(ch),
+            c if c >= 32 => self.show_char(ch),
+            _ if !inner.termio.echo() => self.show_char(ch),
+            _ if !inner.termio.echoctl() => self.show_char(ch),
+            _ if !inner.termio.iexten() => self.show_char(ch),
+            _ => {
+                self.show_char(b'^');
+                self.show_char(ch + 0x40);
+            }
+        }
+    }
+
+    fn signal(&self, inner: &mut TerminalInner, signal: Signal) {
+        if let Some(session) = inner.session.upgrade() {
+            session.raise_foreground(signal);
+        }
+        if !inner.termio.noflsh() {
+            self.clear_read_buffer(inner);
+        }
+    }
+
+    fn echo_and_signal(&self, inner: &mut TerminalInner, ch: u8, signal: Signal) {
+        self.echo_char(inner, ch);
+        self.signal(inner, signal);
+    }
+
+    fn do_commit_char(&self, inner: &mut TerminalInner, ch: u8) {
+        inner.buffer.push_back(ch);
+
+        if inner.termio.echo() || (ch == b'\n' && inner.termio.echonl()) {
+            self.echo_char(inner, ch);
+        }
+
+        // If ICANON is set, we notify all waiting processes.
+        // If ICANON is not set but we have a new line, there are data ready, we notify as well.
+        if ch == b'\n' || inner.termio.icanon() {
+            self.cv.notify_all();
+        }
+    }
+
+    // TODO: Find a better way to handle this.
+    pub fn commit_char(&self, ch: u8) {
+        let mut inner = self.inner.lock_irq();
+        if inner.termio.isig() {
+            match ch {
+                0xff => {}
+                ch if ch == inner.termio.vintr() => {
+                    return self.echo_and_signal(&mut inner, ch, Signal::SIGINT)
+                }
+                ch if ch == inner.termio.vquit() => {
+                    return self.echo_and_signal(&mut inner, ch, Signal::SIGQUIT)
+                }
+                ch if ch == inner.termio.vsusp() => {
+                    return self.echo_and_signal(&mut inner, ch, Signal::SIGTSTP)
+                }
+                _ => {}
+            }
+        }
+
+        // If handled, the character is discarded.
+        if inner.termio.icanon() {
+            match ch {
+                0xff => {}
+                ch if ch == inner.termio.veof() => return self.cv.notify_all(),
+                ch if ch == inner.termio.verase() => {
+                    self.erase(&mut inner, true);
+                    return;
+                }
+                ch if ch == inner.termio.vkill() => {
+                    if inner.termio.echok() {
+                        while self.erase(&mut inner, false).is_some() {}
+                        self.show_char(b'\n');
+                    } else if inner.termio.echoke() && inner.termio.iexten() {
+                        while self.erase(&mut inner, true).is_some() {}
+                    }
+                    return;
+                }
+                _ => {}
+            }
+        }
+
+        match ch {
+            b'\r' if inner.termio.igncr() => {}
+            b'\r' if inner.termio.icrnl() => return self.do_commit_char(&mut inner, b'\n'),
+            b'\n' if inner.termio.inlcr() => return self.do_commit_char(&mut inner, b'\r'),
+            _ => self.do_commit_char(&mut inner, ch),
+        }
+    }
+
+    pub fn poll_in(&self) -> KResult<()> {
+        let mut inner = self.inner.lock_irq();
+        if inner.buffer.is_empty() {
+            self.cv.wait(&mut inner);
+
+            if Thread::current().signal_list.has_pending_signal() {
+                return Err(EINTR);
+            }
+        }
+        Ok(())
+    }
+
+    pub fn read(&self, buffer: &mut dyn Buffer) -> KResult<usize> {
+        'block: {
+            if buffer.available() == 0 {
+                break 'block;
+            }
+
+            let mut inner = self.inner.lock_irq();
+            if inner.buffer.is_empty() {
+                self.cv.wait(&mut inner);
+
+                if Thread::current().signal_list.has_pending_signal() {
+                    return Err(EINTR);
+                }
+            }
+
+            if inner.buffer.is_empty() {
+                break 'block;
+            }
+
+            if !inner.termio.icanon() {
+                let ch = inner.buffer.pop_front().unwrap();
+                buffer.fill(&[ch])?;
+                break 'block;
+            }
+
+            // Canonical mode, return data until we see a newline.
+            let length = inner
+                .buffer
+                .iter()
+                .position(|&ch| ch == b'\n')
+                .map(|pos| pos + 1)
+                .unwrap_or(inner.buffer.len());
+
+            let (first, second) = inner.buffer.as_slices();
+            let first_data = first
+                .split_at_checked(length)
+                .map_or(first, |(data, _)| data);
+            let second_data = second
+                .split_at_checked(length - first_data.len())
+                .map_or(second, |(data, _)| data);
+
+            buffer.fill(first_data)?.allow_partial();
+            buffer.fill(second_data)?.allow_partial();
+
+            inner.buffer.drain(..buffer.wrote());
+        }
+
+        Ok(buffer.wrote())
+    }
+
+    pub fn ioctl(&self, request: TerminalIORequest) -> KResult<()> {
+        match request {
+            TerminalIORequest::GetProcessGroup(pgid_pointer) => {
+                let inner = self.inner.lock();
+                let session = inner.session.upgrade();
+                let pgid = session.map(|session| session.foreground_pgid()).flatten();
+
+                if let Some(pgid) = pgid {
+                    pgid_pointer.write(pgid)
+                } else {
+                    Err(ENOTTY)
+                }
+            }
+            TerminalIORequest::SetProcessGroup(pgid) => {
+                let inner = self.inner.lock();
+                let session = inner.session.upgrade();
+                let pgid = pgid.read()?;
+
+                if let Some(session) = session {
+                    session.set_foreground_pgid(pgid)
+                } else {
+                    Err(ENOTTY)
+                }
+            }
+            TerminalIORequest::GetWindowSize(ptr) => {
+                // TODO: Get the actual window size
+                let window_size = UserWindowSize {
+                    row: 40,
+                    col: 80,
+                    xpixel: 0,
+                    ypixel: 0,
+                };
+
+                ptr.write(window_size)
+            }
+            TerminalIORequest::GetTermios(ptr) => {
+                let inner = self.inner.lock();
+                ptr.write(inner.termio.get_user())
+            }
+            TerminalIORequest::SetTermios(ptr) => {
+                let mut inner = self.inner.lock();
+                let user_termios = ptr.read()?;
+
+                // TODO: We ignore unknown bits for now.
+                inner.termio.iflag = TermioIFlags::from_bits_truncate(user_termios.iflag);
+                inner.termio.oflag = TermioOFlags::from_bits_truncate(user_termios.oflag);
+                inner.termio.lflag = TermioLFlags::from_bits_truncate(user_termios.lflag);
+                inner.termio.cflag = user_termios.cflag as u32;
+                inner.termio.line = user_termios.line;
+                inner.termio.cc = user_termios.cc;
+
+                Ok(())
+            }
+        }
+    }
+}

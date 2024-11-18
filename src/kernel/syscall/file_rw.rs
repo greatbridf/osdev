@@ -8,14 +8,23 @@ use bindings::{
 use crate::{
     io::{Buffer, BufferFill},
     kernel::{
-        user::dataflow::{CheckedUserPointer, UserBuffer, UserString},
-        vfs::{dentry::Dentry, file::SeekOption, filearray::FileArray, FsContext},
+        task::Thread,
+        user::{
+            dataflow::{CheckedUserPointer, UserBuffer, UserString},
+            UserPointer, UserPointerMut,
+        },
+        vfs::{
+            dentry::Dentry,
+            file::{PollEvent, SeekOption},
+            filearray::FileArray,
+            FsContext,
+        },
     },
     path::Path,
     prelude::*,
 };
 
-use super::{define_syscall32, register_syscall_handler};
+use super::{define_syscall32, register_syscall};
 
 fn do_read(fd: u32, buffer: *mut u8, bufsize: usize) -> KResult<usize> {
     let mut buffer = UserBuffer::new(buffer, bufsize)?;
@@ -198,24 +207,22 @@ struct IoVec32 {
     len: u32,
 }
 
-fn do_readv(fd: u32, iov_user: *const u8, iovcnt: u32) -> KResult<usize> {
+fn do_readv(fd: u32, iov_user: *const IoVec32, iovcnt: u32) -> KResult<usize> {
     let files = FileArray::get_current();
     let file = files.get(fd).ok_or(EBADF)?;
 
-    let iov_user =
-        CheckedUserPointer::new(iov_user, iovcnt as usize * core::mem::size_of::<IoVec32>())?;
-    let mut iov_user_copied: Vec<IoVec32> = vec![];
-    iov_user_copied.resize(iovcnt as usize, IoVec32::default());
-
-    iov_user.read(
-        iov_user_copied.as_mut_ptr() as *mut (),
-        iov_user_copied.len() * core::mem::size_of::<IoVec32>(),
-    )?;
-
-    let iov_buffers = iov_user_copied
-        .into_iter()
-        .take_while(|iov| iov.len != 0)
-        .map(|iov| UserBuffer::new(iov.base as *mut u8, iov.len as usize))
+    let mut iov_user = UserPointer::new(iov_user as *mut IoVec32)?;
+    let iov_buffers = (0..iovcnt)
+        .map(|_| {
+            let iov_result = iov_user.read()?;
+            iov_user = iov_user.offset(1)?;
+            Ok(iov_result)
+        })
+        .filter_map(|iov_result| match iov_result {
+            Err(err) => Some(Err(err)),
+            Ok(IoVec32 { len: 0, .. }) => None,
+            Ok(IoVec32 { base, len }) => Some(UserBuffer::new(base as *mut u8, len as usize)),
+        })
         .collect::<KResult<Vec<_>>>()?;
 
     let mut tot = 0usize;
@@ -224,7 +231,7 @@ fn do_readv(fd: u32, iov_user: *const u8, iovcnt: u32) -> KResult<usize> {
         let nread = file.read(&mut buffer)?;
         tot += nread;
 
-        if nread == 0 || nread != buffer.total() {
+        if nread != buffer.total() {
             break;
         }
     }
@@ -236,6 +243,7 @@ fn do_writev(fd: u32, iov_user: *const u8, iovcnt: u32) -> KResult<usize> {
     let files = FileArray::get_current();
     let file = files.get(fd).ok_or(EBADF)?;
 
+    // TODO: Rewrite this with `UserPointer`.
     let iov_user =
         CheckedUserPointer::new(iov_user, iovcnt as usize * core::mem::size_of::<IoVec32>())?;
     let mut iov_user_copied: Vec<IoVec32> = vec![];
@@ -312,6 +320,34 @@ fn do_fcntl64(fd: u32, cmd: u32, arg: usize) -> KResult<usize> {
     FileArray::get_current().fcntl(fd, cmd, arg)
 }
 
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+struct UserPollFd {
+    fd: u32,
+    events: u16,
+    revents: u16,
+}
+
+fn do_poll(fds: *mut UserPollFd, nfds: u32, timeout: u32) -> KResult<u32> {
+    match nfds {
+        0 => Ok(0),
+        2.. => unimplemented!("Poll with {} fds", nfds),
+        1 => {
+            if timeout != u32::MAX {
+                unimplemented!("Poll with timeout {}", timeout);
+            }
+            let fds = UserPointerMut::new(fds)?;
+            let mut fd = fds.read()?;
+
+            let file = Thread::current().files.get(fd.fd).ok_or(EBADF)?;
+            fd.revents = file.poll(PollEvent::from_bits_retain(fd.events))?.bits();
+
+            fds.write(fd)?;
+            Ok(1)
+        }
+    }
+}
+
 define_syscall32!(sys_read, do_read, fd: u32, buffer: *mut u8, bufsize: usize);
 define_syscall32!(sys_write, do_write, fd: u32, buffer: *const u8, count: usize);
 define_syscall32!(sys_open, do_open, path: *const u8, flags: u32, mode: u32);
@@ -329,35 +365,37 @@ define_syscall32!(sys_symlink, do_symlink, target: *const u8, linkpath: *const u
 define_syscall32!(sys_readlink, do_readlink, pathname: *const u8, buffer: *mut u8, bufsize: usize);
 define_syscall32!(sys_llseek, do_llseek, fd: u32, offset_high: u32, offset_low: u32, result: *mut u64, whence: u32);
 define_syscall32!(sys_mknod, do_mknod, pathname: *const u8, mode: u32, dev: u32);
-define_syscall32!(sys_readv, do_readv, fd: u32, iov_user: *const u8, iovcnt: u32);
+define_syscall32!(sys_readv, do_readv, fd: u32, iov_user: *const IoVec32, iovcnt: u32);
 define_syscall32!(sys_writev, do_writev, fd: u32, iov_user: *const u8, iovcnt: u32);
 define_syscall32!(sys_access, do_access, pathname: *const u8, mode: u32);
 define_syscall32!(sys_sendfile64, do_sendfile64, out_fd: u32, in_fd: u32, offset: *mut u8, count: usize);
 define_syscall32!(sys_ioctl, do_ioctl, fd: u32, request: usize, arg3: usize);
 define_syscall32!(sys_fcntl64, do_fcntl64, fd: u32, cmd: u32, arg: usize);
+define_syscall32!(sys_poll, do_poll, fds: *mut UserPollFd, nfds: u32, timeout: u32);
 
-pub(super) unsafe fn register() {
-    register_syscall_handler(0x03, sys_read, b"read\0".as_ptr() as *const _);
-    register_syscall_handler(0x04, sys_write, b"write\0".as_ptr() as *const _);
-    register_syscall_handler(0x05, sys_open, b"open\0".as_ptr() as *const _);
-    register_syscall_handler(0x06, sys_close, b"close\0".as_ptr() as *const _);
-    register_syscall_handler(0x0a, sys_unlink, b"unlink\0".as_ptr() as *const _);
-    register_syscall_handler(0x0e, sys_mknod, b"mknod\0".as_ptr() as *const _);
-    register_syscall_handler(0x21, sys_access, b"access\0".as_ptr() as *const _);
-    register_syscall_handler(0x27, sys_mkdir, b"mkdir\0".as_ptr() as *const _);
-    register_syscall_handler(0x29, sys_dup, b"dup\0".as_ptr() as *const _);
-    register_syscall_handler(0x2a, sys_pipe, b"pipe\0".as_ptr() as *const _);
-    register_syscall_handler(0x36, sys_ioctl, b"ioctl\0".as_ptr() as *const _);
-    register_syscall_handler(0x3f, sys_dup2, b"dup2\0".as_ptr() as *const _);
-    register_syscall_handler(0x53, sys_symlink, b"symlink\0".as_ptr() as *const _);
-    register_syscall_handler(0x55, sys_readlink, b"readlink\0".as_ptr() as *const _);
-    register_syscall_handler(0x5c, sys_truncate, b"truncate\0".as_ptr() as *const _);
-    register_syscall_handler(0x8c, sys_llseek, b"llseek\0".as_ptr() as *const _);
-    register_syscall_handler(0x8d, sys_getdents, b"getdents\0".as_ptr() as *const _);
-    register_syscall_handler(0x91, sys_readv, b"readv\0".as_ptr() as *const _);
-    register_syscall_handler(0x92, sys_writev, b"writev\0".as_ptr() as *const _);
-    register_syscall_handler(0xdc, sys_getdents64, b"getdents64\0".as_ptr() as *const _);
-    register_syscall_handler(0xdd, sys_fcntl64, b"fcntl64\0".as_ptr() as *const _);
-    register_syscall_handler(0xef, sys_sendfile64, b"sendfile64\0".as_ptr() as *const _);
-    register_syscall_handler(0x17f, sys_statx, b"statx\0".as_ptr() as *const _);
+pub(super) fn register() {
+    register_syscall!(0x03, read);
+    register_syscall!(0x04, write);
+    register_syscall!(0x05, open);
+    register_syscall!(0x06, close);
+    register_syscall!(0x0a, unlink);
+    register_syscall!(0x0e, mknod);
+    register_syscall!(0x21, access);
+    register_syscall!(0x27, mkdir);
+    register_syscall!(0x29, dup);
+    register_syscall!(0x2a, pipe);
+    register_syscall!(0x36, ioctl);
+    register_syscall!(0x3f, dup2);
+    register_syscall!(0x53, symlink);
+    register_syscall!(0x55, readlink);
+    register_syscall!(0x5c, truncate);
+    register_syscall!(0x8c, llseek);
+    register_syscall!(0x8d, getdents);
+    register_syscall!(0x91, readv);
+    register_syscall!(0x92, writev);
+    register_syscall!(0xa8, poll);
+    register_syscall!(0xdc, getdents64);
+    register_syscall!(0xdd, fcntl64);
+    register_syscall!(0xef, sendfile64);
+    register_syscall!(0x17f, statx);
 }

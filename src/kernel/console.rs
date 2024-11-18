@@ -1,18 +1,34 @@
 use crate::prelude::*;
 
+use alloc::sync::Arc;
+use bindings::EEXIST;
 use lazy_static::lazy_static;
 
-pub struct Console;
+pub struct Console {
+    terminal: Option<Arc<Terminal>>,
+}
+
+impl Console {
+    pub fn get_terminal(&self) -> Option<Arc<Terminal>> {
+        self.terminal.clone()
+    }
+
+    pub fn register_terminal(terminal: &Arc<Terminal>) -> KResult<()> {
+        let mut console = CONSOLE.lock_irq();
+        if console.terminal.is_some() {
+            return Err(EEXIST);
+        }
+
+        console.terminal = Some(terminal.clone());
+        Ok(())
+    }
+}
 
 impl Write for Console {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
-        use crate::bindings::root::kernel::tty::console as _console;
-
-        if let Some(console) = unsafe { _console.as_mut() } {
+        if let Some(console) = &self.terminal {
             for &ch in s.as_bytes() {
-                unsafe {
-                    console.show_char(ch as i32);
-                }
+                console.show_char(ch)
             }
         }
 
@@ -26,7 +42,7 @@ pub fn _print(args: core::fmt::Arguments) {
 }
 
 lazy_static! {
-    pub static ref CONSOLE: Spin<Console> = Spin::new(Console {});
+    pub static ref CONSOLE: Spin<Console> = Spin::new(Console { terminal: None });
 }
 
 macro_rules! print {
@@ -68,6 +84,6 @@ macro_rules! println_fatal {
     };
 }
 
-pub(crate) use {
-    print, println, println_debug, println_fatal, println_info, println_warn,
-};
+use super::terminal::Terminal;
+
+pub(crate) use {print, println, println_debug, println_fatal, println_info, println_warn};

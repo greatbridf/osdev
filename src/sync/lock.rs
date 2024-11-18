@@ -23,6 +23,14 @@ impl<Value, Strategy: LockStrategy> Lock<Value, Strategy> {
     }
 }
 
+impl<Value: core::fmt::Debug, Strategy: LockStrategy> core::fmt::Debug for Lock<Value, Strategy> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("Lock")
+            .field("locked_value", &self.value)
+            .finish()
+    }
+}
+
 impl<Value: Clone, Strategy: LockStrategy> Clone for Lock<Value, Strategy> {
     fn clone(&self) -> Self {
         Self {

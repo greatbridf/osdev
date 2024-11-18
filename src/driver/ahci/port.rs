@@ -7,7 +7,7 @@ use crate::kernel::block::{BlockDeviceRequest, BlockRequestQueue};
 use crate::kernel::mem::paging::Page;
 
 use crate::kernel::mem::phys::{NoCachePP, PhysPtr};
-use crate::sync::condvar::CondVar;
+use crate::sync::UCondVar;
 
 use super::command::{Command, IdentifyCommand, ReadLBACommand};
 use super::{
@@ -106,7 +106,7 @@ impl CommandSlotInner {
 
 struct CommandSlot {
     inner: Spin<CommandSlotInner>,
-    cv: CondVar,
+    cv: UCondVar,
 }
 
 impl CommandSlot {
@@ -116,7 +116,7 @@ impl CommandSlot {
                 state: SlotState::Idle,
                 cmdheader,
             }),
-            cv: CondVar::new(),
+            cv: UCondVar::new(),
         }
     }
 }
@@ -153,7 +153,7 @@ pub struct AdapterPort {
     page: Page,
     slots: [CommandSlot; 32],
     free_list: Spin<FreeList>,
-    free_list_cv: CondVar,
+    free_list_cv: UCondVar,
 
     /// Statistics for this port
     pub stats: Spin<AdapterPortStats>,
@@ -176,7 +176,7 @@ impl AdapterPort {
                 CommandSlot::new(unsafe { cmdheaders_start.offset(index as isize) })
             }),
             free_list: Spin::new(FreeList::new()),
-            free_list_cv: CondVar::new(),
+            free_list_cv: UCondVar::new(),
             page,
             stats: Spin::default(),
         }
@@ -222,10 +222,8 @@ impl AdapterPort {
         loop {
             match free_list.free.pop_front() {
                 Some(slot) => break slot,
-                None => {
-                    self.free_list_cv.wait(&mut free_list, false);
-                }
-            }
+                None => self.free_list_cv.wait(&mut free_list),
+            };
         }
     }
 
@@ -323,7 +321,7 @@ impl AdapterPort {
                     saved = true;
                     self.save_working(slot_index as u32);
                 }
-                slot_object.cv.wait(&mut slot, false);
+                slot_object.cv.wait(&mut slot);
             }
         } else {
             // TODO: check error

@@ -25,6 +25,45 @@ pub struct UserString<'lt> {
     _phantom: core::marker::PhantomData<&'lt ()>,
 }
 
+pub struct UserPointer<'a, T: Copy, const CONST: bool> {
+    pointer: CheckedUserPointer,
+    _phantom: core::marker::PhantomData<&'a T>,
+}
+
+impl<'a, T: Copy, const CONST: bool> UserPointer<'a, T, CONST> {
+    pub fn new(ptr: *mut T) -> KResult<Self> {
+        let pointer = CheckedUserPointer::new(ptr as *const u8, core::mem::size_of::<T>())?;
+
+        Ok(Self {
+            pointer,
+            _phantom: core::marker::PhantomData,
+        })
+    }
+
+    pub fn new_vaddr(vaddr: usize) -> KResult<Self> {
+        Self::new(vaddr as *mut T)
+    }
+
+    pub fn read(&self) -> KResult<T> {
+        let mut value = core::mem::MaybeUninit::<T>::uninit();
+        self.pointer
+            .read(value.as_mut_ptr() as *mut (), core::mem::size_of::<T>())?;
+        Ok(unsafe { value.assume_init() })
+    }
+
+    pub fn offset(&self, offset: isize) -> KResult<Self> {
+        let new_vaddr = self.pointer.ptr as isize + offset * size_of::<T>() as isize;
+        Self::new_vaddr(new_vaddr as usize)
+    }
+}
+
+impl<'a, T: Copy> UserPointer<'a, T, false> {
+    pub fn write(&self, value: T) -> KResult<()> {
+        self.pointer
+            .write(&value as *const T as *mut (), core::mem::size_of::<T>())
+    }
+}
+
 impl CheckedUserPointer {
     pub fn new(ptr: *const u8, len: usize) -> KResult<Self> {
         const USER_MAX_ADDR: usize = 0x7ff_fff_fff_fff;
@@ -49,7 +88,10 @@ impl CheckedUserPointer {
         unsafe { core::slice::from_raw_parts(self.ptr, self.len) }
     }
 
+    /// # Might Sleep
     pub fn read(&self, buffer: *mut (), total: usize) -> KResult<()> {
+        might_sleep!();
+
         if total > self.len {
             return Err(EINVAL);
         }
@@ -73,6 +115,79 @@ impl CheckedUserPointer {
                 inout("rdi") buffer => _,
             )
         }
+
+        if error_bytes != 0 {
+            Err(EFAULT)
+        } else {
+            Ok(())
+        }
+    }
+
+    /// # Might Sleep
+    pub fn write(&self, data: *mut (), total: usize) -> KResult<()> {
+        might_sleep!();
+
+        if total > self.len {
+            return Err(EINVAL);
+        }
+
+        // TODO: align to 8 bytes when doing copy for performance
+        let error_bytes: usize;
+        unsafe {
+            asm!(
+                "2:",
+                "rep movsb",
+                "3:",
+                "nop",
+                ".pushsection .fix",
+                ".align 32",
+                ".quad 2b",  // instruction address
+                ".quad 3b - 2b",  // instruction length
+                ".quad 3b",  // fix jump address
+                ".quad 0x1", // type: store
+                ".popsection",
+                inout("rcx") total => error_bytes,
+                inout("rsi") data => _,
+                inout("rdi") self.ptr => _,
+            )
+        };
+
+        if error_bytes != 0 {
+            return Err(EFAULT);
+        }
+
+        Ok(())
+    }
+
+    /// # Might Sleep
+    pub fn zero(&self) -> KResult<()> {
+        might_sleep!();
+
+        if self.len == 0 {
+            return Ok(());
+        }
+
+        // TODO: align to 8 bytes when doing copy for performance
+        let error_bytes: usize;
+        unsafe {
+            asm!(
+                "2:",
+                "rep stosb",
+                "3:",
+                "nop",
+                ".pushsection .fix",
+                ".align 32",
+                ".quad 2b",  // instruction address
+                ".quad 3b - 2b",  // instruction length
+                ".quad 3b",  // fix jump address
+                ".quad 0x1", // type: store
+                ".popsection",
+                in("rax") 0,
+                inout("rcx") self.len => error_bytes,
+                inout("rdi") self.ptr => _,
+                options(att_syntax)
+            )
+        };
 
         if error_bytes != 0 {
             Err(EFAULT)
@@ -108,50 +223,31 @@ impl<'lt> Buffer for UserBuffer<'lt> {
         self.cur
     }
 
+    /// # Might Sleep
     fn fill(&mut self, data: &[u8]) -> KResult<FillResult> {
-        let remaining = self.remaining();
-        if remaining == 0 {
+        might_sleep!();
+
+        let to_write = data.len().min(self.remaining());
+        if to_write == 0 {
             return Ok(FillResult::Full);
         }
 
-        let data = if data.len() > remaining {
-            &data[..remaining]
+        self.ptr.write(data.as_ptr() as *mut (), to_write)?;
+        self.cur += to_write;
+
+        if to_write == data.len() {
+            Ok(FillResult::Done(to_write))
         } else {
-            data
-        };
-
-        // TODO: align to 8 bytes when doing copy for performance
-        let error_bytes: usize;
-        unsafe {
-            asm!(
-                "2:",
-                "rep movsb",
-                "3:",
-                "nop",
-                ".pushsection .fix",
-                ".align 32",
-                ".quad 2b",  // instruction address
-                ".quad 3b - 2b",  // instruction length
-                ".quad 3b",  // fix jump address
-                ".quad 0x1", // type: store
-                ".popsection",
-                inout("rcx") data.len() => error_bytes,
-                inout("rsi") data.as_ptr() => _,
-                inout("rdi") self.ptr.get_mut::<u8>().offset(self.cur as isize) => _,
-            )
-        };
-
-        if error_bytes != 0 {
-            return Err(EFAULT);
+            Ok(FillResult::Partial(to_write))
         }
-
-        self.cur += data.len();
-        Ok(FillResult::Done(data.len()))
     }
 }
 
 impl<'lt> UserString<'lt> {
+    /// # Might Sleep
     pub fn new(ptr: *const u8) -> KResult<Self> {
+        might_sleep!();
+
         const MAX_LEN: usize = 4096;
         // TODO
         let ptr = CheckedUserPointer::new(ptr, MAX_LEN)?;

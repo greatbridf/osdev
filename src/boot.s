@@ -293,7 +293,7 @@ fill_pxe:
 .L64bit_entry:
     jmp start_64bit
 
-.section .text.kinit
+.section .text
 start_64bit:
     # set stack pointer and clear stack bottom
     mov %rsp, %rdi

@@ -1,4 +1,4 @@
-use super::{condvar::CondVar, strategy::LockStrategy, Spin};
+use super::{strategy::LockStrategy, Spin, UCondVar};
 
 pub struct SemaphoreStrategy<const MAX: usize = { core::usize::MAX }>;
 
@@ -12,7 +12,7 @@ impl<const MAX: usize> SemaphoreStrategy<MAX> {
 
 pub struct SemaphoreData {
     counter: Spin<usize>,
-    cv: CondVar,
+    cv: UCondVar,
 }
 
 unsafe impl<const MAX: usize> LockStrategy for SemaphoreStrategy<MAX> {
@@ -23,7 +23,7 @@ unsafe impl<const MAX: usize> LockStrategy for SemaphoreStrategy<MAX> {
     fn data() -> Self::StrategyData {
         SemaphoreData {
             counter: Spin::new(0),
-            cv: CondVar::new(),
+            cv: UCondVar::new(),
         }
     }
 
@@ -41,8 +41,7 @@ unsafe impl<const MAX: usize> LockStrategy for SemaphoreStrategy<MAX> {
                 return;
             }
 
-            // TODO!!!: interruptible wait
-            data.cv.wait(&mut counter, false);
+            data.cv.wait(&mut counter);
         }
     }
 
@@ -79,8 +78,8 @@ impl<const READ_MAX: isize> RwSemaphoreStrategy<READ_MAX> {
 
 pub struct RwSemaphoreData {
     counter: Spin<isize>,
-    read_cv: CondVar,
-    write_cv: CondVar,
+    read_cv: UCondVar,
+    write_cv: UCondVar,
 }
 
 unsafe impl<const READ_MAX: isize> LockStrategy for RwSemaphoreStrategy<READ_MAX> {
@@ -91,8 +90,8 @@ unsafe impl<const READ_MAX: isize> LockStrategy for RwSemaphoreStrategy<READ_MAX
     fn data() -> Self::StrategyData {
         RwSemaphoreData {
             counter: Spin::new(0),
-            read_cv: CondVar::new(),
-            write_cv: CondVar::new(),
+            read_cv: UCondVar::new(),
+            write_cv: UCondVar::new(),
         }
     }
 
@@ -110,8 +109,7 @@ unsafe impl<const READ_MAX: isize> LockStrategy for RwSemaphoreStrategy<READ_MAX
                 return;
             }
 
-            // TODO!!!: interruptible wait
-            data.write_cv.wait(&mut counter, false);
+            data.write_cv.wait(&mut counter);
         }
     }
 
@@ -129,8 +127,7 @@ unsafe impl<const READ_MAX: isize> LockStrategy for RwSemaphoreStrategy<READ_MAX
                 return;
             }
 
-            // TODO!!!: interruptible wait
-            data.read_cv.wait(&mut counter, false);
+            data.read_cv.wait(&mut counter);
         }
     }
 

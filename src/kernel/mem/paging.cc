@@ -21,14 +21,6 @@ static inline void __page_fault_die(uintptr_t vaddr) {
     freeze();
 }
 
-static inline PSE __parse_pse(PSE pse, bool priv) {
-    auto attr = priv ? PA_KERNEL_PAGE_TABLE : PA_USER_PAGE_TABLE;
-    if (!(pse.attributes() & PA_P))
-        pse.set(attr, alloc_page_table());
-
-    return pse.parse();
-}
-
 static struct zone_info {
     page* next;
     std::size_t count;
@@ -407,80 +399,4 @@ void kernel::mem::paging::handle_page_fault(interrupt_stack* int_stack) {
 
         pe.set(attr, pfn);
     }
-}
-
-vaddr_range::vaddr_range(pfn_t pt, uintptr_t start, uintptr_t end, bool priv)
-    : n{start >= end ? 0 : ((end - start) >> 12)}
-    , idx4{!n ? 0 : idx_p4(start)}
-    , idx3{!n ? 0 : idx_p3(start)}
-    , idx2{!n ? 0 : idx_p2(start)}
-    , idx1{!n ? 0 : idx_p1(start)}
-    , pml4{!n ? PSE{0} : PSE{pt}}
-    , pdpt{!n ? PSE{0} : __parse_pse(pml4[idx4], priv)}
-    , pd{!n ? PSE{0} : __parse_pse(pdpt[idx3], priv)}
-    , pt{!n ? PSE{0} : __parse_pse(pd[idx2], priv)}
-    , m_start{!n ? 0 : start}
-    , m_end{!n ? 0 : end}
-    , is_privilege{!n ? false : priv} {}
-
-vaddr_range::vaddr_range(std::nullptr_t)
-    : n{}
-    , idx4{}
-    , idx3{}
-    , idx2{}
-    , idx1{}
-    , pml4{0}
-    , pdpt{0}
-    , pd{0}
-    , pt{0}
-    , m_start{}
-    , m_end{}
-    , is_privilege{} {}
-
-vaddr_range vaddr_range::begin() const noexcept {
-    return *this;
-}
-
-vaddr_range vaddr_range::end() const noexcept {
-    return vaddr_range{nullptr};
-}
-
-PSE vaddr_range::operator*() const noexcept {
-    return pt[idx1];
-}
-
-vaddr_range& vaddr_range::operator++() {
-    --n;
-
-    if ((idx1 = (idx1 + 1) % 512) != 0)
-        return *this;
-
-    do {
-        if ((idx2 = (idx2 + 1) % 512) != 0)
-            break;
-        do {
-            if ((idx3 = (idx3 + 1) % 512) != 0)
-                break;
-
-            idx4 = (idx4 + 1) % 512;
-
-            // if idx4 is 0 after update, we have an overflow
-            assert(idx4 != 0);
-
-            pdpt = __parse_pse(pml4[idx4], is_privilege);
-        } while (false);
-
-        pd = __parse_pse(pdpt[idx3], is_privilege);
-    } while (false);
-
-    pt = __parse_pse(pd[idx2], is_privilege);
-    return *this;
-}
-
-vaddr_range::operator bool() const noexcept {
-    return n;
-}
-
-bool vaddr_range::operator==(const vaddr_range& other) const noexcept {
-    return n == other.n;
 }

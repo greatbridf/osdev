@@ -104,58 +104,6 @@ ISR_stub_restore:
 	iretq
 	.cfi_endproc
 
-# parameters
-# #1: sp* current_task_sp
-# #2: sp* target_task_sp
-.globl asm_ctx_switch
-.type  asm_ctx_switch @function
-asm_ctx_switch:
-	.cfi_startproc
-    pushf
-	.cfi_def_cfa_offset 0x10
-
-	sub $0x38, %rsp  # extra 8 bytes to align to 16 bytes
-	.cfi_def_cfa_offset 0x48
-
-	movcfi %rbx, 0x08
-	movcfi %rbp, 0x10
-	movcfi %r12, 0x18
-	movcfi %r13, 0x20
-	movcfi %r14, 0x28
-	movcfi %r15, 0x30
-
-    push (%rdi) 	 # save sp of previous stack frame of current
-	                 # acts as saving bp
-	.cfi_def_cfa_offset 0x50
-
-    mov %rsp, (%rdi) # save sp of current stack
-    mov (%rsi), %rsp # load sp of target stack
-
-    pop (%rsi)       # load sp of previous stack frame of target
-	                 # acts as restoring previous bp
-	.cfi_def_cfa_offset 0x48
-
-	pop %rax         # align to 16 bytes
-	.cfi_def_cfa_offset 0x40
-
-	call after_ctx_switch
-
-	mov 0x28(%rsp), %r15
-	mov 0x20(%rsp), %r14
-	mov 0x18(%rsp), %r13
-	mov 0x10(%rsp), %r12
-	mov 0x08(%rsp), %rbp
-    mov 0x00(%rsp), %rbx
-
-	add $0x30, %rsp
-	.cfi_def_cfa_offset 0x10
-
-    popf
-	.cfi_def_cfa_offset 0x08
-
-    ret
-	.cfi_endproc
-
 .altmacro
 .macro build_isr_no_err name
 	.align 8

@@ -42,16 +42,35 @@ if [ "$QEMU" = "" ]; then
 fi
 echo "$QEMU"
 
-event "finding gdb"
-for item in $GDB_EXECUTABLES; do
-    if $item --version > /dev/null 2>&1; then
-        GDB="$item"
-        break
+check_gdb_arch() {
+    local item="$1"
+    if $item --init-eval-command 'set arch' \
+             --init-eval-command 'q' 2>&1 \
+             | grep 'x86-64' >/dev/null 2>&1; then
+        return 0
+    else
+        return 1
     fi
-done
+}
+
 if [ "$GDB" = "" ]; then
-    echo "failed"
-    exit 1
+    event "finding gdb"
+    for item in $GDB_EXECUTABLES; do
+        if check_gdb_arch "$item"; then
+            GDB="$item"
+            break
+        fi
+    done
+    if [ "$GDB" = "" ]; then
+        echo "failed"
+        exit 1
+    fi
+else
+    event 'checking given gdb'
+    if ! check_gdb_arch "$GDB"; then
+        echo "failed"
+        exit 1
+    fi
 fi
 echo "$GDB"
 

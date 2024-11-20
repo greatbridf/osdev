@@ -11,6 +11,7 @@ extern crate alloc;
 mod bindings;
 
 mod driver;
+mod elf;
 mod fs;
 mod hash;
 mod io;
@@ -21,9 +22,14 @@ mod prelude;
 mod rcu;
 mod sync;
 
-use alloc::{ffi::CString, sync::Arc};
-use bindings::root::types::elf::{elf32_load, elf32_load_data};
+use alloc::ffi::CString;
+use elf::ParsedElf32;
 use kernel::{
+    mem::{
+        paging::Page,
+        phys::{CachedPP, PhysPtr as _},
+    },
+    task::{init_multitasking, Thread},
     vfs::{
         dentry::Dentry,
         mount::{do_mount, MS_NOATIME, MS_NODEV, MS_NOSUID, MS_RDONLY},
@@ -36,16 +42,32 @@ use prelude::*;
 
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
-    println_fatal!("panicked at {:?}\n\t\t{}", info.location(), info.message());
+    if let Some(location) = info.location() {
+        println_fatal!(
+            "panicked at {}:{}:{}",
+            location.file(),
+            location.line(),
+            location.column()
+        );
+    } else {
+        println_fatal!("panicked at <UNKNOWN>");
+    }
+    println_fatal!();
+    println_fatal!("{}", info.message());
+
     arch::task::freeze()
 }
 
 extern "C" {
     fn _do_allocate(size: usize) -> *mut core::ffi::c_void;
     fn _do_deallocate(ptr: *mut core::ffi::c_void, size: core::ffi::c_size_t) -> i32;
+    fn init_pci();
 }
 
-use core::alloc::{GlobalAlloc, Layout};
+use core::{
+    alloc::{GlobalAlloc, Layout},
+    arch::{asm, global_asm},
+};
 
 struct Allocator {}
 unsafe impl GlobalAlloc for Allocator {
@@ -70,8 +92,56 @@ unsafe impl GlobalAlloc for Allocator {
 #[global_allocator]
 static ALLOCATOR: Allocator = Allocator {};
 
+global_asm!(
+    r"
+    .globl to_init_process
+    to_init_process:
+        push %rbp
+        mov %rbx, %rdi
+        jmp {}
+    ",
+    sym init_process,
+    options(att_syntax)
+);
+
+extern "C" {
+    fn to_init_process();
+}
+
 #[no_mangle]
-pub extern "C" fn late_init_rust(out_sp: *mut usize, out_ip: *mut usize) {
+pub extern "C" fn rust_kinit(early_kstack_pfn: usize) -> ! {
+    // We don't call global constructors.
+    // Rust doesn't need that, and we're not going to use global variables in C++.
+
+    kernel::interrupt::init().unwrap();
+
+    // TODO: Move this to rust.
+    unsafe { init_pci() };
+
+    kernel::vfs::mount::init_vfs().unwrap();
+
+    // We need root dentry to be present in constructor of `FsContext`.
+    // So call `init_vfs` first, then `init_multitasking`.
+    init_multitasking();
+    Thread::current().prepare_kernel_stack(|kstack| {
+        let mut writer = kstack.get_writer();
+        writer.entry = to_init_process;
+        writer.flags = 0x200;
+        writer.rbp = 0;
+        writer.rbx = early_kstack_pfn; // `to_init_process` arg
+        writer.finish();
+    });
+
+    arch::task::context_switch_light(
+        CachedPP::new(early_kstack_pfn).as_ptr(), // We will never come back
+        unsafe { Thread::current().get_sp_ptr() },
+    );
+    arch::task::freeze()
+}
+
+extern "C" fn init_process(early_kstack_pfn: usize) {
+    unsafe { Page::take_pfn(early_kstack_pfn, 9) };
+
     kernel::timer::init().unwrap();
 
     // Use the PIT timer for now.
@@ -83,66 +153,68 @@ pub extern "C" fn late_init_rust(out_sp: *mut usize, out_ip: *mut usize) {
     // We might want the serial initialized as soon as possible.
     driver::serial::init().unwrap();
 
-    kernel::vfs::mount::init_vfs().unwrap();
-
     driver::e1000e::register_e1000e_driver();
     driver::ahci::register_ahci_driver();
 
     fs::procfs::init();
     fs::fat32::init();
 
-    // mount fat32 /mnt directory
-    let fs_context = FsContext::get_current();
-    let mnt_dir = Dentry::open(&fs_context, Path::new(b"/mnt/").unwrap(), true).unwrap();
+    let (ip, sp) = {
+        // mount fat32 /mnt directory
+        let fs_context = FsContext::get_current();
+        let mnt_dir = Dentry::open(&fs_context, Path::new(b"/mnt/").unwrap(), true).unwrap();
 
-    mnt_dir.mkdir(0o755).unwrap();
+        mnt_dir.mkdir(0o755).unwrap();
 
-    do_mount(
-        &mnt_dir,
-        "/dev/sda",
-        "/mnt",
-        "fat32",
-        MS_RDONLY | MS_NOATIME | MS_NODEV | MS_NOSUID,
-    )
-    .unwrap();
+        do_mount(
+            &mnt_dir,
+            "/dev/sda",
+            "/mnt",
+            "fat32",
+            MS_RDONLY | MS_NOATIME | MS_NODEV | MS_NOSUID,
+        )
+        .unwrap();
 
-    let init = Dentry::open(&fs_context, Path::new(b"/mnt/busybox").unwrap(), true)
-        .expect("kernel panic: init not found!");
+        let init = Dentry::open(&fs_context, Path::new(b"/mnt/busybox").unwrap(), true)
+            .expect("busybox should be present in /mnt");
 
-    let argv = vec![
-        CString::new("/mnt/busybox").unwrap(),
-        CString::new("sh").unwrap(),
-        CString::new("/mnt/initsh").unwrap(),
-    ];
+        let argv = vec![
+            CString::new("/mnt/busybox").unwrap(),
+            CString::new("sh").unwrap(),
+            CString::new("/mnt/initsh").unwrap(),
+        ];
 
-    let envp = vec![
-        CString::new("LANG=C").unwrap(),
-        CString::new("HOME=/root").unwrap(),
-        CString::new("PATH=/mnt").unwrap(),
-        CString::new("PWD=/").unwrap(),
-    ];
+        let envp = vec![
+            CString::new("LANG=C").unwrap(),
+            CString::new("HOME=/root").unwrap(),
+            CString::new("PATH=/mnt").unwrap(),
+            CString::new("PWD=/").unwrap(),
+        ];
 
-    let argv_array = argv.iter().map(|x| x.as_ptr()).collect::<Vec<_>>();
-    let envp_array = envp.iter().map(|x| x.as_ptr()).collect::<Vec<_>>();
-
-    // load init
-    let mut load_data = elf32_load_data {
-        exec_dent: Arc::into_raw(init) as *mut _,
-        argv: argv_array.as_ptr(),
-        argv_count: argv_array.len(),
-        envp: envp_array.as_ptr(),
-        envp_count: envp_array.len(),
-        ip: 0,
-        sp: 0,
+        let elf = ParsedElf32::parse(init.clone()).unwrap();
+        elf.load(&Thread::current().process.mm_list, argv, envp)
+            .unwrap()
     };
 
-    let result = unsafe { elf32_load(&mut load_data) };
-    if result != 0 {
-        println_fatal!("Failed to load init: {}", result);
-    }
-
     unsafe {
-        *out_sp = load_data.sp;
-        *out_ip = load_data.ip;
+        asm!(
+            "mov %ax, %fs",
+            "mov %ax, %gs",
+            "mov ${ds}, %rax",
+            "mov %ax, %ds",
+            "mov %ax, %es",
+            "push ${ds}",
+            "push {sp}",
+            "push $0x200",
+            "push ${cs}",
+            "push {ip}",
+            "iretq",
+            ds = const 0x33,
+            cs = const 0x2b,
+            in("rax") 0,
+            ip = in(reg) ip.0,
+            sp = in(reg) sp.0,
+            options(att_syntax, noreturn),
+        );
     }
 }

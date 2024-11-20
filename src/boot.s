@@ -295,7 +295,8 @@ fill_pxe:
 
 .section .text
 start_64bit:
-    # set stack pointer and clear stack bottom
+    # We map the first 1GB identically to the first 1GB of physical memory,
+    # move sp to the correct position in identically mapped area of kernel space.
     mov %rsp, %rdi
     xor %rsp, %rsp
     inc %rsp

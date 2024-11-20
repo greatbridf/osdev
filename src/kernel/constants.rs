@@ -16,6 +16,8 @@ pub const SIG_SETMASK: u32 = 2;
 pub const CLOCK_REALTIME: u32 = 0;
 pub const CLOCK_MONOTONIC: u32 = 1;
 
+pub const ENOEXEC: u32 = 8;
+
 bitflags! {
     pub struct UserMmapFlags: u32 {
         const MAP_SHARED = 0x01;

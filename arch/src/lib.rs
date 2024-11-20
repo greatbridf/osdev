@@ -90,3 +90,5 @@ pub mod io {
         x86_64::io::outl(port, data)
     }
 }
+
+pub use x86_64;

@@ -68,7 +68,7 @@ impl<'lt> KernelStackWriter<'lt> {
 
         // SAFETY: `sp` is always valid.
         unsafe {
-            (self.sp as *mut usize).write(val);
+            (*self.sp as *mut usize).write(val);
         }
     }
 

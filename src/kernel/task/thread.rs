@@ -24,6 +24,7 @@ use alloc::{
     sync::{Arc, Weak},
 };
 use bindings::{ECHILD, EINTR, EINVAL, EPERM, ESRCH};
+use lazy_static::lazy_static;
 
 use crate::kernel::vfs::filearray::FileArray;
 
@@ -221,7 +222,7 @@ pub struct ProcessList {
 
 impl Session {
     fn new(sid: u32, leader: Weak<Process>) -> Arc<Self> {
-        let session = Arc::new(Self {
+        Arc::new(Self {
             sid,
             leader,
             inner: Spin::new(SessionInner {
@@ -229,10 +230,7 @@ impl Session {
                 control_terminal: None,
                 groups: BTreeMap::new(),
             }),
-        });
-
-        ProcessList::get().add_session(&session);
-        session
+        })
     }
 
     fn add_member(&self, pgroup: &Arc<ProcessGroup>) {
@@ -270,15 +268,12 @@ impl Session {
 
 impl ProcessGroup {
     fn new_for_init(pgid: u32, leader: Weak<Process>, session: Weak<Session>) -> Arc<Self> {
-        let pgroup = Arc::new(Self {
+        Arc::new(Self {
             pgid,
             leader: leader.clone(),
             session,
             processes: Spin::new(BTreeMap::from([(pgid, leader)])),
-        });
-
-        ProcessList::get().add_pgroup(&pgroup);
-        pgroup
+        })
     }
 
     fn new(leader: &Arc<Process>, session: &Arc<Session>) -> Arc<Self> {
@@ -289,7 +284,6 @@ impl ProcessGroup {
             processes: Spin::new(BTreeMap::from([(leader.pid, Arc::downgrade(leader))])),
         });
 
-        ProcessList::get().add_pgroup(&pgroup);
         session.add_member(&pgroup);
         pgroup
     }
@@ -324,9 +318,38 @@ impl Drop for ProcessGroup {
     }
 }
 
+lazy_static! {
+    static ref GLOBAL_PROC_LIST: ProcessList = {
+        let init_process = Process::new_for_init(1, None);
+        let init_thread = Thread::new_for_init(b"[kernel kinit]".as_slice().into(), &init_process);
+        Scheduler::set_current(init_thread.clone());
+
+        let idle_process = Process::new_for_init(0, None);
+        let idle_thread =
+            Thread::new_for_init(b"[kernel idle#BS]".as_slice().into(), &idle_process);
+        Scheduler::set_idle(idle_thread.clone());
+
+        let init_session_weak = Arc::downgrade(&init_process.inner.lock().session);
+        let init_pgroup_weak = Arc::downgrade(&init_process.inner.lock().pgroup);
+
+        ProcessList {
+            sessions: Spin::new(BTreeMap::from([(1, init_session_weak)])),
+            pgroups: Spin::new(BTreeMap::from([(1, init_pgroup_weak)])),
+            threads: Spin::new(BTreeMap::from([
+                (1, init_thread.clone()),
+                (0, idle_thread.clone()),
+            ])),
+            processes: Spin::new(BTreeMap::from([
+                (1, Arc::downgrade(&init_process)),
+                (0, Arc::downgrade(&idle_process)),
+            ])),
+            init: init_process,
+        }
+    };
+}
 impl ProcessList {
     pub fn get() -> &'static Self {
-        todo!()
+        &GLOBAL_PROC_LIST
     }
 
     pub fn add_session(&self, session: &Arc<Session>) {
@@ -358,31 +381,6 @@ impl ProcessList {
         );
 
         Scheduler::schedule_noreturn()
-    }
-
-    fn new() -> Self {
-        let init_process = Process::new_for_init(1, None);
-        let init_thread = Thread::new_for_init(b"[kernel kinit]".as_slice().into(), &init_process);
-        Scheduler::set_current(init_thread.clone());
-
-        let idle_process = Process::new_for_init(0, None);
-        let idle_thread =
-            Thread::new_for_init(b"[kernel idle#BS]".as_slice().into(), &idle_process);
-        Scheduler::set_idle(idle_thread.clone());
-
-        Self {
-            sessions: Spin::new(BTreeMap::new()),
-            pgroups: Spin::new(BTreeMap::new()),
-            threads: Spin::new(BTreeMap::from([
-                (1, init_thread.clone()),
-                (0, idle_thread.clone()),
-            ])),
-            processes: Spin::new(BTreeMap::from([
-                (1, Arc::downgrade(&init_process)),
-                (0, Arc::downgrade(&idle_process)),
-            ])),
-            init: init_process,
-        }
     }
 
     // TODO!!!!!!: Reconsider this
@@ -557,7 +555,6 @@ impl Process {
             }
         });
 
-        ProcessList::get().add_process(&process);
         process.inner.lock().pgroup.add_member(&process);
         process
     }
@@ -635,8 +632,12 @@ impl Process {
             return Err(EPERM);
         }
         inner.session = Session::new(self.pid, Arc::downgrade(self));
+        ProcessList::get().add_session(&inner.session);
+
         inner.pgroup.remove_member(self.pid);
         inner.pgroup = ProcessGroup::new(self, &inner.session);
+        ProcessList::get().add_pgroup(&inner.pgroup);
+
         Ok(inner.pgroup.pgid)
     }
 
@@ -672,8 +673,11 @@ impl Process {
             }
 
             inner.session = Session::new(self.pid, Arc::downgrade(self));
+            ProcessList::get().add_session(&inner.session);
+
             inner.pgroup.remove_member(self.pid);
             inner.pgroup = ProcessGroup::new(self, &inner.session);
+            ProcessList::get().add_pgroup(&inner.pgroup);
         }
 
         Ok(())
@@ -772,7 +776,6 @@ impl Thread {
             }),
         });
 
-        ProcessList::get().add_thread(&thread);
         process.add_thread(&thread);
         thread
     }
@@ -961,22 +964,10 @@ impl Process {
     }
 }
 
-// TODO!!!!!!: impl this
-fn init_scheduler() {
-    let process_list = ProcessList::new();
+pub fn init_multitasking() {
+    // Lazy init
+    assert!(ProcessList::get().try_find_thread(1).is_some());
+
     Thread::current().load_interrupt_stack();
     Thread::current().process.mm_list.switch_page_table();
-
-    Scheduler::idle_task().prepare_kernel_stack(|kstack| {
-        let mut writer = kstack.get_writer();
-        writer.flags = 0x200;
-        writer.entry = idle_task;
-        writer.finish();
-    });
-}
-
-extern "C" fn idle_task() {
-    loop {
-        arch::task::halt();
-    }
 }

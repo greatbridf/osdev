@@ -104,62 +104,10 @@ bitflags! {
 }
 
 /* c_cflag bit meaning */
-/* Common CBAUD rates */
-const B0: u32 = 0x00000000; /* hang up */
-const B50: u32 = 0x00000001;
-const B75: u32 = 0x00000002;
-const B110: u32 = 0x00000003;
-const B134: u32 = 0x00000004;
-const B150: u32 = 0x00000005;
-const B200: u32 = 0x00000006;
-const B300: u32 = 0x00000007;
-const B600: u32 = 0x00000008;
-const B1200: u32 = 0x00000009;
-const B1800: u32 = 0x0000000a;
-const B2400: u32 = 0x0000000b;
-const B4800: u32 = 0x0000000c;
-const B9600: u32 = 0x0000000d;
-const B19200: u32 = 0x0000000e;
 const B38400: u32 = 0x0000000f;
-const EXTA: u32 = B19200;
-const EXTB: u32 = B38400;
-
-const ADDRB: u32 = 0x20000000; /* address bit */
-const CMSPAR: u32 = 0x40000000; /* mark or space (stick) parity */
-const CRTSCTS: u32 = 0x80000000; /* flow control */
-
-const IBSHIFT: u32 = 16; /* Shift from CBAUD to CIBAUD */
-
-const CBAUD: u32 = 0x0000100f;
-const CSIZE: u32 = 0x00000030;
-const CS5: u32 = 0x00000000;
-const CS6: u32 = 0x00000010;
-const CS7: u32 = 0x00000020;
 const CS8: u32 = 0x00000030;
-const CSTOPB: u32 = 0x00000040;
 const CREAD: u32 = 0x00000080;
-const PARENB: u32 = 0x00000100;
-const PARODD: u32 = 0x00000200;
 const HUPCL: u32 = 0x00000400;
-const CLOCAL: u32 = 0x00000800;
-const CBAUDEX: u32 = 0x00001000;
-const BOTHER: u32 = 0x00001000;
-const B57600: u32 = 0x00001001;
-const B115200: u32 = 0x00001002;
-const B230400: u32 = 0x00001003;
-const B460800: u32 = 0x00001004;
-const B500000: u32 = 0x00001005;
-const B576000: u32 = 0x00001006;
-const B921600: u32 = 0x00001007;
-const B1000000: u32 = 0x00001008;
-const B1152000: u32 = 0x00001009;
-const B1500000: u32 = 0x0000100a;
-const B2000000: u32 = 0x0000100b;
-const B2500000: u32 = 0x0000100c;
-const B3000000: u32 = 0x0000100d;
-const B3500000: u32 = 0x0000100e;
-const B4000000: u32 = 0x0000100f;
-const CIBAUD: u32 = 0x100f0000; /* input baud rate */
 
 // line disciplines
 
@@ -260,10 +208,6 @@ macro_rules! CTRL {
 }
 
 impl Termios {
-    pub fn ctrl(c: u8) -> u8 {
-        c - 0x40
-    }
-
     pub fn veof(&self) -> u8 {
         self.cc[VEOF]
     }
@@ -286,14 +230,6 @@ impl Termios {
 
     pub fn vsusp(&self) -> u8 {
         self.cc[VSUSP]
-    }
-
-    pub fn vstart(&self) -> u8 {
-        self.cc[VSTART]
-    }
-
-    pub fn vstop(&self) -> u8 {
-        self.cc[VSTOP]
     }
 
     pub fn verase(&self) -> u8 {
@@ -616,7 +552,7 @@ impl Terminal {
 
             if !inner.termio.icanon() {
                 let ch = inner.buffer.pop_front().unwrap();
-                buffer.fill(&[ch])?;
+                buffer.fill(&[ch])?.allow_partial();
                 break 'block;
             }
 

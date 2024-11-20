@@ -1,3 +1,5 @@
+use lazy_static::lazy_static;
+
 use crate::prelude::*;
 
 use crate::bindings::root::{EINVAL, KERNEL_PML4};
@@ -8,8 +10,6 @@ use super::{
     VAddr, VRange,
 };
 use super::{MMArea, Permission};
-
-const EMPTY_PAGE_PFN: usize = 0x8000;
 
 const PA_P: usize = 0x001;
 const PA_RW: usize = 0x002;
@@ -35,20 +35,28 @@ pub struct PageTable {
     page: Page,
 }
 
-pub struct PTEIterator<'lt, const Kernel: bool> {
+pub struct PTEIterator<'lt, const KERNEL: bool> {
     count: usize,
     i4: u16,
     i3: u16,
     i2: u16,
     i1: u16,
-    p4: Page,
-    p3: Page,
-    p2: Page,
-    p1: Page,
+    p4: CachedPP,
+    p3: CachedPP,
+    p2: CachedPP,
+    p1: CachedPP,
 
     start: VAddr,
     end: VAddr,
     _phantom: core::marker::PhantomData<&'lt ()>,
+}
+
+lazy_static! {
+    static ref EMPTY_PAGE: Page = {
+        let page = Page::alloc_one();
+        page.zero();
+        page
+    };
 }
 
 impl PTE {
@@ -61,11 +69,11 @@ impl PTE {
     }
 
     pub fn pfn(&self) -> usize {
-        self.0 & !0xfff
+        self.0 & !PA_MASK
     }
 
     pub fn attributes(&self) -> usize {
-        self.0 & 0xfff
+        self.0 & PA_MASK
     }
 
     pub fn set(&mut self, pfn: usize, attributes: usize) {
@@ -80,7 +88,7 @@ impl PTE {
         self.set(self.pfn(), attributes)
     }
 
-    pub fn parse_page_table(&mut self, kernel: bool) -> Page {
+    fn parse_page_table(&mut self, kernel: bool) -> CachedPP {
         let attributes = if kernel {
             PA_P | PA_RW | PA_G
         } else {
@@ -88,19 +96,20 @@ impl PTE {
         };
 
         if self.is_present() {
-            Page::get(self.pfn(), 0)
+            CachedPP::new(self.pfn())
         } else {
             let page = Page::alloc_one();
+            let pp = page.as_cached();
             page.zero();
-            self.set(page.as_phys(), attributes);
 
-            page
+            self.set(page.into_pfn(), attributes);
+            pp
         }
     }
 
     pub fn setup_cow(&mut self, from: &mut Self) {
         self.set(
-            Page::get(from.pfn(), 0).into_pfn(),
+            unsafe { Page::from_pfn(from.pfn(), 0) }.into_pfn(),
             (from.attributes() & !(PA_RW | PA_A | PA_D)) | PA_COW,
         );
 
@@ -115,21 +124,22 @@ impl PTE {
     pub fn take(&mut self) -> Page {
         // SAFETY: Acquire the ownership of the page from the page table and then
         // clear the PTE so no one could be able to access the page from here later on.
-        let page = unsafe { Page::from_pfn(self.pfn(), 0) };
+        let page = unsafe { Page::take_pfn(self.pfn(), 0) };
         self.clear();
         page
     }
 }
 
-impl<const Kernel: bool> PTEIterator<'_, Kernel> {
-    fn new(pt: Page, start: VAddr, end: VAddr) -> KResult<Self> {
-        if start >= end {
+impl<'lt, const KERNEL: bool> PTEIterator<'lt, KERNEL> {
+    fn new(pt: &'lt Page, start: VAddr, end: VAddr) -> KResult<Self> {
+        if start > end {
             return Err(EINVAL);
         }
 
-        let p3 = pt.as_page_table()[Self::index(4, start)].parse_page_table(Kernel);
-        let p2 = pt.as_page_table()[Self::index(3, start)].parse_page_table(Kernel);
-        let p1 = pt.as_page_table()[Self::index(2, start)].parse_page_table(Kernel);
+        let p4 = pt.as_cached();
+        let p3 = p4.as_mut_slice::<PTE>(512)[Self::index(4, start)].parse_page_table(KERNEL);
+        let p2 = p3.as_mut_slice::<PTE>(512)[Self::index(3, start)].parse_page_table(KERNEL);
+        let p1 = p2.as_mut_slice::<PTE>(512)[Self::index(2, start)].parse_page_table(KERNEL);
 
         Ok(Self {
             count: (end.0 - start.0) >> 12,
@@ -137,7 +147,7 @@ impl<const Kernel: bool> PTEIterator<'_, Kernel> {
             i3: Self::index(3, start) as u16,
             i2: Self::index(2, start) as u16,
             i1: Self::index(1, start) as u16,
-            p4: pt.clone(),
+            p4,
             p3,
             p2,
             p1,
@@ -156,15 +166,17 @@ impl<const Kernel: bool> PTEIterator<'_, Kernel> {
     }
 }
 
-impl<'lt, const Kernel: bool> Iterator for PTEIterator<'lt, Kernel> {
+impl<'lt, const KERNEL: bool> Iterator for PTEIterator<'lt, KERNEL> {
     type Item = &'lt mut PTE;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.count == 0 {
+        if self.count != 0 {
+            self.count -= 1;
+        } else {
             return None;
         }
 
-        let retval = &mut self.p1.as_page_table()[self.i1 as usize];
+        let retval = &mut self.p1.as_mut_slice::<PTE>(512)[self.i1 as usize];
         self.i1 = (self.i1 + 1) % 512;
         if self.i1 == 0 {
             self.i2 = (self.i2 + 1) % 512;
@@ -176,11 +188,12 @@ impl<'lt, const Kernel: bool> Iterator for PTEIterator<'lt, Kernel> {
                         panic!("PTEIterator: out of range");
                     }
                 }
-                self.p3 = self.p4.as_page_table()[self.i4 as usize].parse_page_table(Kernel);
+                self.p3 =
+                    self.p4.as_mut_slice::<PTE>(512)[self.i4 as usize].parse_page_table(KERNEL);
             }
-            self.p2 = self.p3.as_page_table()[self.i3 as usize].parse_page_table(Kernel);
+            self.p2 = self.p3.as_mut_slice::<PTE>(512)[self.i3 as usize].parse_page_table(KERNEL);
         }
-        self.p1 = self.p2.as_page_table()[self.i2 as usize].parse_page_table(Kernel);
+        self.p1 = self.p2.as_mut_slice::<PTE>(512)[self.i2 as usize].parse_page_table(KERNEL);
         Some(retval)
     }
 }
@@ -193,19 +206,19 @@ impl PageTable {
         let kernel_space_page_table = CachedPP::new(KERNEL_PML4 as usize);
         unsafe {
             page.as_cached()
-                .as_ptr::<()>()
+                .as_ptr::<u8>()
                 .copy_from_nonoverlapping(kernel_space_page_table.as_ptr(), page.len())
         };
 
         Self { page }
     }
 
-    pub fn iter_user(&self, range: VRange) -> PTEIterator<'_, false> {
-        PTEIterator::new(self.page.clone(), range.start().floor(), range.end().ceil()).unwrap()
+    pub fn iter_user(&self, range: VRange) -> KResult<PTEIterator<'_, false>> {
+        PTEIterator::new(&self.page, range.start().floor(), range.end().ceil())
     }
 
-    pub fn iter_kernel(&self, range: VRange) -> PTEIterator<'_, true> {
-        PTEIterator::new(self.page.clone(), range.start().floor(), range.end().ceil()).unwrap()
+    pub fn iter_kernel(&self, range: VRange) -> KResult<PTEIterator<'_, true>> {
+        PTEIterator::new(&self.page, range.start().floor(), range.end().ceil())
     }
 
     pub fn switch(&self) {
@@ -215,7 +228,7 @@ impl PageTable {
     pub fn unmap(&self, area: &MMArea) {
         let range = area.range();
         let use_invlpg = range.len() / 4096 < 4;
-        let iter = self.iter_user(range);
+        let iter = self.iter_user(range).unwrap();
 
         if self.page.as_phys() != arch::vm::current_page_table() {
             for pte in iter {
@@ -248,8 +261,8 @@ impl PageTable {
             PA_US | PA_COW | PA_ANON | PA_MMAP | PA_NXE
         };
 
-        for pte in self.iter_user(range) {
-            pte.set(EMPTY_PAGE_PFN, attributes);
+        for pte in self.iter_user(range).unwrap() {
+            pte.set(EMPTY_PAGE.clone().into_pfn(), attributes);
         }
     }
 
@@ -262,15 +275,16 @@ impl PageTable {
             PA_P | PA_US | PA_COW | PA_ANON | PA_NXE
         };
 
-        for pte in self.iter_user(range) {
-            pte.set(EMPTY_PAGE_PFN, attributes);
+        for pte in self.iter_user(range).unwrap() {
+            pte.set(EMPTY_PAGE.clone().into_pfn(), attributes);
         }
     }
 }
 
 fn drop_page_table_recursive(pt: &Page, level: usize) {
     for pte in pt
-        .as_page_table()
+        .as_cached()
+        .as_mut_slice::<PTE>(512)
         .iter_mut()
         .filter(|pte| pte.is_present() && pte.is_user())
     {

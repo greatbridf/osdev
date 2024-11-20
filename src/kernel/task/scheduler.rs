@@ -6,6 +6,7 @@ use alloc::{
     collections::vec_deque::VecDeque,
     sync::{Arc, Weak},
 };
+use lazy_static::lazy_static;
 
 use super::{Thread, ThreadState};
 
@@ -29,6 +30,12 @@ static mut IDLE_TASK: Option<Arc<Thread>> = None;
 /// TODO!!!: This should be per cpu in smp environment.
 static mut CURRENT: Option<Arc<Thread>> = None;
 
+lazy_static! {
+    static ref GLOBAL_SCHEDULER: Spin<Scheduler> = Spin::new(Scheduler {
+        ready: VecDeque::new(),
+    });
+}
+
 impl Scheduler {
     /// `Scheduler` might be used in various places. Do not hold it for a long time.
     ///
@@ -38,7 +45,7 @@ impl Scheduler {
     ///
     /// Drop the lock before calling `schedule`.
     pub fn get() -> &'static Spin<Self> {
-        todo!()
+        &GLOBAL_SCHEDULER
     }
 
     pub fn current<'lt>() -> &'lt Arc<Thread> {
@@ -52,6 +59,13 @@ impl Scheduler {
     }
 
     pub(super) fn set_idle(thread: Arc<Thread>) {
+        thread.prepare_kernel_stack(|kstack| {
+            let mut writer = kstack.get_writer();
+            writer.flags = 0x200;
+            writer.entry = idle_task;
+            writer.finish();
+        });
+
         // TODO!!!: Set per cpu variable.
         unsafe { IDLE_TASK = Some(thread) };
     }

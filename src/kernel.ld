@@ -33,6 +33,7 @@ SECTIONS
     .text :
         AT(LOADADDR(.stage1) + SIZEOF(.stage1))
     {
+        KIMAGE_START = .;
         TEXT_START = .;
         *(.text)
         *(.text*)
@@ -57,15 +58,19 @@ SECTIONS
         end_ctors = .;
 
         . = ALIGN(16);
-        FIX_START = .;
+        _fix_start = .;
         KEEP(*(.fix));
-        FIX_END = .;
+        _fix_end = .;
 
         . = ALIGN(16);
         BSS_ADDR = .;
         QUAD(ABSOLUTE(BSS_START));
         BSS_LENGTH = .;
         QUAD(BSS_END - BSS_START);
+        FIX_START = .;
+        QUAD(ABSOLUTE(_fix_start));
+        FIX_END = .;
+        QUAD(ABSOLUTE(_fix_end));
 
         . = ALIGN(0x1000);
         RODATA_END = .;
@@ -113,42 +118,42 @@ SECTIONS
     } > KIMAGE
 
     /* Stabs debugging sections.  */
-    .stab          0 : { *(.stab) }
-    .stabstr       0 : { *(.stabstr) }
-    .stab.excl     0 : { *(.stab.excl) }
-    .stab.exclstr  0 : { *(.stab.exclstr) }
-    .stab.index    0 : { *(.stab.index) }
-    .stab.indexstr 0 : { *(.stab.indexstr) }
-    .comment       0 : { *(.comment) }
+    .stab          0 : { KEEP(*(.stab)); }
+    .stabstr       0 : { KEEP(*(.stabstr)); }
+    .stab.excl     0 : { KEEP(*(.stab.excl)); }
+    .stab.exclstr  0 : { KEEP(*(.stab.exclstr)); }
+    .stab.index    0 : { KEEP(*(.stab.index)); }
+    .stab.indexstr 0 : { KEEP(*(.stab.indexstr)); }
+    .comment       0 : { KEEP(*(.comment)); }
     /* DWARF debug sections.
        Symbols in the DWARF debugging sections are relative to the beginning
        of the section so we begin them at 0.  */
     /* DWARF 1 */
-    .debug          0 : { *(.debug) }
-    .line           0 : { *(.line) }
+    .debug          0 : { KEEP(*(.debug)); }
+    .line           0 : { KEEP(*(.line)); }
     /* GNU DWARF 1 extensions */
-    .debug_srcinfo  0 : { *(.debug_srcinfo) }
-    .debug_sfnames  0 : { *(.debug_sfnames) }
+    .debug_srcinfo  0 : { KEEP(*(.debug_srcinfo)); }
+    .debug_sfnames  0 : { KEEP(*(.debug_sfnames)); }
     /* DWARF 1.1 and DWARF 2 */
-    .debug_aranges  0 : { *(.debug_aranges) }
-    .debug_pubnames 0 : { *(.debug_pubnames) }
+    .debug_aranges  0 : { KEEP(*(.debug_aranges)); }
+    .debug_pubnames 0 : { KEEP(*(.debug_pubnames)); }
     /* DWARF 2 */
-    .debug_info     0 : { *(.debug_info) }
-    .debug_abbrev   0 : { *(.debug_abbrev) }
-    .debug_line     0 : { *(.debug_line) }
-    .debug_frame    0 : { *(.debug_frame) }
-    .debug_str      0 : { *(.debug_str) }
-    .debug_loc      0 : { *(.debug_loc) }
-    .debug_macinfo  0 : { *(.debug_macinfo) }
+    .debug_info     0 : { KEEP(*(.debug_info)); }
+    .debug_abbrev   0 : { KEEP(*(.debug_abbrev)); }
+    .debug_line     0 : { KEEP(*(.debug_line)); }
+    .debug_frame    0 : { KEEP(*(.debug_frame)); }
+    .debug_str      0 : { KEEP(*(.debug_str)); }
+    .debug_loc      0 : { KEEP(*(.debug_loc)); }
+    .debug_macinfo  0 : { KEEP(*(.debug_macinfo)); }
     /* SGI/MIPS DWARF 2 extensions */
-    .debug_weaknames 0 : { *(.debug_weaknames) }
-    .debug_funcnames 0 : { *(.debug_funcnames) }
-    .debug_typenames 0 : { *(.debug_typenames) }
-    .debug_varnames  0 : { *(.debug_varnames) }
+    .debug_weaknames 0 : { KEEP(*(.debug_weaknames)); }
+    .debug_funcnames 0 : { KEEP(*(.debug_funcnames)); }
+    .debug_typenames 0 : { KEEP(*(.debug_typenames)); }
+    .debug_varnames  0 : { KEEP(*(.debug_varnames)); }
 
     /* DWARF Other */
-    .debug_ranges  0 : { *(.debug_ranges) }
-    .debug_line_str 0 : { *(.debug_line_str) }
+    .debug_ranges  0 : { KEEP(*(.debug_ranges)); }
+    .debug_line_str 0 : { KEEP(*(.debug_line_str)); }
     /* Rust stuff */
 
     /DISCARD/ :

@@ -1,5 +1,6 @@
 pub mod block;
 pub mod console;
+pub mod constants;
 pub mod interrupt;
 pub mod mem;
 pub mod syscall;
@@ -9,7 +10,6 @@ pub mod user;
 pub mod vfs;
 
 mod chardev;
-mod constants;
 mod terminal;
 
 pub use chardev::{CharDevice, CharDeviceType, VirtualCharDevice};

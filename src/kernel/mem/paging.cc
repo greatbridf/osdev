@@ -5,21 +5,14 @@
 
 #include <kernel/async/lock.hpp>
 #include <kernel/log.hpp>
-#include <kernel/mem/mm_list.hpp>
 #include <kernel/mem/paging.hpp>
 #include <kernel/mem/slab.hpp>
-#include <kernel/mem/vm_area.hpp>
 #include <kernel/process.hpp>
 
 using namespace types::list;
 
 using namespace kernel::async;
 using namespace kernel::mem::paging;
-
-static inline void __page_fault_die(uintptr_t vaddr) {
-    kmsgf("[kernel] kernel panic: invalid memory access to %p", vaddr);
-    freeze();
-}
 
 static struct zone_info {
     page* next;
@@ -260,143 +253,4 @@ page* kernel::mem::paging::pfn_to_page(pfn_t pfn) {
 
 void kernel::mem::paging::increase_refcount(page* pg) {
     pg->refcount++;
-}
-
-struct fix_entry {
-    uint64_t start;
-    uint64_t length;
-    uint64_t jump_address;
-    uint64_t type;
-};
-
-extern "C" fix_entry FIX_START[], FIX_END[];
-bool page_fault_fix(interrupt_stack* int_stack) {
-    // TODO: type load
-
-    // type store
-    for (fix_entry* fix = FIX_START; fix < FIX_END; fix++) {
-        if (int_stack->v_rip >= fix->start && int_stack->v_rip < fix->start + fix->length) {
-            int_stack->v_rip = fix->jump_address;
-            return true;
-        }
-    }
-
-    return false;
-}
-
-void kernel::mem::paging::handle_page_fault(interrupt_stack* int_stack) {
-    using namespace kernel::mem;
-    using namespace paging;
-
-    auto err = int_stack->error_code;
-
-    uintptr_t vaddr;
-    asm volatile("mov %%cr2, %0" : "=g"(vaddr) : :);
-    auto& mms = current_process->mms;
-
-    auto* mm_area = mms.find(vaddr);
-    if (!mm_area) [[unlikely]] {
-        // user access to address that does not exist
-        if (err & PAGE_FAULT_U)
-            kill_current(SIGSEGV);
-
-        if (!page_fault_fix(int_stack)) {
-            __page_fault_die(vaddr);
-        } else {
-            return;
-        }
-    }
-
-    // user access to a present page caused the fault
-    // check access rights
-    if (err & PAGE_FAULT_U && err & PAGE_FAULT_P) {
-        // write to read only pages
-        if (err & PAGE_FAULT_W && !(mm_area->flags & MM_WRITE))
-            kill_current(SIGSEGV);
-
-        // execute from non-executable pages
-        if (err & PAGE_FAULT_I && !(mm_area->flags & MM_EXECUTE))
-            kill_current(SIGSEGV);
-    }
-
-    auto idx = idx_all(vaddr);
-
-    auto pe = mms.get_page_table()[std::get<1>(idx)];
-    assert(pe.attributes() & PA_P);
-    pe = pe.parse()[std::get<2>(idx)];
-    assert(pe.attributes() & PA_P);
-    pe = pe.parse()[std::get<3>(idx)];
-    assert(pe.attributes() & PA_P);
-    pe = pe.parse()[std::get<4>(idx)];
-
-    bool mmapped = mm_area->flags & MM_MAPPED;
-    assert(!mmapped || mm_area->mapped_file);
-
-    if (!(err & PAGE_FAULT_P) && !mmapped) [[unlikely]] {
-        if (!page_fault_fix(int_stack)) {
-            __page_fault_die(vaddr);
-        } else {
-            return;
-        }
-    }
-
-    pfn_t pfn = pe.pfn();
-    auto attr = pe.attributes();
-
-    page* pg = pfn_to_page(pfn);
-
-    if (attr & PA_COW) {
-        attr &= ~PA_COW;
-        if (mm_area->flags & MM_WRITE)
-            attr |= PA_RW;
-        else
-            attr &= ~PA_RW;
-
-        // if it is a dying page
-        // TODO: use atomic
-        if (pg->refcount == 1) {
-            pe.set(attr, pfn);
-            return;
-        }
-
-        // duplicate the page
-        page* new_page = alloc_page();
-        pfn_t new_pfn = page_to_pfn(new_page);
-        physaddr<void> new_page_addr{new_pfn};
-
-        if (attr & PA_ANON)
-            memset(new_page_addr, 0x00, 0x1000);
-        else
-            memcpy(new_page_addr, physaddr<void>{pfn}, 0x1000);
-
-        attr &= ~(PA_A | PA_ANON);
-        --pg->refcount;
-
-        pe.set(attr, new_pfn);
-        pfn = new_pfn;
-    }
-
-    if (attr & PA_MMAP) {
-        attr |= PA_P;
-
-        size_t offset = (vaddr & ~0xfff) - mm_area->start;
-        char* data = physaddr<char>{pfn};
-
-        int n = fs::fs_read(mm_area->mapped_file.get(), data, 4096, mm_area->file_offset + offset,
-                            4096);
-
-        if (n < 0) {
-            kill_current(SIGBUS);
-            return;
-        }
-
-        // TODO: send SIGBUS if offset is greater than real size
-        if (n != 4096)
-            memset(data + n, 0x00, 4096 - n);
-
-        // TODO: shared mapping
-        attr &= ~PA_MMAP;
-
-        pe.set(attr, pfn);
-    }
 }

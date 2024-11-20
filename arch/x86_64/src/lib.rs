@@ -43,11 +43,24 @@ pub mod vm {
     pub fn set_cr3(pfn: usize) {
         unsafe {
             asm!(
-                "mov %cr3, {0}",
+                "mov {0}, %cr3",
                 in(reg) pfn,
                 options(att_syntax)
             );
         }
+    }
+
+    #[inline(always)]
+    pub fn get_cr2() -> usize {
+        let cr2: usize;
+        unsafe {
+            asm!(
+                "mov %cr2, {}",
+                out(reg) cr2,
+                options(att_syntax)
+            );
+        }
+        cr2
     }
 }
 

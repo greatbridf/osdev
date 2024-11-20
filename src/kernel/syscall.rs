@@ -179,22 +179,13 @@ const SYSCALL_HANDLERS_SIZE: usize = 404;
 static mut SYSCALL_HANDLERS: [Option<SyscallHandler>; SYSCALL_HANDLERS_SIZE] =
     [const { None }; SYSCALL_HANDLERS_SIZE];
 
-#[no_mangle]
-pub extern "C" fn handle_syscall32(
-    no: usize,
-    int_stack: *mut interrupt_stack,
-    mmxregs: *mut mmx_registers,
-) {
+pub fn handle_syscall32(no: usize, int_stack: &mut interrupt_stack, mmxregs: &mut mmx_registers) {
     // SAFETY: `SYSCALL_HANDLERS` are never modified after initialization.
     let syscall = unsafe { SYSCALL_HANDLERS.get(no) }.and_then(Option::as_ref);
 
-    // SAFETY: `int_stack` and `mmx_registers` are always valid.
-    let int_stack = unsafe { int_stack.as_mut().unwrap() };
-    let mmxregs = unsafe { mmxregs.as_mut().unwrap() };
-
     match syscall {
         None => {
-            println_warn!("Syscall {} isn't implemented", no);
+            println_warn!("Syscall {no}({no:#x}) isn't implemented");
             ProcessList::kill_current(Signal::SIGSYS);
         }
         Some(handler) => {

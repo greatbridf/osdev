@@ -4,11 +4,11 @@ use crate::bindings::root::kernel::mem::paging::{
     pfn_to_page as c_pfn_to_page, PAGE_BUDDY,
 };
 use crate::bindings::root::EFAULT;
+use crate::io::{Buffer, FillResult};
 use crate::kernel::mem::phys;
 use core::fmt;
 
 use super::phys::PhysPtr;
-use super::PTE;
 
 pub struct Page {
     page_ptr: *mut c_page,
@@ -28,12 +28,11 @@ impl Page {
         Self { page_ptr, order }
     }
 
-    /// Get `Page` from `pfn` without increasing the reference count.
+    /// Get `Page` from `pfn`, acquiring the ownership of the page. `refcount` is not increased.
     ///
     /// # Safety
-    ///
-    /// Caller must ensure that the `pfn` is no longer used or there will be a memory leak.
-    pub unsafe fn from_pfn(pfn: usize, order: u32) -> Self {
+    /// Caller must ensure that the pfn is no longer referenced by any other code.
+    pub unsafe fn take_pfn(pfn: usize, order: u32) -> Self {
         let page_ptr = unsafe { c_pfn_to_page(pfn) };
 
         // Only buddy pages can be used here.
@@ -49,12 +48,15 @@ impl Page {
     }
 
     /// Get `Page` from `pfn` and increase the reference count.
-    pub fn get(pfn: usize, order: u32) -> Self {
+    ///
+    /// # Safety
+    /// Caller must ensure that `pfn` refers to a valid physical frame number with `refcount` > 0.
+    pub unsafe fn from_pfn(pfn: usize, order: u32) -> Self {
         // SAFETY: `pfn` is a valid physical frame number with refcount > 0.
         unsafe { Self::increase_refcount(pfn) };
 
-        // SAFETY: `pfn` has increased refcount.
-        unsafe { Self::from_pfn(pfn, order) }
+        // SAFETY: `pfn` has an increased refcount.
+        unsafe { Self::take_pfn(pfn, order) }
     }
 
     /// Consumes the `Page` and returns the physical frame number without dropping the reference
@@ -87,10 +89,6 @@ impl Page {
         unsafe {
             core::ptr::write_bytes(self.as_cached().as_ptr::<u8>(), 0, self.len());
         }
-    }
-
-    pub fn as_page_table<'lt>(&self) -> &'lt mut [PTE; 512] {
-        self.as_cached().as_mut_slice(512).try_into().unwrap()
     }
 
     /// # Safety
@@ -195,6 +193,32 @@ impl core::fmt::Write for PageBuffer {
         self.consume(s.len());
 
         Ok(())
+    }
+}
+
+impl Buffer for PageBuffer {
+    fn total(&self) -> usize {
+        self.page.len()
+    }
+
+    fn wrote(&self) -> usize {
+        self.len()
+    }
+
+    fn fill(&mut self, data: &[u8]) -> crate::KResult<crate::io::FillResult> {
+        if self.remaining() == 0 {
+            return Ok(FillResult::Full);
+        }
+
+        let len = core::cmp::min(data.len(), self.remaining());
+        self.available_as_slice()[..len].copy_from_slice(&data[..len]);
+        self.consume(len);
+
+        if len < data.len() {
+            Ok(FillResult::Partial(len))
+        } else {
+            Ok(FillResult::Done(len))
+        }
     }
 }
 

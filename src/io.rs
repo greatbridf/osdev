@@ -82,6 +82,14 @@ impl<'lt, T: Copy + Sized> UninitBuffer<'lt, T> {
 
         Ok(unsafe { self.data.assume_init_ref() })
     }
+
+    pub fn assume_init(self) -> Option<T> {
+        if self.buffer.filled() {
+            Some(unsafe { *self.data.assume_init() })
+        } else {
+            None
+        }
+    }
 }
 
 impl<'lt, T: Copy + Sized> Buffer for UninitBuffer<'lt, T> {

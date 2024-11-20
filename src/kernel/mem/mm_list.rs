@@ -1,3 +1,5 @@
+mod page_fault;
+
 use crate::prelude::*;
 
 use alloc::{collections::btree_set::BTreeSet, sync::Arc};
@@ -7,10 +9,15 @@ use crate::kernel::vfs::dentry::Dentry;
 
 use super::{MMArea, PageTable, VAddr, VRange};
 
+pub use page_fault::{handle_page_fault, PageFaultError};
+
 #[derive(Debug, Clone)]
 pub struct FileMapping {
     file: Arc<Dentry>,
+    /// Offset in the file, aligned to 4KB boundary.
     offset: usize,
+    /// Length of the mapping. Exceeding part will be zeroed.
+    length: usize,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -37,17 +44,29 @@ struct MMListInner {
 pub struct MMList {
     /// # Safety
     /// This field might be used in IRQ context, so it should be locked with `lock_irq()`.
-    inner: Spin<MMListInner>,
+    inner: Mutex<MMListInner>,
 }
 
 impl FileMapping {
-    pub fn new(file: Arc<Dentry>, offset: usize) -> Self {
+    pub fn new(file: Arc<Dentry>, offset: usize, length: usize) -> Self {
         assert_eq!(offset & 0xfff, 0);
-        Self { file, offset }
+        Self {
+            file,
+            offset,
+            length,
+        }
     }
 
     pub fn offset(&self, offset: usize) -> Self {
-        Self::new(self.file.clone(), self.offset + offset)
+        if self.length <= offset {
+            Self::new(self.file.clone(), self.offset + self.length, 0)
+        } else {
+            Self::new(
+                self.file.clone(),
+                self.offset + offset,
+                self.length - offset,
+            )
+        }
     }
 }
 
@@ -66,7 +85,7 @@ impl MMListInner {
     }
 
     fn check_overlapping_addr(&self, addr: VAddr) -> bool {
-        addr.is_user() && self.overlapping_addr(addr).is_some()
+        addr.is_user() && self.overlapping_addr(addr).is_none()
     }
 
     fn overlapping_range(&self, range: VRange) -> impl DoubleEndedIterator<Item = &MMArea> + '_ {
@@ -74,7 +93,7 @@ impl MMListInner {
     }
 
     fn check_overlapping_range(&self, range: VRange) -> bool {
-        range.is_user() && self.overlapping_range(range).next().is_some()
+        range.is_user() && self.overlapping_range(range).next().is_none()
     }
 
     fn find_available(&self, hint: VAddr, len: usize) -> Option<VAddr> {
@@ -210,7 +229,7 @@ impl MMListInner {
 impl MMList {
     pub fn new() -> Arc<Self> {
         Arc::new(Self {
-            inner: Spin::new(MMListInner {
+            inner: Mutex::new(MMListInner {
                 areas: BTreeSet::new(),
                 page_table: PageTable::new(),
                 break_start: None,
@@ -226,7 +245,7 @@ impl MMList {
         let inner = self.inner.lock_irq();
 
         let list = Arc::new(Self {
-            inner: Spin::new(MMListInner {
+            inner: Mutex::new(MMListInner {
                 areas: inner.areas.clone(),
                 page_table: PageTable::new(),
                 break_start: inner.break_start,
@@ -239,8 +258,8 @@ impl MMList {
             let list_inner = list.inner.lock();
 
             for area in list_inner.areas.iter() {
-                let new_iter = list_inner.page_table.iter_user(area.range());
-                let old_iter = inner.page_table.iter_user(area.range());
+                let new_iter = list_inner.page_table.iter_user(area.range()).unwrap();
+                let old_iter = inner.page_table.iter_user(area.range()).unwrap();
 
                 for (new, old) in new_iter.zip(old_iter) {
                     new.setup_cow(old);
@@ -267,25 +286,34 @@ impl MMList {
         self.inner.lock_irq().unmap(start, len)
     }
 
-    pub fn mmap(
+    pub fn mmap_hint(
         &self,
-        at: VAddr,
+        hint: VAddr,
         len: usize,
         mapping: Mapping,
         permission: Permission,
-        fixed: bool,
     ) -> KResult<VAddr> {
         let mut inner = self.inner.lock_irq();
-        match inner.mmap(at, len, mapping.clone(), permission) {
-            Ok(()) => Ok(at),
-            Err(EEXIST) if fixed => Err(EEXIST),
+        match inner.mmap(hint, len, mapping.clone(), permission) {
+            Ok(()) => Ok(hint),
             Err(EEXIST) => {
-                let at = inner.find_available(at, len).ok_or(ENOMEM)?;
+                let at = inner.find_available(hint, len).ok_or(ENOMEM)?;
                 inner.mmap(at, len, mapping, permission)?;
                 Ok(at)
             }
             Err(err) => Err(err),
         }
+    }
+
+    pub fn mmap_fixed(
+        &self,
+        at: VAddr,
+        len: usize,
+        mapping: Mapping,
+        permission: Permission,
+    ) -> KResult<VAddr> {
+        let mut inner = self.inner.lock_irq();
+        inner.mmap(at, len, mapping.clone(), permission).map(|_| at)
     }
 
     pub fn set_break(&self, pos: Option<VAddr>) -> VAddr {

@@ -8,6 +8,6 @@ pub(self) use kstack::KernelStack;
 pub use scheduler::Scheduler;
 pub use signal::{Signal, SignalAction};
 pub use thread::{
-    Process, ProcessGroup, ProcessList, Session, Thread, ThreadState, UserDescriptor,
-    UserDescriptorFlags, WaitObject,
+    init_multitasking, Process, ProcessGroup, ProcessList, Session, Thread, ThreadState,
+    UserDescriptor, UserDescriptorFlags, WaitObject,
 };

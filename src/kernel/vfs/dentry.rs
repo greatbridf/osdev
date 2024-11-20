@@ -9,14 +9,16 @@ use core::{
 use crate::{
     hash::KernelHasher,
     io::{Buffer, ByteBuffer},
-    kernel::block::BlockDevice,
+    kernel::{block::BlockDevice, CharDevice},
     path::{Path, PathComponent},
     prelude::*,
     rcu::{RCUNode, RCUPointer},
 };
 
 use alloc::sync::Arc;
-use bindings::{statx, EEXIST, EINVAL, EISDIR, ELOOP, ENOENT, ENOTDIR, ERANGE, O_CREAT, O_EXCL};
+use bindings::{
+    statx, EEXIST, EINVAL, EISDIR, ELOOP, ENOENT, ENOTDIR, EPERM, ERANGE, O_CREAT, O_EXCL,
+};
 
 use super::{
     inode::{Ino, Inode, Mode, WriteOffset},
@@ -176,13 +178,6 @@ impl Dentry {
             .as_ref()
             .ok_or(ENOENT)
             .map(|data| data.inode.clone())
-    }
-
-    /// This function is used to get the **borrowed** dentry from a raw pointer
-    pub fn from_raw(raw: &*const Self) -> BorrowedArc<Self> {
-        assert!(!raw.is_null());
-
-        BorrowedArc::new(raw)
     }
 
     pub fn is_directory(&self) -> bool {
@@ -359,27 +354,8 @@ impl Dentry {
                 Ok(device.read_some(offset, buffer)?.allow_partial())
             }
             mode if s_ischr(mode) => {
-                let devid = inode.devid()?;
-
-                // TODO!!!!!: change this
-                let mut temporary_buffer = [0u8; 256];
-
-                let ret = unsafe {
-                    bindings::fs::char_device_read(
-                        devid,
-                        temporary_buffer.as_mut_ptr() as *mut _,
-                        temporary_buffer.len(),
-                        temporary_buffer.len(),
-                    )
-                };
-
-                if ret < 0 {
-                    Err(-ret as u32)
-                } else {
-                    Ok(buffer
-                        .fill(&temporary_buffer[..ret as usize])?
-                        .allow_partial())
-                }
+                let device = CharDevice::get(inode.devid()?).ok_or(EPERM)?;
+                device.read(buffer)
             }
             _ => Err(EINVAL),
         }
@@ -392,23 +368,7 @@ impl Dentry {
             mode if s_isdir(mode) => Err(EISDIR),
             mode if s_isreg(mode) => inode.write(buffer, offset),
             mode if s_isblk(mode) => Err(EINVAL), // TODO
-            mode if s_ischr(mode) => {
-                let devid = inode.devid()?;
-
-                let ret = unsafe {
-                    bindings::fs::char_device_write(
-                        devid,
-                        buffer.as_ptr() as *const _,
-                        buffer.len(),
-                    )
-                };
-
-                if ret < 0 {
-                    Err(-ret as u32)
-                } else {
-                    Ok(ret as usize)
-                }
-            }
+            mode if s_ischr(mode) => CharDevice::get(inode.devid()?).ok_or(EPERM)?.write(buffer),
             _ => Err(EINVAL),
         }
     }
@@ -463,37 +423,4 @@ impl Dentry {
             self.parent.get_inode().unwrap().mknod(self, mode, devid)
         }
     }
-}
-
-#[no_mangle]
-pub extern "C" fn r_dget(dentry: *const Dentry) -> *const Dentry {
-    debug_assert!(!dentry.is_null());
-
-    unsafe { Arc::increment_strong_count(dentry) };
-    dentry
-}
-
-#[no_mangle]
-pub extern "C" fn r_dput(dentry: *const Dentry) {
-    debug_assert!(!dentry.is_null());
-
-    unsafe { Arc::from_raw(dentry) };
-}
-
-#[no_mangle]
-pub extern "C" fn r_dentry_is_directory(dentry: *const Dentry) -> bool {
-    let dentry = Dentry::from_raw(&dentry);
-
-    dentry
-        .data
-        .load()
-        .as_ref()
-        .map_or(false, |data| data.flags & D_DIRECTORY != 0)
-}
-
-#[no_mangle]
-pub extern "C" fn r_dentry_is_invalid(dentry: *const Dentry) -> bool {
-    let dentry = Dentry::from_raw(&dentry);
-
-    dentry.data.load().is_none()
 }

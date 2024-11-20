@@ -96,7 +96,7 @@ impl<Value: ?Sized, Strategy: LockStrategy> Lock<Value, Strategy> {
     }
 }
 
-pub struct Guard<'lock, Value: ?Sized, Strategy: LockStrategy, const Write: bool = true> {
+pub struct Guard<'lock, Value: ?Sized, Strategy: LockStrategy, const WRITE: bool = true> {
     _phantom: core::marker::PhantomData<Strategy>,
     value: &'lock UnsafeCell<Value>,
     strategy_data: &'lock Strategy::StrategyData,
@@ -119,8 +119,8 @@ impl<'lock, Value: ?Sized, Strategy: LockStrategy> Guard<'lock, Value, Strategy>
     }
 }
 
-impl<'lock, Value: ?Sized, Strategy: LockStrategy, const Write: bool> Deref
-    for Guard<'lock, Value, Strategy, Write>
+impl<'lock, Value: ?Sized, Strategy: LockStrategy, const WRITE: bool> Deref
+    for Guard<'lock, Value, Strategy, WRITE>
 {
     type Target = Value;
 
@@ -137,8 +137,8 @@ impl<'lock, Value: ?Sized, Strategy: LockStrategy> DerefMut
     }
 }
 
-impl<'lock, Value: ?Sized, Strategy: LockStrategy, const Write: bool> AsRef<Value>
-    for Guard<'lock, Value, Strategy, Write>
+impl<'lock, Value: ?Sized, Strategy: LockStrategy, const WRITE: bool> AsRef<Value>
+    for Guard<'lock, Value, Strategy, WRITE>
 {
     fn as_ref(&self) -> &Value {
         unsafe { &*self.value.get() }
@@ -153,8 +153,8 @@ impl<'lock, Value: ?Sized, Strategy: LockStrategy> AsMut<Value>
     }
 }
 
-impl<'lock, Value: ?Sized, Strategy: LockStrategy, const Write: bool> Drop
-    for Guard<'lock, Value, Strategy, Write>
+impl<'lock, Value: ?Sized, Strategy: LockStrategy, const WRITE: bool> Drop
+    for Guard<'lock, Value, Strategy, WRITE>
 {
     fn drop(&mut self) {
         unsafe { Strategy::do_unlock(&self.strategy_data, &mut self.context) }

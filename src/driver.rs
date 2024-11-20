@@ -4,20 +4,20 @@ pub mod serial;
 pub mod timer;
 
 // TODO!!!: Put it somewhere else.
-pub(self) struct Port8 {
+pub struct Port8 {
     no: u16,
 }
 
 impl Port8 {
-    const fn new(no: u16) -> Self {
+    pub const fn new(no: u16) -> Self {
         Self { no }
     }
 
-    fn read(&self) -> u8 {
+    pub fn read(&self) -> u8 {
         arch::io::inb(self.no)
     }
 
-    fn write(&self, data: u8) {
+    pub fn write(&self, data: u8) {
         arch::io::outb(self.no, data)
     }
 }

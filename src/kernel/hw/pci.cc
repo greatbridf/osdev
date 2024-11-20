@@ -87,10 +87,11 @@ int register_driver_r(uint16_t vendor, uint16_t device,
 
 namespace kernel::kinit {
 
-void init_pci() {
+extern "C" void init_pci() {
     using namespace hw::acpi;
     using namespace hw::pci;
 
+    assert(parse_acpi_tables() == 0);
     auto* mcfg = (MCFG*)get_table("MCFG");
     assert(mcfg);
 

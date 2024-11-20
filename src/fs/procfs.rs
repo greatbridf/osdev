@@ -69,7 +69,7 @@ impl ProcFsNode {
 }
 
 define_struct_inode! {
-    struct FileInode {
+    pub struct FileInode {
         file: Box<dyn ProcFsFile>,
     }
 }

@@ -33,8 +33,8 @@
 	.cfi_restore \reg
 .endm
 
-.extern after_ctx_switch
 .globl ISR_stub_restore
+.type ISR_stub_restore @function
 
 ISR_stub:
 	.cfi_startproc

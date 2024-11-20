@@ -5,7 +5,6 @@ fn main() {
     let headers = [
         "include/kernel/process.hpp",
         "include/kernel/hw/pci.hpp",
-        "include/types/elf.hpp",
     ];
 
     let bindings = bindgen::Builder::default()

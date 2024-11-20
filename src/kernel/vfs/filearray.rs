@@ -54,36 +54,6 @@ impl OpenFile {
     }
 }
 
-#[no_mangle]
-pub extern "C" fn r_filearray_new_for_init() -> *const FileArray {
-    Arc::into_raw(Arc::new(FileArray {
-        inner: Spin::new(FileArrayInner {
-            files: BTreeMap::new(),
-            fd_min_avail: 0,
-        }),
-    }))
-}
-
-#[no_mangle]
-pub extern "C" fn r_filearray_new_shared(other: *const FileArray) -> *const FileArray {
-    let other = BorrowedArc::from_raw(other);
-
-    Arc::into_raw(FileArray::new_shared(&other))
-}
-
-#[no_mangle]
-pub extern "C" fn r_filearray_new_cloned(other: *const FileArray) -> *const FileArray {
-    let other = BorrowedArc::from_raw(other);
-
-    Arc::into_raw(FileArray::new_cloned(&other))
-}
-
-#[no_mangle]
-pub extern "C" fn r_filearray_drop(other: *const FileArray) {
-    // SAFETY: `other` is a valid pointer from `Arc::into_raw()`.
-    unsafe { Arc::from_raw(other) };
-}
-
 impl FileArray {
     pub fn get_current<'lt>() -> &'lt Arc<Self> {
         &Thread::current().files

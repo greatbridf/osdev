@@ -1,14 +1,14 @@
 use alloc::borrow::ToOwned;
 use alloc::ffi::CString;
-use alloc::sync::Arc;
-use bindings::types::elf::{elf32_load, elf32_load_data, ELF_LOAD_FAIL_NORETURN};
 use bindings::{interrupt_stack, mmx_registers, EINVAL, ENOENT, ENOTDIR, ESRCH};
 use bitflags::bitflags;
 
+use crate::elf::ParsedElf32;
 use crate::io::Buffer;
 use crate::kernel::constants::{PR_GET_NAME, PR_SET_NAME, SIG_BLOCK, SIG_SETMASK, SIG_UNBLOCK};
+use crate::kernel::mem::VAddr;
 use crate::kernel::task::{
-    Process, ProcessList, Scheduler, Signal, SignalAction, Thread, UserDescriptor, WaitObject,
+    ProcessList, Scheduler, Signal, SignalAction, Thread, UserDescriptor, WaitObject,
 };
 use crate::kernel::user::dataflow::UserString;
 use crate::kernel::user::{UserPointer, UserPointerMut};
@@ -77,35 +77,28 @@ fn do_mount(source: *const u8, target: *const u8, fstype: *const u8, flags: usiz
 }
 
 /// # Return
-/// `(ip, sp)`
-fn do_execve(exec: &[u8], argv: &[CString], envp: &[CString]) -> KResult<(usize, usize)> {
-    let context = FsContext::get_current();
-    let dentry = Dentry::open(&context, Path::new(exec)?, true)?;
+/// `(entry_ip, sp)`
+fn do_execve(exec: &[u8], argv: Vec<CString>, envp: Vec<CString>) -> KResult<(VAddr, VAddr)> {
+    let dentry = Dentry::open(&FsContext::get_current(), Path::new(exec)?, true)?;
     if !dentry.is_valid() {
         return Err(ENOENT);
     }
 
-    let argv_array = argv.iter().map(|x| x.as_ptr()).collect::<Vec<_>>();
-    let envp_array = envp.iter().map(|x| x.as_ptr()).collect::<Vec<_>>();
+    // TODO: When `execve` is called by one of the threads in a process, the other threads
+    //       should be terminated and `execve` is performed in the thread group leader.
+    let elf = ParsedElf32::parse(dentry.clone())?;
+    let result = elf.load(&Thread::current().process.mm_list, argv, envp);
+    if let Ok((ip, sp)) = result {
+        Thread::current().files.on_exec();
+        Thread::current().signal_list.clear_non_ignore();
+        Thread::current().set_name(dentry.name().clone());
 
-    let mut load_data = elf32_load_data {
-        exec_dent: Arc::into_raw(dentry) as *mut _,
-        argv: argv_array.as_ptr(),
-        argv_count: argv_array.len(),
-        envp: envp_array.as_ptr(),
-        envp_count: envp_array.len(),
-        ip: 0,
-        sp: 0,
-    };
+        Ok((ip, sp))
+    } else {
+        drop(dentry);
 
-    Thread::current().files.on_exec();
-    match unsafe { elf32_load(&mut load_data) } {
-        ELF_LOAD_FAIL_NORETURN => ProcessList::kill_current(Signal::SIGSEGV),
-        0 => {
-            Thread::current().signal_list.clear_non_ignore();
-            Ok((load_data.ip, load_data.sp))
-        }
-        n => Err(-n as u32),
+        // We can't hold any ownership when we call `kill_current`.
+        ProcessList::kill_current(Signal::SIGSEGV);
     }
 }
 
@@ -143,10 +136,10 @@ fn sys_execve(int_stack: &mut interrupt_stack, _mmxregs: &mut mmx_registers) -> 
             envp = envp.offset(1)?;
         }
 
-        let (ip, sp) = do_execve(exec.as_cstr().to_bytes(), &argv_vec, &envp_vec)?;
+        let (ip, sp) = do_execve(exec.as_cstr().to_bytes(), argv_vec, envp_vec)?;
 
-        int_stack.v_rip = ip;
-        int_stack.rsp = sp;
+        int_stack.v_rip = ip.0;
+        int_stack.rsp = sp.0;
         Ok(())
     })() {
         Ok(_) => 0,

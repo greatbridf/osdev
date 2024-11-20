@@ -4,12 +4,12 @@ use crate::{io::BufferFill, kernel::user::dataflow::UserBuffer, prelude::*};
 
 use alloc::collections::{binary_heap::BinaryHeap, btree_map::BTreeMap};
 use bindings::{
-    interrupt_stack, kill_current, mmx_registers, EFAULT, EINVAL, SA_RESTORER, SIGABRT, SIGBUS,
-    SIGCHLD, SIGCONT, SIGFPE, SIGILL, SIGKILL, SIGQUIT, SIGSEGV, SIGSTOP, SIGSYS, SIGTRAP, SIGTSTP,
-    SIGTTIN, SIGTTOU, SIGURG, SIGWINCH, SIGXCPU, SIGXFSZ,
+    interrupt_stack, mmx_registers, EFAULT, EINVAL, SA_RESTORER, SIGABRT, SIGBUS, SIGCHLD, SIGCONT,
+    SIGFPE, SIGILL, SIGKILL, SIGQUIT, SIGSEGV, SIGSTOP, SIGSYS, SIGTRAP, SIGTSTP, SIGTTIN, SIGTTOU,
+    SIGURG, SIGWINCH, SIGXCPU, SIGXFSZ,
 };
 
-use super::Thread;
+use super::{ProcessList, Thread};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Signal(u32);
@@ -385,11 +385,10 @@ impl SignalList {
 
 // TODO!!!: Should we use `uwake` or `iwake`?
 fn terminate_process(signal: Signal) -> ! {
-    unsafe { kill_current(signal.to_signum() as i32) };
+    ProcessList::kill_current(signal)
 }
 
+// TODO!!!!!!: Check exit status format.
 fn terminate_process_core_dump(signal: Signal) -> ! {
-    unsafe { kill_current(signal.to_signum() as i32 & 0x80) };
+    ProcessList::kill_current(signal)
 }
-
-fn schedule() {}

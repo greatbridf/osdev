@@ -41,31 +41,23 @@ set(BOOTLOADER_SOURCES src/boot.s
 set(KERNEL_MAIN_SOURCES src/kinit.cpp
                         src/kernel/async/lock.cc
                         src/kernel/allocator.cc
-                        src/kernel/interrupt.cpp
                         src/kernel/process.cpp
                         src/kernel/mem/paging.cc
                         src/kernel/mem/slab.cc
-                        src/kernel/vfs.cpp
                         src/kernel/vga.cpp
                         src/kernel/hw/acpi.cc
                         src/kernel/hw/pci.cc
                         src/net/ethernet.cc
                         src/types/crc.cc
-                        src/types/elf.cpp
                         src/types/libstdcpp.cpp
                         include/defs.hpp
                         include/kernel/async/lock.hpp
                         include/kernel/interrupt.hpp
-                        include/kernel/irq.hpp
                         include/kernel/process.hpp
-                        include/kernel/mem/mm_list.hpp
                         include/kernel/mem/paging.hpp
                         include/kernel/mem/slab.hpp
                         include/kernel/mem/types.hpp
-                        include/kernel/mem/vm_area.hpp
                         include/kernel/utsname.hpp
-                        include/kernel/vfs.hpp
-                        include/kernel/vfs/dentry.hpp
                         include/kernel/vga.hpp
                         include/kernel/task/forward.hpp
                         include/kernel/hw/acpi.hpp
@@ -77,7 +69,6 @@ set(KERNEL_MAIN_SOURCES src/kinit.cpp
                         include/net/netdev.hpp
                         include/types/bitmap.hpp
                         include/types/buffer.hpp
-                        include/types/elf.hpp
                         include/types/list.hpp
                         include/types/types.h
                         include/types/allocator.hpp
@@ -112,16 +103,16 @@ add_custom_target(boot.img
     DEPENDS user_space_programs
     COMMAND dd if=mbr_hole.bin of=boot.img
     COMMAND dd if=/dev/zero of=boot.img bs=`expr 512 \\* 1024 \\* 1024` count=0 seek=1
-    COMMAND sh -c \"echo n\; echo\; echo\; echo\; echo\; echo a\; echo w\" | ${FDISK_BIN} boot.img
-    COMMAND mkfs.fat --offset=2048 -v -n SYSTEM boot.img
-    COMMAND mcopy -i boot.img@@1M ${CMAKE_BINARY_DIR}/user-space-program/hello-world.out ::hello
-    COMMAND mcopy -i boot.img@@1M ${CMAKE_BINARY_DIR}/user-space-program/interrupt-test.out ::int
-    COMMAND mcopy -i boot.img@@1M ${CMAKE_BINARY_DIR}/user-space-program/stack-test.out ::stack
-    COMMAND mcopy -i boot.img@@1M ${CMAKE_BINARY_DIR}/user-space-program/init.out ::init
-    COMMAND mcopy -i boot.img@@1M ${CMAKE_BINARY_DIR}/user-space-program/priv-test.out ::priv
-    COMMAND mcopy -i boot.img@@1M ${CMAKE_SOURCE_DIR}/busybox-minimal ::busybox_
-    COMMAND mcopy -i boot.img@@1M ${CMAKE_SOURCE_DIR}/busybox ::busybox
-    COMMAND mcopy -i boot.img@@1M ${CMAKE_SOURCE_DIR}/init_script.sh ::initsh
+    COMMAND sh -c \"echo n\; echo\; echo \; echo 8192\; echo\; echo a\; echo w\" | ${FDISK_BIN} boot.img
+    COMMAND mkfs.fat --offset=8192 -v -n SYSTEM boot.img
+    COMMAND mcopy -i boot.img@@4M ${CMAKE_BINARY_DIR}/user-space-program/hello-world.out ::hello
+    COMMAND mcopy -i boot.img@@4M ${CMAKE_BINARY_DIR}/user-space-program/interrupt-test.out ::int
+    COMMAND mcopy -i boot.img@@4M ${CMAKE_BINARY_DIR}/user-space-program/stack-test.out ::stack
+    COMMAND mcopy -i boot.img@@4M ${CMAKE_BINARY_DIR}/user-space-program/init.out ::init
+    COMMAND mcopy -i boot.img@@4M ${CMAKE_BINARY_DIR}/user-space-program/priv-test.out ::priv
+    COMMAND mcopy -i boot.img@@4M ${CMAKE_SOURCE_DIR}/busybox-minimal ::busybox_
+    COMMAND mcopy -i boot.img@@4M ${CMAKE_SOURCE_DIR}/busybox ::busybox
+    COMMAND mcopy -i boot.img@@4M ${CMAKE_SOURCE_DIR}/init_script.sh ::initsh
 )
 
 add_custom_command(OUTPUT run

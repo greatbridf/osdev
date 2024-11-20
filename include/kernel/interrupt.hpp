@@ -36,8 +36,3 @@ struct interrupt_stack {
 struct mmx_registers {
     uint8_t data[512]; // TODO: list of content
 };
-
-namespace kernel::kinit {
-void init_interrupt();
-
-} // namespace kernel::kinit

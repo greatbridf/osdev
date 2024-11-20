@@ -52,8 +52,8 @@ fn do_mmap_pgoff(
 
     // TODO!!!: If we are doing mmap's in 32-bit mode, we should check whether
     //          `addr` is above user reachable memory.
-    mm_list
-        .mmap(
+    let addr = if flags.contains(UserMmapFlags::MAP_FIXED) {
+        mm_list.mmap_fixed(
             addr,
             len,
             Mapping::Anonymous,
@@ -61,9 +61,20 @@ fn do_mmap_pgoff(
                 write: prot.contains(UserMmapProtocol::PROT_WRITE),
                 execute: prot.contains(UserMmapProtocol::PROT_EXEC),
             },
-            flags.contains(UserMmapFlags::MAP_FIXED),
         )
-        .map(|addr| addr.0)
+    } else {
+        mm_list.mmap_hint(
+            addr,
+            len,
+            Mapping::Anonymous,
+            Permission {
+                write: prot.contains(UserMmapProtocol::PROT_WRITE),
+                execute: prot.contains(UserMmapProtocol::PROT_EXEC),
+            },
+        )
+    };
+
+    addr.map(|addr| addr.0)
 }
 
 fn do_munmap(addr: usize, len: usize) -> KResult<usize> {

@@ -1,5 +1,4 @@
 #include <assert.h>
-#include <stdint.h>
 
 #include <kernel/async/lock.hpp>
 
@@ -49,33 +48,20 @@ static inline void _restore_interrupt_state(lock_context_t context) {
         :);
 }
 
-// TODO: mark as _per_cpu
-static inline preempt_count_t& _preempt_count() {
-    static preempt_count_t _preempt_count;
-    assert(_preempt_count >= 0);
-    return _preempt_count;
-}
+extern "C" void r_preempt_disable();
+extern "C" void r_preempt_enable();
+extern "C" unsigned long r_preempt_count();
 
 void preempt_disable() {
-    ++_preempt_count();
-    asm volatile("" : : : "memory");
+    r_preempt_disable();
 }
 
 void preempt_enable() {
-    asm volatile("" : : : "memory");
-    --_preempt_count();
+    r_preempt_enable();
 }
 
-extern "C" void r_preempt_disable() {
-    preempt_disable();
-}
-
-extern "C" void r_preempt_enable() {
-    preempt_enable();
-}
-
-preempt_count_t preempt_count() {
-    return _preempt_count();
+unsigned long preempt_count() {
+    return r_preempt_count();
 }
 
 void spin_lock(spinlock_t& lock) {
@@ -105,14 +91,6 @@ void spin_unlock_irqrestore(spinlock_t& lock, lock_context_t state) {
 
 mutex::~mutex() {
     assert(m_lock == 0);
-}
-
-void mutex::lock() {
-    spin_lock(m_lock);
-}
-
-void mutex::unlock() {
-    spin_unlock(m_lock);
 }
 
 lock_context_t mutex::lock_irq() {

@@ -5,22 +5,42 @@ pub mod spin;
 pub mod strategy;
 
 pub mod preempt {
-    use core::sync::atomic::{compiler_fence, Ordering};
+    use core::sync::atomic::{compiler_fence, AtomicUsize, Ordering};
 
     /// TODO: This should be per cpu.
-    static mut PREEMPT_COUNT: usize = 0;
+    static PREEMPT_COUNT: AtomicUsize = AtomicUsize::new(0);
 
     #[inline(always)]
     pub fn disable() {
-        unsafe { PREEMPT_COUNT += 1 };
+        PREEMPT_COUNT.fetch_add(1, Ordering::Relaxed);
         compiler_fence(Ordering::SeqCst);
     }
 
     #[inline(always)]
     pub fn enable() {
         compiler_fence(Ordering::SeqCst);
-        unsafe { PREEMPT_COUNT -= 1 };
+        PREEMPT_COUNT.fetch_sub(1, Ordering::Relaxed);
     }
+
+    #[inline(always)]
+    pub fn count() -> usize {
+        PREEMPT_COUNT.load(Ordering::Relaxed)
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn r_preempt_disable() {
+    preempt::disable();
+}
+
+#[no_mangle]
+pub extern "C" fn r_preempt_enable() {
+    preempt::enable();
+}
+
+#[no_mangle]
+pub extern "C" fn r_preempt_count() -> usize {
+    preempt::count()
 }
 
 pub type Spin<T> = lock::Lock<T, spin::SpinStrategy>;
@@ -78,32 +98,18 @@ impl<T: Sized + Sync, U: ?Sized> Locked<T, U> {
 
 macro_rules! might_sleep {
     () => {
-        if cfg!(debug_assertions) {
-            if unsafe { $crate::bindings::root::kernel::async_::preempt_count() } != 0 {
-                println_fatal!("failed assertion");
-                unsafe { $crate::bindings::root::freeze() };
-            }
-        } else {
-            assert_eq!(
-                unsafe { $crate::bindings::root::kernel::async_::preempt_count() },
-                0,
-                "a might_sleep function called with preempt disabled"
-            );
-        }
+        assert_eq!(
+            $crate::sync::preempt::count(),
+            0,
+            "a might_sleep function called with preempt disabled"
+        );
     };
     ($n:expr) => {
-        if cfg!(debug_assertions) {
-            if unsafe { $crate::bindings::root::kernel::async_::preempt_count() } != $n {
-                println_fatal!("failed assertion");
-                unsafe { $crate::bindings::root::freeze() };
-            }
-        } else {
-            assert_eq!(
-                unsafe { $crate::bindings::root::kernel::async_::preempt_count() },
-                $n,
-                "a might_sleep function called with the preempt count not satisfying its requirement",
-            );
-        }
+        assert_eq!(
+            $crate::sync::preempt::count(),
+            $n,
+            "a might_sleep function called with the preempt count not satisfying its requirement",
+        );
     };
 }
 

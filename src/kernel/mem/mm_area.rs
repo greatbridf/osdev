@@ -5,8 +5,8 @@ use super::{Mapping, Permission, VAddr, VRange};
 #[derive(Debug)]
 pub struct MMArea {
     range: UnsafeCell<VRange>,
-    mapping: Mapping,
-    permission: Permission,
+    pub(super) mapping: Mapping,
+    pub(super) permission: Permission,
 }
 
 impl Clone for MMArea {

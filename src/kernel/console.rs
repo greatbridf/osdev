@@ -79,6 +79,9 @@ macro_rules! println_info {
 }
 
 macro_rules! println_fatal {
+    () => {
+        $crate::println!("[kernel:fatal] ")
+    };
     ($($arg:tt)*) => {
         $crate::println!("[kernel:fatal] {}", format_args!($($arg)*))
     };

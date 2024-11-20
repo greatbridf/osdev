@@ -1,5 +1,5 @@
 use crate::{
-    kernel::task::{Scheduler, Thread, ThreadState},
+    kernel::task::{Scheduler, Thread},
     prelude::*,
     sync::preempt,
 };
@@ -7,7 +7,7 @@ use crate::{
 use super::{lock::Guard, strategy::LockStrategy};
 use alloc::{collections::vec_deque::VecDeque, sync::Arc};
 
-pub struct CondVar<const Interruptible: bool> {
+pub struct CondVar<const INTERRUPTIBLE: bool> {
     waiters: Spin<VecDeque<Arc<Thread>>>,
 }
 

@@ -1,4 +1,3 @@
-#include <assert.h>
 #include <stdint.h>
 #include <sys/utsname.h>
 
@@ -7,7 +6,6 @@
 
 #include <kernel/hw/acpi.hpp>
 #include <kernel/hw/pci.hpp>
-#include <kernel/hw/timer.hpp>
 #include <kernel/interrupt.hpp>
 #include <kernel/log.hpp>
 #include <kernel/mem/paging.hpp>
@@ -48,23 +46,6 @@ static inline void enable_sse() {
             : "rax");
 }
 
-void NORETURN real_kernel_init(mem::paging::pfn_t kernel_stack_pfn) {
-    // call global constructors
-    // NOTE: the initializer of global objects MUST NOT contain
-    // all kinds of memory allocations
-    for (auto* ctor = &start_ctors; ctor != &end_ctors; ++ctor)
-        (*ctor)();
-
-    init_interrupt();
-    hw::timer::init_pit();
-
-    hw::acpi::parse_acpi_tables();
-
-    init_pci();
-
-    init_scheduler(kernel_stack_pfn);
-}
-
 static inline void setup_early_kernel_page_table() {
     using namespace kernel::mem::paging;
 
@@ -81,12 +62,9 @@ static inline void setup_early_kernel_page_table() {
 
     // clear kernel bss
     memset((void*)BSS_ADDR, 0x00, BSS_LENGTH);
-
-    // clear empty page
-    memset(mem::physaddr<void>{(uintptr_t)EMPTY_PAGE_PFN}, 0x00, 0x1000);
 }
 
-extern "C" uintptr_t KIMAGE_PAGES_VALUE;
+extern "C" char KIMAGE_PAGES[];
 
 static inline void setup_buddy(uintptr_t addr_max) {
     using namespace kernel::mem;
@@ -97,6 +75,7 @@ static inline void setup_buddy(uintptr_t addr_max) {
     addr_max >>= 12;
     int count = (addr_max * sizeof(page) + 0x200000 - 1) / 0x200000;
 
+    auto KIMAGE_PAGES_VALUE = (size_t)KIMAGE_PAGES;
     pfn_t real_start_pfn = KERNEL_IMAGE_PADDR + KIMAGE_PAGES_VALUE * 0x1000;
     pfn_t aligned_start_pfn = real_start_pfn + 0x200000 - 1;
     aligned_start_pfn &= ~0x1fffff;
@@ -155,7 +134,7 @@ static inline void save_memory_info(bootloader_data* data) {
            sizeof(kernel::mem::info::e820_entries));
 }
 
-void setup_gdt() {
+static inline void setup_gdt() {
     // user code
     mem::gdt[3] = 0x0020'fa00'0000'0000;
     // user data
@@ -193,6 +172,8 @@ void setup_gdt() {
         : "ax", "memory");
 }
 
+extern "C" void rust_kinit(uintptr_t early_kstack_vaddr);
+
 extern "C" void NORETURN kernel_init(bootloader_data* data) {
     enable_sse();
 
@@ -217,12 +198,13 @@ extern "C" void NORETURN kernel_init(bootloader_data* data) {
 
     asm volatile(
         "mov %1, %%rdi\n\t"
-        "mov %2, %%rsp\n\t"
+        "lea -8(%2), %%rsp\n\t"
         "xor %%rbp, %%rbp\n\t"
-        "call *%0\n\t"
+        "mov %%rbp, (%%rsp)\n\t" // Clear previous frame pointer
+        "jmp *%0\n\t"
         :
-        : "r"(real_kernel_init), "g"(kernel_stack_pfn), "g"(kernel_stack_ptr)
-        :);
+        : "r"(rust_kinit), "g"(kernel_stack_pfn), "r"(kernel_stack_ptr)
+        : "memory");
 
     freeze();
 }

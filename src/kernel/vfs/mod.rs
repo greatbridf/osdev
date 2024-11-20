@@ -8,7 +8,6 @@ use inode::Mode;
 use super::task::Thread;
 
 pub mod dentry;
-pub mod ffi;
 pub mod file;
 pub mod filearray;
 pub mod inode;

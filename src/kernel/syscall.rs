@@ -114,22 +114,26 @@ macro_rules! syscall32_call {
                 MapArgumentImpl::map_arg(arg_register!(${index()}, $is));
         )*
 
-        println_info!(
-            "tid{}: {}({}) => {{",
-            Thread::current().tid,
-            stringify!($handler),
-            format_expand!($($arg, $arg),*),
-        );
+        if cfg!(feature = "debug_syscall") {
+            println_info!(
+                "tid{}: {}({}) => {{",
+                Thread::current().tid,
+                stringify!($handler),
+                format_expand!($($arg, $arg),*),
+            );
+        }
 
         let result = $handler($($arg),*);
 
-        println_info!(
-            "tid{}: {}({}) => }} = {:x?}",
-            Thread::current().tid,
-            stringify!($handler),
-            format_expand!($($arg, $arg),*),
-            result
-        );
+        if cfg!(feature = "debug_syscall") {
+            println_info!(
+                "tid{}: {}({}) => }} = {:x?}",
+                Thread::current().tid,
+                stringify!($handler),
+                format_expand!($($arg, $arg),*),
+                result
+            );
+        }
 
         match result {
             Ok(val) => MapReturnValue::map_ret(val),

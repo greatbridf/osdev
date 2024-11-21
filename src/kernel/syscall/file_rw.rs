@@ -328,14 +328,15 @@ struct UserPollFd {
     revents: u16,
 }
 
-fn do_poll(fds: *mut UserPollFd, nfds: u32, timeout: u32) -> KResult<u32> {
+fn do_poll(fds: *mut UserPollFd, nfds: u32, _timeout: u32) -> KResult<u32> {
     match nfds {
         0 => Ok(0),
         2.. => unimplemented!("Poll with {} fds", nfds),
         1 => {
-            if timeout != u32::MAX {
-                unimplemented!("Poll with timeout {}", timeout);
-            }
+            // TODO!!: Poll with timeout
+            // if timeout != u32::MAX {
+            //     unimplemented!("Poll with timeout {}", timeout);
+            // }
             let fds = UserPointerMut::new(fds)?;
             let mut fd = fds.read()?;
 

@@ -44,6 +44,7 @@ impl<'a, T: Copy, const CONST: bool> UserPointer<'a, T, CONST> {
         Self::new(vaddr as *mut T)
     }
 
+    /// # Might Sleep
     pub fn read(&self) -> KResult<T> {
         let mut value = core::mem::MaybeUninit::<T>::uninit();
         self.pointer

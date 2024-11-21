@@ -166,7 +166,6 @@ impl Scheduler {
     }
 
     pub fn schedule_noreturn() -> ! {
-        println_debug!("Scheduler::schedule_noreturn()");
         preempt::disable();
         Self::schedule();
         panic!("Scheduler::schedule_noreturn(): Should never return")

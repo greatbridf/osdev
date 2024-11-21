@@ -240,7 +240,8 @@ impl FileArray {
         }
     }
 
-    pub fn open_console(&self) -> KResult<()> {
+    /// Only used for init process.
+    pub fn open_console(&self) {
         let mut inner = self.inner.lock();
         let (stdin, stdout, stderr) = (inner.next_fd(), inner.next_fd(), inner.next_fd());
 
@@ -259,8 +260,6 @@ impl FileArray {
             O_CLOEXEC as u64,
             TerminalFile::new(CONSOLE.lock_irq().get_terminal().unwrap()),
         );
-
-        Ok(())
     }
 }
 

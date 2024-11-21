@@ -1,5 +1,3 @@
-use core::iter::repeat;
-
 use alloc::{
     collections::vec_deque::VecDeque,
     sync::{Arc, Weak},
@@ -42,6 +40,7 @@ const VEOL2: usize = 16;
 /* c_iflag bits */
 
 bitflags! {
+    #[derive(Debug)]
     pub struct TermioIFlags: u16 {
         /// Ignore break condition
         const IGNBRK = 0x0001;
@@ -70,6 +69,7 @@ bitflags! {
         const IUTF8 = 0x4000;
     }
 
+    #[derive(Debug)]
     pub struct TermioOFlags: u16 {
         /// Perform output processing
         const OPOST = 0x0001;
@@ -84,6 +84,7 @@ bitflags! {
 }
 
 bitflags! {
+    #[derive(Debug)]
     pub struct TermioLFlags: u16 {
         const ISIG = 0x0001;
         const ICANON = 0x0002;
@@ -113,6 +114,7 @@ const HUPCL: u32 = 0x00000400;
 
 const N_TTY: u8 = 0;
 
+#[derive(Debug)]
 pub struct Termios {
     iflag: TermioIFlags,
     oflag: TermioOFlags,
@@ -323,10 +325,10 @@ impl Termios {
 
     fn get_user(&self) -> UserTermios {
         UserTermios {
-            iflag: self.iflag.bits() as u16,
-            oflag: self.oflag.bits() as u16,
-            cflag: self.cflag as u16,
-            lflag: self.lflag.bits() as u16,
+            iflag: self.iflag.bits() as u32,
+            oflag: self.oflag.bits() as u32,
+            cflag: self.cflag,
+            lflag: self.lflag.bits() as u32,
             line: self.line,
             cc: self.cc,
         }
@@ -362,10 +364,10 @@ pub struct UserWindowSize {
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct UserTermios {
-    iflag: u16,
-    oflag: u16,
-    cflag: u16,
-    lflag: u16,
+    iflag: u32,
+    oflag: u32,
+    cflag: u32,
+    lflag: u32,
     line: u8,
     cc: [u8; NCCS],
 }
@@ -390,7 +392,7 @@ impl Terminal {
             inner: Spin::new(TerminalInner {
                 termio: Termios::new_standard(),
                 session: Weak::new(),
-                buffer: repeat(0).take(BUFFER_SIZE).collect(),
+                buffer: VecDeque::with_capacity(BUFFER_SIZE),
             }),
             cv: CondVar::new(),
             device,
@@ -463,9 +465,9 @@ impl Terminal {
             self.echo_char(inner, ch);
         }
 
-        // If ICANON is set, we notify all waiting processes.
-        // If ICANON is not set but we have a new line, there are data ready, we notify as well.
-        if ch == b'\n' || inner.termio.icanon() {
+        // If ICANON is not set, we notify all waiting processes.
+        // If ICANON is set but we have a new line, there are data ready, we notify as well.
+        if ch == b'\n' || !inner.termio.icanon() {
             self.cv.notify_all();
         }
     }
@@ -532,9 +534,11 @@ impl Terminal {
     }
 
     pub fn read(&self, buffer: &mut dyn Buffer) -> KResult<usize> {
-        'block: {
+        let mut tmp_buffer = [0u8; 32];
+
+        let data = 'block: {
             if buffer.available() == 0 {
-                break 'block;
+                break 'block &tmp_buffer[..0];
             }
 
             let mut inner = self.inner.lock_irq();
@@ -547,38 +551,37 @@ impl Terminal {
             }
 
             if inner.buffer.is_empty() {
-                break 'block;
+                break 'block &tmp_buffer[..0];
             }
 
-            if !inner.termio.icanon() {
-                let ch = inner.buffer.pop_front().unwrap();
-                buffer.fill(&[ch])?.allow_partial();
-                break 'block;
-            }
+            let length = if inner.termio.icanon() {
+                // Canonical mode, return data until we see a newline.
+                // TODO!!: We should wait if we don't see one.
+                inner
+                    .buffer
+                    .iter()
+                    .position(|&ch| ch == b'\n')
+                    .map(|pos| pos + 1)
+                    .unwrap_or(inner.buffer.len())
+            } else {
+                buffer.available().min(inner.buffer.len())
+            };
 
-            // Canonical mode, return data until we see a newline.
-            let length = inner
+            // TODO!!!!!!: Change this. We need to loop until we've got enough data.
+            let length = length.min(tmp_buffer.len());
+
+            for (ch, r) in inner
                 .buffer
-                .iter()
-                .position(|&ch| ch == b'\n')
-                .map(|pos| pos + 1)
-                .unwrap_or(inner.buffer.len());
+                .drain(..length)
+                .zip(tmp_buffer.iter_mut().take(length))
+            {
+                *r = ch;
+            }
 
-            let (first, second) = inner.buffer.as_slices();
-            let first_data = first
-                .split_at_checked(length)
-                .map_or(first, |(data, _)| data);
-            let second_data = second
-                .split_at_checked(length - first_data.len())
-                .map_or(second, |(data, _)| data);
+            &tmp_buffer[..length]
+        };
 
-            buffer.fill(first_data)?.allow_partial();
-            buffer.fill(second_data)?.allow_partial();
-
-            inner.buffer.drain(..buffer.wrote());
-        }
-
-        Ok(buffer.wrote())
+        buffer.fill(data).map(|result| result.allow_partial())
     }
 
     pub fn ioctl(&self, request: TerminalIORequest) -> KResult<()> {
@@ -595,9 +598,10 @@ impl Terminal {
                 }
             }
             TerminalIORequest::SetProcessGroup(pgid) => {
+                let pgid = pgid.read()?;
+
                 let inner = self.inner.lock();
                 let session = inner.session.upgrade();
-                let pgid = pgid.read()?;
 
                 if let Some(session) = session {
                     session.set_foreground_pgid(pgid)
@@ -617,18 +621,18 @@ impl Terminal {
                 ptr.write(window_size)
             }
             TerminalIORequest::GetTermios(ptr) => {
-                let inner = self.inner.lock();
-                ptr.write(inner.termio.get_user())
+                let termios = self.inner.lock().termio.get_user();
+                ptr.write(termios)
             }
             TerminalIORequest::SetTermios(ptr) => {
-                let mut inner = self.inner.lock();
                 let user_termios = ptr.read()?;
+                let mut inner = self.inner.lock();
 
                 // TODO: We ignore unknown bits for now.
-                inner.termio.iflag = TermioIFlags::from_bits_truncate(user_termios.iflag);
-                inner.termio.oflag = TermioOFlags::from_bits_truncate(user_termios.oflag);
-                inner.termio.lflag = TermioLFlags::from_bits_truncate(user_termios.lflag);
-                inner.termio.cflag = user_termios.cflag as u32;
+                inner.termio.iflag = TermioIFlags::from_bits_truncate(user_termios.iflag as u16);
+                inner.termio.oflag = TermioOFlags::from_bits_truncate(user_termios.oflag as u16);
+                inner.termio.lflag = TermioLFlags::from_bits_truncate(user_termios.lflag as u16);
+                inner.termio.cflag = user_termios.cflag;
                 inner.termio.line = user_termios.line;
                 inner.termio.cc = user_termios.cc;
 

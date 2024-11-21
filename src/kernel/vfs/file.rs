@@ -41,7 +41,7 @@ pub struct PipeInner {
 }
 
 pub struct Pipe {
-    inner: Spin<PipeInner>,
+    inner: Mutex<PipeInner>,
     cv_read: CondVar,
     cv_write: CondVar,
 }
@@ -100,7 +100,7 @@ impl Pipe {
 
     pub fn new() -> Arc<Self> {
         Arc::new(Self {
-            inner: Spin::new(PipeInner {
+            inner: Mutex::new(PipeInner {
                 buffer: VecDeque::with_capacity(Self::PIPE_SIZE),
                 read_closed: false,
                 write_closed: false,

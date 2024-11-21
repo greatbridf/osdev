@@ -13,6 +13,10 @@ itertools = { version = "0.13.0", default-features = false }
 lazy_static = { version = "1.5.0", features = ["spin_no_std"] }
 spin = "0.9.8"
 
+[features]
+default = []
+debug_syscall = []
+
 [build-dependencies]
 bindgen = "0.70.1"
 

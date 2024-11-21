@@ -121,16 +121,6 @@ impl TerminalDevice for Serial {
         loop {
             // If we poll the status and get the corresponding bit, we should handle the action.
             let status = self.line_status.read();
-
-            // We should receive a byte and commit that to the line.
-            if status & 0x01 != 0 {
-                let ch = self.tx_rx.read();
-
-                if let Some(terminal) = self.terminal.as_ref() {
-                    terminal.commit_char(ch);
-                }
-            }
-
             if status & 0x20 != 0 {
                 self.tx_rx.write(ch);
                 return;

@@ -76,8 +76,10 @@ impl CheckedUserPointer {
         }
     }
 
-    pub fn get_mut<T>(&self) -> *mut T {
-        self.ptr as *mut T
+    pub fn forward(&mut self, offset: usize) {
+        assert!(offset <= self.len);
+        self.ptr = self.ptr.wrapping_offset(offset as isize);
+        self.len -= offset;
     }
 
     pub fn get_const<T>(&self) -> *const T {
@@ -234,6 +236,7 @@ impl<'lt> Buffer for UserBuffer<'lt> {
         }
 
         self.ptr.write(data.as_ptr() as *mut (), to_write)?;
+        self.ptr.forward(to_write);
         self.cur += to_write;
 
         if to_write == data.len() {

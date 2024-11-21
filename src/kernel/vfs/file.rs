@@ -8,6 +8,7 @@ use crate::{
         task::{Signal, Thread},
         terminal::{Terminal, TerminalIORequest},
         user::{UserPointer, UserPointerMut},
+        CharDevice,
     },
     prelude::*,
     sync::CondVar,
@@ -58,11 +59,18 @@ pub struct TerminalFile {
     terminal: Arc<Terminal>,
 }
 
+// TODO: We should use `File` as the base type, instead of `Arc<File>`
+//       If we need shared states, like for `InodeFile`, the files themselves should
+//       have their own shared semantics. All `File` variants will just keep the
+//       `Clone` semantics.
+//
+//       e.g. The `CharDevice` itself is stateless.
 pub enum File {
     Inode(InodeFile),
     PipeRead(PipeReadEnd),
     PipeWrite(PipeWriteEnd),
     TTY(TerminalFile),
+    CharDev(Arc<CharDevice>),
 }
 
 pub enum SeekOption {
@@ -439,6 +447,7 @@ impl File {
             File::Inode(inode) => inode.read(buffer),
             File::PipeRead(pipe) => pipe.pipe.read(buffer),
             File::TTY(tty) => tty.read(buffer),
+            File::CharDev(device) => device.read(buffer),
             _ => Err(EBADF),
         }
     }
@@ -463,6 +472,7 @@ impl File {
             File::Inode(inode) => inode.write(buffer),
             File::PipeWrite(pipe) => pipe.pipe.write(buffer),
             File::TTY(tty) => tty.write(buffer),
+            File::CharDev(device) => device.write(buffer),
             _ => Err(EBADF),
         }
     }
@@ -470,7 +480,7 @@ impl File {
     pub fn seek(&self, option: SeekOption) -> KResult<usize> {
         match self {
             File::Inode(inode) => inode.seek(option),
-            File::PipeRead(_) | File::PipeWrite(_) | File::TTY(_) => Err(ESPIPE),
+            _ => Err(ESPIPE),
         }
     }
 
@@ -532,9 +542,9 @@ impl File {
 
     pub fn poll(&self, event: PollEvent) -> KResult<PollEvent> {
         match self {
-            File::PipeRead(_) | File::PipeWrite(_) => unimplemented!("Poll event not supported."),
             File::Inode(_) => Ok(event),
             File::TTY(tty) => tty.poll(event),
+            _ => unimplemented!("Poll event not supported."),
         }
     }
 }

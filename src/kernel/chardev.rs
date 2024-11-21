@@ -7,7 +7,14 @@ use bindings::{EEXIST, EIO};
 
 use crate::{io::Buffer, kernel::console::CONSOLE, prelude::*};
 
-use super::{block::make_device, terminal::Terminal, vfs::DevId};
+use super::{
+    block::make_device,
+    terminal::Terminal,
+    vfs::{
+        file::{File, TerminalFile},
+        DevId,
+    },
+};
 
 use lazy_static::lazy_static;
 
@@ -63,6 +70,13 @@ impl CharDevice {
             }
             Entry::Occupied(_) => Err(EEXIST),
         }
+    }
+
+    pub fn open(self: &Arc<Self>) -> KResult<Arc<File>> {
+        Ok(match &self.device {
+            CharDeviceType::Terminal(terminal) => TerminalFile::new(terminal.clone()),
+            CharDeviceType::Virtual(_) => Arc::new(File::CharDev(self.clone())),
+        })
     }
 }
 

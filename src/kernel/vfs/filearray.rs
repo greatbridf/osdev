@@ -3,8 +3,10 @@ use core::sync::atomic::Ordering;
 use crate::{
     kernel::{
         console::CONSOLE,
+        constants::ENXIO,
         task::Thread,
         vfs::{dentry::Dentry, file::Pipe, s_isdir, s_isreg},
+        CharDevice,
     },
     path::Path,
     prelude::*,
@@ -204,6 +206,8 @@ impl FileArray {
                 fdflag as u64,
                 TerminalFile::new(CONSOLE.lock_irq().get_terminal().unwrap()),
             );
+
+            let device = CharDevice::get(inode.devid()?).ok_or(ENXIO)?;
         } else {
             inner.do_insert(
                 fd,

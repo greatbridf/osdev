@@ -196,7 +196,7 @@ pub fn handle_page_fault(int_stack: &mut interrupt_stack) {
         .handle_page_fault(int_stack, vaddr, error);
 
     if let Err(signal) = result {
-        println_debug!("Page fault in user space at {:#x}", vaddr.0);
+        println_debug!("Page fault on {:#x} in user space at {:#x}", vaddr.0, int_stack.v_rip);
         ProcessList::kill_current(signal)
     }
 }

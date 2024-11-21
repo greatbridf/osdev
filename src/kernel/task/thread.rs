@@ -375,12 +375,6 @@ impl ProcessList {
     }
 
     pub fn kill_current(signal: Signal) -> ! {
-        println_debug!(
-            "Killing thread {} with signal {:?}",
-            Thread::current().tid,
-            signal,
-        );
-
         ProcessList::get().do_kill_process(
             &Thread::current().process,
             ((signal.to_signum() + 128) << 8) | (signal.to_signum() & 0xff),

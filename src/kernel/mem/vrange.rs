@@ -159,6 +159,10 @@ impl VRange {
     }
 
     pub fn into_range(self) -> impl RangeBounds<Self> {
-        VRange::from(self.start())..VRange::from(self.end())
+        if self.len() == 0 {
+            VRange::from(self.start())..=VRange::from(self.start())
+        } else {
+            VRange::from(self.start())..=VRange::from(self.end() - 1)
+        }
     }
 }

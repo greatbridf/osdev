@@ -108,9 +108,7 @@ impl KernelStack {
         // TODO!!!: Make `TSS` a per cpu struct.
         // SAFETY: `TSS_RSP0` is always valid.
         unsafe {
-            TSS_RSP0
-                .as_ptr::<u64>()
-                .write_unaligned(*self.sp.get() as u64);
+            TSS_RSP0.as_ptr::<u64>().write_unaligned(self.bottom as u64);
         }
     }
 

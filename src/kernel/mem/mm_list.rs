@@ -97,7 +97,11 @@ impl MMListInner {
     }
 
     fn find_available(&self, hint: VAddr, len: usize) -> Option<VAddr> {
-        let mut range = VRange::new(hint.floor(), (hint + len).ceil());
+        let mut range = if hint == VAddr::NULL {
+            VRange::new(VAddr(0x1234000), VAddr(0x1234000 + len).ceil())
+        } else {
+            VRange::new(hint.floor(), (hint + len).ceil())
+        };
         let len = range.len();
 
         loop {
@@ -192,6 +196,18 @@ impl MMListInner {
         Ok(())
     }
 
+    fn grow(&self, area: &MMArea, len: usize) {
+        self.page_table.set_anonymous(
+            VRange::from(area.range().end()).grow(len),
+            Permission {
+                write: true,
+                execute: false,
+            },
+        );
+
+        area.grow(len);
+    }
+
     fn set_break(&mut self, pos: Option<VAddr>) -> VAddr {
         // SAFETY: `set_break` is only called in syscalls, where program break should be valid.
         assert!(self.break_start.is_some() && self.break_pos.is_some());
@@ -207,20 +223,23 @@ impl MMListInner {
             return current_break;
         }
 
-        self.page_table.set_anonymous(
-            range,
-            Permission {
-                write: true,
-                execute: false,
-            },
-        );
+        if !self.areas.contains(&break_start) {
+            self.areas.insert(MMArea::new(
+                break_start,
+                Mapping::Anonymous,
+                Permission {
+                    write: true,
+                    execute: false,
+                },
+            ));
+        }
 
         let program_break = self
             .areas
             .get(&break_start)
             .expect("Program break area should be valid");
-        program_break.grow(pos - current_break);
 
+        self.grow(program_break, pos - current_break);
         self.break_pos = Some(pos);
         pos
     }
@@ -238,9 +257,6 @@ impl MMList {
         })
     }
 
-    /// # Safety
-    /// Calling this function on the `MMList` of current process will need invalidating
-    /// the TLB cache after the clone will be done. We might set some of the pages as COW.
     pub fn new_cloned(&self) -> Arc<Self> {
         let inner = self.inner.lock_irq();
 
@@ -267,12 +283,13 @@ impl MMList {
             }
         }
 
+        // We set some pages as COW, so we need to invalidate TLB.
+        inner.page_table.lazy_invalidate_tlb_all();
+
         list
     }
 
-    /// # Safety
-    /// Calling this function on the `MMList` of current process will need invalidating
-    /// the TLB cache after the clone will be done. We might remove some mappings.
+    /// No need to do invalidation manually, `PageTable` already does it.
     pub fn clear_user(&self) {
         self.inner.lock_irq().clear_user()
     }
@@ -294,6 +311,12 @@ impl MMList {
         permission: Permission,
     ) -> KResult<VAddr> {
         let mut inner = self.inner.lock_irq();
+        if hint == VAddr::NULL {
+            let at = inner.find_available(hint, len).ok_or(ENOMEM)?;
+            inner.mmap(at, len, mapping, permission)?;
+            return Ok(at);
+        }
+
         match inner.mmap(hint, len, mapping.clone(), permission) {
             Ok(()) => Ok(hint),
             Err(EEXIST) => {
@@ -320,21 +343,10 @@ impl MMList {
         self.inner.lock_irq().set_break(pos)
     }
 
+    /// This should be called only **once** for every thread.
     pub fn register_break(&self, start: VAddr) {
         let mut inner = self.inner.lock_irq();
         assert!(inner.break_start.is_none() && inner.break_pos.is_none());
-
-        inner
-            .mmap(
-                start,
-                0,
-                Mapping::Anonymous,
-                Permission {
-                    write: true,
-                    execute: false,
-                },
-            )
-            .expect("Probably, we have a bug in the ELF loader?");
 
         inner.break_start = Some(start.into());
         inner.break_pos = Some(start);

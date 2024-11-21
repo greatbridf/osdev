@@ -1,3 +1,5 @@
+use core::arch::global_asm;
+
 use alloc::borrow::ToOwned;
 use alloc::ffi::CString;
 use bindings::{interrupt_stack, mmx_registers, EINVAL, ENOENT, ENOTDIR, ESRCH};
@@ -14,6 +16,7 @@ use crate::kernel::user::dataflow::UserString;
 use crate::kernel::user::{UserPointer, UserPointerMut};
 use crate::kernel::vfs::dentry::Dentry;
 use crate::path::Path;
+use crate::sync::preempt;
 use crate::{kernel::user::dataflow::UserBuffer, prelude::*};
 
 use crate::kernel::vfs::{self, FsContext};
@@ -189,6 +192,14 @@ fn do_waitpid(waitpid: u32, arg1: *mut u32, options: u32) -> KResult<u32> {
     }
 }
 
+fn do_wait4(waitpid: u32, arg1: *mut u32, options: u32, rusage: *mut ()) -> KResult<u32> {
+    if rusage.is_null() {
+        do_waitpid(waitpid, arg1, options)
+    } else {
+        unimplemented!("wait4 with rusage")
+    }
+}
+
 fn do_setsid() -> KResult<u32> {
     Thread::current().process.setsid()
 }
@@ -333,7 +344,7 @@ fn do_rt_sigprocmask(how: u32, set: *mut u64, oldset: *mut u64, sigsetsize: usiz
         UserPointerMut::new(oldset)?.write(old_mask)?;
     }
 
-    let new_mask = !if set.is_null() {
+    let new_mask = if !set.is_null() {
         UserPointer::new(set)?.read()?
     } else {
         return Ok(());
@@ -366,10 +377,10 @@ fn do_rt_sigaction(
     }
 
     if !act.is_null() {
-        let new_action = UserPointer::new(act as *mut _)?.read()?;
+        let new_action = UserPointer::new(act)?.read()?;
         Thread::current()
             .signal_list
-            .set_handler(signal, new_action)?;
+            .set_handler(signal, &new_action)?;
     }
 
     Ok(())
@@ -380,6 +391,7 @@ define_syscall32!(sys_umask, do_umask, mask: u32);
 define_syscall32!(sys_getcwd, do_getcwd, buffer: *mut u8, bufsize: usize);
 define_syscall32!(sys_exit, do_exit, status: u32);
 define_syscall32!(sys_waitpid, do_waitpid, waitpid: u32, arg1: *mut u32, options: u32);
+define_syscall32!(sys_wait4, do_wait4, waitpid: u32, arg1: *mut u32, options: u32, rusage: *mut ());
 define_syscall32!(sys_setsid, do_setsid);
 define_syscall32!(sys_setpgid, do_setpgid, pid: u32, pgid: i32);
 define_syscall32!(sys_getsid, do_getsid, pid: u32);
@@ -405,7 +417,26 @@ define_syscall32!(sys_rt_sigaction, do_rt_sigaction,
 
 extern "C" {
     fn ISR_stub_restore();
+    fn new_process_return();
 }
+
+unsafe extern "C" fn real_new_process_return() {
+    // We don't land on the typical `Scheduler::schedule()` function, so we need to
+    // manually enable preemption.
+    preempt::enable();
+}
+
+global_asm!(
+    r"
+        .globl new_process_return
+        new_process_return:
+            call {0}
+            jmp {1}
+    ",
+    sym real_new_process_return,
+    sym ISR_stub_restore,
+    options(att_syntax),
+);
 
 fn sys_fork(int_stack: &mut interrupt_stack, mmxregs: &mut mmx_registers) -> usize {
     let new_thread = Thread::new_cloned(Thread::current());
@@ -418,7 +449,7 @@ fn sys_fork(int_stack: &mut interrupt_stack, mmxregs: &mut mmx_registers) -> usi
 
         // We make the child process return to `ISR_stub_restore`, pretending that we've
         // just returned from a interrupt handler.
-        writer.entry = ISR_stub_restore;
+        writer.entry = new_process_return;
 
         let mut new_int_stack = int_stack.clone();
 
@@ -456,6 +487,7 @@ pub(super) fn register() {
     register_syscall!(0x3c, umask);
     register_syscall!(0x40, getppid);
     register_syscall!(0x42, setsid);
+    register_syscall!(0x72, wait4);
     register_syscall!(0x84, getpgid);
     register_syscall!(0x93, getsid);
     register_syscall!(0xac, prctl);

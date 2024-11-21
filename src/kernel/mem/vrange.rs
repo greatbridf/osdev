@@ -16,6 +16,8 @@ pub struct VRange {
 const USER_SPACE_MEMORY_TOP: VAddr = VAddr(0x8000_0000_0000);
 
 impl VAddr {
+    pub const NULL: Self = Self(0);
+
     pub fn floor(&self) -> Self {
         VAddr(self.0 & !0xfff)
     }

@@ -19,6 +19,7 @@ pub const CLOCK_MONOTONIC: u32 = 1;
 pub const ENOEXEC: u32 = 8;
 
 bitflags! {
+    #[derive(Debug, Clone, Copy)]
     pub struct UserMmapFlags: u32 {
         const MAP_SHARED = 0x01;
         const MAP_PRIVATE = 0x02;
@@ -26,6 +27,7 @@ bitflags! {
         const MAP_ANONYMOUS = 0x20;
     }
 
+    #[derive(Debug, Clone, Copy)]
     pub struct UserMmapProtocol: u32 {
         const PROT_READ = 0x01;
         const PROT_WRITE = 0x02;

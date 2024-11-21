@@ -1,6 +1,6 @@
 use core::sync::atomic::{compiler_fence, Ordering};
 
-use crate::prelude::*;
+use crate::{prelude::*, sync::preempt};
 
 use alloc::{
     collections::vec_deque::VecDeque,
@@ -65,6 +65,7 @@ impl Scheduler {
             writer.entry = idle_task;
             writer.finish();
         });
+        // We don't wake the idle thread to prevent from accidentally being scheduled there.
 
         // TODO!!!: Set per cpu variable.
         unsafe { IDLE_TASK = Some(thread) };
@@ -144,7 +145,8 @@ impl Scheduler {
 }
 
 impl Scheduler {
-    /// Go to idle task. Call this with `preempt_count == 1`
+    /// Go to idle task. Call this with `preempt_count == 1`.
+    /// The preempt count will be decremented by this function.
     ///
     /// # Safety
     /// We might never return from here.
@@ -160,9 +162,12 @@ impl Scheduler {
         // Since we might never return to here, we can't take ownership of `current()`.
         // Is it safe to believe that `current()` will never change across calls?
         context_switch_light(Thread::current(), Scheduler::idle_task());
+        preempt::enable();
     }
 
     pub fn schedule_noreturn() -> ! {
+        println_debug!("Scheduler::schedule_noreturn()");
+        preempt::disable();
         Self::schedule();
         panic!("Scheduler::schedule_noreturn(): Should never return")
     }

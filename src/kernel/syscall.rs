@@ -94,17 +94,44 @@ macro_rules! arg_register {
     };
 }
 
+macro_rules! format_expand {
+    ($name:ident, $arg:tt) => {
+        format_args!("{}: {:x?}", stringify!($name), $arg)
+    };
+    ($name1:ident, $arg1:tt, $($name:ident, $arg:tt),*) => {
+        format_args!("{}: {:x?}, {}", stringify!($name1), $arg1, format_expand!($($name, $arg),*))
+    }
+}
+
 macro_rules! syscall32_call {
     ($is:ident, $handler:ident, $($arg:ident: $type:ty),*) => {{
         use $crate::kernel::syscall::{MapArgument, MapArgumentImpl, arg_register};
-        use $crate::kernel::syscall::{MapReturnValue};
+        use $crate::kernel::syscall::{MapReturnValue, format_expand};
+        use $crate::{kernel::task::Thread, println_info};
 
         $(
             let $arg: $type =
                 MapArgumentImpl::map_arg(arg_register!(${index()}, $is));
         )*
 
-        match $handler($($arg),*) {
+        println_info!(
+            "tid{}: {}({}) => {{",
+            Thread::current().tid,
+            stringify!($handler),
+            format_expand!($($arg, $arg),*),
+        );
+
+        let result = $handler($($arg),*);
+
+        println_info!(
+            "tid{}: {}({}) => }} = {:x?}",
+            Thread::current().tid,
+            stringify!($handler),
+            format_expand!($($arg, $arg),*),
+            result
+        );
+
+        match result {
             Ok(val) => MapReturnValue::map_ret(val),
             Err(err) => (-(err as i32)) as usize,
         }
@@ -146,7 +173,7 @@ macro_rules! register_syscall {
 
 use super::task::Thread;
 
-pub(self) use {arg_register, define_syscall32, register_syscall, syscall32_call};
+pub(self) use {arg_register, define_syscall32, format_expand, register_syscall, syscall32_call};
 
 pub(self) struct SyscallHandler {
     handler: fn(&mut interrupt_stack, &mut mmx_registers) -> usize,
@@ -185,7 +212,7 @@ pub fn handle_syscall32(no: usize, int_stack: &mut interrupt_stack, mmxregs: &mu
 
     match syscall {
         None => {
-            println_warn!("Syscall {no}({no:#x}) isn't implemented");
+            println_warn!("Syscall {no}({no:#x}) isn't implemented.");
             ProcessList::kill_current(Signal::SIGSYS);
         }
         Some(handler) => {

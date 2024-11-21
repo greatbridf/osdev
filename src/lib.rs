@@ -29,7 +29,7 @@ use kernel::{
         paging::Page,
         phys::{CachedPP, PhysPtr as _},
     },
-    task::{init_multitasking, Thread},
+    task::{init_multitasking, Scheduler, Thread},
     vfs::{
         dentry::Dentry,
         mount::{do_mount, MS_NOATIME, MS_NODEV, MS_NOSUID, MS_RDONLY},
@@ -39,6 +39,7 @@ use kernel::{
 };
 use path::Path;
 use prelude::*;
+use sync::preempt;
 
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
@@ -132,15 +133,22 @@ pub extern "C" fn rust_kinit(early_kstack_pfn: usize) -> ! {
         writer.finish();
     });
 
+    // To satisfy the `Scheduler` "preempt count == 0" assertion.
+    preempt::disable();
+
+    Scheduler::get().lock().uwake(Thread::current());
+
     arch::task::context_switch_light(
         CachedPP::new(early_kstack_pfn).as_ptr(), // We will never come back
-        unsafe { Thread::current().get_sp_ptr() },
+        unsafe { Scheduler::idle_task().get_sp_ptr() },
     );
     arch::task::freeze()
 }
 
+/// We enter this function with `preempt count == 0`
 extern "C" fn init_process(early_kstack_pfn: usize) {
     unsafe { Page::take_pfn(early_kstack_pfn, 9) };
+    preempt::enable();
 
     kernel::timer::init().unwrap();
 
@@ -195,6 +203,8 @@ extern "C" fn init_process(early_kstack_pfn: usize) {
         elf.load(&Thread::current().process.mm_list, argv, envp)
             .unwrap()
     };
+
+    Thread::current().files.open_console();
 
     unsafe {
         asm!(

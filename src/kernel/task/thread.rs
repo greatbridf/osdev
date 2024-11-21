@@ -375,6 +375,12 @@ impl ProcessList {
     }
 
     pub fn kill_current(signal: Signal) -> ! {
+        println_debug!(
+            "Killing thread {} with signal {:?}",
+            Thread::current().tid,
+            signal,
+        );
+
         ProcessList::get().do_kill_process(
             &Thread::current().process,
             ((signal.to_signum() + 128) << 8) | (signal.to_signum() & 0xff),
@@ -463,15 +469,15 @@ impl ProcessList {
         }
 
         {
-            let parent = process.parent().unwrap();
             {
-                let mut parent_waits = parent.wait_list.wait_procs.lock();
+                let parent_wait_list = &inner.parent.as_ref().unwrap().wait_list;
+                let mut parent_waits = parent_wait_list.wait_procs.lock();
                 parent_waits.push_back(WaitObject {
                     pid: process.pid,
                     code: status,
                 });
+                parent_wait_list.cv_wait_procs.notify_all();
             }
-            parent.wait_list.cv_wait_procs.notify_all();
         }
 
         preempt::enable();

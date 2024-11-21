@@ -3,7 +3,7 @@
 BUSYBOX=/mnt/busybox
 
 freeze() {
-    echo "an error occurred while executing '''$@''', freezing..." > /dev/console
+    echo "an error occurred while executing '''$@''', freezing..." >&2
 
     while true; do
         true
@@ -26,14 +26,14 @@ do_or_freeze $BUSYBOX mknod -m 666 /dev/zero c 1 5
 do_or_freeze $BUSYBOX mknod -m 666 /dev/sda b 8 0
 do_or_freeze $BUSYBOX mknod -m 666 /dev/sda1 b 8 1
 
-echo -n -e "deploying busybox... " > /dev/console
+echo -n -e "deploying busybox... " >&2
 
 do_or_freeze $BUSYBOX mkdir -p /bin
 do_or_freeze $BUSYBOX --install -s /bin
 
 export PATH="/bin"
 
-echo ok > /dev/console
+echo ok >&2
 
 do_or_freeze mkdir -p /etc /root /proc
 do_or_freeze mount -t procfs proc proc

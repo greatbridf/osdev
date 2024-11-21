@@ -31,7 +31,7 @@ pub struct UserPointer<'a, T: Copy, const CONST: bool> {
 }
 
 impl<'a, T: Copy, const CONST: bool> UserPointer<'a, T, CONST> {
-    pub fn new(ptr: *mut T) -> KResult<Self> {
+    pub fn new(ptr: *const T) -> KResult<Self> {
         let pointer = CheckedUserPointer::new(ptr as *const u8, core::mem::size_of::<T>())?;
 
         Ok(Self {

@@ -42,7 +42,13 @@ clean-all: clean
 
 .PHONY: debug
 debug:
-	-$(GDB_BIN) --symbols=build/kernel.out --init-eval-command 'source pretty-print.py' --init-eval-command 'set pagination off' --init-eval-command 'set output-radix 16' --init-eval-command 'set print pretty on' --init-eval-command 'target remote:1234'
+	-$(GDB_BIN) --symbols=build/kernel.out \
+		-iex 'source pretty-print.py' \
+		-iex 'set pagination off' \
+		-iex 'set output-radix 16' \
+		-iex 'set print asm-demangle on' \
+		-iex 'set print pretty on' \
+		-iex 'target remote:1234'
 	-killall $(QEMU_BIN)
 
 build/boot.vdi: build/boot.img

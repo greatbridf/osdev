@@ -252,6 +252,12 @@ impl PageTable {
         }
     }
 
+    pub fn lazy_invalidate_tlb_all(&self) {
+        if self.page.as_phys() == arch::vm::current_page_table() {
+            arch::vm::invlpg_all();
+        }
+    }
+
     pub fn set_mmapped(&self, range: VRange, permission: Permission) {
         // PA_RW is set during page fault handling.
         // PA_NXE is preserved across page faults, so we set PA_NXE now.

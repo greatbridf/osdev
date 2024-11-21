@@ -239,6 +239,29 @@ impl FileArray {
             _ => unimplemented!("fcntl: cmd={}", cmd),
         }
     }
+
+    pub fn open_console(&self) -> KResult<()> {
+        let mut inner = self.inner.lock();
+        let (stdin, stdout, stderr) = (inner.next_fd(), inner.next_fd(), inner.next_fd());
+
+        inner.do_insert(
+            stdin,
+            O_CLOEXEC as u64,
+            TerminalFile::new(CONSOLE.lock_irq().get_terminal().unwrap()),
+        );
+        inner.do_insert(
+            stdout,
+            O_CLOEXEC as u64,
+            TerminalFile::new(CONSOLE.lock_irq().get_terminal().unwrap()),
+        );
+        inner.do_insert(
+            stderr,
+            O_CLOEXEC as u64,
+            TerminalFile::new(CONSOLE.lock_irq().get_terminal().unwrap()),
+        );
+
+        Ok(())
+    }
 }
 
 impl FileArrayInner {

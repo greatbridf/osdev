@@ -2,7 +2,7 @@ use alloc::{
     collections::vec_deque::VecDeque,
     sync::{Arc, Weak},
 };
-use bindings::{EINTR, ENOTTY};
+use bindings::{EINTR, ENOTTY, EPERM};
 use bitflags::bitflags;
 
 use crate::{io::Buffer, prelude::*, sync::CondVar};
@@ -587,8 +587,7 @@ impl Terminal {
     pub fn ioctl(&self, request: TerminalIORequest) -> KResult<()> {
         match request {
             TerminalIORequest::GetProcessGroup(pgid_pointer) => {
-                let inner = self.inner.lock();
-                let session = inner.session.upgrade();
+                let session = self.inner.lock().session.upgrade();
                 let pgid = session.map(|session| session.foreground_pgid()).flatten();
 
                 if let Some(pgid) = pgid {
@@ -639,5 +638,31 @@ impl Terminal {
                 Ok(())
             }
         }
+    }
+
+    /// Assign the `session` to this terminal. Drop the previous session if `forced` is true.
+    pub fn set_session(&self, session: &Arc<Session>, forced: bool) -> KResult<()> {
+        let mut inner = self.inner.lock();
+        if let Some(session) = inner.session.upgrade() {
+            if !forced {
+                Err(EPERM)
+            } else {
+                session.drop_control_terminal();
+                inner.session = Arc::downgrade(&session);
+                Ok(())
+            }
+        } else {
+            // Sessions should set their `control_terminal` field.
+            inner.session = Arc::downgrade(&session);
+            Ok(())
+        }
+    }
+
+    pub fn drop_session(&self) {
+        self.inner.lock().session = Weak::new();
+    }
+
+    pub fn session(&self) -> Option<Arc<Session>> {
+        self.inner.lock().session.upgrade()
     }
 }

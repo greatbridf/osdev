@@ -199,15 +199,10 @@ impl FileArray {
         let mut inner = self.inner.lock();
         let fd = inner.next_fd();
 
-        if s_ischr(filemode) && inode.devid()? == 0x0501 {
-            // TODO!!!: Get terminal from char device.
-            inner.do_insert(
-                fd,
-                fdflag as u64,
-                TerminalFile::new(CONSOLE.lock_irq().get_terminal().unwrap()),
-            );
-
+        if s_ischr(filemode) {
             let device = CharDevice::get(inode.devid()?).ok_or(ENXIO)?;
+            let file = device.open()?;
+            inner.do_insert(fd, fdflag as u64, file);
         } else {
             inner.do_insert(
                 fd,
@@ -248,21 +243,22 @@ impl FileArray {
     pub fn open_console(&self) {
         let mut inner = self.inner.lock();
         let (stdin, stdout, stderr) = (inner.next_fd(), inner.next_fd(), inner.next_fd());
+        let console_terminal = CONSOLE.lock_irq().get_terminal().unwrap();
 
         inner.do_insert(
             stdin,
             O_CLOEXEC as u64,
-            TerminalFile::new(CONSOLE.lock_irq().get_terminal().unwrap()),
+            TerminalFile::new(console_terminal.clone()),
         );
         inner.do_insert(
             stdout,
             O_CLOEXEC as u64,
-            TerminalFile::new(CONSOLE.lock_irq().get_terminal().unwrap()),
+            TerminalFile::new(console_terminal.clone()),
         );
         inner.do_insert(
             stderr,
             O_CLOEXEC as u64,
-            TerminalFile::new(CONSOLE.lock_irq().get_terminal().unwrap()),
+            TerminalFile::new(console_terminal.clone()),
         );
     }
 }

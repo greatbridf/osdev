@@ -259,6 +259,36 @@ impl Session {
         }
     }
 
+    /// Only session leaders can set the control terminal.
+    /// Make sure we've checked that before calling this function.
+    pub fn set_control_terminal(
+        self: &Arc<Self>,
+        terminal: &Arc<Terminal>,
+        forced: bool,
+    ) -> KResult<()> {
+        let mut inner = self.inner.lock();
+        if let Some(_) = inner.control_terminal.as_ref() {
+            if let Some(session) = terminal.session().as_ref() {
+                if session.sid == self.sid {
+                    return Ok(());
+                }
+            }
+            return Err(EPERM);
+        }
+        terminal.set_session(self, forced)?;
+        inner.control_terminal = Some(terminal.clone());
+        inner.foreground = Arc::downgrade(&Thread::current().process.pgroup());
+        Ok(())
+    }
+
+    /// Drop the control terminal reference inside the session.
+    /// DO NOT TOUCH THE TERMINAL'S SESSION FIELD.
+    pub fn drop_control_terminal(&self) -> Option<Arc<Terminal>> {
+        let mut inner = self.inner.lock();
+        inner.foreground = Weak::new();
+        inner.control_terminal.take()
+    }
+
     pub fn raise_foreground(&self, signal: Signal) {
         if let Some(fg) = self.inner.lock().foreground.upgrade() {
             fg.raise(signal);
@@ -423,6 +453,13 @@ impl ProcessList {
             thread.files.close_all();
         }
 
+        // If we are the session leader, we should drop the control terminal.
+        if inner.session.sid == process.pid {
+            if let Some(terminal) = inner.session.drop_control_terminal() {
+                terminal.drop_session();
+            }
+        }
+
         // Unmap all user memory areas
         process.mm_list.clear_user();
 
@@ -463,15 +500,13 @@ impl ProcessList {
         }
 
         {
-            {
-                let parent_wait_list = &inner.parent.as_ref().unwrap().wait_list;
-                let mut parent_waits = parent_wait_list.wait_procs.lock();
-                parent_waits.push_back(WaitObject {
-                    pid: process.pid,
-                    code: status,
-                });
-                parent_wait_list.cv_wait_procs.notify_all();
-            }
+            let parent_wait_list = &inner.parent.as_ref().unwrap().wait_list;
+            let mut parent_waits = parent_wait_list.wait_procs.lock();
+            parent_waits.push_back(WaitObject {
+                pid: process.pid,
+                code: status,
+            });
+            parent_wait_list.cv_wait_procs.notify_all();
         }
 
         preempt::enable();
@@ -671,9 +706,6 @@ impl Process {
             if pgid != self.pid {
                 return Err(EPERM);
             }
-
-            inner.session = Session::new(self.pid, Arc::downgrade(self));
-            ProcessList::get().add_session(&inner.session);
 
             inner.pgroup.remove_member(self.pid);
             inner.pgroup = ProcessGroup::new(self, &inner.session);

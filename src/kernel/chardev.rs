@@ -9,6 +9,7 @@ use crate::{io::Buffer, kernel::console::CONSOLE, prelude::*};
 
 use super::{
     block::make_device,
+    task::Thread,
     terminal::Terminal,
     vfs::{
         file::{File, TerminalFile},
@@ -74,7 +75,16 @@ impl CharDevice {
 
     pub fn open(self: &Arc<Self>) -> KResult<Arc<File>> {
         Ok(match &self.device {
-            CharDeviceType::Terminal(terminal) => TerminalFile::new(terminal.clone()),
+            CharDeviceType::Terminal(terminal) => {
+                // We only set the control terminal if the process is the session leader.
+                if Thread::current().process.sid() == Thread::current().process.pid {
+                    let session = Thread::current().process.session();
+                    // Silently fail if we can't set the control terminal.
+                    dont_check!(session.set_control_terminal(&terminal, false));
+                }
+
+                TerminalFile::new(terminal.clone())
+            }
             CharDeviceType::Virtual(_) => Arc::new(File::CharDev(self.clone())),
         })
     }
@@ -107,22 +117,16 @@ impl VirtualCharDevice for ZeroDevice {
 struct ConsoleDevice;
 impl VirtualCharDevice for ConsoleDevice {
     fn read(&self, buffer: &mut dyn Buffer) -> KResult<usize> {
-        match CONSOLE.lock_irq().get_terminal() {
-            Some(console) => console.read(buffer),
-            None => Err(EIO),
-        }
+        let console_terminal = CONSOLE.lock_irq().get_terminal().ok_or(EIO)?;
+        console_terminal.read(buffer)
     }
 
     fn write(&self, data: &[u8]) -> KResult<usize> {
-        match CONSOLE.lock_irq().get_terminal() {
-            None => Err(EIO),
-            Some(console) => {
-                for &ch in data.iter() {
-                    console.show_char(ch);
-                }
-                Ok(data.len())
-            }
+        let console_terminal = CONSOLE.lock_irq().get_terminal().ok_or(EIO)?;
+        for &ch in data.iter() {
+            console_terminal.show_char(ch);
         }
+        Ok(data.len())
     }
 }
 

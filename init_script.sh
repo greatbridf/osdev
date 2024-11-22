@@ -25,6 +25,8 @@ do_or_freeze $BUSYBOX mknod -m 666 /dev/null c 1 3
 do_or_freeze $BUSYBOX mknod -m 666 /dev/zero c 1 5
 do_or_freeze $BUSYBOX mknod -m 666 /dev/sda b 8 0
 do_or_freeze $BUSYBOX mknod -m 666 /dev/sda1 b 8 1
+do_or_freeze $BUSYBOX mknod -m 666 /dev/ttyS0 c 4 64
+do_or_freeze $BUSYBOX mknod -m 666 /dev/ttyS1 c 4 65
 
 echo -n -e "deploying busybox... " >&2
 
@@ -57,5 +59,4 @@ alias ll="ls -l "
 alias la="ls -la "
 EOF
 
-exec /mnt/init /bin/sh -l \
-    < /dev/console > /dev/console 2> /dev/console
+exec /mnt/init /bin/sh -c 'exec sh -l < /dev/ttyS0 > /dev/ttyS0 2> /dev/ttyS0'

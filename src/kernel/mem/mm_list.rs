@@ -35,7 +35,6 @@ pub enum Mapping {
 #[derive(Debug)]
 struct MMListInner {
     areas: BTreeSet<MMArea>,
-    page_table: PageTable,
     break_start: Option<VRange>,
     break_pos: Option<VAddr>,
 }
@@ -45,6 +44,8 @@ pub struct MMList {
     /// # Safety
     /// This field might be used in IRQ context, so it should be locked with `lock_irq()`.
     inner: Mutex<MMListInner>,
+    /// Do not modify entries in the page table without acquiring the `inner` lock.
+    page_table: PageTable,
 }
 
 impl FileMapping {
@@ -71,15 +72,6 @@ impl FileMapping {
 }
 
 impl MMListInner {
-    fn clear_user(&mut self) {
-        self.areas.retain(|area| {
-            self.page_table.unmap(area);
-            false
-        });
-        self.break_start = None;
-        self.break_pos = None;
-    }
-
     fn overlapping_addr(&self, addr: VAddr) -> Option<&MMArea> {
         self.areas.get(&VRange::from(addr))
     }
@@ -118,7 +110,7 @@ impl MMListInner {
         }
     }
 
-    fn unmap(&mut self, start: VAddr, len: usize) -> KResult<()> {
+    fn unmap(&mut self, page_table: &PageTable, start: VAddr, len: usize) -> KResult<()> {
         assert_eq!(start.floor(), start);
         let end = (start + len).ceil();
         let range = VRange::new(start, end);
@@ -136,7 +128,7 @@ impl MMListInner {
             }
             if area.range() == range.start().into() {
                 let (left, right) = area.clone().split(range.start());
-                self.page_table.unmap(&right.unwrap());
+                page_table.unmap(&right.unwrap());
 
                 if let Some(left) = left {
                     assert!(
@@ -146,7 +138,7 @@ impl MMListInner {
                 }
             } else if area.range() == range.end().into() {
                 let (left, right) = area.clone().split(range.end());
-                self.page_table.unmap(&left.unwrap());
+                page_table.unmap(&left.unwrap());
 
                 assert!(
                     back_remaining
@@ -155,7 +147,7 @@ impl MMListInner {
                     "There should be only one `back`."
                 );
             } else {
-                self.page_table.unmap(area);
+                page_table.unmap(area);
             }
 
             false
@@ -173,6 +165,7 @@ impl MMListInner {
 
     fn mmap(
         &mut self,
+        page_table: &PageTable,
         at: VAddr,
         len: usize,
         mapping: Mapping,
@@ -188,60 +181,12 @@ impl MMListInner {
         }
 
         match &mapping {
-            Mapping::Anonymous => self.page_table.set_anonymous(range, permission),
-            Mapping::File(_) => self.page_table.set_mmapped(range, permission),
+            Mapping::Anonymous => page_table.set_anonymous(range, permission),
+            Mapping::File(_) => page_table.set_mmapped(range, permission),
         }
 
         self.areas.insert(MMArea::new(range, mapping, permission));
         Ok(())
-    }
-
-    fn grow(&self, area: &MMArea, len: usize) {
-        self.page_table.set_anonymous(
-            VRange::from(area.range().end()).grow(len),
-            Permission {
-                write: true,
-                execute: false,
-            },
-        );
-
-        area.grow(len);
-    }
-
-    fn set_break(&mut self, pos: Option<VAddr>) -> VAddr {
-        // SAFETY: `set_break` is only called in syscalls, where program break should be valid.
-        assert!(self.break_start.is_some() && self.break_pos.is_some());
-        let break_start = self.break_start.unwrap();
-        let current_break = self.break_pos.unwrap();
-        let pos = match pos {
-            None => return current_break,
-            Some(pos) => pos.ceil(),
-        };
-
-        let range = VRange::new(current_break, pos);
-        if !self.check_overlapping_range(range) {
-            return current_break;
-        }
-
-        if !self.areas.contains(&break_start) {
-            self.areas.insert(MMArea::new(
-                break_start,
-                Mapping::Anonymous,
-                Permission {
-                    write: true,
-                    execute: false,
-                },
-            ));
-        }
-
-        let program_break = self
-            .areas
-            .get(&break_start)
-            .expect("Program break area should be valid");
-
-        self.grow(program_break, pos - current_break);
-        self.break_pos = Some(pos);
-        pos
     }
 }
 
@@ -250,10 +195,10 @@ impl MMList {
         Arc::new(Self {
             inner: Mutex::new(MMListInner {
                 areas: BTreeSet::new(),
-                page_table: PageTable::new(),
                 break_start: None,
                 break_pos: None,
             }),
+            page_table: PageTable::new(),
         })
     }
 
@@ -263,10 +208,10 @@ impl MMList {
         let list = Arc::new(Self {
             inner: Mutex::new(MMListInner {
                 areas: inner.areas.clone(),
-                page_table: PageTable::new(),
                 break_start: inner.break_start,
                 break_pos: inner.break_pos,
             }),
+            page_table: PageTable::new(),
         });
 
         // SAFETY: `self.inner` already locked with IRQ disabled.
@@ -274,8 +219,8 @@ impl MMList {
             let list_inner = list.inner.lock();
 
             for area in list_inner.areas.iter() {
-                let new_iter = list_inner.page_table.iter_user(area.range()).unwrap();
-                let old_iter = inner.page_table.iter_user(area.range()).unwrap();
+                let new_iter = list.page_table.iter_user(area.range()).unwrap();
+                let old_iter = self.page_table.iter_user(area.range()).unwrap();
 
                 for (new, old) in new_iter.zip(old_iter) {
                     new.setup_cow(old);
@@ -284,23 +229,29 @@ impl MMList {
         }
 
         // We set some pages as COW, so we need to invalidate TLB.
-        inner.page_table.lazy_invalidate_tlb_all();
+        self.page_table.lazy_invalidate_tlb_all();
 
         list
     }
 
     /// No need to do invalidation manually, `PageTable` already does it.
     pub fn clear_user(&self) {
-        self.inner.lock_irq().clear_user()
+        let mut inner = self.inner.lock_irq();
+        inner.areas.retain(|area| {
+            self.page_table.unmap(area);
+            false
+        });
+        inner.break_start = None;
+        inner.break_pos = None;
     }
 
     pub fn switch_page_table(&self) {
-        self.inner.lock_irq().page_table.switch();
+        self.page_table.switch();
     }
 
     /// No need to do invalidation manually, `PageTable` already does it.
     pub fn unmap(&self, start: VAddr, len: usize) -> KResult<()> {
-        self.inner.lock_irq().unmap(start, len)
+        self.inner.lock_irq().unmap(&self.page_table, start, len)
     }
 
     pub fn mmap_hint(
@@ -313,15 +264,15 @@ impl MMList {
         let mut inner = self.inner.lock_irq();
         if hint == VAddr::NULL {
             let at = inner.find_available(hint, len).ok_or(ENOMEM)?;
-            inner.mmap(at, len, mapping, permission)?;
+            inner.mmap(&self.page_table, at, len, mapping, permission)?;
             return Ok(at);
         }
 
-        match inner.mmap(hint, len, mapping.clone(), permission) {
+        match inner.mmap(&self.page_table, hint, len, mapping.clone(), permission) {
             Ok(()) => Ok(hint),
             Err(EEXIST) => {
                 let at = inner.find_available(hint, len).ok_or(ENOMEM)?;
-                inner.mmap(at, len, mapping, permission)?;
+                inner.mmap(&self.page_table, at, len, mapping, permission)?;
                 Ok(at)
             }
             Err(err) => Err(err),
@@ -335,12 +286,58 @@ impl MMList {
         mapping: Mapping,
         permission: Permission,
     ) -> KResult<VAddr> {
-        let mut inner = self.inner.lock_irq();
-        inner.mmap(at, len, mapping.clone(), permission).map(|_| at)
+        self.inner
+            .lock_irq()
+            .mmap(&self.page_table, at, len, mapping.clone(), permission)
+            .map(|_| at)
     }
 
     pub fn set_break(&self, pos: Option<VAddr>) -> VAddr {
-        self.inner.lock_irq().set_break(pos)
+        let mut inner = self.inner.lock_irq();
+
+        // SAFETY: `set_break` is only called in syscalls, where program break should be valid.
+        assert!(inner.break_start.is_some() && inner.break_pos.is_some());
+        let break_start = inner.break_start.unwrap();
+        let current_break = inner.break_pos.unwrap();
+        let pos = match pos {
+            None => return current_break,
+            Some(pos) => pos.ceil(),
+        };
+
+        let range = VRange::new(current_break, pos);
+        if !inner.check_overlapping_range(range) {
+            return current_break;
+        }
+
+        if !inner.areas.contains(&break_start) {
+            inner.areas.insert(MMArea::new(
+                break_start,
+                Mapping::Anonymous,
+                Permission {
+                    write: true,
+                    execute: false,
+                },
+            ));
+        }
+
+        let program_break = inner
+            .areas
+            .get(&break_start)
+            .expect("Program break area should be valid");
+
+        let len = pos - current_break;
+        self.page_table.set_anonymous(
+            VRange::from(program_break.range().end()).grow(len),
+            Permission {
+                write: true,
+                execute: false,
+            },
+        );
+
+        program_break.grow(len);
+
+        inner.break_pos = Some(pos);
+        pos
     }
 
     /// This should be called only **once** for every thread.

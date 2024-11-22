@@ -33,7 +33,7 @@ use super::{
     KernelStack, Scheduler,
 };
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ThreadState {
     Preparing,
     Running,

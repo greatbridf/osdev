@@ -30,13 +30,9 @@ fn timer_interrupt() {
     TICKS.fetch_add(1, Ordering::Relaxed);
     if preempt::count() == 0 {
         println_debug!("Timer interrupt reschedule");
-        preempt::disable();
-
         // To make scheduler satisfied.
         preempt::disable();
         Scheduler::schedule();
-
-        preempt::enable();
     }
 }
 

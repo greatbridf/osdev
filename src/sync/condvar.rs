@@ -85,5 +85,9 @@ impl<const I: bool> CondVar<I> {
         unsafe { guard.force_unlock() };
         Scheduler::schedule();
         unsafe { guard.force_relock() };
+
+        self.waiters
+            .lock_irq()
+            .retain(|waiter| waiter != Thread::current());
     }
 }

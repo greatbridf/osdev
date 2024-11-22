@@ -62,7 +62,7 @@ impl MMList {
             }
         }
 
-        let pte = inner
+        let pte = self
             .page_table
             .iter_user(VRange::new(addr.floor(), addr.floor() + 0x1000))
             .unwrap()
@@ -196,7 +196,11 @@ pub fn handle_page_fault(int_stack: &mut interrupt_stack) {
         .handle_page_fault(int_stack, vaddr, error);
 
     if let Err(signal) = result {
-        println_debug!("Page fault on {:#x} in user space at {:#x}", vaddr.0, int_stack.v_rip);
+        println_debug!(
+            "Page fault on {:#x} in user space at {:#x}",
+            vaddr.0,
+            int_stack.v_rip
+        );
         ProcessList::kill_current(signal)
     }
 }

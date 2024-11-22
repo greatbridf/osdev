@@ -82,7 +82,7 @@ impl Scheduler {
 
     pub fn usleep(&mut self, thread: &Arc<Thread>) {
         let mut state = thread.state.lock();
-        assert!(matches!(*state, ThreadState::Running));
+        assert_eq!(*state, ThreadState::Running);
         // No need to dequeue. We have proved that the thread is running so not in the queue.
 
         *state = ThreadState::USleep;
@@ -90,7 +90,7 @@ impl Scheduler {
 
     pub fn uwake(&mut self, thread: &Arc<Thread>) {
         let mut state = thread.state.lock();
-        assert!(matches!(*state, ThreadState::USleep));
+        assert_eq!(*state, ThreadState::USleep);
 
         *state = ThreadState::Ready;
         self.enqueue(&thread);
@@ -98,7 +98,7 @@ impl Scheduler {
 
     pub fn isleep(&mut self, thread: &Arc<Thread>) {
         let mut state = thread.state.lock();
-        assert!(matches!(*state, ThreadState::Running));
+        assert_eq!(*state, ThreadState::Running);
         // No need to dequeue. We have proved that the thread is running so not in the queue.
 
         *state = ThreadState::ISleep;
@@ -113,14 +113,14 @@ impl Scheduler {
                 *state = ThreadState::Ready;
                 self.enqueue(&thread);
             }
-            _ => panic!(),
+            state => panic!("Invalid transition from state {:?} to `Ready`", state),
         }
     }
 
     /// Put `Running` thread into `Ready` state and enqueue the task.
     pub fn put_ready(&mut self, thread: &Arc<Thread>) {
         let mut state = thread.state.lock();
-        assert!(matches!(*state, ThreadState::Running));
+        assert_eq!(*state, ThreadState::Running);
 
         *state = ThreadState::Ready;
         self.enqueue(&thread);
@@ -129,7 +129,7 @@ impl Scheduler {
     /// Set `Ready` threads to the `Running` state.
     pub fn set_running(&mut self, thread: &Arc<Thread>) {
         let mut state = thread.state.lock();
-        assert!(matches!(*state, ThreadState::Ready));
+        assert_eq!(*state, ThreadState::Ready);
 
         *state = ThreadState::Running;
         // No need to dequeue. We got the thread from the queue.
@@ -138,7 +138,7 @@ impl Scheduler {
     /// Set `Running` threads to the `Zombie` state.
     pub fn set_zombie(&mut self, thread: &Arc<Thread>) {
         let mut state = thread.state.lock();
-        assert!(matches!(*state, ThreadState::Running));
+        assert_eq!(*state, ThreadState::Running);
 
         *state = ThreadState::Zombie;
     }
@@ -181,11 +181,13 @@ fn context_switch_light(from: &Arc<Thread>, to: &Arc<Thread>) {
 /// In this function, we should see `preempt_count == 1`.
 extern "C" fn idle_task() {
     loop {
+        debug_assert_eq!(preempt::count(), 1);
+
         // SAFETY: No need to call `lock_irq`, preempt is already disabled.
         let mut scheduler = Scheduler::get().lock();
         let state = *Thread::current().state.lock();
 
-        // Previous thread is `Running`
+        // Previous thread is `Running`.
         if let ThreadState::Running = state {
             // No other thread to run, return to current running thread without changing its state.
             if scheduler.ready.is_empty() {
@@ -194,7 +196,7 @@ extern "C" fn idle_task() {
                 continue;
             } else {
                 // Put it into `Ready` state
-                scheduler.put_ready(&Thread::current());
+                scheduler.put_ready(Thread::current());
             }
         }
 

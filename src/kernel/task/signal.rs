@@ -69,7 +69,8 @@ struct SignalListInner {
 
 #[derive(Debug, Clone)]
 pub struct SignalList {
-    inner: Mutex<SignalListInner>,
+    /// We might use this inside interrupt handler, so we need to use `lock_irq`.
+    inner: Spin<SignalListInner>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -155,16 +156,13 @@ impl SignalAction {
         self.sa_handler == SIG_DFL
     }
 
-    /// # Return
-    /// `(new_ip, new_sp)`
-    ///
     /// # Might Sleep
     fn handle(
         &self,
         signum: u32,
         int_stack: &mut interrupt_stack,
         mmxregs: &mut mmx_registers,
-    ) -> KResult<(usize, usize)> {
+    ) -> KResult<()> {
         if self.sa_flags & SA_RESTORER as usize == 0 {
             return Err(EINVAL);
         }
@@ -187,7 +185,9 @@ impl SignalAction {
         stack.copy(mmxregs)?.ok_or(EFAULT)?; // MMX registers
         stack.copy(int_stack)?.ok_or(EFAULT)?; // Interrupt stack
 
-        Ok((self.sa_handler, sp))
+        int_stack.v_rip = self.sa_handler;
+        int_stack.rsp = sp;
+        Ok(())
     }
 }
 
@@ -248,7 +248,7 @@ impl SignalListInner {
 impl SignalList {
     pub fn new() -> Self {
         Self {
-            inner: Mutex::new(SignalListInner {
+            inner: Spin::new(SignalListInner {
                 mask: 0,
                 pending: BinaryHeap::new(),
                 handlers: BTreeMap::new(),
@@ -257,19 +257,19 @@ impl SignalList {
     }
 
     pub fn get_mask(&self) -> u64 {
-        self.inner.lock().get_mask()
+        self.inner.lock_irq().get_mask()
     }
 
     pub fn set_mask(&self, mask: u64) {
-        self.inner.lock().set_mask(mask)
+        self.inner.lock_irq().set_mask(mask)
     }
 
     pub fn mask(&self, mask: u64) {
-        self.inner.lock().set_mask(mask)
+        self.inner.lock_irq().set_mask(mask)
     }
 
     pub fn unmask(&self, mask: u64) {
-        self.inner.lock().unmask(mask)
+        self.inner.lock_irq().unmask(mask)
     }
 
     pub fn set_handler(&self, signal: Signal, action: &SignalAction) -> KResult<()> {
@@ -277,7 +277,7 @@ impl SignalList {
             return Err(EINVAL);
         }
 
-        let mut inner = self.inner.lock();
+        let mut inner = self.inner.lock_irq();
         if action.is_default() {
             inner.handlers.remove(&signal);
         } else {
@@ -289,7 +289,7 @@ impl SignalList {
 
     pub fn get_handler(&self, signal: Signal) -> SignalAction {
         self.inner
-            .lock()
+            .lock_irq()
             .handlers
             .get(&signal)
             .cloned()
@@ -300,7 +300,7 @@ impl SignalList {
     /// This is used when `execve` is called.
     pub fn clear_non_ignore(&self) {
         self.inner
-            .lock()
+            .lock_irq()
             .handlers
             .retain(|_, action| action.is_ignore());
     }
@@ -308,87 +308,64 @@ impl SignalList {
     /// Clear all pending signals.
     /// This is used when `fork` is called.
     pub fn clear_pending(&self) {
-        self.inner.lock().pending.clear()
+        self.inner.lock_irq().pending.clear()
     }
 
     pub fn has_pending_signal(&self) -> bool {
-        !self.inner.lock().pending.is_empty()
+        !self.inner.lock_irq().pending.is_empty()
     }
 
     /// Do not use this, use `Thread::raise` instead.
     pub(super) fn raise(&self, signal: Signal) -> RaiseResult {
-        self.inner.lock().raise(signal)
+        self.inner.lock_irq().raise(signal)
     }
 
+    /// Handle signals in the context of `Thread::current()`.
+    ///
     /// # Safety
     /// This function might never return. Caller must make sure that local variables
     /// that own resources are dropped before calling this function.
-    ///
-    /// # Return
-    /// `(new_ip, new_sp)`
-    pub fn handle(
-        &self,
-        int_stack: &mut interrupt_stack,
-        mmxregs: &mut mmx_registers,
-    ) -> Option<(usize, usize)> {
-        let mut inner = self.inner.lock();
-
+    pub fn handle(&self, int_stack: &mut interrupt_stack, mmxregs: &mut mmx_registers) {
         loop {
-            let signal = match self.inner.lock().pop() {
-                Some(signal) => signal,
-                None => return None,
+            let signal = {
+                let mut inner = self.inner.lock_irq();
+                let signal = match inner.pop() {
+                    Some(signal) => signal,
+                    None => return,
+                };
+
+                if let Some(handler) = inner.handlers.get(&signal) {
+                    if !signal.is_now() {
+                        let result = handler.handle(signal.to_signum(), int_stack, mmxregs);
+                        match result {
+                            Err(EFAULT) => inner.raise(Signal::SIGSEGV),
+                            Err(_) => inner.raise(Signal::SIGSYS),
+                            Ok(()) => return,
+                        };
+                        continue;
+                    }
+                }
+
+                // Default actions include stopping the thread, continuing the thread and
+                // terminating the process. All these actions will block the thread or return
+                // to the thread immediately. So we can unmask these signals now.
+                inner.unmask(signal.to_mask());
+                signal
             };
 
-            if signal.is_now() {
-                match signal {
-                    Signal::SIGKILL => terminate_process(signal),
-                    Signal::SIGSTOP => {
-                        Thread::current().do_stop();
-                        inner.unmask(signal.to_mask());
-                    }
-                    _ => unreachable!(),
-                }
-            }
-
-            match inner.handlers.get(&signal) {
-                // Default action
-                None => {
-                    match signal {
-                        s if s.is_continue() => {
-                            Thread::current().do_continue();
-                            inner.unmask(signal.to_mask());
-                            return None;
-                        }
-                        s if s.is_stop() => {
-                            Thread::current().do_stop();
-                            inner.unmask(signal.to_mask());
-                            continue;
-                        }
-                        s if s.is_coredump() => terminate_process_core_dump(signal),
-                        s if !s.is_ignore() => terminate_process(signal),
-                        _ => continue, // Ignore
-                    }
-                }
-                Some(handler) => {
-                    let result = handler.handle(signal.to_signum(), int_stack, mmxregs);
-                    match result {
-                        Err(EFAULT) => inner.raise(Signal::SIGSEGV),
-                        Err(_) => inner.raise(Signal::SIGSYS),
-                        Ok((ip, sp)) => return Some((ip, sp)),
-                    };
-                    continue;
-                }
+            // Default actions.
+            match signal {
+                Signal::SIGSTOP => Thread::current().do_stop(),
+                Signal::SIGCONT => Thread::current().do_continue(),
+                Signal::SIGKILL => ProcessList::kill_current(signal),
+                // Ignored
+                Signal::SIGCHLD | Signal::SIGURG | Signal::SIGWINCH => continue,
+                // "Soft" stops.
+                Signal::SIGTSTP | Signal::SIGTTIN | Signal::SIGTTOU => Thread::current().do_stop(),
+                // TODO!!!!!!: Check exit status format.
+                s if s.is_coredump() => ProcessList::kill_current(signal),
+                signal => ProcessList::kill_current(signal),
             }
         }
     }
-}
-
-// TODO!!!: Should we use `uwake` or `iwake`?
-fn terminate_process(signal: Signal) -> ! {
-    ProcessList::kill_current(signal)
-}
-
-// TODO!!!!!!: Check exit status format.
-fn terminate_process_core_dump(signal: Signal) -> ! {
-    ProcessList::kill_current(signal)
 }

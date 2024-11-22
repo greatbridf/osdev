@@ -275,7 +275,7 @@ impl<'lt> UserString<'lt> {
                 ".quad 3b",  // fix jump address
                 ".quad 0x2", // type: string
                 ".popsection",
-                in("rdx") ptr.get_const::<u8>(),
+                inout("rdx") ptr.get_const::<u8>() => _,
                 inout("rcx") MAX_LEN => result,
             )
         };

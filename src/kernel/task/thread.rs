@@ -43,19 +43,43 @@ pub enum ThreadState {
     USleep,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WaitType {
+    Exited(u32),
+    Signaled(Signal),
+    Stopped(Signal),
+    Continued,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct WaitObject {
     pub pid: u32,
-    pub code: u32,
+    pub code: WaitType,
+}
+
+impl WaitType {
+    pub fn to_wstatus(self) -> u32 {
+        match self {
+            WaitType::Exited(status) => (status & 0xff) << 8,
+            WaitType::Signaled(signal) if signal.is_coredump() => signal.to_signum() | 0x80,
+            WaitType::Signaled(signal) => signal.to_signum(),
+            WaitType::Stopped(signal) => 0x7f | (signal.to_signum() << 8),
+            WaitType::Continued => 0xffff,
+        }
+    }
 }
 
 impl WaitObject {
-    pub fn is_stopped(&self) -> bool {
-        self.code & 0x7f == 0x7f
+    pub fn stopped(&self) -> Option<Signal> {
+        if let WaitType::Stopped(signal) = self.code {
+            Some(signal)
+        } else {
+            None
+        }
     }
 
     pub fn is_continue(&self) -> bool {
-        self.code == 0xffff
+        matches!(self.code, WaitType::Continued)
     }
 }
 
@@ -405,11 +429,7 @@ impl ProcessList {
     }
 
     pub fn kill_current(signal: Signal) -> ! {
-        ProcessList::get().do_kill_process(
-            &Thread::current().process,
-            ((signal.to_signum() + 128) << 8) | (signal.to_signum() & 0xff),
-        );
-
+        ProcessList::get().do_kill_process(&Thread::current().process, WaitType::Signaled(signal));
         Scheduler::schedule_noreturn()
     }
 
@@ -437,7 +457,7 @@ impl ProcessList {
     }
 
     /// Make the process a zombie and notify the parent.
-    pub fn do_kill_process(&self, process: &Arc<Process>, status: u32) {
+    pub fn do_kill_process(&self, process: &Arc<Process>, status: WaitType) {
         if &self.init == process {
             panic!("init exited");
         }
@@ -485,7 +505,7 @@ impl ProcessList {
 
             let mut done_some_work = false;
             waits.retain(|item| {
-                if !item.is_stopped() && !item.is_continue() {
+                if item.stopped().is_none() && !item.is_continue() {
                     init_waits.push_back(*item);
                     done_some_work = true;
                 }
@@ -623,7 +643,7 @@ impl Process {
                 .iter()
                 .enumerate()
                 .filter(|(_, item)| {
-                    if item.is_stopped() {
+                    if item.stopped().is_some() {
                         trace_stop
                     } else if item.is_continue() {
                         trace_continue
@@ -649,7 +669,7 @@ impl Process {
             }
         };
 
-        if wait_object.is_stopped() || wait_object.is_continue() {
+        if wait_object.stopped().is_some() || wait_object.is_continue() {
             Ok(Some(wait_object))
         } else {
             ProcessList::get().remove(wait_object.pid);
@@ -847,9 +867,9 @@ impl Thread {
         Scheduler::current()
     }
 
-    pub fn do_stop(self: &Arc<Self>) {
+    pub fn do_stop(self: &Arc<Self>, signal: Signal) {
         if let Some(parent) = self.process.parent() {
-            parent.wait_list.notify_stop(self.process.pid);
+            parent.wait_list.notify_stop(self.process.pid, signal);
         }
 
         preempt::disable();
@@ -979,13 +999,19 @@ impl WaitList {
 
     pub fn notify_continue(&self, pid: u32) {
         let mut wait_procs = self.wait_procs.lock();
-        wait_procs.push_back(WaitObject { pid, code: 0xffff });
+        wait_procs.push_back(WaitObject {
+            pid,
+            code: WaitType::Continued,
+        });
         self.cv_wait_procs.notify_all();
     }
 
-    pub fn notify_stop(&self, pid: u32) {
+    pub fn notify_stop(&self, pid: u32, signal: Signal) {
         let mut wait_procs = self.wait_procs.lock();
-        wait_procs.push_back(WaitObject { pid, code: 0x7f });
+        wait_procs.push_back(WaitObject {
+            pid,
+            code: WaitType::Stopped(signal),
+        });
         self.cv_wait_procs.notify_all();
     }
 }

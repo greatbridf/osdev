@@ -107,7 +107,7 @@ impl Signal {
         }
     }
 
-    fn is_coredump(&self) -> bool {
+    pub fn is_coredump(&self) -> bool {
         match self.0 {
             SIGQUIT | SIGILL | SIGABRT | SIGFPE | SIGSEGV | SIGBUS | SIGTRAP | SIGSYS | SIGXCPU
             | SIGXFSZ => true,
@@ -355,13 +355,15 @@ impl SignalList {
 
             // Default actions.
             match signal {
-                Signal::SIGSTOP => Thread::current().do_stop(),
+                Signal::SIGSTOP => Thread::current().do_stop(Signal::SIGSTOP),
                 Signal::SIGCONT => Thread::current().do_continue(),
                 Signal::SIGKILL => ProcessList::kill_current(signal),
                 // Ignored
                 Signal::SIGCHLD | Signal::SIGURG | Signal::SIGWINCH => continue,
                 // "Soft" stops.
-                Signal::SIGTSTP | Signal::SIGTTIN | Signal::SIGTTOU => Thread::current().do_stop(),
+                Signal::SIGTSTP | Signal::SIGTTIN | Signal::SIGTTOU => {
+                    Thread::current().do_stop(signal)
+                }
                 // TODO!!!!!!: Check exit status format.
                 s if s.is_coredump() => ProcessList::kill_current(signal),
                 signal => ProcessList::kill_current(signal),

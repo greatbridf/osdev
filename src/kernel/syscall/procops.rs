@@ -10,7 +10,7 @@ use crate::io::Buffer;
 use crate::kernel::constants::{PR_GET_NAME, PR_SET_NAME, SIG_BLOCK, SIG_SETMASK, SIG_UNBLOCK};
 use crate::kernel::mem::VAddr;
 use crate::kernel::task::{
-    ProcessList, Scheduler, Signal, SignalAction, Thread, UserDescriptor, WaitObject,
+    ProcessList, Scheduler, Signal, SignalAction, Thread, UserDescriptor, WaitObject, WaitType,
 };
 use crate::kernel::user::dataflow::UserString;
 use crate::kernel::user::{UserPointer, UserPointerMut};
@@ -153,7 +153,7 @@ fn sys_execve(int_stack: &mut interrupt_stack, _mmxregs: &mut mmx_registers) -> 
 // TODO: Find a better way.
 #[allow(unreachable_code)]
 fn do_exit(status: u32) -> KResult<()> {
-    ProcessList::get().do_kill_process(&Thread::current().process, (status & 0xff) << 8);
+    ProcessList::get().do_kill_process(&Thread::current().process, WaitType::Exited(status));
     Scheduler::schedule_noreturn();
     panic!("schedule_noreturn returned!");
 }
@@ -185,7 +185,7 @@ fn do_waitpid(waitpid: u32, arg1: *mut u32, options: u32) -> KResult<u32> {
         None => Ok(0),
         Some(WaitObject { pid, code }) => {
             if !arg1.is_null() {
-                UserPointerMut::new(arg1)?.write(code)?;
+                UserPointerMut::new(arg1)?.write(code.to_wstatus())?;
             }
             Ok(pid)
         }

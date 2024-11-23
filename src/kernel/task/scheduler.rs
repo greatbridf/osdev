@@ -108,7 +108,7 @@ impl Scheduler {
         let mut state = thread.state.lock();
 
         match *state {
-            ThreadState::USleep => return,
+            ThreadState::Running | ThreadState::USleep => return,
             ThreadState::ISleep => {
                 *state = ThreadState::Ready;
                 self.enqueue(&thread);

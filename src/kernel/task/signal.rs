@@ -1,6 +1,13 @@
 use core::cmp::Reverse;
 
-use crate::{io::BufferFill, kernel::user::dataflow::UserBuffer, prelude::*};
+use crate::{
+    io::BufferFill,
+    kernel::{
+        constants::SA_SIGINFO,
+        user::{dataflow::UserBuffer, UserPointer},
+    },
+    prelude::*,
+};
 
 use alloc::collections::{binary_heap::BinaryHeap, btree_map::BTreeMap};
 use bindings::{
@@ -52,10 +59,10 @@ impl Signal {
 
 #[derive(Debug, Clone, Copy)]
 pub struct SignalAction {
-    sa_handler: usize,
-    sa_flags: usize,
-    sa_restorer: usize,
-    sa_mask: usize,
+    pub sa_handler: usize,
+    pub sa_flags: usize,
+    pub sa_restorer: usize,
+    pub sa_mask: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -160,6 +167,7 @@ impl SignalAction {
     fn handle(
         &self,
         signum: u32,
+        old_mask: u64,
         int_stack: &mut interrupt_stack,
         mmxregs: &mut mmx_registers,
     ) -> KResult<()> {
@@ -169,19 +177,19 @@ impl SignalAction {
 
         const CONTEXT_SIZE: usize = size_of::<interrupt_stack>()
             + size_of::<mmx_registers>()
-            + 2 * size_of::<u32>() // Signum and address of sa_restorer
-            + size_of::<usize>(); // Original RSP
+            + size_of::<usize>() // old_mask
+            + size_of::<u32>(); // `sa_handler` argument: `signum`
 
         // Save current interrupt context to 128 bytes above current user stack
-        // and align to 16 bytes
+        // and align to 16 bytes. Then we push the return address of the restorer.
         // TODO!!!: Determine the size of the return address
-        let sp = (int_stack.rsp - (128 + CONTEXT_SIZE + size_of::<u32>())) & !0xf;
+        let sp = ((int_stack.rsp - 128 - CONTEXT_SIZE) & !0xf) - size_of::<u32>();
         let restorer_address: u32 = self.sa_restorer as u32;
-        let mut stack = UserBuffer::new(sp as *mut _, CONTEXT_SIZE)?;
+        let mut stack = UserBuffer::new(sp as *mut _, CONTEXT_SIZE + size_of::<u32>())?;
 
         stack.copy(&restorer_address)?.ok_or(EFAULT)?; // Restorer address
-        stack.copy(&signum)?.ok_or(EFAULT)?; // Signal number
-        stack.copy(&int_stack.rsp)?.ok_or(EFAULT)?; // Original RSP
+        stack.copy(&signum)?.ok_or(EFAULT)?; // Restorer address
+        stack.copy(&old_mask)?.ok_or(EFAULT)?; // Original signal mask
         stack.copy(mmxregs)?.ok_or(EFAULT)?; // MMX registers
         stack.copy(int_stack)?.ok_or(EFAULT)?; // Interrupt stack
 
@@ -233,7 +241,7 @@ impl SignalListInner {
         self.pending.push(Reverse(signal));
 
         if signal.is_stop() {
-            return RaiseResult::Finished;
+            return RaiseResult::ShouldIWakeUp;
         }
 
         // TODO!!!!!!: Fix this. SIGCONT could wake up USleep threads.
@@ -273,7 +281,7 @@ impl SignalList {
     }
 
     pub fn set_handler(&self, signal: Signal, action: &SignalAction) -> KResult<()> {
-        if signal.is_now() {
+        if signal.is_now() || action.sa_flags & SA_SIGINFO as usize != 0 {
             return Err(EINVAL);
         }
 
@@ -328,28 +336,40 @@ impl SignalList {
     pub fn handle(&self, int_stack: &mut interrupt_stack, mmxregs: &mut mmx_registers) {
         loop {
             let signal = {
-                let mut inner = self.inner.lock_irq();
-                let signal = match inner.pop() {
+                let signal = match self.inner.lock_irq().pop() {
                     Some(signal) => signal,
                     None => return,
                 };
 
-                if let Some(handler) = inner.handlers.get(&signal) {
+                let handler = self.inner.lock_irq().handlers.get(&signal).cloned();
+                if let Some(handler) = handler {
                     if !signal.is_now() {
-                        let result = handler.handle(signal.to_signum(), int_stack, mmxregs);
+                        let old_mask = {
+                            let mut inner = self.inner.lock_irq();
+                            let old_mask = inner.mask;
+                            inner.mask(handler.sa_mask as u64);
+                            old_mask
+                        };
+                        let result =
+                            handler.handle(signal.to_signum(), old_mask, int_stack, mmxregs);
+                        if result.is_err() {
+                            self.inner.lock_irq().set_mask(old_mask);
+                        }
                         match result {
-                            Err(EFAULT) => inner.raise(Signal::SIGSEGV),
-                            Err(_) => inner.raise(Signal::SIGSYS),
+                            Err(EFAULT) => self.inner.lock_irq().raise(Signal::SIGSEGV),
+                            Err(_) => self.inner.lock_irq().raise(Signal::SIGSYS),
                             Ok(()) => return,
                         };
                         continue;
                     }
                 }
 
+                // TODO: The default signal handling process should be atomic.
+
                 // Default actions include stopping the thread, continuing the thread and
                 // terminating the process. All these actions will block the thread or return
                 // to the thread immediately. So we can unmask these signals now.
-                inner.unmask(signal.to_mask());
+                self.inner.lock_irq().unmask(signal.to_mask());
                 signal
             };
 
@@ -369,5 +389,25 @@ impl SignalList {
                 signal => ProcessList::kill_current(signal),
             }
         }
+    }
+
+    /// Load the signal mask, MMX registers and interrupt stack from the user stack.
+    /// We must be here because `sigreturn` is called. Se we return the value of the register
+    /// used to store the syscall return value to prevent the original value being clobbered.
+    pub fn restore(
+        &self,
+        int_stack: &mut interrupt_stack,
+        mmxregs: &mut mmx_registers,
+    ) -> KResult<usize> {
+        let old_mask_vaddr = int_stack.rsp;
+        let old_mmxregs_vaddr = old_mask_vaddr + size_of::<usize>();
+        let old_int_stack_vaddr = old_mmxregs_vaddr + size_of::<mmx_registers>();
+
+        let old_mask = UserPointer::<u64>::new_vaddr(old_mask_vaddr)?.read()?;
+        *mmxregs = UserPointer::<mmx_registers>::new_vaddr(old_mmxregs_vaddr)?.read()?;
+        *int_stack = UserPointer::<interrupt_stack>::new_vaddr(old_int_stack_vaddr)?.read()?;
+
+        self.inner.lock_irq().set_mask(old_mask);
+        Ok(int_stack.regs.rax as usize)
     }
 }

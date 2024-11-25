@@ -16,7 +16,7 @@ use crate::{
         vfs::FsContext,
     },
     prelude::*,
-    sync::{preempt, CondVar},
+    sync::{preempt, CondVar, SpinGuard},
 };
 
 use alloc::{
@@ -134,6 +134,25 @@ struct ProcessInner {
 pub struct WaitList {
     wait_procs: Spin<VecDeque<WaitObject>>,
     cv_wait_procs: CondVar,
+    process: Weak<Process>,
+}
+
+pub struct NotifyBatch<'waitlist, 'cv, 'process> {
+    wait_procs: SpinGuard<'waitlist, VecDeque<WaitObject>>,
+    cv: &'cv CondVar,
+    process: &'process Weak<Process>,
+    needs_notify: bool,
+}
+
+pub struct Entry<'waitlist, 'cv> {
+    wait_procs: SpinGuard<'waitlist, VecDeque<WaitObject>>,
+    cv: &'cv CondVar,
+    want_stop: bool,
+    want_continue: bool,
+}
+
+pub struct DrainExited<'waitlist> {
+    wait_procs: SpinGuard<'waitlist, VecDeque<WaitObject>>,
 }
 
 #[derive(Debug)]
@@ -484,50 +503,35 @@ impl ProcessList {
         process.mm_list.clear_user();
 
         // Make children orphans (adopted by init)
-        let mut init_inner = self.init.inner.lock();
+        {
+            let mut init_inner = self.init.inner.lock();
 
-        inner.children.retain(|_, child| {
-            let child = child.upgrade().unwrap();
-            let mut child_inner = child.process.inner.lock();
-            if child_inner.parent.as_ref().unwrap() == &self.init {
-                return false;
-            }
-
-            child_inner.parent = Some(self.init.clone());
-            init_inner.add_child(&child);
-
-            false
-        });
-
-        let has_waiting = {
-            let mut init_waits = self.init.wait_list.wait_procs.lock();
-            let mut waits = process.wait_list.wait_procs.lock();
-
-            let mut done_some_work = false;
-            waits.retain(|item| {
-                if item.stopped().is_none() && !item.is_continue() {
-                    init_waits.push_back(*item);
-                    done_some_work = true;
+            inner.children.retain(|_, child| {
+                let child = child.upgrade().unwrap();
+                let mut child_inner = child.process.inner.lock();
+                if child_inner.parent.as_ref().unwrap() == &self.init {
+                    return false;
                 }
+
+                child_inner.parent = Some(self.init.clone());
+                init_inner.add_child(&child);
+
                 false
             });
-
-            done_some_work
-        };
-
-        if has_waiting {
-            self.init.wait_list.cv_wait_procs.notify_all();
         }
 
-        {
-            let parent_wait_list = &inner.parent.as_ref().unwrap().wait_list;
-            let mut parent_waits = parent_wait_list.wait_procs.lock();
-            parent_waits.push_back(WaitObject {
-                pid: process.pid,
-                code: status,
-            });
-            parent_wait_list.cv_wait_procs.notify_all();
-        }
+        let mut init_notify = self.init.wait_list.notify_batch();
+        process
+            .wait_list
+            .drain_exited()
+            .into_iter()
+            .for_each(|item| init_notify.notify(item));
+        init_notify.finish();
+
+        inner.parent.as_ref().unwrap().wait_list.notify(WaitObject {
+            pid: process.pid,
+            code: status,
+        });
 
         preempt::enable();
     }
@@ -572,9 +576,9 @@ impl Process {
     pub fn new_cloned(other: &Arc<Self>) -> Arc<Self> {
         let other_inner = other.inner.lock();
 
-        let process = Arc::new(Self {
+        let process = Arc::new_cyclic(|weak| Self {
             pid: Self::alloc_pid(),
-            wait_list: WaitList::new(),
+            wait_list: WaitList::new(weak.clone()),
             mm_list: MMList::new_cloned(&other.mm_list),
             inner: Spin::new(ProcessInner {
                 pgroup: other_inner.pgroup.clone(),
@@ -598,7 +602,7 @@ impl Process {
             session.add_member(&pgroup);
             Self {
                 pid,
-                wait_list: WaitList::new(),
+                wait_list: WaitList::new(weak.clone()),
                 mm_list: MMList::new(),
                 inner: Spin::new(ProcessInner {
                     parent,
@@ -637,36 +641,21 @@ impl Process {
         trace_stop: bool,
         trace_continue: bool,
     ) -> KResult<Option<WaitObject>> {
-        let mut wait_list = self.wait_list.wait_procs.lock();
+        let mut waits = self.wait_list.entry(trace_stop, trace_continue);
         let wait_object = loop {
-            if let Some(idx) = wait_list
-                .iter()
-                .enumerate()
-                .filter(|(_, item)| {
-                    if item.stopped().is_some() {
-                        trace_stop
-                    } else if item.is_continue() {
-                        trace_continue
-                    } else {
-                        true
-                    }
-                })
-                .map(|(idx, _)| idx)
-                .next()
-            {
-                break wait_list.remove(idx).unwrap();
+            if let Some(object) = waits.get() {
+                break object;
             }
 
             if self.inner.lock().children.is_empty() {
                 return Err(ECHILD);
             }
+
             if no_block {
                 return Ok(None);
             }
-            self.wait_list.cv_wait_procs.wait(&mut wait_list);
-            if Thread::current().signal_list.has_pending_signal() {
-                return Err(EINTR);
-            }
+
+            waits.wait()?;
         };
 
         if wait_object.stopped().is_some() || wait_object.is_continue() {
@@ -869,7 +858,10 @@ impl Thread {
 
     pub fn do_stop(self: &Arc<Self>, signal: Signal) {
         if let Some(parent) = self.process.parent() {
-            parent.wait_list.notify_stop(self.process.pid, signal);
+            parent.wait_list.notify(WaitObject {
+                pid: self.process.pid,
+                code: WaitType::Stopped(signal),
+            });
         }
 
         preempt::disable();
@@ -882,7 +874,10 @@ impl Thread {
 
     pub fn do_continue(self: &Arc<Self>) {
         if let Some(parent) = self.process.parent() {
-            parent.wait_list.notify_continue(self.process.pid);
+            parent.wait_list.notify(WaitObject {
+                pid: self.process.pid,
+                code: WaitType::Continued,
+            });
         }
     }
 
@@ -990,29 +985,117 @@ impl Thread {
 unsafe impl Sync for Thread {}
 
 impl WaitList {
-    pub fn new() -> Self {
+    pub fn new(process: Weak<Process>) -> Self {
         Self {
             wait_procs: Spin::new(VecDeque::new()),
             cv_wait_procs: CondVar::new(),
+            process,
         }
     }
 
-    pub fn notify_continue(&self, pid: u32) {
+    pub fn notify(&self, wait: WaitObject) {
         let mut wait_procs = self.wait_procs.lock();
-        wait_procs.push_back(WaitObject {
-            pid,
-            code: WaitType::Continued,
-        });
+        wait_procs.push_back(wait);
         self.cv_wait_procs.notify_all();
+
+        self.process
+            .upgrade()
+            .expect("`process` must be valid if we are using `WaitList`")
+            .raise(Signal::SIGCHLD);
     }
 
-    pub fn notify_stop(&self, pid: u32, signal: Signal) {
-        let mut wait_procs = self.wait_procs.lock();
-        wait_procs.push_back(WaitObject {
-            pid,
-            code: WaitType::Stopped(signal),
-        });
-        self.cv_wait_procs.notify_all();
+    /// Notify some processes in batch. The process is waken up if we have really notified
+    /// some processes.
+    ///
+    /// # Lock
+    /// This function locks the `wait_procs` and returns a `NotifyBatch` that
+    /// will unlock it on dropped.
+    pub fn notify_batch(&self) -> NotifyBatch {
+        NotifyBatch {
+            wait_procs: self.wait_procs.lock(),
+            cv: &self.cv_wait_procs,
+            needs_notify: false,
+            process: &self.process,
+        }
+    }
+
+    pub fn drain_exited(&self) -> DrainExited {
+        DrainExited {
+            wait_procs: self.wait_procs.lock(),
+        }
+    }
+
+    pub fn entry(&self, want_stop: bool, want_continue: bool) -> Entry {
+        Entry {
+            wait_procs: self.wait_procs.lock(),
+            cv: &self.cv_wait_procs,
+            want_stop,
+            want_continue,
+        }
+    }
+}
+
+impl Entry<'_, '_> {
+    pub fn get(&mut self) -> Option<WaitObject> {
+        if let Some(idx) = self
+            .wait_procs
+            .iter()
+            .enumerate()
+            .filter(|(_, item)| {
+                if item.stopped().is_some() {
+                    self.want_stop
+                } else if item.is_continue() {
+                    self.want_continue
+                } else {
+                    true
+                }
+            })
+            .map(|(idx, _)| idx)
+            .next()
+        {
+            Some(self.wait_procs.remove(idx).unwrap())
+        } else {
+            None
+        }
+    }
+
+    pub fn wait(&mut self) -> KResult<()> {
+        self.cv.wait(&mut self.wait_procs);
+        if Thread::current().signal_list.has_pending_signal() {
+            return Err(EINTR);
+        }
+        Ok(())
+    }
+}
+
+impl DrainExited<'_> {
+    pub fn into_iter(&mut self) -> impl Iterator<Item = WaitObject> + '_ {
+        // We don't propagate stop and continue to the new parent.
+        self.wait_procs
+            .drain(..)
+            .filter(|item| item.stopped().is_none() && !item.is_continue())
+    }
+}
+
+impl NotifyBatch<'_, '_, '_> {
+    pub fn notify(&mut self, wait: WaitObject) {
+        self.wait_procs.push_back(wait);
+    }
+
+    /// Finish the batch and notify all if we have notified some processes.
+    pub fn finish(self) {}
+}
+
+impl Drop for NotifyBatch<'_, '_, '_> {
+    fn drop(&mut self) {
+        if self.needs_notify {
+            self.cv.notify_all();
+
+            self.process
+                .upgrade()
+                .expect("`process` must be valid if we are using `WaitList`")
+                .raise(Signal::SIGCHLD);
+        }
     }
 }
 

@@ -13,6 +13,8 @@ pub const SIG_BLOCK: u32 = 0;
 pub const SIG_UNBLOCK: u32 = 1;
 pub const SIG_SETMASK: u32 = 2;
 
+pub const SA_SIGINFO: u32 = 4;
+
 pub const CLOCK_REALTIME: u32 = 0;
 pub const CLOCK_MONOTONIC: u32 = 1;
 

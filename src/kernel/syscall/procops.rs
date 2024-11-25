@@ -360,10 +360,41 @@ fn do_rt_sigprocmask(how: u32, set: *mut u64, oldset: *mut u64, sigsetsize: usiz
     Ok(())
 }
 
+#[repr(C, packed)]
+#[derive(Debug, Clone, Copy)]
+struct UserSignalAction {
+    sa_handler: u32,
+    sa_flags: u32,
+    sa_restorer: u32,
+    sa_mask: u64,
+}
+
+impl From<UserSignalAction> for SignalAction {
+    fn from(from: UserSignalAction) -> SignalAction {
+        SignalAction {
+            sa_handler: from.sa_handler as usize,
+            sa_flags: from.sa_flags as usize,
+            sa_mask: from.sa_mask as usize,
+            sa_restorer: from.sa_restorer as usize,
+        }
+    }
+}
+
+impl From<SignalAction> for UserSignalAction {
+    fn from(from: SignalAction) -> UserSignalAction {
+        UserSignalAction {
+            sa_handler: from.sa_handler as u32,
+            sa_flags: from.sa_flags as u32,
+            sa_mask: from.sa_mask as u64,
+            sa_restorer: from.sa_restorer as u32,
+        }
+    }
+}
+
 fn do_rt_sigaction(
     signum: u32,
-    act: *const SignalAction,
-    oldact: *mut SignalAction,
+    act: *const UserSignalAction,
+    oldact: *mut UserSignalAction,
     sigsetsize: usize,
 ) -> KResult<()> {
     let signal = Signal::try_from(signum)?;
@@ -373,14 +404,14 @@ fn do_rt_sigaction(
 
     let old_action = Thread::current().signal_list.get_handler(signal);
     if !oldact.is_null() {
-        UserPointerMut::new(oldact)?.write(old_action)?;
+        UserPointerMut::new(oldact)?.write(old_action.into())?;
     }
 
     if !act.is_null() {
         let new_action = UserPointer::new(act)?.read()?;
         Thread::current()
             .signal_list
-            .set_handler(signal, &new_action)?;
+            .set_handler(signal, &new_action.into())?;
     }
 
     Ok(())
@@ -413,7 +444,7 @@ define_syscall32!(sys_tkill, do_tkill, tid: u32, sig: u32);
 define_syscall32!(sys_rt_sigprocmask, do_rt_sigprocmask,
     how: u32, set: *mut u64, oldset: *mut u64, sigsetsize: usize);
 define_syscall32!(sys_rt_sigaction, do_rt_sigaction,
-    signum: u32, act: *const SignalAction, oldact: *mut SignalAction, sigsetsize: usize);
+    signum: u32, act: *const UserSignalAction, oldact: *mut UserSignalAction, sigsetsize: usize);
 
 extern "C" {
     fn ISR_stub_restore();
@@ -473,6 +504,18 @@ fn sys_fork(int_stack: &mut interrupt_stack, mmxregs: &mut mmx_registers) -> usi
     new_thread.process.pid as usize
 }
 
+fn sys_sigreturn(int_stack: &mut interrupt_stack, mmxregs: &mut mmx_registers) -> usize {
+    let result = Thread::current().signal_list.restore(int_stack, mmxregs);
+    match result {
+        Ok(ret) => ret,
+        Err(_) => {
+            println_warn!("`sigreturn` failed in thread {}!", Thread::current().tid);
+            Thread::current().raise(Signal::SIGSEGV);
+            0
+        }
+    }
+}
+
 pub(super) fn register() {
     register_syscall!(0x01, exit);
     register_syscall!(0x02, fork);
@@ -488,6 +531,7 @@ pub(super) fn register() {
     register_syscall!(0x40, getppid);
     register_syscall!(0x42, setsid);
     register_syscall!(0x72, wait4);
+    register_syscall!(0x77, sigreturn);
     register_syscall!(0x84, getpgid);
     register_syscall!(0x93, getsid);
     register_syscall!(0xac, prctl);

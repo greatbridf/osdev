@@ -83,6 +83,7 @@ target_include_directories(kernel.out PRIVATE ${PROJECT_SOURCE_DIR}/include)
 target_link_options(kernel.out PRIVATE
     -T "${CMAKE_SOURCE_DIR}/src/kernel.ld"
     -L "${CMAKE_BINARY_DIR}/x86_64-unknown-none/${CARGO_BUILD_TYPE}"
+    --no-check-sections
     )
 set_target_properties(kernel.out PROPERTIES LINK_DEPENDS "${CMAKE_SOURCE_DIR}/src/kernel.ld")
 set_source_files_properties(src/mbr.S PROPERTIES OBJECT_DEPENDS

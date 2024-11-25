@@ -203,12 +203,11 @@ impl PageTable {
         let page = Page::alloc_one();
         page.zero();
 
+        // TODO: copy only the kernel space mappings.
         let kernel_space_page_table = CachedPP::new(KERNEL_PML4 as usize);
-        unsafe {
-            page.as_cached()
-                .as_ptr::<u8>()
-                .copy_from_nonoverlapping(kernel_space_page_table.as_ptr(), page.len())
-        };
+
+        page.as_cached().as_mut_slice::<u64>(512)[256..]
+            .copy_from_slice(&kernel_space_page_table.as_mut_slice(512)[256..]);
 
         Self { page }
     }

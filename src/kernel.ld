@@ -2,12 +2,13 @@ OUTPUT_FORMAT(elf64-x86-64)
 
 MEMORY
 {
-    MBR    (wx) : org = 0x0e00, l = 512
-    STAGE1 (wx) : org = 0x1000, l = 4K
-    PHYMEM (w)  : org = 0xffffff0000000000, len = 512 * 1024M
-    PARRAY (w)  : org = 0xffffff8000000000, len = 128 * 1024M
-    KBSS   (w)  : org = 0xffffffffc0200000, len = 2M
-    KIMAGE (wx) : org = 0xffffffffffc00000, len = 2M
+    MBR           (wx) : org = 0x0e00, l = 512
+    STAGE1        (wx) : org = 0x1000, l = 4K
+    PHYMEM        (w)  : org = 0xffffff0000000000, len = 512 * 1024M
+    PARRAY        (w)  : org = 0xffffff8000000000, len = 128 * 1024M
+    KBSS          (w)  : org = 0xffffffffc0200000, len = 2M
+    KIMAGE        (wx) : org = 0xffffffffffc00000, len = 2M
+    KPERCPU       (w)  : org = 0x0000000000000000, len = 128K
 }
 
 SECTIONS
@@ -26,14 +27,17 @@ SECTIONS
 
     .stage1 : AT(LOADADDR(.mbr) + SIZEOF(.mbr))
     {
+        KEEP(*(.stage1.smp));
+
+        . = ALIGN(16);
         *(.stage1)
+
         . = ALIGN(0x1000);
     } > STAGE1
 
     .text :
         AT(LOADADDR(.stage1) + SIZEOF(.stage1))
     {
-        KIMAGE_START = .;
         TEXT_START = .;
         *(.text)
         *(.text*)
@@ -41,6 +45,8 @@ SECTIONS
         . = ALIGN(0x1000);
         TEXT_END = .;
     } > KIMAGE
+
+    TEXT_PAGES = (TEXT_END - TEXT_START) / 0x1000;
 
     .rodata :
         AT(LOADADDR(.text) + SIZEOF(.text))
@@ -76,8 +82,9 @@ SECTIONS
         RODATA_END = .;
     } > KIMAGE
 
-    .data :
-        AT(LOADADDR(.rodata) + SIZEOF(.rodata))
+    RODATA_PAGES = (RODATA_END - RODATA_START) / 0x1000;
+
+    .data : AT(LOADADDR(.rodata) + SIZEOF(.rodata))
     {
         DATA_START = .;
         *(.data)
@@ -89,10 +96,25 @@ SECTIONS
         . = . + 4;
         . = ALIGN(0x1000) - 4;
         LONG(KERNEL_MAGIC);
-
         DATA_END = .;
-        KIMAGE_END = .;
     } > KIMAGE
+
+    DATA_PAGES = (DATA_END - DATA_START) / 0x1000;
+
+    _PERCPU_DATA_START = .;
+    .percpu 0 (NOLOAD) : AT(LOADADDR(.data) + SIZEOF(.data))
+    {
+        PERCPU_START = .;
+        . += 0x10; /* Reserved for x86 percpu pointer */
+
+        *(.percpu .percpu*)
+
+        . = ALIGN(0x1000);
+        PERCPU_END = .;
+    } > KPERCPU
+    _PERCPU_LENGTH = PERCPU_END - PERCPU_START;
+
+    PERCPU_PAGES = _PERCPU_LENGTH / 0x1000;
 
     .bss :
     {
@@ -104,11 +126,11 @@ SECTIONS
         BSS_END = .;
     } > KBSS
 
-    KIMAGE_PAGES = (KIMAGE_END - KIMAGE_START) / 0x1000;
+    KIMAGE_PAGES = TEXT_PAGES + RODATA_PAGES + PERCPU_PAGES + DATA_PAGES;
     BSS_PAGES = (BSS_END - BSS_START) / 0x1000;
     KERNEL_MAGIC = 0x01145140;
 
-    KIMAGE_32K_COUNT = ((KIMAGE_END - KIMAGE_START) + 32 * 1024 - 1) / (32 * 1024);
+    KIMAGE_32K_COUNT = (KIMAGE_PAGES * 0x1000 + 32 * 1024 - 1) / (32 * 1024);
 
     .eh_frame :
         AT(LOADADDR(.data) + SIZEOF(.data))

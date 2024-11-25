@@ -23,6 +23,11 @@ mod rcu;
 mod sync;
 
 use alloc::ffi::CString;
+use core::{
+    alloc::{GlobalAlloc, Layout},
+    arch::{asm, global_asm},
+    sync::atomic::AtomicU32,
+};
 use elf::ParsedElf32;
 use kernel::{
     mem::{
@@ -65,11 +70,6 @@ extern "C" {
     fn init_pci();
 }
 
-use core::{
-    alloc::{GlobalAlloc, Layout},
-    arch::{asm, global_asm},
-};
-
 struct Allocator {}
 unsafe impl GlobalAlloc for Allocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
@@ -107,6 +107,55 @@ global_asm!(
 
 extern "C" {
     fn to_init_process();
+    fn boot_semaphore();
+}
+
+fn rdmsr(msr: u32) -> u64 {
+    let edx: u32;
+    let eax: u32;
+
+    unsafe {
+        asm!(
+            "rdmsr",
+            in("ecx") msr,
+            out("eax") eax,
+            out("edx") edx,
+        )
+    };
+
+    (edx as u64) << 32 | eax as u64
+}
+
+fn bootstrap_cpus() {
+    let apic_base = rdmsr(0x1b);
+    assert_eq!(apic_base & 0x800, 0x800, "LAPIC not enabled");
+    assert_eq!(apic_base & 0x100, 0x100, "Is not bootstrap processor");
+
+    let apic_base = apic_base & !0xfff;
+    println_debug!("IA32_APIC_BASE: {apic_base:#x}");
+
+    let apic_base = CachedPP::new(apic_base as usize);
+    let spurious = apic_base.offset(0xf0).as_ptr::<u32>();
+    let icr = apic_base.offset(0x300).as_ptr::<u32>();
+
+    println_debug!("SPURIOUS: {:#x}", unsafe { spurious.read() });
+
+    unsafe { icr.write_volatile(0xc4500) };
+
+    while unsafe { icr.read_volatile() } & 0x1000 != 0 {
+        unsafe { asm!("pause") };
+    }
+
+    unsafe { icr.write_volatile(0xc4601) };
+
+    while unsafe { icr.read_volatile() } & 0x1000 != 0 {
+        unsafe { asm!("pause") };
+    }
+
+    let sem = unsafe { AtomicU32::from_ptr(boot_semaphore as *mut _) };
+    while sem.load(core::sync::atomic::Ordering::Acquire) != 3 {}
+
+    println_info!("Processors startup finished");
 }
 
 #[no_mangle]
@@ -166,6 +215,8 @@ extern "C" fn init_process(early_kstack_pfn: usize) {
 
     fs::procfs::init();
     fs::fat32::init();
+
+    bootstrap_cpus();
 
     let (ip, sp) = {
         // mount fat32 /mnt directory

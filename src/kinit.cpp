@@ -49,9 +49,6 @@ static inline void enable_sse() {
 static inline void setup_early_kernel_page_table() {
     using namespace kernel::mem::paging;
 
-    // remove temporary mapping
-    KERNEL_PAGE_TABLE[0x000].clear();
-
     constexpr auto idx = idx_all(0xffffffffc0200000ULL);
 
     auto pdpt = KERNEL_PAGE_TABLE[std::get<1>(idx)].parse();
@@ -115,8 +112,6 @@ static inline void setup_buddy(uintptr_t addr_max) {
         mem::paging::create_zone(start, end);
     }
 
-    // free .stage1
-    create_zone(0x1000, 0x2000);
     // unused space
     create_zone(0x9000, 0x80000);
     create_zone(0x100000, 0x200000);

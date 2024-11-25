@@ -321,3 +321,58 @@ start_64bit:
     cli
     hlt
     jmp .L64bit_hlt
+
+.section .stage1.smp
+.code16
+
+.globl ap_bootstrap
+.type ap_bootstrap, @function
+ap_bootstrap:
+	ljmp $0x0, $.Lap1
+
+.Lap1:
+    # we use a shared gdt for now
+	lgdt shared_gdt_desc
+
+    # set msr
+    mov $0xc0000080, %ecx
+    rdmsr
+    or $0x901, %eax # set LME, NXE, SCE
+    wrmsr
+
+    # set cr4
+    mov %cr4, %eax
+    or $0xa0, %eax # set PAE, PGE
+    mov %eax, %cr4
+
+    # load new page table
+    mov $KERNEL_PML4, %eax
+    mov %eax, %cr3
+
+    mov %cr0, %eax
+    // SET PE, WP, PG
+    or $0x80010001, %eax
+    mov %eax, %cr0
+
+	ljmp $0x08, $.Lap_bootstrap_end
+
+.align 16
+shared_gdt_desc:
+	.8byte 0x0000000000005f
+
+.code64
+.Lap_bootstrap_end:
+    mov $0x10, %ax
+	mov %ax, %ds
+	mov %ax, %es
+	mov %ax, %ss
+
+	lock incl boot_semaphore
+	jmp .
+
+.section .bss
+.align 4
+.globl boot_semaphore
+.type boot_semaphore, @object
+boot_semaphore:
+	.long 0

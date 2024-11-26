@@ -395,12 +395,12 @@ lazy_static! {
     static ref GLOBAL_PROC_LIST: ProcessList = {
         let init_process = Process::new_for_init(1, None);
         let init_thread = Thread::new_for_init(b"[kernel kinit]".as_slice().into(), &init_process);
-        Scheduler::set_current(init_thread.clone());
+        unsafe { Scheduler::set_current(init_thread.clone()) };
 
         let idle_process = Process::new_for_init(0, None);
         let idle_thread =
             Thread::new_for_init(b"[kernel idle#BS]".as_slice().into(), &idle_process);
-        Scheduler::set_idle(idle_thread.clone());
+        unsafe { Scheduler::set_idle(idle_thread.clone()) };
 
         let init_session_weak = Arc::downgrade(&init_process.inner.lock().session);
         let init_pgroup_weak = Arc::downgrade(&init_process.inner.lock().pgroup);
@@ -487,7 +487,7 @@ impl ProcessList {
         // TODO!!!!!!: When we are killing multiple threads, we need to wait until all
         // the threads are stopped then proceed.
         for thread in inner.threads.values().map(|t| t.upgrade().unwrap()) {
-            assert!(&thread == Thread::current());
+            assert!(&thread == Thread::current().as_ref());
             Scheduler::get().lock().set_zombie(&thread);
             thread.files.close_all();
         }
@@ -854,7 +854,7 @@ impl Thread {
         thread
     }
 
-    pub fn current<'lt>() -> &'lt Arc<Self> {
+    pub fn current<'lt>() -> BorrowedArc<'lt, Self> {
         Scheduler::current()
     }
 

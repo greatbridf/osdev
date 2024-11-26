@@ -175,7 +175,7 @@ pub extern "C" fn rust_kinit(early_kstack_pfn: usize) -> ! {
     // To satisfy the `Scheduler` "preempt count == 0" assertion.
     preempt::disable();
 
-    Scheduler::get().lock().uwake(Thread::current());
+    Scheduler::get().lock().uwake(&Thread::current());
 
     arch::task::context_switch_light(
         CachedPP::new(early_kstack_pfn).as_ptr(), // We will never come back

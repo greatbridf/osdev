@@ -470,7 +470,7 @@ global_asm!(
 );
 
 fn sys_fork(int_stack: &mut interrupt_stack, mmxregs: &mut mmx_registers) -> usize {
-    let new_thread = Thread::new_cloned(Thread::current());
+    let new_thread = Thread::new_cloned(&Thread::current());
 
     // TODO: We should make the preparation of the kernel stack more abstract.
     //       Currently, we can see that we are directly writing to the kernel stack,

@@ -32,7 +32,7 @@ pub(crate) use alloc::{boxed::Box, string::String, vec, vec::Vec};
 pub(crate) use core::{any::Any, fmt::Write, marker::PhantomData, str};
 use core::{mem::ManuallyDrop, ops::Deref};
 
-pub use crate::sync::{Mutex, RwSemaphore, Semaphore, Spin, Locked};
+pub use crate::sync::{Locked, Mutex, RwSemaphore, Semaphore, Spin};
 
 pub struct BorrowedArc<'lt, T: ?Sized> {
     arc: ManuallyDrop<Arc<T>>,
@@ -54,6 +54,16 @@ impl<'lt, T: ?Sized> BorrowedArc<'lt, T> {
             arc: ManuallyDrop::new(unsafe { Arc::from_raw(*ptr) }),
             _phantom: PhantomData,
         }
+    }
+
+    pub fn borrow(&self) -> &'lt T {
+        let reference: &T = &self.arc;
+        let ptr = reference as *const T;
+
+        // SAFETY: `ptr` is a valid pointer to `T` because `reference` is a valid reference to `T`.
+        // `ptr` is also guaranteed to be valid for the lifetime `'lt` because it is derived from
+        // `self.arc` which is guaranteed to be valid for the lifetime `'lt`.
+        unsafe { ptr.as_ref().unwrap() }
     }
 }
 

@@ -1,4 +1,7 @@
-use core::sync::atomic::{compiler_fence, Ordering};
+use core::{
+    ptr::NonNull,
+    sync::atomic::{compiler_fence, Ordering},
+};
 
 use crate::{prelude::*, sync::preempt};
 
@@ -15,20 +18,13 @@ pub struct Scheduler {
 }
 
 /// Idle task thread
-///
-/// # Safety
-/// This variable is per cpu. So no need to synchronize accesses to it.
-///
-/// TODO!!!: This should be per cpu in smp environment.
-static mut IDLE_TASK: Option<Arc<Thread>> = None;
+/// All the idle task threads belongs to `pid 0` and are pinned to the current cpu.
+#[arch::define_percpu]
+static IDLE_TASK: Option<NonNull<Thread>> = None;
 
 /// Current thread
-///
-/// # Safety
-/// This variable is per cpu. So no need to synchronize accesses to it.
-///
-/// TODO!!!: This should be per cpu in smp environment.
-static mut CURRENT: Option<Arc<Thread>> = None;
+#[arch::define_percpu]
+static mut CURRENT: Option<NonNull<Thread>> = None;
 
 lazy_static! {
     static ref GLOBAL_SCHEDULER: Spin<Scheduler> = Spin::new(Scheduler {
@@ -48,17 +44,21 @@ impl Scheduler {
         &GLOBAL_SCHEDULER
     }
 
-    pub fn current<'lt>() -> &'lt Arc<Thread> {
-        // SAFETY: `CURRENT` is per cpu.
-        unsafe { CURRENT.as_ref().unwrap() }
+    /// # Safety
+    /// We should never "inspect" a change in `current`.
+    /// The change of `CURRENT` will only happen in the scheduler. And if we are preempted,
+    /// when we DO return, the `CURRENT` will be the same and remain valid.
+    pub fn current<'lt>() -> BorrowedArc<'lt, Thread> {
+        BorrowedArc::from_raw(CURRENT.get().unwrap().as_ptr())
     }
 
-    pub fn idle_task() -> &'static Arc<Thread> {
-        // SAFETY: `IDLE_TASK` is per cpu.
-        unsafe { IDLE_TASK.as_ref().unwrap() }
+    /// # Safety
+    /// Idle task should never change so we can borrow it without touching the refcount.
+    pub fn idle_task() -> BorrowedArc<'static, Thread> {
+        BorrowedArc::from_raw(IDLE_TASK.get().unwrap().as_ptr())
     }
 
-    pub(super) fn set_idle(thread: Arc<Thread>) {
+    pub(super) unsafe fn set_idle(thread: Arc<Thread>) {
         thread.prepare_kernel_stack(|kstack| {
             let mut writer = kstack.get_writer();
             writer.flags = 0x200;
@@ -67,13 +67,15 @@ impl Scheduler {
         });
         // We don't wake the idle thread to prevent from accidentally being scheduled there.
 
-        // TODO!!!: Set per cpu variable.
-        unsafe { IDLE_TASK = Some(thread) };
+        let old = IDLE_TASK.swap(NonNull::new(Arc::into_raw(thread) as *mut _));
+        assert!(old.is_none(), "Idle task is already set");
     }
 
-    pub(super) fn set_current(thread: Arc<Thread>) {
-        // TODO!!!: Set per cpu variable.
-        unsafe { CURRENT = Some(thread) };
+    pub(super) unsafe fn set_current(thread: Arc<Thread>) {
+        let old = CURRENT.swap(NonNull::new(Arc::into_raw(thread) as *mut _));
+        if let Some(thread_pointer) = old {
+            Arc::from_raw(thread_pointer.as_ptr());
+        }
     }
 
     fn enqueue(&mut self, thread: &Arc<Thread>) {
@@ -161,7 +163,7 @@ impl Scheduler {
         //
         // Since we might never return to here, we can't take ownership of `current()`.
         // Is it safe to believe that `current()` will never change across calls?
-        context_switch_light(Thread::current(), Scheduler::idle_task());
+        context_switch_light(&Thread::current(), &Scheduler::idle_task());
         preempt::enable();
     }
 
@@ -192,11 +194,11 @@ extern "C" fn idle_task() {
             // No other thread to run, return to current running thread without changing its state.
             if scheduler.ready.is_empty() {
                 drop(scheduler);
-                context_switch_light(Scheduler::idle_task(), Thread::current());
+                context_switch_light(&Scheduler::idle_task(), &Thread::current());
                 continue;
             } else {
                 // Put it into `Ready` state
-                scheduler.put_ready(Thread::current());
+                scheduler.put_ready(&Thread::current());
             }
         }
 
@@ -217,7 +219,9 @@ extern "C" fn idle_task() {
         drop(scheduler);
 
         next_thread.process.mm_list.switch_page_table();
-        unsafe { CURRENT = Some(next_thread) };
+        unsafe {
+            Scheduler::set_current(next_thread);
+        }
 
         Thread::current().load_interrupt_stack();
         Thread::current().load_thread_area32();
@@ -226,6 +230,6 @@ extern "C" fn idle_task() {
         //
         // The other cpu should see the changes of kernel stack of the target thread
         // made in this cpu.
-        context_switch_light(Scheduler::idle_task(), Thread::current());
+        context_switch_light(&Scheduler::idle_task(), &Thread::current());
     }
 }

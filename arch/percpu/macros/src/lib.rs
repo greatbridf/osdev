@@ -18,8 +18,10 @@ pub fn define_percpu(attrs: TokenStream, item: TokenStream) -> TokenStream {
     let ty = &item.ty;
     let expr = &item.expr;
 
-    if !["bool", "u8", "u16", "u32", "u64", "usize"].contains(&quote!(#ty).to_string().as_str()) {
-        panic!("`define_percpu` only supports bool, u8, u16, u32, u64 and usize");
+    if !["bool", "u8", "u16", "u32", "u64", "usize"].contains(&quote!(#ty).to_string().as_str())
+        && !quote!(#ty).to_string().contains("NonNull")
+    {
+        panic!("`define_percpu` only supports bool, u8, u16, u32, u64, usize and pointers");
     }
 
     let inner_ident = format_ident!("_percpu_inner_{}", ident);
@@ -27,6 +29,7 @@ pub fn define_percpu(attrs: TokenStream, item: TokenStream) -> TokenStream {
 
     let integer_methods = match quote!(#ty).to_string().as_str() {
         "bool" => quote! {},
+        name if name.contains("NonNull") => quote! {},
         _ => quote! {
             pub fn add(&self, value: #ty) {
                 *unsafe { self.as_mut() } += value;
@@ -59,6 +62,11 @@ pub fn define_percpu(attrs: TokenStream, item: TokenStream) -> TokenStream {
 
             pub fn set(&self, value: #ty) {
                 unsafe { self.as_ptr().write(value) }
+            }
+
+            pub fn swap(&self, mut value: #ty) -> #ty {
+                unsafe { self.as_ptr().swap(&mut value) }
+                value
             }
 
             /// # Safety

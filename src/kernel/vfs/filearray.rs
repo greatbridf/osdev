@@ -58,7 +58,7 @@ impl OpenFile {
 
 impl FileArray {
     pub fn get_current<'lt>() -> &'lt Arc<Self> {
-        &Thread::current().files
+        &Thread::current().borrow().files
     }
 
     pub fn new_for_init() -> Arc<Self> {

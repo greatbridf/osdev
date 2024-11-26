@@ -38,9 +38,9 @@ impl<const I: bool> CondVar<I> {
 
     fn sleep(scheduler: &mut Scheduler) {
         if I {
-            scheduler.isleep(Thread::current());
+            scheduler.isleep(&Thread::current());
         } else {
-            scheduler.usleep(Thread::current());
+            scheduler.usleep(&Thread::current());
         }
     }
 
@@ -88,6 +88,6 @@ impl<const I: bool> CondVar<I> {
 
         self.waiters
             .lock_irq()
-            .retain(|waiter| waiter != Thread::current());
+            .retain(|waiter| waiter != Thread::current().as_ref());
     }
 }

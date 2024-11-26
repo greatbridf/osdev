@@ -52,8 +52,7 @@ pub struct FsContext {
 
 impl FsContext {
     pub fn get_current<'lt>() -> &'lt Arc<Self> {
-        let current = Thread::current();
-        &current.fs_context
+        &Thread::current().borrow().fs_context
     }
 
     pub fn new_for_init() -> Arc<Self> {

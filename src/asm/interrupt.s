@@ -42,6 +42,11 @@ ISR_stub:
 	.cfi_def_cfa_offset 0x18
 	.cfi_offset %rsp, 0x10
 
+	cmpq $0x08, 24(%rsp)
+	je 1f
+	swapgs
+
+1:
 	sub $0x78, %rsp
 	.cfi_def_cfa_offset 0x90
 
@@ -101,6 +106,11 @@ ISR_stub_restore:
 	add $0x88, %rsp
 	.cfi_def_cfa_offset 0x08
 
+	cmpq $0x08, 8(%rsp)
+	je 1f
+	swapgs
+
+1:
 	iretq
 	.cfi_endproc
 

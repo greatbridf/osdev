@@ -1,5 +1,4 @@
 use core::{
-    arch::asm,
     cell::RefCell,
     cmp,
     sync::atomic::{self, AtomicU32},
@@ -193,7 +192,8 @@ struct ThreadInner {
     name: Arc<[u8]>,
 
     /// Thread TLS descriptor 32-bit
-    tls_desc32: u64,
+    tls_desc32: Option<u64>,
+    tls_base: Option<u64>,
 
     /// User pointer
     /// Store child thread's tid when child thread returns to user space.
@@ -812,7 +812,8 @@ impl Thread {
             state: Spin::new(ThreadState::Preparing),
             inner: Spin::new(ThreadInner {
                 name,
-                tls_desc32: 0,
+                tls_desc32: None,
+                tls_base: None,
                 set_child_tid: 0,
             }),
         });
@@ -842,6 +843,7 @@ impl Thread {
             inner: Spin::new(ThreadInner {
                 name: other_inner.name.clone(),
                 tls_desc32: other_inner.tls_desc32,
+                tls_base: other_inner.tls_base,
                 set_child_tid: other_inner.set_child_tid,
             }),
         });
@@ -896,23 +898,19 @@ impl Thread {
     }
 
     pub fn load_thread_area32(&self) {
+        const IA32_KERNEL_GS_BASE: u32 = 0xc0000102;
+
         let inner = self.inner.lock();
-        if inner.tls_desc32 == 0 {
-            return;
+
+        if let Some(desc32) = inner.tls_desc32 {
+            // SAFETY: `tls32` should be per cpu.
+            let tls32_addr = CachedPP::new(0x0 + 7 * 8);
+            tls32_addr.as_mut::<u64>().clone_from(&desc32);
         }
 
-        // SAFETY: `tls32` should be per cpu.
-        let tls32_addr = CachedPP::new(0x0 + 7 * 8);
-        tls32_addr.as_mut::<u64>().clone_from(&inner.tls_desc32);
-
-        unsafe {
-            asm!(
-                "mov %gs, %ax",
-                "mov %ax, %gs",
-                out("ax") _,
-                options(att_syntax)
-            )
-        };
+        if let Some(base) = inner.tls_base {
+            arch::x86_64::task::wrmsr(IA32_KERNEL_GS_BASE, base);
+        }
     }
 
     pub fn set_thread_area(&self, desc: &mut UserDescriptor) -> KResult<()> {
@@ -920,9 +918,17 @@ impl Thread {
 
         // Clear the TLS area if it is not present.
         if desc.flags.is_read_exec_only() && !desc.flags.is_present() {
-            if desc.limit != 0 && desc.base != 0 {
-                CheckedUserPointer::new(desc.base as _, desc.limit as _)?.zero()?;
+            if desc.limit == 0 || desc.base == 0 {
+                return Ok(());
             }
+
+            let len = if desc.flags.is_limit_in_pages() {
+                (desc.limit as usize) << 12
+            } else {
+                desc.limit as usize
+            };
+
+            CheckedUserPointer::new(desc.base as _, len)?.zero()?;
             return Ok(());
         }
 
@@ -931,17 +937,19 @@ impl Thread {
         }
         desc.entry = 7;
 
-        inner.tls_desc32 = desc.limit as u64 & 0xffff;
-        inner.tls_desc32 |= (desc.base as u64 & 0xffffff) << 16;
-        inner.tls_desc32 |= 0x4_0_f2_000000_0000;
-        inner.tls_desc32 |= (desc.limit as u64 & 0xf_0000) << (48 - 16);
+        let mut desc32 = desc.limit as u64 & 0xffff;
+        desc32 |= (desc.base as u64 & 0xffffff) << 16;
+        desc32 |= 0x4_0_f2_000000_0000;
+        desc32 |= (desc.limit as u64 & 0xf_0000) << (48 - 16);
 
         if desc.flags.is_limit_in_pages() {
-            inner.tls_desc32 |= 1 << 55;
+            desc32 |= 1 << 55;
         }
 
-        inner.tls_desc32 |= (desc.base as u64 & 0xff_000000) << (56 - 24);
+        desc32 |= (desc.base as u64 & 0xff_000000) << (56 - 24);
 
+        inner.tls_desc32 = Some(desc32);
+        inner.tls_base = Some(desc.base as u64);
         Ok(())
     }
 

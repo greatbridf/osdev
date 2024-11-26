@@ -45,6 +45,9 @@ pub mod task {
     pub fn context_switch_light(current_task_sp: *mut usize, next_task_sp: *mut usize) {
         x86_64::task::context_switch_light(current_task_sp, next_task_sp);
     }
+
+    #[cfg(target_arch = "x86_64")]
+    pub use x86_64::task::{rdmsr, wrmsr};
 }
 
 pub mod interrupt {
@@ -91,4 +94,5 @@ pub mod io {
     }
 }
 
+pub use percpu::{define_percpu, set_percpu_area_thiscpu};
 pub use x86_64;

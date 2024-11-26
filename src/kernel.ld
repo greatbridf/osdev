@@ -77,6 +77,8 @@ SECTIONS
         QUAD(ABSOLUTE(_fix_start));
         FIX_END = .;
         QUAD(ABSOLUTE(_fix_end));
+        PERCPU_PAGES = .;
+        QUAD(_PERCPU_PAGES);
 
         . = ALIGN(0x1000);
         RODATA_END = .;
@@ -102,10 +104,11 @@ SECTIONS
     DATA_PAGES = (DATA_END - DATA_START) / 0x1000;
 
     _PERCPU_DATA_START = .;
-    .percpu 0 (NOLOAD) : AT(LOADADDR(.data) + SIZEOF(.data))
+    .percpu 0 : AT(LOADADDR(.data) + SIZEOF(.data))
     {
         PERCPU_START = .;
-        . += 0x10; /* Reserved for x86 percpu pointer */
+        QUAD(0); /* Reserved for x86 percpu pointer */
+        QUAD(0);
 
         *(.percpu .percpu*)
 
@@ -114,7 +117,7 @@ SECTIONS
     } > KPERCPU
     _PERCPU_LENGTH = PERCPU_END - PERCPU_START;
 
-    PERCPU_PAGES = _PERCPU_LENGTH / 0x1000;
+    _PERCPU_PAGES = _PERCPU_LENGTH / 0x1000;
 
     .bss :
     {
@@ -126,14 +129,14 @@ SECTIONS
         BSS_END = .;
     } > KBSS
 
-    KIMAGE_PAGES = TEXT_PAGES + RODATA_PAGES + PERCPU_PAGES + DATA_PAGES;
+    KIMAGE_PAGES = TEXT_PAGES + RODATA_PAGES + _PERCPU_PAGES + DATA_PAGES;
     BSS_PAGES = (BSS_END - BSS_START) / 0x1000;
     KERNEL_MAGIC = 0x01145140;
 
     KIMAGE_32K_COUNT = (KIMAGE_PAGES * 0x1000 + 32 * 1024 - 1) / (32 * 1024);
 
     .eh_frame :
-        AT(LOADADDR(.data) + SIZEOF(.data))
+        AT(LOADADDR(.percpu) + SIZEOF(.percpu))
     {
         KEEP(*(.eh_frame*))
         . = ALIGN(0x1000);

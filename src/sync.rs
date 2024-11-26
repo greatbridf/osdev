@@ -5,26 +5,26 @@ pub mod spin;
 pub mod strategy;
 
 pub mod preempt {
-    use core::sync::atomic::{compiler_fence, AtomicUsize, Ordering};
+    use core::sync::atomic::{compiler_fence, Ordering};
 
-    /// TODO: This should be per cpu.
-    static PREEMPT_COUNT: AtomicUsize = AtomicUsize::new(0);
+    #[arch::define_percpu]
+    static PREEMPT_COUNT: usize = 0;
 
     #[inline(always)]
     pub fn disable() {
-        PREEMPT_COUNT.fetch_add(1, Ordering::Relaxed);
+        PREEMPT_COUNT.add(1);
         compiler_fence(Ordering::SeqCst);
     }
 
     #[inline(always)]
     pub fn enable() {
         compiler_fence(Ordering::SeqCst);
-        PREEMPT_COUNT.fetch_sub(1, Ordering::Relaxed);
+        PREEMPT_COUNT.sub(1);
     }
 
     #[inline(always)]
     pub fn count() -> usize {
-        PREEMPT_COUNT.load(Ordering::Relaxed)
+        PREEMPT_COUNT.get()
     }
 }
 

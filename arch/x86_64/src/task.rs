@@ -24,6 +24,40 @@ pub fn freeze() -> ! {
     }
 }
 
+#[inline(always)]
+pub fn rdmsr(msr: u32) -> u64 {
+    let edx: u32;
+    let eax: u32;
+
+    unsafe {
+        asm!(
+            "rdmsr",
+            in("ecx") msr,
+            out("eax") eax,
+            out("edx") edx,
+            options(att_syntax),
+        );
+    }
+
+    (edx as u64) << 32 | eax as u64
+}
+
+#[inline(always)]
+pub fn wrmsr(msr: u32, value: u64) {
+    let eax = value as u32;
+    let edx = (value >> 32) as u32;
+
+    unsafe {
+        asm!(
+            "wrmsr",
+            in("ecx") msr,
+            in("eax") eax,
+            in("edx") edx,
+            options(att_syntax),
+        );
+    }
+}
+
 global_asm!(
     r"
     .macro movcfi reg, offset

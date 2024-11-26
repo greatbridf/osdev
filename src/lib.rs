@@ -23,6 +23,7 @@ mod rcu;
 mod sync;
 
 use alloc::ffi::CString;
+use arch::task::rdmsr;
 use core::{
     alloc::{GlobalAlloc, Layout},
     arch::{asm, global_asm},
@@ -110,22 +111,6 @@ extern "C" {
     fn boot_semaphore();
 }
 
-fn rdmsr(msr: u32) -> u64 {
-    let edx: u32;
-    let eax: u32;
-
-    unsafe {
-        asm!(
-            "rdmsr",
-            in("ecx") msr,
-            out("eax") eax,
-            out("edx") edx,
-        )
-    };
-
-    (edx as u64) << 32 | eax as u64
-}
-
 fn bootstrap_cpus() {
     let apic_base = rdmsr(0x1b);
     assert_eq!(apic_base & 0x800, 0x800, "LAPIC not enabled");
@@ -162,6 +147,11 @@ fn bootstrap_cpus() {
 pub extern "C" fn rust_kinit(early_kstack_pfn: usize) -> ! {
     // We don't call global constructors.
     // Rust doesn't need that, and we're not going to use global variables in C++.
+
+    unsafe {
+        let area = kernel::smp::alloc_percpu_area();
+        kernel::smp::set_percpu_area(area);
+    }
 
     kernel::interrupt::init().unwrap();
 
@@ -259,8 +249,7 @@ extern "C" fn init_process(early_kstack_pfn: usize) {
 
     unsafe {
         asm!(
-            "mov %ax, %fs",
-            "mov %ax, %gs",
+            "swapgs",
             "mov ${ds}, %rax",
             "mov %ax, %ds",
             "mov %ax, %es",

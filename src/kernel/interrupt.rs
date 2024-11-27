@@ -1,6 +1,4 @@
-use alloc::boxed::Box;
-use alloc::vec;
-use alloc::vec::Vec;
+use alloc::sync::Arc;
 
 use lazy_static::lazy_static;
 
@@ -35,8 +33,8 @@ extern "C" {
 }
 
 lazy_static! {
-    static ref IRQ_HANDLERS: Spin<[Vec<Box<dyn Fn() + Send>>; 16]> =
-        Spin::new(core::array::from_fn(|_| vec![]));
+    static ref IRQ_HANDLERS: Spin<[Option<Arc<dyn Fn() + Send + Sync>>; 16]> =
+        Spin::new([const { None }; 16]);
     static ref IDT: [IDTEntry; 256] = core::array::from_fn(|idx| {
         match idx {
             0..0x80 => IDTEntry::new(unsafe { ISR_START_ADDR } + 8 * idx, 0x08, 0x8e),
@@ -75,8 +73,8 @@ impl IDTEntry {
 fn irq_handler(irqno: usize) {
     assert!(irqno < 16);
 
-    let handlers = IRQ_HANDLERS.lock();
-    for handler in handlers[irqno as usize].iter() {
+    let handler = IRQ_HANDLERS.lock()[irqno as usize].as_ref().cloned();
+    if let Some(handler) = handler {
         handler();
     }
 
@@ -113,13 +111,14 @@ pub extern "C" fn interrupt_handler(int_stack: *mut interrupt_stack, mmxregs: *m
 
 pub fn register_irq_handler<F>(irqno: i32, handler: F) -> Result<(), u32>
 where
-    F: Fn() + Send + 'static,
+    F: Fn() + Send + Sync + 'static,
 {
     if irqno < 0 || irqno >= 16 {
         return Err(EINVAL);
     }
 
-    IRQ_HANDLERS.lock_irq()[irqno as usize].push(Box::new(handler));
+    let old = IRQ_HANDLERS.lock_irq()[irqno as usize].replace(Arc::new(handler));
+    assert!(old.is_none(), "IRQ handler already registered");
     Ok(())
 }
 

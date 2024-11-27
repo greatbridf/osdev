@@ -26,9 +26,6 @@ class mutex {
     mutex(const mutex&) = delete;
     ~mutex();
 
-    void lock();
-    void unlock();
-
     lock_context_t lock_irq();
     void unlock_irq(lock_context_t state);
 };

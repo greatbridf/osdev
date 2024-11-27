@@ -1,6 +1,6 @@
 use core::{
     ptr::NonNull,
-    sync::atomic::{compiler_fence, Ordering},
+    sync::atomic::{compiler_fence, fence, Ordering},
 };
 
 use crate::{prelude::*, sync::preempt};
@@ -58,7 +58,7 @@ impl Scheduler {
         BorrowedArc::from_raw(IDLE_TASK.get().unwrap().as_ptr())
     }
 
-    pub(super) unsafe fn set_idle(thread: Arc<Thread>) {
+    pub unsafe fn set_idle(thread: Arc<Thread>) {
         thread.prepare_kernel_stack(|kstack| {
             let mut writer = kstack.get_writer();
             writer.flags = 0x200;
@@ -71,10 +71,13 @@ impl Scheduler {
         assert!(old.is_none(), "Idle task is already set");
     }
 
-    pub(super) unsafe fn set_current(thread: Arc<Thread>) {
+    pub unsafe fn set_current(thread: Arc<Thread>) {
+        assert_eq!(thread.oncpu.swap(true, Ordering::AcqRel), false);
         let old = CURRENT.swap(NonNull::new(Arc::into_raw(thread) as *mut _));
+
         if let Some(thread_pointer) = old {
-            Arc::from_raw(thread_pointer.as_ptr());
+            let thread = Arc::from_raw(thread_pointer.as_ptr());
+            thread.oncpu.store(false, Ordering::Release);
         }
     }
 
@@ -94,8 +97,12 @@ impl Scheduler {
         let mut state = thread.state.lock();
         assert_eq!(*state, ThreadState::USleep);
 
-        *state = ThreadState::Ready;
-        self.enqueue(&thread);
+        if thread.oncpu.load(Ordering::Acquire) {
+            *state = ThreadState::Running;
+        } else {
+            *state = ThreadState::Ready;
+            self.enqueue(&thread);
+        }
     }
 
     pub fn isleep(&mut self, thread: &Arc<Thread>) {
@@ -112,8 +119,12 @@ impl Scheduler {
         match *state {
             ThreadState::Ready | ThreadState::Running | ThreadState::USleep => return,
             ThreadState::ISleep => {
-                *state = ThreadState::Ready;
-                self.enqueue(&thread);
+                if thread.oncpu.load(Ordering::Acquire) {
+                    *state = ThreadState::Running;
+                } else {
+                    *state = ThreadState::Ready;
+                    self.enqueue(&thread);
+                }
             }
             state => panic!("Invalid transition from state {:?} to `Ready`", state),
         }
@@ -229,6 +240,8 @@ extern "C" fn idle_task() {
         //
         // The other cpu should see the changes of kernel stack of the target thread
         // made in this cpu.
+        fence(Ordering::SeqCst);
         context_switch_light(&Scheduler::idle_task(), &Thread::current());
+        fence(Ordering::SeqCst);
     }
 }

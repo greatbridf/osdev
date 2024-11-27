@@ -4,11 +4,14 @@ use crate::{
         arch::interrupt::APIC_BASE,
         mem::{paging::Page, phys::PhysPtr as _},
         smp,
+        task::{ProcessList, Scheduler, Thread},
     },
     println_debug, println_info,
     sync::preempt,
 };
+use alloc::{format, sync::Arc};
 use arch::{
+    interrupt,
     task::pause,
     x86_64::{gdt::GDT, task::TSS},
 };
@@ -71,14 +74,28 @@ pub static BOOT_STACK: AtomicUsize = AtomicUsize::new(0);
 pub static CPU_COUNT: AtomicUsize = AtomicUsize::new(0);
 
 #[no_mangle]
-pub unsafe extern "C" fn ap_entry(_stack_start: u64) {
+pub unsafe extern "C" fn ap_entry(stack_start: u64) {
     init_cpu();
 
-    // TODO!!!!!: Set up idle task.
+    let idle_process = ProcessList::get()
+        .try_find_process(0)
+        .expect("Idle process must exist");
 
-    // TODO!!!!!: Free the stack before switching to idle task.
+    let idle_thread_name = format!("[kernel idle#AP{}]", 0);
+    let idle_thread = Thread::new_for_init(Arc::from(idle_thread_name.as_bytes()), &idle_process);
+    ProcessList::get().add_thread(&idle_thread);
+    Scheduler::set_idle(idle_thread.clone());
+    Scheduler::set_current(idle_thread);
 
-    loop {}
+    preempt::disable();
+    interrupt::enable();
+
+    // TODO!!!!!: Free the stack after having switched to idle task.
+    arch::task::context_switch_light(
+        stack_start as *mut _, // We will never come back
+        unsafe { Scheduler::idle_task().get_sp_ptr() },
+    );
+    arch::task::freeze()
 }
 
 pub unsafe fn bootstrap_cpus() {
@@ -94,7 +111,7 @@ pub unsafe fn bootstrap_cpus() {
         pause();
     }
 
-    while CPU_COUNT.load(Ordering::Acquire) != 3 {
+    while CPU_COUNT.load(Ordering::Acquire) != 4 {
         if BOOT_STACK.load(Ordering::Acquire) == 0 {
             let page = Page::alloc_many(9);
             let stack_start = page.as_cached().as_ptr::<()>() as usize;

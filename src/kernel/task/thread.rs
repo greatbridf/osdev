@@ -1,15 +1,12 @@
 use core::{
     cell::RefCell,
     cmp,
-    sync::atomic::{self, AtomicU32},
+    sync::atomic::{self, AtomicBool, AtomicU32},
 };
 
 use crate::{
     kernel::{
-        arch::user::TLS,
-        mem::{phys::PhysPtr, MMList},
-        terminal::Terminal,
-        user::dataflow::CheckedUserPointer,
+        arch::user::TLS, mem::MMList, terminal::Terminal, user::dataflow::CheckedUserPointer,
         vfs::FsContext,
     },
     prelude::*,
@@ -20,7 +17,7 @@ use alloc::{
     collections::{btree_map::BTreeMap, vec_deque::VecDeque},
     sync::{Arc, Weak},
 };
-use bindings::{ECHILD, EINTR, EINVAL, EPERM, ESRCH};
+use bindings::{ECHILD, EINTR, EPERM, ESRCH};
 use lazy_static::lazy_static;
 
 use crate::kernel::vfs::filearray::FileArray;
@@ -209,6 +206,8 @@ pub struct Thread {
     /// Thread state for scheduler use.
     pub state: Spin<ThreadState>,
 
+    pub oncpu: AtomicBool,
+
     /// Kernel stack
     /// Never access this directly.
     ///
@@ -389,15 +388,15 @@ impl Drop for ProcessGroup {
 }
 
 lazy_static! {
-    static ref GLOBAL_PROC_LIST: ProcessList = {
+    static ref GLOBAL_PROC_LIST: ProcessList = unsafe {
         let init_process = Process::new_for_init(1, None);
         let init_thread = Thread::new_for_init(b"[kernel kinit]".as_slice().into(), &init_process);
-        unsafe { Scheduler::set_current(init_thread.clone()) };
+        Scheduler::set_current(init_thread.clone());
 
         let idle_process = Process::new_for_init(0, None);
         let idle_thread =
             Thread::new_for_init(b"[kernel idle#BS]".as_slice().into(), &idle_process);
-        unsafe { Scheduler::set_idle(idle_thread.clone()) };
+        Scheduler::set_idle(idle_thread.clone());
 
         let init_session_weak = Arc::downgrade(&init_process.inner.lock().session);
         let init_pgroup_weak = Arc::downgrade(&init_process.inner.lock().pgroup);
@@ -591,7 +590,7 @@ impl Process {
         process
     }
 
-    fn new_for_init(pid: u32, parent: Option<Arc<Self>>) -> Arc<Self> {
+    unsafe fn new_for_init(pid: u32, parent: Option<Arc<Self>>) -> Arc<Self> {
         let process = Arc::new_cyclic(|weak| {
             let session = Session::new(pid, weak.clone());
             let pgroup = ProcessGroup::new_for_init(pid, weak.clone(), Arc::downgrade(&session));
@@ -798,7 +797,7 @@ impl UserDescriptorFlags {
 }
 
 impl Thread {
-    fn new_for_init(name: Arc<[u8]>, process: &Arc<Process>) -> Arc<Self> {
+    pub unsafe fn new_for_init(name: Arc<[u8]>, process: &Arc<Process>) -> Arc<Self> {
         let thread = Arc::new(Self {
             tid: process.pid,
             process: process.clone(),
@@ -807,6 +806,7 @@ impl Thread {
             signal_list: SignalList::new(),
             kstack: RefCell::new(KernelStack::new()),
             state: Spin::new(ThreadState::Preparing),
+            oncpu: AtomicBool::new(false),
             inner: Spin::new(ThreadInner {
                 name,
                 tls: None,
@@ -836,6 +836,7 @@ impl Thread {
             signal_list,
             kstack: RefCell::new(KernelStack::new()),
             state: Spin::new(ThreadState::Preparing),
+            oncpu: AtomicBool::new(false),
             inner: Spin::new(ThreadInner {
                 name: other_inner.name.clone(),
                 tls: other_inner.tls.clone(),

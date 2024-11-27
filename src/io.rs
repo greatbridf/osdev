@@ -2,8 +2,9 @@ use bindings::EFAULT;
 
 use crate::prelude::*;
 
-use core::{ffi::c_char, fmt::Write, mem::MaybeUninit};
+use core::{fmt::Write, mem::MaybeUninit};
 
+#[must_use]
 pub enum FillResult {
     Done(usize),
     Partial(usize),
@@ -33,7 +34,27 @@ impl FillResult {
 pub trait Buffer {
     fn total(&self) -> usize;
     fn wrote(&self) -> usize;
+
+    #[must_use]
     fn fill(&mut self, data: &[u8]) -> KResult<FillResult>;
+
+    fn available(&self) -> usize {
+        self.total() - self.wrote()
+    }
+}
+
+pub trait BufferFill<T: Copy> {
+    fn copy(&mut self, object: &T) -> KResult<FillResult>;
+}
+
+impl<T: Copy, B: Buffer + ?Sized> BufferFill<T> for B {
+    fn copy(&mut self, object: &T) -> KResult<FillResult> {
+        let ptr = object as *const T as *const u8;
+        let len = core::mem::size_of::<T>();
+
+        // SAFETY: `object` is a valid object.
+        self.fill(unsafe { core::slice::from_raw_parts(ptr, len) })
+    }
 }
 
 pub struct UninitBuffer<'lt, T: Copy + Sized> {
@@ -49,10 +70,7 @@ impl<'lt, T: Copy + Sized> UninitBuffer<'lt, T> {
         Self {
             data,
             buffer: RawBuffer::new_from_slice(unsafe {
-                core::slice::from_raw_parts_mut(
-                    ptr as *mut u8,
-                    core::mem::size_of::<T>(),
-                )
+                core::slice::from_raw_parts_mut(ptr as *mut u8, core::mem::size_of::<T>())
             }),
         }
     }
@@ -63,6 +81,14 @@ impl<'lt, T: Copy + Sized> UninitBuffer<'lt, T> {
         }
 
         Ok(unsafe { self.data.assume_init_ref() })
+    }
+
+    pub fn assume_init(self) -> Option<T> {
+        if self.buffer.filled() {
+            Some(unsafe { *self.data.assume_init() })
+        } else {
+            None
+        }
     }
 }
 
@@ -106,9 +132,9 @@ impl<'lt> RawBuffer<'lt> {
         }
     }
 
-    pub fn new_from_raw(buf: &'lt mut *mut u8, tot: usize) -> Self {
+    pub fn new_from_raw(buf: *mut u8, tot: usize) -> Self {
         Self {
-            buf: *buf,
+            buf,
             tot,
             cur: 0,
             _phantom: core::marker::PhantomData,
@@ -136,11 +162,7 @@ impl<'lt> RawBuffer<'lt> {
             n if n == 0 => Ok(FillResult::Full),
             n if n < data.len() => {
                 unsafe {
-                    core::ptr::copy_nonoverlapping(
-                        data.as_ptr(),
-                        self.buf.add(self.count()),
-                        n,
-                    );
+                    core::ptr::copy_nonoverlapping(data.as_ptr(), self.buf.add(self.count()), n);
                 }
                 self.cur += n;
                 Ok(FillResult::Partial(n))
@@ -226,43 +248,4 @@ impl Write for RawBuffer<'_> {
             _ => Err(core::fmt::Error),
         }
     }
-}
-
-pub fn get_str_from_cstr<'a>(cstr: *const c_char) -> KResult<&'a str> {
-    if cstr.is_null() {
-        return Err(EFAULT);
-    }
-
-    let cstr = unsafe { core::ffi::CStr::from_ptr::<'a>(cstr) };
-    cstr.to_str().map_err(|_| EFAULT)
-}
-
-/// Copy data from src to dst, starting from offset, and copy at most count bytes.
-///
-/// # Return
-///
-/// The number of bytes copied.
-pub fn copy_offset_count(
-    src: &[u8],
-    dst: &mut [u8],
-    offset: usize,
-    count: usize,
-) -> usize {
-    if offset >= src.len() {
-        return 0;
-    }
-
-    let count = {
-        let count = count.min(dst.len());
-
-        if offset + count > src.len() {
-            src.len() - offset
-        } else {
-            count
-        }
-    };
-
-    dst[..count].copy_from_slice(&src[offset..offset + count]);
-
-    count
 }

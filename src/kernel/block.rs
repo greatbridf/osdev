@@ -11,7 +11,7 @@ use alloc::{
 };
 use bindings::{EEXIST, EINVAL, EIO, ENOENT};
 
-use crate::KResult;
+use lazy_static::lazy_static;
 
 use super::{
     mem::{paging::Page, phys::PhysPtr},
@@ -27,18 +27,18 @@ pub trait BlockRequestQueue: Send + Sync {
     ///
     fn max_request_pages(&self) -> u64;
 
-    fn submit(&mut self, req: BlockDeviceRequest) -> KResult<()>;
+    fn submit(&self, req: BlockDeviceRequest) -> KResult<()>;
 }
 
 struct BlockDeviceDisk {
-    queue: Arc<Mutex<dyn BlockRequestQueue>>,
+    queue: Arc<dyn BlockRequestQueue>,
 }
 
 struct BlockDevicePartition {
     disk_dev: DevId,
     offset: u64,
 
-    queue: Arc<Mutex<dyn BlockRequestQueue>>,
+    queue: Arc<dyn BlockRequestQueue>,
 }
 
 enum BlockDeviceType {
@@ -74,8 +74,10 @@ impl Ord for BlockDevice {
     }
 }
 
-static BLOCK_DEVICE_LIST: Mutex<BTreeMap<DevId, Arc<BlockDevice>>> =
-    Mutex::new(BTreeMap::new());
+lazy_static! {
+    static ref BLOCK_DEVICE_LIST: Spin<BTreeMap<DevId, Arc<BlockDevice>>> =
+        Spin::new(BTreeMap::new());
+}
 
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]
@@ -100,9 +102,9 @@ impl BlockDevice {
     pub fn register_disk(
         devid: DevId,
         size: u64,
-        queue: Arc<Mutex<dyn BlockRequestQueue>>,
+        queue: Arc<dyn BlockRequestQueue>,
     ) -> KResult<Arc<Self>> {
-        let max_pages = queue.lock().max_request_pages();
+        let max_pages = queue.max_request_pages();
         let device = Arc::new(Self {
             devid,
             size,
@@ -199,10 +201,10 @@ impl BlockDevice {
         }
 
         match self.dev_type {
-            BlockDeviceType::Disk(ref disk) => disk.queue.lock().submit(req),
+            BlockDeviceType::Disk(ref disk) => disk.queue.submit(req),
             BlockDeviceType::Partition(ref part) => {
                 req.sector += part.offset;
-                part.queue.lock().submit(req)
+                part.queue.submit(req)
             }
         }
     }

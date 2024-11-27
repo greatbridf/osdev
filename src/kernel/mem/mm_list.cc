@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <errno.h>
 #include <stdint.h>
 
 #include <kernel/mem/mm_list.hpp>
@@ -16,8 +17,7 @@ static inline void __invalidate_all_tlb() {
         : "rax", "memory");
 }
 
-static inline void __dealloc_page_table_all(paging::pfn_t pt, int depth,
-                                            int from, int to) {
+static inline void __dealloc_page_table_all(paging::pfn_t pt, int depth, int from, int to) {
     using namespace paging;
 
     if (depth > 1) {
@@ -43,7 +43,8 @@ static inline void __dealloc_page_table(paging::pfn_t pt) {
 }
 
 mm_list::mm_list() : m_pt{paging::alloc_page_table()}, m_brk{m_areas.end()} {
-    memcpy(physaddr<void>{m_pt}, paging::KERNEL_PAGE_TABLE_PHYS_ADDR, 0x1000);
+    // copy only kernel space
+    memcpy(physaddr<void>{m_pt + 0x800}, physaddr<void>{KERNEL_PML4 + 0x800}, 0x800);
 }
 
 mm_list::mm_list(const mm_list& other) : mm_list{} {
@@ -138,8 +139,7 @@ int mm_list::register_brk(uintptr_t addr) {
         return -ENOMEM;
 
     bool inserted;
-    std::tie(m_brk, inserted) =
-        m_areas.emplace(addr, MM_ANONYMOUS | MM_WRITE | MM_BREAK);
+    std::tie(m_brk, inserted) = m_areas.emplace(addr, MM_ANONYMOUS | MM_WRITE | MM_BREAK);
 
     assert(inserted);
     return 0;
@@ -186,8 +186,8 @@ mm_list::iterator mm_list::split(iterator area, uintptr_t addr) {
     auto new_end = area->end;
     area->end = addr;
 
-    auto [iter, inserted] = m_areas.emplace(addr, area->flags, new_end,
-                                            area->mapped_file, new_file_offset);
+    auto [iter, inserted] =
+        m_areas.emplace(addr, area->flags, new_end, d_get(area->mapped_file), new_file_offset);
 
     assert(inserted);
     return iter;
@@ -217,8 +217,7 @@ int mm_list::unmap(iterator area, bool should_invalidate_tlb) {
     return 0;
 }
 
-int mm_list::unmap(uintptr_t start, std::size_t length,
-                   bool should_invalidate_tlb) {
+int mm_list::unmap(uintptr_t start, std::size_t length, bool should_invalidate_tlb) {
     // standard says that addr and len MUST be
     // page-aligned or the call is invalid
     if (start & 0xfff)
@@ -279,7 +278,7 @@ int mm_list::unmap(uintptr_t start, std::size_t length,
 int mm_list::mmap(const map_args& args) {
     auto& vaddr = args.vaddr;
     auto& length = args.length;
-    auto& finode = args.file_inode;
+    auto& file = args.file;
     auto& foff = args.file_offset;
     auto& flags = args.flags;
 
@@ -298,10 +297,10 @@ int mm_list::mmap(const map_args& args) {
         attributes |= PA_NXE;
 
     if (flags & MM_MAPPED) {
-        assert(finode);
+        assert(file);
 
-        auto [area, inserted] = m_areas.emplace(
-            vaddr, flags & ~MM_INTERNAL_MASK, vaddr + length, finode, foff);
+        auto [area, inserted] =
+            m_areas.emplace(vaddr, flags & ~MM_INTERNAL_MASK, vaddr + length, d_get(file), foff);
         assert(inserted);
 
         attributes |= PA_MMAPPED_PAGE;
@@ -310,8 +309,7 @@ int mm_list::mmap(const map_args& args) {
     } else if (flags & MM_ANONYMOUS) {
         // private mapping of zero-filled pages
         // TODO: shared mapping
-        auto [area, inserted] =
-            m_areas.emplace(vaddr, (flags & ~MM_INTERNAL_MASK), vaddr + length);
+        auto [area, inserted] = m_areas.emplace(vaddr, (flags & ~MM_INTERNAL_MASK), vaddr + length);
         assert(inserted);
 
         attributes |= PA_ANONYMOUS_PAGE;

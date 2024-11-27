@@ -9,12 +9,6 @@
 
 #include <kernel/mem/phys.hpp>
 
-namespace kernel::kinit {
-
-void init_pci();
-
-} // namespace kernel::kinit
-
 namespace kernel::hw::pci {
 
 struct PACKED device_header_base {

@@ -16,19 +16,20 @@ pub trait Command {
 }
 
 pub struct IdentifyCommand {
-    pages: [Page; 1],
+    page: Page,
 }
 
 impl IdentifyCommand {
     pub fn new() -> Self {
-        let page = Page::alloc_one();
-        Self { pages: [page] }
+        Self {
+            page: Page::alloc_one(),
+        }
     }
 }
 
 impl Command for IdentifyCommand {
     fn pages(&self) -> &[Page] {
-        &self.pages
+        core::slice::from_ref(&self.page)
     }
 
     fn lba(&self) -> u64 {

@@ -17,9 +17,7 @@ extern "C" void NORETURN __cxa_pure_virtual(void) {
         ;
 }
 
-void NORETURN __assert_fail(const char* statement, const char* file, int line,
-                            const char* func) {
-    kmsgf("Kernel assertion failed: (%s), %s:%d, %s", statement, file, line,
-          func);
+void NORETURN __assert_fail(const char* statement, const char* file, int line, const char* func) {
+    (void)statement, (void)file, (void)line, (void)func;
     freeze();
 }

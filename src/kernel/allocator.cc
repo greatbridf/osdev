@@ -218,7 +218,6 @@ static constexpr int __cache_index(std::size_t size) {
     return -1;
 }
 
-SECTION(".text.kinit")
 void kernel::kinit::init_allocator() {
     mem::init_slab_cache(caches + 0, 32);
     mem::init_slab_cache(caches + 1, 64);

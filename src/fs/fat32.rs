@@ -1,4 +1,10 @@
-use alloc::{sync::Arc, vec::Vec};
+use core::{ops::ControlFlow, sync::atomic::Ordering};
+
+use alloc::{
+    collections::btree_map::BTreeMap,
+    sync::{Arc, Weak},
+    vec::Vec,
+};
 use bindings::{EINVAL, EIO, S_IFDIR, S_IFREG};
 
 use itertools::Itertools;
@@ -10,10 +16,10 @@ use crate::{
         mem::{paging::Page, phys::PhysPtr},
         vfs::{
             dentry::Dentry,
-            inode::{Ino, Inode, InodeCache, InodeOps},
+            inode::{define_struct_inode, Ino, Inode, InodeData},
             mount::{register_filesystem, Mount, MountCreator},
             vfs::Vfs,
-            DevId, ReadDirCallback,
+            DevId,
         },
     },
     prelude::*,
@@ -131,19 +137,35 @@ struct Bootsector {
     mbr_signature: u16,
 }
 
+impl_any!(FatFs);
 /// # Lock order
-/// 1. FatFs
 /// 2. FatTable
 /// 3. Inodes
 ///
 struct FatFs {
-    device: Arc<BlockDevice>,
-    icache: Mutex<InodeCache<FatFs>>,
     sectors_per_cluster: u8,
     rootdir_cluster: ClusterNo,
     data_start: u64,
-    fat: Mutex<Vec<ClusterNo>>,
-    volume_label: String,
+    volume_label: [u8; 11],
+
+    device: Arc<BlockDevice>,
+    fat: RwSemaphore<Vec<ClusterNo>>,
+    weak: Weak<FatFs>,
+    icache: BTreeMap<Ino, FatInode>,
+}
+
+impl Vfs for FatFs {
+    fn io_blksize(&self) -> usize {
+        4096
+    }
+
+    fn fs_devid(&self) -> DevId {
+        self.device.devid()
+    }
+
+    fn is_read_only(&self) -> bool {
+        true
+    }
 }
 
 impl FatFs {
@@ -151,8 +173,7 @@ impl FatFs {
         let cluster = cluster - 2;
 
         let rq = BlockDeviceRequest {
-            sector: self.data_start as u64
-                + cluster as u64 * self.sectors_per_cluster as u64,
+            sector: self.data_start as u64 + cluster as u64 * self.sectors_per_cluster as u64,
             count: self.sectors_per_cluster as u64,
             buffer: core::slice::from_ref(buf),
         };
@@ -160,57 +181,34 @@ impl FatFs {
 
         Ok(())
     }
-}
 
-impl InodeCache<FatFs> {
-    fn get_or_alloc(
-        &mut self,
-        ino: Ino,
-        is_directory: bool,
-        size: u64,
-    ) -> KResult<Arc<Inode>> {
-        self.get(ino).map(|inode| Ok(inode)).unwrap_or_else(|| {
-            let nlink;
-            let mut mode = 0o777;
-
-            let ops: Box<dyn InodeOps>;
-
-            if is_directory {
-                nlink = 2;
-                mode |= S_IFDIR;
-                ops = Box::new(DirOps);
-            } else {
-                nlink = 1;
-                mode |= S_IFREG;
-                ops = Box::new(FileOps);
-            }
-
-            let mut inode = self.alloc(ino, ops);
-            let inode_mut = unsafe { Arc::get_mut_unchecked(&mut inode) };
-            let inode_idata = inode_mut.idata.get_mut();
-
-            inode_idata.mode = mode;
-            inode_idata.nlink = nlink;
-            inode_idata.size = size;
-
-            self.submit(&inode)?;
-
-            Ok(inode)
-        })
+    fn get_or_alloc_inode(&self, ino: Ino, is_directory: bool, size: u32) -> Arc<dyn Inode> {
+        self.icache
+            .get(&ino)
+            .cloned()
+            .map(FatInode::unwrap)
+            .unwrap_or_else(|| {
+                if is_directory {
+                    DirInode::new(ino, self.weak.clone(), size)
+                } else {
+                    FileInode::new(ino, self.weak.clone(), size)
+                }
+            })
     }
 }
 
 impl FatFs {
-    pub fn create(device: DevId) -> KResult<(Arc<Self>, Arc<Inode>)> {
+    pub fn create(device: DevId) -> KResult<(Arc<Self>, Arc<dyn Inode>)> {
         let device = BlockDevice::get(device)?;
-        let mut fatfs_arc = Arc::new_cyclic(|weak| Self {
+        let mut fatfs_arc = Arc::new_cyclic(|weak: &Weak<FatFs>| Self {
             device,
-            icache: Mutex::new(InodeCache::new(weak.clone())),
             sectors_per_cluster: 0,
             rootdir_cluster: 0,
             data_start: 0,
-            fat: Mutex::new(Vec::new()),
-            volume_label: String::new(),
+            fat: RwSemaphore::new(Vec::new()),
+            weak: weak.clone(),
+            icache: BTreeMap::new(),
+            volume_label: [0; 11],
         });
 
         let fatfs = unsafe { Arc::get_mut_unchecked(&mut fatfs_arc) };
@@ -221,13 +219,13 @@ impl FatFs {
 
         fatfs.sectors_per_cluster = info.sectors_per_cluster;
         fatfs.rootdir_cluster = info.root_cluster;
-        fatfs.data_start = info.reserved_sectors as u64
-            + info.fat_copies as u64 * info.sectors_per_fat as u64;
+        fatfs.data_start =
+            info.reserved_sectors as u64 + info.fat_copies as u64 * info.sectors_per_fat as u64;
 
         let fat = fatfs.fat.get_mut();
+
         fat.resize(
-            512 * info.sectors_per_fat as usize
-                / core::mem::size_of::<ClusterNo>(),
+            512 * info.sectors_per_fat as usize / core::mem::size_of::<ClusterNo>(),
             0,
         );
 
@@ -242,48 +240,18 @@ impl FatFs {
             return Err(EIO);
         }
 
-        fatfs.volume_label = String::from(
-            str::from_utf8(&info.volume_label)
-                .map_err(|_| EINVAL)?
-                .trim_end_matches(char::from(' ')),
-        );
+        info.volume_label
+            .iter()
+            .take_while(|&&c| c != ' ' as u8)
+            .take(11)
+            .enumerate()
+            .for_each(|(idx, c)| fatfs.volume_label[idx] = *c);
 
-        let root_dir_cluster_count =
-            ClusterIterator::new(&fat, fatfs.rootdir_cluster).count();
-
-        let root_inode = {
-            let icache = fatfs.icache.get_mut();
-
-            let mut inode =
-                icache.alloc(info.root_cluster as Ino, Box::new(DirOps));
-            let inode_mut = unsafe { Arc::get_mut_unchecked(&mut inode) };
-            let inode_idata = inode_mut.idata.get_mut();
-
-            inode_idata.mode = S_IFDIR | 0o777;
-            inode_idata.nlink = 2;
-            inode_idata.size = root_dir_cluster_count as u64
-                * info.sectors_per_cluster as u64
-                * 512;
-
-            icache.submit(&inode)?;
-            inode
-        };
+        let root_dir_cluster_count = ClusterIterator::new(fat, fatfs.rootdir_cluster).count();
+        let root_dir_size = root_dir_cluster_count as u32 * info.sectors_per_cluster as u32 * 512;
+        let root_inode = DirInode::new(info.root_cluster as Ino, fatfs.weak.clone(), root_dir_size);
 
         Ok((fatfs_arc, root_inode))
-    }
-}
-
-impl Vfs for FatFs {
-    fn io_blksize(&self) -> usize {
-        4096
-    }
-
-    fn fs_devid(&self) -> DevId {
-        self.device.devid()
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
     }
 }
 
@@ -371,24 +339,47 @@ impl<'fat> Iterator for ClusterIterator<'fat> {
     }
 }
 
-struct FileOps;
-impl InodeOps for FileOps {
-    fn as_any(&self) -> &dyn Any {
-        self
+#[derive(Clone)]
+enum FatInode {
+    File(Arc<FileInode>),
+    Dir(Arc<DirInode>),
+}
+
+impl FatInode {
+    fn unwrap(self) -> Arc<dyn Inode> {
+        match self {
+            FatInode::File(inode) => inode,
+            FatInode::Dir(inode) => inode,
+        }
     }
+}
 
-    fn read(
-        &self,
-        inode: &Inode,
-        buffer: &mut dyn Buffer,
-        offset: usize,
-    ) -> KResult<usize> {
-        let vfs = inode.vfs.upgrade().ok_or(EIO)?;
-        let vfs = vfs.as_any().downcast_ref::<FatFs>().ok_or(EINVAL)?;
-        let fat = vfs.fat.lock();
+define_struct_inode! {
+    struct FileInode;
+}
 
-        let iter = ClusterIterator::new(&fat, inode.ino as ClusterNo)
-            .read(vfs, offset);
+impl FileInode {
+    fn new(ino: Ino, weak: Weak<FatFs>, size: u32) -> Arc<Self> {
+        let inode = Arc::new(Self {
+            idata: InodeData::new(ino, weak),
+        });
+
+        // Safety: We are initializing the inode
+        inode.nlink.store(1, Ordering::Relaxed);
+        inode.mode.store(S_IFREG | 0o777, Ordering::Relaxed);
+        inode.size.store(size as u64, Ordering::Relaxed);
+
+        inode
+    }
+}
+
+impl Inode for FileInode {
+    fn read(&self, buffer: &mut dyn Buffer, offset: usize) -> KResult<usize> {
+        let vfs = self.vfs.upgrade().ok_or(EIO)?;
+        let vfs = vfs.as_any().downcast_ref::<FatFs>().unwrap();
+        let fat = vfs.fat.lock_shared();
+
+        let iter = ClusterIterator::new(fat.as_ref(), self.ino as ClusterNo).read(vfs, offset);
 
         for data in iter {
             if buffer.fill(data?)?.should_stop() {
@@ -400,23 +391,32 @@ impl InodeOps for FileOps {
     }
 }
 
-struct DirOps;
-impl InodeOps for DirOps {
-    fn as_any(&self) -> &dyn Any {
-        self
+define_struct_inode! {
+    struct DirInode;
+}
+
+impl DirInode {
+    fn new(ino: Ino, weak: Weak<FatFs>, size: u32) -> Arc<Self> {
+        let inode = Arc::new(Self {
+            idata: InodeData::new(ino, weak),
+        });
+
+        // Safety: We are initializing the inode
+        inode.nlink.store(2, Ordering::Relaxed);
+        inode.mode.store(S_IFDIR | 0o777, Ordering::Relaxed);
+        inode.size.store(size as u64, Ordering::Relaxed);
+
+        inode
     }
+}
 
-    fn lookup(
-        &self,
-        dir: &Inode,
-        dentry: &Arc<Dentry>,
-    ) -> KResult<Option<Arc<Inode>>> {
-        let vfs = dir.vfs.upgrade().ok_or(EIO)?;
-        let vfs = vfs.as_any().downcast_ref::<FatFs>().ok_or(EINVAL)?;
-        let fat = vfs.fat.lock();
+impl Inode for DirInode {
+    fn lookup(&self, dentry: &Arc<Dentry>) -> KResult<Option<Arc<dyn Inode>>> {
+        let vfs = self.vfs.upgrade().ok_or(EIO)?;
+        let vfs = vfs.as_any().downcast_ref::<FatFs>().unwrap();
+        let fat = vfs.fat.lock_shared();
 
-        let mut entries =
-            ClusterIterator::new(&fat, dir.ino as ClusterNo).dirs(vfs, 0);
+        let mut entries = ClusterIterator::new(fat.as_ref(), self.ino as ClusterNo).dirs(vfs, 0);
 
         let entry = entries.find_map(|entry| {
             if entry.is_err() {
@@ -438,28 +438,27 @@ impl InodeOps for DirOps {
             Some(Ok(entry)) => {
                 let ino = entry.ino();
 
-                Ok(Some(vfs.icache.lock().get_or_alloc(
+                Ok(Some(vfs.get_or_alloc_inode(
                     ino,
                     entry.is_directory(),
-                    entry.size as u64,
-                )?))
+                    entry.size,
+                )))
             }
         }
     }
 
-    fn readdir<'cb, 'r: 'cb>(
-        &'r self,
-        dir: &'r Inode,
+    fn do_readdir(
+        &self,
         offset: usize,
-        callback: &ReadDirCallback<'cb>,
+        callback: &mut dyn FnMut(&[u8], Ino) -> KResult<ControlFlow<(), ()>>,
     ) -> KResult<usize> {
-        let vfs = dir.vfs.upgrade().ok_or(EIO)?;
-        let vfs = vfs.as_any().downcast_ref::<FatFs>().ok_or(EINVAL)?;
-        let fat = vfs.fat.lock();
+        let vfs = self.vfs.upgrade().ok_or(EIO)?;
+        let vfs = vfs.as_any().downcast_ref::<FatFs>().unwrap();
+        let fat = vfs.fat.lock_shared();
 
         const ENTRY_SIZE: usize = core::mem::size_of::<FatDirectoryEntry>();
         let cluster_iter =
-            ClusterIterator::new(&fat, dir.ino as ClusterNo).dirs(vfs, offset);
+            ClusterIterator::new(fat.as_ref(), self.ino as ClusterNo).dirs(vfs, offset);
 
         let mut nread = 0;
         for entry in cluster_iter {
@@ -473,13 +472,9 @@ impl InodeOps for DirOps {
             let ino = entry.ino();
             let name = entry.filename();
 
-            vfs.icache.lock().get_or_alloc(
-                ino,
-                entry.is_directory(),
-                entry.size as u64,
-            )?;
+            vfs.get_or_alloc_inode(ino, entry.is_directory(), entry.size);
 
-            if callback(name.as_ref(), ino).is_err() {
+            if callback(name.as_ref(), ino)?.is_break() {
                 break;
             }
 
@@ -493,13 +488,7 @@ impl InodeOps for DirOps {
 struct FatMountCreator;
 
 impl MountCreator for FatMountCreator {
-    fn create_mount(
-        &self,
-        _source: &str,
-        _flags: u64,
-        _data: &[u8],
-        mp: &Arc<Dentry>,
-    ) -> KResult<Mount> {
+    fn create_mount(&self, _source: &str, _flags: u64, mp: &Arc<Dentry>) -> KResult<Mount> {
         let (fatfs, root_inode) = FatFs::create(make_device(8, 1))?;
 
         Mount::new(mp, fatfs, root_inode)
@@ -507,5 +496,5 @@ impl MountCreator for FatMountCreator {
 }
 
 pub fn init() {
-    register_filesystem("fat32", Box::new(FatMountCreator)).unwrap();
+    register_filesystem("fat32", Arc::new(FatMountCreator)).unwrap();
 }

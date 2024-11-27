@@ -1,0 +1,8 @@
+[package]
+name = "percpu"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+percpu-macros = { path = "macros" }
+x86_64 = { path = "../x86_64" }

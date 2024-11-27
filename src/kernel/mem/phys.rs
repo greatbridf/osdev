@@ -31,11 +31,11 @@ pub struct NoCachePP {
 }
 
 impl CachedPP {
-    pub fn new(addr: usize) -> Self {
+    pub const fn new(addr: usize) -> Self {
         Self { addr }
     }
 
-    pub fn offset(&self, offset: usize) -> Self {
+    pub const fn offset(&self, offset: usize) -> Self {
         Self {
             addr: self.addr + offset,
         }

@@ -17,6 +17,33 @@ pub const PORT_CMD_FRE: u32 = 0x00000010;
 pub const PORT_CMD_FR: u32 = 0x00004000;
 pub const PORT_CMD_CR: u32 = 0x00008000;
 
+pub const PORT_IE_DHRE: u32 = 0x00000001;
+pub const PORT_IE_UFE: u32 = 0x00000010;
+pub const PORT_IE_INFE: u32 = 0x04000000;
+pub const PORT_IE_IFE: u32 = 0x08000000;
+pub const PORT_IE_HBDE: u32 = 0x10000000;
+pub const PORT_IE_IBFE: u32 = 0x20000000;
+pub const PORT_IE_TFEE: u32 = 0x40000000;
+
+pub const PORT_IE_DEFAULT: u32 = PORT_IE_DHRE
+    | PORT_IE_UFE
+    | PORT_IE_INFE
+    | PORT_IE_IFE
+    | PORT_IE_HBDE
+    | PORT_IE_IBFE
+    | PORT_IE_TFEE;
+
+pub const PORT_IS_DHRS: u32 = 0x00000001;
+pub const PORT_IS_UFS: u32 = 0x00000010;
+pub const PORT_IS_INFS: u32 = 0x04000000;
+pub const PORT_IS_IFS: u32 = 0x08000000;
+pub const PORT_IS_HBDS: u32 = 0x10000000;
+pub const PORT_IS_IBFS: u32 = 0x20000000;
+pub const PORT_IS_TFES: u32 = 0x40000000;
+
+pub const PORT_IS_ERROR: u32 =
+    PORT_IS_UFS | PORT_IS_INFS | PORT_IS_IFS | PORT_IS_HBDS | PORT_IS_IBFS;
+
 /// A `CommandHeader` is used to send commands to the HBA device
 ///
 /// # Access
@@ -29,47 +56,20 @@ pub struct CommandHeader {
     // [5]: ATAPI
     // [6]: Write
     // [7]: Prefetchable
-    first: u8,
+    pub first: u8,
 
     // [0]: Reset
     // [1]: BIST
     // [2]: Clear busy upon ok
     // [3]: Reserved
     // [4:7]: Port multiplier
-    second: u8,
+    pub second: u8,
 
-    prdt_length: u16,
-    bytes_transferred: u32,
-    command_table_base: u64,
+    pub prdt_length: u16,
+    pub bytes_transferred: u32,
+    pub command_table_base: u64,
 
-    _reserved: [u32; 4],
-}
-
-impl CommandHeader {
-    pub fn clear(&mut self) {
-        self.first = 0;
-        self.second = 0;
-        self.prdt_length = 0;
-        self.bytes_transferred = 0;
-        self.command_table_base = 0;
-        self._reserved = [0; 4];
-    }
-
-    pub fn setup(&mut self, cmdtable_base: u64, prdtlen: u16, write: bool) {
-        self.first = 0x05; // FIS type
-
-        if write {
-            self.first |= 0x40;
-        }
-
-        self.second = 0x04; // Clear busy upon ok
-
-        self.prdt_length = prdtlen;
-        self.bytes_transferred = 0;
-        self.command_table_base = cmdtable_base;
-
-        self._reserved = [0; 4];
-    }
+    pub _reserved: [u32; 4],
 }
 
 pub enum FisType {

@@ -1,9 +1,13 @@
 use crate::{
-    kernel::block::{make_device, BlockDevice},
+    fs::procfs,
+    kernel::{
+        block::{make_device, BlockDevice},
+        interrupt::register_irq_handler,
+    },
     prelude::*,
 };
 
-use alloc::sync::Arc;
+use alloc::{format, sync::Arc};
 use bindings::{
     kernel::hw::pci::{self, pci_device},
     EIO,
@@ -17,100 +21,149 @@ mod control;
 mod defs;
 mod port;
 
-fn vread<T: Sized + Copy>(refval: &T) -> T {
-    unsafe { core::ptr::read_volatile(refval) }
+pub struct BitsIterator {
+    data: u32,
+    n: u32,
 }
 
-fn vwrite<T: Sized + Copy>(refval: &mut T, val: T) {
-    unsafe { core::ptr::write_volatile(refval, val) }
+impl BitsIterator {
+    fn new(data: u32) -> Self {
+        Self { data, n: 0 }
+    }
 }
 
-fn spinwait_clear(refval: &u32, mask: u32) -> KResult<()> {
-    const SPINWAIT_MAX: usize = 1000;
+impl Iterator for BitsIterator {
+    type Item = u32;
 
-    let mut spins = 0;
-    while vread(refval) & mask != 0 {
-        if spins == SPINWAIT_MAX {
-            return Err(EIO);
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.n == 32 {
+            return None;
         }
 
-        spins += 1;
-    }
+        let have: bool = self.data & 1 != 0;
+        self.data >>= 1;
+        self.n += 1;
 
-    Ok(())
-}
-
-fn spinwait_set(refval: &u32, mask: u32) -> KResult<()> {
-    const SPINWAIT_MAX: usize = 1000;
-
-    let mut spins = 0;
-    while vread(refval) & mask != mask {
-        if spins == SPINWAIT_MAX {
-            return Err(EIO);
+        if have {
+            Some(self.n - 1)
+        } else {
+            self.next()
         }
-
-        spins += 1;
     }
-
-    Ok(())
 }
 
-struct Device<'lt, 'port> {
+fn vread<T: Sized + Copy>(refval: *const T) -> T {
+    unsafe { refval.read_volatile() }
+}
+
+fn vwrite<T: Sized + Copy>(refval: *mut T, val: T) {
+    unsafe { refval.write_volatile(val) }
+}
+
+struct Device {
     control_base: usize,
-    control: &'lt mut AdapterControl,
+    control: AdapterControl,
     // TODO: impl Drop to free pci device
     pcidev: *mut pci_device,
-    ports: Vec<Option<Arc<Mutex<AdapterPort<'port>>>>>,
+    /// # Lock
+    /// Might be accessed from irq handler, use with `lock_irq()`
+    ports: Spin<[Option<Arc<AdapterPort>>; 32]>,
 }
 
-impl<'lt, 'port: 'static> Device<'lt, 'port> {
-    fn probe_ports(&mut self) -> KResult<()> {
-        for nport in self.control.implemented_ports() {
-            let mut port = AdapterPort::<'port>::new(self.control_base, nport);
+/// # Safety
+/// `pcidev` is never accessed from Rust code
+/// TODO!!!: place *mut pci_device in a safe wrapper
+unsafe impl Send for Device {}
+unsafe impl Sync for Device {}
 
+impl Device {
+    fn probe_ports(&self) -> KResult<()> {
+        for nport in self.control.implemented_ports() {
+            let port = Arc::new(AdapterPort::new(self.control_base, nport));
             if !port.status_ok() {
                 continue;
             }
 
-            port.init()?;
+            self.ports.lock_irq()[nport as usize] = Some(port.clone());
+            if let Err(e) = (|| -> KResult<()> {
+                port.init()?;
 
-            let port = Arc::new(Mutex::new(port));
+                {
+                    let port = port.clone();
+                    let name = format!("ahci-p{}-stats", port.nport);
+                    procfs::populate_root(name.into_bytes().into(), move |buffer| {
+                        writeln!(buffer, "{:?}", port.stats.lock().as_ref()).map_err(|_| EIO)
+                    })?;
+                }
 
-            self.ports[nport as usize] = Some(port.clone());
+                let port = BlockDevice::register_disk(
+                    make_device(8, nport * 16),
+                    2147483647, // TODO: get size from device
+                    port,
+                )?;
 
-            let port = BlockDevice::register_disk(
-                make_device(8, nport * 16),
-                2147483647, // TODO: get size from device
-                port,
-            )?;
+                port.partprobe()?;
 
-            port.partprobe()?;
+                Ok(())
+            })() {
+                self.ports.lock_irq()[nport as usize] = None;
+                println_warn!("probe port {nport} failed with {e}");
+            }
         }
 
         Ok(())
     }
+
+    fn handle_interrupt(&self) {
+        // Safety
+        // `self.ports` is accessed inside irq handler
+        let ports = self.ports.lock();
+        for nport in self.control.pending_interrupts() {
+            if let None = ports[nport as usize] {
+                println_warn!("port {nport} not found");
+                continue;
+            }
+
+            let port = ports[nport as usize].as_ref().unwrap();
+            let status = vread(port.interrupt_status());
+
+            if status & PORT_IS_ERROR != 0 {
+                println_warn!("port {nport} SATA error");
+                continue;
+            }
+
+            debug_assert!(status & PORT_IS_DHRS != 0);
+            vwrite(port.interrupt_status(), PORT_IS_DHRS);
+
+            self.control.clear_interrupt(nport);
+
+            port.handle_interrupt();
+        }
+    }
 }
 
-impl<'lt: 'static, 'port: 'static> Device<'lt, 'port> {
-    pub fn new(pcidev: *mut pci_device) -> KResult<Self> {
+impl Device {
+    pub fn new(pcidev: *mut pci_device) -> KResult<Arc<Self>> {
         let base = unsafe { *(*pcidev).header_type0() }.bars[PCI_REG_ABAR];
+        let irqno = unsafe { *(*pcidev).header_type0() }.interrupt_line;
 
         // use MMIO
         if base & 0xf != 0 {
             return Err(EIO);
         }
 
-        let mut ports = Vec::with_capacity(32);
-        ports.resize_with(32, || None);
-
-        let mut device = Device {
+        let device = Arc::new(Device {
             control_base: base as usize,
             control: AdapterControl::new(base as usize),
             pcidev,
-            ports,
-        };
+            ports: Spin::new([const { None }; 32]),
+        });
 
         device.control.enable_interrupts();
+
+        let device_irq = device.clone();
+        register_irq_handler(irqno as i32, move || device_irq.handle_interrupt())?;
+
         device.probe_ports()?;
 
         Ok(device)
@@ -123,15 +176,13 @@ unsafe extern "C" fn probe_device(pcidev: *mut pci_device) -> i32 {
             // TODO!!!: save device to pci_device
             Box::leak(Box::new(device));
             0
-        },
+        }
         Err(e) => -(e as i32),
     }
 }
 
 pub fn register_ahci_driver() {
-    let ret = unsafe {
-        pci::register_driver_r(VENDOR_INTEL, DEVICE_AHCI, Some(probe_device))
-    };
+    let ret = unsafe { pci::register_driver_r(VENDOR_INTEL, DEVICE_AHCI, Some(probe_device)) };
 
     assert_eq!(ret, 0);
 }

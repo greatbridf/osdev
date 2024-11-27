@@ -30,7 +30,9 @@ extern int* __errno_location(void);
 #define ESPIPE 29
 #define EROFS 30
 #define EPIPE 32
+#define ERANGE 34
 #define ELOOP 40
+#define EOVERFLOW 75
 
 #ifdef __cplusplus
 }

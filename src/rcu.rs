@@ -3,23 +3,30 @@ use core::{
     sync::atomic::{AtomicPtr, Ordering},
 };
 
-use crate::prelude::*;
+use crate::{
+    prelude::*,
+    sync::{lock::Guard, semaphore::RwSemaphoreStrategy},
+};
 
 use alloc::sync::Arc;
 
+use lazy_static::lazy_static;
+
 pub struct RCUReadGuard<'data, T: 'data> {
     value: T,
-    guard: RwLockReadGuard<'static, ()>,
+    guard: Guard<'data, (), RwSemaphoreStrategy, false>,
     _phantom: PhantomData<&'data T>,
 }
 
-static READ_GUARD: RwLock<()> = RwLock::new(());
+lazy_static! {
+    static ref GLOBAL_RCU_SEM: RwSemaphore<()> = RwSemaphore::new(());
+}
 
 impl<'data, T: 'data> RCUReadGuard<'data, T> {
     fn lock(value: T) -> Self {
         Self {
             value,
-            guard: READ_GUARD.read(),
+            guard: GLOBAL_RCU_SEM.lock_shared(),
             _phantom: PhantomData,
         }
     }
@@ -34,7 +41,7 @@ impl<'data, T: 'data> Deref for RCUReadGuard<'data, T> {
 }
 
 fn rcu_sync() {
-    READ_GUARD.write();
+    GLOBAL_RCU_SEM.lock();
 }
 
 pub trait RCUNode<MySelf> {
@@ -45,15 +52,15 @@ pub trait RCUNode<MySelf> {
 pub struct RCUList<T: RCUNode<T>> {
     head: AtomicPtr<T>,
 
-    reader_lock: RwLock<()>,
+    reader_lock: RwSemaphore<()>,
     update_lock: Mutex<()>,
 }
 
 impl<T: RCUNode<T>> RCUList<T> {
-    pub const fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             head: AtomicPtr::new(core::ptr::null_mut()),
-            reader_lock: RwLock::new(()),
+            reader_lock: RwSemaphore::new(()),
             update_lock: Mutex::new(()),
         }
     }
@@ -68,17 +75,16 @@ impl<T: RCUNode<T>> RCUList<T> {
         new_node.rcu_next().store(old_head, Ordering::Release);
 
         if let Some(old_head) = unsafe { old_head.as_ref() } {
-            old_head.rcu_prev().store(
-                Arc::into_raw(new_node.clone()) as *mut _,
-                Ordering::Release,
-            );
+            old_head
+                .rcu_prev()
+                .store(Arc::into_raw(new_node.clone()) as *mut _, Ordering::Release);
         }
 
         self.head
             .store(Arc::into_raw(new_node) as *mut _, Ordering::Release);
     }
 
-    pub fn remove(&self, node: Arc<T>) {
+    pub fn remove(&self, node: &Arc<T>) {
         let _lck = self.update_lock.lock();
 
         let prev = node.rcu_prev().load(Ordering::Acquire);
@@ -91,21 +97,19 @@ impl<T: RCUNode<T>> RCUList<T> {
         }
 
         {
-            let prev_next = unsafe { prev.as_ref().map(|rcu| rcu.rcu_next()) }
-                .unwrap_or(&self.head);
+            let prev_next =
+                unsafe { prev.as_ref().map(|rcu| rcu.rcu_next()) }.unwrap_or(&self.head);
 
             let me = prev_next.swap(next, Ordering::AcqRel);
             debug_assert!(me == Arc::as_ptr(&node) as *mut _);
             unsafe { Arc::from_raw(me) };
         }
 
-        let _lck = self.reader_lock.write();
+        let _lck = self.reader_lock.lock();
         node.rcu_prev()
             .store(core::ptr::null_mut(), Ordering::Release);
         node.rcu_next()
             .store(core::ptr::null_mut(), Ordering::Release);
-
-        drop(node);
     }
 
     pub fn replace(&self, old_node: &Arc<T>, new_node: Arc<T>) {
@@ -118,29 +122,25 @@ impl<T: RCUNode<T>> RCUList<T> {
         new_node.rcu_next().store(next, Ordering::Release);
 
         {
-            let prev_next = unsafe { prev.as_ref().map(|rcu| rcu.rcu_next()) }
-                .unwrap_or(&self.head);
+            let prev_next =
+                unsafe { prev.as_ref().map(|rcu| rcu.rcu_next()) }.unwrap_or(&self.head);
 
-            let old = prev_next.swap(
-                Arc::into_raw(new_node.clone()) as *mut _,
-                Ordering::AcqRel,
-            );
+            let old = prev_next.swap(Arc::into_raw(new_node.clone()) as *mut _, Ordering::AcqRel);
 
             debug_assert!(old == Arc::as_ptr(&old_node) as *mut _);
             unsafe { Arc::from_raw(old) };
         }
 
         if let Some(next) = unsafe { next.as_ref() } {
-            let old = next.rcu_prev().swap(
-                Arc::into_raw(new_node.clone()) as *mut _,
-                Ordering::AcqRel,
-            );
+            let old = next
+                .rcu_prev()
+                .swap(Arc::into_raw(new_node.clone()) as *mut _, Ordering::AcqRel);
 
             debug_assert!(old == Arc::as_ptr(&old_node) as *mut _);
             unsafe { Arc::from_raw(old) };
         }
 
-        let _lck = self.reader_lock.write();
+        let _lck = self.reader_lock.lock();
         old_node
             .rcu_prev()
             .store(core::ptr::null_mut(), Ordering::Release);
@@ -150,7 +150,7 @@ impl<T: RCUNode<T>> RCUList<T> {
     }
 
     pub fn iter(&self) -> RCUIterator<T> {
-        let _lck = self.reader_lock.read();
+        let _lck = self.reader_lock.lock_shared();
 
         RCUIterator {
             // SAFETY: We have a read lock, so the node is still alive.
@@ -162,7 +162,7 @@ impl<T: RCUNode<T>> RCUList<T> {
 
 pub struct RCUIterator<'lt, T: RCUNode<T>> {
     cur: *const T,
-    _lock: RwLockReadGuard<'lt, ()>,
+    _lock: Guard<'lt, (), RwSemaphoreStrategy, false>,
 }
 
 impl<'lt, T: RCUNode<T>> Iterator for RCUIterator<'lt, T> {
@@ -203,7 +203,9 @@ impl<T> RCUPointer<T> {
         }
     }
 
-    pub fn swap(&self, new: Option<Arc<T>>) -> Option<Arc<T>> {
+    /// # Safety
+    /// Caller must ensure that the pointer is freed after all readers are done.
+    pub unsafe fn swap(&self, new: Option<Arc<T>>) -> Option<Arc<T>> {
         let new = new
             .map(|arc| Arc::into_raw(arc) as *mut T)
             .unwrap_or(core::ptr::null_mut());

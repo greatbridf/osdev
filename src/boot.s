@@ -128,8 +128,8 @@ start_32bit:
     # read kimage into memory
 	lea -16(%esp), %esp
     mov $KIMAGE_32K_COUNT, %ecx
-    mov $KERNEL_IMAGE_PADDR, 4(%esp) # destination address
-	mov $9, (%esp) # LBA
+    movl $KERNEL_IMAGE_PADDR, 4(%esp) # destination address
+	movl $9, (%esp) # LBA
 
 .Lread_kimage:
 	mov (%esp), %edi
@@ -139,8 +139,8 @@ start_32bit:
     call read_disk
 	mov %ebx, %ecx
 
-    add $0x8000, 4(%esp)
-	add $64, (%esp)
+    addl $0x8000, 4(%esp)
+	addl $64, (%esp)
 
     loop .Lread_kimage
 
@@ -293,9 +293,10 @@ fill_pxe:
 .L64bit_entry:
     jmp start_64bit
 
-.section .text.kinit
+.section .text
 start_64bit:
-    # set stack pointer and clear stack bottom
+    # We map the first 1GB identically to the first 1GB of physical memory,
+    # move sp to the correct position in identically mapped area of kernel space.
     mov %rsp, %rdi
     xor %rsp, %rsp
     inc %rsp
@@ -320,3 +321,77 @@ start_64bit:
     cli
     hlt
     jmp .L64bit_hlt
+
+.section .stage1.smp
+.code16
+
+.globl ap_bootstrap
+.type ap_bootstrap, @function
+ap_bootstrap:
+	ljmp $0x0, $.Lap1
+
+.Lap1:
+    # we use a shared gdt for now
+	lgdt shared_gdt_desc
+
+    # set msr
+    mov $0xc0000080, %ecx
+    rdmsr
+    or $0x901, %eax # set LME, NXE, SCE
+    wrmsr
+
+    # set cr4
+    mov %cr4, %eax
+    or $0xa0, %eax # set PAE, PGE
+    mov %eax, %cr4
+
+    # load new page table
+    mov $KERNEL_PML4, %eax
+    mov %eax, %cr3
+
+    mov %cr0, %eax
+    // SET PE, WP, PG
+    or $0x80010001, %eax
+    mov %eax, %cr0
+
+	ljmp $0x08, $.Lap_bootstrap_end
+
+.align 16
+shared_gdt_desc:
+	.8byte 0x0000000000005f
+
+.code64
+.Lap_bootstrap_end:
+    mov $0x10, %ax
+	mov %ax, %ds
+	mov %ax, %es
+	mov %ax, %ss
+
+	xor %rsp, %rsp
+	xor %rax, %rax
+	inc %rax
+1:
+	xchg %rax, BOOT_SEMAPHORE
+	cmp $0, %rax
+	je 1f
+	pause
+	jmp 1b
+
+1:
+	mov BOOT_STACK, %rsp # Acquire
+	cmp $0, %rsp
+	jne 1f
+	pause
+	jmp 1b
+
+1:
+	xor %rax, %rax
+	mov %rax, BOOT_STACK # Release
+	xchg %rax, BOOT_SEMAPHORE
+
+	xor %rbp, %rbp
+	mov %rsp, %rdi # stack area start address as the first argument
+
+	add $0x200000, %rsp # kernel stack order 9
+	push %rbp # NULL return address
+	jmp ap_entry

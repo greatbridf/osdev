@@ -1,7 +1,8 @@
 use alloc::{collections::btree_map::BTreeMap, sync::Arc};
-use spin::Mutex;
 
-use crate::bindings::root::EFAULT;
+use crate::{bindings::root::EFAULT, prelude::*};
+
+use lazy_static::lazy_static;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LinkStatus {
@@ -19,7 +20,7 @@ pub enum LinkSpeed {
 
 pub type Mac = [u8; 6];
 
-pub trait Netdev {
+pub trait Netdev: Send {
     fn up(&mut self) -> Result<(), u32>;
     fn send(&mut self, data: &[u8]) -> Result<(), u32>;
     fn fire(&mut self) -> Result<(), u32>;
@@ -51,12 +52,14 @@ impl Ord for dyn Netdev {
     }
 }
 
-static mut NETDEVS_ID: Mutex<u32> = Mutex::new(0);
-static mut NETDEVS: Mutex<BTreeMap<u32, Arc<Mutex<dyn Netdev>>>> =
-    Mutex::new(BTreeMap::new());
+lazy_static! {
+    static ref NETDEVS_ID: Spin<u32> = Spin::new(0);
+    static ref NETDEVS: Spin<BTreeMap<u32, Arc<Mutex<dyn Netdev>>>> =
+        Spin::new(BTreeMap::new());
+}
 
 pub fn alloc_id() -> u32 {
-    let mut id = unsafe { NETDEVS_ID.lock() };
+    let mut id = NETDEVS_ID.lock();
     let retval = *id;
 
     *id += 1;
@@ -68,7 +71,7 @@ pub fn register_netdev(
 ) -> Result<Arc<Mutex<dyn Netdev>>, u32> {
     let devid = netdev.id();
 
-    let mut netdevs = unsafe { NETDEVS.lock() };
+    let mut netdevs = NETDEVS.lock();
 
     use alloc::collections::btree_map::Entry;
     match netdevs.entry(devid) {
@@ -82,7 +85,5 @@ pub fn register_netdev(
 }
 
 pub fn get_netdev(id: u32) -> Option<Arc<Mutex<dyn Netdev>>> {
-    let netdevs = unsafe { NETDEVS.lock() };
-
-    netdevs.get(&id).map(|netdev| netdev.clone())
+    NETDEVS.lock().get(&id).map(|netdev| netdev.clone())
 }

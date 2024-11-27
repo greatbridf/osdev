@@ -1,4 +1,3 @@
-
 #define KERNEL_IMAGE_PADDR         0x400000
 #define KERNEL_STAGE1_PADDR        0x001000
 #define KERNEL_PML4                0x002000
@@ -7,9 +6,9 @@
 #define KERNEL_PD_KIMAGE           0x005000
 #define KERNEL_PT_KIMAGE           0x006000
 #define KERNEL_PD_STRUCT_PAGE_ARR  0x007000
-#define EMPTY_PAGE_PFN             0x008000
 
 #define KERNEL_BSS_HUGE_PAGE       0x200000
+
 
 #define PA_P    0x0000000000000001
 #define PA_RW   0x0000000000000002

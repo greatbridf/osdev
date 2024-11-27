@@ -4,6 +4,7 @@
 
 #include <types/list.hpp>
 
+#include <kernel/async/lock.hpp>
 #include <kernel/mem/paging.hpp>
 #include <kernel/mem/slab.hpp>
 
@@ -11,6 +12,8 @@ using namespace kernel::mem;
 using namespace types::list;
 
 constexpr std::size_t SLAB_PAGE_SIZE = 0x1000; // 4K
+
+kernel::async::mutex slab_lock;
 
 std::ptrdiff_t _slab_data_start_offset(std::size_t size) {
     return (sizeof(slab_head) + size - 1) & ~(size - 1);
@@ -67,6 +70,8 @@ void _slab_add_page(slab_cache* cache) {
 }
 
 void* kernel::mem::slab_alloc(slab_cache* cache) {
+    async::lock_guard_irq lock(slab_lock);
+
     slab_head* slab = cache->slabs_partial;
     if (!slab) {                 // no partial slabs, try to get an empty slab
         if (!cache->slabs_empty) // no empty slabs, create a new one
@@ -88,24 +93,29 @@ void* kernel::mem::slab_alloc(slab_cache* cache) {
 }
 
 void kernel::mem::slab_free(void* ptr) {
+    async::lock_guard_irq lock(slab_lock);
+
     slab_head* slab = (slab_head*)((uintptr_t)ptr & ~(SLAB_PAGE_SIZE - 1));
 
     *(void**)ptr = slab->free;
     slab->free = ptr;
     slab->free_count++;
 
-    if (slab->free_count == _slab_max_count(slab->obj_size)) {
-        auto* cache = slab->cache;
-        slab_head** head = nullptr;
+    auto max_count = _slab_max_count(slab->obj_size);
 
-        if (cache->slabs_full == slab) {
-            head = &cache->slabs_full;
-        } else {
-            head = &cache->slabs_partial;
-        }
+    if (max_count == 1) {
+        list_remove(&slab->cache->slabs_full, slab);
+        list_insert(&slab->cache->slabs_empty, slab);
+    }
 
-        list_remove(head, slab);
-        list_insert(&cache->slabs_empty, slab);
+    if (slab->free_count == 1) {
+        list_remove(&slab->cache->slabs_full, slab);
+        list_insert(&slab->cache->slabs_partial, slab);
+    }
+
+    if (slab->free_count == max_count) {
+        list_remove(&slab->cache->slabs_partial, slab);
+        list_insert(&slab->cache->slabs_empty, slab);
     }
 }
 

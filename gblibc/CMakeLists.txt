@@ -45,9 +45,12 @@ add_library(crt0_32 OBJECT
     src/crt0.s
 )
 
-target_compile_options(gblibc_32 PRIVATE "-m32")
+target_compile_options(gblibc_32 PRIVATE "-fno-pic")
 target_compile_options(gblibc_32 PRIVATE "-mcmodel=32")
+target_compile_options(gblibc_32 PRIVATE "-m32")
+target_compile_options(crt0_32 PRIVATE "-fno-pic")
 target_compile_options(crt0_32 PRIVATE "-m32")
+target_compile_options(crt0_32 PRIVATE "-mcmodel=32")
 target_link_options(gblibc_32 PRIVATE "LINKER:-melf_i386")
 target_link_options(crt0_32 PRIVATE "LINKER:-melf_i386")
 

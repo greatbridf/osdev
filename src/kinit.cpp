@@ -1,4 +1,3 @@
-#include <assert.h>
 #include <stdint.h>
 #include <sys/utsname.h>
 
@@ -7,14 +6,12 @@
 
 #include <kernel/hw/acpi.hpp>
 #include <kernel/hw/pci.hpp>
-#include <kernel/hw/timer.hpp>
 #include <kernel/interrupt.hpp>
 #include <kernel/log.hpp>
 #include <kernel/mem/paging.hpp>
 #include <kernel/mem/phys.hpp>
 #include <kernel/mem/types.hpp>
 #include <kernel/process.hpp>
-#include <kernel/syscall.hpp>
 #include <kernel/utsname.hpp>
 
 using constructor = void (*)();
@@ -35,60 +32,8 @@ struct PACKED bootloader_data {
 
 namespace kernel::kinit {
 
-SECTION(".text.kinit")
-static inline void enable_sse() {
-    asm volatile(
-        "mov %%cr0, %%rax\n\t"
-        "and $(~0xc), %%rax\n\t"
-        "or $0x22, %%rax\n\t"
-        "mov %%rax, %%cr0\n\t"
-        "\n\t"
-        "mov %%cr4, %%rax\n\t"
-        "or $0x600, %%rax\n\t"
-        "mov %%rax, %%cr4\n\t"
-        "fninit\n\t" ::
-            : "rax");
-}
-
-SECTION(".text.kinit")
-static inline void set_uname() {
-    kernel::sys_utsname = new new_utsname;
-    strcpy(kernel::sys_utsname->sysname, "Linux"); // linux compatible
-    strcpy(kernel::sys_utsname->nodename, "(none)");
-    strcpy(kernel::sys_utsname->release, "1.0.0");
-    strcpy(kernel::sys_utsname->version, "1.0.0");
-    strcpy(kernel::sys_utsname->machine, "x86");
-    strcpy(kernel::sys_utsname->domainname, "(none)");
-}
-
-SECTION(".text.kinit")
-void NORETURN real_kernel_init(mem::paging::pfn_t kernel_stack_pfn) {
-    // call global constructors
-    // NOTE: the initializer of global objects MUST NOT contain
-    // all kinds of memory allocations
-    for (auto* ctor = &start_ctors; ctor != &end_ctors; ++ctor)
-        (*ctor)();
-
-    set_uname();
-
-    init_interrupt();
-    hw::timer::init_pit();
-
-    hw::acpi::parse_acpi_tables();
-
-    init_pci();
-
-    init_syscall_table();
-
-    init_scheduler(kernel_stack_pfn);
-}
-
-SECTION(".text.kinit")
 static inline void setup_early_kernel_page_table() {
     using namespace kernel::mem::paging;
-
-    // remove temporary mapping
-    KERNEL_PAGE_TABLE[0x000].clear();
 
     constexpr auto idx = idx_all(0xffffffffc0200000ULL);
 
@@ -100,14 +45,10 @@ static inline void setup_early_kernel_page_table() {
 
     // clear kernel bss
     memset((void*)BSS_ADDR, 0x00, BSS_LENGTH);
-
-    // clear empty page
-    memset(mem::physaddr<void>{(uintptr_t)EMPTY_PAGE_PFN}, 0x00, 0x1000);
 }
 
-extern "C" uintptr_t KIMAGE_PAGES_VALUE;
+extern "C" char KIMAGE_PAGES[];
 
-SECTION(".text.kinit")
 static inline void setup_buddy(uintptr_t addr_max) {
     using namespace kernel::mem;
     using namespace kernel::mem::paging;
@@ -117,6 +58,7 @@ static inline void setup_buddy(uintptr_t addr_max) {
     addr_max >>= 12;
     int count = (addr_max * sizeof(page) + 0x200000 - 1) / 0x200000;
 
+    auto KIMAGE_PAGES_VALUE = (size_t)KIMAGE_PAGES;
     pfn_t real_start_pfn = KERNEL_IMAGE_PADDR + KIMAGE_PAGES_VALUE * 0x1000;
     pfn_t aligned_start_pfn = real_start_pfn + 0x200000 - 1;
     aligned_start_pfn &= ~0x1fffff;
@@ -156,15 +98,12 @@ static inline void setup_buddy(uintptr_t addr_max) {
         mem::paging::create_zone(start, end);
     }
 
-    // free .stage1
-    create_zone(0x1000, 0x2000);
     // unused space
     create_zone(0x9000, 0x80000);
     create_zone(0x100000, 0x200000);
     create_zone(real_start_pfn, saved_start_pfn);
 }
 
-SECTION(".text.kinit")
 static inline void save_memory_info(bootloader_data* data) {
     kernel::mem::info::memory_size = 1ULL * 1024ULL * 1024ULL + // initial 1M
                                      1024ULL * data->meminfo_1k_blocks +
@@ -176,52 +115,10 @@ static inline void save_memory_info(bootloader_data* data) {
            sizeof(kernel::mem::info::e820_entries));
 }
 
-SECTION(".text.kinit")
-void setup_gdt() {
-    // user code
-    mem::gdt[3] = 0x0020'fa00'0000'0000;
-    // user data
-    mem::gdt[4] = 0x0000'f200'0000'0000;
-    // user code32
-    mem::gdt[5] = 0x00cf'fa00'0000'ffff;
-    // user data32
-    mem::gdt[6] = 0x00cf'f200'0000'ffff;
-    // thread load 32bit
-    mem::gdt[7] = 0x0000'0000'0000'0000;
+extern "C" void rust_kinit(uintptr_t early_kstack_vaddr);
 
-    // TSS descriptor
-    mem::gdt[8] = 0x0000'8900'0070'0067;
-    mem::gdt[9] = 0x0000'0000'ffff'ff00;
-
-    // LDT descriptor
-    mem::gdt[10] = 0x0000'8200'0060'001f;
-    mem::gdt[11] = 0x0000'0000'ffff'ff00;
-
-    // null segment
-    mem::gdt[12] = 0x0000'0000'0000'0000;
-    // thread local 64bit
-    mem::gdt[13] = 0x0000'0000'0000'0000;
-
-    uint64_t descriptor[] = {0x005f'0000'0000'0000,
-                             (uintptr_t)(uint64_t*)mem::gdt};
-
-    asm volatile(
-        "lgdt (%0)\n\t"
-        "mov $0x50, %%ax\n\t"
-        "lldt %%ax\n\t"
-        "mov $0x40, %%ax\n\t"
-        "ltr %%ax\n\t"
-        :
-        : "r"((uintptr_t)descriptor + 6)
-        : "ax", "memory");
-}
-
-extern "C" SECTION(".text.kinit") void NORETURN
-    kernel_init(bootloader_data* data) {
-    enable_sse();
-
+extern "C" void NORETURN kernel_init(bootloader_data* data) {
     setup_early_kernel_page_table();
-    setup_gdt();
     save_memory_info(data);
 
     uintptr_t addr_max = 0;
@@ -237,17 +134,17 @@ extern "C" SECTION(".text.kinit") void NORETURN
 
     using namespace mem::paging;
     auto kernel_stack_pfn = page_to_pfn(alloc_pages(9));
-    auto kernel_stack_ptr =
-        mem::physaddr<std::byte>{kernel_stack_pfn} + (1 << 9) * 0x1000;
+    auto kernel_stack_ptr = mem::physaddr<std::byte>{kernel_stack_pfn} + (1 << 9) * 0x1000;
 
     asm volatile(
         "mov %1, %%rdi\n\t"
-        "mov %2, %%rsp\n\t"
+        "lea -8(%2), %%rsp\n\t"
         "xor %%rbp, %%rbp\n\t"
-        "call *%0\n\t"
+        "mov %%rbp, (%%rsp)\n\t" // Clear previous frame pointer
+        "jmp *%0\n\t"
         :
-        : "r"(real_kernel_init), "g"(kernel_stack_pfn), "g"(kernel_stack_ptr)
-        :);
+        : "r"(rust_kinit), "g"(kernel_stack_pfn), "r"(kernel_stack_ptr)
+        : "memory");
 
     freeze();
 }

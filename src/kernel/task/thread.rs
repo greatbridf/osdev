@@ -1,6 +1,6 @@
 use core::{
-    arch::asm,
-    cell::RefCell,
+    arch::{asm, naked_asm},
+    cell::{RefCell, UnsafeCell},
     cmp,
     sync::atomic::{self, AtomicU32},
 };
@@ -29,9 +29,10 @@ use lazy_static::lazy_static;
 use crate::kernel::vfs::filearray::FileArray;
 
 use super::{
-    signal::{RaiseResult, Signal, SignalList},
-    KernelStack, Scheduler,
+    kstack, signal::{RaiseResult, Signal, SignalList}, KernelStack, Scheduler
 };
+
+use arch::{TaskContext, InterruptContext};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ThreadState {
@@ -212,13 +213,16 @@ pub struct Thread {
     /// Thread state for scheduler use.
     pub state: Spin<ThreadState>,
 
+    /// Thread context
+    pub context: UnsafeCell<TaskContext>,
+
     /// Kernel stack
     /// Never access this directly.
     ///
     /// We can only touch kernel stack when the process is neither running nor sleeping.
     /// AKA, the process is in the ready queue and will return to `schedule` context.
     kstack: RefCell<KernelStack>,
-
+    
     inner: Spin<ThreadInner>,
 }
 
@@ -809,6 +813,7 @@ impl Thread {
             fs_context: FsContext::new_for_init(),
             signal_list: SignalList::new(),
             kstack: RefCell::new(KernelStack::new()),
+            context: UnsafeCell::new(TaskContext::new()),
             state: Spin::new(ThreadState::Preparing),
             inner: Spin::new(ThreadInner {
                 name,
@@ -838,6 +843,7 @@ impl Thread {
             fs_context: FsContext::new_cloned(&other.fs_context),
             signal_list,
             kstack: RefCell::new(KernelStack::new()),
+            context: UnsafeCell::new(TaskContext::new()),
             state: Spin::new(ThreadState::Preparing),
             inner: Spin::new(ThreadInner {
                 name: other_inner.name.clone(),
@@ -945,31 +951,34 @@ impl Thread {
         Ok(())
     }
 
-    /// This function is used to prepare the kernel stack for the thread in `Preparing` state.
-    ///
-    /// # Safety
-    /// Calling this function on a thread that is not in `Preparing` state will panic.
-    pub fn prepare_kernel_stack<F: FnOnce(&mut KernelStack)>(&self, func: F) {
+    pub fn fork_init(&self, interrupt_context: InterruptContext) {
         let mut state = self.state.lock();
-        assert!(matches!(*state, ThreadState::Preparing));
-
-        // SAFETY: We are in the preparing state with `state` locked.
-        func(&mut self.kstack.borrow_mut());
-
-        // Enter USleep state. Await for the thread to be scheduled manually.
         *state = ThreadState::USleep;
+
+        let sp = self.kstack.borrow().init(interrupt_context);
+        unsafe {
+            (&mut(*self.get_context_mut_ptr())).init(fork_return as usize, sp);
+        }
+    }
+
+    pub fn init(&self, entry: usize) {
+        let mut state = self.state.lock();
+        *state = ThreadState::USleep;
+        unsafe {
+            (&mut(*self.get_context_mut_ptr())).init(entry, self.get_kstack_bottom()); 
+        }
     }
 
     pub fn load_interrupt_stack(&self) {
         self.kstack.borrow().load_interrupt_stack();
     }
 
-    /// Get a pointer to `self.sp` so we can use it in `context_switch()`.
-    ///
-    /// # Safety
-    /// Save the pointer somewhere or pass it to a function that will use it is UB.
-    pub unsafe fn get_sp_ptr(&self) -> *mut usize {
-        self.kstack.borrow().get_sp_ptr()
+    pub fn get_kstack_bottom(&self) -> usize {
+        self.kstack.borrow().get_stack_bottom()
+    }
+
+    pub unsafe fn get_context_mut_ptr(&self) -> *mut TaskContext {
+        self.context.get() 
     }
 
     pub fn set_name(&self, name: Arc<[u8]>) {
@@ -978,6 +987,35 @@ impl Thread {
 
     pub fn get_name(&self) -> Arc<[u8]> {
         self.inner.lock().name.clone()
+    }
+}
+
+#[naked]
+unsafe extern "C" fn fork_return() {
+    // We don't land on the typical `Scheduler::schedule()` function, so we need to
+    // manually enable preemption.
+    naked_asm! {
+        "
+        call {preempt_enable}
+        pop rax
+        pop rbx
+        pop rcx
+        pop rdx 
+        pop rdi
+        pop rsi
+        pop r8
+        pop r9
+        pop r10
+        pop r11
+        pop r12
+        pop r13
+        pop r14
+        pop r15
+        pop rbp
+        add rsp, 16
+        iretq
+        ",
+        preempt_enable = sym preempt::enable,
     }
 }
 

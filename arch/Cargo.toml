@@ -4,4 +4,4 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-x86_64 = { path="./x86_64" }
+cfg-if = "1.0"

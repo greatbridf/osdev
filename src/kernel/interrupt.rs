@@ -2,9 +2,10 @@ use alloc::boxed::Box;
 use alloc::vec;
 use alloc::vec::Vec;
 
+use arch::InterruptContext;
 use lazy_static::lazy_static;
 
-use crate::bindings::root::{interrupt_stack, mmx_registers, EINVAL};
+use crate::bindings::root::{mmx_registers, EINVAL};
 use crate::{driver::Port8, prelude::*};
 
 use super::mem::handle_page_fault;
@@ -86,7 +87,7 @@ fn irq_handler(irqno: usize) {
     }
 }
 
-fn fault_handler(int_stack: &mut interrupt_stack) {
+fn fault_handler(int_stack: &mut InterruptContext) {
     match int_stack.int_no {
         // Invalid Op or Double Fault
         14 => handle_page_fault(int_stack),
@@ -97,7 +98,7 @@ fn fault_handler(int_stack: &mut interrupt_stack) {
 }
 
 #[no_mangle]
-pub extern "C" fn interrupt_handler(int_stack: *mut interrupt_stack, mmxregs: *mut mmx_registers) {
+pub extern "C" fn interrupt_handler(int_stack: *mut InterruptContext, mmxregs: *mut mmx_registers) {
     let int_stack = unsafe { &mut *int_stack };
     let mmxregs = unsafe { &mut *mmxregs };
 
@@ -105,7 +106,7 @@ pub extern "C" fn interrupt_handler(int_stack: *mut interrupt_stack, mmxregs: *m
         // Fault
         0..0x20 => fault_handler(int_stack),
         // Syscall
-        0x80 => handle_syscall32(int_stack.regs.rax as usize, int_stack, mmxregs),
+        0x80 => handle_syscall32(int_stack.rax as usize, int_stack, mmxregs),
         // IRQ
         no => irq_handler(no as usize - 0x20),
     }
@@ -124,7 +125,7 @@ where
 }
 
 pub fn init() -> KResult<()> {
-    arch::x86_64::interrupt::lidt(
+    arch::lidt(
         IDT.as_ptr() as usize,
         (size_of::<IDTEntry>() * 256 - 1) as u16,
     );

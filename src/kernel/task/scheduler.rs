@@ -59,14 +59,14 @@ impl Scheduler {
     }
 
     pub(super) fn set_idle(thread: Arc<Thread>) {
-        thread.prepare_kernel_stack(|kstack| {
-            let mut writer = kstack.get_writer();
-            writer.flags = 0x200;
-            writer.entry = idle_task;
-            writer.finish();
-        });
+        // thread.prepare_kernel_stack(|kstack| {
+        //     let mut writer = kstack.get_writer();
+        //     writer.flags = 0x200;
+        //     writer.entry = idle_task;
+        //     writer.finish();
+        // });
         // We don't wake the idle thread to prevent from accidentally being scheduled there.
-
+        thread.init(idle_task as usize);
         // TODO!!!: Set per cpu variable.
         unsafe { IDLE_TASK = Some(thread) };
     }
@@ -174,7 +174,7 @@ impl Scheduler {
 
 fn context_switch_light(from: &Arc<Thread>, to: &Arc<Thread>) {
     unsafe {
-        arch::task::context_switch_light(from.get_sp_ptr(), to.get_sp_ptr());
+        arch::TaskContext::switch_to(&mut *(from.get_context_mut_ptr()) ,&mut *(to.get_context_mut_ptr()));
     }
 }
 
@@ -203,7 +203,7 @@ extern "C" fn idle_task() {
         // No thread to run, halt the cpu and rerun the loop.
         if scheduler.ready.is_empty() {
             drop(scheduler);
-            arch::task::halt();
+            arch::halt();
             continue;
         }
 

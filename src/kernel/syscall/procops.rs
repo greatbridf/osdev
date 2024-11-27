@@ -1,8 +1,9 @@
-use core::arch::global_asm;
+use core::arch::{asm, global_asm, naked_asm};
 
 use alloc::borrow::ToOwned;
 use alloc::ffi::CString;
-use bindings::{interrupt_stack, mmx_registers, EINVAL, ENOENT, ENOTDIR, ESRCH};
+use arch::InterruptContext;
+use bindings::{mmx_registers, EINVAL, ENOENT, ENOTDIR, ESRCH};
 use bitflags::bitflags;
 
 use crate::elf::ParsedElf32;
@@ -105,14 +106,14 @@ fn do_execve(exec: &[u8], argv: Vec<CString>, envp: Vec<CString>) -> KResult<(VA
     }
 }
 
-fn sys_execve(int_stack: &mut interrupt_stack, _mmxregs: &mut mmx_registers) -> usize {
+fn sys_execve(int_stack: &mut InterruptContext, _mmxregs: &mut mmx_registers) -> usize {
     match (|| -> KResult<()> {
-        let exec = int_stack.regs.rbx as *const u8;
+        let exec = int_stack.rbx as *const u8;
         let exec = UserString::new(exec)?;
 
         // TODO!!!!!: copy from user
-        let mut argv: UserPointer<u32> = UserPointer::new_vaddr(int_stack.regs.rcx as _)?;
-        let mut envp: UserPointer<u32> = UserPointer::new_vaddr(int_stack.regs.rdx as _)?;
+        let mut argv: UserPointer<u32> = UserPointer::new_vaddr(int_stack.rcx as _)?;
+        let mut envp: UserPointer<u32> = UserPointer::new_vaddr(int_stack.rdx as _)?;
 
         let mut argv_vec = Vec::new();
         let mut envp_vec = Vec::new();
@@ -141,8 +142,8 @@ fn sys_execve(int_stack: &mut interrupt_stack, _mmxregs: &mut mmx_registers) -> 
 
         let (ip, sp) = do_execve(exec.as_cstr().to_bytes(), argv_vec, envp_vec)?;
 
-        int_stack.v_rip = ip.0;
-        int_stack.rsp = sp.0;
+        int_stack.rip = ip.0 as u64;
+        int_stack.rsp = sp.0 as u64;
         Ok(())
     })() {
         Ok(_) => 0,
@@ -446,65 +447,19 @@ define_syscall32!(sys_rt_sigprocmask, do_rt_sigprocmask,
 define_syscall32!(sys_rt_sigaction, do_rt_sigaction,
     signum: u32, act: *const UserSignalAction, oldact: *mut UserSignalAction, sigsetsize: usize);
 
-extern "C" {
-    fn ISR_stub_restore();
-    fn new_process_return();
-}
 
-unsafe extern "C" fn real_new_process_return() {
-    // We don't land on the typical `Scheduler::schedule()` function, so we need to
-    // manually enable preemption.
-    preempt::enable();
-}
 
-global_asm!(
-    r"
-        .globl new_process_return
-        new_process_return:
-            call {0}
-            jmp {1}
-    ",
-    sym real_new_process_return,
-    sym ISR_stub_restore,
-    options(att_syntax),
-);
-
-fn sys_fork(int_stack: &mut interrupt_stack, mmxregs: &mut mmx_registers) -> usize {
+fn sys_fork(int_stack: &mut InterruptContext, mmxregs: &mut mmx_registers) -> usize {
     let new_thread = Thread::new_cloned(Thread::current());
-
-    // TODO: We should make the preparation of the kernel stack more abstract.
-    //       Currently, we can see that we are directly writing to the kernel stack,
-    //       which is platform dependent.
-    new_thread.prepare_kernel_stack(|kstack| {
-        let mut writer = kstack.get_writer();
-
-        // We make the child process return to `ISR_stub_restore`, pretending that we've
-        // just returned from a interrupt handler.
-        writer.entry = new_process_return;
-
-        let mut new_int_stack = int_stack.clone();
-
-        // Child's return value: 0
-        new_int_stack.regs.rax = 0;
-
-        writer.write(new_int_stack);
-
-        // In `ISR_stub_restore`, we will restore the mmx register context, followed by
-        // restoring the stack pointer by moving the value in `rbx` to `rsp`, which should
-        // point to the interrupt stack.
-        writer.rbx = writer.get_current_sp();
-
-        // Push the mmx register context to the stack.
-        writer.write(mmxregs.clone());
-
-        writer.finish();
-    });
-
+    let mut new_int_stack = int_stack.clone();
+    new_int_stack.rax = 0;
+    new_int_stack.eflags = 0x200;
+    new_thread.fork_init(new_int_stack);
     Scheduler::get().lock_irq().uwake(&new_thread);
     new_thread.process.pid as usize
 }
 
-fn sys_sigreturn(int_stack: &mut interrupt_stack, mmxregs: &mut mmx_registers) -> usize {
+fn sys_sigreturn(int_stack: &mut InterruptContext, mmxregs: &mut mmx_registers) -> usize {
     let result = Thread::current().signal_list.restore(int_stack, mmxregs);
     match result {
         Ok(ret) => ret,

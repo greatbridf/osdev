@@ -14,10 +14,10 @@ impl Port8 {
     }
 
     pub fn read(&self) -> u8 {
-        arch::io::inb(self.no)
+        arch::inb(self.no)
     }
 
     pub fn write(&self, data: u8) {
-        arch::io::outb(self.no, data)
+        arch::outb(self.no, data)
     }
 }

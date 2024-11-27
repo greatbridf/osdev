@@ -5,6 +5,8 @@
 #![feature(arbitrary_self_types)]
 #![feature(get_mut_unchecked)]
 #![feature(macro_metavar_expr)]
+#![feature(naked_functions)]
+
 extern crate alloc;
 
 #[allow(warnings)]
@@ -56,7 +58,7 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
     println_fatal!();
     println_fatal!("{}", info.message());
 
-    arch::task::freeze()
+    arch::freeze()
 }
 
 extern "C" {
@@ -124,30 +126,29 @@ pub extern "C" fn rust_kinit(early_kstack_pfn: usize) -> ! {
     // We need root dentry to be present in constructor of `FsContext`.
     // So call `init_vfs` first, then `init_multitasking`.
     init_multitasking();
-    Thread::current().prepare_kernel_stack(|kstack| {
-        let mut writer = kstack.get_writer();
-        writer.entry = to_init_process;
-        writer.flags = 0x200;
-        writer.rbp = 0;
-        writer.rbx = early_kstack_pfn; // `to_init_process` arg
-        writer.finish();
-    });
 
+    Thread::current().init(init_process as usize);
     // To satisfy the `Scheduler` "preempt count == 0" assertion.
     preempt::disable();
 
     Scheduler::get().lock().uwake(Thread::current());
 
-    arch::task::context_switch_light(
-        CachedPP::new(early_kstack_pfn).as_ptr(), // We will never come back
-        unsafe { Scheduler::idle_task().get_sp_ptr() },
-    );
-    arch::task::freeze()
+    let mut unuse_ctx = arch::TaskContext::new();
+    unuse_ctx.init(to_init_process as usize, early_kstack_pfn + 0xffffff0000000000);
+    unsafe {
+        arch::TaskContext::switch_to(
+            &mut unuse_ctx, // We will never come back
+            &mut *Scheduler::idle_task().get_context_mut_ptr()
+        );
+    }
+
+    arch::freeze()
 }
 
 /// We enter this function with `preempt count == 0`
 extern "C" fn init_process(early_kstack_pfn: usize) {
-    unsafe { Page::take_pfn(early_kstack_pfn, 9) };
+    // TODO!!! Should free pass eraly_kstack_pfn and free !!!
+    // unsafe { Page::take_pfn(early_kstack_pfn, 9) };
     preempt::enable();
 
     kernel::timer::init().unwrap();
@@ -208,8 +209,6 @@ extern "C" fn init_process(early_kstack_pfn: usize) {
 
     unsafe {
         asm!(
-            "mov %ax, %fs",
-            "mov %ax, %gs",
             "mov ${ds}, %rax",
             "mov %ax, %ds",
             "mov %ax, %es",

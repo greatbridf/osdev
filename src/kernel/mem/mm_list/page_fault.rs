@@ -1,8 +1,8 @@
+use arch::InterruptContext;
 use bindings::kernel::mem::paging::pfn_to_page;
 use bindings::{PA_A, PA_ANON, PA_COW, PA_MMAP, PA_P, PA_RW};
 use bitflags::bitflags;
 
-use crate::bindings::root::interrupt_stack;
 use crate::kernel::mem::paging::{Page, PageBuffer};
 use crate::kernel::mem::phys::{CachedPP, PhysPtr};
 use crate::kernel::mem::{Mapping, VRange};
@@ -34,7 +34,7 @@ struct FixEntry {
 impl MMList {
     fn handle_page_fault(
         &self,
-        int_stack: &mut interrupt_stack,
+        int_stack: &mut InterruptContext,
         addr: VAddr,
         error: PageFaultError,
     ) -> Result<(), Signal> {
@@ -157,8 +157,8 @@ extern "C" {
 /// Try to fix the page fault by jumping to the `error` address.
 ///
 /// Panic if we can't find the `ip` in the fix list.
-fn try_page_fault_fix(int_stack: &mut interrupt_stack, addr: VAddr) {
-    let ip = int_stack.v_rip as u64;
+fn try_page_fault_fix(int_stack: &mut InterruptContext, addr: VAddr) {
+    let ip = int_stack.rip as u64;
     // TODO: Use `op_type` to fix.
 
     // SAFETY: `FIX_START` and `FIX_END` are defined in the linker script in `.rodata` section.
@@ -171,7 +171,7 @@ fn try_page_fault_fix(int_stack: &mut interrupt_stack, addr: VAddr) {
 
     for entry in entries.iter() {
         if ip >= entry.start && ip < entry.start + entry.length {
-            int_stack.v_rip = entry.jump_address as usize;
+            int_stack.rip = entry.jump_address as u64;
             return;
         }
     }
@@ -186,9 +186,9 @@ fn kernel_page_fault_die(vaddr: VAddr, ip: usize) -> ! {
     )
 }
 
-pub fn handle_page_fault(int_stack: &mut interrupt_stack) {
+pub fn handle_page_fault(int_stack: &mut InterruptContext) {
     let error = PageFaultError::from_bits_truncate(int_stack.error_code);
-    let vaddr = VAddr(arch::x86_64::vm::get_cr2());
+    let vaddr = VAddr(arch::get_page_fault_address());
 
     let result = Thread::current()
         .process
@@ -199,7 +199,7 @@ pub fn handle_page_fault(int_stack: &mut interrupt_stack) {
         println_debug!(
             "Page fault on {:#x} in user space at {:#x}",
             vaddr.0,
-            int_stack.v_rip
+            int_stack.rip
         );
         ProcessList::kill_current(signal)
     }

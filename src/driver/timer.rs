@@ -4,7 +4,7 @@ const COUNT: Port8 = Port8::new(0x40);
 const CONTROL: Port8 = Port8::new(0x43);
 
 pub fn init() {
-    arch::interrupt::disable();
+    arch::disable_irqs();
     // Set interval
     CONTROL.write(0x34);
 
@@ -12,5 +12,5 @@ pub fn init() {
     // 0x2e9a = 11930 = 100Hz
     COUNT.write(0x9a);
     COUNT.write(0x2e);
-    arch::interrupt::enable();
+    arch::enable_irqs();
 }

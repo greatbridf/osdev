@@ -1,8 +1,8 @@
 use core::sync::atomic::{AtomicUsize, Ordering};
 
-use crate::{prelude::*, sync::preempt};
+use crate::{println_debug, sync::preempt};
 
-use super::{interrupt::register_irq_handler, task::Scheduler};
+use super::{arch::interrupt::end_of_interrupt, task::Scheduler};
 
 static TICKS: AtomicUsize = AtomicUsize::new(0);
 
@@ -26,19 +26,18 @@ impl Ticks {
     }
 }
 
-fn timer_interrupt() {
+pub fn timer_interrupt() {
     TICKS.fetch_add(1, Ordering::Relaxed);
     if preempt::count() == 0 {
         // To make scheduler satisfied.
         preempt::disable();
+        end_of_interrupt();
         Scheduler::schedule();
+    } else {
+        end_of_interrupt();
     }
 }
 
 pub fn ticks() -> Ticks {
     Ticks(TICKS.load(Ordering::Relaxed))
-}
-
-pub fn init() -> KResult<()> {
-    register_irq_handler(0, timer_interrupt)
 }

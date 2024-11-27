@@ -72,7 +72,7 @@ impl GDT {
     }
 
     pub fn set_tls32(&mut self, desc: GDTEntry) {
-        self.0[7] = desc;
+        self.0[Self::TLS32_INDEX] = desc;
     }
 
     pub unsafe fn load(&self) {

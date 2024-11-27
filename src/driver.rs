@@ -1,7 +1,6 @@
 pub mod ahci;
 pub mod e1000e;
 pub mod serial;
-pub mod timer;
 
 // TODO!!!: Put it somewhere else.
 pub struct Port8 {

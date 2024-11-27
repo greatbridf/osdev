@@ -1,4 +1,5 @@
 pub mod init;
+pub mod interrupt;
 
 use arch::x86_64::{gdt::GDT, task::TSS};
 

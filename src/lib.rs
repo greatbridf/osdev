@@ -150,11 +150,6 @@ extern "C" fn init_process(early_kstack_pfn: usize) {
     unsafe { Page::take_pfn(early_kstack_pfn, 9) };
     preempt::enable();
 
-    kernel::timer::init().unwrap();
-
-    // Use the PIT timer for now.
-    driver::timer::init();
-
     kernel::syscall::register_syscalls();
     CharDevice::init().unwrap();
 

@@ -260,11 +260,11 @@ impl<'lt> UserString<'lt> {
         unsafe {
             asm!(
                 "2:",
-                "mov al, byte ptr [rdx]",
+                "movb ({ptr}), %al",
                 "4:",
-                "test al, al",
+                "test %al, %al",
                 "jz 3f",
-                "add rdx, 1",
+                "add $1, {ptr}",
                 "loop 2b",
                 "3:",
                 "nop",
@@ -275,8 +275,10 @@ impl<'lt> UserString<'lt> {
                 ".quad 3b",  // fix jump address
                 ".quad 0x2", // type: string
                 ".popsection",
-                inout("rdx") ptr.get_const::<u8>() => _,
+                out("al") _,
                 inout("rcx") MAX_LEN => result,
+                ptr = inout(reg) ptr.ptr => _,
+                options(att_syntax),
             )
         };
 

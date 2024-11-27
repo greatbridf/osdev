@@ -32,20 +32,6 @@ struct PACKED bootloader_data {
 
 namespace kernel::kinit {
 
-static inline void enable_sse() {
-    asm volatile(
-        "mov %%cr0, %%rax\n\t"
-        "and $(~0xc), %%rax\n\t"
-        "or $0x22, %%rax\n\t"
-        "mov %%rax, %%cr0\n\t"
-        "\n\t"
-        "mov %%cr4, %%rax\n\t"
-        "or $0x600, %%rax\n\t"
-        "mov %%rax, %%cr4\n\t"
-        "fninit\n\t" ::
-            : "rax");
-}
-
 static inline void setup_early_kernel_page_table() {
     using namespace kernel::mem::paging;
 
@@ -132,8 +118,6 @@ static inline void save_memory_info(bootloader_data* data) {
 extern "C" void rust_kinit(uintptr_t early_kstack_vaddr);
 
 extern "C" void NORETURN kernel_init(bootloader_data* data) {
-    enable_sse();
-
     setup_early_kernel_page_table();
     save_memory_info(data);
 

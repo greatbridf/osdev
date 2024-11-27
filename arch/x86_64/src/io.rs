@@ -1,5 +1,22 @@
 use core::arch::asm;
 
+pub fn enable_sse() {
+    unsafe {
+        asm!(
+            "mov %cr0, %rax",
+            "and $(~0xc), %rax",
+            "or $0x22, %rax",
+            "mov %rax, %cr0",
+            "mov %cr4, %rax",
+            "or $0x600, %rax",
+            "mov %rax, %cr4",
+            "fninit",
+            out("rax") _,
+            options(att_syntax, nomem, nostack)
+        )
+    }
+}
+
 pub fn inb(no: u16) -> u8 {
     let data;
     unsafe {

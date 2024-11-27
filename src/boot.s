@@ -367,12 +367,31 @@ shared_gdt_desc:
 	mov %ax, %es
 	mov %ax, %ss
 
-	lock incl boot_semaphore
-	jmp .
+	xor %rsp, %rsp
+	xor %rax, %rax
+	inc %rax
+1:
+	xchg %rax, BOOT_SEMAPHORE
+	cmp $0, %rax
+	je 1f
+	pause
+	jmp 1b
 
-.section .bss
-.align 4
-.globl boot_semaphore
-.type boot_semaphore, @object
-boot_semaphore:
-	.long 0
+1:
+	mov BOOT_STACK, %rsp # Acquire
+	cmp $0, %rsp
+	jne 1f
+	pause
+	jmp 1b
+
+1:
+	xor %rax, %rax
+	mov %rax, BOOT_STACK # Release
+	xchg %rax, BOOT_SEMAPHORE
+
+	xor %rbp, %rbp
+	mov %rsp, %rdi # stack area start address as the first argument
+
+	add $0x200000, %rsp # kernel stack order 9
+	push %rbp # NULL return address
+	jmp ap_entry

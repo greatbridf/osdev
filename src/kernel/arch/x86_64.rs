@@ -1,3 +1,5 @@
+pub mod init;
+
 use arch::x86_64::{gdt::GDT, task::TSS};
 
 // TODO!!!: This can be stored in the percpu area.
@@ -9,40 +11,6 @@ static GDT_OBJECT: Option<GDT> = None;
 #[arch::define_percpu]
 static TSS_OBJECT: Option<TSS> = None;
 
-pub mod init {
-    use super::{GDT_OBJECT, TSS_OBJECT};
-    use crate::{kernel::smp, sync::preempt};
-    use arch::x86_64::{gdt::GDT, task::TSS};
-
-    unsafe fn init_gdt_tss_thiscpu() {
-        preempt::disable();
-        let gdt_ref = unsafe { GDT_OBJECT.as_mut() };
-        let tss_ref = unsafe { TSS_OBJECT.as_mut() };
-        *gdt_ref = Some(GDT::new());
-        *tss_ref = Some(TSS::new());
-
-        if let Some(gdt) = gdt_ref.as_mut() {
-            if let Some(tss) = tss_ref.as_mut() {
-                gdt.set_tss(tss as *mut _ as u64);
-            } else {
-                panic!("TSS is not initialized");
-            }
-
-            unsafe { gdt.load() };
-        } else {
-            panic!("GDT is not initialized");
-        }
-
-        preempt::enable();
-    }
-
-    pub unsafe fn init_bscpu() {
-        let area = smp::alloc_percpu_area();
-        smp::set_percpu_area(area);
-        init_gdt_tss_thiscpu();
-    }
-}
-
 pub mod user {
     use crate::sync::preempt;
     use arch::x86_64::gdt::GDTEntry;
@@ -51,8 +19,13 @@ pub mod user {
 
     #[derive(Debug, Clone)]
     pub enum TLS {
+        /// TODO: This is not used yet.
+        #[allow(dead_code)]
         TLS64(u64),
-        TLS32 { base: u64, desc: GDTEntry },
+        TLS32 {
+            base: u64,
+            desc: GDTEntry,
+        },
     }
 
     impl TLS {

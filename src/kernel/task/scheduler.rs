@@ -185,8 +185,7 @@ extern "C" fn idle_task() {
     loop {
         debug_assert_eq!(preempt::count(), 1);
 
-        // SAFETY: No need to call `lock_irq`, preempt is already disabled.
-        let mut scheduler = Scheduler::get().lock();
+        let mut scheduler = Scheduler::get().lock_irq();
         let state = *Thread::current().state.lock();
 
         // Previous thread is `Running`.

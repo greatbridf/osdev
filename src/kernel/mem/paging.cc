@@ -100,7 +100,7 @@ static inline page* _alloc_zone(unsigned order) {
         if (!zone)
             continue;
 
-        increase_refcount(zone);
+        zone->refcount++;
 
         if (i > order)
             _split_zone(zone, i, order);
@@ -197,13 +197,12 @@ pfn_t kernel::mem::paging::alloc_page_table() {
 }
 
 void kernel::mem::paging::free_pages(page* pg, unsigned order) {
+    lock_guard_irq lock{zone_lock};
     assert((pg->flags & 0xff) == order);
 
-    // TODO: atomic
     if (!(pg->flags & PAGE_BUDDY) || --pg->refcount)
         return;
 
-    lock_guard_irq lock{zone_lock};
     while (order < 52) {
         pfn_t pfn = page_to_pfn(pg);
         pfn_t buddy_pfn = buddy(pfn, order);
@@ -252,5 +251,6 @@ page* kernel::mem::paging::pfn_to_page(pfn_t pfn) {
 }
 
 void kernel::mem::paging::increase_refcount(page* pg) {
+    lock_guard_irq lock{zone_lock};
     pg->refcount++;
 }

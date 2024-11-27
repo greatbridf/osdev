@@ -1,8 +1,8 @@
 physical memory
 
-0x0000 - 0x1000 : GDT, TSS, LDT and some early kernel data
+0x0000 - 0x1000 : GDT for kernel initialization use and some early kernel data
 0x1000 - 0x2000 : kernel stage1
-0x2000 - 0x3000 : kernel PML4
+0x2000 - 0x3000 : kernel space PML4
 0x3000 - 0x4000 : kernel PDPT for physical memory mappings
 0x4000 - 0x5000 : kernel PDPT for kernel space
 0x5000 - 0x6000 : kernel PD for kernel image

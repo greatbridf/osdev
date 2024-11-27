@@ -129,51 +129,12 @@ static inline void save_memory_info(bootloader_data* data) {
            sizeof(kernel::mem::info::e820_entries));
 }
 
-static inline void setup_gdt() {
-    // user code
-    mem::gdt[3] = 0x0020'fa00'0000'0000;
-    // user data
-    mem::gdt[4] = 0x0000'f200'0000'0000;
-    // user code32
-    mem::gdt[5] = 0x00cf'fa00'0000'ffff;
-    // user data32
-    mem::gdt[6] = 0x00cf'f200'0000'ffff;
-    // thread load 32bit
-    mem::gdt[7] = 0x0000'0000'0000'0000;
-
-    // TSS descriptor
-    mem::gdt[8] = 0x0000'8900'0070'0067;
-    mem::gdt[9] = 0x0000'0000'ffff'ff00;
-
-    // LDT descriptor
-    mem::gdt[10] = 0x0000'8200'0060'001f;
-    mem::gdt[11] = 0x0000'0000'ffff'ff00;
-
-    // null segment
-    mem::gdt[12] = 0x0000'0000'0000'0000;
-    // thread local 64bit
-    mem::gdt[13] = 0x0000'0000'0000'0000;
-
-    uint64_t descriptor[] = {0x005f'0000'0000'0000, (uintptr_t)(uint64_t*)mem::gdt};
-
-    asm volatile(
-        "lgdt (%0)\n\t"
-        "mov $0x50, %%ax\n\t"
-        "lldt %%ax\n\t"
-        "mov $0x40, %%ax\n\t"
-        "ltr %%ax\n\t"
-        :
-        : "r"((uintptr_t)descriptor + 6)
-        : "ax", "memory");
-}
-
 extern "C" void rust_kinit(uintptr_t early_kstack_vaddr);
 
 extern "C" void NORETURN kernel_init(bootloader_data* data) {
     enable_sse();
 
     setup_early_kernel_page_table();
-    setup_gdt();
     save_memory_info(data);
 
     uintptr_t addr_max = 0;

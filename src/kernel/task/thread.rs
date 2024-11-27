@@ -6,10 +6,8 @@ use core::{
 
 use crate::{
     kernel::{
-        mem::{
-            phys::{CachedPP, PhysPtr},
-            MMList,
-        },
+        arch::user::TLS,
+        mem::{phys::PhysPtr, MMList},
         terminal::Terminal,
         user::dataflow::CheckedUserPointer,
         vfs::FsContext,
@@ -191,9 +189,8 @@ struct ThreadInner {
     /// Thread name
     name: Arc<[u8]>,
 
-    /// Thread TLS descriptor 32-bit
-    tls_desc32: Option<u64>,
-    tls_base: Option<u64>,
+    /// Thread TLS
+    tls: Option<TLS>,
 
     /// User pointer
     /// Store child thread's tid when child thread returns to user space.
@@ -812,8 +809,7 @@ impl Thread {
             state: Spin::new(ThreadState::Preparing),
             inner: Spin::new(ThreadInner {
                 name,
-                tls_desc32: None,
-                tls_base: None,
+                tls: None,
                 set_child_tid: 0,
             }),
         });
@@ -842,8 +838,7 @@ impl Thread {
             state: Spin::new(ThreadState::Preparing),
             inner: Spin::new(ThreadInner {
                 name: other_inner.name.clone(),
-                tls_desc32: other_inner.tls_desc32,
-                tls_base: other_inner.tls_base,
+                tls: other_inner.tls.clone(),
                 set_child_tid: other_inner.set_child_tid,
             }),
         });
@@ -898,18 +893,8 @@ impl Thread {
     }
 
     pub fn load_thread_area32(&self) {
-        const IA32_KERNEL_GS_BASE: u32 = 0xc0000102;
-
-        let inner = self.inner.lock();
-
-        if let Some(desc32) = inner.tls_desc32 {
-            // SAFETY: `tls32` should be per cpu.
-            let tls32_addr = CachedPP::new(0x0 + 7 * 8);
-            tls32_addr.as_mut::<u64>().clone_from(&desc32);
-        }
-
-        if let Some(base) = inner.tls_base {
-            arch::x86_64::task::wrmsr(IA32_KERNEL_GS_BASE, base);
+        if let Some(tls) = self.inner.lock().tls.as_ref() {
+            tls.load();
         }
     }
 
@@ -932,24 +917,9 @@ impl Thread {
             return Ok(());
         }
 
-        if desc.entry != u32::MAX || !desc.flags.is_32bit_segment() {
-            return Err(EINVAL);
-        }
-        desc.entry = 7;
-
-        let mut desc32 = desc.limit as u64 & 0xffff;
-        desc32 |= (desc.base as u64 & 0xffffff) << 16;
-        desc32 |= 0x4_0_f2_000000_0000;
-        desc32 |= (desc.limit as u64 & 0xf_0000) << (48 - 16);
-
-        if desc.flags.is_limit_in_pages() {
-            desc32 |= 1 << 55;
-        }
-
-        desc32 |= (desc.base as u64 & 0xff_000000) << (56 - 24);
-
-        inner.tls_desc32 = Some(desc32);
-        inner.tls_base = Some(desc.base as u64);
+        let (tls, entry) = TLS::new32(desc.base, desc.limit, desc.flags.is_limit_in_pages());
+        desc.entry = entry;
+        inner.tls = Some(tls);
         Ok(())
     }
 

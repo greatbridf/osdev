@@ -18,19 +18,17 @@ pub fn define_percpu(attrs: TokenStream, item: TokenStream) -> TokenStream {
     let ty = &item.ty;
     let expr = &item.expr;
 
-    if !["bool", "u8", "u16", "u32", "u64", "usize"].contains(&quote!(#ty).to_string().as_str())
-        && !quote!(#ty).to_string().contains("NonNull")
-    {
-        panic!("`define_percpu` only supports bool, u8, u16, u32, u64, usize and pointers");
-    }
+    let is_bool = quote!(#ty).to_string().as_str() == "bool";
+    let is_integer =
+        ["u8", "u16", "u32", "u64", "usize"].contains(&quote!(#ty).to_string().as_str());
+
+    let is_atomic_like = is_bool || is_integer || quote!(#ty).to_string().contains("NonNull");
 
     let inner_ident = format_ident!("_percpu_inner_{}", ident);
     let access_ident = format_ident!("_access_{}", ident);
 
-    let integer_methods = match quote!(#ty).to_string().as_str() {
-        "bool" => quote! {},
-        name if name.contains("NonNull") => quote! {},
-        _ => quote! {
+    let integer_methods = if is_integer {
+        quote! {
             pub fn add(&self, value: #ty) {
                 *unsafe { self.as_mut() } += value;
             }
@@ -38,7 +36,21 @@ pub fn define_percpu(attrs: TokenStream, item: TokenStream) -> TokenStream {
             pub fn sub(&self, value: #ty) {
                 *unsafe { self.as_mut() } -= value;
             }
-        },
+        }
+    } else {
+        quote! {}
+    };
+
+    let preempt_disable = if !is_atomic_like {
+        quote! { crate::sync::preempt::disable(); }
+    } else {
+        quote! {}
+    };
+
+    let preempt_enable = if !is_atomic_like {
+        quote! { crate::sync::preempt::enable(); }
+    } else {
+        quote! {}
     };
 
     let as_ptr = arch::get_percpu_pointer(&inner_ident, &ty);
@@ -52,20 +64,31 @@ pub fn define_percpu(attrs: TokenStream, item: TokenStream) -> TokenStream {
         #vis static #ident: #access_ident = #access_ident;
 
         impl #access_ident {
+            /// # Safety
+            /// This function is unsafe because it allows for mutable aliasing of the percpu
+            /// variable.
+            /// Make sure that preempt is disabled when calling this function.
             pub unsafe fn as_ptr(&self) -> *mut #ty {
                 #as_ptr
             }
 
             pub fn get(&self) -> #ty {
-                unsafe { self.as_ptr().read() }
+                #preempt_disable
+                let value = unsafe { self.as_ptr().read() };
+                #preempt_enable
+                value
             }
 
             pub fn set(&self, value: #ty) {
+                #preempt_disable
                 unsafe { self.as_ptr().write(value) }
+                #preempt_enable
             }
 
             pub fn swap(&self, mut value: #ty) -> #ty {
+                #preempt_disable
                 unsafe { self.as_ptr().swap(&mut value) }
+                #preempt_enable
                 value
             }
 

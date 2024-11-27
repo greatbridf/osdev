@@ -147,11 +147,7 @@ fn bootstrap_cpus() {
 pub extern "C" fn rust_kinit(early_kstack_pfn: usize) -> ! {
     // We don't call global constructors.
     // Rust doesn't need that, and we're not going to use global variables in C++.
-
-    unsafe {
-        let area = kernel::smp::alloc_percpu_area();
-        kernel::smp::set_percpu_area(area);
-    }
+    unsafe { kernel::arch::init::init_bscpu() };
 
     kernel::interrupt::init().unwrap();
 

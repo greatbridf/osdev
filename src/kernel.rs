@@ -1,3 +1,4 @@
+pub mod arch;
 pub mod block;
 pub mod console;
 pub mod constants;

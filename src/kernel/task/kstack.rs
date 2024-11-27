@@ -1,6 +1,6 @@
-use crate::kernel::mem::{
-    paging::Page,
-    phys::{CachedPP, PhysPtr},
+use crate::kernel::{
+    arch::user::{self},
+    mem::{paging::Page, phys::PhysPtr},
 };
 
 use core::cell::UnsafeCell;
@@ -103,13 +103,7 @@ impl KernelStack {
     }
 
     pub fn load_interrupt_stack(&self) {
-        const TSS_RSP0: CachedPP = CachedPP::new(0x00000074);
-
-        // TODO!!!: Make `TSS` a per cpu struct.
-        // SAFETY: `TSS_RSP0` is always valid.
-        unsafe {
-            TSS_RSP0.as_ptr::<u64>().write_unaligned(self.bottom as u64);
-        }
+        user::load_interrupt_stack(user::InterruptStack(self.bottom as u64));
     }
 
     pub fn get_writer(&mut self) -> KernelStackWriter {

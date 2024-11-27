@@ -2,6 +2,47 @@ use core::arch::{asm, global_asm};
 
 use crate::interrupt;
 
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+struct SP {
+    low: u32,
+    high: u32,
+}
+
+#[repr(C)]
+pub struct TSS {
+    _reserved1: u32,
+    rsp: [SP; 3],
+    _reserved2: u32,
+    _reserved3: u32,
+    ist: [SP; 7],
+    _reserved4: u32,
+    _reserved5: u32,
+    _reserved6: u16,
+    iomap_base: u16,
+}
+
+impl TSS {
+    pub fn new() -> Self {
+        Self {
+            _reserved1: 0,
+            rsp: [SP { low: 0, high: 0 }; 3],
+            _reserved2: 0,
+            _reserved3: 0,
+            ist: [SP { low: 0, high: 0 }; 7],
+            _reserved4: 0,
+            _reserved5: 0,
+            _reserved6: 0,
+            iomap_base: 0,
+        }
+    }
+
+    pub fn set_rsp0(&mut self, rsp: u64) {
+        self.rsp[0].low = rsp as u32;
+        self.rsp[0].high = (rsp >> 32) as u32;
+    }
+}
+
 #[inline(always)]
 pub fn halt() {
     unsafe {

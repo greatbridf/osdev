@@ -59,13 +59,8 @@ impl Scheduler {
     }
 
     pub unsafe fn set_idle(thread: Arc<Thread>) {
-        thread.prepare_kernel_stack(|kstack| {
-            let mut writer = kstack.get_writer();
-            writer.flags = 0x200;
-            writer.entry = idle_task;
-            writer.finish();
-        });
         // We don't wake the idle thread to prevent from accidentally being scheduled there.
+        thread.init(idle_task as *const () as usize);
 
         let old = IDLE_TASK.swap(NonNull::new(Arc::into_raw(thread) as *mut _));
         assert!(old.is_none(), "Idle task is already set");
@@ -187,7 +182,10 @@ impl Scheduler {
 
 fn context_switch_light(from: &Arc<Thread>, to: &Arc<Thread>) {
     unsafe {
-        arch::task::context_switch_light(from.get_sp_ptr(), to.get_sp_ptr());
+        arch::TaskContext::switch_to(
+            &mut *from.get_context_mut_ptr(),
+            &mut *to.get_context_mut_ptr(),
+        );
     }
 }
 
@@ -215,7 +213,7 @@ extern "C" fn idle_task() {
         // No thread to run, halt the cpu and rerun the loop.
         if scheduler.ready.is_empty() {
             drop(scheduler);
-            arch::task::halt();
+            arch::halt();
             continue;
         }
 
@@ -233,13 +231,19 @@ extern "C" fn idle_task() {
             Scheduler::set_current(next_thread);
         }
 
-        Thread::current().load_interrupt_stack();
-        Thread::current().load_thread_area32();
+        unsafe {
+            // SAFETY: We are in the idle task where preemption is disabled.
+            //         So we can safely load the thread area and interrupt stack.
+            Thread::current().load_interrupt_stack();
+            Thread::current().load_thread_area32();
+        }
 
         // TODO!!!: If the task comes from another cpu, we need to sync.
         //
         // The other cpu should see the changes of kernel stack of the target thread
         // made in this cpu.
+        //
+        // Can we find a better way other than `fence`s?
         fence(Ordering::SeqCst);
         context_switch_light(&Scheduler::idle_task(), &Thread::current());
         fence(Ordering::SeqCst);

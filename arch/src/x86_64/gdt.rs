@@ -1,6 +1,5 @@
+use crate::TSS;
 use core::arch::asm;
-
-use crate::task::TSS;
 
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy)]

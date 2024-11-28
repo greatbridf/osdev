@@ -5,7 +5,7 @@
 do_find()
 {
     for ext in $2; do
-        find src include -name "*.$ext" -exec grep -n --color=always -H -i "$1" {} \; -exec echo "" \;
+        find arch src include -name "*.$ext" -exec grep -n --color=always -H -i "$1" {} \; -exec echo "" \;
     done
 }
 

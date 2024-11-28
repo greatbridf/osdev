@@ -2,6 +2,7 @@ use super::{strategy::LockStrategy, Spin, UCondVar};
 
 pub struct SemaphoreStrategy<const MAX: usize = { core::usize::MAX }>;
 
+#[allow(dead_code)]
 impl<const MAX: usize> SemaphoreStrategy<MAX> {
     #[inline(always)]
     fn is_locked(data: &<Self as LockStrategy>::StrategyData) -> bool {
@@ -62,6 +63,7 @@ unsafe impl<const MAX: usize> LockStrategy for SemaphoreStrategy<MAX> {
 
 pub struct RwSemaphoreStrategy<const READ_MAX: isize = { core::isize::MAX }>;
 
+#[allow(dead_code)]
 impl<const READ_MAX: isize> RwSemaphoreStrategy<READ_MAX> {
     #[inline(always)]
     fn is_read_locked(data: &<Self as LockStrategy>::StrategyData) -> bool {

@@ -5,6 +5,8 @@
 #![feature(arbitrary_self_types)]
 #![feature(get_mut_unchecked)]
 #![feature(macro_metavar_expr)]
+#![feature(naked_functions)]
+
 extern crate alloc;
 
 #[allow(warnings)]
@@ -29,10 +31,7 @@ use core::{
 };
 use elf::ParsedElf32;
 use kernel::{
-    mem::{
-        paging::Page,
-        phys::{CachedPP, PhysPtr as _},
-    },
+    cpu::init_thiscpu,
     task::{init_multitasking, Scheduler, Thread},
     vfs::{
         dentry::Dentry,
@@ -60,7 +59,7 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
     println_fatal!();
     println_fatal!("{}", info.message());
 
-    arch::task::freeze()
+    arch::freeze()
 }
 
 extern "C" {
@@ -112,7 +111,7 @@ extern "C" {
 pub extern "C" fn rust_kinit(early_kstack_pfn: usize) -> ! {
     // We don't call global constructors.
     // Rust doesn't need that, and we're not going to use global variables in C++.
-    unsafe { kernel::arch::init::init_cpu() };
+    unsafe { init_thiscpu() };
 
     kernel::interrupt::init().unwrap();
 
@@ -121,33 +120,37 @@ pub extern "C" fn rust_kinit(early_kstack_pfn: usize) -> ! {
 
     kernel::vfs::mount::init_vfs().unwrap();
 
-    // We need root dentry to be present in constructor of `FsContext`.
-    // So call `init_vfs` first, then `init_multitasking`.
-    init_multitasking();
-    Thread::current().prepare_kernel_stack(|kstack| {
-        let mut writer = kstack.get_writer();
-        writer.entry = to_init_process;
-        writer.flags = 0x200;
-        writer.rbp = 0;
-        writer.rbx = early_kstack_pfn; // `to_init_process` arg
-        writer.finish();
-    });
-
     // To satisfy the `Scheduler` "preempt count == 0" assertion.
     preempt::disable();
 
+    // We need root dentry to be present in constructor of `FsContext`.
+    // So call `init_vfs` first, then `init_multitasking`.
+    init_multitasking();
+
+    Thread::current().init(init_process as usize);
+
     Scheduler::get().lock().uwake(&Thread::current());
 
-    arch::task::context_switch_light(
-        CachedPP::new(early_kstack_pfn).as_ptr(), // We will never come back
-        unsafe { Scheduler::idle_task().get_sp_ptr() },
+    let mut unuse_ctx = arch::TaskContext::new();
+    // TODO: Temporary solution: we will never access this later on.
+    unuse_ctx.init(
+        to_init_process as usize,
+        early_kstack_pfn + 0x1000 + 0xffffff0000000000,
     );
-    arch::task::freeze()
+    unsafe {
+        arch::TaskContext::switch_to(
+            &mut unuse_ctx, // We will never come back
+            &mut *Scheduler::idle_task().get_context_mut_ptr(),
+        );
+    }
+
+    arch::freeze()
 }
 
 /// We enter this function with `preempt count == 0`
-extern "C" fn init_process(early_kstack_pfn: usize) {
-    unsafe { Page::take_pfn(early_kstack_pfn, 9) };
+extern "C" fn init_process(/* early_kstack_pfn: usize */) {
+    // TODO!!! Should free pass eraly_kstack_pfn and free !!!
+    // unsafe { Page::take_pfn(early_kstack_pfn, 9) };
     preempt::enable();
 
     kernel::syscall::register_syscalls();

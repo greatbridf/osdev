@@ -14,6 +14,7 @@ use crate::{
 };
 
 #[repr(u8)]
+#[allow(dead_code)]
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum ElfFormat {
     Elf32 = 1,
@@ -21,6 +22,7 @@ pub enum ElfFormat {
 }
 
 #[repr(u8)]
+#[allow(dead_code)]
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum ElfEndian {
     Little = 1,
@@ -28,6 +30,7 @@ pub enum ElfEndian {
 }
 
 #[repr(u8)]
+#[allow(dead_code)]
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum ElfABI {
     // SystemV = 0,
@@ -35,6 +38,7 @@ pub enum ElfABI {
 }
 
 #[repr(u16)]
+#[allow(dead_code)]
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum ElfType {
     Relocatable = 1,
@@ -44,6 +48,7 @@ pub enum ElfType {
 }
 
 #[repr(u16)]
+#[allow(dead_code)]
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum ElfArch {
     X86 = 0x03,
@@ -71,6 +76,7 @@ bitflags! {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Default, Clone, Copy, PartialEq, Eq)]
 pub enum Elf32PhType {
     #[default]
@@ -88,6 +94,7 @@ pub enum Elf32PhType {
     Hiproc = 0x7fffffff,
 }
 
+#[allow(dead_code)]
 #[derive(Default, Clone, Copy, PartialEq, Eq)]
 pub enum Elf32ShType {
     #[default]
@@ -171,6 +178,7 @@ pub struct Elf32ShEntry {
     pub entry_size: u32,
 }
 
+#[allow(dead_code)]
 pub struct ParsedElf32 {
     entry: u32,
     file: Arc<Dentry>,

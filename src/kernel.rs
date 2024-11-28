@@ -1,7 +1,7 @@
-pub mod arch;
 pub mod block;
 pub mod console;
 pub mod constants;
+pub mod cpu;
 pub mod interrupt;
 pub mod mem;
 pub mod syscall;

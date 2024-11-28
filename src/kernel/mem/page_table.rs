@@ -221,7 +221,7 @@ impl PageTable {
     }
 
     pub fn switch(&self) {
-        arch::vm::switch_page_table(self.page.as_phys())
+        arch::set_root_page_table(self.page.as_phys())
     }
 
     pub fn unmap(&self, area: &MMArea) {
@@ -229,7 +229,7 @@ impl PageTable {
         let use_invlpg = range.len() / 4096 < 4;
         let iter = self.iter_user(range).unwrap();
 
-        if self.page.as_phys() != arch::vm::current_page_table() {
+        if self.page.as_phys() != arch::get_root_page_table() {
             for pte in iter {
                 pte.take();
             }
@@ -241,19 +241,19 @@ impl PageTable {
                 pte.take();
 
                 let pfn = range.start().floor().0 + offset_pages * 4096;
-                arch::vm::invlpg(pfn);
+                arch::flush_tlb(pfn);
             }
         } else {
             for pte in iter {
                 pte.take();
             }
-            arch::vm::invlpg_all();
+            arch::flush_tlb_all();
         }
     }
 
     pub fn lazy_invalidate_tlb_all(&self) {
-        if self.page.as_phys() == arch::vm::current_page_table() {
-            arch::vm::invlpg_all();
+        if self.page.as_phys() == arch::get_root_page_table() {
+            arch::flush_tlb_all();
         }
     }
 

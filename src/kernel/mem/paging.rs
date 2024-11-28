@@ -10,11 +10,59 @@ use core::fmt;
 
 use super::phys::PhysPtr;
 
+fn msb(x: u64) -> u64 {
+    // What the ****.
+    let mut x = x;
+    x |= x >> 1;
+    x |= x >> 2;
+    x |= x >> 4;
+    x |= x >> 8;
+    x |= x >> 16;
+    x |= x >> 32;
+    x -= x >> 1;
+    x
+}
+
+fn msb_position(x: u64) -> Option<u32> {
+    if x == 0 {
+        return None;
+    }
+
+    let mut pos = 0;
+    let mut x = x;
+    if x >= 1 << 32 {
+        x >>= 32;
+        pos += 32;
+    }
+    if x >= 1 << 16 {
+        x >>= 16;
+        pos += 16;
+    }
+    if x >= 1 << 8 {
+        x >>= 8;
+        pos += 8;
+    }
+    if x >= 1 << 4 {
+        x >>= 4;
+        pos += 4;
+    }
+    if x >= 1 << 2 {
+        x >>= 2;
+        pos += 2;
+    }
+    if x >= 1 {
+        pos += 1;
+    }
+
+    Some(pos)
+}
+
 pub struct Page {
     page_ptr: *mut c_page,
     order: u32,
 }
 
+#[allow(dead_code)]
 impl Page {
     pub fn alloc_one() -> Self {
         let page_ptr = unsafe { c_alloc_page() };
@@ -26,6 +74,16 @@ impl Page {
         let page_ptr = unsafe { c_alloc_pages(order) };
 
         Self { page_ptr, order }
+    }
+
+    /// Allocate a contiguous block of pages that can contain at least `count` pages.
+    pub fn alloc_ceil(count: usize) -> Self {
+        assert_ne!(count, 0);
+        let count_msb = msb(count as u64) as usize;
+        let order = msb_position((count + count_msb - 1) as u64)
+            .expect("`count` can't be 0, so can't `order`");
+
+        Self::alloc_many(order)
     }
 
     /// Get `Page` from `pfn`, acquiring the ownership of the page. `refcount` is not increased.
@@ -146,6 +204,7 @@ pub struct PageBuffer {
     offset: usize,
 }
 
+#[allow(dead_code)]
 impl PageBuffer {
     pub fn new(page: Page) -> Self {
         Self { page, offset: 0 }

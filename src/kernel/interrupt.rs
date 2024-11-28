@@ -1,10 +1,12 @@
 use alloc::sync::Arc;
 
+use arch::InterruptContext;
 use lazy_static::lazy_static;
 
-use crate::bindings::root::{interrupt_stack, mmx_registers, EINVAL};
+use crate::bindings::root::{mmx_registers, EINVAL};
 use crate::{driver::Port8, prelude::*};
 
+use super::cpu::current_cpu;
 use super::mem::handle_page_fault;
 use super::syscall::handle_syscall32;
 use super::task::{ProcessList, Signal};
@@ -34,7 +36,7 @@ fn irq_handler(irqno: usize) {
     }
 }
 
-fn fault_handler(int_stack: &mut interrupt_stack) {
+fn fault_handler(int_stack: &mut InterruptContext) {
     match int_stack.int_no {
         // Invalid Op or Double Fault
         14 => handle_page_fault(int_stack),
@@ -45,7 +47,7 @@ fn fault_handler(int_stack: &mut interrupt_stack) {
 }
 
 #[no_mangle]
-pub extern "C" fn interrupt_handler(int_stack: *mut interrupt_stack, mmxregs: *mut mmx_registers) {
+pub extern "C" fn interrupt_handler(int_stack: *mut InterruptContext, mmxregs: *mut mmx_registers) {
     let int_stack = unsafe { &mut *int_stack };
     let mmxregs = unsafe { &mut *mmxregs };
 
@@ -53,7 +55,7 @@ pub extern "C" fn interrupt_handler(int_stack: *mut interrupt_stack, mmxregs: *m
         // Fault
         0..0x20 => fault_handler(int_stack),
         // Syscall
-        0x80 => handle_syscall32(int_stack.regs.rax as usize, int_stack, mmxregs),
+        0x80 => handle_syscall32(int_stack.rax as usize, int_stack, mmxregs),
         // Timer
         0x40 => timer_interrupt(),
         // IRQ
@@ -75,7 +77,6 @@ where
 }
 
 pub fn init() -> KResult<()> {
-    // TODO: Move this to `arch`
     // Initialize PIC
     PIC1_COMMAND.write(0x11); // edge trigger mode
     PIC1_DATA.write(0x20); // IRQ 0-7 offset
@@ -92,4 +93,9 @@ pub fn init() -> KResult<()> {
     PIC2_DATA.write(0x0);
 
     Ok(())
+}
+
+pub fn end_of_interrupt() {
+    // SAFETY: We only use this function in irq context, where preemption is disabled.
+    unsafe { current_cpu() }.interrupt.end_of_interrupt();
 }

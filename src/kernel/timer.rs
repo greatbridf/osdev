@@ -1,8 +1,8 @@
 use core::sync::atomic::{AtomicUsize, Ordering};
 
-use crate::{println_debug, sync::preempt};
+use crate::sync::preempt;
 
-use super::{arch::interrupt::end_of_interrupt, task::Scheduler};
+use super::{interrupt::end_of_interrupt, task::Scheduler};
 
 static TICKS: AtomicUsize = AtomicUsize::new(0);
 

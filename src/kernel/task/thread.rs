@@ -1,12 +1,13 @@
 use core::{
-    cell::RefCell,
+    arch::naked_asm,
+    cell::{RefCell, UnsafeCell},
     cmp,
     sync::atomic::{self, AtomicBool, AtomicU32},
 };
 
 use crate::{
     kernel::{
-        arch::user::TLS, mem::MMList, terminal::Terminal, user::dataflow::CheckedUserPointer,
+        cpu::current_cpu, mem::MMList, terminal::Terminal, user::dataflow::CheckedUserPointer,
         vfs::FsContext,
     },
     prelude::*,
@@ -26,6 +27,8 @@ use super::{
     signal::{RaiseResult, Signal, SignalList},
     KernelStack, Scheduler,
 };
+
+use arch::{InterruptContext, TaskContext, UserTLS};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ThreadState {
@@ -85,6 +88,7 @@ struct SessionInner {
     groups: BTreeMap<u32, Weak<ProcessGroup>>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct Session {
     sid: u32,
@@ -93,6 +97,7 @@ pub struct Session {
     inner: Spin<SessionInner>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct ProcessGroup {
     pgid: u32,
@@ -187,7 +192,7 @@ struct ThreadInner {
     name: Arc<[u8]>,
 
     /// Thread TLS
-    tls: Option<TLS>,
+    tls: Option<UserTLS>,
 
     /// User pointer
     /// Store child thread's tid when child thread returns to user space.
@@ -207,6 +212,9 @@ pub struct Thread {
     pub state: Spin<ThreadState>,
 
     pub oncpu: AtomicBool,
+
+    /// Thread context
+    pub context: UnsafeCell<TaskContext>,
 
     /// Kernel stack
     /// Never access this directly.
@@ -770,6 +778,7 @@ impl Process {
     }
 }
 
+#[allow(dead_code)]
 impl UserDescriptorFlags {
     fn is_32bit_segment(&self) -> bool {
         self.0 & 0b1 != 0
@@ -805,6 +814,7 @@ impl Thread {
             fs_context: FsContext::new_for_init(),
             signal_list: SignalList::new(),
             kstack: RefCell::new(KernelStack::new()),
+            context: UnsafeCell::new(TaskContext::new()),
             state: Spin::new(ThreadState::Preparing),
             oncpu: AtomicBool::new(false),
             inner: Spin::new(ThreadInner {
@@ -835,6 +845,7 @@ impl Thread {
             fs_context: FsContext::new_cloned(&other.fs_context),
             signal_list,
             kstack: RefCell::new(KernelStack::new()),
+            context: UnsafeCell::new(TaskContext::new()),
             state: Spin::new(ThreadState::Preparing),
             oncpu: AtomicBool::new(false),
             inner: Spin::new(ThreadInner {
@@ -893,9 +904,13 @@ impl Thread {
         }
     }
 
-    pub fn load_thread_area32(&self) {
+    /// # Safety
+    /// This function is unsafe because it accesses the `current_cpu()`, which needs
+    /// to be called in a preemption disabled context.
+    pub unsafe fn load_thread_area32(&self) {
         if let Some(tls) = self.inner.lock().tls.as_ref() {
-            tls.load();
+            // SAFETY: Preemption is disabled.
+            tls.load(current_cpu());
         }
     }
 
@@ -918,37 +933,49 @@ impl Thread {
             return Ok(());
         }
 
-        let (tls, entry) = TLS::new32(desc.base, desc.limit, desc.flags.is_limit_in_pages());
+        let (tls, entry) = UserTLS::new32(desc.base, desc.limit, desc.flags.is_limit_in_pages());
         desc.entry = entry;
         inner.tls = Some(tls);
         Ok(())
     }
 
-    /// This function is used to prepare the kernel stack for the thread in `Preparing` state.
-    ///
-    /// # Safety
-    /// Calling this function on a thread that is not in `Preparing` state will panic.
-    pub fn prepare_kernel_stack<F: FnOnce(&mut KernelStack)>(&self, func: F) {
+    pub fn fork_init(&self, interrupt_context: InterruptContext) {
         let mut state = self.state.lock();
-        assert!(matches!(*state, ThreadState::Preparing));
-
-        // SAFETY: We are in the preparing state with `state` locked.
-        func(&mut self.kstack.borrow_mut());
-
-        // Enter USleep state. Await for the thread to be scheduled manually.
         *state = ThreadState::USleep;
+
+        let sp = self.kstack.borrow().init(interrupt_context);
+        unsafe {
+            self.get_context_mut_ptr()
+                .as_mut()
+                .unwrap()
+                .init(fork_return as usize, sp);
+        }
     }
 
-    pub fn load_interrupt_stack(&self) {
+    pub fn init(&self, entry: usize) {
+        let mut state = self.state.lock();
+        *state = ThreadState::USleep;
+        unsafe {
+            self.get_context_mut_ptr()
+                .as_mut()
+                .unwrap()
+                .init(entry, self.get_kstack_bottom());
+        }
+    }
+
+    /// # Safety
+    /// This function is unsafe because it accesses the `current_cpu()`, which needs
+    /// to be called in a preemption disabled context.
+    pub unsafe fn load_interrupt_stack(&self) {
         self.kstack.borrow().load_interrupt_stack();
     }
 
-    /// Get a pointer to `self.sp` so we can use it in `context_switch()`.
-    ///
-    /// # Safety
-    /// Save the pointer somewhere or pass it to a function that will use it is UB.
-    pub unsafe fn get_sp_ptr(&self) -> *mut usize {
-        self.kstack.borrow().get_sp_ptr()
+    pub fn get_kstack_bottom(&self) -> usize {
+        self.kstack.borrow().get_stack_bottom()
+    }
+
+    pub unsafe fn get_context_mut_ptr(&self) -> *mut TaskContext {
+        self.context.get()
     }
 
     pub fn set_name(&self, name: Arc<[u8]>) {
@@ -957,6 +984,37 @@ impl Thread {
 
     pub fn get_name(&self) -> Arc<[u8]> {
         self.inner.lock().name.clone()
+    }
+}
+
+#[naked]
+unsafe extern "C" fn fork_return() {
+    // We don't land on the typical `Scheduler::schedule()` function, so we need to
+    // manually enable preemption.
+    naked_asm! {
+        "
+        call {preempt_enable}
+        swapgs
+        pop %rax
+        pop %rbx
+        pop %rcx
+        pop %rdx
+        pop %rdi
+        pop %rsi
+        pop %r8
+        pop %r9
+        pop %r10
+        pop %r11
+        pop %r12
+        pop %r13
+        pop %r14
+        pop %r15
+        pop %rbp
+        add $16, %rsp
+        iretq
+        ",
+        preempt_enable = sym preempt::enable,
+        options(att_syntax),
     }
 }
 
@@ -1088,6 +1146,9 @@ pub fn init_multitasking() {
     // Lazy init
     assert!(ProcessList::get().try_find_thread(1).is_some());
 
-    Thread::current().load_interrupt_stack();
+    unsafe {
+        // SAFETY: Preemption is disabled outside this function.
+        Thread::current().load_interrupt_stack();
+    }
     Thread::current().process.mm_list.switch_page_table();
 }

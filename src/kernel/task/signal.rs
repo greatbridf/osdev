@@ -10,10 +10,11 @@ use crate::{
 };
 
 use alloc::collections::{binary_heap::BinaryHeap, btree_map::BTreeMap};
+use arch::InterruptContext;
 use bindings::{
-    interrupt_stack, mmx_registers, EFAULT, EINVAL, SA_RESTORER, SIGABRT, SIGBUS, SIGCHLD, SIGCONT,
-    SIGFPE, SIGILL, SIGKILL, SIGQUIT, SIGSEGV, SIGSTOP, SIGSYS, SIGTRAP, SIGTSTP, SIGTTIN, SIGTTOU,
-    SIGURG, SIGWINCH, SIGXCPU, SIGXFSZ,
+    mmx_registers, EFAULT, EINVAL, SA_RESTORER, SIGABRT, SIGBUS, SIGCHLD, SIGCONT, SIGFPE, SIGILL,
+    SIGKILL, SIGQUIT, SIGSEGV, SIGSTOP, SIGSYS, SIGTRAP, SIGTSTP, SIGTTIN, SIGTTOU, SIGURG,
+    SIGWINCH, SIGXCPU, SIGXFSZ,
 };
 
 use super::{ProcessList, Thread};
@@ -21,6 +22,7 @@ use super::{ProcessList, Thread};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Signal(u32);
 
+#[allow(dead_code)]
 impl Signal {
     pub const SIGHUP: Signal = Signal(1);
     pub const SIGINT: Signal = Signal(2);
@@ -168,14 +170,14 @@ impl SignalAction {
         &self,
         signum: u32,
         old_mask: u64,
-        int_stack: &mut interrupt_stack,
+        int_stack: &mut InterruptContext,
         mmxregs: &mut mmx_registers,
     ) -> KResult<()> {
         if self.sa_flags & SA_RESTORER as usize == 0 {
             return Err(EINVAL);
         }
 
-        const CONTEXT_SIZE: usize = size_of::<interrupt_stack>()
+        const CONTEXT_SIZE: usize = size_of::<InterruptContext>()
             + size_of::<mmx_registers>()
             + size_of::<usize>() // old_mask
             + size_of::<u32>(); // `sa_handler` argument: `signum`
@@ -183,9 +185,9 @@ impl SignalAction {
         // Save current interrupt context to 128 bytes above current user stack
         // and align to 16 bytes. Then we push the return address of the restorer.
         // TODO!!!: Determine the size of the return address
-        let sp = ((int_stack.rsp - 128 - CONTEXT_SIZE) & !0xf) - size_of::<u32>();
+        let sp = ((int_stack.rsp as usize - 128 - CONTEXT_SIZE) & !0xf) - size_of::<u32>();
         let restorer_address: u32 = self.sa_restorer as u32;
-        let mut stack = UserBuffer::new(sp as *mut _, CONTEXT_SIZE + size_of::<u32>())?;
+        let mut stack = UserBuffer::new(sp as *mut u8, CONTEXT_SIZE + size_of::<u32>())?;
 
         stack.copy(&restorer_address)?.ok_or(EFAULT)?; // Restorer address
         stack.copy(&signum)?.ok_or(EFAULT)?; // Restorer address
@@ -193,8 +195,8 @@ impl SignalAction {
         stack.copy(mmxregs)?.ok_or(EFAULT)?; // MMX registers
         stack.copy(int_stack)?.ok_or(EFAULT)?; // Interrupt stack
 
-        int_stack.v_rip = self.sa_handler;
-        int_stack.rsp = sp;
+        int_stack.rip = self.sa_handler as u64;
+        int_stack.rsp = sp as u64;
         Ok(())
     }
 }
@@ -333,7 +335,7 @@ impl SignalList {
     /// # Safety
     /// This function might never return. Caller must make sure that local variables
     /// that own resources are dropped before calling this function.
-    pub fn handle(&self, int_stack: &mut interrupt_stack, mmxregs: &mut mmx_registers) {
+    pub fn handle(&self, int_stack: &mut InterruptContext, mmxregs: &mut mmx_registers) {
         loop {
             let signal = {
                 let signal = match self.inner.lock_irq().pop() {
@@ -396,18 +398,18 @@ impl SignalList {
     /// used to store the syscall return value to prevent the original value being clobbered.
     pub fn restore(
         &self,
-        int_stack: &mut interrupt_stack,
+        int_stack: &mut InterruptContext,
         mmxregs: &mut mmx_registers,
     ) -> KResult<usize> {
-        let old_mask_vaddr = int_stack.rsp;
+        let old_mask_vaddr = int_stack.rsp as usize;
         let old_mmxregs_vaddr = old_mask_vaddr + size_of::<usize>();
         let old_int_stack_vaddr = old_mmxregs_vaddr + size_of::<mmx_registers>();
 
         let old_mask = UserPointer::<u64>::new_vaddr(old_mask_vaddr)?.read()?;
         *mmxregs = UserPointer::<mmx_registers>::new_vaddr(old_mmxregs_vaddr)?.read()?;
-        *int_stack = UserPointer::<interrupt_stack>::new_vaddr(old_int_stack_vaddr)?.read()?;
+        *int_stack = UserPointer::<InterruptContext>::new_vaddr(old_int_stack_vaddr)?.read()?;
 
         self.inner.lock_irq().set_mask(old_mask);
-        Ok(int_stack.regs.rax as usize)
+        Ok(int_stack.rax as usize)
     }
 }

@@ -51,6 +51,15 @@ debug:
 		-iex 'target remote:1234'
 	-killall $(QEMU_BIN)
 
+.PHONY: tmux-debug
+tmux-debug:
+	tmux new-session -s gbos-debug -d
+	-tmux split-window -t gbos-debug -hf
+	-tmux send-keys -t gbos-debug:1.1 'make srun' C-m
+	-tmux send-keys -t gbos-debug:1.2 'make debug' C-m C-m
+	-tmux attach -t gbos-debug
+	tmux kill-session -t gbos-debug
+
 build/boot.vdi: build/boot.img
 	-rm build/boot.vdi
 	VBoxManage convertfromraw $< $@ --format VDI

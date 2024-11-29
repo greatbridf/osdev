@@ -7,6 +7,7 @@ use crate::bindings::root::EFAULT;
 use crate::io::{Buffer, FillResult};
 use crate::kernel::mem::phys;
 use core::fmt;
+use core::sync::atomic::{AtomicU64, Ordering};
 
 use super::phys::PhysPtr;
 
@@ -157,6 +158,10 @@ impl Page {
         unsafe {
             c_increase_refcount(page);
         }
+    }
+
+    pub unsafe fn load_refcount(&self) -> usize {
+        AtomicU64::from_ptr(&mut (*self.page_ptr).refcount).load(Ordering::Acquire) as usize
     }
 }
 

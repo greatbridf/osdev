@@ -1,5 +1,4 @@
 use arch::InterruptContext;
-use bindings::kernel::mem::paging::pfn_to_page;
 use bindings::{PA_A, PA_ANON, PA_COW, PA_MMAP, PA_P, PA_RW};
 use bitflags::bitflags;
 
@@ -86,10 +85,13 @@ impl MMList {
                 attributes &= !PA_RW as usize;
             }
 
-            // TODO!!!: Change this.
-            let page = unsafe { pfn_to_page(pfn).as_mut().unwrap() };
-            if page.refcount == 1 {
+            let page = unsafe { Page::take_pfn(pfn, 0) };
+            if unsafe { page.load_refcount() } == 1 {
+                // SAFETY: This is actually safe. If we read `1` here and we have `MMList` lock
+                // held, there couldn't be neither other processes sharing the page, nor other
+                // threads making the page COW at the same time.
                 pte.set_attributes(attributes);
+                core::mem::forget(page);
                 return Ok(());
             }
 
@@ -104,7 +106,6 @@ impl MMList {
             }
 
             attributes &= !(PA_A | PA_ANON) as usize;
-            page.refcount -= 1;
 
             pfn = new_page.into_pfn();
             pte.set(pfn, attributes);

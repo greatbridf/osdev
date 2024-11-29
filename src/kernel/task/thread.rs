@@ -512,12 +512,7 @@ impl ProcessList {
 
             inner.children.retain(|_, child| {
                 let child = child.upgrade().unwrap();
-                let mut child_inner = child.process.inner.lock();
-                if child_inner.parent.as_ref().unwrap() == &self.init {
-                    return false;
-                }
-
-                child_inner.parent = Some(self.init.clone());
+                child.process.inner.lock().parent = Some(self.init.clone());
                 init_inner.add_child(&child);
 
                 false

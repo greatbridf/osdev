@@ -1,4 +1,4 @@
-use core::arch::asm;
+use core::arch::naked_asm;
 
 #[repr(C)]
 #[derive(Debug, Default)]
@@ -48,7 +48,7 @@ impl TaskContext {
 
 #[naked]
 unsafe extern "C" fn _switch_to(current_context_sp: &mut u64, next_context_sp: &mut u64) {
-    asm!(
+    naked_asm!(
         "pushf",
         "push %rbp",
         "push %rbx",
@@ -66,6 +66,6 @@ unsafe extern "C" fn _switch_to(current_context_sp: &mut u64, next_context_sp: &
         "pop %rbp",
         "popf",
         "ret",
-        options(att_syntax, noreturn),
+        options(att_syntax),
     );
 }

@@ -24,6 +24,23 @@ unsafe impl LockStrategy for SpinStrategy {
     }
 
     #[inline(always)]
+    unsafe fn is_locked(data: &Self::StrategyData) -> bool {
+        data.load(Ordering::Relaxed)
+    }
+
+    #[inline(always)]
+    unsafe fn try_lock(data: &Self::StrategyData) -> Option<Self::GuardContext> {
+        use Ordering::{Acquire, Relaxed};
+        preempt::disable();
+
+        if data.compare_exchange(false, true, Acquire, Relaxed).is_ok() {
+            Some(())
+        } else {
+            None
+        }
+    }
+
+    #[inline(always)]
     unsafe fn do_lock(data: &Self::StrategyData) -> Self::GuardContext {
         use Ordering::{Acquire, Relaxed};
         preempt::disable();
@@ -91,5 +108,23 @@ unsafe impl<Strategy: LockStrategy> LockStrategy for IrqStrategy<Strategy> {
     #[inline(always)]
     unsafe fn do_relock(data: &Self::StrategyData, context: &mut Self::GuardContext) {
         Strategy::do_relock(data, &mut context.0);
+    }
+
+    #[inline(always)]
+    unsafe fn is_locked(data: &Self::StrategyData) -> bool {
+        Strategy::is_locked(data)
+    }
+
+    #[inline(always)]
+    unsafe fn try_lock(data: &Self::StrategyData) -> Option<Self::GuardContext> {
+        let mut irq_context: usize;
+        asm!(
+            "pushf",
+            "pop {context}",
+            "cli",
+            context = out(reg) irq_context,
+        );
+
+        Strategy::try_lock(data).map(|lock_context| (lock_context, irq_context))
     }
 }

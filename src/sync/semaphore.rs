@@ -29,6 +29,23 @@ unsafe impl<const MAX: usize> LockStrategy for SemaphoreStrategy<MAX> {
     }
 
     #[inline(always)]
+    unsafe fn is_locked(data: &Self::StrategyData) -> bool {
+        *data.counter.lock() == MAX
+    }
+
+    #[inline(always)]
+    unsafe fn try_lock(data: &Self::StrategyData) -> Option<Self::GuardContext> {
+        let mut counter = data.counter.lock();
+        assert!(*counter <= MAX);
+        if *counter < MAX {
+            *counter += 1;
+            Some(())
+        } else {
+            None
+        }
+    }
+
+    #[inline(always)]
     /// Acquire the semaphore in write mode
     ///
     /// # Might Sleep
@@ -87,6 +104,23 @@ pub struct RwSemaphoreData {
 unsafe impl<const READ_MAX: isize> LockStrategy for RwSemaphoreStrategy<READ_MAX> {
     type StrategyData = RwSemaphoreData;
     type GuardContext = ();
+
+    #[inline(always)]
+    unsafe fn is_locked(data: &Self::StrategyData) -> bool {
+        *data.counter.lock() != 0
+    }
+
+    #[inline(always)]
+    unsafe fn try_lock(data: &Self::StrategyData) -> Option<Self::GuardContext> {
+        let mut counter = data.counter.lock();
+        assert!(*counter >= -1 && *counter <= READ_MAX);
+        if *counter == 0 {
+            *counter -= 1;
+            Some(())
+        } else {
+            None
+        }
+    }
 
     #[inline(always)]
     fn data() -> Self::StrategyData {

@@ -15,7 +15,7 @@ pub unsafe fn current_cpu() -> Pin<&'static mut CPUStatus> {
 }
 
 pub unsafe fn init_thiscpu() {
-    CPU_STATUS.set(Some(arch::CPUStatus::new_thiscpu(|layout| {
+    let status = arch::CPUStatus::new_thiscpu(|layout| {
         // TODO: Use page size defined in `arch`.
         let page_count = (layout.size() + 0x1000 - 1) / 0x1000;
         let page = Page::alloc_ceil(page_count);
@@ -23,7 +23,9 @@ pub unsafe fn init_thiscpu() {
         core::mem::forget(page);
 
         NonNull::new(pointer).expect("Allocated page pfn should be non-null")
-    })));
+    });
+
+    CPU_STATUS.set(Some(status));
 
     // SAFETY: `CPU_STATUS` is global static and initialized only once.
     current_cpu().init();

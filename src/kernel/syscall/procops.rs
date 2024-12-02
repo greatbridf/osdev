@@ -15,7 +15,7 @@ use crate::kernel::user::dataflow::UserString;
 use crate::kernel::user::{UserPointer, UserPointerMut};
 use crate::kernel::vfs::dentry::Dentry;
 use crate::path::Path;
-use crate::sync::preempt;
+use crate::sync::{preempt, AsRefPosition as _};
 use crate::{kernel::user::dataflow::UserBuffer, prelude::*};
 
 use crate::kernel::vfs::{self, FsContext};
@@ -152,7 +152,10 @@ fn sys_execve(int_stack: &mut InterruptContext, _mmxregs: &mut mmx_registers) ->
 // TODO: Find a better way.
 #[allow(unreachable_code)]
 fn do_exit(status: u32) -> KResult<()> {
-    ProcessList::get().do_kill_process(&Thread::current().process, WaitType::Exited(status));
+    {
+        let mut procs = ProcessList::get().lock();
+        procs.do_kill_process(&Thread::current().process, WaitType::Exited(status));
+    }
     Scheduler::schedule_noreturn();
     panic!("schedule_noreturn returned!");
 }
@@ -217,22 +220,24 @@ fn do_setpgid(pid: u32, pgid: i32) -> KResult<()> {
 
 fn do_getsid(pid: u32) -> KResult<u32> {
     if pid == 0 {
-        Ok(Thread::current().process.sid())
+        Ok(Thread::current().process.session_rcu().sid)
     } else {
-        ProcessList::get()
+        let procs = ProcessList::get().lock_shared();
+        procs
             .try_find_process(pid)
-            .map(|proc| proc.sid())
+            .map(|proc| proc.session(procs.as_pos()).sid)
             .ok_or(ESRCH)
     }
 }
 
 fn do_getpgid(pid: u32) -> KResult<u32> {
     if pid == 0 {
-        Ok(Thread::current().process.pgid())
+        Ok(Thread::current().process.pgroup_rcu().pgid)
     } else {
-        ProcessList::get()
+        let procs = ProcessList::get().lock_shared();
+        procs
             .try_find_process(pid)
-            .map(|proc| proc.pgid())
+            .map(|proc| proc.pgroup(procs.as_pos()).pgid)
             .ok_or(ESRCH)
     }
 }
@@ -242,7 +247,7 @@ fn do_getpid() -> KResult<u32> {
 }
 
 fn do_getppid() -> KResult<u32> {
-    Ok(Thread::current().process.parent().map_or(0, |x| x.pid))
+    Ok(Thread::current().process.parent_rcu().map_or(0, |x| x.pid))
 }
 
 fn do_getuid() -> KResult<u32> {
@@ -307,6 +312,7 @@ fn do_prctl(option: u32, arg2: usize) -> KResult<()> {
 }
 
 fn do_kill(pid: i32, sig: u32) -> KResult<()> {
+    let procs = ProcessList::get().lock_shared();
     match pid {
         // Send signal to every process for which the calling process has
         // permission to send signals.
@@ -314,18 +320,18 @@ fn do_kill(pid: i32, sig: u32) -> KResult<()> {
         // Send signal to every process in the process group.
         0 => Thread::current()
             .process
-            .pgroup()
-            .raise(Signal::try_from(sig)?),
+            .pgroup(procs.as_pos())
+            .raise(Signal::try_from(sig)?, procs.as_pos()),
         // Send signal to the process with the specified pid.
-        1.. => ProcessList::get()
+        1.. => procs
             .try_find_process(pid as u32)
             .ok_or(ESRCH)?
-            .raise(Signal::try_from(sig)?),
+            .raise(Signal::try_from(sig)?, procs.as_pos()),
         // Send signal to the process group with the specified pgid equals to `-pid`.
-        ..-1 => ProcessList::get()
+        ..-1 => procs
             .try_find_pgroup((-pid) as u32)
             .ok_or(ESRCH)?
-            .raise(Signal::try_from(sig)?),
+            .raise(Signal::try_from(sig)?, procs.as_pos()),
     }
 
     Ok(())
@@ -333,6 +339,7 @@ fn do_kill(pid: i32, sig: u32) -> KResult<()> {
 
 fn do_tkill(tid: u32, sig: u32) -> KResult<()> {
     ProcessList::get()
+        .lock_shared()
         .try_find_thread(tid)
         .ok_or(ESRCH)?
         .raise(Signal::try_from(sig)?);
@@ -452,7 +459,8 @@ define_syscall32!(sys_rt_sigaction, do_rt_sigaction,
     signum: u32, act: *const UserSignalAction, oldact: *mut UserSignalAction, sigsetsize: usize);
 
 fn sys_fork(int_stack: &mut InterruptContext, _mmxregs: &mut mmx_registers) -> usize {
-    let new_thread = Thread::new_cloned(&Thread::current());
+    let mut procs = ProcessList::get().lock();
+    let new_thread = Thread::current().new_cloned(procs.as_mut());
     let mut new_int_stack = int_stack.clone();
     new_int_stack.rax = 0;
     new_int_stack.eflags = 0x200;

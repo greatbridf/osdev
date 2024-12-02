@@ -5,11 +5,11 @@ use alloc::{
 };
 use bindings::{EEXIST, EIO};
 
-use crate::{io::Buffer, kernel::console::CONSOLE, prelude::*};
+use crate::{io::Buffer, kernel::console::CONSOLE, prelude::*, sync::AsRefPosition as _};
 
 use super::{
     block::make_device,
-    task::Thread,
+    task::{ProcessList, Thread},
     terminal::Terminal,
     vfs::{
         file::{File, TerminalFile},
@@ -76,11 +76,13 @@ impl CharDevice {
     pub fn open(self: &Arc<Self>) -> KResult<Arc<File>> {
         Ok(match &self.device {
             CharDeviceType::Terminal(terminal) => {
+                let procs = ProcessList::get().lock_shared();
+                let current = Thread::current();
+                let session = current.process.session(procs.as_pos());
                 // We only set the control terminal if the process is the session leader.
-                if Thread::current().process.sid() == Thread::current().process.pid {
-                    let session = Thread::current().process.session();
+                if session.sid == Thread::current().process.pid {
                     // Silently fail if we can't set the control terminal.
-                    dont_check!(session.set_control_terminal(&terminal, false));
+                    dont_check!(session.set_control_terminal(&terminal, false, procs.as_pos()));
                 }
 
                 TerminalFile::new(terminal.clone())

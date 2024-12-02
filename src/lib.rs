@@ -125,11 +125,7 @@ pub extern "C" fn rust_kinit(early_kstack_pfn: usize) -> ! {
 
     // We need root dentry to be present in constructor of `FsContext`.
     // So call `init_vfs` first, then `init_multitasking`.
-    init_multitasking();
-
-    Thread::current().init(init_process as usize);
-
-    Scheduler::get().lock().uwake(&Thread::current());
+    unsafe { init_multitasking(init_process) };
 
     let mut unuse_ctx = arch::TaskContext::new();
     // TODO: Temporary solution: we will never access this later on.

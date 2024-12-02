@@ -5,10 +5,14 @@ use alloc::{
 use bindings::{EINTR, ENOTTY, EPERM};
 use bitflags::bitflags;
 
-use crate::{io::Buffer, prelude::*, sync::CondVar};
+use crate::{
+    io::Buffer,
+    prelude::*,
+    sync::{AsRefPosition as _, CondVar},
+};
 
 use super::{
-    task::{Session, Signal, Thread},
+    task::{ProcessList, Session, Signal, Thread},
     user::{UserPointer, UserPointerMut},
 };
 
@@ -588,10 +592,10 @@ impl Terminal {
         match request {
             TerminalIORequest::GetProcessGroup(pgid_pointer) => {
                 let session = self.inner.lock().session.upgrade();
-                let pgid = session.map(|session| session.foreground_pgid()).flatten();
+                let pgroup = session.map(|session| session.foreground()).flatten();
 
-                if let Some(pgid) = pgid {
-                    pgid_pointer.write(pgid)
+                if let Some(pgroup) = pgroup {
+                    pgid_pointer.write(pgroup.pgid)
                 } else {
                     Err(ENOTTY)
                 }
@@ -599,11 +603,12 @@ impl Terminal {
             TerminalIORequest::SetProcessGroup(pgid) => {
                 let pgid = pgid.read()?;
 
+                let procs = ProcessList::get().lock_shared();
                 let inner = self.inner.lock();
                 let session = inner.session.upgrade();
 
                 if let Some(session) = session {
-                    session.set_foreground_pgid(pgid)
+                    session.set_foreground_pgid(pgid, procs.as_pos())
                 } else {
                     Err(ENOTTY)
                 }

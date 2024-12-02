@@ -16,6 +16,15 @@ constexpr uintptr_t KERNEL_HEAP_SIZE = KERNEL_HEAP_END - KERNEL_HEAP_START;
 
 namespace types::memory {
 
+extern "C" {
+    struct Page {
+       char item[32]; 
+    };
+    Page* c_alloc_pages(uint32_t order);
+    uintptr_t page_to_pfn(Page* page);
+    uintptr_t c_alloc_page_table();
+}
+
 struct mem_blk_flags {
     unsigned long is_free : 8;
     unsigned long has_next : 8;
@@ -117,11 +126,11 @@ std::byte* brk_memory_allocator::brk(byte* addr) {
 
         auto pdpte = pdpt[std::get<2>(idx)];
         if (!pdpte.pfn())
-            pdpte.set(PA_KERNEL_PAGE_TABLE, alloc_page_table());
+            pdpte.set(PA_KERNEL_PAGE_TABLE, c_alloc_page_table());
 
         auto pde = pdpte.parse()[std::get<3>(idx)];
         assert(!(pde.attributes() & PA_P));
-        pde.set(PA_KERNEL_DATA_HUGE, page_to_pfn(alloc_pages(9)));
+        pde.set(PA_KERNEL_DATA_HUGE, page_to_pfn(c_alloc_pages(9)) << 12);
 
         current_allocated += 0x200000;
     }

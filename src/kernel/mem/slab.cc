@@ -13,6 +13,14 @@ using namespace types::list;
 
 constexpr std::size_t SLAB_PAGE_SIZE = 0x1000; // 4K
 
+extern "C" {
+    struct Page {
+       char item[32]; 
+    };
+    Page* c_alloc_page();
+    uintptr_t page_to_pfn(Page* page);
+}
+
 kernel::async::mutex slab_lock;
 
 std::ptrdiff_t _slab_data_start_offset(std::size_t size) {
@@ -58,10 +66,10 @@ slab_head* _make_slab(uintptr_t start, std::size_t size) {
 }
 
 void _slab_add_page(slab_cache* cache) {
-    auto* new_page = paging::alloc_page();
-    auto new_page_pfn = paging::page_to_pfn(new_page);
+    auto new_page_pfn = page_to_pfn(c_alloc_page()) << 12;
 
-    new_page->flags |= paging::PAGE_SLAB;
+    // TODO!!!
+    // new_page->flags |= paging::PAGE_SLAB;
 
     auto* slab = _make_slab(new_page_pfn, cache->obj_size);
     slab->cache = cache;

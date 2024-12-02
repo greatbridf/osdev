@@ -48,6 +48,15 @@ static inline void setup_early_kernel_page_table() {
 }
 
 extern "C" char KIMAGE_PAGES[];
+extern "C" {
+    void create_pages(uintptr_t start, uintptr_t end);
+    void mark_present(uintptr_t start, uintptr_t end);
+    struct Page {
+       char fuck[32]; 
+    };
+    Page* c_alloc_pages(uint32_t order);
+    uintptr_t page_to_pfn(Page* page);
+}
 
 static inline void setup_buddy(uintptr_t addr_max) {
     using namespace kernel::mem;
@@ -95,13 +104,13 @@ static inline void setup_buddy(uintptr_t addr_max) {
         if (start > end)
             continue;
 
-        mem::paging::create_zone(start, end);
+        create_pages(start, end);
     }
 
     // unused space
-    create_zone(0x9000, 0x80000);
-    create_zone(0x100000, 0x200000);
-    create_zone(real_start_pfn, saved_start_pfn);
+    create_pages(0x9000, 0x80000);
+    create_pages(0x100000, 0x200000);
+    create_pages(real_start_pfn, saved_start_pfn);
 }
 
 static inline void save_memory_info(bootloader_data* data) {
@@ -133,7 +142,7 @@ extern "C" void NORETURN kernel_init(bootloader_data* data) {
     init_allocator();
 
     using namespace mem::paging;
-    auto kernel_stack_pfn = page_to_pfn(alloc_pages(9));
+    auto kernel_stack_pfn = page_to_pfn(c_alloc_pages(9)) << 12;
     auto kernel_stack_ptr = mem::physaddr<std::byte>{kernel_stack_pfn} + (1 << 9) * 0x1000;
 
     asm volatile(

@@ -86,7 +86,7 @@ impl MMList {
             }
 
             let page = unsafe { Page::take_pfn(pfn, 0) };
-            if unsafe { page.load_refcount() } == 1 {
+            if page.load_refcount() == 1 {
                 // SAFETY: This is actually safe. If we read `1` here and we have `MMList` lock
                 // held, there couldn't be neither other processes sharing the page, nor other
                 // threads making the page COW at the same time.

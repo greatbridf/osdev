@@ -5,7 +5,10 @@ use bindings::{
     S_IFMT,
 };
 use core::{
-    mem::MaybeUninit, ops::ControlFlow, ptr::addr_of_mut, sync::atomic::{AtomicU32, AtomicU64, Ordering}
+    mem::MaybeUninit,
+    ops::ControlFlow,
+    ptr::addr_of_mut,
+    sync::atomic::{AtomicU32, AtomicU64, Ordering},
 };
 
 use super::{dentry::Dentry, s_isblk, s_ischr, vfs::Vfs, DevId, TimeSpec};
@@ -241,7 +244,7 @@ pub trait Inode: Send + Sync + InodeInner {
 
         f(
             uninit_mut.as_mut_ptr(),
-            // Safety: `idata` is initialized
+            // SAFETY: `idata` is initialized and we will never move the lock.
             &unsafe { idata.assume_init_ref() }.rwsem.lock_shared(),
         );
 

@@ -5,6 +5,7 @@ use crate::{
     kernel::{
         cpu::current_cpu,
         mem::{paging::Page, phys::PhysPtr as _},
+        task::{Process, Thread},
     },
     println_debug,
     sync::preempt,
@@ -12,7 +13,7 @@ use crate::{
 
 use super::{
     cpu::init_thiscpu,
-    task::{ProcessList, Scheduler, Thread},
+    task::{ProcessList, Scheduler},
 };
 
 define_smp_bootstrap!(4, ap_entry, {
@@ -27,16 +28,17 @@ unsafe extern "C" fn ap_entry() {
     println_debug!("AP{} started", current_cpu().cpuid());
 
     {
-        let idle_process = ProcessList::get()
-            .try_find_process(0)
-            .expect("Idle process must exist");
+        let mut procs = ProcessList::get().lock_nosleep();
+        let idle_process = procs.idle_process().clone();
 
         let idle_thread_name = format!("[kernel idle#AP{}]", 0);
-        let idle_thread =
-            Thread::new_for_init(Arc::from(idle_thread_name.as_bytes()), &idle_process);
-        ProcessList::get().add_thread(&idle_thread);
-        Scheduler::set_idle(idle_thread.clone());
-        Scheduler::set_current(idle_thread);
+        let idle_thread = Thread::new_for_init(
+            Arc::from(idle_thread_name.as_bytes()),
+            Process::alloc_pid(),
+            &idle_process,
+            procs.as_mut(),
+        );
+        Scheduler::set_idle_and_current(idle_thread);
     }
 
     preempt::disable();

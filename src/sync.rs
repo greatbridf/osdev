@@ -1,5 +1,6 @@
 mod condvar;
 pub mod lock;
+mod locked;
 pub mod semaphore;
 pub mod spin;
 pub mod strategy;
@@ -67,35 +68,6 @@ pub type RwSemWriteGuard<'lock, T> = lock::Guard<'lock, T, semaphore::RwSemaphor
 pub type CondVar = condvar::CondVar<true>;
 pub type UCondVar = condvar::CondVar<false>;
 
-pub struct Locked<T: Sized, U: ?Sized> {
-    inner: UnsafeCell<T>,
-    guard: *const U,
-}
-
-unsafe impl<T: Sized + Send, U: ?Sized> Send for Locked<T, U> {}
-unsafe impl<T: Sized + Send + Sync, U: ?Sized> Sync for Locked<T, U> {}
-
-impl<T: Sized + Sync, U: ?Sized> Locked<T, U> {
-    pub fn new(value: T, from: &U) -> Self {
-        Self {
-            inner: UnsafeCell::new(value),
-            guard: from,
-        }
-    }
-
-    pub fn access<'lt>(&'lt self, guard: &'lt U) -> &'lt T {
-        assert_eq!(self.guard, guard as *const U, "wrong guard");
-        // SAFETY: The guard protects the shared access to the inner value.
-        unsafe { self.inner.get().as_ref() }.unwrap()
-    }
-
-    pub fn access_mut<'lt>(&'lt self, guard: &'lt mut U) -> &'lt mut T {
-        assert_eq!(self.guard, guard as *const U, "wrong guard");
-        // SAFETY: The guard protects the exclusive access to the inner value.
-        unsafe { self.inner.get().as_mut() }.unwrap()
-    }
-}
-
 macro_rules! might_sleep {
     () => {
         assert_eq!(
@@ -113,6 +85,5 @@ macro_rules! might_sleep {
     };
 }
 
-use core::cell::UnsafeCell;
-
+pub use locked::{AsRefMutPosition, AsRefPosition, Locked, RefMutPosition, RefPosition};
 pub(crate) use might_sleep;

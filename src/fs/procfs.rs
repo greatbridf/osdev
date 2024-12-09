@@ -20,7 +20,7 @@ use crate::{
         },
     },
     prelude::*,
-    sync::Locked,
+    sync::{AsRefMutPosition as _, AsRefPosition as _, Locked},
 };
 
 fn split_len_offset(data: &[u8], len: usize, offset: usize) -> Option<&[u8]> {
@@ -135,7 +135,7 @@ impl Inode for DirInode {
         let lock = self.rwsem.lock_shared();
         Ok(self
             .entries
-            .access(lock.as_ref())
+            .access(lock.as_pos())
             .iter()
             .find_map(|(name, node)| {
                 name.as_ref()
@@ -151,7 +151,7 @@ impl Inode for DirInode {
     ) -> KResult<usize> {
         let lock = self.rwsem.lock_shared();
         self.entries
-            .access(lock.as_ref())
+            .access(lock.as_pos())
             .iter()
             .skip(offset)
             .map(|(name, node)| callback(name.as_ref(), node.ino()))
@@ -236,10 +236,10 @@ pub fn creat(
     let inode = FileInode::new(ino, Arc::downgrade(&fs), file);
 
     {
-        let mut lock = parent.idata.rwsem.lock();
+        let lock = parent.idata.rwsem.lock();
         parent
             .entries
-            .access_mut(lock.as_mut())
+            .access_mut(lock.as_pos_mut())
             .push((name, ProcFsNode::File(inode.clone())));
     }
 
@@ -259,7 +259,7 @@ pub fn mkdir(parent: &ProcFsNode, name: &[u8]) -> KResult<ProcFsNode> {
 
     parent
         .entries
-        .access_mut(inode.rwsem.lock().as_mut())
+        .access_mut(inode.rwsem.lock().as_pos_mut())
         .push((Arc::from(name), ProcFsNode::Dir(inode.clone())));
 
     Ok(ProcFsNode::Dir(inode))

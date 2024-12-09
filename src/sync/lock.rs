@@ -3,7 +3,12 @@ use core::{
     ops::{Deref, DerefMut},
 };
 
-use super::{spin::IrqStrategy, strategy::LockStrategy};
+use super::{
+    semaphore::{RwSemaphoreStrategy, SemaphoreStrategy},
+    spin::IrqStrategy,
+    strategy::LockStrategy,
+    RwSemWriteGuard, SemGuard,
+};
 
 pub struct Lock<Value: ?Sized, Strategy: LockStrategy> {
     strategy_data: Strategy::StrategyData,
@@ -49,7 +54,58 @@ impl<Value: Default, Strategy: LockStrategy> Default for Lock<Value, Strategy> {
     }
 }
 
+#[allow(dead_code)]
+impl<Value: ?Sized> Lock<Value, SemaphoreStrategy> {
+    #[inline(always)]
+    pub fn lock_nosleep(&self) -> SemGuard<'_, Value> {
+        loop {
+            if !self.is_locked() {
+                if let Some(guard) = self.try_lock() {
+                    return guard;
+                }
+            }
+
+            arch::pause();
+        }
+    }
+}
+
+impl<Value: ?Sized> Lock<Value, RwSemaphoreStrategy> {
+    #[inline(always)]
+    pub fn lock_nosleep(&self) -> RwSemWriteGuard<'_, Value> {
+        loop {
+            if self.is_locked() {
+                if let Some(guard) = self.try_lock() {
+                    return guard;
+                }
+            }
+
+            arch::pause();
+        }
+    }
+}
+
+#[allow(dead_code)]
 impl<Value: ?Sized, Strategy: LockStrategy> Lock<Value, Strategy> {
+    #[inline(always)]
+    pub fn is_locked(&self) -> bool {
+        unsafe { Strategy::is_locked(&self.strategy_data) }
+    }
+
+    #[inline(always)]
+    pub fn try_lock<'lt>(&'lt self) -> Option<Guard<'lt, Value, Strategy>> {
+        if unsafe { Strategy::is_locked(&self.strategy_data) } {
+            return None;
+        }
+
+        unsafe { Strategy::try_lock(&self.strategy_data) }.map(|context| Guard {
+            _phantom: core::marker::PhantomData,
+            value: &self.value,
+            strategy_data: &self.strategy_data,
+            context,
+        })
+    }
+
     #[inline(always)]
     pub fn lock<'lt>(&'lt self) -> Guard<'lt, Value, Strategy> {
         Guard {
@@ -103,7 +159,7 @@ pub struct Guard<'lock, Value: ?Sized, Strategy: LockStrategy, const WRITE: bool
     context: Strategy::GuardContext,
 }
 
-impl<'lock, Value: ?Sized, Strategy: LockStrategy> Guard<'lock, Value, Strategy> {
+impl<'lock, Value: ?Sized, Strategy: LockStrategy, const W: bool> Guard<'lock, Value, Strategy, W> {
     /// # Safety
     /// Use of the lock after calling this function without relocking is undefined behavior.
     #[inline(always)]

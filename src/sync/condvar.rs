@@ -66,7 +66,7 @@ impl<const I: bool> CondVar<I> {
     ///
     /// # Return
     /// - `true`: a pending signal was received
-    pub fn wait<'a, T, S: LockStrategy>(&self, guard: &mut Guard<'a, T, S>) {
+    pub fn wait<'a, T, S: LockStrategy, const W: bool>(&self, guard: &mut Guard<'a, T, S, W>) {
         preempt::disable();
         {
             let mut scheduler = Scheduler::get().lock_irq();
@@ -88,6 +88,6 @@ impl<const I: bool> CondVar<I> {
 
         self.waiters
             .lock_irq()
-            .retain(|waiter| waiter != Thread::current().as_ref());
+            .retain(|waiter| waiter.tid != Thread::current().tid);
     }
 }

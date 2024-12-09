@@ -249,3 +249,12 @@ impl Write for RawBuffer<'_> {
         }
     }
 }
+
+impl Write for dyn Buffer + '_ {
+    fn write_str(&mut self, s: &str) -> core::fmt::Result {
+        match self.fill(s.as_bytes()) {
+            Ok(FillResult::Done(_)) => Ok(()),
+            _ => Err(core::fmt::Error),
+        }
+    }
+}

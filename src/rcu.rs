@@ -1,5 +1,6 @@
 use core::{
     ops::Deref,
+    ptr::NonNull,
     sync::atomic::{AtomicPtr, Ordering},
 };
 
@@ -40,7 +41,7 @@ impl<'data, T: 'data> Deref for RCUReadGuard<'data, T> {
     }
 }
 
-fn rcu_sync() {
+pub fn rcu_sync() {
     GLOBAL_RCU_SEM.lock();
 }
 
@@ -184,6 +185,19 @@ impl<'lt, T: RCUNode<T>> Iterator for RCUIterator<'lt, T> {
 
 pub struct RCUPointer<T>(AtomicPtr<T>);
 
+impl<T: core::fmt::Debug> core::fmt::Debug for RCUPointer<T> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match NonNull::new(self.0.load(Ordering::Acquire)) {
+            Some(pointer) => {
+                let borrowed = BorrowedArc::from_raw(pointer.as_ptr());
+                f.write_str("RCUPointer of ")?;
+                borrowed.fmt(f)
+            }
+            None => f.debug_tuple("NULL RCUPointer").finish(),
+        }
+    }
+}
+
 impl<T> RCUPointer<T> {
     pub fn new_with(value: Arc<T>) -> Self {
         Self(AtomicPtr::new(Arc::into_raw(value) as *mut _))
@@ -204,7 +218,18 @@ impl<T> RCUPointer<T> {
     }
 
     /// # Safety
-    /// Caller must ensure that the pointer is freed after all readers are done.
+    /// Caller must ensure no writers are updating the pointer.
+    pub unsafe fn load_locked<'lt>(&self) -> Option<BorrowedArc<'lt, T>> {
+        let ptr = self.0.load(Ordering::Acquire);
+        if ptr.is_null() {
+            None
+        } else {
+            Some(BorrowedArc::from_raw(ptr))
+        }
+    }
+
+    /// # Safety
+    /// Caller must ensure that the actual pointer is freed after all readers are done.
     pub unsafe fn swap(&self, new: Option<Arc<T>>) -> Option<Arc<T>> {
         let new = new
             .map(|arc| Arc::into_raw(arc) as *mut T)
@@ -215,8 +240,19 @@ impl<T> RCUPointer<T> {
         if old.is_null() {
             None
         } else {
-            rcu_sync();
             Some(unsafe { Arc::from_raw(old) })
+        }
+    }
+}
+
+impl<T> Drop for RCUPointer<T> {
+    fn drop(&mut self) {
+        // SAFETY: We call `rcu_sync()` to ensure that all readers are done.
+        if let Some(arc) = unsafe { self.swap(None) } {
+            // We only wait if there are other references.
+            if Arc::strong_count(&arc) == 1 {
+                rcu_sync();
+            }
         }
     }
 }

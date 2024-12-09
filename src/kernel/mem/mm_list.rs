@@ -352,6 +352,9 @@ impl MMList {
 
 impl Drop for MMList {
     fn drop(&mut self) {
-        self.clear_user();
+        let inner = self.inner.get_mut();
+        assert!(inner.areas.is_empty());
+        assert_eq!(inner.break_start, None);
+        assert_eq!(inner.break_pos, None);
     }
 }

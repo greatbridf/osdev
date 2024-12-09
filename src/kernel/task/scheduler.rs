@@ -5,16 +5,13 @@ use core::{
 
 use crate::{prelude::*, sync::preempt};
 
-use alloc::{
-    collections::vec_deque::VecDeque,
-    sync::{Arc, Weak},
-};
+use alloc::{collections::vec_deque::VecDeque, sync::Arc};
 use lazy_static::lazy_static;
 
 use super::{Thread, ThreadState};
 
 pub struct Scheduler {
-    ready: VecDeque<Weak<Thread>>,
+    ready: VecDeque<Arc<Thread>>,
 }
 
 /// Idle task thread
@@ -24,7 +21,7 @@ static IDLE_TASK: Option<NonNull<Thread>> = None;
 
 /// Current thread
 #[arch::define_percpu]
-static mut CURRENT: Option<NonNull<Thread>> = None;
+static CURRENT: Option<NonNull<Thread>> = None;
 
 lazy_static! {
     static ref GLOBAL_SCHEDULER: Spin<Scheduler> = Spin::new(Scheduler {
@@ -58,26 +55,51 @@ impl Scheduler {
         BorrowedArc::from_raw(IDLE_TASK.get().unwrap().as_ptr())
     }
 
-    pub unsafe fn set_idle(thread: Arc<Thread>) {
+    pub unsafe fn set_idle_and_current(thread: Arc<Thread>) {
         // We don't wake the idle thread to prevent from accidentally being scheduled there.
         thread.init(idle_task as *const () as usize);
+        assert_eq!(
+            thread.oncpu.swap(true, Ordering::AcqRel),
+            false,
+            "Idle task is already on cpu"
+        );
 
-        let old = IDLE_TASK.swap(NonNull::new(Arc::into_raw(thread) as *mut _));
+        let old = IDLE_TASK.swap(NonNull::new(Arc::into_raw(thread.clone()) as *mut _));
         assert!(old.is_none(), "Idle task is already set");
+
+        let old = CURRENT.swap(NonNull::new(Arc::into_raw(thread) as *mut _));
+        assert!(old.is_none(), "Current is already set");
     }
 
-    pub unsafe fn set_current(thread: Arc<Thread>) {
-        assert_eq!(thread.oncpu.swap(true, Ordering::AcqRel), false);
-        let old = CURRENT.swap(NonNull::new(Arc::into_raw(thread) as *mut _));
+    pub fn pop(&mut self) -> Option<Arc<Thread>> {
+        self.ready.pop_front()
+    }
+
+    pub unsafe fn swap_current(&mut self, next: Arc<Thread>) {
+        {
+            let mut next_state = next.state.lock();
+            assert_eq!(*next_state, ThreadState::Ready);
+            *next_state = ThreadState::Running;
+            assert_eq!(next.oncpu.swap(true, Ordering::AcqRel), false);
+        }
+
+        let old: Option<NonNull<Thread>> =
+            CURRENT.swap(NonNull::new(Arc::into_raw(next) as *mut _));
 
         if let Some(thread_pointer) = old {
             let thread = Arc::from_raw(thread_pointer.as_ptr());
-            thread.oncpu.store(false, Ordering::Release);
+            let mut state = thread.state.lock();
+            assert_eq!(thread.oncpu.swap(false, Ordering::AcqRel), true);
+
+            if let ThreadState::Running = *state {
+                *state = ThreadState::Ready;
+                self.enqueue(&thread);
+            }
         }
     }
 
     fn enqueue(&mut self, thread: &Arc<Thread>) {
-        self.ready.push_back(Arc::downgrade(thread));
+        self.ready.push_back(thread.clone());
     }
 
     pub fn usleep(&mut self, thread: &Arc<Thread>) {
@@ -123,24 +145,6 @@ impl Scheduler {
             }
             state => panic!("Invalid transition from state {:?} to `Ready`", state),
         }
-    }
-
-    /// Put `Running` thread into `Ready` state and enqueue the task.
-    pub fn put_ready(&mut self, thread: &Arc<Thread>) {
-        let mut state = thread.state.lock();
-        assert_eq!(*state, ThreadState::Running);
-
-        *state = ThreadState::Ready;
-        self.enqueue(&thread);
-    }
-
-    /// Set `Ready` threads to the `Running` state.
-    pub fn set_running(&mut self, thread: &Arc<Thread>) {
-        let mut state = thread.state.lock();
-        assert_eq!(*state, ThreadState::Ready);
-
-        *state = ThreadState::Running;
-        // No need to dequeue. We got the thread from the queue.
     }
 
     /// Set `Running` threads to the `Zombie` state.
@@ -197,38 +201,25 @@ extern "C" fn idle_task() {
         let mut scheduler = Scheduler::get().lock_irq();
         let state = *Thread::current().state.lock();
 
-        // Previous thread is `Running`.
-        if let ThreadState::Running = state {
-            // No other thread to run, return to current running thread without changing its state.
-            if scheduler.ready.is_empty() {
+        // No other thread to run
+        match scheduler.pop() {
+            None => {
                 drop(scheduler);
-                context_switch_light(&Scheduler::idle_task(), &Thread::current());
+                if let ThreadState::Running = state {
+                    // Previous thread is `Running`, Return to current running thread
+                    // without changing its state.
+                    context_switch_light(&Scheduler::idle_task(), &Thread::current());
+                } else {
+                    // Halt the cpu and rerun the loop.
+                    arch::halt();
+                }
                 continue;
-            } else {
-                // Put it into `Ready` state
-                scheduler.put_ready(&Thread::current());
             }
-        }
-
-        // No thread to run, halt the cpu and rerun the loop.
-        if scheduler.ready.is_empty() {
-            drop(scheduler);
-            arch::halt();
-            continue;
-        }
-
-        let next_thread = scheduler
-            .ready
-            .pop_front()
-            .as_ref()
-            .map(|weak| weak.upgrade().unwrap())
-            .expect("We should have a thread to run");
-        scheduler.set_running(&next_thread);
-        drop(scheduler);
-
-        next_thread.process.mm_list.switch_page_table();
-        unsafe {
-            Scheduler::set_current(next_thread);
+            Some(next) => {
+                next.process.mm_list.switch_page_table();
+                unsafe { scheduler.swap_current(next) };
+                drop(scheduler);
+            }
         }
 
         unsafe {

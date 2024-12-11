@@ -96,29 +96,6 @@ struct page {
 
 inline page* PAGE_ARRAY;
 
-void create_zone(uintptr_t start, uintptr_t end);
-void mark_present(uintptr_t start, uintptr_t end);
-
-[[nodiscard]] page* alloc_page();
-// order represents power of 2
-[[nodiscard]] page* alloc_pages(unsigned order);
-
-// order represents power of 2
-void free_pages(page* page, unsigned order);
-void free_page(page* page);
-
-// order represents power of 2
-void free_pages(pfn_t pfn, unsigned order);
-void free_page(pfn_t pfn);
-
-// clear the page all zero
-[[nodiscard]] pfn_t alloc_page_table();
-
-pfn_t page_to_pfn(page* page);
-page* pfn_to_page(pfn_t pfn);
-
-void increase_refcount(page* page);
-
 constexpr unsigned long PAGE_FAULT_P = 0x00000001;
 constexpr unsigned long PAGE_FAULT_W = 0x00000002;
 constexpr unsigned long PAGE_FAULT_U = 0x00000004;
@@ -128,6 +105,11 @@ constexpr unsigned long PAGE_FAULT_PK = 0x00000020;
 constexpr unsigned long PAGE_FAULT_SS = 0x00000040;
 constexpr unsigned long PAGE_FAULT_SGX = 0x00008000;
 
-void handle_page_fault(interrupt_stack* int_stack);
-
 } // namespace kernel::mem::paging
+
+struct Page;
+
+extern "C" Page* c_alloc_page();
+extern "C" Page* c_alloc_pages(uint32_t order);
+extern "C" uintptr_t c_alloc_page_table();
+extern "C" uintptr_t page_to_pfn(Page* page);

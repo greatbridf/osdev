@@ -42,7 +42,6 @@ set(KERNEL_MAIN_SOURCES src/kinit.cpp
                         src/kernel/async/lock.cc
                         src/kernel/allocator.cc
                         src/kernel/process.cpp
-                        src/kernel/mem/paging.cc
                         src/kernel/mem/slab.cc
                         src/kernel/vga.cpp
                         src/kernel/hw/acpi.cc

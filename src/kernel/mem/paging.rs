@@ -1,89 +1,32 @@
-use crate::bindings::root::kernel::mem::paging::{
-    alloc_page as c_alloc_page, alloc_pages as c_alloc_pages, free_pages as c_free_pages,
-    increase_refcount as c_increase_refcount, page as c_page, page_to_pfn as c_page_to_pfn,
-    pfn_to_page as c_pfn_to_page, PAGE_BUDDY,
-};
+use super::address::PFN;
+use super::page_alloc::{alloc_page, alloc_pages, free_pages, PagePtr};
+use super::phys::PhysPtr;
 use crate::bindings::root::EFAULT;
 use crate::io::{Buffer, FillResult};
 use crate::kernel::mem::phys;
 use core::fmt;
-use core::sync::atomic::{AtomicU64, Ordering};
-
-use super::phys::PhysPtr;
-
-fn msb(x: u64) -> u64 {
-    // What the ****.
-    let mut x = x;
-    x |= x >> 1;
-    x |= x >> 2;
-    x |= x >> 4;
-    x |= x >> 8;
-    x |= x >> 16;
-    x |= x >> 32;
-    x -= x >> 1;
-    x
-}
-
-fn msb_position(x: u64) -> Option<u32> {
-    if x == 0 {
-        return None;
-    }
-
-    let mut pos = 0;
-    let mut x = x;
-    if x >= 1 << 32 {
-        x >>= 32;
-        pos += 32;
-    }
-    if x >= 1 << 16 {
-        x >>= 16;
-        pos += 16;
-    }
-    if x >= 1 << 8 {
-        x >>= 8;
-        pos += 8;
-    }
-    if x >= 1 << 4 {
-        x >>= 4;
-        pos += 4;
-    }
-    if x >= 1 << 2 {
-        x >>= 2;
-        pos += 2;
-    }
-    if x >= 1 {
-        pos += 1;
-    }
-
-    Some(pos)
-}
 
 pub struct Page {
-    page_ptr: *mut c_page,
+    page_ptr: PagePtr,
     order: u32,
 }
 
 #[allow(dead_code)]
 impl Page {
     pub fn alloc_one() -> Self {
-        let page_ptr = unsafe { c_alloc_page() };
-
+        let page_ptr = alloc_page();
         Self { page_ptr, order: 0 }
     }
 
     pub fn alloc_many(order: u32) -> Self {
-        let page_ptr = unsafe { c_alloc_pages(order) };
-
+        let page_ptr = alloc_pages(order);
         Self { page_ptr, order }
     }
 
     /// Allocate a contiguous block of pages that can contain at least `count` pages.
     pub fn alloc_ceil(count: usize) -> Self {
         assert_ne!(count, 0);
-        let count_msb = msb(count as u64) as usize;
-        let order = msb_position((count + count_msb - 1) as u64)
-            .expect("`count` can't be 0, so can't `order`");
-
+        let order = count.next_power_of_two().trailing_zeros();
         Self::alloc_many(order)
     }
 
@@ -92,16 +35,11 @@ impl Page {
     /// # Safety
     /// Caller must ensure that the pfn is no longer referenced by any other code.
     pub unsafe fn take_pfn(pfn: usize, order: u32) -> Self {
-        let page_ptr = unsafe { c_pfn_to_page(pfn) };
+        let page_ptr: PagePtr = PFN::from(pfn >> 12).into();
 
         // Only buddy pages can be used here.
-        assert!(unsafe { page_ptr.as_ref().unwrap() }.flags & PAGE_BUDDY != 0);
-
-        // Check if the order is correct.
-        assert_eq!(
-            unsafe { page_ptr.as_ref().unwrap() }.flags & 0xff,
-            order as u64
-        );
+        // Also, check if the order is correct.
+        assert!(page_ptr.as_ref().is_buddy() && page_ptr.is_valid(order));
 
         Self { page_ptr, order }
     }
@@ -112,7 +50,7 @@ impl Page {
     /// Caller must ensure that `pfn` refers to a valid physical frame number with `refcount` > 0.
     pub unsafe fn from_pfn(pfn: usize, order: u32) -> Self {
         // SAFETY: `pfn` is a valid physical frame number with refcount > 0.
-        unsafe { Self::increase_refcount(pfn) };
+        Self::increase_refcount(pfn);
 
         // SAFETY: `pfn` has an increased refcount.
         unsafe { Self::take_pfn(pfn, order) }
@@ -121,9 +59,9 @@ impl Page {
     /// Consumes the `Page` and returns the physical frame number without dropping the reference
     /// count the page holds.
     pub fn into_pfn(self) -> usize {
-        let pfn = unsafe { c_page_to_pfn(self.page_ptr) };
+        let pfn: PFN = self.page_ptr.into();
         core::mem::forget(self);
-        pfn
+        usize::from(pfn) << 12
     }
 
     pub fn len(&self) -> usize {
@@ -131,7 +69,8 @@ impl Page {
     }
 
     pub fn as_phys(&self) -> usize {
-        unsafe { c_page_to_pfn(self.page_ptr) }
+        let pfn: PFN = self.page_ptr.into();
+        usize::from(pfn) << 12
     }
 
     pub fn as_cached(&self) -> phys::CachedPP {
@@ -153,23 +92,18 @@ impl Page {
     /// # Safety
     /// Caller must ensure that the page is properly freed.
     pub unsafe fn increase_refcount(pfn: usize) {
-        let page = unsafe { c_pfn_to_page(pfn) };
-
-        unsafe {
-            c_increase_refcount(page);
-        }
+        let page_ptr: PagePtr = PFN::from(pfn >> 12).into();
+        page_ptr.increase_refcount();
     }
 
     pub unsafe fn load_refcount(&self) -> usize {
-        AtomicU64::from_ptr(&mut (*self.page_ptr).refcount).load(Ordering::Acquire) as usize
+        self.page_ptr.load_refcount() as usize
     }
 }
 
 impl Clone for Page {
     fn clone(&self) -> Self {
-        unsafe {
-            c_increase_refcount(self.page_ptr);
-        }
+        unsafe { self.page_ptr.increase_refcount() };
 
         Self {
             page_ptr: self.page_ptr,
@@ -180,17 +114,19 @@ impl Clone for Page {
 
 impl Drop for Page {
     fn drop(&mut self) {
-        unsafe {
-            c_free_pages(self.page_ptr, self.order);
+        match unsafe { self.page_ptr.decrease_refcount() } {
+            0 => panic!("In-use page refcount is 0"),
+            1 => free_pages(self.page_ptr, self.order),
+            _ => {}
         }
     }
 }
 
 impl PartialEq for Page {
     fn eq(&self, other: &Self) -> bool {
-        assert!(self.page_ptr != other.page_ptr || self.order == other.order);
+        // assert!(self.page_ptr != other.page_ptr || self.order == other.order);
 
-        self.page_ptr == other.page_ptr
+        self.page_ptr.as_ptr() == other.page_ptr.as_ptr()
     }
 }
 

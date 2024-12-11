@@ -117,11 +117,11 @@ std::byte* brk_memory_allocator::brk(byte* addr) {
 
         auto pdpte = pdpt[std::get<2>(idx)];
         if (!pdpte.pfn())
-            pdpte.set(PA_KERNEL_PAGE_TABLE, alloc_page_table());
+            pdpte.set(PA_KERNEL_PAGE_TABLE, c_alloc_page_table());
 
         auto pde = pdpte.parse()[std::get<3>(idx)];
         assert(!(pde.attributes() & PA_P));
-        pde.set(PA_KERNEL_DATA_HUGE, page_to_pfn(alloc_pages(9)));
+        pde.set(PA_KERNEL_DATA_HUGE, page_to_pfn(c_alloc_pages(9)) << 12);
 
         current_allocated += 0x200000;
     }

@@ -2,7 +2,7 @@ use alloc::{
     collections::btree_map::BTreeMap,
     sync::{Arc, Weak},
 };
-use bindings::{EACCES, ENOTDIR, S_IFDIR, S_IFREG};
+use bindings::{EACCES, ENOTDIR};
 use core::{ops::ControlFlow, sync::atomic::Ordering};
 use itertools::Itertools;
 use lazy_static::lazy_static;
@@ -10,6 +10,7 @@ use lazy_static::lazy_static;
 use crate::{
     io::Buffer,
     kernel::{
+        constants::{S_IFDIR, S_IFREG},
         mem::paging::{Page, PageBuffer},
         vfs::{
             dentry::Dentry,
@@ -272,7 +273,7 @@ impl ProcFsFile for DumpMountsFile {
     }
 
     fn read(&self, buffer: &mut PageBuffer) -> KResult<usize> {
-        dump_mounts(buffer);
+        dump_mounts(&mut buffer.get_writer());
 
         Ok(buffer.len())
     }

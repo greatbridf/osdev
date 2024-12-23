@@ -1,9 +1,9 @@
 use alloc::sync::Arc;
 
-use arch::InterruptContext;
+use arch::{ExtendedContext, InterruptContext};
 use lazy_static::lazy_static;
 
-use crate::bindings::root::{mmx_registers, EINVAL};
+use crate::bindings::root::EINVAL;
 use crate::{driver::Port8, prelude::*};
 
 use super::cpu::current_cpu;
@@ -47,15 +47,18 @@ fn fault_handler(int_stack: &mut InterruptContext) {
 }
 
 #[no_mangle]
-pub extern "C" fn interrupt_handler(int_stack: *mut InterruptContext, mmxregs: *mut mmx_registers) {
+pub extern "C" fn interrupt_handler(
+    int_stack: *mut InterruptContext,
+    ext_ctx: *mut ExtendedContext,
+) {
     let int_stack = unsafe { &mut *int_stack };
-    let mmxregs = unsafe { &mut *mmxregs };
+    let ext_ctx = unsafe { &mut *ext_ctx };
 
     match int_stack.int_no {
         // Fault
         0..0x20 => fault_handler(int_stack),
         // Syscall
-        0x80 => handle_syscall32(int_stack.rax as usize, int_stack, mmxregs),
+        0x80 => handle_syscall32(int_stack.rax as usize, int_stack, ext_ctx),
         // Timer
         0x40 => timer_interrupt(),
         // IRQ

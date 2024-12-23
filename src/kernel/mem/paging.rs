@@ -163,12 +163,6 @@ impl PageBuffer {
         unsafe { core::slice::from_raw_parts(self.page.as_cached().as_ptr::<u8>(), self.offset) }
     }
 
-    pub fn as_mut_slice(&self) -> &mut [u8] {
-        unsafe {
-            core::slice::from_raw_parts_mut(self.page.as_cached().as_ptr::<u8>(), self.offset)
-        }
-    }
-
     fn available_as_slice(&self) -> &mut [u8] {
         unsafe {
             core::slice::from_raw_parts_mut(
@@ -176,23 +170,6 @@ impl PageBuffer {
                 self.remaining(),
             )
         }
-    }
-
-    pub fn consume(&mut self, len: usize) {
-        self.offset += len;
-    }
-}
-
-impl core::fmt::Write for PageBuffer {
-    fn write_str(&mut self, s: &str) -> core::fmt::Result {
-        if s.len() > self.remaining() {
-            return Err(core::fmt::Error);
-        }
-
-        self.available_as_slice()[..s.len()].copy_from_slice(s.as_bytes());
-        self.consume(s.len());
-
-        Ok(())
     }
 }
 
@@ -212,7 +189,7 @@ impl Buffer for PageBuffer {
 
         let len = core::cmp::min(data.len(), self.remaining());
         self.available_as_slice()[..len].copy_from_slice(&data[..len]);
-        self.consume(len);
+        self.offset += len;
 
         if len < data.len() {
             Ok(FillResult::Partial(len))

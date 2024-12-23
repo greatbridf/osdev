@@ -3,7 +3,7 @@ fn main() {
     println!("cargo:rustc-link-lib=static=gblibstdc++");
 
     let headers = [
-        "include/kernel/process.hpp",
+        "rust-headers.hpp",
         "include/kernel/hw/pci.hpp",
     ];
 

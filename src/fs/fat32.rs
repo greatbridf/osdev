@@ -5,7 +5,7 @@ use alloc::{
     sync::{Arc, Weak},
     vec::Vec,
 };
-use bindings::{EINVAL, EIO, S_IFDIR, S_IFREG};
+use bindings::{EINVAL, EIO};
 
 use itertools::Itertools;
 
@@ -13,6 +13,7 @@ use crate::{
     io::{Buffer, RawBuffer, UninitBuffer},
     kernel::{
         block::{make_device, BlockDevice, BlockDeviceRequest},
+        constants::{S_IFDIR, S_IFREG},
         mem::{paging::Page, phys::PhysPtr},
         vfs::{
             dentry::Dentry,

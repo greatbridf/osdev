@@ -3,19 +3,15 @@ use core::cmp::Reverse;
 use crate::{
     io::BufferFill,
     kernel::{
-        constants::SA_SIGINFO,
+        constants::{SA_RESTORER, SA_SIGINFO},
         user::{dataflow::UserBuffer, UserPointer},
     },
     prelude::*,
 };
 
 use alloc::collections::{binary_heap::BinaryHeap, btree_map::BTreeMap};
-use arch::InterruptContext;
-use bindings::{
-    mmx_registers, EFAULT, EINVAL, SA_RESTORER, SIGABRT, SIGBUS, SIGCHLD, SIGCONT, SIGFPE, SIGILL,
-    SIGKILL, SIGQUIT, SIGSEGV, SIGSTOP, SIGSYS, SIGTRAP, SIGTSTP, SIGTTIN, SIGTTOU, SIGURG,
-    SIGWINCH, SIGXCPU, SIGXFSZ,
-};
+use arch::{ExtendedContext, InterruptContext};
+use bindings::{EFAULT, EINVAL};
 
 use super::{ProcessList, Thread};
 
@@ -92,34 +88,42 @@ pub enum RaiseResult {
 
 impl Signal {
     fn is_continue(&self) -> bool {
-        self.0 == SIGCONT
+        self == &Self::SIGCONT
     }
 
     fn is_stop(&self) -> bool {
-        match self.0 {
-            SIGSTOP | SIGTSTP | SIGTTIN | SIGTTOU => true,
+        match self {
+            &Self::SIGSTOP | &Self::SIGTSTP | &Self::SIGTTIN | &Self::SIGTTOU => true,
             _ => false,
         }
     }
 
     fn is_ignore(&self) -> bool {
-        match self.0 {
-            SIGCHLD | SIGURG | SIGWINCH => true,
+        match self {
+            &Self::SIGCHLD | &Self::SIGURG | &Self::SIGWINCH => true,
             _ => false,
         }
     }
 
     pub fn is_now(&self) -> bool {
-        match self.0 {
-            SIGKILL | SIGSTOP => true,
+        match self {
+            &Self::SIGKILL | &Self::SIGSTOP => true,
             _ => false,
         }
     }
 
     pub fn is_coredump(&self) -> bool {
-        match self.0 {
-            SIGQUIT | SIGILL | SIGABRT | SIGFPE | SIGSEGV | SIGBUS | SIGTRAP | SIGSYS | SIGXCPU
-            | SIGXFSZ => true,
+        match self {
+            &Self::SIGQUIT
+            | &Self::SIGILL
+            | &Self::SIGABRT
+            | &Self::SIGFPE
+            | &Self::SIGSEGV
+            | &Self::SIGBUS
+            | &Self::SIGTRAP
+            | &Self::SIGSYS
+            | &Self::SIGXCPU
+            | &Self::SIGXFSZ => true,
             _ => false,
         }
     }
@@ -171,14 +175,14 @@ impl SignalAction {
         signum: u32,
         old_mask: u64,
         int_stack: &mut InterruptContext,
-        mmxregs: &mut mmx_registers,
+        ext_ctx: &mut ExtendedContext,
     ) -> KResult<()> {
         if self.sa_flags & SA_RESTORER as usize == 0 {
             return Err(EINVAL);
         }
 
         const CONTEXT_SIZE: usize = size_of::<InterruptContext>()
-            + size_of::<mmx_registers>()
+            + size_of::<ExtendedContext>()
             + size_of::<usize>() // old_mask
             + size_of::<u32>(); // `sa_handler` argument: `signum`
 
@@ -192,7 +196,7 @@ impl SignalAction {
         stack.copy(&restorer_address)?.ok_or(EFAULT)?; // Restorer address
         stack.copy(&signum)?.ok_or(EFAULT)?; // Restorer address
         stack.copy(&old_mask)?.ok_or(EFAULT)?; // Original signal mask
-        stack.copy(mmxregs)?.ok_or(EFAULT)?; // MMX registers
+        stack.copy(ext_ctx)?.ok_or(EFAULT)?; // MMX registers
         stack.copy(int_stack)?.ok_or(EFAULT)?; // Interrupt stack
 
         int_stack.rip = self.sa_handler as u64;
@@ -335,7 +339,7 @@ impl SignalList {
     /// # Safety
     /// This function might never return. Caller must make sure that local variables
     /// that own resources are dropped before calling this function.
-    pub fn handle(&self, int_stack: &mut InterruptContext, mmxregs: &mut mmx_registers) {
+    pub fn handle(&self, int_stack: &mut InterruptContext, ext_ctx: &mut ExtendedContext) {
         loop {
             let signal = {
                 let signal = match self.inner.lock_irq().pop() {
@@ -353,7 +357,7 @@ impl SignalList {
                             old_mask
                         };
                         let result =
-                            handler.handle(signal.to_signum(), old_mask, int_stack, mmxregs);
+                            handler.handle(signal.to_signum(), old_mask, int_stack, ext_ctx);
                         if result.is_err() {
                             self.inner.lock_irq().set_mask(old_mask);
                         }
@@ -399,14 +403,14 @@ impl SignalList {
     pub fn restore(
         &self,
         int_stack: &mut InterruptContext,
-        mmxregs: &mut mmx_registers,
+        ext_ctx: &mut ExtendedContext,
     ) -> KResult<usize> {
         let old_mask_vaddr = int_stack.rsp as usize;
         let old_mmxregs_vaddr = old_mask_vaddr + size_of::<usize>();
-        let old_int_stack_vaddr = old_mmxregs_vaddr + size_of::<mmx_registers>();
+        let old_int_stack_vaddr = old_mmxregs_vaddr + size_of::<ExtendedContext>();
 
         let old_mask = UserPointer::<u64>::new_vaddr(old_mask_vaddr)?.read()?;
-        *mmxregs = UserPointer::<mmx_registers>::new_vaddr(old_mmxregs_vaddr)?.read()?;
+        *ext_ctx = UserPointer::<ExtendedContext>::new_vaddr(old_mmxregs_vaddr)?.read()?;
         *int_stack = UserPointer::<InterruptContext>::new_vaddr(old_int_stack_vaddr)?.read()?;
 
         self.inner.lock_irq().set_mask(old_mask);

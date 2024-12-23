@@ -1,12 +1,10 @@
 #pragma once
 
-#include <bit>
 #include <cstddef>
 #include <tuple>
 
 #include <stdint.h>
 
-#include <kernel/interrupt.hpp>
 #include <kernel/mem/paging_asm.h>
 #include <kernel/mem/phys.hpp>
 

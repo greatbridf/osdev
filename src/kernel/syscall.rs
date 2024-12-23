@@ -1,9 +1,8 @@
 use crate::{
-    bindings::root::{mmx_registers},
     kernel::task::{ProcessList, Signal},
     println_warn,
 };
-use arch::InterruptContext;
+use arch::{ExtendedContext, InterruptContext};
 
 extern crate arch;
 
@@ -148,7 +147,7 @@ macro_rules! syscall32_call {
 macro_rules! define_syscall32 {
     ($name:ident, $handler:ident) => {
         fn $name(_int_stack: &mut $crate::kernel::syscall::arch::InterruptContext,
-            _mmxregs: &mut $crate::bindings::root::mmx_registers) -> usize {
+            _: &mut ::arch::ExtendedContext) -> usize {
             use $crate::kernel::syscall::MapReturnValue;
 
             match $handler() {
@@ -160,7 +159,7 @@ macro_rules! define_syscall32 {
     ($name:ident, $handler:ident, $($arg:ident: $argt:ty),*) => {
         fn $name(
             int_stack: &mut $crate::kernel::syscall::arch::InterruptContext,
-            _mmxregs: &mut $crate::bindings::root::mmx_registers) -> usize {
+            _: &mut ::arch::ExtendedContext) -> usize {
             use $crate::kernel::syscall::syscall32_call;
 
             syscall32_call!(int_stack, $handler, $($arg: $argt),*)
@@ -183,13 +182,13 @@ use super::task::Thread;
 pub(self) use {arg_register, define_syscall32, format_expand, register_syscall, syscall32_call};
 
 pub(self) struct SyscallHandler {
-    handler: fn(&mut InterruptContext, &mut mmx_registers) -> usize,
+    handler: fn(&mut InterruptContext, &mut ExtendedContext) -> usize,
     name: &'static str,
 }
 
 pub(self) fn register_syscall_handler(
     no: usize,
-    handler: fn(&mut InterruptContext, &mut mmx_registers) -> usize,
+    handler: fn(&mut InterruptContext, &mut ExtendedContext) -> usize,
     name: &'static str,
 ) {
     // SAFETY: `SYSCALL_HANDLERS` is never modified after initialization.
@@ -213,7 +212,11 @@ const SYSCALL_HANDLERS_SIZE: usize = 404;
 static mut SYSCALL_HANDLERS: [Option<SyscallHandler>; SYSCALL_HANDLERS_SIZE] =
     [const { None }; SYSCALL_HANDLERS_SIZE];
 
-pub fn handle_syscall32(no: usize, int_stack: &mut InterruptContext, mmxregs: &mut mmx_registers) {
+pub fn handle_syscall32(
+    no: usize,
+    int_stack: &mut InterruptContext,
+    ext_ctx: &mut ExtendedContext,
+) {
     // SAFETY: `SYSCALL_HANDLERS` are never modified after initialization.
     let syscall = unsafe { SYSCALL_HANDLERS.get(no) }.and_then(Option::as_ref);
 
@@ -224,7 +227,7 @@ pub fn handle_syscall32(no: usize, int_stack: &mut InterruptContext, mmxregs: &m
         }
         Some(handler) => {
             arch::enable_irqs();
-            let retval = (handler.handler)(int_stack, mmxregs);
+            let retval = (handler.handler)(int_stack, ext_ctx);
 
             // SAFETY: `int_stack` is always valid.
             int_stack.rax = retval as u64;
@@ -240,6 +243,6 @@ pub fn handle_syscall32(no: usize, int_stack: &mut InterruptContext, mmxregs: &m
     }
 
     if Thread::current().signal_list.has_pending_signal() {
-        Thread::current().signal_list.handle(int_stack, mmxregs);
+        Thread::current().signal_list.handle(int_stack, ext_ctx);
     }
 }

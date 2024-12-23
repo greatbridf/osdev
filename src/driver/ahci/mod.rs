@@ -1,5 +1,6 @@
 use crate::{
     fs::procfs,
+    io::Buffer as _,
     kernel::{
         block::{make_device, BlockDevice},
         interrupt::register_irq_handler,
@@ -92,7 +93,8 @@ impl Device {
                     let port = port.clone();
                     let name = format!("ahci-p{}-stats", port.nport);
                     procfs::populate_root(name.into_bytes().into(), move |buffer| {
-                        writeln!(buffer, "{:?}", port.stats.lock().as_ref()).map_err(|_| EIO)
+                        writeln!(&mut buffer.get_writer(), "{:?}", port.stats.lock().as_ref())
+                            .map_err(|_| EIO)
                     })?;
                 }
 

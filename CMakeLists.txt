@@ -35,43 +35,27 @@ add_subdirectory(user-space-program)
 
 set(BOOTLOADER_SOURCES src/boot.s
                        src/mbr.S
-                       src/asm/interrupt.s
                        )
 
 set(KERNEL_MAIN_SOURCES src/kinit.cpp
                         src/kernel/async/lock.cc
                         src/kernel/allocator.cc
-                        src/kernel/process.cpp
                         src/kernel/mem/slab.cc
-                        src/kernel/vga.cpp
                         src/kernel/hw/acpi.cc
                         src/kernel/hw/pci.cc
-                        src/net/ethernet.cc
-                        src/types/crc.cc
                         src/types/libstdcpp.cpp
                         include/defs.hpp
                         include/kernel/async/lock.hpp
-                        include/kernel/interrupt.hpp
-                        include/kernel/process.hpp
                         include/kernel/mem/paging.hpp
                         include/kernel/mem/slab.hpp
                         include/kernel/mem/types.hpp
                         include/kernel/utsname.hpp
-                        include/kernel/vga.hpp
-                        include/kernel/task/forward.hpp
                         include/kernel/hw/acpi.hpp
                         include/kernel/hw/pci.hpp
                         include/kernel/hw/port.hpp
-                        include/kernel/input/keycodes.h
-                        include/net/arp.hpp
-                        include/net/ethernet.hpp
-                        include/net/netdev.hpp
-                        include/types/bitmap.hpp
-                        include/types/buffer.hpp
                         include/types/list.hpp
                         include/types/types.h
                         include/types/allocator.hpp
-                        include/types/cplusplus.hpp
                         include/kernel/log.hpp
                         )
 

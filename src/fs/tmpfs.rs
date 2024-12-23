@@ -1,10 +1,11 @@
 use alloc::sync::{Arc, Weak};
-use bindings::{EINVAL, EIO, EISDIR, S_IFBLK, S_IFCHR, S_IFDIR, S_IFLNK, S_IFREG};
+use bindings::{EINVAL, EIO, EISDIR};
 use core::{ops::ControlFlow, sync::atomic::Ordering};
 use itertools::Itertools;
 
 use crate::{
     io::Buffer,
+    kernel::constants::{S_IFBLK, S_IFCHR, S_IFDIR, S_IFLNK, S_IFREG},
     kernel::vfs::{
         dentry::{dcache, Dentry},
         inode::{define_struct_inode, AtomicIno, Ino, Inode, Mode, WriteOffset},

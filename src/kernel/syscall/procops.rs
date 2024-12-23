@@ -1,7 +1,7 @@
 use alloc::borrow::ToOwned;
 use alloc::ffi::CString;
-use arch::InterruptContext;
-use bindings::{mmx_registers, EINVAL, ENOENT, ENOTDIR, ESRCH};
+use arch::{ExtendedContext, InterruptContext};
+use bindings::{EINVAL, ENOENT, ENOTDIR, ESRCH};
 use bitflags::bitflags;
 
 use crate::elf::ParsedElf32;
@@ -104,7 +104,7 @@ fn do_execve(exec: &[u8], argv: Vec<CString>, envp: Vec<CString>) -> KResult<(VA
     }
 }
 
-fn sys_execve(int_stack: &mut InterruptContext, _mmxregs: &mut mmx_registers) -> usize {
+fn sys_execve(int_stack: &mut InterruptContext, _: &mut ExtendedContext) -> usize {
     match (|| -> KResult<()> {
         let exec = int_stack.rbx as *const u8;
         let exec = UserString::new(exec)?;
@@ -458,7 +458,7 @@ define_syscall32!(sys_rt_sigprocmask, do_rt_sigprocmask,
 define_syscall32!(sys_rt_sigaction, do_rt_sigaction,
     signum: u32, act: *const UserSignalAction, oldact: *mut UserSignalAction, sigsetsize: usize);
 
-fn sys_fork(int_stack: &mut InterruptContext, _mmxregs: &mut mmx_registers) -> usize {
+fn sys_fork(int_stack: &mut InterruptContext, _: &mut ExtendedContext) -> usize {
     let mut procs = ProcessList::get().lock();
     let new_thread = Thread::current().new_cloned(procs.as_mut());
     let mut new_int_stack = int_stack.clone();
@@ -469,8 +469,8 @@ fn sys_fork(int_stack: &mut InterruptContext, _mmxregs: &mut mmx_registers) -> u
     new_thread.process.pid as usize
 }
 
-fn sys_sigreturn(int_stack: &mut InterruptContext, mmxregs: &mut mmx_registers) -> usize {
-    let result = Thread::current().signal_list.restore(int_stack, mmxregs);
+fn sys_sigreturn(int_stack: &mut InterruptContext, ext_ctx: &mut ExtendedContext) -> usize {
+    let result = Thread::current().signal_list.restore(int_stack, ext_ctx);
     match result {
         Ok(ret) => ret,
         Err(_) => {

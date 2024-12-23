@@ -29,7 +29,3 @@
 #define likely(expr) (!!(expr))
 #define unlikely(expr) (!!(expr))
 #endif
-
-#ifdef __cplusplus
-#include <types/cplusplus.hpp>
-#endif

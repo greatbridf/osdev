@@ -2,7 +2,7 @@ use bindings::EFAULT;
 
 use crate::prelude::*;
 
-use core::{fmt::Write, mem::MaybeUninit};
+use core::mem::MaybeUninit;
 
 #[must_use]
 pub enum FillResult {
@@ -41,6 +41,13 @@ pub trait Buffer {
     fn available(&self) -> usize {
         self.total() - self.wrote()
     }
+
+    fn get_writer(&mut self) -> BufferWrite<'_, Self>
+    where
+        Self: Sized,
+    {
+        BufferWrite(self)
+    }
 }
 
 pub trait BufferFill<T: Copy> {
@@ -54,6 +61,22 @@ impl<T: Copy, B: Buffer + ?Sized> BufferFill<T> for B {
 
         // SAFETY: `object` is a valid object.
         self.fill(unsafe { core::slice::from_raw_parts(ptr, len) })
+    }
+}
+
+pub struct BufferWrite<'b, B>(&'b mut B)
+where
+    B: Buffer + ?Sized;
+
+impl<'b, B> core::fmt::Write for BufferWrite<'b, B>
+where
+    B: Buffer + ?Sized,
+{
+    fn write_str(&mut self, s: &str) -> core::fmt::Result {
+        match self.0.fill(s.as_bytes()) {
+            Ok(FillResult::Done(_)) => Ok(()),
+            _ => Err(core::fmt::Error),
+        }
     }
 }
 
@@ -77,10 +100,10 @@ impl<'lt, T: Copy + Sized> UninitBuffer<'lt, T> {
 
     pub fn assume_filled_ref(&self) -> KResult<&T> {
         if !self.buffer.filled() {
-            return Err(EFAULT);
+            Err(EFAULT)
+        } else {
+            Ok(unsafe { self.data.assume_init_ref() })
         }
-
-        Ok(unsafe { self.data.assume_init_ref() })
     }
 
     pub fn assume_init(self) -> Option<T> {
@@ -114,28 +137,10 @@ pub struct RawBuffer<'lt> {
 }
 
 impl<'lt> RawBuffer<'lt> {
-    pub fn new_from_mut<T: Copy + Sized>(buf: &'lt mut T) -> Self {
-        Self {
-            buf: buf as *mut T as *mut u8,
-            tot: core::mem::size_of::<T>(),
-            cur: 0,
-            _phantom: core::marker::PhantomData,
-        }
-    }
-
     pub fn new_from_slice<T: Copy + Sized>(buf: &'lt mut [T]) -> Self {
         Self {
             buf: buf.as_mut_ptr() as *mut u8,
             tot: core::mem::size_of::<T>() * buf.len(),
-            cur: 0,
-            _phantom: core::marker::PhantomData,
-        }
-    }
-
-    pub fn new_from_raw(buf: *mut u8, tot: usize) -> Self {
-        Self {
-            buf,
-            tot,
             cur: 0,
             _phantom: core::marker::PhantomData,
         }
@@ -238,23 +243,5 @@ impl Buffer for ByteBuffer<'_> {
 
     fn wrote(&self) -> usize {
         self.cur
-    }
-}
-
-impl Write for RawBuffer<'_> {
-    fn write_str(&mut self, s: &str) -> core::fmt::Result {
-        match self.fill(s.as_bytes()) {
-            Ok(FillResult::Done(_)) => Ok(()),
-            _ => Err(core::fmt::Error),
-        }
-    }
-}
-
-impl Write for dyn Buffer + '_ {
-    fn write_str(&mut self, s: &str) -> core::fmt::Result {
-        match self.fill(s.as_bytes()) {
-            Ok(FillResult::Done(_)) => Ok(()),
-            _ => Err(core::fmt::Error),
-        }
     }
 }

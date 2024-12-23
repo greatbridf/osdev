@@ -6,12 +6,10 @@
 
 #include <kernel/hw/acpi.hpp>
 #include <kernel/hw/pci.hpp>
-#include <kernel/interrupt.hpp>
 #include <kernel/log.hpp>
 #include <kernel/mem/paging.hpp>
 #include <kernel/mem/phys.hpp>
 #include <kernel/mem/types.hpp>
-#include <kernel/process.hpp>
 #include <kernel/utsname.hpp>
 
 using constructor = void (*)();
@@ -148,7 +146,10 @@ extern "C" void NORETURN kernel_init(bootloader_data* data) {
         : "r"(rust_kinit), "g"(kernel_stack_pfn), "r"(kernel_stack_ptr)
         : "memory");
 
-    freeze();
+    for (;;)
+        asm volatile(
+            "cli\n\t"
+            "hlt\n\t");
 }
 
 } // namespace kernel::kinit

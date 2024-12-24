@@ -1,4 +1,4 @@
-# gbos
+# Eonix
 
 A simple OS kernel written in C++ and Rust that aims to be Linux compatible out of the box.
 

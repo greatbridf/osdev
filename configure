@@ -93,7 +93,7 @@ event "setting hardware acceleration type"
 case "$OS" in
     "Linux")
         echo "kvm"
-        QEMU_ACCEL='-enable-kvm'
+        # QEMU_ACCEL='-enable-kvm'
         ;;
     "Darwin")
         echo "tcg"

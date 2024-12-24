@@ -1,5 +1,0 @@
-"disas $pc,+32" disassembles 32 bytes from the current PC
-
-the display command prints after execution stops, so "disp /3i $pc" will print the next 3 instructions every time gdb gets control
-
-"stepi" and "nexti" do single-instruction step/next ("step" and "next" are source-line stepping and require debug info)

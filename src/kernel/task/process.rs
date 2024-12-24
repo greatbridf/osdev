@@ -299,6 +299,8 @@ impl Process {
                 return Ok(());
             }
 
+            new_pgroup.add_member(self, procs.as_pos_mut());
+
             new_pgroup
         } else {
             // Create a new process group only if `pgid` matches our `pid`.

@@ -27,11 +27,11 @@
 
 ## 初赛文档
 
-- [启动加载]()
+- [启动加载](https://gitlab.eduxiji.net/T202410247994622/project2608132-275906/-/blob/master/doc/boot.md)
 - [内存管理]()
-- [进程管理]()
-- [文件系统]()
-- [设备驱动]()
+- [进程管理](https://gitlab.eduxiji.net/T202410247994622/project2608132-275906/-/blob/master/doc/task.md)
+- [文件系统](https://gitlab.eduxiji.net/T202410247994622/project2608132-275906/-/blob/master/doc/filesystem.md)
+- [设备驱动](https://gitlab.eduxiji.net/T202410247994622/project2608132-275906/-/blob/master/doc/device_driver.md)
 - [多平台支持]()
 
 ## 代码树结构

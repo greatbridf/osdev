@@ -34,6 +34,7 @@ struct BlockDeviceDisk {
     queue: Arc<dyn BlockRequestQueue>,
 }
 
+#[allow(dead_code)]
 struct BlockDevicePartition {
     disk_dev: DevId,
     offset: u64,
@@ -128,12 +129,7 @@ impl BlockDevice {
         self.devid
     }
 
-    pub fn register_partition(
-        &self,
-        idx: u32,
-        offset: u64,
-        size: u64,
-    ) -> KResult<Arc<Self>> {
+    pub fn register_partition(&self, idx: u32, offset: u64, size: u64) -> KResult<Arc<Self>> {
         let queue = match self.dev_type {
             BlockDeviceType::Disk(ref disk) => disk.queue.clone(),
             BlockDeviceType::Partition(_) => return Err(EINVAL),
@@ -216,15 +212,10 @@ impl BlockDevice {
     /// # Arguments
     /// `offset` - offset in bytes
     ///
-    pub fn read_some(
-        &self,
-        offset: usize,
-        buffer: &mut dyn Buffer,
-    ) -> KResult<FillResult> {
+    pub fn read_some(&self, offset: usize, buffer: &mut dyn Buffer) -> KResult<FillResult> {
         let mut sector_start = offset as u64 / 512;
         let mut first_sector_offset = offset as u64 % 512;
-        let mut sector_count =
-            (first_sector_offset + buffer.total() as u64 + 511) / 512;
+        let mut sector_count = (first_sector_offset + buffer.total() as u64 + 511) / 512;
 
         let mut nfilled = 0;
         'outer: while sector_count != 0 {

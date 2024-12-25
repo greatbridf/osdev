@@ -23,7 +23,8 @@
 
 项目经测试可使用 *busybox* 中大多数功能，并且该内核使用 *busybox* 搭配 init 脚本启动，运行 *busybox* 提供的 *ash* 来执行 shell 命令。
 
-![测试](doc/image.png)
+![测试](doc/image-0.png)
+![test pipes](doc/image-1.png)
 
 ## 初赛文档
 

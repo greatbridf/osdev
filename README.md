@@ -23,17 +23,17 @@
 
 项目经测试可使用 *busybox* 中大多数功能，并且该内核使用 *busybox* 搭配 init 脚本启动，运行 *busybox* 提供的 *ash* 来执行 shell 命令。
 
-![测试](doc/image-0.png)
-![test pipes](doc/image-1.png)
+![测试](doc/images/image-0.png)
+![test pipes](doc/images/image-1.png)
 
 ## 初赛文档
 
 - [启动加载](https://gitlab.eduxiji.net/T202410247994622/project2608132-275906/-/blob/master/doc/boot.md)
-- [内存管理]()
+- [内存管理](https://gitlab.eduxiji.net/T202410247994622/project2608132-275906/-/blob/master/doc/memory.md)
 - [进程管理](https://gitlab.eduxiji.net/T202410247994622/project2608132-275906/-/blob/master/doc/task.md)
 - [文件系统](https://gitlab.eduxiji.net/T202410247994622/project2608132-275906/-/blob/master/doc/filesystem.md)
 - [设备驱动](https://gitlab.eduxiji.net/T202410247994622/project2608132-275906/-/blob/master/doc/device_driver.md)
-- [多平台支持]()
+- [多平台支持](https://gitlab.eduxiji.net/T202410247994622/project2608132-275906/-/blob/master/doc/multi_arch.md)
 
 ## 代码树结构
 

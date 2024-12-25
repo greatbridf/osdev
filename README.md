@@ -28,6 +28,8 @@
 
 ## 初赛文档
 
+本项目开发时代码仓库在 [GitHub](https://github.com/greatbridf/osdev.git)。
+
 - [启动加载](https://gitlab.eduxiji.net/T202410247994622/project2608132-275906/-/blob/master/doc/boot.md)
 - [内存管理](https://gitlab.eduxiji.net/T202410247994622/project2608132-275906/-/blob/master/doc/memory.md)
 - [进程管理](https://gitlab.eduxiji.net/T202410247994622/project2608132-275906/-/blob/master/doc/task.md)

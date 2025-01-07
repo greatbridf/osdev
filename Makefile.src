@@ -7,6 +7,8 @@ QEMU_ARGS=-machine q35 -drive id=disk,file=build/boot.img,format=raw,if=none \
 	-device ahci,id=ahci -device ide-hd,drive=disk,bus=ahci.0 -smp 4 \
 	-no-reboot -no-shutdown $(QEMU_ACCELERATION_FLAG) $(QEMU_DEBUG_FLAG)
 
+FDISK_BIN ?= ##PLACEHOLDER_5##
+
 CROSS_COMPILE=##PLACEHOLDER_4##
 .PHONY: run
 run: build
@@ -60,6 +62,17 @@ tmux-debug:
 	-tmux attach -t gbos-debug
 	tmux kill-session -t gbos-debug
 
+build/fs.img:
+	sh script/build-img.sh
+
+build/boot.img: build/fs.img build/mbr_hole.bin
+	dd if=build/mbr_hole.bin of=build/boot.img
+	dd if=build/fs.img of=build/boot.img bs=$(shell expr 4 \* 1024 \* 1024) seek=1 conv=notrunc
+	sh -c 'echo n; echo; echo; echo 8192; echo; echo a; echo w' | $(FDISK_BIN) build/boot.img
+
 build/boot.vdi: build/boot.img
 	-rm build/boot.vdi
 	VBoxManage convertfromraw $< $@ --format VDI
+
+.PHONY: image
+image: build/boot.img

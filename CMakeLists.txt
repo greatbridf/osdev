@@ -85,18 +85,7 @@ add_custom_command(OUTPUT mbr_hole.bin
 add_custom_target(boot.img
     DEPENDS mbr_hole.bin
     DEPENDS user_space_programs
-    COMMAND dd if=mbr_hole.bin of=boot.img
-    COMMAND dd if=/dev/zero of=boot.img bs=`expr 512 \\* 1024 \\* 1024` count=0 seek=1
-    COMMAND sh -c \"echo n\; echo\; echo \; echo 8192\; echo\; echo a\; echo w\" | ${FDISK_BIN} boot.img
-    COMMAND mkfs.fat --offset=8192 -v -n SYSTEM boot.img
-    COMMAND mcopy -i boot.img@@4M ${CMAKE_BINARY_DIR}/user-space-program/hello-world.out ::hello
-    COMMAND mcopy -i boot.img@@4M ${CMAKE_BINARY_DIR}/user-space-program/interrupt-test.out ::int
-    COMMAND mcopy -i boot.img@@4M ${CMAKE_BINARY_DIR}/user-space-program/stack-test.out ::stack
-    COMMAND mcopy -i boot.img@@4M ${CMAKE_BINARY_DIR}/user-space-program/init.out ::init
-    COMMAND mcopy -i boot.img@@4M ${CMAKE_BINARY_DIR}/user-space-program/priv-test.out ::priv
-    COMMAND mcopy -i boot.img@@4M ${CMAKE_SOURCE_DIR}/busybox-minimal ::busybox_
-    COMMAND mcopy -i boot.img@@4M ${CMAKE_SOURCE_DIR}/busybox ::busybox
-    COMMAND mcopy -i boot.img@@4M ${CMAKE_SOURCE_DIR}/init_script.sh ::initsh
+    COMMAND make -C ${CMAKE_SOURCE_DIR} image
 )
 
 add_custom_command(OUTPUT run

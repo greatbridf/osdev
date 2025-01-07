@@ -6,7 +6,7 @@ use bitflags::bitflags;
 
 use crate::elf::ParsedElf32;
 use crate::io::Buffer;
-use crate::kernel::constants::{PR_GET_NAME, PR_SET_NAME, SIG_BLOCK, SIG_SETMASK, SIG_UNBLOCK};
+use crate::kernel::constants::{ENOSYS, PR_GET_NAME, PR_SET_NAME, SIG_BLOCK, SIG_SETMASK, SIG_UNBLOCK};
 use crate::kernel::mem::phys::PhysPtr;
 use crate::kernel::mem::{Page, PageBuffer, VAddr};
 use crate::kernel::task::{
@@ -39,7 +39,9 @@ fn do_getcwd(buffer: *mut u8, bufsize: usize) -> KResult<usize> {
     let page = Page::alloc_one();
     let mut buffer = PageBuffer::new(page.clone());
     context.cwd.lock().get_path(&context, &mut buffer)?;
-    user_buffer.fill(page.as_cached().as_slice(page.len()))?.ok_or(ERANGE)?;
+    user_buffer
+        .fill(page.as_cached().as_slice(page.len()))?
+        .ok_or(ERANGE)?;
 
     Ok(buffer.wrote())
 }
@@ -433,6 +435,57 @@ fn do_rt_sigaction(
     Ok(())
 }
 
+fn do_prlimit64(pid: u32, resource: u32, new_limit: *const (), old_limit: *mut ()) -> KResult<()> {
+    Err(ENOSYS)
+    // if pid != 0 {
+    //     return Err(ESRCH);
+    // }
+
+    // let resource = match resource {
+    //     0 => Ok(libc::RLIMIT_AS),
+    //     1 => Ok(libc::RLIMIT_CORE),
+    //     2 => Ok(libc::RLIMIT_CPU),
+    //     3 => Ok(libc::RLIMIT_DATA),
+    //     4 => Ok(libc::RLIMIT_FSIZE),
+    //     5 => Ok(libc::RLIMIT_LOCKS),
+    //     6 => Ok(libc::RLIMIT_MEMLOCK),
+    //     7 => Ok(libc::RLIMIT_MSGQUEUE),
+    //     8 => Ok(libc::RLIMIT_NICE),
+    //     9 => Ok(libc::RLIMIT_NOFILE),
+    //     10 => Ok(libc::RLIMIT_NPROC),
+    //     11 => Ok(libc::RLIMIT_RSS),
+    //     12 => Ok(libc::RLIMIT_RTPRIO),
+    //     13 => Ok(libc::RLIMIT_RTTIME),
+    //     14 => Ok(libc::RLIMIT_SIGPENDING),
+    //     15 => Ok(libc::RLIMIT_STACK),
+    //     _ => Err(EINVAL),
+    // }?;
+
+    // let new_limit = if !new_limit.is_null() {
+    //     let new_limit = UserPointer::new(new_limit)?.read()?;
+    //     Some(libc::rlimit {
+    //         rlim_cur: new_limit.rlim_cur,
+    //         rlim_max: new_limit.rlim_max,
+    //     })
+    // } else {
+    //     None
+    // };
+
+    // let old_limit = if !old_limit.is_null() {
+    //     Some(UserPointerMut::new(old_limit)?)
+    // } else {
+    //     None
+    // };
+
+    // let mut rlimit = Thread::current().process.rlimit.lock();
+    // let old_limit = rlimit.set_limit(resource, new_limit, old_limit)?;
+    // if let Some(old_limit) = old_limit {
+    //     old_limit.write()?;
+    // }
+
+    // Ok(())
+}
+
 define_syscall32!(sys_chdir, do_chdir, path: *const u8);
 define_syscall32!(sys_umask, do_umask, mask: u32);
 define_syscall32!(sys_getcwd, do_getcwd, buffer: *mut u8, bufsize: usize);
@@ -461,6 +514,8 @@ define_syscall32!(sys_rt_sigprocmask, do_rt_sigprocmask,
     how: u32, set: *mut u64, oldset: *mut u64, sigsetsize: usize);
 define_syscall32!(sys_rt_sigaction, do_rt_sigaction,
     signum: u32, act: *const UserSignalAction, oldact: *mut UserSignalAction, sigsetsize: usize);
+define_syscall32!(sys_prlimit64, do_prlimit64,
+    pid: u32, resource: u32, new_limit: *const (), old_limit: *mut ());
 
 fn sys_fork(int_stack: &mut InterruptContext, _: &mut ExtendedContext) -> usize {
     let mut procs = ProcessList::get().lock();
@@ -516,5 +571,6 @@ pub(super) fn register() {
     register_syscall!(0xf3, set_thread_area);
     register_syscall!(0xfc, exit);
     register_syscall!(0x102, set_tid_address);
+    register_syscall!(0x154, prlimit64);
     register_syscall!(0x180, arch_prctl);
 }

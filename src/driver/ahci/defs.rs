@@ -240,7 +240,9 @@ impl PRDTEntry {
         self.base = page.as_phys() as u64;
         self._reserved1 = 0;
 
-        self.shared = 0x80000000 | (page.len() as u32 & 0x3fffff);
+        // The last bit MUST be set to 1 according to the AHCI spec
+        let len = page.len() as u32 - 1;
+        self.shared = 0x80000000 | (len & 0x3fffff);
     }
 }
 

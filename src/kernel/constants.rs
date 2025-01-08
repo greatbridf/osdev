@@ -30,6 +30,8 @@ pub const S_IFBLK: u32 = 0o060000;
 pub const S_IFREG: u32 = 0o100000;
 pub const S_IFLNK: u32 = 0o120000;
 
+pub const RLIMIT_STACK: u32 = 0x3;
+
 bitflags! {
     #[derive(Debug, Clone, Copy)]
     pub struct UserMmapFlags: u32 {

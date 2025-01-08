@@ -7,7 +7,7 @@ use bitflags::bitflags;
 use crate::elf::ParsedElf32;
 use crate::io::Buffer;
 use crate::kernel::constants::{
-    ENOSYS, PR_GET_NAME, PR_SET_NAME, SIG_BLOCK, SIG_SETMASK, SIG_UNBLOCK,
+    ENOSYS, PR_GET_NAME, PR_SET_NAME, RLIMIT_STACK, SIG_BLOCK, SIG_SETMASK, SIG_UNBLOCK,
 };
 use crate::kernel::mem::{Page, PageBuffer, VAddr};
 use crate::kernel::task::{
@@ -434,55 +434,49 @@ fn do_rt_sigaction(
     Ok(())
 }
 
-fn do_prlimit64(pid: u32, resource: u32, new_limit: *const (), old_limit: *mut ()) -> KResult<()> {
-    Err(ENOSYS)
-    // if pid != 0 {
-    //     return Err(ESRCH);
-    // }
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+struct RLimit {
+    rlim_cur: u64,
+    rlim_max: u64,
+}
 
-    // let resource = match resource {
-    //     0 => Ok(libc::RLIMIT_AS),
-    //     1 => Ok(libc::RLIMIT_CORE),
-    //     2 => Ok(libc::RLIMIT_CPU),
-    //     3 => Ok(libc::RLIMIT_DATA),
-    //     4 => Ok(libc::RLIMIT_FSIZE),
-    //     5 => Ok(libc::RLIMIT_LOCKS),
-    //     6 => Ok(libc::RLIMIT_MEMLOCK),
-    //     7 => Ok(libc::RLIMIT_MSGQUEUE),
-    //     8 => Ok(libc::RLIMIT_NICE),
-    //     9 => Ok(libc::RLIMIT_NOFILE),
-    //     10 => Ok(libc::RLIMIT_NPROC),
-    //     11 => Ok(libc::RLIMIT_RSS),
-    //     12 => Ok(libc::RLIMIT_RTPRIO),
-    //     13 => Ok(libc::RLIMIT_RTTIME),
-    //     14 => Ok(libc::RLIMIT_SIGPENDING),
-    //     15 => Ok(libc::RLIMIT_STACK),
-    //     _ => Err(EINVAL),
-    // }?;
+fn do_prlimit64(
+    pid: u32,
+    resource: u32,
+    new_limit: *const RLimit,
+    old_limit: *mut RLimit,
+) -> KResult<()> {
+    println_debug!(
+        "prlimit64({}, {}, {:?}, {:?})",
+        pid,
+        resource,
+        new_limit,
+        old_limit
+    );
 
-    // let new_limit = if !new_limit.is_null() {
-    //     let new_limit = UserPointer::new(new_limit)?.read()?;
-    //     Some(libc::rlimit {
-    //         rlim_cur: new_limit.rlim_cur,
-    //         rlim_max: new_limit.rlim_max,
-    //     })
-    // } else {
-    //     None
-    // };
+    if pid != 0 {
+        return Err(ENOSYS);
+    }
 
-    // let old_limit = if !old_limit.is_null() {
-    //     Some(UserPointerMut::new(old_limit)?)
-    // } else {
-    //     None
-    // };
+    match resource {
+        RLIMIT_STACK => {
+            if !old_limit.is_null() {
+                let old_limit = UserPointerMut::new(old_limit)?;
+                let rlimit = RLimit {
+                    rlim_cur: 8 * 1024 * 1024,
+                    rlim_max: 8 * 1024 * 1024,
+                };
+                old_limit.write(rlimit)?;
+            }
 
-    // let mut rlimit = Thread::current().process.rlimit.lock();
-    // let old_limit = rlimit.set_limit(resource, new_limit, old_limit)?;
-    // if let Some(old_limit) = old_limit {
-    //     old_limit.write()?;
-    // }
-
-    // Ok(())
+            if !new_limit.is_null() {
+                return Err(ENOSYS);
+            }
+            Ok(())
+        }
+        _ => Err(ENOSYS),
+    }
 }
 
 define_syscall32!(sys_chdir, do_chdir, path: *const u8);
@@ -514,7 +508,7 @@ define_syscall32!(sys_rt_sigprocmask, do_rt_sigprocmask,
 define_syscall32!(sys_rt_sigaction, do_rt_sigaction,
     signum: u32, act: *const UserSignalAction, oldact: *mut UserSignalAction, sigsetsize: usize);
 define_syscall32!(sys_prlimit64, do_prlimit64,
-    pid: u32, resource: u32, new_limit: *const (), old_limit: *mut ());
+    pid: u32, resource: u32, new_limit: *const RLimit, old_limit: *mut RLimit);
 
 fn sys_fork(int_stack: &mut InterruptContext, _: &mut ExtendedContext) -> usize {
     let mut procs = ProcessList::get().lock();

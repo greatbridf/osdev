@@ -29,7 +29,7 @@ impl<'data, 'fat: 'data> ClusterRead<'data> for ClusterIterator<'fat> {
 
         self.skip(skip_clusters).map(move |cluster| {
             vfs.read_cluster(cluster, &buffer_page)?;
-            let data = &buffer_page.as_cached().as_slice(buffer_page.len())[inner_offset..];
+            let data = &buffer_page.as_slice()[inner_offset..];
             inner_offset = 0;
             Ok(data)
         })

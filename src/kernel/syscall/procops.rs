@@ -6,8 +6,9 @@ use bitflags::bitflags;
 
 use crate::elf::ParsedElf32;
 use crate::io::Buffer;
-use crate::kernel::constants::{ENOSYS, PR_GET_NAME, PR_SET_NAME, SIG_BLOCK, SIG_SETMASK, SIG_UNBLOCK};
-use crate::kernel::mem::phys::PhysPtr;
+use crate::kernel::constants::{
+    ENOSYS, PR_GET_NAME, PR_SET_NAME, SIG_BLOCK, SIG_SETMASK, SIG_UNBLOCK,
+};
 use crate::kernel::mem::{Page, PageBuffer, VAddr};
 use crate::kernel::task::{
     ProcessList, Scheduler, Signal, SignalAction, Thread, UserDescriptor, WaitObject, WaitType,
@@ -39,9 +40,7 @@ fn do_getcwd(buffer: *mut u8, bufsize: usize) -> KResult<usize> {
     let page = Page::alloc_one();
     let mut buffer = PageBuffer::new(page.clone());
     context.cwd.lock().get_path(&context, &mut buffer)?;
-    user_buffer
-        .fill(page.as_cached().as_slice(page.len()))?
-        .ok_or(ERANGE)?;
+    user_buffer.fill(page.as_slice())?.ok_or(ERANGE)?;
 
     Ok(buffer.wrote())
 }

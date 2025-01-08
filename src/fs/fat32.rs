@@ -11,7 +11,7 @@ use dir::Dirs as _;
 use file::ClusterRead;
 
 use crate::{
-    io::{Buffer, RawBuffer, UninitBuffer},
+    io::{Buffer, ByteBuffer, UninitBuffer},
     kernel::{
         block::{make_device, BlockDevice, BlockDeviceRequest},
         constants::{S_IFDIR, S_IFREG},
@@ -159,16 +159,12 @@ impl FatFs {
             0,
         );
 
-        let mut buffer = RawBuffer::new_from_slice(fat.as_mut_slice());
+        let mut buffer = ByteBuffer::from(fat.as_mut_slice());
 
         fatfs
             .device
             .read_some(info.reserved_sectors as usize * 512, &mut buffer)?
             .ok_or(EIO)?;
-
-        if !buffer.filled() {
-            return Err(EIO);
-        }
 
         info.volume_label
             .iter()

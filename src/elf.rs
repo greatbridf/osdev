@@ -2,7 +2,7 @@ use alloc::{ffi::CString, sync::Arc};
 use bitflags::bitflags;
 
 use crate::{
-    io::{RawBuffer, UninitBuffer},
+    io::{ByteBuffer, UninitBuffer},
     kernel::{
         constants::ENOEXEC,
         mem::{FileMapping, MMList, Mapping, Permission, VAddr},
@@ -204,7 +204,7 @@ impl ParsedElf32 {
         let mut header = UninitBuffer::<Elf32Header>::new();
         file.read(&mut header, 0)?;
 
-        let header = header.assume_init().ok_or(ENOEXEC)?;
+        let header = header.assume_init().map_err(|_| ENOEXEC)?;
         if !header.check_valid() {
             return Err(ENOEXEC);
         }
@@ -212,7 +212,7 @@ impl ParsedElf32 {
         // TODO: Use `UninitBuffer` for `phents` and `shents`.
         let mut phents = vec![Elf32PhEntry::default(); header.ph_entry_count as usize];
         let nread = file.read(
-            &mut RawBuffer::new_from_slice(phents.as_mut_slice()),
+            &mut ByteBuffer::from(phents.as_mut_slice()),
             header.ph_offset as usize,
         )?;
         if nread != header.ph_entry_count as usize * size_of::<Elf32PhEntry>() {
@@ -221,7 +221,7 @@ impl ParsedElf32 {
 
         let mut shents = vec![Elf32ShEntry::default(); header.sh_entry_count as usize];
         let nread = file.read(
-            &mut RawBuffer::new_from_slice(shents.as_mut_slice()),
+            &mut ByteBuffer::from(shents.as_mut_slice()),
             header.sh_offset as usize,
         )?;
         if nread != header.sh_entry_count as usize * size_of::<Elf32ShEntry>() {

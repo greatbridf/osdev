@@ -3,7 +3,6 @@ use bindings::{PA_A, PA_ANON, PA_COW, PA_MMAP, PA_P, PA_RW};
 use bitflags::bitflags;
 
 use crate::kernel::mem::paging::{Page, PageBuffer};
-use crate::kernel::mem::phys::{CachedPP, PhysPtr};
 use crate::kernel::mem::{Mapping, VRange};
 use crate::kernel::task::{ProcessList, Signal, Thread};
 use crate::prelude::*;
@@ -99,10 +98,7 @@ impl MMList {
             if attributes & PA_ANON as usize != 0 {
                 new_page.zero();
             } else {
-                new_page
-                    .as_cached()
-                    .as_mut_slice::<u8>(0x1000)
-                    .copy_from_slice(CachedPP::new(pfn).as_slice(0x1000));
+                new_page.as_mut_slice().copy_from_slice(page.as_slice());
             }
 
             attributes &= !(PA_A | PA_ANON) as usize;
@@ -129,12 +125,12 @@ impl MMList {
                         .map_err(|_| Signal::SIGBUS)?;
 
                     if nread < page.len() {
-                        page.as_cached().as_mut_slice::<u8>(0x1000)[nread..].fill(0);
+                        page.as_mut_slice()[nread..].fill(0);
                     }
 
                     if mapping.length - load_offset < 0x1000 {
                         let length_to_end = mapping.length - load_offset;
-                        page.as_cached().as_mut_slice::<u8>(0x1000)[length_to_end..].fill(0);
+                        page.as_mut_slice()[length_to_end..].fill(0);
                     }
                 }
                 // Otherwise, the page is kept zero emptied.

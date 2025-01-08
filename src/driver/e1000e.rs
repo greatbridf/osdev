@@ -2,11 +2,11 @@ use crate::prelude::*;
 
 use crate::bindings::root::kernel::hw::pci;
 use crate::kernel::interrupt::register_irq_handler;
-use crate::kernel::mem::paging::copy_to_page;
 use crate::kernel::mem::{paging, phys};
 use crate::net::netdev;
 use alloc::boxed::Box;
 use alloc::vec::Vec;
+use bindings::EFAULT;
 use paging::Page;
 use phys::{NoCachePP, PhysPtr};
 
@@ -105,9 +105,7 @@ impl netdev::Netdev for E1000eDev {
         match status & defs::STAT_SPEED_MASK {
             defs::STAT_SPEED_10M => self.speed = netdev::LinkSpeed::Speed10M,
             defs::STAT_SPEED_100M => self.speed = netdev::LinkSpeed::Speed100M,
-            defs::STAT_SPEED_1000M => {
-                self.speed = netdev::LinkSpeed::Speed1000M
-            }
+            defs::STAT_SPEED_1000M => self.speed = netdev::LinkSpeed::Speed1000M,
             _ => return Err(EINVAL),
         }
 
@@ -163,17 +161,9 @@ impl netdev::Netdev for E1000eDev {
             let len = desc.length as usize;
 
             let buffers = self.rx_buffers.as_mut().ok_or(EIO)?;
-            let data = unsafe {
-                core::slice::from_raw_parts(
-                    buffers[next_tail as usize].as_cached().as_ptr::<u8>(),
-                    len,
-                )
-            };
+            let data = &buffers[next_tail as usize].as_slice()[..len];
 
-            println_debug!(
-                "e1000e: received {len} bytes, {:?}",
-                PrintableBytes(data)
-            );
+            println_debug!("e1000e: received {len} bytes, {:?}", PrintableBytes(data));
             self.rx_tail = Some(next_tail);
         }
 
@@ -195,7 +185,10 @@ impl netdev::Netdev for E1000eDev {
         }
 
         let buffer_page = Page::alloc_one();
-        copy_to_page(buf, &buffer_page)?;
+        if buf.len() > buffer_page.len() {
+            return Err(EFAULT);
+        }
+        buffer_page.as_mut_slice()[..buf.len()].copy_from_slice(buf);
 
         desc.buffer = buffer_page.as_phys() as u64;
         desc.length = buf.len() as u16;
@@ -437,8 +430,7 @@ pub fn register_e1000e_driver() {
     let dev_ids = [0x100e, 0x10d3, 0x10ea, 0x153a];
 
     for id in dev_ids.into_iter() {
-        let ret =
-            unsafe { pci::register_driver_r(0x8086, id, Some(probe_device)) };
+        let ret = unsafe { pci::register_driver_r(0x8086, id, Some(probe_device)) };
 
         assert_eq!(ret, 0);
     }

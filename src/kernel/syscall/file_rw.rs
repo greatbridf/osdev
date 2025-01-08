@@ -66,12 +66,16 @@ fn do_dup2(old_fd: u32, new_fd: u32) -> KResult<u32> {
     files.dup_to(old_fd, new_fd, 0)
 }
 
-fn do_pipe(pipe_fd: *mut [u32; 2]) -> KResult<()> {
+fn do_pipe2(pipe_fd: *mut [u32; 2], flags: u32) -> KResult<()> {
     let mut buffer = UserBuffer::new(pipe_fd as *mut u8, core::mem::size_of::<[u32; 2]>())?;
     let files = FileArray::get_current();
-    let (read_fd, write_fd) = files.pipe()?;
+    let (read_fd, write_fd) = files.pipe(flags)?;
 
     buffer.copy(&[read_fd, write_fd])?.ok_or(EFAULT)
+}
+
+fn do_pipe(pipe_fd: *mut [u32; 2]) -> KResult<()> {
+    do_pipe2(pipe_fd, 0)
 }
 
 fn do_getdents(fd: u32, buffer: *mut u8, bufsize: usize) -> KResult<usize> {
@@ -356,6 +360,7 @@ define_syscall32!(sys_close, do_close, fd: u32);
 define_syscall32!(sys_dup, do_dup, fd: u32);
 define_syscall32!(sys_dup2, do_dup2, old_fd: u32, new_fd: u32);
 define_syscall32!(sys_pipe, do_pipe, pipe_fd: *mut [u32; 2]);
+define_syscall32!(sys_pipe2, do_pipe2, pipe_fd: *mut [u32; 2], flags: u32);
 define_syscall32!(sys_getdents, do_getdents, fd: u32, buffer: *mut u8, bufsize: usize);
 define_syscall32!(sys_getdents64, do_getdents64, fd: u32, buffer: *mut u8, bufsize: usize);
 define_syscall32!(sys_statx, do_statx, fd: u32, path: *const u8, flags: u32, mask: u32, buffer: *mut u8);
@@ -398,5 +403,6 @@ pub(super) fn register() {
     register_syscall!(0xdc, getdents64);
     register_syscall!(0xdd, fcntl64);
     register_syscall!(0xef, sendfile64);
+    register_syscall!(0x14b, pipe2);
     register_syscall!(0x17f, statx);
 }

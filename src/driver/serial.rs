@@ -11,6 +11,7 @@ use crate::{
 
 use super::Port8;
 
+#[allow(dead_code)]
 struct Serial {
     id: u32,
     name: Arc<str>,

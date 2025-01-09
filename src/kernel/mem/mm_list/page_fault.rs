@@ -1,8 +1,6 @@
 use arch::InterruptContext;
-use bindings::{PA_A, PA_ANON, PA_COW, PA_MMAP, PA_P, PA_RW};
 use bitflags::bitflags;
 
-use crate::kernel::mem::paging::{Page, PageBuffer};
 use crate::kernel::mem::{Mapping, VRange};
 use crate::kernel::task::{ProcessList, Signal, Thread};
 use crate::prelude::*;

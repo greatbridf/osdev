@@ -3,6 +3,7 @@ use core::fmt;
 pub trait PhysPtr {
     fn as_ptr<T>(&self) -> *mut T;
 
+    #[allow(dead_code)]
     fn as_ref<'lifetime, T>(&self) -> &'lifetime T {
         unsafe { &*(self.as_ptr()) }
     }

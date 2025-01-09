@@ -11,7 +11,7 @@ use crate::kernel::vfs::dentry::Dentry;
 
 use super::{MMArea, Page, PageTable, VAddr, VRange};
 
-pub use page_fault::{handle_page_fault, PageFaultError};
+pub use page_fault::handle_page_fault;
 
 #[derive(Debug, Clone)]
 pub struct FileMapping {

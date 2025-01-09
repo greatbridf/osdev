@@ -49,12 +49,14 @@ fn do_newuname(buffer: *mut NewUTSName) -> KResult<()> {
     buffer.write(uname)
 }
 
+#[allow(dead_code)]
 #[derive(Clone, Copy)]
 struct TimeVal {
     sec: u64,
     usec: u64,
 }
 
+#[allow(dead_code)]
 #[derive(Clone, Copy)]
 struct TimeSpec {
     sec: u64,

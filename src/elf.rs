@@ -6,8 +6,6 @@ use crate::{
     kernel::{
         constants::ENOEXEC,
         mem::{FileMapping, MMList, Mapping, Permission, VAddr},
-        task::Thread,
-        user::{dataflow::CheckedUserPointer, UserPointerMut},
         vfs::dentry::Dentry,
     },
     prelude::*,

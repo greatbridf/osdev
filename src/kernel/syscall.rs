@@ -181,6 +181,7 @@ use super::task::Thread;
 
 pub(self) use {arg_register, define_syscall32, format_expand, register_syscall, syscall32_call};
 
+#[allow(dead_code)]
 pub(self) struct SyscallHandler {
     handler: fn(&mut InterruptContext, &mut ExtendedContext) -> usize,
     name: &'static str,
@@ -192,6 +193,7 @@ pub(self) fn register_syscall_handler(
     name: &'static str,
 ) {
     // SAFETY: `SYSCALL_HANDLERS` is never modified after initialization.
+    #[allow(static_mut_refs)]
     let syscall = unsafe { SYSCALL_HANDLERS.get_mut(no) }.unwrap();
     assert!(
         syscall.replace(SyscallHandler { handler, name }).is_none(),
@@ -218,6 +220,7 @@ pub fn handle_syscall32(
     ext_ctx: &mut ExtendedContext,
 ) {
     // SAFETY: `SYSCALL_HANDLERS` are never modified after initialization.
+    #[allow(static_mut_refs)]
     let syscall = unsafe { SYSCALL_HANDLERS.get(no) }.and_then(Option::as_ref);
 
     match syscall {

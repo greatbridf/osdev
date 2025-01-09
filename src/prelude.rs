@@ -32,6 +32,7 @@ pub(crate) use alloc::{boxed::Box, string::String, vec, vec::Vec};
 pub(crate) use core::{any::Any, fmt::Write, marker::PhantomData, str};
 use core::{mem::ManuallyDrop, ops::Deref};
 
+#[allow(unused_imports)]
 pub use crate::sync::{Locked, Mutex, RwSemaphore, Semaphore, Spin};
 
 pub struct BorrowedArc<'lt, T: ?Sized> {
@@ -48,6 +49,7 @@ impl<'lt, T: ?Sized> BorrowedArc<'lt, T> {
         }
     }
 
+    #[allow(dead_code)]
     pub fn new(ptr: &'lt *const T) -> Self {
         assert!(!ptr.is_null());
         Self {
@@ -81,6 +83,7 @@ impl<'lt, T: ?Sized> AsRef<Arc<T>> for BorrowedArc<'lt, T> {
     }
 }
 
+#[allow(dead_code)]
 pub trait AsAny: Send + Sync {
     fn as_any(&self) -> &dyn Any;
     fn as_any_mut(&mut self) -> &mut dyn Any;

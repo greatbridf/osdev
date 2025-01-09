@@ -10,6 +10,7 @@ pub struct PathIterator<'lt> {
     rem: &'lt [u8],
 }
 
+#[allow(dead_code)]
 impl<'lt> Path<'lt> {
     pub fn new(all: &'lt [u8]) -> KResult<Self> {
         if all.is_empty() {

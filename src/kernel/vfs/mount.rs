@@ -40,6 +40,7 @@ lazy_static! {
 
 static mut ROOTFS: Option<Arc<Dentry>> = None;
 
+#[allow(dead_code)]
 pub struct Mount {
     vfs: Arc<dyn Vfs>,
     root: Arc<Dentry>,
@@ -79,6 +80,7 @@ pub fn register_filesystem(fstype: &str, creator: Arc<dyn MountCreator>) -> KRes
     }
 }
 
+#[allow(dead_code)]
 struct MountPointData {
     mount: Mount,
     source: String,
@@ -198,6 +200,9 @@ pub fn init_vfs() -> KResult<()> {
 
 impl Dentry {
     pub fn kernel_root_dentry() -> Arc<Dentry> {
-        unsafe { ROOTFS.as_ref().cloned().unwrap() }
+        #[allow(static_mut_refs)]
+        unsafe {
+            ROOTFS.as_ref().cloned().unwrap()
+        }
     }
 }

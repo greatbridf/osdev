@@ -1,5 +1,6 @@
 pub mod dataflow;
 
+#[allow(unused_imports)]
 pub use dataflow::{UserBuffer, UserString};
 
 pub type UserPointer<'a, T> = dataflow::UserPointer<'a, T, true>;

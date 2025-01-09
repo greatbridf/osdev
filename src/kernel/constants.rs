@@ -23,6 +23,7 @@ pub const ENXIO: u32 = 6;
 pub const ENOEXEC: u32 = 8;
 pub const ENOSYS: u32 = 38;
 
+#[allow(dead_code)]
 pub const S_IFIFO: u32 = 0o010000;
 pub const S_IFCHR: u32 = 0o020000;
 pub const S_IFDIR: u32 = 0o040000;

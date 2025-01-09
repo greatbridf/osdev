@@ -39,6 +39,7 @@ impl RawDirEntry {
     const ATTR_SYSTEM: u8 = 0x04;
     const ATTR_VOLUME_ID: u8 = 0x08;
     const ATTR_DIRECTORY: u8 = 0x10;
+    #[allow(dead_code)]
     const ATTR_ARCHIVE: u8 = 0x20;
 
     const RESERVED_FILENAME_LOWERCASE: u8 = 0x08;

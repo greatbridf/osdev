@@ -1,6 +1,6 @@
-use bindings::PA_MMAP;
+use crate::prelude::*;
 
-use crate::{kernel::task::Signal, prelude::*};
+use bindings::PA_MMAP;
 
 use core::{borrow::Borrow, cell::UnsafeCell, cmp::Ordering};
 
@@ -44,6 +44,7 @@ impl MMArea {
         *self.range_borrow()
     }
 
+    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.range_borrow().len()
     }

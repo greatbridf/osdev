@@ -70,6 +70,7 @@ impl FileArray {
         })
     }
 
+    #[allow(dead_code)]
     pub fn new_shared(other: &Arc<Self>) -> Arc<Self> {
         other.clone()
     }

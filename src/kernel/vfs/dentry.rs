@@ -60,6 +60,7 @@ impl core::fmt::Debug for Dentry {
 }
 
 const D_DIRECTORY: u64 = 1;
+#[allow(dead_code)]
 const D_MOUNTPOINT: u64 = 2;
 const D_SYMLINK: u64 = 4;
 const D_REGULAR: u64 = 8;

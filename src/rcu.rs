@@ -13,6 +13,7 @@ use alloc::sync::Arc;
 
 use lazy_static::lazy_static;
 
+#[allow(dead_code)]
 pub struct RCUReadGuard<'data, T: 'data> {
     value: T,
     guard: Guard<'data, (), RwSemaphoreStrategy, false>,

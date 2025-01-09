@@ -208,6 +208,7 @@ impl<'fat> Iterator for ClusterIterator<'fat> {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Clone)]
 enum FatInode {
     File(Arc<FileInode>),

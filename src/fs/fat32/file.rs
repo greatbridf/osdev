@@ -1,7 +1,4 @@
-use crate::{
-    kernel::mem::{phys::PhysPtr, Page},
-    KResult,
-};
+use crate::{kernel::mem::Page, KResult};
 
 use super::{ClusterIterator, FatFs};
 

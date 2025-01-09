@@ -20,6 +20,7 @@ pub enum LinkSpeed {
 
 pub type Mac = [u8; 6];
 
+#[allow(dead_code)]
 pub trait Netdev: Send {
     fn up(&mut self) -> Result<(), u32>;
     fn send(&mut self, data: &[u8]) -> Result<(), u32>;
@@ -54,8 +55,7 @@ impl Ord for dyn Netdev {
 
 lazy_static! {
     static ref NETDEVS_ID: Spin<u32> = Spin::new(0);
-    static ref NETDEVS: Spin<BTreeMap<u32, Arc<Mutex<dyn Netdev>>>> =
-        Spin::new(BTreeMap::new());
+    static ref NETDEVS: Spin<BTreeMap<u32, Arc<Mutex<dyn Netdev>>>> = Spin::new(BTreeMap::new());
 }
 
 pub fn alloc_id() -> u32 {
@@ -66,9 +66,7 @@ pub fn alloc_id() -> u32 {
     retval
 }
 
-pub fn register_netdev(
-    netdev: impl Netdev + 'static,
-) -> Result<Arc<Mutex<dyn Netdev>>, u32> {
+pub fn register_netdev(netdev: impl Netdev + 'static) -> Result<Arc<Mutex<dyn Netdev>>, u32> {
     let devid = netdev.id();
 
     let mut netdevs = NETDEVS.lock();

@@ -1,7 +1,7 @@
 use core::{
     cmp::Ordering,
     fmt::{self, Debug, Formatter},
-    ops::{Add, Sub, RangeBounds},
+    ops::{Add, RangeBounds, Sub},
 };
 
 #[repr(C)]
@@ -38,7 +38,7 @@ impl From<PFN> for usize {
 
 impl From<VAddr> for usize {
     fn from(v: VAddr) -> Self {
-       v.0
+        v.0
     }
 }
 
@@ -71,7 +71,6 @@ impl From<usize> for VPN {
         Self(v)
     }
 }
-
 
 impl From<VPN> for VAddr {
     fn from(v: VPN) -> Self {
@@ -353,6 +352,7 @@ impl VRange {
         VRange { start, end }
     }
 
+    #[allow(dead_code)]
     pub fn is_overlapped(&self, other: &Self) -> bool {
         self == other
     }

@@ -138,6 +138,10 @@ pub trait Inode: Send + Sync + InodeInner {
         Err(if !self.is_dir() { ENOTDIR } else { EPERM })
     }
 
+    fn chmod(&self, mode: Mode) -> KResult<()> {
+        Err(EPERM)
+    }
+
     fn statx(&self, stat: &mut statx, mask: u32) -> KResult<()> {
         // Safety: ffi should have checked reference
         let vfs = self.vfs.upgrade().expect("Vfs is dropped");

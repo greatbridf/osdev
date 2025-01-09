@@ -59,4 +59,23 @@ alias ll="ls -l "
 alias la="ls -la "
 EOF
 
+cat > /root/test.c <<EOF
+#include <stdio.h>
+
+int main() {
+    int var = 0;
+    printf("Hello, world!\n");
+    printf("Please input a number: \n");
+    scanf("%d", &var);
+    if (var > 0) {
+        printf("You typed a positive number.\n");
+    } else if (var == 0 ) {
+        printf("You input a zero.\n");
+    } else {
+        printf("You typed a negative number.\n");
+    }
+    return 0;
+}
+EOF
+
 exec /mnt/init /bin/sh -c 'exec sh -l < /dev/ttyS0 > /dev/ttyS0 2> /dev/ttyS0'

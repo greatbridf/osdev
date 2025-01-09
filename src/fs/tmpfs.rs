@@ -203,6 +203,17 @@ impl Inode for DirectoryInode {
 
         Ok(())
     }
+
+    fn chmod(&self, mode: Mode) -> KResult<()> {
+        let _vfs = acquire(&self.vfs)?;
+        let _lock = self.rwsem.lock();
+
+        // SAFETY: `rwsem` has done the synchronization
+        let old = self.mode.load(Ordering::Relaxed);
+        self.mode
+            .store((old & !0o777) | (mode & 0o777), Ordering::Relaxed);
+        Ok(())
+    }
 }
 
 define_struct_inode! {
@@ -228,6 +239,10 @@ impl Inode for SymlinkInode {
         buffer
             .fill(self.target.as_ref())
             .map(|result| result.allow_partial())
+    }
+
+    fn chmod(&self, _: Mode) -> KResult<()> {
+        Ok(())
     }
 }
 
@@ -296,6 +311,17 @@ impl Inode for FileInode {
         self.size.store(length as u64, Ordering::Relaxed);
         filedata.resize(length, 0);
 
+        Ok(())
+    }
+
+    fn chmod(&self, mode: Mode) -> KResult<()> {
+        let _vfs = acquire(&self.vfs)?;
+        let _lock = self.rwsem.lock();
+
+        // SAFETY: `rwsem` has done the synchronization
+        let old = self.mode.load(Ordering::Relaxed);
+        self.mode
+            .store((old & !0o777) | (mode & 0o777), Ordering::Relaxed);
         Ok(())
     }
 }

@@ -449,14 +449,6 @@ fn do_prlimit64(
     new_limit: *const RLimit,
     old_limit: *mut RLimit,
 ) -> KResult<()> {
-    println_debug!(
-        "prlimit64({}, {}, {:?}, {:?})",
-        pid,
-        resource,
-        new_limit,
-        old_limit
-    );
-
     if pid != 0 {
         return Err(ENOSYS);
     }
@@ -507,8 +499,6 @@ struct RUsage {
 }
 
 fn do_getrusage(who: u32, rusage: *mut RUsage) -> KResult<()> {
-    println_debug!("getrusage({}, {:?})", who, rusage);
-
     if who != 0 {
         return Err(ENOSYS);
     }
@@ -534,6 +524,19 @@ fn do_getrusage(who: u32, rusage: *mut RUsage) -> KResult<()> {
     })?;
 
     Ok(())
+}
+
+fn do_chmod(pathname: *const u8, mode: u32) -> KResult<()> {
+    let context = FsContext::get_current();
+    let path = UserString::new(pathname)?;
+    let path = Path::new(path.as_cstr().to_bytes())?;
+
+    let dentry = Dentry::open(&context, path, true)?;
+    if !dentry.is_valid() {
+        return Err(ENOENT);
+    }
+
+    dentry.chmod(mode)
 }
 
 define_syscall32!(sys_chdir, do_chdir, path: *const u8);
@@ -568,6 +571,7 @@ define_syscall32!(sys_prlimit64, do_prlimit64,
     pid: u32, resource: u32, new_limit: *const RLimit, old_limit: *mut RLimit);
 define_syscall32!(sys_getrlimit, do_getrlimit, resource: u32, rlimit: *mut RLimit);
 define_syscall32!(sys_getrusage, do_getrusage, who: u32, rlimit: *mut RUsage);
+define_syscall32!(sys_chmod, do_chmod, pathname: *const u8, mode: u32);
 
 fn sys_vfork(int_stack: &mut InterruptContext, ext: &mut ExtendedContext) -> usize {
     sys_fork(int_stack, ext)
@@ -602,6 +606,7 @@ pub(super) fn register() {
     register_syscall!(0x07, waitpid);
     register_syscall!(0x0b, execve);
     register_syscall!(0x0c, chdir);
+    register_syscall!(0x0f, chmod);
     register_syscall!(0x14, getpid);
     register_syscall!(0x15, mount);
     register_syscall!(0x25, kill);

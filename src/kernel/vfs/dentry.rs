@@ -433,4 +433,8 @@ impl Dentry {
             self.parent.get_inode().unwrap().mknod(self, mode, devid)
         }
     }
+
+    pub fn chmod(&self, mode: Mode) -> KResult<()> {
+        self.get_inode()?.chmod(mode)
+    }
 }

@@ -68,6 +68,14 @@ impl PTE {
         self.0 & PA_P != 0
     }
 
+    pub fn is_cow(&self) -> bool {
+        self.0 & PA_COW != 0
+    }
+
+    pub fn is_mmap(&self) -> bool {
+        self.0 & PA_MMAP != 0
+    }
+
     pub fn pfn(&self) -> usize {
         self.0 & !PA_MASK
     }
@@ -212,16 +220,16 @@ impl PageTable {
         Self { page }
     }
 
+    pub fn root_page_table(&self) -> usize {
+        self.page.as_phys()
+    }
+
     pub fn iter_user(&self, range: VRange) -> KResult<PTEIterator<'_, false>> {
         PTEIterator::new(&self.page, range.start().floor(), range.end().ceil())
     }
 
     pub fn iter_kernel(&self, range: VRange) -> KResult<PTEIterator<'_, true>> {
         PTEIterator::new(&self.page, range.start().floor(), range.end().ceil())
-    }
-
-    pub fn switch(&self) {
-        arch::set_root_page_table(self.page.as_phys())
     }
 
     pub fn unmap(&self, area: &MMArea) {

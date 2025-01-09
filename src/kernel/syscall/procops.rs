@@ -94,8 +94,9 @@ fn do_execve(exec: &[u8], argv: Vec<CString>, envp: Vec<CString>) -> KResult<(VA
     // TODO: When `execve` is called by one of the threads in a process, the other threads
     //       should be terminated and `execve` is performed in the thread group leader.
     let elf = ParsedElf32::parse(dentry.clone())?;
-    let result = elf.load(&Thread::current().process.mm_list, argv, envp);
-    if let Ok((ip, sp)) = result {
+    let result = elf.load(argv, envp);
+    if let Ok((ip, sp, mm_list)) = result {
+        Thread::current().process.mm_list.replace(mm_list);
         Thread::current().files.on_exec();
         Thread::current().signal_list.clear_non_ignore();
         Thread::current().set_name(dentry.name().clone());

@@ -164,7 +164,7 @@ extern "C" fn init_process(/* early_kstack_pfn: usize */) {
 
     unsafe { kernel::smp::bootstrap_smp() };
 
-    let (ip, sp) = {
+    let (ip, sp, mm_list) = {
         // mount fat32 /mnt directory
         let fs_context = FsContext::get_current();
         let mnt_dir = Dentry::open(&fs_context, Path::new(b"/mnt/").unwrap(), true).unwrap();
@@ -197,10 +197,10 @@ extern "C" fn init_process(/* early_kstack_pfn: usize */) {
         ];
 
         let elf = ParsedElf32::parse(init.clone()).unwrap();
-        elf.load(&Thread::current().process.mm_list, argv, envp)
-            .unwrap()
+        elf.load(argv, envp).unwrap()
     };
 
+    Thread::current().process.mm_list.replace(mm_list);
     Thread::current().files.open_console();
 
     unsafe {

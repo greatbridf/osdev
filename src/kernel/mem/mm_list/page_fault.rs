@@ -36,7 +36,9 @@ impl MMList {
         addr: VAddr,
         error: PageFaultError,
     ) -> Result<(), Signal> {
-        let inner = self.inner.lock();
+        let inner = self.inner.borrow();
+        let inner = inner.lock();
+
         let area = match inner.areas.get(&VRange::from(addr)) {
             Some(area) => area,
             None => {
@@ -60,7 +62,7 @@ impl MMList {
             }
         }
 
-        let pte = self
+        let pte = inner
             .page_table
             .iter_user(VRange::new(addr.floor(), addr.floor() + 0x1000))
             .unwrap()
@@ -73,76 +75,8 @@ impl MMList {
             return Ok(());
         }
 
-        let mut pfn = pte.pfn();
-        let mut attributes = pte.attributes();
-
-        if attributes & PA_COW as usize != 0 {
-            attributes &= !PA_COW as usize;
-            if area.permission.write {
-                attributes |= PA_RW as usize;
-            } else {
-                attributes &= !PA_RW as usize;
-            }
-
-            let page = unsafe { Page::take_pfn(pfn, 0) };
-            if unsafe { page.load_refcount() } == 1 {
-                // SAFETY: This is actually safe. If we read `1` here and we have `MMList` lock
-                // held, there couldn't be neither other processes sharing the page, nor other
-                // threads making the page COW at the same time.
-                pte.set_attributes(attributes);
-                core::mem::forget(page);
-                return Ok(());
-            }
-
-            let new_page = Page::alloc_one();
-            if attributes & PA_ANON as usize != 0 {
-                new_page.zero();
-            } else {
-                new_page.as_mut_slice().copy_from_slice(page.as_slice());
-            }
-
-            attributes &= !(PA_A | PA_ANON) as usize;
-
-            pfn = new_page.into_pfn();
-            pte.set(pfn, attributes);
-        }
-
-        // TODO: shared mapping
-        if attributes & PA_MMAP as usize != 0 {
-            attributes |= PA_P as usize;
-
-            if let Mapping::File(mapping) = &area.mapping {
-                let load_offset = addr.floor() - area.range().start();
-                if load_offset < mapping.length {
-                    // SAFETY: Since we are here, the `pfn` must refer to a valid buddy page.
-                    let page = unsafe { Page::from_pfn(pfn, 0) };
-                    let nread = mapping
-                        .file
-                        .read(
-                            &mut PageBuffer::new(page.clone()),
-                            mapping.offset + load_offset,
-                        )
-                        .map_err(|_| Signal::SIGBUS)?;
-
-                    if nread < page.len() {
-                        page.as_mut_slice()[nread..].fill(0);
-                    }
-
-                    if mapping.length - load_offset < 0x1000 {
-                        let length_to_end = mapping.length - load_offset;
-                        page.as_mut_slice()[length_to_end..].fill(0);
-                    }
-                }
-                // Otherwise, the page is kept zero emptied.
-
-                attributes &= !PA_MMAP as usize;
-                pte.set_attributes(attributes);
-            } else {
-                panic!("Anonymous mapping should not be PA_MMAP");
-            }
-        }
-
-        Ok(())
+        area.handle(pte, addr.floor() - area.range().start())
+            .map_err(|_| Signal::SIGBUS)
     }
 }
 

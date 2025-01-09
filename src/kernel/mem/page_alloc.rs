@@ -142,7 +142,7 @@ struct Zone {
 
 struct PerCpuPages {
     batch: u32,
-    high: u32,
+    high: u32,  // TODO: use in future
     free_areas: [FreeArea; PAGE_ALLOC_COSTLY_ORDER as usize + 1],
 }
 
@@ -170,16 +170,14 @@ impl PerCpuPages {
         }
     }
 
-    fn free_pages(&mut self, mut pages_ptr: PagePtr, order: u32) {
+    fn free_pages(&mut self, pages_ptr: PagePtr, order: u32) {
         assert!(order <= PAGE_ALLOC_COSTLY_ORDER);
         assert_eq!(unsafe { pages_ptr.load_refcount() }, 0);
         assert_eq!(pages_ptr.get_order(), order);
 
-        unimplemented!()
+        self.free_areas[order as usize].add_pages(pages_ptr);
     }
 }
-
-
 
 impl Page {
     fn set_flags(&mut self, flags: PageFlags) {
@@ -438,7 +436,7 @@ pub(super) fn early_alloc_pages(order: u32) -> PagePtr {
 }
 
 pub(super) fn free_pages(page_ptr: PagePtr, order: u32) {
-    ZONE.lock().free_pages(page_ptr, order)
+    __free_pages(page_ptr, order)
 }
 
 #[no_mangle]

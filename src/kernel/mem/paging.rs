@@ -1,5 +1,5 @@
 use super::address::PFN;
-use super::page_alloc::{alloc_page, alloc_pages, free_pages, PagePtr};
+use super::page_alloc::{alloc_page, alloc_pages, early_alloc_pages, free_pages, PagePtr};
 use super::phys::PhysPtr;
 use crate::bindings::root::EFAULT;
 use crate::io::{Buffer, FillResult};
@@ -28,6 +28,13 @@ impl Page {
         assert_ne!(count, 0);
         let order = count.next_power_of_two().trailing_zeros();
         Self::alloc_many(order)
+    }
+
+    pub fn early_alloc_ceil(count: usize) -> Self {
+        assert_ne!(count, 0);
+        let order = count.next_power_of_two().trailing_zeros();
+        let page_ptr = early_alloc_pages(order);
+        Self { page_ptr, order }
     }
 
     /// Get `Page` from `pfn`, acquiring the ownership of the page. `refcount` is not increased.

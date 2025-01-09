@@ -35,8 +35,3 @@ class brk_memory_allocator {
 };
 
 } // namespace types::memory
-
-namespace kernel::kinit {
-void init_allocator();
-
-} // namespace kernel::kinit

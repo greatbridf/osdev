@@ -218,14 +218,14 @@ static constexpr int __cache_index(std::size_t size) {
     return -1;
 }
 
-void kernel::kinit::init_allocator() {
-    mem::init_slab_cache(caches + 0, 32);
-    mem::init_slab_cache(caches + 1, 64);
-    mem::init_slab_cache(caches + 2, 96);
-    mem::init_slab_cache(caches + 3, 128);
-    mem::init_slab_cache(caches + 4, 192);
-    mem::init_slab_cache(caches + 5, 256);
-    mem::init_slab_cache(caches + 6, 512);
+extern "C" void init_allocator() {
+    kernel::mem::init_slab_cache(caches + 0, 32);
+    kernel::mem::init_slab_cache(caches + 1, 64);
+    kernel::mem::init_slab_cache(caches + 2, 96);
+    kernel::mem::init_slab_cache(caches + 3, 128);
+    kernel::mem::init_slab_cache(caches + 4, 192);
+    kernel::mem::init_slab_cache(caches + 5, 256);
+    kernel::mem::init_slab_cache(caches + 6, 512);
 
     types::memory::k_alloc = new types::memory::brk_memory_allocator(
         (std::byte*)KERNEL_HEAP_START, KERNEL_HEAP_SIZE);

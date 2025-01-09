@@ -62,7 +62,7 @@ tmux-debug:
 	-tmux attach -t gbos-debug
 	tmux kill-session -t gbos-debug
 
-build/fs.img:
+build/fs.img: init_script.sh
 	sh script/build-img.sh
 
 build/boot.img: build/fs.img build/mbr_hole.bin

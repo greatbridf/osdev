@@ -50,15 +50,15 @@ fn do_newuname(buffer: *mut NewUTSName) -> KResult<()> {
 }
 
 #[allow(dead_code)]
-#[derive(Clone, Copy)]
-struct TimeVal {
+#[derive(Default, Clone, Copy)]
+pub struct TimeVal {
     sec: u64,
     usec: u64,
 }
 
 #[allow(dead_code)]
 #[derive(Clone, Copy)]
-struct TimeSpec {
+pub struct TimeSpec {
     sec: u64,
     nsec: u64,
 }

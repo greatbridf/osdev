@@ -22,6 +22,7 @@ use crate::{kernel::user::dataflow::UserBuffer, prelude::*};
 
 use crate::kernel::vfs::{self, FsContext};
 
+use super::sysinfo::TimeVal;
 use super::{define_syscall32, register_syscall};
 
 fn do_umask(mask: u32) -> KResult<u32> {
@@ -484,6 +485,57 @@ fn do_getrlimit(resource: u32, rlimit: *mut RLimit) -> KResult<()> {
     do_prlimit64(0, resource, core::ptr::null(), rlimit)
 }
 
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct RUsage {
+    ru_utime: TimeVal,
+    ru_stime: TimeVal,
+    ru_maxrss: u32,
+    ru_ixrss: u32,
+    ru_idrss: u32,
+    ru_isrss: u32,
+    ru_minflt: u32,
+    ru_majflt: u32,
+    ru_nswap: u32,
+    ru_inblock: u32,
+    ru_oublock: u32,
+    ru_msgsnd: u32,
+    ru_msgrcv: u32,
+    ru_nsignals: u32,
+    ru_nvcsw: u32,
+    ru_nivcsw: u32,
+}
+
+fn do_getrusage(who: u32, rusage: *mut RUsage) -> KResult<()> {
+    println_debug!("getrusage({}, {:?})", who, rusage);
+
+    if who != 0 {
+        return Err(ENOSYS);
+    }
+
+    let rusage = UserPointerMut::new(rusage)?;
+    rusage.write(RUsage {
+        ru_utime: TimeVal::default(),
+        ru_stime: TimeVal::default(),
+        ru_maxrss: 0,
+        ru_ixrss: 0,
+        ru_idrss: 0,
+        ru_isrss: 0,
+        ru_minflt: 0,
+        ru_majflt: 0,
+        ru_nswap: 0,
+        ru_inblock: 0,
+        ru_oublock: 0,
+        ru_msgsnd: 0,
+        ru_msgrcv: 0,
+        ru_nsignals: 0,
+        ru_nvcsw: 0,
+        ru_nivcsw: 0,
+    })?;
+
+    Ok(())
+}
+
 define_syscall32!(sys_chdir, do_chdir, path: *const u8);
 define_syscall32!(sys_umask, do_umask, mask: u32);
 define_syscall32!(sys_getcwd, do_getcwd, buffer: *mut u8, bufsize: usize);
@@ -515,6 +567,7 @@ define_syscall32!(sys_rt_sigaction, do_rt_sigaction,
 define_syscall32!(sys_prlimit64, do_prlimit64,
     pid: u32, resource: u32, new_limit: *const RLimit, old_limit: *mut RLimit);
 define_syscall32!(sys_getrlimit, do_getrlimit, resource: u32, rlimit: *mut RLimit);
+define_syscall32!(sys_getrusage, do_getrusage, who: u32, rlimit: *mut RUsage);
 
 fn sys_vfork(int_stack: &mut InterruptContext, ext: &mut ExtendedContext) -> usize {
     sys_fork(int_stack, ext)
@@ -557,6 +610,7 @@ pub(super) fn register() {
     register_syscall!(0x3c, umask);
     register_syscall!(0x40, getppid);
     register_syscall!(0x42, setsid);
+    register_syscall!(0x4d, getrusage);
     register_syscall!(0x72, wait4);
     register_syscall!(0x77, sigreturn);
     register_syscall!(0x84, getpgid);

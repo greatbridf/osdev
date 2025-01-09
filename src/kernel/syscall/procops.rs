@@ -175,9 +175,9 @@ bitflags! {
 }
 
 fn do_waitpid(waitpid: u32, arg1: *mut u32, options: u32) -> KResult<u32> {
-    if waitpid != u32::MAX {
-        unimplemented!("waitpid with pid {waitpid}")
-    }
+    // if waitpid != u32::MAX {
+    //     unimplemented!("waitpid with pid {waitpid}")
+    // }
     let options = match UserWaitOptions::from_bits(options) {
         None => unimplemented!("waitpid with options {options}"),
         Some(options) => options,
@@ -480,6 +480,10 @@ fn do_prlimit64(
     }
 }
 
+fn do_getrlimit(resource: u32, rlimit: *mut RLimit) -> KResult<()> {
+    do_prlimit64(0, resource, core::ptr::null(), rlimit)
+}
+
 define_syscall32!(sys_chdir, do_chdir, path: *const u8);
 define_syscall32!(sys_umask, do_umask, mask: u32);
 define_syscall32!(sys_getcwd, do_getcwd, buffer: *mut u8, bufsize: usize);
@@ -510,6 +514,11 @@ define_syscall32!(sys_rt_sigaction, do_rt_sigaction,
     signum: u32, act: *const UserSignalAction, oldact: *mut UserSignalAction, sigsetsize: usize);
 define_syscall32!(sys_prlimit64, do_prlimit64,
     pid: u32, resource: u32, new_limit: *const RLimit, old_limit: *mut RLimit);
+define_syscall32!(sys_getrlimit, do_getrlimit, resource: u32, rlimit: *mut RLimit);
+
+fn sys_vfork(int_stack: &mut InterruptContext, ext: &mut ExtendedContext) -> usize {
+    sys_fork(int_stack, ext)
+}
 
 fn sys_fork(int_stack: &mut InterruptContext, _: &mut ExtendedContext) -> usize {
     let mut procs = ProcessList::get().lock();
@@ -556,6 +565,8 @@ pub(super) fn register() {
     register_syscall!(0xae, rt_sigaction);
     register_syscall!(0xaf, rt_sigprocmask);
     register_syscall!(0xb7, getcwd);
+    register_syscall!(0xbe, vfork);
+    register_syscall!(0xbf, getrlimit);
     register_syscall!(0xc7, getuid);
     register_syscall!(0xc8, getgid);
     register_syscall!(0xc9, geteuid);

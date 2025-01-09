@@ -93,12 +93,51 @@ fn do_clock_gettime64(clock_id: u32, timespec: *mut TimeSpec) -> KResult<()> {
     })
 }
 
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct Sysinfo {
+    uptime: u32,
+    loads: [u32; 3],
+    totalram: u32,
+    freeram: u32,
+    sharedram: u32,
+    bufferram: u32,
+    totalswap: u32,
+    freeswap: u32,
+    procs: u16,
+    totalhigh: u32,
+    freehigh: u32,
+    mem_unit: u32,
+    _padding: [u8; 8],
+}
+
+fn do_sysinfo(info: *mut Sysinfo) -> KResult<()> {
+    let info = UserPointerMut::new(info)?;
+    info.write(Sysinfo {
+        uptime: ticks().in_secs() as u32,
+        loads: [0; 3],
+        totalram: 100,
+        freeram: 50,
+        sharedram: 0,
+        bufferram: 0,
+        totalswap: 0,
+        freeswap: 0,
+        procs: 10,
+        totalhigh: 0,
+        freehigh: 0,
+        mem_unit: 1024,
+        _padding: [0; 8],
+    })
+}
+
 define_syscall32!(sys_newuname, do_newuname, buffer: *mut NewUTSName);
 define_syscall32!(sys_gettimeofday, do_gettimeofday, timeval: *mut TimeVal, timezone: *mut ());
 define_syscall32!(sys_clock_gettime64, do_clock_gettime64, clock_id: u32, timespec: *mut TimeSpec);
+define_syscall32!(sys_sysinfo, do_sysinfo, info: *mut Sysinfo);
 
 pub(super) fn register() {
     register_syscall!(0x4e, gettimeofday);
+    register_syscall!(0x74, sysinfo);
     register_syscall!(0x7a, newuname);
     register_syscall!(0x193, clock_gettime64);
 }

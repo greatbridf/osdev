@@ -2,6 +2,7 @@ use alloc::{
     collections::btree_map::BTreeMap,
     sync::{Arc, Weak},
 };
+use bindings::KERNEL_PML4;
 
 use crate::{
     prelude::*,
@@ -145,8 +146,12 @@ impl ProcessList {
             }
         }
 
-        // Unmap all user memory areas
-        process.mm_list.clear_user();
+        // Release the MMList as well as the page table.
+        // Before we release the page table, we need to switch to the kernel page table.
+        arch::set_root_page_table(KERNEL_PML4 as usize);
+        unsafe {
+            process.mm_list.release();
+        }
 
         // Make children orphans (adopted by init)
         {

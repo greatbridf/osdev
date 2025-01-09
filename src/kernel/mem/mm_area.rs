@@ -1,6 +1,12 @@
+use crate::prelude::*;
+
+use bindings::PA_MMAP;
+
 use core::{borrow::Borrow, cell::UnsafeCell, cmp::Ordering};
 
-use super::{Mapping, Permission, VAddr, VRange};
+use crate::bindings::root::{PA_A, PA_ANON, PA_COW, PA_P, PA_RW};
+
+use super::{Mapping, Page, PageBuffer, Permission, VAddr, VRange, PTE};
 
 #[derive(Debug)]
 pub struct MMArea {
@@ -38,6 +44,7 @@ impl MMArea {
         *self.range_borrow()
     }
 
+    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.range_borrow().len()
     }
@@ -75,6 +82,91 @@ impl MMArea {
                 (Some(self), Some(right))
             }
         }
+    }
+
+    /// # Return
+    /// Whether the whole handling process is done.
+    pub fn handle_cow(&self, pte: &mut PTE) -> bool {
+        let mut attributes = pte.attributes();
+        let mut pfn = pte.pfn();
+
+        attributes &= !PA_COW as usize;
+        if self.permission.write {
+            attributes |= PA_RW as usize;
+        } else {
+            attributes &= !PA_RW as usize;
+        }
+
+        let page = unsafe { Page::take_pfn(pfn, 0) };
+        if unsafe { page.load_refcount() } == 1 {
+            // SAFETY: This is actually safe. If we read `1` here and we have `MMList` lock
+            // held, there couldn't be neither other processes sharing the page, nor other
+            // threads making the page COW at the same time.
+            pte.set_attributes(attributes);
+            core::mem::forget(page);
+            return true;
+        }
+
+        let new_page = Page::alloc_one();
+        if attributes & PA_ANON as usize != 0 {
+            new_page.zero();
+        } else {
+            new_page.as_mut_slice().copy_from_slice(page.as_slice());
+        }
+
+        attributes &= !(PA_A | PA_ANON) as usize;
+
+        pfn = new_page.into_pfn();
+        pte.set(pfn, attributes);
+
+        false
+    }
+
+    /// # Arguments
+    /// * `offset`: The offset from the start of the mapping, aligned to 4KB boundary.
+    pub fn handle_mmap(&self, pte: &mut PTE, offset: usize) -> KResult<()> {
+        // TODO: Implement shared mapping
+        let mut attributes = pte.attributes();
+        let pfn = pte.pfn();
+
+        attributes |= PA_P as usize;
+
+        match &self.mapping {
+            Mapping::File(mapping) if offset < mapping.length => {
+                // SAFETY: Since we are here, the `pfn` must refer to a valid buddy page.
+                let page = unsafe { Page::from_pfn(pfn, 0) };
+                let nread = mapping
+                    .file
+                    .read(&mut PageBuffer::new(page.clone()), mapping.offset + offset)?;
+
+                if nread < page.len() {
+                    page.as_mut_slice()[nread..].fill(0);
+                }
+
+                if mapping.length - offset < 0x1000 {
+                    let length_to_end = mapping.length - offset;
+                    page.as_mut_slice()[length_to_end..].fill(0);
+                }
+            }
+            Mapping::File(_) => panic!("Offset out of range"),
+            _ => panic!("Anonymous mapping should not be PA_MMAP"),
+        }
+
+        attributes &= !PA_MMAP as usize;
+        pte.set_attributes(attributes);
+        Ok(())
+    }
+
+    pub fn handle(&self, pte: &mut PTE, offset: usize) -> KResult<()> {
+        if pte.is_cow() {
+            self.handle_cow(pte);
+        }
+
+        if pte.is_mmap() {
+            self.handle_mmap(pte, offset)?;
+        }
+
+        Ok(())
     }
 }
 

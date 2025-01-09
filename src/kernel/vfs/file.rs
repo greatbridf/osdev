@@ -1,10 +1,10 @@
 use core::{ops::ControlFlow, sync::atomic::Ordering};
 
 use crate::{
-    io::{Buffer, BufferFill, RawBuffer},
+    io::{Buffer, BufferFill, ByteBuffer},
     kernel::{
         constants::{TCGETS, TCSETS, TIOCGPGRP, TIOCGWINSZ, TIOCSPGRP},
-        mem::{paging::Page, phys::PhysPtr},
+        mem::paging::Page,
         task::{Signal, Thread},
         terminal::{Terminal, TerminalIORequest},
         user::{UserPointer, UserPointerMut},
@@ -15,13 +15,15 @@ use crate::{
 };
 
 use alloc::{collections::vec_deque::VecDeque, sync::Arc};
-use bindings::{EBADF, EFAULT, EINTR, EINVAL, ENOTDIR, ENOTTY, EOVERFLOW, EPIPE, ESPIPE, S_IFMT};
+use bindings::{
+    statx, EBADF, EFAULT, EINTR, EINVAL, ENOTDIR, ENOTTY, EOVERFLOW, EPIPE, ESPIPE, S_IFMT,
+};
 use bitflags::bitflags;
 
 use super::{
     dentry::Dentry,
     inode::{Mode, WriteOffset},
-    s_isblk, s_isreg,
+    s_isblk, s_isdir, s_isreg,
 };
 
 pub struct InodeFile {
@@ -518,8 +520,8 @@ impl File {
             }
 
             let batch_size = usize::min(count - tot, buffer_page.len());
-            let slice = buffer_page.as_cached().as_mut_slice::<u8>(batch_size);
-            let mut buffer = RawBuffer::new_from_slice(slice);
+            let slice = &mut buffer_page.as_mut_slice()[..batch_size];
+            let mut buffer = ByteBuffer::new(slice);
 
             let nwrote = self.read(&mut buffer)?;
 
@@ -545,6 +547,20 @@ impl File {
             File::Inode(_) => Ok(event),
             File::TTY(tty) => tty.poll(event),
             _ => unimplemented!("Poll event not supported."),
+        }
+    }
+
+    pub fn statx(&self, buffer: &mut statx, mask: u32) -> KResult<()> {
+        match self {
+            File::Inode(inode) => inode.dentry.statx(buffer, mask),
+            _ => Err(EBADF),
+        }
+    }
+
+    pub fn as_path(&self) -> Option<&Arc<Dentry>> {
+        match self {
+            File::Inode(inode_file) if s_isdir(inode_file.mode) => Some(&inode_file.dentry),
+            _ => None,
         }
     }
 }

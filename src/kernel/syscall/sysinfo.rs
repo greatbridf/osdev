@@ -49,14 +49,16 @@ fn do_newuname(buffer: *mut NewUTSName) -> KResult<()> {
     buffer.write(uname)
 }
 
-#[derive(Clone, Copy)]
-struct TimeVal {
+#[allow(dead_code)]
+#[derive(Default, Clone, Copy)]
+pub struct TimeVal {
     sec: u64,
     usec: u64,
 }
 
+#[allow(dead_code)]
 #[derive(Clone, Copy)]
-struct TimeSpec {
+pub struct TimeSpec {
     sec: u64,
     nsec: u64,
 }
@@ -91,12 +93,72 @@ fn do_clock_gettime64(clock_id: u32, timespec: *mut TimeSpec) -> KResult<()> {
     })
 }
 
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct Sysinfo {
+    uptime: u32,
+    loads: [u32; 3],
+    totalram: u32,
+    freeram: u32,
+    sharedram: u32,
+    bufferram: u32,
+    totalswap: u32,
+    freeswap: u32,
+    procs: u16,
+    totalhigh: u32,
+    freehigh: u32,
+    mem_unit: u32,
+    _padding: [u8; 8],
+}
+
+fn do_sysinfo(info: *mut Sysinfo) -> KResult<()> {
+    let info = UserPointerMut::new(info)?;
+    info.write(Sysinfo {
+        uptime: ticks().in_secs() as u32,
+        loads: [0; 3],
+        totalram: 100,
+        freeram: 50,
+        sharedram: 0,
+        bufferram: 0,
+        totalswap: 0,
+        freeswap: 0,
+        procs: 10,
+        totalhigh: 0,
+        freehigh: 0,
+        mem_unit: 1024,
+        _padding: [0; 8],
+    })
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct TMS {
+    tms_utime: u32,
+    tms_stime: u32,
+    tms_cutime: u32,
+    tms_cstime: u32,
+}
+
+fn do_times(tms: *mut TMS) -> KResult<()> {
+    let tms = UserPointerMut::new(tms)?;
+    tms.write(TMS {
+        tms_utime: 0,
+        tms_stime: 0,
+        tms_cutime: 0,
+        tms_cstime: 0,
+    })
+}
+
 define_syscall32!(sys_newuname, do_newuname, buffer: *mut NewUTSName);
 define_syscall32!(sys_gettimeofday, do_gettimeofday, timeval: *mut TimeVal, timezone: *mut ());
 define_syscall32!(sys_clock_gettime64, do_clock_gettime64, clock_id: u32, timespec: *mut TimeSpec);
+define_syscall32!(sys_sysinfo, do_sysinfo, info: *mut Sysinfo);
+define_syscall32!(sys_times, do_times, tms: *mut TMS);
 
 pub(super) fn register() {
+    register_syscall!(0x2b, times);
     register_syscall!(0x4e, gettimeofday);
+    register_syscall!(0x74, sysinfo);
     register_syscall!(0x7a, newuname);
     register_syscall!(0x193, clock_gettime64);
 }

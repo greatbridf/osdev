@@ -82,7 +82,7 @@ where
 
 pub struct UninitBuffer<'lt, T: Copy + Sized> {
     data: Box<MaybeUninit<T>>,
-    buffer: RawBuffer<'lt>,
+    buffer: ByteBuffer<'lt>,
 }
 
 impl<'lt, T: Copy + Sized> UninitBuffer<'lt, T> {
@@ -92,25 +92,25 @@ impl<'lt, T: Copy + Sized> UninitBuffer<'lt, T> {
 
         Self {
             data,
-            buffer: RawBuffer::new_from_slice(unsafe {
+            buffer: ByteBuffer::from(unsafe {
                 core::slice::from_raw_parts_mut(ptr as *mut u8, core::mem::size_of::<T>())
             }),
         }
     }
 
     pub fn assume_filled_ref(&self) -> KResult<&T> {
-        if !self.buffer.filled() {
+        if self.buffer.available() != 0 {
             Err(EFAULT)
         } else {
             Ok(unsafe { self.data.assume_init_ref() })
         }
     }
 
-    pub fn assume_init(self) -> Option<T> {
-        if self.buffer.filled() {
-            Some(unsafe { *self.data.assume_init() })
+    pub fn assume_init(self) -> KResult<T> {
+        if self.buffer.available() != 0 {
+            Err(EFAULT)
         } else {
-            None
+            Ok(unsafe { *self.data.assume_init() })
         }
     }
 }
@@ -126,78 +126,6 @@ impl<'lt, T: Copy + Sized> Buffer for UninitBuffer<'lt, T> {
 
     fn fill(&mut self, data: &[u8]) -> KResult<FillResult> {
         self.buffer.fill(data)
-    }
-}
-
-pub struct RawBuffer<'lt> {
-    buf: *mut u8,
-    tot: usize,
-    cur: usize,
-    _phantom: core::marker::PhantomData<&'lt mut u8>,
-}
-
-impl<'lt> RawBuffer<'lt> {
-    pub fn new_from_slice<T: Copy + Sized>(buf: &'lt mut [T]) -> Self {
-        Self {
-            buf: buf.as_mut_ptr() as *mut u8,
-            tot: core::mem::size_of::<T>() * buf.len(),
-            cur: 0,
-            _phantom: core::marker::PhantomData,
-        }
-    }
-
-    pub fn count(&self) -> usize {
-        self.cur
-    }
-
-    pub fn total(&self) -> usize {
-        self.tot
-    }
-
-    pub fn available(&self) -> usize {
-        self.total() - self.count()
-    }
-
-    pub fn filled(&self) -> bool {
-        self.count() == self.total()
-    }
-
-    pub fn fill(&mut self, data: &[u8]) -> KResult<FillResult> {
-        match self.available() {
-            n if n == 0 => Ok(FillResult::Full),
-            n if n < data.len() => {
-                unsafe {
-                    core::ptr::copy_nonoverlapping(data.as_ptr(), self.buf.add(self.count()), n);
-                }
-                self.cur += n;
-                Ok(FillResult::Partial(n))
-            }
-            _ => {
-                unsafe {
-                    core::ptr::copy_nonoverlapping(
-                        data.as_ptr(),
-                        self.buf.add(self.count()),
-                        data.len(),
-                    );
-                }
-                self.cur += data.len();
-                Ok(FillResult::Done(data.len()))
-            }
-        }
-    }
-}
-
-impl Buffer for RawBuffer<'_> {
-    fn total(&self) -> usize {
-        RawBuffer::total(self)
-    }
-
-    fn wrote(&self) -> usize {
-        self.count()
-    }
-
-    fn fill(&mut self, data: &[u8]) -> KResult<FillResult> {
-        RawBuffer::fill(self, data)
     }
 }
 
@@ -220,6 +148,20 @@ impl<'lt> ByteBuffer<'lt> {
     }
 }
 
+impl<'lt, T: Copy + Sized> From<&'lt mut [T]> for ByteBuffer<'lt> {
+    fn from(value: &'lt mut [T]) -> Self {
+        Self {
+            buf: unsafe {
+                core::slice::from_raw_parts_mut(
+                    value.as_ptr() as *mut u8,
+                    core::mem::size_of::<T>() * value.len(),
+                )
+            },
+            cur: 0,
+        }
+    }
+}
+
 impl Buffer for ByteBuffer<'_> {
     fn total(&self) -> usize {
         self.buf.len()
@@ -227,7 +169,7 @@ impl Buffer for ByteBuffer<'_> {
 
     fn fill(&mut self, data: &[u8]) -> KResult<FillResult> {
         match self.available() {
-            n if n == 0 => Ok(FillResult::Full),
+            0 => Ok(FillResult::Full),
             n if n < data.len() => {
                 self.buf[self.cur..].copy_from_slice(&data[..n]);
                 self.cur += n;

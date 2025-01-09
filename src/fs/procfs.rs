@@ -30,6 +30,7 @@ fn split_len_offset(data: &[u8], len: usize, offset: usize) -> Option<&[u8]> {
     real_data.split_at_checked(offset).map(|(_, data)| data)
 }
 
+#[allow(dead_code)]
 pub trait ProcFsFile: Send + Sync {
     fn can_read(&self) -> bool {
         false
@@ -116,7 +117,7 @@ impl Inode for FileInode {
 }
 
 define_struct_inode! {
-    struct DirInode {
+    pub struct DirInode {
         entries: Locked<Vec<(Arc<[u8]>, ProcFsNode)>, ()>,
     }
 }
@@ -196,6 +197,7 @@ lazy_static! {
 
 struct ProcFsMountCreator;
 
+#[allow(dead_code)]
 impl ProcFsMountCreator {
     pub fn get() -> Arc<ProcFs> {
         GLOBAL_PROCFS.clone()
@@ -247,6 +249,7 @@ pub fn creat(
     Ok(ProcFsNode::File(inode))
 }
 
+#[allow(dead_code)]
 pub fn mkdir(parent: &ProcFsNode, name: &[u8]) -> KResult<ProcFsNode> {
     let parent = match parent {
         ProcFsNode::File(_) => return Err(ENOTDIR),

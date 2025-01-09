@@ -70,6 +70,7 @@ impl FileArray {
         })
     }
 
+    #[allow(dead_code)]
     pub fn new_shared(other: &Arc<Self>) -> Arc<Self> {
         other.clone()
     }
@@ -154,16 +155,18 @@ impl FileArray {
 
     /// # Return
     /// `(read_fd, write_fd)`
-    pub fn pipe(&self) -> KResult<(FD, FD)> {
+    pub fn pipe(&self, flags: u32) -> KResult<(FD, FD)> {
         let mut inner = self.inner.lock();
 
         let read_fd = inner.next_fd();
         let write_fd = inner.next_fd();
 
+        let fdflag = if flags & O_CLOEXEC != 0 { FD_CLOEXEC } else { 0 };
+
         let pipe = Pipe::new();
         let (read_end, write_end) = pipe.split();
-        inner.do_insert(read_fd, 0, read_end);
-        inner.do_insert(write_fd, 0, write_end);
+        inner.do_insert(read_fd, fdflag as u64, read_end);
+        inner.do_insert(write_fd, fdflag as u64, write_end);
 
         Ok((read_fd, write_fd))
     }

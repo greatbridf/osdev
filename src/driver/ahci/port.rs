@@ -36,6 +36,7 @@ fn spinwait_clear(refval: *const u32, mask: u32) -> KResult<()> {
 ///
 /// All reads and writes to this struct is volatile
 ///
+#[allow(dead_code)]
 #[repr(C)]
 pub struct AdapterPortData {
     pub command_list_base: u64,
@@ -65,6 +66,7 @@ pub struct AdapterPortData {
     vendor: [u32; 4],
 }
 
+#[allow(dead_code)]
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 enum SlotState {
     Idle,

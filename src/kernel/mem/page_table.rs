@@ -14,10 +14,13 @@ use super::{MMArea, Permission};
 const PA_P: usize = 0x001;
 const PA_RW: usize = 0x002;
 const PA_US: usize = 0x004;
+#[allow(dead_code)]
 const PA_PWT: usize = 0x008;
+#[allow(dead_code)]
 const PA_PCD: usize = 0x010;
 const PA_A: usize = 0x020;
 const PA_D: usize = 0x040;
+#[allow(dead_code)]
 const PA_PS: usize = 0x080;
 const PA_G: usize = 0x100;
 const PA_COW: usize = 0x200;
@@ -35,6 +38,7 @@ pub struct PageTable {
     page: Page,
 }
 
+#[allow(dead_code)]
 pub struct PTEIterator<'lt, const KERNEL: bool> {
     count: usize,
     i4: u16,
@@ -68,6 +72,14 @@ impl PTE {
         self.0 & PA_P != 0
     }
 
+    pub fn is_cow(&self) -> bool {
+        self.0 & PA_COW != 0
+    }
+
+    pub fn is_mmap(&self) -> bool {
+        self.0 & PA_MMAP != 0
+    }
+
     pub fn pfn(&self) -> usize {
         self.0 & !PA_MASK
     }
@@ -80,6 +92,7 @@ impl PTE {
         self.0 = pfn | attributes;
     }
 
+    #[allow(dead_code)]
     pub fn set_pfn(&mut self, pfn: usize) {
         self.set(pfn, self.attributes())
     }
@@ -212,16 +225,17 @@ impl PageTable {
         Self { page }
     }
 
+    pub fn root_page_table(&self) -> usize {
+        self.page.as_phys()
+    }
+
     pub fn iter_user(&self, range: VRange) -> KResult<PTEIterator<'_, false>> {
         PTEIterator::new(&self.page, range.start().floor(), range.end().ceil())
     }
 
+    #[allow(dead_code)]
     pub fn iter_kernel(&self, range: VRange) -> KResult<PTEIterator<'_, true>> {
         PTEIterator::new(&self.page, range.start().floor(), range.end().ceil())
-    }
-
-    pub fn switch(&self) {
-        arch::set_root_page_table(self.page.as_phys())
     }
 
     pub fn unmap(&self, area: &MMArea) {

@@ -13,10 +13,7 @@ use bindings::{EEXIST, EINVAL, EIO, ENOENT};
 
 use lazy_static::lazy_static;
 
-use super::{
-    mem::{paging::Page, phys::PhysPtr},
-    vfs::DevId,
-};
+use super::{mem::paging::Page, vfs::DevId};
 
 pub fn make_device(major: u32, minor: u32) -> DevId {
     (major << 8) & 0xff00u32 | minor & 0xffu32
@@ -262,17 +259,8 @@ impl BlockDevice {
             self.read_raw(req)?;
 
             for page in pages.iter() {
-                let data = if first_sector_offset != 0 {
-                    let ret = page
-                        .as_cached()
-                        .as_slice(page.len())
-                        .split_at(first_sector_offset as usize)
-                        .1;
-                    first_sector_offset = 0;
-                    ret
-                } else {
-                    page.as_cached().as_slice(page.len())
-                };
+                let data = &page.as_slice()[first_sector_offset as usize..];
+                first_sector_offset = 0;
 
                 match buffer.fill(data)? {
                     FillResult::Done(n) => nfilled += n,

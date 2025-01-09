@@ -5,16 +5,17 @@ use alloc::{
     sync::{Arc, Weak},
     vec::Vec,
 };
-use bindings::{EINVAL, EIO};
+use bindings::EIO;
 
-use itertools::Itertools;
+use dir::Dirs as _;
+use file::ClusterRead;
 
 use crate::{
-    io::{Buffer, RawBuffer, UninitBuffer},
+    io::{Buffer, ByteBuffer, UninitBuffer},
     kernel::{
         block::{make_device, BlockDevice, BlockDeviceRequest},
         constants::{S_IFDIR, S_IFREG},
-        mem::{paging::Page, phys::PhysPtr},
+        mem::paging::Page,
         vfs::{
             dentry::Dentry,
             inode::{define_struct_inode, Ino, Inode, InodeData},
@@ -27,82 +28,10 @@ use crate::{
     KResult,
 };
 
+mod dir;
+mod file;
+
 type ClusterNo = u32;
-
-const ATTR_RO: u8 = 0x01;
-const ATTR_HIDDEN: u8 = 0x02;
-const ATTR_SYSTEM: u8 = 0x04;
-const ATTR_VOLUME_ID: u8 = 0x08;
-const ATTR_DIRECTORY: u8 = 0x10;
-const ATTR_ARCHIVE: u8 = 0x20;
-
-const RESERVED_FILENAME_LOWERCASE: u8 = 0x08;
-
-#[repr(C, packed)]
-struct FatDirectoryEntry {
-    name: [u8; 8],
-    extension: [u8; 3],
-    attr: u8,
-    reserved: u8,
-    create_time_tenth: u8,
-    create_time: u16,
-    create_date: u16,
-    access_date: u16,
-    cluster_high: u16,
-    modify_time: u16,
-    modify_date: u16,
-    cluster_low: u16,
-    size: u32,
-}
-
-impl FatDirectoryEntry {
-    pub fn filename(&self) -> Arc<[u8]> {
-        let fnpos = self.name.iter().position(|&c| c == ' ' as u8).unwrap_or(8);
-        let mut name = self.name[..fnpos].to_vec();
-
-        let extpos = self
-            .extension
-            .iter()
-            .position(|&c| c == ' ' as u8)
-            .unwrap_or(3);
-
-        if extpos != 0 {
-            name.push('.' as u8);
-            name.extend_from_slice(&self.extension[..extpos]);
-        }
-
-        if self.reserved & RESERVED_FILENAME_LOWERCASE != 0 {
-            name.make_ascii_lowercase();
-        }
-
-        name.into()
-    }
-
-    pub fn ino(&self) -> Ino {
-        let cluster_high = (self.cluster_high as u32) << 16;
-        (self.cluster_low as u32 | cluster_high) as Ino
-    }
-
-    fn is_volume_id(&self) -> bool {
-        self.attr & ATTR_VOLUME_ID != 0
-    }
-
-    fn is_free(&self) -> bool {
-        self.name[0] == 0x00
-    }
-
-    fn is_deleted(&self) -> bool {
-        self.name[0] == 0xE5
-    }
-
-    fn is_invalid(&self) -> bool {
-        self.is_volume_id() || self.is_free() || self.is_deleted()
-    }
-
-    fn is_directory(&self) -> bool {
-        self.attr & ATTR_DIRECTORY != 0
-    }
-}
 
 #[derive(Clone, Copy)]
 #[repr(C, packed)]
@@ -230,16 +159,12 @@ impl FatFs {
             0,
         );
 
-        let mut buffer = RawBuffer::new_from_slice(fat.as_mut_slice());
+        let mut buffer = ByteBuffer::from(fat.as_mut_slice());
 
         fatfs
             .device
             .read_some(info.reserved_sectors as usize * 512, &mut buffer)?
             .ok_or(EIO)?;
-
-        if !buffer.filled() {
-            return Err(EIO);
-        }
 
         info.volume_label
             .iter()
@@ -265,63 +190,6 @@ impl<'fat> ClusterIterator<'fat> {
     fn new(fat: &'fat [ClusterNo], start: ClusterNo) -> Self {
         Self { fat, cur: start }
     }
-
-    fn read<'closure, 'vfs>(
-        self,
-        vfs: &'vfs FatFs,
-        offset: usize,
-    ) -> impl Iterator<Item = KResult<&'closure [u8]>> + 'closure
-    where
-        'fat: 'closure,
-        'vfs: 'closure,
-    {
-        let cluster_size = vfs.sectors_per_cluster as usize * 512;
-
-        let skip_count = offset / cluster_size;
-        let mut inner_offset = offset % cluster_size;
-
-        let page_buffer = Page::alloc_one();
-
-        self.skip(skip_count).map(move |cluster| {
-            vfs.read_cluster(cluster, &page_buffer)?;
-
-            let data = page_buffer
-                .as_cached()
-                .as_slice::<u8>(page_buffer.len())
-                .split_at(inner_offset)
-                .1;
-            inner_offset = 0;
-
-            Ok(data)
-        })
-    }
-
-    fn dirs<'closure, 'vfs>(
-        self,
-        vfs: &'vfs FatFs,
-        offset: usize,
-    ) -> impl Iterator<Item = KResult<&'closure FatDirectoryEntry>> + 'closure
-    where
-        'fat: 'closure,
-        'vfs: 'closure,
-    {
-        const ENTRY_SIZE: usize = core::mem::size_of::<FatDirectoryEntry>();
-        self.read(vfs, offset)
-            .map(|result| {
-                let data = result?;
-                if data.len() % ENTRY_SIZE != 0 {
-                    return Err(EINVAL);
-                }
-
-                Ok(unsafe {
-                    core::slice::from_raw_parts(
-                        data.as_ptr() as *const FatDirectoryEntry,
-                        data.len() / ENTRY_SIZE,
-                    )
-                })
-            })
-            .flatten_ok()
-    }
 }
 
 impl<'fat> Iterator for ClusterIterator<'fat> {
@@ -340,6 +208,7 @@ impl<'fat> Iterator for ClusterIterator<'fat> {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Clone)]
 enum FatInode {
     File(Arc<FileInode>),
@@ -380,6 +249,10 @@ impl Inode for FileInode {
         let vfs = vfs.as_any().downcast_ref::<FatFs>().unwrap();
         let fat = vfs.fat.lock_shared();
 
+        if self.size.load(Ordering::Relaxed) as usize == 0 {
+            return Ok(0);
+        }
+
         let iter = ClusterIterator::new(fat.as_ref(), self.ino as ClusterNo).read(vfs, offset);
 
         for data in iter {
@@ -417,34 +290,25 @@ impl Inode for DirInode {
         let vfs = vfs.as_any().downcast_ref::<FatFs>().unwrap();
         let fat = vfs.fat.lock_shared();
 
-        let mut entries = ClusterIterator::new(fat.as_ref(), self.ino as ClusterNo).dirs(vfs, 0);
+        let mut entries = ClusterIterator::new(fat.as_ref(), self.ino as ClusterNo)
+            .read(vfs, 0)
+            .dirs();
 
-        let entry = entries.find_map(|entry| {
-            if entry.is_err() {
-                return Some(entry);
-            }
-
-            let entry = entry.unwrap();
-
-            if !entry.is_invalid() && entry.filename().eq(dentry.name()) {
-                Some(Ok(entry))
-            } else {
-                None
-            }
+        let entry = entries.find(|entry| {
+            entry
+                .as_ref()
+                .map(|entry| &entry.filename == dentry.name())
+                .unwrap_or(true)
         });
 
         match entry {
             None => Ok(None),
             Some(Err(err)) => Err(err),
-            Some(Ok(entry)) => {
-                let ino = entry.ino();
-
-                Ok(Some(vfs.get_or_alloc_inode(
-                    ino,
-                    entry.is_directory(),
-                    entry.size,
-                )))
-            }
+            Some(Ok(entry)) => Ok(Some(vfs.get_or_alloc_inode(
+                entry.cluster as Ino,
+                entry.is_directory,
+                entry.size,
+            ))),
         }
     }
 
@@ -457,32 +321,23 @@ impl Inode for DirInode {
         let vfs = vfs.as_any().downcast_ref::<FatFs>().unwrap();
         let fat = vfs.fat.lock_shared();
 
-        const ENTRY_SIZE: usize = core::mem::size_of::<FatDirectoryEntry>();
-        let cluster_iter =
-            ClusterIterator::new(fat.as_ref(), self.ino as ClusterNo).dirs(vfs, offset);
+        let cluster_iter = ClusterIterator::new(fat.as_ref(), self.ino as ClusterNo)
+            .read(vfs, offset)
+            .dirs();
 
-        let mut nread = 0;
+        let mut nread = 0usize;
         for entry in cluster_iter {
             let entry = entry?;
 
-            if entry.is_invalid() {
-                nread += 1;
-                continue;
-            }
-
-            let ino = entry.ino();
-            let name = entry.filename();
-
-            vfs.get_or_alloc_inode(ino, entry.is_directory(), entry.size);
-
-            if callback(name.as_ref(), ino)?.is_break() {
+            vfs.get_or_alloc_inode(entry.cluster as Ino, entry.is_directory, entry.size);
+            if callback(&entry.filename, entry.cluster as Ino)?.is_break() {
                 break;
             }
 
-            nread += 1;
+            nread += entry.entry_offset as usize;
         }
 
-        Ok(nread * ENTRY_SIZE)
+        Ok(nread)
     }
 }
 

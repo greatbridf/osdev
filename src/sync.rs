@@ -1,3 +1,4 @@
+mod arcswap;
 mod condvar;
 pub mod lock;
 mod locked;
@@ -85,5 +86,6 @@ macro_rules! might_sleep {
     };
 }
 
+pub use arcswap::ArcSwap;
 pub use locked::{AsRefMutPosition, AsRefPosition, Locked, RefMutPosition, RefPosition};
 pub(crate) use might_sleep;

@@ -4,6 +4,7 @@ use crate::kernel::{
 };
 use arch::InterruptContext;
 
+#[allow(dead_code)]
 pub struct KernelStack {
     pages: Page,
     bottom: usize,

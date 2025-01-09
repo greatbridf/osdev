@@ -8,6 +8,7 @@ use bindings::{
 use crate::{
     io::{Buffer, BufferFill},
     kernel::{
+        constants::AT_EMPTY_PATH,
         task::Thread,
         user::{
             dataflow::{CheckedUserPointer, UserBuffer, UserString},
@@ -66,12 +67,16 @@ fn do_dup2(old_fd: u32, new_fd: u32) -> KResult<u32> {
     files.dup_to(old_fd, new_fd, 0)
 }
 
-fn do_pipe(pipe_fd: *mut [u32; 2]) -> KResult<()> {
+fn do_pipe2(pipe_fd: *mut [u32; 2], flags: u32) -> KResult<()> {
     let mut buffer = UserBuffer::new(pipe_fd as *mut u8, core::mem::size_of::<[u32; 2]>())?;
     let files = FileArray::get_current();
-    let (read_fd, write_fd) = files.pipe()?;
+    let (read_fd, write_fd) = files.pipe(flags)?;
 
     buffer.copy(&[read_fd, write_fd])?.ok_or(EFAULT)
+}
+
+fn do_pipe(pipe_fd: *mut [u32; 2]) -> KResult<()> {
+    do_pipe2(pipe_fd, 0)
 }
 
 fn do_getdents(fd: u32, buffer: *mut u8, bufsize: usize) -> KResult<usize> {
@@ -95,23 +100,36 @@ fn do_statx(dirfd: u32, path: *const u8, flags: u32, mask: u32, buffer: *mut u8)
         unimplemented!("AT_STATX_SYNC_TYPE={:x}", flags & AT_STATX_SYNC_TYPE);
     }
 
-    if dirfd != AT_FDCWD as u32 {
-        unimplemented!("dirfd={}", dirfd);
-    }
-
-    let path = UserString::new(path)?;
-    let path = Path::new(path.as_cstr().to_bytes())?;
+    let mut stat: statx = unsafe { MaybeUninit::zeroed().assume_init() };
     let mut buffer = UserBuffer::new(buffer, core::mem::size_of::<statx>())?;
 
-    let file = Dentry::open(
-        &FsContext::get_current(),
-        path,
-        (flags & AT_SYMLINK_NOFOLLOW) != AT_SYMLINK_NOFOLLOW,
-    )?;
+    if (flags & AT_EMPTY_PATH) != 0 {
+        let file = FileArray::get_current().get(dirfd).ok_or(EBADF)?;
+        file.statx(&mut stat, mask)?;
+    } else {
+        let path = UserString::new(path)?;
+        let path = Path::new(path.as_cstr().to_bytes())?;
 
-    let mut stat: statx = unsafe { MaybeUninit::zeroed().assume_init() };
+        let file;
+        if dirfd != AT_FDCWD as u32 && !path.is_absolute() {
+            let at = FileArray::get_current().get(dirfd).ok_or(EBADF)?;
+            file = Dentry::open_at(
+                &FsContext::get_current(),
+                at.as_path().ok_or(EBADF)?,
+                path,
+                (flags & AT_SYMLINK_NOFOLLOW) != AT_SYMLINK_NOFOLLOW,
+            )?;
+        } else {
+            file = Dentry::open(
+                &FsContext::get_current(),
+                path,
+                (flags & AT_SYMLINK_NOFOLLOW) != AT_SYMLINK_NOFOLLOW,
+            )?;
+        }
 
-    file.statx(&mut stat, mask)?;
+        file.statx(&mut stat, mask)?;
+    }
+
     buffer.copy(&stat)?.ok_or(EFAULT)
 }
 
@@ -356,6 +374,7 @@ define_syscall32!(sys_close, do_close, fd: u32);
 define_syscall32!(sys_dup, do_dup, fd: u32);
 define_syscall32!(sys_dup2, do_dup2, old_fd: u32, new_fd: u32);
 define_syscall32!(sys_pipe, do_pipe, pipe_fd: *mut [u32; 2]);
+define_syscall32!(sys_pipe2, do_pipe2, pipe_fd: *mut [u32; 2], flags: u32);
 define_syscall32!(sys_getdents, do_getdents, fd: u32, buffer: *mut u8, bufsize: usize);
 define_syscall32!(sys_getdents64, do_getdents64, fd: u32, buffer: *mut u8, bufsize: usize);
 define_syscall32!(sys_statx, do_statx, fd: u32, path: *const u8, flags: u32, mask: u32, buffer: *mut u8);
@@ -398,5 +417,6 @@ pub(super) fn register() {
     register_syscall!(0xdc, getdents64);
     register_syscall!(0xdd, fcntl64);
     register_syscall!(0xef, sendfile64);
+    register_syscall!(0x14b, pipe2);
     register_syscall!(0x17f, statx);
 }

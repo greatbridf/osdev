@@ -5,6 +5,7 @@ pub struct Link {
     next: Option<NonNull<Link>>,
 }
 
+#[allow(dead_code)]
 impl Link {
     pub const fn new() -> Self {
         Self {

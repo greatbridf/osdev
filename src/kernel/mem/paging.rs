@@ -1,7 +1,6 @@
 use super::address::PFN;
 use super::page_alloc::{alloc_page, alloc_pages, free_pages, PagePtr};
 use super::phys::PhysPtr;
-use crate::bindings::root::EFAULT;
 use crate::io::{Buffer, FillResult};
 use crate::kernel::mem::phys;
 use core::fmt;
@@ -81,12 +80,16 @@ impl Page {
         phys::NoCachePP::new(self.as_phys())
     }
 
-    pub fn zero(&self) {
-        use phys::PhysPtr;
+    pub fn as_slice<'r, 'lt>(&'r self) -> &'lt [u8] {
+        self.as_cached().as_slice(self.len())
+    }
 
-        unsafe {
-            core::ptr::write_bytes(self.as_cached().as_ptr::<u8>(), 0, self.len());
-        }
+    pub fn as_mut_slice<'r, 'lt>(&'r self) -> &'lt mut [u8] {
+        self.as_cached().as_mut_slice(self.len())
+    }
+
+    pub fn zero(&self) {
+        self.as_mut_slice().fill(0);
     }
 
     /// # Safety
@@ -160,16 +163,11 @@ impl PageBuffer {
     }
 
     pub fn as_slice(&self) -> &[u8] {
-        unsafe { core::slice::from_raw_parts(self.page.as_cached().as_ptr::<u8>(), self.offset) }
+        self.page.as_slice()
     }
 
     fn available_as_slice(&self) -> &mut [u8] {
-        unsafe {
-            core::slice::from_raw_parts_mut(
-                self.page.as_cached().as_ptr::<u8>().add(self.offset),
-                self.remaining(),
-            )
-        }
+        &mut self.page.as_mut_slice()[self.offset..]
     }
 }
 
@@ -197,25 +195,4 @@ impl Buffer for PageBuffer {
             Ok(FillResult::Done(len))
         }
     }
-}
-
-/// Copy data from a slice to a `Page`
-///
-/// DONT USE THIS FUNCTION TO COPY DATA TO MMIO ADDRESSES
-///
-/// # Returns
-///
-/// Returns `Err(EFAULT)` if the slice is larger than the page
-/// Returns `Ok(())` otherwise
-pub fn copy_to_page(src: &[u8], dst: &Page) -> Result<(), u32> {
-    use phys::PhysPtr;
-    if src.len() > dst.len() {
-        return Err(EFAULT);
-    }
-
-    unsafe {
-        core::ptr::copy_nonoverlapping(src.as_ptr(), dst.as_cached().as_ptr(), src.len());
-    }
-
-    Ok(())
 }

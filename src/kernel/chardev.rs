@@ -29,6 +29,7 @@ pub enum CharDeviceType {
     Virtual(Box<dyn VirtualCharDevice>),
 }
 
+#[allow(dead_code)]
 pub struct CharDevice {
     name: Arc<str>,
     device: CharDeviceType,

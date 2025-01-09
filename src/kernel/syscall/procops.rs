@@ -1,13 +1,15 @@
 use alloc::borrow::ToOwned;
 use alloc::ffi::CString;
 use arch::{ExtendedContext, InterruptContext};
-use bindings::{EINVAL, ENOENT, ENOTDIR, ESRCH};
+use bindings::{EINVAL, ENOENT, ENOTDIR, ERANGE, ESRCH};
 use bitflags::bitflags;
 
 use crate::elf::ParsedElf32;
 use crate::io::Buffer;
-use crate::kernel::constants::{PR_GET_NAME, PR_SET_NAME, SIG_BLOCK, SIG_SETMASK, SIG_UNBLOCK};
-use crate::kernel::mem::VAddr;
+use crate::kernel::constants::{
+    ENOSYS, PR_GET_NAME, PR_SET_NAME, RLIMIT_STACK, SIG_BLOCK, SIG_SETMASK, SIG_UNBLOCK,
+};
+use crate::kernel::mem::{Page, PageBuffer, VAddr};
 use crate::kernel::task::{
     ProcessList, Scheduler, Signal, SignalAction, Thread, UserDescriptor, WaitObject, WaitType,
 };
@@ -20,6 +22,7 @@ use crate::{kernel::user::dataflow::UserBuffer, prelude::*};
 
 use crate::kernel::vfs::{self, FsContext};
 
+use super::sysinfo::TimeVal;
 use super::{define_syscall32, register_syscall};
 
 fn do_umask(mask: u32) -> KResult<u32> {
@@ -33,9 +36,12 @@ fn do_umask(mask: u32) -> KResult<u32> {
 
 fn do_getcwd(buffer: *mut u8, bufsize: usize) -> KResult<usize> {
     let context = FsContext::get_current();
-    let mut buffer = UserBuffer::new(buffer, bufsize)?;
+    let mut user_buffer = UserBuffer::new(buffer, bufsize)?;
 
+    let page = Page::alloc_one();
+    let mut buffer = PageBuffer::new(page.clone());
     context.cwd.lock().get_path(&context, &mut buffer)?;
+    user_buffer.fill(page.as_slice())?.ok_or(ERANGE)?;
 
     Ok(buffer.wrote())
 }
@@ -89,8 +95,9 @@ fn do_execve(exec: &[u8], argv: Vec<CString>, envp: Vec<CString>) -> KResult<(VA
     // TODO: When `execve` is called by one of the threads in a process, the other threads
     //       should be terminated and `execve` is performed in the thread group leader.
     let elf = ParsedElf32::parse(dentry.clone())?;
-    let result = elf.load(&Thread::current().process.mm_list, argv, envp);
-    if let Ok((ip, sp)) = result {
+    let result = elf.load(argv, envp);
+    if let Ok((ip, sp, mm_list)) = result {
+        Thread::current().process.mm_list.replace(mm_list);
         Thread::current().files.on_exec();
         Thread::current().signal_list.clear_non_ignore();
         Thread::current().set_name(dentry.name().clone());
@@ -169,9 +176,9 @@ bitflags! {
 }
 
 fn do_waitpid(waitpid: u32, arg1: *mut u32, options: u32) -> KResult<u32> {
-    if waitpid != u32::MAX {
-        unimplemented!("waitpid with pid {waitpid}")
-    }
+    // if waitpid != u32::MAX {
+    //     unimplemented!("waitpid with pid {waitpid}")
+    // }
     let options = match UserWaitOptions::from_bits(options) {
         None => unimplemented!("waitpid with options {options}"),
         Some(options) => options,
@@ -429,6 +436,109 @@ fn do_rt_sigaction(
     Ok(())
 }
 
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+struct RLimit {
+    rlim_cur: u64,
+    rlim_max: u64,
+}
+
+fn do_prlimit64(
+    pid: u32,
+    resource: u32,
+    new_limit: *const RLimit,
+    old_limit: *mut RLimit,
+) -> KResult<()> {
+    if pid != 0 {
+        return Err(ENOSYS);
+    }
+
+    match resource {
+        RLIMIT_STACK => {
+            if !old_limit.is_null() {
+                let old_limit = UserPointerMut::new(old_limit)?;
+                let rlimit = RLimit {
+                    rlim_cur: 8 * 1024 * 1024,
+                    rlim_max: 8 * 1024 * 1024,
+                };
+                old_limit.write(rlimit)?;
+            }
+
+            if !new_limit.is_null() {
+                return Err(ENOSYS);
+            }
+            Ok(())
+        }
+        _ => Err(ENOSYS),
+    }
+}
+
+fn do_getrlimit(resource: u32, rlimit: *mut RLimit) -> KResult<()> {
+    do_prlimit64(0, resource, core::ptr::null(), rlimit)
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct RUsage {
+    ru_utime: TimeVal,
+    ru_stime: TimeVal,
+    ru_maxrss: u32,
+    ru_ixrss: u32,
+    ru_idrss: u32,
+    ru_isrss: u32,
+    ru_minflt: u32,
+    ru_majflt: u32,
+    ru_nswap: u32,
+    ru_inblock: u32,
+    ru_oublock: u32,
+    ru_msgsnd: u32,
+    ru_msgrcv: u32,
+    ru_nsignals: u32,
+    ru_nvcsw: u32,
+    ru_nivcsw: u32,
+}
+
+fn do_getrusage(who: u32, rusage: *mut RUsage) -> KResult<()> {
+    if who != 0 {
+        return Err(ENOSYS);
+    }
+
+    let rusage = UserPointerMut::new(rusage)?;
+    rusage.write(RUsage {
+        ru_utime: TimeVal::default(),
+        ru_stime: TimeVal::default(),
+        ru_maxrss: 0,
+        ru_ixrss: 0,
+        ru_idrss: 0,
+        ru_isrss: 0,
+        ru_minflt: 0,
+        ru_majflt: 0,
+        ru_nswap: 0,
+        ru_inblock: 0,
+        ru_oublock: 0,
+        ru_msgsnd: 0,
+        ru_msgrcv: 0,
+        ru_nsignals: 0,
+        ru_nvcsw: 0,
+        ru_nivcsw: 0,
+    })?;
+
+    Ok(())
+}
+
+fn do_chmod(pathname: *const u8, mode: u32) -> KResult<()> {
+    let context = FsContext::get_current();
+    let path = UserString::new(pathname)?;
+    let path = Path::new(path.as_cstr().to_bytes())?;
+
+    let dentry = Dentry::open(&context, path, true)?;
+    if !dentry.is_valid() {
+        return Err(ENOENT);
+    }
+
+    dentry.chmod(mode)
+}
+
 define_syscall32!(sys_chdir, do_chdir, path: *const u8);
 define_syscall32!(sys_umask, do_umask, mask: u32);
 define_syscall32!(sys_getcwd, do_getcwd, buffer: *mut u8, bufsize: usize);
@@ -457,6 +567,15 @@ define_syscall32!(sys_rt_sigprocmask, do_rt_sigprocmask,
     how: u32, set: *mut u64, oldset: *mut u64, sigsetsize: usize);
 define_syscall32!(sys_rt_sigaction, do_rt_sigaction,
     signum: u32, act: *const UserSignalAction, oldact: *mut UserSignalAction, sigsetsize: usize);
+define_syscall32!(sys_prlimit64, do_prlimit64,
+    pid: u32, resource: u32, new_limit: *const RLimit, old_limit: *mut RLimit);
+define_syscall32!(sys_getrlimit, do_getrlimit, resource: u32, rlimit: *mut RLimit);
+define_syscall32!(sys_getrusage, do_getrusage, who: u32, rlimit: *mut RUsage);
+define_syscall32!(sys_chmod, do_chmod, pathname: *const u8, mode: u32);
+
+fn sys_vfork(int_stack: &mut InterruptContext, ext: &mut ExtendedContext) -> usize {
+    sys_fork(int_stack, ext)
+}
 
 fn sys_fork(int_stack: &mut InterruptContext, _: &mut ExtendedContext) -> usize {
     let mut procs = ProcessList::get().lock();
@@ -487,6 +606,7 @@ pub(super) fn register() {
     register_syscall!(0x07, waitpid);
     register_syscall!(0x0b, execve);
     register_syscall!(0x0c, chdir);
+    register_syscall!(0x0f, chmod);
     register_syscall!(0x14, getpid);
     register_syscall!(0x15, mount);
     register_syscall!(0x25, kill);
@@ -495,6 +615,7 @@ pub(super) fn register() {
     register_syscall!(0x3c, umask);
     register_syscall!(0x40, getppid);
     register_syscall!(0x42, setsid);
+    register_syscall!(0x4d, getrusage);
     register_syscall!(0x72, wait4);
     register_syscall!(0x77, sigreturn);
     register_syscall!(0x84, getpgid);
@@ -503,6 +624,8 @@ pub(super) fn register() {
     register_syscall!(0xae, rt_sigaction);
     register_syscall!(0xaf, rt_sigprocmask);
     register_syscall!(0xb7, getcwd);
+    register_syscall!(0xbe, vfork);
+    register_syscall!(0xbf, getrlimit);
     register_syscall!(0xc7, getuid);
     register_syscall!(0xc8, getgid);
     register_syscall!(0xc9, geteuid);
@@ -512,5 +635,6 @@ pub(super) fn register() {
     register_syscall!(0xf3, set_thread_area);
     register_syscall!(0xfc, exit);
     register_syscall!(0x102, set_tid_address);
+    register_syscall!(0x154, prlimit64);
     register_syscall!(0x180, arch_prctl);
 }

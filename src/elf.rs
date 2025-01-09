@@ -2,12 +2,10 @@ use alloc::{ffi::CString, sync::Arc};
 use bitflags::bitflags;
 
 use crate::{
-    io::{RawBuffer, UninitBuffer},
+    io::{ByteBuffer, UninitBuffer},
     kernel::{
         constants::ENOEXEC,
         mem::{FileMapping, MMList, Mapping, Permission, VAddr},
-        task::Thread,
-        user::{dataflow::CheckedUserPointer, UserPointerMut},
         vfs::dentry::Dentry,
     },
     prelude::*,
@@ -204,7 +202,7 @@ impl ParsedElf32 {
         let mut header = UninitBuffer::<Elf32Header>::new();
         file.read(&mut header, 0)?;
 
-        let header = header.assume_init().ok_or(ENOEXEC)?;
+        let header = header.assume_init().map_err(|_| ENOEXEC)?;
         if !header.check_valid() {
             return Err(ENOEXEC);
         }
@@ -212,7 +210,7 @@ impl ParsedElf32 {
         // TODO: Use `UninitBuffer` for `phents` and `shents`.
         let mut phents = vec![Elf32PhEntry::default(); header.ph_entry_count as usize];
         let nread = file.read(
-            &mut RawBuffer::new_from_slice(phents.as_mut_slice()),
+            &mut ByteBuffer::from(phents.as_mut_slice()),
             header.ph_offset as usize,
         )?;
         if nread != header.ph_entry_count as usize * size_of::<Elf32PhEntry>() {
@@ -221,7 +219,7 @@ impl ParsedElf32 {
 
         let mut shents = vec![Elf32ShEntry::default(); header.sh_entry_count as usize];
         let nread = file.read(
-            &mut RawBuffer::new_from_slice(shents.as_mut_slice()),
+            &mut ByteBuffer::from(shents.as_mut_slice()),
             header.sh_offset as usize,
         )?;
         if nread != header.sh_entry_count as usize * size_of::<Elf32ShEntry>() {
@@ -236,20 +234,15 @@ impl ParsedElf32 {
         })
     }
 
-    /// Load the ELF file into memory. Return the entry point address.
+    /// Load the ELF file into memory. Return the entry point address and the memory list containing the program data.
     ///
     /// We clear the user space and load the program headers into memory.
     /// Can't make a way back if failed from now on.
     ///
     /// # Return
-    /// `(entry_ip, sp)`
-    pub fn load(
-        self,
-        mm_list: &MMList,
-        args: Vec<CString>,
-        envs: Vec<CString>,
-    ) -> KResult<(VAddr, VAddr)> {
-        mm_list.clear_user();
+    /// `(entry_ip, sp, mm_list)`
+    pub fn load(self, args: Vec<CString>, envs: Vec<CString>) -> KResult<(VAddr, VAddr, MMList)> {
+        let mm_list = MMList::new();
 
         let mut data_segment_end = VAddr(0);
         for phent in self
@@ -312,67 +305,45 @@ impl ParsedElf32 {
             },
         )?;
 
-        // TODO!!!!!: A temporary workaround.
-        mm_list.switch_page_table();
+        let mut sp = VAddr::from(0xc0000000); // Current stack top
+        let arg_addrs = push_strings(&mm_list, &mut sp, args)?;
+        let env_addrs = push_strings(&mm_list, &mut sp, envs)?;
 
-        let mut sp = 0xc0000000u32;
-        let arg_addrs = args
-            .into_iter()
-            .map(|arg| push_string(&mut sp, arg))
-            .collect::<Vec<_>>();
+        let mut longs = vec![];
+        longs.push(arg_addrs.len() as u32); // argc
+        longs.extend(arg_addrs.into_iter()); // args
+        longs.push(0); // null
+        longs.extend(env_addrs.into_iter()); // envs
+        longs.push(0); // null
+        longs.push(0); // AT_NULL
+        longs.push(0); // AT_NULL
 
-        let env_addrs = envs
-            .into_iter()
-            .map(|env| push_string(&mut sp, env))
-            .collect::<Vec<_>>();
+        sp = sp - longs.len() * size_of::<u32>();
+        sp = VAddr::from(usize::from(sp) & !0xf); // Align to 16 bytes
 
-        let longs = 2 // Null auxiliary vector entry
-            + env_addrs.len() + 1 // Envs + null
-            + arg_addrs.len() + 1 // Args + null
-            + 1; // argc
+        mm_list.access_mut(sp, longs.len() * size_of::<u32>(), |offset, data| {
+            data.copy_from_slice(unsafe {
+                core::slice::from_raw_parts(
+                    longs.as_ptr().byte_add(offset) as *const u8,
+                    data.len(),
+                )
+            })
+        })?;
 
-        sp -= longs as u32 * 4;
-        sp &= !0xf; // Align to 16 bytes
-
-        let mut cursor = (0..longs)
-            .map(|idx| UserPointerMut::<u32>::new_vaddr(sp as usize + size_of::<u32>() * idx));
-
-        // argc
-        cursor.next().unwrap()?.write(arg_addrs.len() as u32)?;
-
-        // args
-        for arg_addr in arg_addrs.into_iter() {
-            cursor.next().unwrap()?.write(arg_addr)?;
-        }
-        cursor.next().unwrap()?.write(0)?; // null
-
-        // envs
-        for env_addr in env_addrs.into_iter() {
-            cursor.next().unwrap()?.write(env_addr)?;
-        }
-        cursor.next().unwrap()?.write(0)?; // null
-
-        // Null auxiliary vector
-        cursor.next().unwrap()?.write(0)?; // AT_NULL
-        cursor.next().unwrap()?.write(0)?; // AT_NULL
-
-        // TODO!!!!!: A temporary workaround.
-        Thread::current().process.mm_list.switch_page_table();
-
-        assert!(cursor.next().is_none());
-        Ok((VAddr(self.entry as usize), VAddr(sp as usize)))
+        Ok((VAddr(self.entry as usize), sp, mm_list))
     }
 }
 
-fn push_string(sp: &mut u32, string: CString) -> u32 {
-    let data = string.as_bytes_with_nul();
-    let new_sp = (*sp - data.len() as u32) & !0x3; // Align to 4 bytes
+fn push_strings(mm_list: &MMList, sp: &mut VAddr, strings: Vec<CString>) -> KResult<Vec<u32>> {
+    let mut addrs = vec![];
+    for string in strings {
+        let len = string.as_bytes_with_nul().len();
+        *sp = *sp - len;
+        mm_list.access_mut(*sp, len, |offset, data| {
+            data.copy_from_slice(&string.as_bytes_with_nul()[offset..offset + data.len()])
+        })?;
+        addrs.push(usize::from(*sp) as u32);
+    }
 
-    CheckedUserPointer::new(new_sp as *const u8, data.len())
-        .unwrap()
-        .write(data.as_ptr() as _, data.len())
-        .unwrap();
-
-    *sp = new_sp;
-    new_sp
+    Ok(addrs)
 }

@@ -29,7 +29,7 @@ pub struct Process {
     pub pid: u32,
 
     pub wait_list: WaitList,
-    pub mm_list: Arc<MMList>,
+    pub mm_list: MMList,
 
     /// Parent process
     ///

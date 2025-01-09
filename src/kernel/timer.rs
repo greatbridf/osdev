@@ -13,6 +13,7 @@ impl Ticks {
         self.0 / 100
     }
 
+    #[allow(dead_code)]
     pub fn in_msecs(&self) -> usize {
         self.0 * 10
     }

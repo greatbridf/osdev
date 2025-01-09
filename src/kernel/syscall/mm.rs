@@ -108,8 +108,14 @@ impl MapArgument<'_, UserMmapFlags> for MapArgumentImpl {
     }
 }
 
+#[allow(unused_variables)]
+fn do_madvise(addr: usize, len: usize, advice: u32) -> KResult<()> {
+    Ok(())
+}
+
 define_syscall32!(sys_brk, do_brk, addr: usize);
 define_syscall32!(sys_munmap, do_munmap, addr: usize, len: usize);
+define_syscall32!(sys_madvise, do_madvise, addr: usize, len: usize, advice: u32);
 define_syscall32!(sys_mmap_pgoff, do_mmap_pgoff,
     addr: usize, len: usize,
     prot: UserMmapProtocol,
@@ -120,4 +126,5 @@ pub(super) fn register() {
     register_syscall!(0x2d, brk);
     register_syscall!(0x5b, munmap);
     register_syscall!(0xc0, mmap_pgoff);
+    register_syscall!(0xdb, madvise);
 }

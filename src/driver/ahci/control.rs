@@ -8,6 +8,7 @@ use super::{BitsIterator, GHC_IE};
 ///
 /// All reads and writes to this struct is volatile
 ///
+#[allow(dead_code)]
 #[repr(C)]
 struct AdapterControlData {
     capabilities: u32,
@@ -26,6 +27,7 @@ struct AdapterControlData {
     vendor: [u8; 96],
 }
 
+#[allow(dead_code)]
 const CONTROL_CAP: usize = 0;
 const CONTROL_GHC: usize = 1;
 const CONTROL_IS: usize = 2;

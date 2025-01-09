@@ -61,6 +61,7 @@ fn vwrite<T: Sized + Copy>(refval: *mut T, val: T) {
     unsafe { refval.write_volatile(val) }
 }
 
+#[allow(dead_code)]
 struct Device {
     control_base: usize,
     control: AdapterControl,

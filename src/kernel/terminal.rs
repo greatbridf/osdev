@@ -28,16 +28,24 @@ const VQUIT: usize = 1;
 const VERASE: usize = 2;
 const VKILL: usize = 3;
 const VEOF: usize = 4;
+#[allow(dead_code)]
 const VTIME: usize = 5;
 const VMIN: usize = 6;
+#[allow(dead_code)]
 const VSWTC: usize = 7;
+#[allow(dead_code)]
 const VSTART: usize = 8;
+#[allow(dead_code)]
 const VSTOP: usize = 9;
 const VSUSP: usize = 10;
 const VEOL: usize = 11;
+#[allow(dead_code)]
 const VREPRINT: usize = 12;
+#[allow(dead_code)]
 const VDISCARD: usize = 13;
+#[allow(dead_code)]
 const VWERASE: usize = 14;
+#[allow(dead_code)]
 const VLNEXT: usize = 15;
 const VEOL2: usize = 16;
 

@@ -60,6 +60,7 @@ impl core::fmt::Debug for Dentry {
 }
 
 const D_DIRECTORY: u64 = 1;
+#[allow(dead_code)]
 const D_MOUNTPOINT: u64 = 2;
 const D_SYMLINK: u64 = 4;
 const D_REGULAR: u64 = 8;
@@ -310,6 +311,15 @@ impl Dentry {
         Dentry::open_recursive(context, &cwd, path, follow_symlinks, 0)
     }
 
+    pub fn open_at(
+        context: &FsContext,
+        at: &Arc<Self>,
+        path: Path,
+        follow_symlinks: bool,
+    ) -> KResult<Arc<Self>> {
+        Dentry::open_recursive(context, at, path, follow_symlinks, 0)
+    }
+
     pub fn get_path(
         self: &Arc<Dentry>,
         context: &FsContext,
@@ -422,5 +432,9 @@ impl Dentry {
         } else {
             self.parent.get_inode().unwrap().mknod(self, mode, devid)
         }
+    }
+
+    pub fn chmod(&self, mode: Mode) -> KResult<()> {
+        self.get_inode()?.chmod(mode)
     }
 }

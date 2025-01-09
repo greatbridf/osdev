@@ -21,13 +21,19 @@ pub const CLOCK_MONOTONIC: u32 = 1;
 
 pub const ENXIO: u32 = 6;
 pub const ENOEXEC: u32 = 8;
+pub const ENOSYS: u32 = 38;
 
+#[allow(dead_code)]
 pub const S_IFIFO: u32 = 0o010000;
 pub const S_IFCHR: u32 = 0o020000;
 pub const S_IFDIR: u32 = 0o040000;
 pub const S_IFBLK: u32 = 0o060000;
 pub const S_IFREG: u32 = 0o100000;
 pub const S_IFLNK: u32 = 0o120000;
+
+pub const RLIMIT_STACK: u32 = 0x3;
+
+pub const AT_EMPTY_PATH: u32 = 0x1000;
 
 bitflags! {
     #[derive(Debug, Clone, Copy)]

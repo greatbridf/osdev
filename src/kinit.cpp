@@ -130,7 +130,6 @@ extern "C" void NORETURN kernel_init(bootloader_data* data) {
     }
 
     setup_buddy(addr_max);
-    init_allocator();
 
     using namespace mem::paging;
     auto kernel_stack_pfn = page_to_pfn(c_alloc_pages(9)) << 12;

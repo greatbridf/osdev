@@ -18,7 +18,7 @@ pub unsafe fn init_thiscpu() {
     let status = arch::CPUStatus::new_thiscpu(|layout| {
         // TODO: Use page size defined in `arch`.
         let page_count = (layout.size() + 0x1000 - 1) / 0x1000;
-        let page = Page::alloc_ceil(page_count);
+        let page = Page::early_alloc_ceil(page_count);
         let pointer = page.as_cached().as_ptr();
         core::mem::forget(page);
 

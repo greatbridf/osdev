@@ -7,6 +7,8 @@ use core::{ptr::NonNull, sync::atomic::AtomicU32};
 use lazy_static::lazy_static;
 
 const MAX_PAGE_ORDER: u32 = 10;
+const PAGE_ALLOC_COSTLY_ORDER: u32 = 3;
+const BATCH_SIZE: u32 = 64;
 const PAGE_ARRAY: *mut Page = 0xffffff8040000000 as *mut Page;
 
 pub(super) type PagePtr = Ptr<Page>;
@@ -109,6 +111,7 @@ bitflags! {
         const SLAB    = 1 << 3;
         const DIRTY   = 1 << 4;
         const FREE    = 1 << 5;
+        const LOCAL   = 1 << 6;
     }
 }
 
@@ -136,6 +139,47 @@ unsafe impl Send for Zone {}
 struct Zone {
     free_areas: [FreeArea; MAX_PAGE_ORDER as usize + 1],
 }
+
+struct PerCpuPages {
+    batch: u32,
+    high: u32,
+    free_areas: [FreeArea; PAGE_ALLOC_COSTLY_ORDER as usize + 1],
+}
+
+impl PerCpuPages {
+    const fn new() -> Self {
+        Self {
+            batch: BATCH_SIZE,
+            high: 0,
+            free_areas: [const { FreeArea::new() }; PAGE_ALLOC_COSTLY_ORDER as usize + 1],
+        }
+    }
+
+    fn get_free_pages(&mut self, order: u32) -> PagePtr {
+        assert!(order <= PAGE_ALLOC_COSTLY_ORDER);
+
+        loop {
+            let pages_ptr = self.free_areas[order as usize].get_free_pages();
+            if pages_ptr.is_some() {
+                return pages_ptr;
+            }
+
+            let batch = self.batch >> order;
+            ZONE.lock()
+                .get_bulk_free_pages(&mut self.free_areas[order as usize], order, batch);
+        }
+    }
+
+    fn free_pages(&mut self, mut pages_ptr: PagePtr, order: u32) {
+        assert!(order <= PAGE_ALLOC_COSTLY_ORDER);
+        assert_eq!(unsafe { pages_ptr.load_refcount() }, 0);
+        assert_eq!(pages_ptr.get_order(), order);
+
+        unimplemented!()
+    }
+}
+
+
 
 impl Page {
     fn set_flags(&mut self, flags: PageFlags) {
@@ -174,6 +218,10 @@ impl Page {
     pub fn is_free(&self) -> bool {
         self.flags.contains(PageFlags::FREE)
     }
+
+    pub fn is_local(&self) -> bool {
+        self.flags.contains(PageFlags::LOCAL)
+    }
 }
 
 impl FreeArea {
@@ -184,7 +232,7 @@ impl FreeArea {
         }
     }
 
-    fn alloc_pages(&mut self) -> PagePtr {
+    fn get_free_pages(&mut self) -> PagePtr {
         if let Some(pages_link) = self.free_list.next_mut() {
             assert_ne!(self.count, 0);
 
@@ -192,7 +240,6 @@ impl FreeArea {
             let pages_ptr = Ptr::from_raw(pages_ptr);
 
             self.count -= 1;
-            pages_ptr.as_mut().remove_flags(PageFlags::FREE);
             pages_link.remove();
 
             pages_ptr
@@ -222,22 +269,33 @@ impl Zone {
         }
     }
 
-    fn alloc_pages(&mut self, order: u32) -> PagePtr {
+    /// Only used for per-cpu pages
+    fn get_bulk_free_pages(&mut self, free_area: &mut FreeArea, order: u32, count: u32) -> u32 {
+        for i in 0..count {
+            let pages_ptr = self.get_free_pages(order);
+            if pages_ptr.is_none() {
+                return i;
+            }
+
+            pages_ptr.as_mut().set_flags(PageFlags::LOCAL);
+            free_area.add_pages(pages_ptr);
+        }
+        count
+    }
+
+    fn get_free_pages(&mut self, order: u32) -> PagePtr {
         for current_order in order..=MAX_PAGE_ORDER {
-            let pages_ptr = self.free_areas[current_order as usize].alloc_pages();
+            let pages_ptr = self.free_areas[current_order as usize].get_free_pages();
             if pages_ptr.is_none() {
                 continue;
             }
 
-            unsafe {
-                pages_ptr.as_mut().increase_refcount();
-            }
             pages_ptr.as_mut().set_order(order);
 
             if current_order > order {
                 self.expand(pages_ptr, current_order, order);
             }
-            assert!(pages_ptr.as_ref().is_present() && !pages_ptr.as_ref().is_free());
+            assert!(pages_ptr.as_ref().is_present() && pages_ptr.as_ref().is_free());
             return pages_ptr;
         }
         PagePtr::new(None)
@@ -297,6 +355,9 @@ impl Zone {
         if !(pages_ptr.as_ref().is_free()) {
             return false;
         }
+        if pages_ptr.as_ref().is_local() {
+            return false;
+        }
         if pages_ptr.as_ref().order != order {
             return false;
         }
@@ -324,16 +385,56 @@ impl Zone {
     }
 }
 
+#[arch::define_percpu]
+static PER_CPU_PAGES: PerCpuPages = PerCpuPages::new();
+
 lazy_static! {
     static ref ZONE: Spin<Zone> = Spin::new(Zone::new());
 }
 
+fn __alloc_pages(order: u32) -> PagePtr {
+    let pages_ptr;
+
+    if order <= PAGE_ALLOC_COSTLY_ORDER {
+        unsafe {
+            pages_ptr = PER_CPU_PAGES.as_mut().get_free_pages(order);
+        }
+    } else {
+        pages_ptr = ZONE.lock().get_free_pages(order);
+    }
+
+    unsafe {
+        pages_ptr.as_mut().increase_refcount();
+    }
+    pages_ptr.as_mut().remove_flags(PageFlags::FREE);
+    pages_ptr
+}
+
+fn __free_pages(pages_ptr: PagePtr, order: u32) {
+    if order <= PAGE_ALLOC_COSTLY_ORDER {
+        unsafe {
+            PER_CPU_PAGES.as_mut().free_pages(pages_ptr, order);
+        }
+    } else {
+        ZONE.lock().free_pages(pages_ptr, order);
+    }
+}
+
 pub(super) fn alloc_page() -> PagePtr {
-    ZONE.lock().alloc_pages(0)
+    __alloc_pages(0)
 }
 
 pub(super) fn alloc_pages(order: u32) -> PagePtr {
-    ZONE.lock().alloc_pages(order)
+    __alloc_pages(order)
+}
+
+pub(super) fn early_alloc_pages(order: u32) -> PagePtr {
+    let pages_ptr = ZONE.lock().get_free_pages(order);
+    unsafe {
+        pages_ptr.as_mut().increase_refcount();
+    }
+    pages_ptr.as_mut().remove_flags(PageFlags::FREE);
+    pages_ptr
 }
 
 pub(super) fn free_pages(page_ptr: PagePtr, order: u32) {
@@ -364,17 +465,17 @@ pub extern "C" fn page_to_pfn(page: *const Page) -> usize {
 
 #[no_mangle]
 pub extern "C" fn c_alloc_page() -> *const Page {
-    ZONE.lock().alloc_pages(0).as_ptr() as *const Page
+    alloc_page().as_ptr() as *const Page
 }
 
 #[no_mangle]
 pub extern "C" fn c_alloc_pages(order: u32) -> *const Page {
-    ZONE.lock().alloc_pages(order).as_ptr() as *const Page
+    alloc_pages(order).as_ptr() as *const Page
 }
 
 #[no_mangle]
 pub extern "C" fn c_alloc_page_table() -> usize {
-    let pfn: PFN = ZONE.lock().alloc_pages(0).into();
+    let pfn: PFN = alloc_page().into();
     let paddr: usize = usize::from(pfn) << 12;
     unsafe {
         core::ptr::write_bytes(paddr as *mut u8, 0, 4096);

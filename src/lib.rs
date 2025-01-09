@@ -106,6 +106,7 @@ global_asm!(
 
 extern "C" {
     fn to_init_process();
+    fn init_allocator();
 }
 
 #[no_mangle]
@@ -113,6 +114,8 @@ pub extern "C" fn rust_kinit(early_kstack_pfn: usize) -> ! {
     // We don't call global constructors.
     // Rust doesn't need that, and we're not going to use global variables in C++.
     unsafe { init_thiscpu() };
+
+    unsafe { init_allocator() };
 
     kernel::interrupt::init().unwrap();
 

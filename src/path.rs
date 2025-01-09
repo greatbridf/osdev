@@ -2,6 +2,8 @@ use crate::prelude::*;
 
 use bindings::ENOENT;
 
+use core::fmt::{self, Debug, Formatter};
+
 pub struct Path<'lt> {
     all: &'lt [u8],
 }
@@ -77,5 +79,11 @@ impl<'lt> Iterator for PathIterator<'lt> {
             cur if cur == b".." => Some(PathComponent::Parent),
             cur => Some(PathComponent::Name(cur)),
         }
+    }
+}
+
+impl Debug for Path<'_> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "Path({:?})", self.all)
     }
 }

@@ -130,12 +130,33 @@ fn do_sysinfo(info: *mut Sysinfo) -> KResult<()> {
     })
 }
 
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct TMS {
+    tms_utime: u32,
+    tms_stime: u32,
+    tms_cutime: u32,
+    tms_cstime: u32,
+}
+
+fn do_times(tms: *mut TMS) -> KResult<()> {
+    let tms = UserPointerMut::new(tms)?;
+    tms.write(TMS {
+        tms_utime: 0,
+        tms_stime: 0,
+        tms_cutime: 0,
+        tms_cstime: 0,
+    })
+}
+
 define_syscall32!(sys_newuname, do_newuname, buffer: *mut NewUTSName);
 define_syscall32!(sys_gettimeofday, do_gettimeofday, timeval: *mut TimeVal, timezone: *mut ());
 define_syscall32!(sys_clock_gettime64, do_clock_gettime64, clock_id: u32, timespec: *mut TimeSpec);
 define_syscall32!(sys_sysinfo, do_sysinfo, info: *mut Sysinfo);
+define_syscall32!(sys_times, do_times, tms: *mut TMS);
 
 pub(super) fn register() {
+    register_syscall!(0x2b, times);
     register_syscall!(0x4e, gettimeofday);
     register_syscall!(0x74, sysinfo);
     register_syscall!(0x7a, newuname);

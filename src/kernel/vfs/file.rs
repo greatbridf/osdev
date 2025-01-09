@@ -15,13 +15,15 @@ use crate::{
 };
 
 use alloc::{collections::vec_deque::VecDeque, sync::Arc};
-use bindings::{EBADF, EFAULT, EINTR, EINVAL, ENOTDIR, ENOTTY, EOVERFLOW, EPIPE, ESPIPE, S_IFMT};
+use bindings::{
+    statx, EBADF, EFAULT, EINTR, EINVAL, ENOTDIR, ENOTTY, EOVERFLOW, EPIPE, ESPIPE, S_IFMT,
+};
 use bitflags::bitflags;
 
 use super::{
     dentry::Dentry,
     inode::{Mode, WriteOffset},
-    s_isblk, s_isreg,
+    s_isblk, s_isdir, s_isreg,
 };
 
 pub struct InodeFile {
@@ -545,6 +547,20 @@ impl File {
             File::Inode(_) => Ok(event),
             File::TTY(tty) => tty.poll(event),
             _ => unimplemented!("Poll event not supported."),
+        }
+    }
+
+    pub fn statx(&self, buffer: &mut statx, mask: u32) -> KResult<()> {
+        match self {
+            File::Inode(inode) => inode.dentry.statx(buffer, mask),
+            _ => Err(EBADF),
+        }
+    }
+
+    pub fn as_path(&self) -> Option<&Arc<Dentry>> {
+        match self {
+            File::Inode(inode_file) if s_isdir(inode_file.mode) => Some(&inode_file.dentry),
+            _ => None,
         }
     }
 }

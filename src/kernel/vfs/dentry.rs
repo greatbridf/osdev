@@ -311,6 +311,15 @@ impl Dentry {
         Dentry::open_recursive(context, &cwd, path, follow_symlinks, 0)
     }
 
+    pub fn open_at(
+        context: &FsContext,
+        at: &Arc<Self>,
+        path: Path,
+        follow_symlinks: bool,
+    ) -> KResult<Arc<Self>> {
+        Dentry::open_recursive(context, at, path, follow_symlinks, 0)
+    }
+
     pub fn get_path(
         self: &Arc<Dentry>,
         context: &FsContext,

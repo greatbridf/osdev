@@ -40,8 +40,8 @@ fn fault_handler(int_stack: &mut InterruptContext) {
     match int_stack.int_no {
         // Invalid Op or Double Fault
         14 => handle_page_fault(int_stack),
-        13 if int_stack.ss == 0 => ProcessList::kill_current(Signal::SIGILL),
-        6 | 8 if int_stack.ss == 0 => ProcessList::kill_current(Signal::SIGSEGV),
+        13 if int_stack.cs & 0x3 != 0 => ProcessList::kill_current(Signal::SIGILL),
+        6 | 8 if int_stack.cs & 0x3 != 0 => ProcessList::kill_current(Signal::SIGSEGV),
         _ => panic!("Unhandled fault: {}", int_stack.int_no),
     }
 }

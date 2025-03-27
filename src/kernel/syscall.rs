@@ -96,6 +96,7 @@ macro_rules! arg_register {
     };
 }
 
+#[allow(unused_macros)]
 macro_rules! format_expand {
     ($name:ident, $arg:tt) => {
         format_args!("{}: {:x?}", stringify!($name), $arg)
@@ -108,34 +109,34 @@ macro_rules! format_expand {
 macro_rules! syscall32_call {
     ($is:ident, $handler:ident, $($arg:ident: $type:ty),*) => {{
         use $crate::kernel::syscall::{MapArgument, MapArgumentImpl, arg_register};
+        #[allow(unused_imports)]
         use $crate::kernel::syscall::{MapReturnValue, format_expand};
-        use $crate::{kernel::task::Thread, println_info};
+        #[allow(unused_imports)]
+        use $crate::{kernel::task::Thread, println_trace};
 
         $(
             let $arg: $type =
                 MapArgumentImpl::map_arg(arg_register!(${index()}, $is));
         )*
 
-        if cfg!(feature = "debug_syscall") {
-            println_info!(
-                "tid{}: {}({}) => {{",
-                Thread::current().tid,
-                stringify!($handler),
-                format_expand!($($arg, $arg),*),
-            );
-        }
+        println_trace!(
+            "trace_syscall",
+            "tid{}: {}({}) => {{",
+            Thread::current().tid,
+            stringify!($handler),
+            format_expand!($($arg, $arg),*),
+        );
 
         let result = $handler($($arg),*);
 
-        if cfg!(feature = "debug_syscall") {
-            println_info!(
-                "tid{}: {}({}) => }} = {:x?}",
-                Thread::current().tid,
-                stringify!($handler),
-                format_expand!($($arg, $arg),*),
-                result
-            );
-        }
+        println_trace!(
+            "trace_syscall",
+            "tid{}: {}({}) => }} = {:x?}",
+            Thread::current().tid,
+            stringify!($handler),
+            format_expand!($($arg, $arg),*),
+            result
+        );
 
         match result {
             Ok(val) => MapReturnValue::map_ret(val),

@@ -2,7 +2,10 @@ use core::{pin::Pin, ptr::NonNull};
 
 use arch::CPUStatus;
 
-use super::mem::{paging::Page, phys::PhysPtr as _};
+use super::{
+    mem::{paging::Page, phys::PhysPtr as _},
+    task::init_rq_thiscpu,
+};
 
 #[arch::define_percpu]
 static CPU_STATUS: Option<CPUStatus> = None;
@@ -29,4 +32,5 @@ pub unsafe fn init_thiscpu() {
 
     // SAFETY: `CPU_STATUS` is global static and initialized only once.
     current_cpu().init();
+    init_rq_thiscpu();
 }

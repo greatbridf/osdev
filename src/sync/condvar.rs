@@ -1,5 +1,8 @@
 use crate::{
-    kernel::task::{Scheduler, Thread},
+    kernel::{
+        console::println_trace,
+        task::{Scheduler, Thread, ThreadState},
+    },
     prelude::*,
     sync::preempt,
 };
@@ -28,33 +31,36 @@ impl<const I: bool> CondVar<I> {
         }
     }
 
-    fn wake(schedule: &mut Scheduler, thread: &Arc<Thread>) {
+    fn wake(thread: &Arc<Thread>) {
+        println_trace!("trace_condvar", "tid({}) is trying to wake", thread.tid);
         if I {
-            schedule.iwake(thread);
+            thread.iwake();
         } else {
-            schedule.uwake(thread);
+            thread.uwake();
         }
+        println_trace!("trace_condvar", "tid({}) is awake", thread.tid);
     }
 
-    fn sleep(scheduler: &mut Scheduler) {
+    fn sleep() {
+        let thread = Thread::current();
+        println_trace!("trace_condvar", "tid({}) is trying to sleep", thread.tid);
         if I {
-            scheduler.isleep(&Thread::current());
+            thread.isleep();
         } else {
-            scheduler.usleep(&Thread::current());
+            thread.usleep();
         }
+        println_trace!("trace_condvar", "tid({}) is sleeping", thread.tid);
     }
 
     pub fn notify_one(&self) {
-        let mut scheduler = Scheduler::get().lock_irq();
         if let Some(waiter) = self.waiters.lock().pop_front() {
-            Self::wake(scheduler.as_mut(), &waiter);
+            Self::wake(&waiter);
         }
     }
 
     pub fn notify_all(&self) {
-        let mut scheduler = Scheduler::get().lock_irq();
         self.waiters.lock().retain(|waiter| {
-            Self::wake(scheduler.as_mut(), &waiter);
+            Self::wake(&waiter);
             false
         });
     }
@@ -63,18 +69,10 @@ impl<const I: bool> CondVar<I> {
     ///
     /// # Might Sleep
     /// This function **might sleep**, so call it in a preemptible context.
-    ///
-    /// # Return
-    /// - `true`: a pending signal was received
     pub fn wait<'a, T, S: LockStrategy, const W: bool>(&self, guard: &mut Guard<'a, T, S, W>) {
         preempt::disable();
-        {
-            let mut scheduler = Scheduler::get().lock_irq();
-            // We have scheduler locked and IRQ disabled. So no one could be waking us up for now.
-
-            self.waiters.lock().push_back(Thread::current().clone());
-            Self::sleep(scheduler.as_mut());
-        }
+        self.waiters.lock().push_back(Thread::current().clone());
+        Self::sleep();
 
         // TODO!!!: Another way to do this:
         //
@@ -86,8 +84,10 @@ impl<const I: bool> CondVar<I> {
         Scheduler::schedule();
         unsafe { guard.force_relock() };
 
+        Thread::current().state.assert(ThreadState::RUNNING);
+
         self.waiters
-            .lock_irq()
+            .lock()
             .retain(|waiter| waiter.tid != Thread::current().tid);
     }
 }

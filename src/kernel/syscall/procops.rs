@@ -584,7 +584,7 @@ fn sys_fork(int_stack: &mut InterruptContext, _: &mut ExtendedContext) -> usize 
     new_int_stack.rax = 0;
     new_int_stack.eflags = 0x200;
     new_thread.fork_init(new_int_stack);
-    Scheduler::get().lock_irq().uwake(&new_thread);
+    new_thread.uwake();
     new_thread.process.pid as usize
 }
 

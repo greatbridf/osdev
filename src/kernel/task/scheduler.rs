@@ -3,16 +3,13 @@ use core::{
     sync::atomic::{compiler_fence, fence, Ordering},
 };
 
-use crate::{prelude::*, sync::preempt};
+use crate::{kernel::console::println_trace, prelude::*, sync::preempt};
 
-use alloc::{collections::vec_deque::VecDeque, sync::Arc};
-use lazy_static::lazy_static;
+use alloc::sync::Arc;
 
-use super::{Thread, ThreadState};
+use super::{readyqueue::rq_thiscpu, Thread};
 
-pub struct Scheduler {
-    ready: VecDeque<Arc<Thread>>,
-}
+pub struct Scheduler;
 
 /// Idle task thread
 /// All the idle task threads belongs to `pid 0` and are pinned to the current cpu.
@@ -23,12 +20,6 @@ static IDLE_TASK: Option<NonNull<Thread>> = None;
 #[arch::define_percpu]
 static CURRENT: Option<NonNull<Thread>> = None;
 
-lazy_static! {
-    static ref GLOBAL_SCHEDULER: Spin<Scheduler> = Spin::new(Scheduler {
-        ready: VecDeque::new(),
-    });
-}
-
 impl Scheduler {
     /// `Scheduler` might be used in various places. Do not hold it for a long time.
     ///
@@ -37,7 +28,8 @@ impl Scheduler {
     /// rescheduling during access to the scheduler. Disabling preemption will do the same.
     ///
     /// Drop the lock before calling `schedule`.
-    pub fn get() -> &'static Spin<Self> {
+    pub fn get() -> &'static Self {
+        static GLOBAL_SCHEDULER: Scheduler = Scheduler;
         &GLOBAL_SCHEDULER
     }
 
@@ -58,11 +50,6 @@ impl Scheduler {
     pub unsafe fn set_idle_and_current(thread: Arc<Thread>) {
         // We don't wake the idle thread to prevent from accidentally being scheduled there.
         thread.init(idle_task as *const () as usize);
-        assert_eq!(
-            thread.oncpu.swap(true, Ordering::AcqRel),
-            false,
-            "Idle task is already on cpu"
-        );
 
         let old = IDLE_TASK.swap(NonNull::new(Arc::into_raw(thread.clone()) as *mut _));
         assert!(old.is_none(), "Idle task is already set");
@@ -71,88 +58,11 @@ impl Scheduler {
         assert!(old.is_none(), "Current is already set");
     }
 
-    pub fn pop(&mut self) -> Option<Arc<Thread>> {
-        self.ready.pop_front()
-    }
-
-    pub unsafe fn swap_current(&mut self, next: Arc<Thread>) {
-        {
-            let mut next_state = next.state.lock();
-            assert_eq!(*next_state, ThreadState::Ready);
-            *next_state = ThreadState::Running;
-            assert_eq!(next.oncpu.swap(true, Ordering::AcqRel), false);
+    pub fn activate(&self, thread: &Arc<Thread>) {
+        // TODO: Select an appropriate ready queue to enqueue.
+        if !thread.on_rq.swap(true, Ordering::AcqRel) {
+            rq_thiscpu().lock_irq().put(thread.clone());
         }
-
-        let old: Option<NonNull<Thread>> =
-            CURRENT.swap(NonNull::new(Arc::into_raw(next) as *mut _));
-
-        if let Some(thread_pointer) = old {
-            let thread = Arc::from_raw(thread_pointer.as_ptr());
-            let mut state = thread.state.lock();
-            assert_eq!(thread.oncpu.swap(false, Ordering::AcqRel), true);
-
-            if let ThreadState::Running = *state {
-                *state = ThreadState::Ready;
-                self.enqueue(&thread);
-            }
-        }
-    }
-
-    fn enqueue(&mut self, thread: &Arc<Thread>) {
-        self.ready.push_back(thread.clone());
-    }
-
-    pub fn usleep(&mut self, thread: &Arc<Thread>) {
-        let mut state = thread.state.lock();
-        assert_eq!(*state, ThreadState::Running);
-        // No need to dequeue. We have proved that the thread is running so not in the queue.
-
-        *state = ThreadState::USleep;
-    }
-
-    pub fn uwake(&mut self, thread: &Arc<Thread>) {
-        let mut state = thread.state.lock();
-        assert_eq!(*state, ThreadState::USleep);
-
-        if thread.oncpu.load(Ordering::Acquire) {
-            *state = ThreadState::Running;
-        } else {
-            *state = ThreadState::Ready;
-            self.enqueue(&thread);
-        }
-    }
-
-    pub fn isleep(&mut self, thread: &Arc<Thread>) {
-        let mut state = thread.state.lock();
-        assert_eq!(*state, ThreadState::Running);
-        // No need to dequeue. We have proved that the thread is running so not in the queue.
-
-        *state = ThreadState::ISleep;
-    }
-
-    pub fn iwake(&mut self, thread: &Arc<Thread>) {
-        let mut state = thread.state.lock();
-
-        match *state {
-            ThreadState::Ready | ThreadState::Running | ThreadState::USleep => return,
-            ThreadState::ISleep => {
-                if thread.oncpu.load(Ordering::Acquire) {
-                    *state = ThreadState::Running;
-                } else {
-                    *state = ThreadState::Ready;
-                    self.enqueue(&thread);
-                }
-            }
-            state => panic!("Invalid transition from state {:?} to `Ready`", state),
-        }
-    }
-
-    /// Set `Running` threads to the `Zombie` state.
-    pub fn set_zombie(&mut self, thread: &Arc<Thread>) {
-        let mut state = thread.state.lock();
-        assert_eq!(*state, ThreadState::Running);
-
-        *state = ThreadState::Zombie;
     }
 }
 
@@ -198,14 +108,16 @@ extern "C" fn idle_task() {
     loop {
         debug_assert_eq!(preempt::count(), 1);
 
-        let mut scheduler = Scheduler::get().lock_irq();
-        let state = *Thread::current().state.lock();
-
-        // No other thread to run
-        match scheduler.pop() {
+        let next = rq_thiscpu().lock().get();
+        match next {
             None => {
-                drop(scheduler);
-                if let ThreadState::Running = state {
+                if Thread::current().state.is_runnable() {
+                    println_trace!(
+                        "trace_scheduler",
+                        "Returning to tid({}) without doing context switch",
+                        Thread::current().tid
+                    );
+
                     // Previous thread is `Running`, Return to current running thread
                     // without changing its state.
                     context_switch_light(&Scheduler::idle_task(), &Thread::current());
@@ -216,9 +128,33 @@ extern "C" fn idle_task() {
                 continue;
             }
             Some(next) => {
+                println_trace!(
+                    "trace_scheduler",
+                    "Switching from tid({}) to tid({})",
+                    Thread::current().tid,
+                    next.tid
+                );
+
+                debug_assert_ne!(
+                    next.tid,
+                    Thread::current().tid,
+                    "Switching to the same thread"
+                );
+
                 next.process.mm_list.switch_page_table();
-                unsafe { scheduler.swap_current(next) };
-                drop(scheduler);
+
+                if let Some(thread_pointer) =
+                    CURRENT.swap(NonNull::new(Arc::into_raw(next) as *mut _))
+                {
+                    let thread = unsafe { Arc::from_raw(thread_pointer.as_ptr()) };
+                    let mut rq = rq_thiscpu().lock();
+
+                    if thread.state.is_runnable() {
+                        rq.put(thread);
+                    } else {
+                        thread.on_rq.store(false, Ordering::Release);
+                    }
+                }
             }
         }
 

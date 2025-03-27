@@ -19,7 +19,7 @@ pub use crate::bindings::root as bindings;
 
 #[allow(unused_imports)]
 pub(crate) use crate::kernel::console::{
-    print, println, println_debug, println_fatal, println_info, println_warn,
+    print, println, println_debug, println_fatal, println_info, println_trace, println_warn,
 };
 
 #[allow(unused_imports)]

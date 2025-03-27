@@ -1,7 +1,7 @@
 use core::{
     arch::naked_asm,
     cell::{RefCell, UnsafeCell},
-    sync::atomic::AtomicBool,
+    sync::atomic::{AtomicBool, AtomicU32, Ordering},
 };
 
 use crate::{
@@ -21,14 +21,41 @@ use super::{
 
 use arch::{InterruptContext, TaskContext, UserTLS};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ThreadState {
-    Preparing,
-    Running,
-    Ready,
-    Zombie,
-    ISleep,
-    USleep,
+#[derive(Debug)]
+pub struct ThreadState(AtomicU32);
+
+impl ThreadState {
+    pub const RUNNING: u32 = 0;
+    pub const PREPARING: u32 = 1;
+    pub const ZOMBIE: u32 = 2;
+    pub const ISLEEP: u32 = 4;
+    pub const USLEEP: u32 = 8;
+
+    pub const fn new(state: u32) -> Self {
+        Self(AtomicU32::new(state))
+    }
+
+    pub fn store(&self, state: u32) {
+        self.0.store(state, Ordering::Release);
+    }
+
+    pub fn swap(&self, state: u32) -> u32 {
+        self.0.swap(state, Ordering::AcqRel)
+    }
+
+    pub fn cmpxchg(&self, current: u32, new: u32) -> u32 {
+        self.0
+            .compare_exchange(current, new, Ordering::AcqRel, Ordering::Acquire)
+            .unwrap_or_else(|x| x)
+    }
+
+    pub fn assert(&self, state: u32) {
+        assert_eq!(self.0.load(Ordering::Acquire), state);
+    }
+
+    pub fn is_runnable(&self) -> bool {
+        self.0.load(Ordering::Acquire) == Self::RUNNING
+    }
 }
 
 #[derive(Debug)]
@@ -54,9 +81,8 @@ pub struct Thread {
     pub signal_list: SignalList,
 
     /// Thread state for scheduler use.
-    pub state: Spin<ThreadState>,
-
-    pub oncpu: AtomicBool,
+    pub state: ThreadState,
+    pub on_rq: AtomicBool,
 
     /// Thread context
     pub context: UnsafeCell<TaskContext>,
@@ -126,8 +152,8 @@ impl Thread {
             signal_list: SignalList::new(),
             kstack: RefCell::new(KernelStack::new()),
             context: UnsafeCell::new(TaskContext::new()),
-            state: Spin::new(ThreadState::Preparing),
-            oncpu: AtomicBool::new(false),
+            state: ThreadState::new(ThreadState::PREPARING),
+            on_rq: AtomicBool::new(false),
             inner: Spin::new(ThreadInner {
                 name,
                 tls: None,
@@ -142,9 +168,8 @@ impl Thread {
     pub fn new_cloned(&self, procs: &mut ProcessList) -> Arc<Self> {
         let process = Process::new_cloned(&self.process, procs);
 
-        let state = self.state.lock();
         let inner = self.inner.lock();
-        assert!(matches!(*state, ThreadState::Running));
+        self.state.assert(ThreadState::RUNNING);
 
         let signal_list = self.signal_list.clone();
         signal_list.clear_pending();
@@ -157,8 +182,8 @@ impl Thread {
             signal_list,
             kstack: RefCell::new(KernelStack::new()),
             context: UnsafeCell::new(TaskContext::new()),
-            state: Spin::new(ThreadState::Preparing),
-            oncpu: AtomicBool::new(false),
+            state: ThreadState::new(ThreadState::PREPARING),
+            on_rq: AtomicBool::new(false),
             inner: Spin::new(ThreadInner {
                 name: inner.name.clone(),
                 tls: inner.tls.clone(),
@@ -190,7 +215,7 @@ impl Thread {
 
         // `SIGSTOP` can only be waken up by `SIGCONT` or `SIGKILL`.
         // SAFETY: Preempt disabled above.
-        Scheduler::get().lock().usleep(self);
+        self.usleep();
         Scheduler::schedule();
     }
 
@@ -206,14 +231,14 @@ impl Thread {
         }
     }
 
-    pub fn raise(self: &Arc<Thread>, signal: Signal) -> RaiseResult {
+    pub fn raise(self: &Arc<Self>, signal: Signal) -> RaiseResult {
         match self.signal_list.raise(signal) {
             RaiseResult::ShouldIWakeUp => {
-                Scheduler::get().lock_irq().iwake(self);
+                self.iwake();
                 RaiseResult::Finished
             }
             RaiseResult::ShouldUWakeUp => {
-                Scheduler::get().lock_irq().uwake(self);
+                self.uwake();
                 RaiseResult::Finished
             }
             result => result,
@@ -256,8 +281,7 @@ impl Thread {
     }
 
     pub fn fork_init(&self, interrupt_context: InterruptContext) {
-        let mut state = self.state.lock();
-        *state = ThreadState::USleep;
+        self.state.store(ThreadState::USLEEP);
 
         let sp = self.kstack.borrow().init(interrupt_context);
         unsafe {
@@ -269,8 +293,7 @@ impl Thread {
     }
 
     pub fn init(&self, entry: usize) {
-        let mut state = self.state.lock();
-        *state = ThreadState::USleep;
+        self.state.store(ThreadState::USLEEP);
         unsafe {
             self.get_context_mut_ptr()
                 .as_mut()
@@ -300,6 +323,42 @@ impl Thread {
 
     pub fn get_name(&self) -> Arc<[u8]> {
         self.inner.lock().name.clone()
+    }
+
+    pub fn usleep(&self) {
+        // No need to dequeue. We have proved that the thread is running so not in the queue.
+        let prev_state = self.state.swap(ThreadState::USLEEP);
+        assert_eq!(prev_state, ThreadState::RUNNING);
+    }
+
+    pub fn uwake(self: &Arc<Self>) {
+        let prev_state = self.state.swap(ThreadState::RUNNING);
+        assert_eq!(prev_state, ThreadState::USLEEP);
+
+        Scheduler::get().activate(self);
+    }
+
+    pub fn isleep(self: &Arc<Self>) {
+        // No need to dequeue. We have proved that the thread is running so not in the queue.
+        let prev_state = self.state.swap(ThreadState::ISLEEP);
+        assert_eq!(prev_state, ThreadState::RUNNING);
+    }
+
+    pub fn iwake(self: &Arc<Self>) {
+        match self
+            .state
+            .cmpxchg(ThreadState::ISLEEP, ThreadState::RUNNING)
+        {
+            ThreadState::RUNNING | ThreadState::USLEEP => return,
+            ThreadState::ISLEEP => Scheduler::get().activate(self),
+            state => panic!("Invalid transition from state {:?} to `Running`", state),
+        }
+    }
+
+    /// Set `Running` threads to the `Zombie` state.
+    pub fn set_zombie(self: &Arc<Self>) {
+        let prev_state = self.state.swap(ThreadState::ZOMBIE);
+        assert_eq!(prev_state, ThreadState::RUNNING);
     }
 }
 

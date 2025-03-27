@@ -135,7 +135,7 @@ impl ProcessList {
         // the threads are stopped then proceed.
         for thread in inner.threads.values().map(|t| t.upgrade().unwrap()) {
             assert!(thread.tid == Thread::current().tid);
-            Scheduler::get().lock().set_zombie(&thread);
+            thread.set_zombie();
             thread.files.close_all();
         }
 
@@ -214,9 +214,7 @@ pub unsafe fn init_multitasking(init_fn: unsafe extern "C" fn()) {
     procs.init = Some(init_process);
     procs.idle = Some(idle_process);
 
-    let mut scheduler = Scheduler::get().lock_irq();
-
     init_thread.init(init_fn as usize);
-    scheduler.uwake(&init_thread);
+    init_thread.uwake();
     Scheduler::set_idle_and_current(idle_thread);
 }

@@ -15,7 +15,11 @@ spin = "0.9.8"
 
 [features]
 default = ["smp"]
-debug_syscall = []
+trace_condvar = []
+trace_syscall = []
+trace_scheduler = []
+log_trace = ["trace_condvar", "trace_syscall", "trace_scheduler"]
+log_debug = []
 smp = []
 
 [build-dependencies]

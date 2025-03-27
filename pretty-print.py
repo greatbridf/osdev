@@ -3,6 +3,7 @@ from gdb import Frame
 import gdb.printing
 from gdb.FrameDecorator import FrameDecorator
 import re
+from os import environ
 
 def parseCompressedPairElement(elem: gdb.Value) -> gdb.Value:
     return elem[elem.type.fields()[0]]
@@ -522,6 +523,8 @@ def build_pretty_printer(val: gdb.Value):
 
 gdb.execute('skip -rfu ^core::([a-zA-Z0-9_]+::)*[a-zA-Z0-9_<>]+')
 gdb.execute('skip -rfu ^alloc::([a-zA-Z0-9_]+::)*[a-zA-Z0-9_<>]+')
+gdb.execute('skip -rfu ^std::([a-zA-Z0-9_]+::)*[a-zA-Z0-9_<>]+')
 gdb.execute('skip -rfu "^gbos_rust_part::sync::lock::Lock<[a-zA-Z0-9_<>: ,]+, [a-zA-Z0-9_<>: ,]+>::new<[a-zA-Z0-9_<>: ,]+, [a-zA-Z0-9_<>: ,]+>"')
 gdb.execute('skip -rfu "^gbos_rust_part::sync::locked::Locked<[a-zA-Z0-9_<>: ,]+, [a-zA-Z0-9_<>: ,]+>::new<[a-zA-Z0-9_<>: ,]+, [a-zA-Z0-9_<>: ,]+>"')
+gdb.execute('source ' + environ['HOME'] + '/.rustup/toolchains/nightly-aarch64-apple-darwin/lib/rustlib/etc/gdb_load_rust_pretty_printers.py')
 gdb.pretty_printers.append(build_pretty_printer)

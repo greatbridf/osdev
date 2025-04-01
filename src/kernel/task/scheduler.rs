@@ -63,6 +63,28 @@ impl Task {
     }
 }
 
+impl<O> JoinHandle<O>
+where
+    O: Send,
+{
+    pub fn join(self) -> O {
+        let Self(output) = self;
+        let mut waker = Some(Waker::from(Task::current().clone()));
+
+        loop {
+            let mut locked = output.lock();
+            match locked.try_resolve() {
+                Some(output) => break output,
+                None => {
+                    if let Some(waker) = waker.take() {
+                        locked.register_waiter(waker);
+                    }
+                }
+            }
+        }
+    }
+}
+
 impl Scheduler {
     /// `Scheduler` might be used in various places. Do not hold it for a long time.
     ///
@@ -107,7 +129,7 @@ impl Scheduler {
         O: Send,
     {
         let (task, output) = Self::extract_handle(task);
-        TASKS.lock().insert(task.clone());
+        Task::add(task.clone());
         self.activate(&task);
 
         JoinHandle(output)
@@ -131,12 +153,6 @@ impl Scheduler {
         // Is it safe to believe that `current()` will never change across calls?
         Task::switch(&Task::current(), &Task::idle());
         preempt::enable();
-    }
-
-    pub fn schedule_noreturn() -> ! {
-        preempt::disable();
-        Self::schedule();
-        panic!("Scheduler::schedule_noreturn(): Should never return")
     }
 
     pub async fn yield_now() {

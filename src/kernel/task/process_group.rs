@@ -10,7 +10,12 @@ use crate::{
 
 use super::{Process, ProcessList, Session, Signal};
 
-#[allow(dead_code)]
+pub struct ProcessGroupBuilder {
+    pgid: Option<u32>,
+    leader: Option<Weak<Process>>,
+    session: Option<Arc<Session>>,
+}
+
 #[derive(Debug)]
 pub struct ProcessGroup {
     pub pgid: u32,
@@ -20,28 +25,45 @@ pub struct ProcessGroup {
     pub processes: Locked<BTreeMap<u32, Weak<Process>>, ProcessList>,
 }
 
-impl ProcessGroup {
-    /// Don't use this function directly. Use `Session::new_group` instead.
-    pub(super) fn new(
-        leader: &Arc<Process>,
-        session: Weak<Session>,
-        procs: &mut ProcessList,
-    ) -> Arc<Self> {
-        let pgroup = Arc::new(Self {
-            pgid: leader.pid,
-            leader: Arc::downgrade(leader),
-            session,
-            processes: Locked::new(
-                BTreeMap::from([(leader.pid, Arc::downgrade(leader))]),
-                // SAFETY: `procs` must be the global process list, which won't be moved.
-                procs,
-            ),
-        });
-
-        procs.add_pgroup(&pgroup);
-        pgroup
+impl ProcessGroupBuilder {
+    pub const fn new() -> Self {
+        Self {
+            pgid: None,
+            leader: None,
+            session: None,
+        }
     }
 
+    pub fn leader(mut self, leader: &Arc<Process>) -> Self {
+        self.pgid = Some(leader.pid);
+        self.leader = Some(Arc::downgrade(leader));
+        self
+    }
+
+    pub fn session(mut self, session: Arc<Session>) -> Self {
+        self.session = Some(session);
+        self
+    }
+
+    pub fn build(self, process_list: &mut ProcessList) -> Arc<ProcessGroup> {
+        let pgid = self.pgid.expect("PGID is not set");
+        let leader = self.leader.expect("Leader is not set");
+        let session = self.session.expect("Session is not set");
+
+        let pgroup = Arc::new(ProcessGroup {
+            pgid,
+            session: Arc::downgrade(&session),
+            processes: Locked::new(BTreeMap::from([(pgid, leader.clone())]), process_list),
+            leader,
+        });
+
+        process_list.add_pgroup(&pgroup);
+        session.add_member(process_list, &pgroup);
+        pgroup
+    }
+}
+
+impl ProcessGroup {
     pub(super) fn add_member(
         &self,
         process: &Arc<Process>,

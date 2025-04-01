@@ -1,14 +1,19 @@
+use core::task::Waker;
+
 use crate::{
-    kernel::task::{Scheduler, Thread},
+    kernel::{
+        console::println_trace,
+        task::{Scheduler, Task},
+    },
     prelude::*,
     sync::preempt,
 };
 
 use super::{lock::Guard, strategy::LockStrategy};
-use alloc::{collections::vec_deque::VecDeque, sync::Arc};
+use alloc::collections::vec_deque::VecDeque;
 
 pub struct CondVar<const INTERRUPTIBLE: bool> {
-    waiters: Spin<VecDeque<Arc<Thread>>>,
+    waiters: Spin<VecDeque<Waker>>,
 }
 
 impl<const I: bool> core::fmt::Debug for CondVar<I> {
@@ -28,53 +33,48 @@ impl<const I: bool> CondVar<I> {
         }
     }
 
-    fn wake(schedule: &mut Scheduler, thread: &Arc<Thread>) {
-        if I {
-            schedule.iwake(thread);
-        } else {
-            schedule.uwake(thread);
-        }
+    fn wake(waker: Waker) {
+        println_trace!("trace_condvar", "tid({}) is trying to wake", thread.tid);
+        waker.wake();
+        println_trace!("trace_condvar", "tid({}) is awake", thread.tid);
     }
 
-    fn sleep(scheduler: &mut Scheduler) {
-        if I {
-            scheduler.isleep(&Thread::current());
+    fn sleep() -> Waker {
+        let task = Task::current();
+
+        println_trace!("trace_condvar", "tid({}) is trying to sleep", task.id);
+
+        let waker = if I {
+            Waker::from(task.isleep())
         } else {
-            scheduler.usleep(&Thread::current());
-        }
+            Waker::from(task.usleep())
+        };
+
+        println_trace!("trace_condvar", "tid({}) is sleeping", task.id);
+
+        waker
     }
 
     pub fn notify_one(&self) {
-        let mut scheduler = Scheduler::get().lock_irq();
-        if let Some(waiter) = self.waiters.lock().pop_front() {
-            Self::wake(scheduler.as_mut(), &waiter);
+        if let Some(waker) = self.waiters.lock().pop_front() {
+            Self::wake(waker);
         }
     }
 
     pub fn notify_all(&self) {
-        let mut scheduler = Scheduler::get().lock_irq();
-        self.waiters.lock().retain(|waiter| {
-            Self::wake(scheduler.as_mut(), &waiter);
-            false
-        });
+        for waker in self.waiters.lock().drain(..) {
+            Self::wake(waker);
+        }
     }
 
     /// Unlock the `guard`. Then wait until being waken up. Relock the `guard` before returning.
     ///
     /// # Might Sleep
     /// This function **might sleep**, so call it in a preemptible context.
-    ///
-    /// # Return
-    /// - `true`: a pending signal was received
     pub fn wait<'a, T, S: LockStrategy, const W: bool>(&self, guard: &mut Guard<'a, T, S, W>) {
         preempt::disable();
-        {
-            let mut scheduler = Scheduler::get().lock_irq();
-            // We have scheduler locked and IRQ disabled. So no one could be waking us up for now.
-
-            self.waiters.lock().push_back(Thread::current().clone());
-            Self::sleep(scheduler.as_mut());
-        }
+        let waker = Self::sleep();
+        self.waiters.lock().push_back(waker);
 
         // TODO!!!: Another way to do this:
         //
@@ -86,8 +86,6 @@ impl<const I: bool> CondVar<I> {
         Scheduler::schedule();
         unsafe { guard.force_relock() };
 
-        self.waiters
-            .lock_irq()
-            .retain(|waiter| waiter.tid != Thread::current().tid);
+        assert!(Task::current().is_runnable());
     }
 }

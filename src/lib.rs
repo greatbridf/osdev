@@ -25,15 +25,15 @@ mod prelude;
 mod rcu;
 mod sync;
 
-use alloc::ffi::CString;
-use core::{
-    alloc::{GlobalAlloc, Layout},
-    arch::{asm, global_asm},
-};
+use alloc::{ffi::CString, sync::Arc};
+use core::alloc::{GlobalAlloc, Layout};
 use elf::ParsedElf32;
 use kernel::{
     cpu::init_thiscpu,
-    task::{init_multitasking, Scheduler, Thread},
+    mem::Page,
+    task::{
+        FutureRunnable, ProcessBuilder, ProcessList, Scheduler, Task, ThreadBuilder, ThreadRunnable,
+    },
     vfs::{
         dentry::Dentry,
         mount::{do_mount, MS_NOATIME, MS_NODEV, MS_NOSUID, MS_RDONLY},
@@ -92,20 +92,7 @@ unsafe impl GlobalAlloc for Allocator {
 #[global_allocator]
 static ALLOCATOR: Allocator = Allocator {};
 
-global_asm!(
-    r"
-    .globl to_init_process
-    to_init_process:
-        push %rbp
-        mov %rbx, %rdi
-        jmp {}
-    ",
-    sym init_process,
-    options(att_syntax)
-);
-
 extern "C" {
-    fn to_init_process();
     fn init_allocator();
 }
 
@@ -129,29 +116,16 @@ pub extern "C" fn rust_kinit(early_kstack_pfn: usize) -> ! {
 
     // We need root dentry to be present in constructor of `FsContext`.
     // So call `init_vfs` first, then `init_multitasking`.
-    unsafe { init_multitasking(init_process) };
+    Scheduler::init_scheduler_thiscpu();
 
-    let mut unuse_ctx = arch::TaskContext::new();
-    // TODO: Temporary solution: we will never access this later on.
-    unuse_ctx.init(
-        to_init_process as usize,
-        early_kstack_pfn + 0x1000 + 0xffffff0000000000,
-    );
-    unsafe {
-        arch::TaskContext::switch_to(
-            &mut unuse_ctx, // We will never come back
-            &mut *Scheduler::idle_task().get_context_mut_ptr(),
-        );
-    }
+    let runnable = FutureRunnable::new(init_process(early_kstack_pfn));
+    Scheduler::get().spawn(Task::new(runnable));
 
-    arch::freeze()
+    Task::switch_noreturn(&Task::idle());
 }
 
-/// We enter this function with `preempt count == 0`
-extern "C" fn init_process(/* early_kstack_pfn: usize */) {
-    // TODO!!! Should free pass eraly_kstack_pfn and free !!!
-    // unsafe { Page::take_pfn(early_kstack_pfn, 9) };
-    preempt::enable();
+async fn init_process(early_kstack_pfn: usize) {
+    unsafe { Page::take_pfn(early_kstack_pfn, 9) };
 
     kernel::syscall::register_syscalls();
     CharDevice::init().unwrap();
@@ -169,8 +143,8 @@ extern "C" fn init_process(/* early_kstack_pfn: usize */) {
 
     let (ip, sp, mm_list) = {
         // mount fat32 /mnt directory
-        let fs_context = FsContext::get_current();
-        let mnt_dir = Dentry::open(&fs_context, Path::new(b"/mnt/").unwrap(), true).unwrap();
+        let fs_context = FsContext::global();
+        let mnt_dir = Dentry::open(fs_context, Path::new(b"/mnt/").unwrap(), true).unwrap();
 
         mnt_dir.mkdir(0o755).unwrap();
 
@@ -183,7 +157,7 @@ extern "C" fn init_process(/* early_kstack_pfn: usize */) {
         )
         .unwrap();
 
-        let init = Dentry::open(&fs_context, Path::new(b"/mnt/busybox").unwrap(), true)
+        let init = Dentry::open(fs_context, Path::new(b"/mnt/busybox").unwrap(), true)
             .expect("busybox should be present in /mnt");
 
         let argv = vec![
@@ -203,27 +177,19 @@ extern "C" fn init_process(/* early_kstack_pfn: usize */) {
         elf.load(argv, envp).unwrap()
     };
 
-    Thread::current().process.mm_list.replace(mm_list);
-    Thread::current().files.open_console();
+    let thread_builder = ThreadBuilder::new().name(Arc::from(*b"busybox"));
 
-    unsafe {
-        asm!(
-            "swapgs",
-            "mov ${ds}, %rax",
-            "mov %ax, %ds",
-            "mov %ax, %es",
-            "push ${ds}",
-            "push {sp}",
-            "push $0x200",
-            "push ${cs}",
-            "push {ip}",
-            "iretq",
-            ds = const 0x33,
-            cs = const 0x2b,
-            in("rax") 0,
-            ip = in(reg) ip.0,
-            sp = in(reg) sp.0,
-            options(att_syntax, noreturn),
-        );
-    }
+    let mut process_list = ProcessList::get().lock();
+    let (thread, process) = ProcessBuilder::new()
+        .mm_list(mm_list)
+        .thread_builder(thread_builder)
+        .build(&mut process_list);
+
+    process_list.set_init_process(process);
+
+    // TODO!!!: Remove this.
+    thread.files.open_console();
+
+    let task = Task::new(ThreadRunnable::new(thread, ip, sp));
+    Scheduler::get().spawn(task);
 }

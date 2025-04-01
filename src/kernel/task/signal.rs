@@ -1,4 +1,4 @@
-use core::cmp::Reverse;
+use core::{cmp::Reverse, task::Waker};
 
 use crate::{
     io::BufferFill,
@@ -7,13 +7,14 @@ use crate::{
         user::{dataflow::UserBuffer, UserPointer},
     },
     prelude::*,
+    sync::{preempt, AsRefPosition as _},
 };
 
 use alloc::collections::{binary_heap::BinaryHeap, btree_map::BTreeMap};
 use arch::{ExtendedContext, InterruptContext};
 use bindings::{EFAULT, EINVAL};
 
-use super::{ProcessList, Thread};
+use super::{ProcessList, Scheduler, Task, Thread, WaitObject, WaitType};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Signal(u32);
@@ -63,77 +64,84 @@ pub struct SignalAction {
     pub sa_mask: usize,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct SignalListInner {
     mask: u64,
     pending: BinaryHeap<Reverse<Signal>>,
+
+    signal_waker: Option<Waker>,
+    stop_waker: Option<Waker>,
 
     // TODO!!!!!: Signal disposition should be per-process.
     handlers: BTreeMap<Signal, SignalAction>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct SignalList {
     /// We might use this inside interrupt handler, so we need to use `lock_irq`.
     inner: Spin<SignalListInner>,
 }
 
+impl Clone for SignalList {
+    fn clone(&self) -> Self {
+        let inner = self.inner.lock();
+
+        debug_assert!(
+            inner.stop_waker.is_none(),
+            "We should not have a stop waker here"
+        );
+
+        Self {
+            inner: Spin::new(SignalListInner {
+                mask: inner.mask,
+                pending: BinaryHeap::new(),
+                signal_waker: None,
+                stop_waker: None,
+                handlers: inner.handlers.clone(),
+            }),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub enum RaiseResult {
-    ShouldIWakeUp,
-    ShouldUWakeUp,
     Finished,
     Masked,
 }
 
 impl Signal {
-    fn is_continue(&self) -> bool {
-        self == &Self::SIGCONT
-    }
-
-    fn is_stop(&self) -> bool {
-        match self {
-            &Self::SIGSTOP | &Self::SIGTSTP | &Self::SIGTTIN | &Self::SIGTTOU => true,
+    const fn is_ignore(&self) -> bool {
+        match *self {
+            Self::SIGCHLD | Self::SIGURG | Self::SIGWINCH => true,
             _ => false,
         }
     }
 
-    fn is_ignore(&self) -> bool {
-        match self {
-            &Self::SIGCHLD | &Self::SIGURG | &Self::SIGWINCH => true,
+    pub const fn is_now(&self) -> bool {
+        match *self {
+            Self::SIGKILL | Self::SIGSTOP => true,
             _ => false,
         }
     }
 
-    pub fn is_now(&self) -> bool {
-        match self {
-            &Self::SIGKILL | &Self::SIGSTOP => true,
-            _ => false,
-        }
-    }
-
-    pub fn is_coredump(&self) -> bool {
-        match self {
-            &Self::SIGQUIT
-            | &Self::SIGILL
-            | &Self::SIGABRT
-            | &Self::SIGFPE
-            | &Self::SIGSEGV
-            | &Self::SIGBUS
-            | &Self::SIGTRAP
-            | &Self::SIGSYS
-            | &Self::SIGXCPU
-            | &Self::SIGXFSZ => true,
+    pub const fn is_coredump(&self) -> bool {
+        match *self {
+            Self::SIGQUIT
+            | Self::SIGILL
+            | Self::SIGABRT
+            | Self::SIGFPE
+            | Self::SIGSEGV
+            | Self::SIGBUS
+            | Self::SIGTRAP
+            | Self::SIGSYS
+            | Self::SIGXCPU
+            | Self::SIGXFSZ => true,
             _ => false,
         }
     }
 
     fn to_mask(&self) -> u64 {
         1 << (self.0 - 1)
-    }
-
-    pub fn to_signum(&self) -> u32 {
-        self.0
     }
 }
 
@@ -146,6 +154,13 @@ impl TryFrom<u32> for Signal {
         } else {
             Err(EINVAL)
         }
+    }
+}
+
+impl From<Signal> for u32 {
+    fn from(signal: Signal) -> Self {
+        let Signal(signum) = signal;
+        signum
     }
 }
 
@@ -172,7 +187,7 @@ impl SignalAction {
     /// # Might Sleep
     fn handle(
         &self,
-        signum: u32,
+        signal: Signal,
         old_mask: u64,
         int_stack: &mut InterruptContext,
         ext_ctx: &mut ExtendedContext,
@@ -194,7 +209,7 @@ impl SignalAction {
         let mut stack = UserBuffer::new(sp as *mut u8, CONTEXT_SIZE + size_of::<u32>())?;
 
         stack.copy(&restorer_address)?.ok_or(EFAULT)?; // Restorer address
-        stack.copy(&signum)?.ok_or(EFAULT)?; // Restorer address
+        stack.copy(&u32::from(signal))?.ok_or(EFAULT)?; // Restorer address
         stack.copy(&old_mask)?.ok_or(EFAULT)?; // Original signal mask
         stack.copy(ext_ctx)?.ok_or(EFAULT)?; // MMX registers
         stack.copy(int_stack)?.ok_or(EFAULT)?; // Interrupt stack
@@ -246,16 +261,21 @@ impl SignalListInner {
         self.mask(signal.to_mask());
         self.pending.push(Reverse(signal));
 
-        if signal.is_stop() {
-            return RaiseResult::ShouldIWakeUp;
+        match signal {
+            Signal::SIGCONT => {
+                self.stop_waker.take().map(|waker| waker.wake());
+            }
+            _ => {
+                let waker = self
+                    .signal_waker
+                    .as_ref()
+                    .expect("We should have a signal waker");
+
+                waker.wake_by_ref();
+            }
         }
 
-        // TODO!!!!!!: Fix this. SIGCONT could wake up USleep threads.
-        if signal.is_continue() {
-            return RaiseResult::ShouldUWakeUp;
-        }
-
-        return RaiseResult::ShouldIWakeUp;
+        return RaiseResult::Finished;
     }
 }
 
@@ -265,6 +285,8 @@ impl SignalList {
             inner: Spin::new(SignalListInner {
                 mask: 0,
                 pending: BinaryHeap::new(),
+                signal_waker: None,
+                stop_waker: None,
                 handlers: BTreeMap::new(),
             }),
         }
@@ -308,6 +330,13 @@ impl SignalList {
             .get(&signal)
             .cloned()
             .unwrap_or_else(SignalAction::default_action)
+    }
+
+    // TODO!!!: Find a better way.
+    pub fn set_signal_waker(&self, waker: Waker) {
+        let mut inner = self.inner.lock_irq();
+        let old_waker = inner.signal_waker.replace(waker);
+        assert!(old_waker.is_none(), "We should not have a waker here");
     }
 
     /// Clear all signals except for `SIG_IGN`.
@@ -356,8 +385,7 @@ impl SignalList {
                             inner.mask(handler.sa_mask as u64);
                             old_mask
                         };
-                        let result =
-                            handler.handle(signal.to_signum(), old_mask, int_stack, ext_ctx);
+                        let result = handler.handle(signal, old_mask, int_stack, ext_ctx);
                         if result.is_err() {
                             self.inner.lock_irq().set_mask(old_mask);
                         }
@@ -381,15 +409,45 @@ impl SignalList {
 
             // Default actions.
             match signal {
-                Signal::SIGSTOP => Thread::current().do_stop(Signal::SIGSTOP),
-                Signal::SIGCONT => Thread::current().do_continue(),
+                Signal::SIGSTOP | Signal::SIGTSTP | Signal::SIGTTIN | Signal::SIGTTOU => {
+                    let thread = Thread::current();
+                    if let Some(parent) = thread.process.parent.load() {
+                        parent.notify(
+                            WaitObject {
+                                pid: thread.process.pid,
+                                code: WaitType::Stopped(signal),
+                            },
+                            ProcessList::get().lock_shared().as_pos(),
+                        );
+                    }
+
+                    preempt::disable();
+
+                    // `SIGSTOP` can only be waken up by `SIGCONT` or `SIGKILL`.
+                    // SAFETY: Preempt disabled above.
+                    {
+                        let mut inner = self.inner.lock_irq();
+                        let waker = Waker::from(Task::current().usleep());
+                        let old_waker = inner.stop_waker.replace(waker);
+                        assert!(old_waker.is_none(), "We should not have a waker here");
+                    }
+
+                    Scheduler::schedule();
+
+                    if let Some(parent) = thread.process.parent.load() {
+                        parent.notify(
+                            WaitObject {
+                                pid: thread.process.pid,
+                                code: WaitType::Continued,
+                            },
+                            ProcessList::get().lock_shared().as_pos(),
+                        );
+                    }
+                }
+                Signal::SIGCONT => {}
                 Signal::SIGKILL => ProcessList::kill_current(signal),
                 // Ignored
-                Signal::SIGCHLD | Signal::SIGURG | Signal::SIGWINCH => continue,
-                // "Soft" stops.
-                Signal::SIGTSTP | Signal::SIGTTIN | Signal::SIGTTOU => {
-                    Thread::current().do_stop(signal)
-                }
+                Signal::SIGCHLD | Signal::SIGURG | Signal::SIGWINCH => {}
                 // TODO!!!!!!: Check exit status format.
                 s if s.is_coredump() => ProcessList::kill_current(signal),
                 signal => ProcessList::kill_current(signal),

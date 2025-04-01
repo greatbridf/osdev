@@ -72,6 +72,7 @@ macro_rules! println_debug {
     };
 }
 
+#[allow(unused_macros)]
 macro_rules! println_info {
     ($($arg:tt)*) => {
         $crate::println!("[kernel: info] {}", format_args!($($arg)*))
@@ -87,6 +88,25 @@ macro_rules! println_fatal {
     };
 }
 
+macro_rules! println_trace {
+    ($feat:literal) => {
+        #[deny(unexpected_cfgs)]
+        {
+            #[cfg(feature = $feat)]
+            $crate::println!("[kernel:trace] ")
+        }
+    };
+    ($feat:literal, $($arg:tt)*) => {{
+        #[deny(unexpected_cfgs)]
+        {
+            #[cfg(feature = $feat)]
+            $crate::println!("[kernel:trace] {}", format_args!($($arg)*))
+        }
+    }};
+}
+
 use super::terminal::Terminal;
 
-pub(crate) use {print, println, println_debug, println_fatal, println_info, println_warn};
+pub(crate) use {
+    print, println, println_debug, println_fatal, println_info, println_trace, println_warn,
+};

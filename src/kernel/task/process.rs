@@ -1,7 +1,4 @@
-use core::{
-    ptr::addr_of,
-    sync::atomic::{AtomicU32, Ordering},
-};
+use core::sync::atomic::{AtomicU32, Ordering};
 
 use alloc::{
     collections::{btree_map::BTreeMap, vec_deque::VecDeque},
@@ -19,7 +16,18 @@ use crate::{
     },
 };
 
-use super::{signal::RaiseResult, ProcessGroup, ProcessList, Session, Signal, Thread};
+use super::{
+    process_group::ProcessGroupBuilder, signal::RaiseResult, thread::ThreadBuilder, ProcessGroup,
+    ProcessList, Session, Signal, Thread,
+};
+
+pub struct ProcessBuilder {
+    mm_list: Option<MMList>,
+    parent: Option<Arc<Process>>,
+    thread_builder: Option<ThreadBuilder>,
+    pgroup: Option<Arc<ProcessGroup>>,
+    session: Option<Arc<Session>>,
+}
 
 #[derive(Debug)]
 pub struct Process {
@@ -103,9 +111,9 @@ impl WaitType {
     pub fn to_wstatus(self) -> u32 {
         match self {
             WaitType::Exited(status) => (status & 0xff) << 8,
-            WaitType::Signaled(signal) if signal.is_coredump() => signal.to_signum() | 0x80,
-            WaitType::Signaled(signal) => signal.to_signum(),
-            WaitType::Stopped(signal) => 0x7f | (signal.to_signum() << 8),
+            WaitType::Signaled(signal) if signal.is_coredump() => u32::from(signal) | 0x80,
+            WaitType::Signaled(signal) => u32::from(signal),
+            WaitType::Stopped(signal) => 0x7f | (u32::from(signal) << 8),
             WaitType::Continued => 0xffff,
         }
     }
@@ -125,47 +133,54 @@ impl WaitObject {
     }
 }
 
-/// PID 0 and 1 is created manually so we start from 2.
-static NEXT_PID: AtomicU32 = AtomicU32::new(2);
-impl Process {
-    pub fn alloc_pid() -> u32 {
+impl ProcessBuilder {
+    pub fn new() -> Self {
+        Self {
+            mm_list: None,
+            parent: None,
+            thread_builder: None,
+            pgroup: None,
+            session: None,
+        }
+    }
+
+    pub fn mm_list(mut self, mm_list: MMList) -> Self {
+        self.mm_list = Some(mm_list);
+        self
+    }
+
+    pub fn parent(mut self, parent: Arc<Process>) -> Self {
+        self.parent = Some(parent);
+        self
+    }
+
+    pub fn thread_builder(mut self, thread_builder: ThreadBuilder) -> Self {
+        self.thread_builder = Some(thread_builder);
+        self
+    }
+
+    pub fn pgroup(mut self, pgroup: Arc<ProcessGroup>) -> Self {
+        self.pgroup = Some(pgroup);
+        self
+    }
+
+    pub fn session(mut self, session: Arc<Session>) -> Self {
+        self.session = Some(session);
+        self
+    }
+
+    fn alloc_pid() -> u32 {
+        static NEXT_PID: AtomicU32 = AtomicU32::new(1);
         NEXT_PID.fetch_add(1, Ordering::Relaxed)
     }
 
-    pub fn new_cloned(other: &Arc<Self>, procs: &mut ProcessList) -> Arc<Self> {
-        let procs_addr = addr_of!(*procs);
+    pub fn build(self, process_list: &mut ProcessList) -> (Arc<Thread>, Arc<Process>) {
+        let mm_list = self.mm_list.unwrap_or_else(|| MMList::new());
 
-        // SAFETY: We are holding the process list lock.
-        let other_pgroup = unsafe { other.pgroup.load_locked().unwrap() };
-        let other_session = unsafe { other.session.load_locked().unwrap() };
-
-        let process = Arc::new(Self {
+        let process = Arc::new(Process {
             pid: Self::alloc_pid(),
             wait_list: WaitList::new(),
-            mm_list: MMList::new_cloned(&other.mm_list),
-            parent: RCUPointer::new_with(other.clone()),
-            pgroup: RCUPointer::new_with(other_pgroup.clone()),
-            session: RCUPointer::new_with(other_session.clone()),
-            inner: Locked::new(
-                ProcessInner {
-                    children: BTreeMap::new(),
-                    threads: BTreeMap::new(),
-                },
-                procs_addr,
-            ),
-        });
-
-        procs.add_process(&process);
-        other.add_child(&process, procs.as_pos_mut());
-        other_pgroup.add_member(&process, procs.as_pos_mut());
-        process
-    }
-
-    pub(super) unsafe fn new_for_init(pid: u32, procs: &mut ProcessList) -> Arc<Self> {
-        Arc::new(Self {
-            pid,
-            wait_list: WaitList::new(),
-            mm_list: MMList::new(),
+            mm_list,
             parent: RCUPointer::empty(),
             pgroup: RCUPointer::empty(),
             session: RCUPointer::empty(),
@@ -174,11 +189,50 @@ impl Process {
                     children: BTreeMap::new(),
                     threads: BTreeMap::new(),
                 },
-                procs,
+                process_list,
             ),
-        })
-    }
+        });
 
+        process_list.add_process(&process);
+
+        let thread_builder = self.thread_builder.expect("Thread builder is not set");
+        let thread = thread_builder
+            .process(process.clone())
+            .tid(process.pid)
+            .build(process_list);
+
+        let session = match self.session {
+            Some(session) => session,
+            None => Session::new(&process, process_list),
+        };
+
+        let pgroup = match self.pgroup {
+            Some(pgroup) => {
+                pgroup.add_member(&process, process_list.as_pos_mut());
+                pgroup
+            }
+            None => ProcessGroupBuilder::new()
+                .leader(&process)
+                .session(session.clone())
+                .build(process_list),
+        };
+
+        if let Some(parent) = &self.parent {
+            parent.add_child(&process, process_list.as_pos_mut());
+        }
+
+        // SAFETY: We are holding the process list lock.
+        unsafe {
+            process.parent.swap(self.parent);
+            process.pgroup.swap(Some(pgroup));
+            process.session.swap(Some(session));
+        }
+
+        (thread, process)
+    }
+}
+
+impl Process {
     pub fn raise(&self, signal: Signal, procs: RefPosition<'_, ProcessList>) {
         let inner = self.inner.access(procs);
         for thread in inner.threads.values().map(|t| t.upgrade().unwrap()) {
@@ -254,20 +308,23 @@ impl Process {
 
     /// Create a new session for the process.
     pub fn setsid(self: &Arc<Self>) -> KResult<u32> {
-        let mut procs = ProcessList::get().lock();
+        let mut process_list = ProcessList::get().lock();
         // If there exists a session that has the same sid as our pid, we can't create a new
         // session. The standard says that we should create a new process group and be the
         // only process in the new process group and session.
-        if procs.try_find_session(self.pid).is_some() {
+        if process_list.try_find_session(self.pid).is_some() {
             return Err(EPERM);
         }
-        let session = Session::new(procs.as_mut(), self);
-        let pgroup = session.new_group(procs.as_mut(), self);
+        let session = Session::new(self, &mut process_list);
+        let pgroup = ProcessGroupBuilder::new()
+            .leader(self)
+            .session(session.clone())
+            .build(&mut process_list);
 
         {
             let _old_session = unsafe { self.session.swap(Some(session.clone())) }.unwrap();
             let old_pgroup = unsafe { self.pgroup.swap(Some(pgroup.clone())) }.unwrap();
-            old_pgroup.remove_member(self.pid, procs.as_pos_mut());
+            old_pgroup.remove_member(self.pid, process_list.as_pos_mut());
             rcu_sync();
         }
 
@@ -308,7 +365,10 @@ impl Process {
                 return Err(EPERM);
             }
 
-            session.new_group(procs, self)
+            ProcessGroupBuilder::new()
+                .leader(self)
+                .session(session.clone())
+                .build(procs)
         };
 
         pgroup.remove_member(self.pid, procs.as_pos_mut());

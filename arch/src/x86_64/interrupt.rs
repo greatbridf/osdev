@@ -34,161 +34,163 @@ global_asm!(
     .set SS, 0xa8
 
     .macro movcfi reg, offset
-    	mov \reg, \offset(%rsp)
-    	.cfi_rel_offset \reg, \offset
+        mov \reg, \offset(%rsp)
+        .cfi_rel_offset \reg, \offset
     .endm
 
     .macro movrst reg, offset
-    	mov \offset(%rsp), \reg
-    	.cfi_restore \reg
+        mov \offset(%rsp), \reg
+        .cfi_restore \reg
     .endm
 
     .globl ISR_stub_restore
     .type ISR_stub_restore @function
 
     ISR_stub:
-    	.cfi_startproc
-    	.cfi_signal_frame
-    	.cfi_def_cfa_offset 0x18
-    	.cfi_offset %rsp, 0x10
+        .cfi_startproc
+        .cfi_signal_frame
+        .cfi_def_cfa_offset 0x18
+        .cfi_offset %rsp, 0x10
 
-    	cmpq $0x08, 24(%rsp)
-    	je 1f
-    	swapgs
-    
+        cmpq $0x08, 24(%rsp)
+        je 1f
+        swapgs
+
     1:
-    	sub $0x78, %rsp
-    	.cfi_def_cfa_offset 0x90
-    
-    	movcfi %rax, RAX
-    	movcfi %rbx, RBX
-    	movcfi %rcx, RCX
-    	movcfi %rdx, RDX
-    	movcfi %rdi, RDI
-    	movcfi %rsi, RSI
-    	movcfi %r8,  R8
-    	movcfi %r9,  R9
-    	movcfi %r10, R10
-    	movcfi %r11, R11
-    	movcfi %r12, R12
-    	movcfi %r13, R13
-    	movcfi %r14, R14
-    	movcfi %r15, R15
-    	movcfi %rbp, RBP
-    
-    	mov INT_NO(%rsp), %rax
-    	sub $ISR0, %rax
-    	shr $3, %rax
-    	mov %rax, INT_NO(%rsp)
-    
-    	mov %rsp, %rbx
-    	.cfi_def_cfa_register %rbx
-    
-    	and $~0xf, %rsp
-    	sub $512, %rsp
-    	fxsave (%rsp)
-    
-    	mov %rbx, %rdi
-    	mov %rsp, %rsi
-    	call interrupt_handler
-    
+        sub $0x78, %rsp
+        .cfi_def_cfa_offset 0x90
+
+        movcfi %rax, RAX
+        movcfi %rbx, RBX
+        movcfi %rcx, RCX
+        movcfi %rdx, RDX
+        movcfi %rdi, RDI
+        movcfi %rsi, RSI
+        movcfi %r8,  R8
+        movcfi %r9,  R9
+        movcfi %r10, R10
+        movcfi %r11, R11
+        movcfi %r12, R12
+        movcfi %r13, R13
+        movcfi %r14, R14
+        movcfi %r15, R15
+        movcfi %rbp, RBP
+
+        mov INT_NO(%rsp), %rax
+        sub $ISR0, %rax
+        shr $3, %rax
+        mov %rax, INT_NO(%rsp)
+
+        mov %rsp, %rbx
+        .cfi_def_cfa_register %rbx
+
+        and $~0xf, %rsp
+        sub $512, %rsp
+        fxsave (%rsp)
+
+        mov %rbx, %rdi
+        mov %rsp, %rsi
+        call interrupt_handler
+
     ISR_stub_restore:
-    	fxrstor (%rsp)
-    	mov %rbx, %rsp
-    	.cfi_def_cfa_register %rsp
-    
-    	movrst %rax, RAX
-    	movrst %rbx, RBX
-    	movrst %rcx, RCX
-    	movrst %rdx, RDX
-    	movrst %rdi, RDI
-    	movrst %rsi, RSI
-    	movrst %r8,  R8
-    	movrst %r9,  R9
-    	movrst %r10, R10
-    	movrst %r11, R11
-    	movrst %r12, R12
-    	movrst %r13, R13
-    	movrst %r14, R14
-    	movrst %r15, R15
-    	movrst %rbp, RBP
-    
-    	add $0x88, %rsp
-    	.cfi_def_cfa_offset 0x08
-    
-    	cmpq $0x08, 8(%rsp)
-    	je 1f
-    	swapgs
-    
+        fxrstor (%rsp)
+        mov %rbx, %rsp
+        .cfi_def_cfa_register %rsp
+
+    .globl _arch_fork_return
+    _arch_fork_return:
+        movrst %rax, RAX
+        movrst %rbx, RBX
+        movrst %rcx, RCX
+        movrst %rdx, RDX
+        movrst %rdi, RDI
+        movrst %rsi, RSI
+        movrst %r8,  R8
+        movrst %r9,  R9
+        movrst %r10, R10
+        movrst %r11, R11
+        movrst %r12, R12
+        movrst %r13, R13
+        movrst %r14, R14
+        movrst %r15, R15
+        movrst %rbp, RBP
+
+        add $0x88, %rsp
+        .cfi_def_cfa_offset 0x08
+
+        cmpq $0x08, 8(%rsp)
+        je 1f
+        swapgs
+
     1:
-    	iretq
-    	.cfi_endproc
-    
+        iretq
+        .cfi_endproc
+
     .altmacro
     .macro build_isr_no_err name
-    	.align 8
-    	.globl ISR\name
-    	.type  ISR\name @function
-    	ISR\name:
-    		.cfi_startproc
-    		.cfi_signal_frame
-    		.cfi_def_cfa_offset 0x08
-    		.cfi_offset %rsp, 0x10
-    
-    		.cfi_same_value %rax
-    		.cfi_same_value %rbx
-    		.cfi_same_value %rcx
-    		.cfi_same_value %rdx
-    		.cfi_same_value %rdi
-    		.cfi_same_value %rsi
-    		.cfi_same_value %r8
-    		.cfi_same_value %r9
-    		.cfi_same_value %r10
-    		.cfi_same_value %r11
-    		.cfi_same_value %r12
-    		.cfi_same_value %r13
-    		.cfi_same_value %r14
-    		.cfi_same_value %r15
-    		.cfi_same_value %rbp
-    
-    		push %rbp # push placeholder for error code
-    		.cfi_def_cfa_offset 0x10
-    
-    		call ISR_stub
-    		.cfi_endproc
+        .align 8
+        .globl ISR\name
+        .type  ISR\name @function
+        ISR\name:
+            .cfi_startproc
+            .cfi_signal_frame
+            .cfi_def_cfa_offset 0x08
+            .cfi_offset %rsp, 0x10
+
+            .cfi_same_value %rax
+            .cfi_same_value %rbx
+            .cfi_same_value %rcx
+            .cfi_same_value %rdx
+            .cfi_same_value %rdi
+            .cfi_same_value %rsi
+            .cfi_same_value %r8
+            .cfi_same_value %r9
+            .cfi_same_value %r10
+            .cfi_same_value %r11
+            .cfi_same_value %r12
+            .cfi_same_value %r13
+            .cfi_same_value %r14
+            .cfi_same_value %r15
+            .cfi_same_value %rbp
+
+            push %rbp # push placeholder for error code
+            .cfi_def_cfa_offset 0x10
+
+            call ISR_stub
+            .cfi_endproc
     .endm
-    
+
     .altmacro
     .macro build_isr_err name
-    	.align 8
-    	.globl ISR\name
-    	.type  ISR\name @function
-    	ISR\name:
-    		.cfi_startproc
-    		.cfi_signal_frame
-    		.cfi_def_cfa_offset 0x10
-    		.cfi_offset %rsp, 0x10
-    
-    		.cfi_same_value %rax
-    		.cfi_same_value %rbx
-    		.cfi_same_value %rcx
-    		.cfi_same_value %rdx
-    		.cfi_same_value %rdi
-    		.cfi_same_value %rsi
-    		.cfi_same_value %r8
-    		.cfi_same_value %r9
-    		.cfi_same_value %r10
-    		.cfi_same_value %r11
-    		.cfi_same_value %r12
-    		.cfi_same_value %r13
-    		.cfi_same_value %r14
-    		.cfi_same_value %r15
-    		.cfi_same_value %rbp
-    
-    		call ISR_stub
-    		.cfi_endproc
+        .align 8
+        .globl ISR\name
+        .type  ISR\name @function
+        ISR\name:
+            .cfi_startproc
+            .cfi_signal_frame
+            .cfi_def_cfa_offset 0x10
+            .cfi_offset %rsp, 0x10
+
+            .cfi_same_value %rax
+            .cfi_same_value %rbx
+            .cfi_same_value %rcx
+            .cfi_same_value %rdx
+            .cfi_same_value %rdi
+            .cfi_same_value %rsi
+            .cfi_same_value %r8
+            .cfi_same_value %r9
+            .cfi_same_value %r10
+            .cfi_same_value %r11
+            .cfi_same_value %r12
+            .cfi_same_value %r13
+            .cfi_same_value %r14
+            .cfi_same_value %r15
+            .cfi_same_value %rbp
+
+            call ISR_stub
+            .cfi_endproc
     .endm
-    
+
     build_isr_no_err 0
     build_isr_no_err 1
     build_isr_no_err 2
@@ -221,20 +223,20 @@ global_asm!(
     build_isr_err    29
     build_isr_err    30
     build_isr_no_err 31
-    
+
     .set i, 32
     .rept 0x80+1
-    	build_isr_no_err %i
-    	.set i, i+1
+        build_isr_no_err %i
+        .set i, i+1
     .endr
-    
+
     .section .rodata
-    
+
     .align 8
     .globl ISR_START_ADDR
     .type  ISR_START_ADDR @object
     ISR_START_ADDR:
-    	.quad ISR0
+        .quad ISR0
     ",
     options(att_syntax),
 );
@@ -302,6 +304,42 @@ pub struct APICRegs {
 pub struct InterruptControl {
     idt: [IDTEntry; 256],
     apic_base: APICRegs,
+}
+
+impl InterruptContext {
+    pub fn set_return_value(&mut self, value: u64) {
+        // The return value is stored in rax.
+        self.rax = value;
+    }
+
+    pub fn set_return_address(&mut self, addr: u64, user: bool) {
+        // The return address is stored in rip.
+        self.rip = addr;
+        if user {
+            self.cs = 0x2b; // User code segment
+        } else {
+            self.cs = 0x08; // Kernel code segment
+        }
+    }
+
+    pub fn set_stack_pointer(&mut self, sp: u64, user: bool) {
+        // The stack pointer is stored in rsp.
+        self.rsp = sp;
+        if user {
+            self.ss = 0x33; // User stack segment
+        } else {
+            self.ss = 0x10; // Kernel stack segment
+        }
+    }
+
+    pub fn set_interrupt_enabled(&mut self, enabled: bool) {
+        // The interrupt state is stored in eflags.
+        if enabled {
+            self.eflags |= 0x200; // Set the interrupt flag
+        } else {
+            self.eflags &= !0x200; // Clear the interrupt flag
+        }
+    }
 }
 
 impl IDTEntry {
@@ -463,6 +501,10 @@ pub fn disable_irqs() {
     unsafe {
         asm!("cli");
     }
+}
+
+extern "C" {
+    pub fn _arch_fork_return();
 }
 
 fn lidt(base: usize, limit: u16) {

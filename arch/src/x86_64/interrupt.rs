@@ -97,6 +97,8 @@ global_asm!(
         mov %rbx, %rsp
         .cfi_def_cfa_register %rsp
 
+    .globl _arch_fork_return
+    _arch_fork_return:
         movrst %rax, RAX
         movrst %rbx, RBX
         movrst %rcx, RCX
@@ -304,6 +306,42 @@ pub struct InterruptControl {
     apic_base: APICRegs,
 }
 
+impl InterruptContext {
+    pub fn set_return_value(&mut self, value: u64) {
+        // The return value is stored in rax.
+        self.rax = value;
+    }
+
+    pub fn set_return_address(&mut self, addr: u64, user: bool) {
+        // The return address is stored in rip.
+        self.rip = addr;
+        if user {
+            self.cs = 0x2b; // User code segment
+        } else {
+            self.cs = 0x08; // Kernel code segment
+        }
+    }
+
+    pub fn set_stack_pointer(&mut self, sp: u64, user: bool) {
+        // The stack pointer is stored in rsp.
+        self.rsp = sp;
+        if user {
+            self.ss = 0x33; // User stack segment
+        } else {
+            self.ss = 0x10; // Kernel stack segment
+        }
+    }
+
+    pub fn set_interrupt_enabled(&mut self, enabled: bool) {
+        // The interrupt state is stored in eflags.
+        if enabled {
+            self.eflags |= 0x200; // Set the interrupt flag
+        } else {
+            self.eflags &= !0x200; // Clear the interrupt flag
+        }
+    }
+}
+
 impl IDTEntry {
     const fn new(offset: usize, selector: u16, attributes: u8) -> Self {
         Self {
@@ -463,6 +501,10 @@ pub fn disable_irqs() {
     unsafe {
         asm!("cli");
     }
+}
+
+extern "C" {
+    pub fn _arch_fork_return();
 }
 
 fn lidt(base: usize, limit: u16) {

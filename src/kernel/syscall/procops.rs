@@ -11,7 +11,8 @@ use crate::kernel::constants::{
 };
 use crate::kernel::mem::{Page, PageBuffer, VAddr};
 use crate::kernel::task::{
-    ProcessList, Scheduler, Signal, SignalAction, Thread, UserDescriptor, WaitObject, WaitType,
+    ProcessBuilder, ProcessList, Scheduler, Signal, SignalAction, Task, Thread, ThreadBuilder,
+    ThreadRunnable, UserDescriptor, WaitObject, WaitType,
 };
 use crate::kernel::user::dataflow::UserString;
 use crate::kernel::user::{UserPointer, UserPointerMut};
@@ -156,15 +157,21 @@ fn sys_execve(int_stack: &mut InterruptContext, _: &mut ExtendedContext) -> usiz
     }
 }
 
-// TODO: Find a better way.
-#[allow(unreachable_code)]
-fn do_exit(status: u32) -> KResult<()> {
-    {
+fn sys_exit(int_stack: &mut InterruptContext, _: &mut ExtendedContext) -> usize {
+    let status = int_stack.rbx as u32;
+
+    unsafe {
         let mut procs = ProcessList::get().lock();
+        preempt::disable();
+
+        // SAFETY: Preemption is disabled.
         procs.do_kill_process(&Thread::current().process, WaitType::Exited(status));
     }
-    Scheduler::schedule_noreturn();
-    panic!("schedule_noreturn returned!");
+
+    unsafe {
+        // SAFETY: Preempt count == 1.
+        Thread::runnable().exit();
+    }
 }
 
 bitflags! {
@@ -542,7 +549,6 @@ fn do_chmod(pathname: *const u8, mode: u32) -> KResult<()> {
 define_syscall32!(sys_chdir, do_chdir, path: *const u8);
 define_syscall32!(sys_umask, do_umask, mask: u32);
 define_syscall32!(sys_getcwd, do_getcwd, buffer: *mut u8, bufsize: usize);
-define_syscall32!(sys_exit, do_exit, status: u32);
 define_syscall32!(sys_waitpid, do_waitpid, waitpid: u32, arg1: *mut u32, options: u32);
 define_syscall32!(sys_wait4, do_wait4, waitpid: u32, arg1: *mut u32, options: u32, rusage: *mut ());
 define_syscall32!(sys_setsid, do_setsid);
@@ -579,13 +585,30 @@ fn sys_vfork(int_stack: &mut InterruptContext, ext: &mut ExtendedContext) -> usi
 
 fn sys_fork(int_stack: &mut InterruptContext, _: &mut ExtendedContext) -> usize {
     let mut procs = ProcessList::get().lock();
-    let new_thread = Thread::current().new_cloned(procs.as_mut());
-    let mut new_int_stack = int_stack.clone();
-    new_int_stack.rax = 0;
-    new_int_stack.eflags = 0x200;
-    new_thread.fork_init(new_int_stack);
-    new_thread.uwake();
-    new_thread.process.pid as usize
+
+    let current = Thread::current();
+    let current_process = current.process.clone();
+    let current_pgroup = current_process.pgroup(procs.as_pos()).clone();
+    let current_session = current_process.session(procs.as_pos()).clone();
+
+    let mut new_int_context = int_stack.clone();
+    new_int_context.set_return_value(0);
+
+    let thread_builder = ThreadBuilder::new().fork_from(&current);
+    let (new_thread, new_process) = ProcessBuilder::new()
+        .mm_list(current_process.mm_list.new_cloned())
+        .parent(current_process)
+        .pgroup(current_pgroup)
+        .session(current_session)
+        .thread_builder(thread_builder)
+        .build(&mut procs);
+
+    Scheduler::get().spawn(Task::new(ThreadRunnable::from_context(
+        new_thread,
+        new_int_context,
+    )));
+
+    new_process.pid as usize
 }
 
 fn sys_sigreturn(int_stack: &mut InterruptContext, ext_ctx: &mut ExtendedContext) -> usize {

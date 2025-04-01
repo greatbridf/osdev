@@ -61,7 +61,7 @@ impl FileArray {
         &Thread::current().borrow().files
     }
 
-    pub fn new_for_init() -> Arc<Self> {
+    pub fn new() -> Arc<Self> {
         Arc::new(FileArray {
             inner: Spin::new(FileArrayInner {
                 files: BTreeMap::new(),

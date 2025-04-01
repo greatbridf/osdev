@@ -1,19 +1,19 @@
 use alloc::{collections::VecDeque, sync::Arc};
 
-use crate::{println_debug, sync::Spin};
+use crate::sync::Spin;
 
-use super::Thread;
+use super::Task;
 
 #[arch::define_percpu]
 static READYQUEUE: Option<Spin<FifoReadyQueue>> = None;
 
 pub trait ReadyQueue {
-    fn get(&mut self) -> Option<Arc<Thread>>;
-    fn put(&mut self, thread: Arc<Thread>);
+    fn get(&mut self) -> Option<Arc<Task>>;
+    fn put(&mut self, thread: Arc<Task>);
 }
 
 pub struct FifoReadyQueue {
-    threads: VecDeque<Arc<Thread>>,
+    threads: VecDeque<Arc<Task>>,
 }
 
 impl FifoReadyQueue {
@@ -25,11 +25,11 @@ impl FifoReadyQueue {
 }
 
 impl ReadyQueue for FifoReadyQueue {
-    fn get(&mut self) -> Option<Arc<Thread>> {
+    fn get(&mut self) -> Option<Arc<Task>> {
         self.threads.pop_front()
     }
 
-    fn put(&mut self, thread: Arc<Thread>) {
+    fn put(&mut self, thread: Arc<Task>) {
         self.threads.push_back(thread);
     }
 }
@@ -43,6 +43,6 @@ pub fn rq_thiscpu() -> &'static Spin<dyn ReadyQueue> {
         .expect("ReadyQueue should be initialized")
 }
 
-pub unsafe fn init_rq_thiscpu() {
+pub fn init_rq_thiscpu() {
     READYQUEUE.set(Some(Spin::new(FifoReadyQueue::new())));
 }

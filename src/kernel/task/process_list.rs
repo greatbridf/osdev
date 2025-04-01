@@ -12,16 +12,14 @@ use crate::{
 
 use lazy_static::lazy_static;
 
-use super::{Process, ProcessGroup, Scheduler, Session, Signal, Thread, WaitObject, WaitType};
+use super::{Process, ProcessGroup, Session, Signal, Thread, WaitObject, WaitType};
 
 pub struct ProcessList {
     /// The init process.
     init: Option<Arc<Process>>,
-    /// The kernel idle process.
-    idle: Option<Arc<Process>>,
-    /// All threads except the idle thread.
+    /// All threads.
     threads: BTreeMap<u32, Arc<Thread>>,
-    /// All processes except the idle process.
+    /// All processes.
     processes: BTreeMap<u32, Weak<Process>>,
     /// All process groups.
     pgroups: BTreeMap<u32, Weak<ProcessGroup>>,
@@ -33,7 +31,6 @@ lazy_static! {
     static ref GLOBAL_PROC_LIST: RwSemaphore<ProcessList> = {
         RwSemaphore::new(ProcessList {
             init: None,
-            idle: None,
             threads: BTreeMap::new(),
             processes: BTreeMap::new(),
             pgroups: BTreeMap::new(),
@@ -64,10 +61,18 @@ impl ProcessList {
     }
 
     pub fn kill_current(signal: Signal) -> ! {
-        ProcessList::get()
-            .lock()
-            .do_kill_process(&Thread::current().process, WaitType::Signaled(signal));
-        Scheduler::schedule_noreturn()
+        unsafe {
+            let mut process_list = ProcessList::get().lock();
+            preempt::disable();
+
+            // SAFETY: Preemption disabled.
+            process_list.do_kill_process(&Thread::current().process, WaitType::Signaled(signal));
+        }
+
+        unsafe {
+            // SAFETY: Preempt count == 1.
+            Thread::runnable().exit();
+        }
     }
 
     pub fn remove_process(&mut self, pid: u32) {
@@ -94,12 +99,13 @@ impl ProcessList {
         }
     }
 
-    pub fn init_process(&self) -> &Arc<Process> {
-        self.init.as_ref().unwrap()
+    pub fn set_init_process(&mut self, init: Arc<Process>) {
+        let old_init = self.init.replace(init);
+        assert!(old_init.is_none(), "Init process already set");
     }
 
-    pub fn idle_process(&self) -> &Arc<Process> {
-        self.idle.as_ref().unwrap()
+    pub fn init_process(&self) -> &Arc<Process> {
+        self.init.as_ref().unwrap()
     }
 
     pub fn try_find_thread(&self, tid: u32) -> Option<&Arc<Thread>> {
@@ -119,23 +125,19 @@ impl ProcessList {
     }
 
     /// Make the process a zombie and notify the parent.
-    pub fn do_kill_process(&mut self, process: &Arc<Process>, status: WaitType) {
-        if self.idle_process().pid == process.pid {
-            panic!("idle exited");
-        }
-
-        if self.init_process().pid == process.pid {
+    /// # Safety
+    /// This function needs to be called with preemption disabled.
+    pub unsafe fn do_kill_process(&mut self, process: &Arc<Process>, status: WaitType) {
+        if process.pid == 1 {
             panic!("init exited");
         }
-
-        preempt::disable();
 
         let inner = process.inner.access_mut(self.as_pos_mut());
         // TODO!!!!!!: When we are killing multiple threads, we need to wait until all
         // the threads are stopped then proceed.
         for thread in inner.threads.values().map(|t| t.upgrade().unwrap()) {
             assert!(thread.tid == Thread::current().tid);
-            thread.set_zombie();
+            // TODO: Send SIGKILL to all threads.
             thread.files.close_all();
         }
 
@@ -181,40 +183,5 @@ impl ProcessList {
             },
             self.as_pos(),
         );
-
-        preempt::enable();
     }
-}
-
-pub unsafe fn init_multitasking(init_fn: unsafe extern "C" fn()) {
-    let mut procs = ProcessList::get().lock();
-
-    let init_process = Process::new_for_init(1, procs.as_mut());
-    let init_thread = Thread::new_for_init(
-        Arc::from(b"[kernel kinit]".as_slice()),
-        1,
-        &init_process,
-        procs.as_mut(),
-    );
-
-    let init_session = Session::new(procs.as_mut(), &init_process);
-    let init_pgroup = init_session.new_group(procs.as_mut(), &init_process);
-
-    assert!(init_process.session.swap(Some(init_session)).is_none());
-    assert!(init_process.pgroup.swap(Some(init_pgroup)).is_none());
-
-    let idle_process = Process::new_for_init(0, procs.as_mut());
-    let idle_thread = Thread::new_for_init(
-        Arc::from(b"[kernel idle#BS]".as_slice()),
-        0,
-        &idle_process,
-        procs.as_mut(),
-    );
-
-    procs.init = Some(init_process);
-    procs.idle = Some(idle_process);
-
-    init_thread.init(init_fn as usize);
-    init_thread.uwake();
-    Scheduler::set_idle_and_current(idle_thread);
 }

@@ -278,7 +278,8 @@ impl MMList {
     pub unsafe fn release(&self) {
         // TODO: Check whether we should wake someone up if they've been put to sleep when calling `vfork`.
         self.inner.swap(None);
-        self.root_page_table.store(0, Ordering::Relaxed);
+        self.root_page_table
+            .swap(KERNEL_PML4 as _, Ordering::Relaxed);
     }
 
     /// No need to do invalidation manually, `PageTable` already does it.

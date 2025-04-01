@@ -8,17 +8,27 @@ crate-type = ["staticlib"]
 
 [dependencies]
 arch = { path = "./arch" }
+atomic_unique_refcell = { path = "./crates/atomic_unique_refcell", features = [
+    "no_std",
+] }
 bitflags = "2.6.0"
+intrusive-collections = "0.9.7"
 itertools = { version = "0.13.0", default-features = false }
 lazy_static = { version = "1.5.0", features = ["spin_no_std"] }
 spin = "0.9.8"
 
 [features]
-default = ["smp"]
+default = ["smp", "trace_future"]
 trace_condvar = []
 trace_syscall = []
 trace_scheduler = []
-log_trace = ["trace_condvar", "trace_syscall", "trace_scheduler"]
+trace_future = []
+log_trace = [
+    "trace_condvar",
+    "trace_syscall",
+    "trace_scheduler",
+    "trace_future",
+]
 log_debug = []
 smp = []
 
@@ -27,10 +37,6 @@ bindgen = "0.70.1"
 
 [profile.dev]
 panic = "abort"
-
-[profile.dev.package.core]
-opt-level = 2
-debug = true
 
 [profile.dev.package."*"]
 opt-level = 2

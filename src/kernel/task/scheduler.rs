@@ -1,24 +1,67 @@
 use core::{
+    future::Future,
+    pin::Pin,
     ptr::NonNull,
-    sync::atomic::{compiler_fence, fence, Ordering},
+    sync::atomic::{compiler_fence, Ordering},
+    task::{Context, Poll, Waker},
 };
 
 use crate::{kernel::console::println_trace, prelude::*, sync::preempt};
 
 use alloc::sync::Arc;
 
-use super::{readyqueue::rq_thiscpu, Thread};
+use intrusive_collections::RBTree;
+use lazy_static::lazy_static;
+
+use super::{
+    init_rq_thiscpu,
+    readyqueue::rq_thiscpu,
+    task::{FutureRunnable, TaskAdapter, TaskHandle, TaskOutput},
+    Task,
+};
 
 pub struct Scheduler;
 
-/// Idle task thread
-/// All the idle task threads belongs to `pid 0` and are pinned to the current cpu.
-#[arch::define_percpu]
-static IDLE_TASK: Option<NonNull<Thread>> = None;
+pub struct JoinHandle<Output>(Arc<Spin<TaskOutput<Output>>>)
+where
+    Output: Send;
 
-/// Current thread
+/// Idle task
+/// All the idle tasks are pinned to the current cpu.
 #[arch::define_percpu]
-static CURRENT: Option<NonNull<Thread>> = None;
+static IDLE_TASK: Option<NonNull<Task>> = None;
+
+/// Current running task
+#[arch::define_percpu]
+static CURRENT: Option<NonNull<Task>> = None;
+
+lazy_static! {
+    static ref TASKS: Spin<RBTree<TaskAdapter>> = Spin::new(RBTree::new(TaskAdapter::new()));
+}
+
+impl Task {
+    /// # Safety
+    /// We should never "inspect" a change in `current`.
+    /// The change of `CURRENT` will only happen in the scheduler. And if we are preempted,
+    /// when we DO return, the `CURRENT` will be the same and remain valid.
+    pub fn current<'a>() -> BorrowedArc<'a, Task> {
+        BorrowedArc::from_raw(CURRENT.get().unwrap().as_ptr())
+    }
+
+    /// # Safety
+    /// Idle task should never change so we can borrow it without touching the refcount.
+    pub fn idle() -> BorrowedArc<'static, Task> {
+        BorrowedArc::from_raw(IDLE_TASK.get().unwrap().as_ptr())
+    }
+
+    pub fn add(task: Arc<Self>) {
+        TASKS.lock().insert(task);
+    }
+
+    pub fn remove(&self) {
+        unsafe { TASKS.lock().cursor_mut_from_ptr(self as *const _) }.remove();
+    }
+}
 
 impl Scheduler {
     /// `Scheduler` might be used in various places. Do not hold it for a long time.
@@ -33,40 +76,43 @@ impl Scheduler {
         &GLOBAL_SCHEDULER
     }
 
-    /// # Safety
-    /// We should never "inspect" a change in `current`.
-    /// The change of `CURRENT` will only happen in the scheduler. And if we are preempted,
-    /// when we DO return, the `CURRENT` will be the same and remain valid.
-    pub fn current<'lt>() -> BorrowedArc<'lt, Thread> {
-        BorrowedArc::from_raw(CURRENT.get().unwrap().as_ptr())
+    pub fn init_scheduler_thiscpu() {
+        let runnable = FutureRunnable::new(idle_task());
+        let (init_task, _) = Self::extract_handle(Task::new(runnable));
+        TASKS.lock().insert(init_task.clone());
+
+        init_rq_thiscpu();
+        Self::set_idle_and_current(init_task);
     }
 
-    /// # Safety
-    /// Idle task should never change so we can borrow it without touching the refcount.
-    pub fn idle_task() -> BorrowedArc<'static, Thread> {
-        BorrowedArc::from_raw(IDLE_TASK.get().unwrap().as_ptr())
-    }
+    pub fn set_idle_and_current(task: Arc<Task>) {
+        task.set_usleep();
 
-    pub unsafe fn set_idle_and_current(thread: Arc<Thread>) {
-        // We don't wake the idle thread to prevent from accidentally being scheduled there.
-        thread.init(idle_task as *const () as usize);
-
-        let old = IDLE_TASK.swap(NonNull::new(Arc::into_raw(thread.clone()) as *mut _));
+        let old = IDLE_TASK.swap(NonNull::new(Arc::into_raw(task.clone()) as *mut _));
         assert!(old.is_none(), "Idle task is already set");
 
-        let old = CURRENT.swap(NonNull::new(Arc::into_raw(thread) as *mut _));
+        let old = CURRENT.swap(NonNull::new(Arc::into_raw(task) as *mut _));
         assert!(old.is_none(), "Current is already set");
     }
 
-    pub fn activate(&self, thread: &Arc<Thread>) {
+    pub fn activate(&self, task: &Arc<Task>) {
         // TODO: Select an appropriate ready queue to enqueue.
-        if !thread.on_rq.swap(true, Ordering::AcqRel) {
-            rq_thiscpu().lock_irq().put(thread.clone());
+        if !task.on_rq.swap(true, Ordering::AcqRel) {
+            rq_thiscpu().lock_irq().put(task.clone());
         }
     }
-}
 
-impl Scheduler {
+    pub fn spawn<O>(&self, task: TaskHandle<O>) -> JoinHandle<O>
+    where
+        O: Send,
+    {
+        let (task, output) = Self::extract_handle(task);
+        TASKS.lock().insert(task.clone());
+        self.activate(&task);
+
+        JoinHandle(output)
+    }
+
     /// Go to idle task. Call this with `preempt_count == 1`.
     /// The preempt count will be decremented by this function.
     ///
@@ -83,7 +129,7 @@ impl Scheduler {
         //
         // Since we might never return to here, we can't take ownership of `current()`.
         // Is it safe to believe that `current()` will never change across calls?
-        context_switch_light(&Thread::current(), &Scheduler::idle_task());
+        Task::switch(&Task::current(), &Task::idle());
         preempt::enable();
     }
 
@@ -92,87 +138,81 @@ impl Scheduler {
         Self::schedule();
         panic!("Scheduler::schedule_noreturn(): Should never return")
     }
-}
 
-fn context_switch_light(from: &Arc<Thread>, to: &Arc<Thread>) {
-    unsafe {
-        arch::TaskContext::switch_to(
-            &mut *from.get_context_mut_ptr(),
-            &mut *to.get_context_mut_ptr(),
-        );
-    }
-}
+    pub async fn yield_now() {
+        struct Yield(bool);
 
-/// In this function, we should see `preempt_count == 1`.
-extern "C" fn idle_task() {
-    loop {
-        debug_assert_eq!(preempt::count(), 1);
+        impl Future for Yield {
+            type Output = ();
 
-        let next = rq_thiscpu().lock().get();
-        match next {
-            None => {
-                if Thread::current().state.is_runnable() {
-                    println_trace!(
-                        "trace_scheduler",
-                        "Returning to tid({}) without doing context switch",
-                        Thread::current().tid
-                    );
-
-                    // Previous thread is `Running`, Return to current running thread
-                    // without changing its state.
-                    context_switch_light(&Scheduler::idle_task(), &Thread::current());
-                } else {
-                    // Halt the cpu and rerun the loop.
-                    arch::halt();
-                }
-                continue;
-            }
-            Some(next) => {
-                println_trace!(
-                    "trace_scheduler",
-                    "Switching from tid({}) to tid({})",
-                    Thread::current().tid,
-                    next.tid
-                );
-
-                debug_assert_ne!(
-                    next.tid,
-                    Thread::current().tid,
-                    "Switching to the same thread"
-                );
-
-                next.process.mm_list.switch_page_table();
-
-                if let Some(thread_pointer) =
-                    CURRENT.swap(NonNull::new(Arc::into_raw(next) as *mut _))
-                {
-                    let thread = unsafe { Arc::from_raw(thread_pointer.as_ptr()) };
-                    let mut rq = rq_thiscpu().lock();
-
-                    if thread.state.is_runnable() {
-                        rq.put(thread);
-                    } else {
-                        thread.on_rq.store(false, Ordering::Release);
+            fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+                match *self {
+                    Yield(true) => Poll::Ready(()),
+                    Yield(false) => {
+                        self.set(Yield(true));
+                        cx.waker().wake_by_ref();
+                        Poll::Pending
                     }
                 }
             }
         }
 
-        unsafe {
-            // SAFETY: We are in the idle task where preemption is disabled.
-            //         So we can safely load the thread area and interrupt stack.
-            Thread::current().load_interrupt_stack();
-            Thread::current().load_thread_area32();
-        }
+        Yield(false).await
+    }
+}
 
-        // TODO!!!: If the task comes from another cpu, we need to sync.
-        //
-        // The other cpu should see the changes of kernel stack of the target thread
-        // made in this cpu.
-        //
-        // Can we find a better way other than `fence`s?
-        fence(Ordering::SeqCst);
-        context_switch_light(&Scheduler::idle_task(), &Thread::current());
-        fence(Ordering::SeqCst);
+async fn idle_task() {
+    preempt::disable();
+    let mut cx = Context::from_waker(Waker::noop());
+
+    loop {
+        debug_assert_eq!(
+            preempt::count(),
+            1,
+            "Scheduler::idle_task() preempt count != 1"
+        );
+
+        let next = rq_thiscpu().lock().get();
+        match next {
+            None if Task::current().is_runnable() => {
+                println_trace!(
+                    "trace_scheduler",
+                    "Returning to task id({}) without doing context switch",
+                    Task::current().id
+                );
+
+                // Previous thread is `Running`, return to the current running thread.
+                Task::current().run(&mut cx);
+            }
+            None => {
+                // Halt the cpu and rerun the loop.
+                arch::halt();
+            }
+            Some(next) => {
+                println_trace!(
+                    "trace_scheduler",
+                    "Switching from task id({}) to task id({})",
+                    Task::current().id,
+                    next.id
+                );
+
+                debug_assert_ne!(next.id, Task::current().id, "Switching to the same task");
+
+                if let Some(task_pointer) =
+                    CURRENT.swap(NonNull::new(Arc::into_raw(next) as *mut _))
+                {
+                    let task = unsafe { Arc::from_raw(task_pointer.as_ptr()) };
+                    let mut rq = rq_thiscpu().lock();
+
+                    if task.is_runnable() {
+                        rq.put(task);
+                    } else {
+                        task.on_rq.store(false, Ordering::Release);
+                    }
+                }
+
+                Task::current().run(&mut cx);
+            }
+        }
     }
 }

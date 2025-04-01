@@ -96,13 +96,13 @@ macro_rules! println_trace {
             $crate::println!("[kernel:trace] ")
         }
     };
-    ($feat:literal, $($arg:tt)*) => {
+    ($feat:literal, $($arg:tt)*) => {{
         #[deny(unexpected_cfgs)]
         {
             #[cfg(feature = $feat)]
             $crate::println!("[kernel:trace] {}", format_args!($($arg)*))
         }
-    };
+    }};
 }
 
 use super::terminal::Terminal;

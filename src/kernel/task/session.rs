@@ -31,7 +31,7 @@ pub struct Session {
 
 impl Session {
     /// Create a session and add it to the global session list.
-    pub(super) fn new(procs: &mut ProcessList, leader: &Arc<Process>) -> Arc<Self> {
+    pub fn new(leader: &Arc<Process>, process_list: &mut ProcessList) -> Arc<Self> {
         let session = Arc::new(Self {
             sid: leader.pid,
             leader: Arc::downgrade(leader),
@@ -42,26 +42,18 @@ impl Session {
             groups: Locked::new(
                 BTreeMap::new(),
                 // SAFETY: `procs` must be the global process list, which won't be moved.
-                procs,
+                process_list,
             ),
         });
 
-        procs.add_session(&session);
+        process_list.add_session(&session);
         session
     }
 
-    pub(super) fn new_group(
-        self: &Arc<Self>,
-        procs: &mut ProcessList,
-        leader: &Arc<Process>,
-    ) -> Arc<ProcessGroup> {
-        let pgroup = ProcessGroup::new(leader, Arc::downgrade(self), procs);
+    pub(super) fn add_member(&self, procs: &mut ProcessList, pgroup: &Arc<ProcessGroup>) {
         let groups = self.groups.access_mut(procs.as_pos_mut());
-        assert!(groups
-            .insert(pgroup.pgid, Arc::downgrade(&pgroup))
-            .is_none());
-
-        pgroup
+        let old = groups.insert(pgroup.pgid, Arc::downgrade(pgroup));
+        assert!(old.is_none(), "Process group already exists");
     }
 
     pub(super) fn remove_member(&self, pgid: u32, procs: RefMutPosition<'_, ProcessList>) {

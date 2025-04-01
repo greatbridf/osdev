@@ -1,61 +1,43 @@
-use core::{
-    arch::naked_asm,
-    cell::{RefCell, UnsafeCell},
-    sync::atomic::{AtomicBool, AtomicU32, Ordering},
-};
+use core::{arch::asm, pin::Pin, ptr::NonNull, task::Waker};
 
 use crate::{
-    kernel::{cpu::current_cpu, user::dataflow::CheckedUserPointer, vfs::FsContext},
+    kernel::{
+        cpu::current_cpu,
+        mem::VAddr,
+        user::dataflow::CheckedUserPointer,
+        vfs::{filearray::FileArray, FsContext},
+    },
     prelude::*,
-    sync::{preempt, AsRefMutPosition as _, AsRefPosition as _},
+    sync::{preempt, AsRefMutPosition as _},
 };
 
 use alloc::sync::Arc;
 
-use crate::kernel::vfs::filearray::FileArray;
-
 use super::{
     signal::{RaiseResult, Signal, SignalList},
-    KernelStack, Process, ProcessList, Scheduler, WaitObject, WaitType,
+    task::{Contexted, PinRunnable, RunState},
+    Process, ProcessList, TaskContext,
 };
 
-use arch::{InterruptContext, TaskContext, UserTLS};
+use arch::{InterruptContext, UserTLS, _arch_fork_return};
 
-#[derive(Debug)]
-pub struct ThreadState(AtomicU32);
+struct CurrentThread {
+    thread: NonNull<Thread>,
+    runnable: NonNull<ThreadRunnable>,
+}
 
-impl ThreadState {
-    pub const RUNNING: u32 = 0;
-    pub const PREPARING: u32 = 1;
-    pub const ZOMBIE: u32 = 2;
-    pub const ISLEEP: u32 = 4;
-    pub const USLEEP: u32 = 8;
+#[arch::define_percpu]
+static CURRENT_THREAD: Option<CurrentThread> = None;
 
-    pub const fn new(state: u32) -> Self {
-        Self(AtomicU32::new(state))
-    }
-
-    pub fn store(&self, state: u32) {
-        self.0.store(state, Ordering::Release);
-    }
-
-    pub fn swap(&self, state: u32) -> u32 {
-        self.0.swap(state, Ordering::AcqRel)
-    }
-
-    pub fn cmpxchg(&self, current: u32, new: u32) -> u32 {
-        self.0
-            .compare_exchange(current, new, Ordering::AcqRel, Ordering::Acquire)
-            .unwrap_or_else(|x| x)
-    }
-
-    pub fn assert(&self, state: u32) {
-        assert_eq!(self.0.load(Ordering::Acquire), state);
-    }
-
-    pub fn is_runnable(&self) -> bool {
-        self.0.load(Ordering::Acquire) == Self::RUNNING
-    }
+pub struct ThreadBuilder {
+    tid: Option<u32>,
+    name: Option<Arc<[u8]>>,
+    process: Option<Arc<Process>>,
+    files: Option<Arc<FileArray>>,
+    fs_context: Option<Arc<FsContext>>,
+    signal_list: Option<SignalList>,
+    tls: Option<UserTLS>,
+    set_child_tid: Option<usize>,
 }
 
 #[derive(Debug)]
@@ -79,21 +61,6 @@ pub struct Thread {
     pub fs_context: Arc<FsContext>,
 
     pub signal_list: SignalList,
-
-    /// Thread state for scheduler use.
-    pub state: ThreadState,
-    pub on_rq: AtomicBool,
-
-    /// Thread context
-    pub context: UnsafeCell<TaskContext>,
-
-    /// Kernel stack
-    /// Never access this directly.
-    ///
-    /// We can only touch kernel stack when the process is neither running nor sleeping.
-    /// AKA, the process is in the ready queue and will return to `schedule` context.
-    kstack: RefCell<KernelStack>,
-
     inner: Spin<ThreadInner>,
 }
 
@@ -137,112 +104,127 @@ impl UserDescriptorFlags {
     }
 }
 
-impl Thread {
-    pub unsafe fn new_for_init(
-        name: Arc<[u8]>,
-        tid: u32,
-        process: &Arc<Process>,
-        procs: &mut ProcessList,
-    ) -> Arc<Self> {
-        let thread = Arc::new(Self {
-            tid,
-            process: process.clone(),
-            files: FileArray::new_for_init(),
-            fs_context: FsContext::new_for_init(),
-            signal_list: SignalList::new(),
-            kstack: RefCell::new(KernelStack::new()),
-            context: UnsafeCell::new(TaskContext::new()),
-            state: ThreadState::new(ThreadState::PREPARING),
-            on_rq: AtomicBool::new(false),
-            inner: Spin::new(ThreadInner {
-                name,
-                tls: None,
-                set_child_tid: 0,
-            }),
-        });
-
-        process.add_thread(&thread, procs.as_pos_mut());
-        thread
+impl ThreadBuilder {
+    pub fn new() -> Self {
+        Self {
+            tid: None,
+            name: None,
+            process: None,
+            files: None,
+            fs_context: None,
+            signal_list: None,
+            tls: None,
+            set_child_tid: None,
+        }
     }
 
-    pub fn new_cloned(&self, procs: &mut ProcessList) -> Arc<Self> {
-        let process = Process::new_cloned(&self.process, procs);
+    pub fn tid(mut self, tid: u32) -> Self {
+        self.tid = Some(tid);
+        self
+    }
 
-        let inner = self.inner.lock();
-        self.state.assert(ThreadState::RUNNING);
+    pub fn name(mut self, name: Arc<[u8]>) -> Self {
+        self.name = Some(name);
+        self
+    }
 
-        let signal_list = self.signal_list.clone();
+    pub fn process(mut self, process: Arc<Process>) -> Self {
+        self.process = Some(process);
+        self
+    }
+
+    pub fn files(mut self, files: Arc<FileArray>) -> Self {
+        self.files = Some(files);
+        self
+    }
+
+    pub fn fs_context(mut self, fs_context: Arc<FsContext>) -> Self {
+        self.fs_context = Some(fs_context);
+        self
+    }
+
+    pub fn signal_list(mut self, signal_list: SignalList) -> Self {
+        self.signal_list = Some(signal_list);
+        self
+    }
+
+    pub fn tls(mut self, tls: Option<UserTLS>) -> Self {
+        self.tls = tls;
+        self
+    }
+
+    pub fn set_child_tid(mut self, set_child_tid: usize) -> Self {
+        self.set_child_tid = Some(set_child_tid);
+        self
+    }
+
+    /// Fork the thread from another thread.
+    ///
+    /// Sets the thread's files, fs_context, signal_list, name, tls, and set_child_tid
+    pub fn fork_from(self, thread: &Thread) -> Self {
+        let inner = thread.inner.lock();
+
+        self.files(FileArray::new_cloned(&thread.files))
+            .fs_context(FsContext::new_cloned(&thread.fs_context))
+            .signal_list(thread.signal_list.clone())
+            .name(inner.name.clone())
+            .tls(inner.tls.clone())
+            .set_child_tid(inner.set_child_tid)
+    }
+
+    pub fn build(self, process_list: &mut ProcessList) -> Arc<Thread> {
+        let tid = self.tid.expect("TID is not set");
+        let name = self.name.expect("Name is not set");
+        let process = self.process.expect("Process is not set");
+        let files = self.files.unwrap_or_else(|| FileArray::new());
+        let fs_context = self
+            .fs_context
+            .unwrap_or_else(|| FsContext::global().clone());
+        let signal_list = self.signal_list.unwrap_or_else(|| SignalList::new());
+        let set_child_tid = self.set_child_tid.unwrap_or(0);
+
         signal_list.clear_pending();
 
-        let thread = Arc::new(Self {
-            tid: process.pid,
+        let thread = Arc::new(Thread {
+            tid,
             process: process.clone(),
-            files: FileArray::new_cloned(&self.files),
-            fs_context: FsContext::new_cloned(&self.fs_context),
+            files,
+            fs_context,
             signal_list,
-            kstack: RefCell::new(KernelStack::new()),
-            context: UnsafeCell::new(TaskContext::new()),
-            state: ThreadState::new(ThreadState::PREPARING),
-            on_rq: AtomicBool::new(false),
             inner: Spin::new(ThreadInner {
-                name: inner.name.clone(),
-                tls: inner.tls.clone(),
-                set_child_tid: inner.set_child_tid,
+                name,
+                tls: self.tls,
+                set_child_tid,
             }),
         });
 
-        procs.add_thread(&thread);
-        process.add_thread(&thread, procs.as_pos_mut());
+        process_list.add_thread(&thread);
+        process.add_thread(&thread, process_list.as_pos_mut());
         thread
     }
+}
 
+impl Thread {
     pub fn current<'lt>() -> BorrowedArc<'lt, Self> {
-        Scheduler::current()
+        // SAFETY: We won't change the thread pointer in the current CPU when
+        // we return here after some preemption.
+        let current: &Option<CurrentThread> = unsafe { CURRENT_THREAD.as_ref() };
+        let current = current.as_ref().expect("Current thread is not set");
+        BorrowedArc::from_raw(current.thread.as_ptr())
     }
 
-    pub fn do_stop(self: &Arc<Self>, signal: Signal) {
-        if let Some(parent) = self.process.parent.load() {
-            parent.notify(
-                WaitObject {
-                    pid: self.process.pid,
-                    code: WaitType::Stopped(signal),
-                },
-                ProcessList::get().lock_shared().as_pos(),
-            );
-        }
+    pub fn runnable<'lt>() -> &'lt ThreadRunnable {
+        // SAFETY: We won't change the thread pointer in the current CPU when
+        // we return here after some preemption.
+        let current: &Option<CurrentThread> = unsafe { CURRENT_THREAD.as_ref() };
+        let current = current.as_ref().expect("Current thread is not set");
 
-        preempt::disable();
-
-        // `SIGSTOP` can only be waken up by `SIGCONT` or `SIGKILL`.
-        // SAFETY: Preempt disabled above.
-        self.usleep();
-        Scheduler::schedule();
-    }
-
-    pub fn do_continue(self: &Arc<Self>) {
-        if let Some(parent) = self.process.parent.load() {
-            parent.notify(
-                WaitObject {
-                    pid: self.process.pid,
-                    code: WaitType::Continued,
-                },
-                ProcessList::get().lock_shared().as_pos(),
-            );
-        }
+        // SAFETY: We can only use the returned value when we are in the context of the thread.
+        unsafe { &*current.runnable.as_ptr() }
     }
 
     pub fn raise(self: &Arc<Self>, signal: Signal) -> RaiseResult {
-        match self.signal_list.raise(signal) {
-            RaiseResult::ShouldIWakeUp => {
-                self.iwake();
-                RaiseResult::Finished
-            }
-            RaiseResult::ShouldUWakeUp => {
-                self.uwake();
-                RaiseResult::Finished
-            }
-            result => result,
-        }
+        self.signal_list.raise(signal)
     }
 
     /// # Safety
@@ -280,43 +262,6 @@ impl Thread {
         Ok(())
     }
 
-    pub fn fork_init(&self, interrupt_context: InterruptContext) {
-        self.state.store(ThreadState::USLEEP);
-
-        let sp = self.kstack.borrow().init(interrupt_context);
-        unsafe {
-            self.get_context_mut_ptr()
-                .as_mut()
-                .unwrap()
-                .init(fork_return as usize, sp);
-        }
-    }
-
-    pub fn init(&self, entry: usize) {
-        self.state.store(ThreadState::USLEEP);
-        unsafe {
-            self.get_context_mut_ptr()
-                .as_mut()
-                .unwrap()
-                .init(entry, self.get_kstack_bottom());
-        }
-    }
-
-    /// # Safety
-    /// This function is unsafe because it accesses the `current_cpu()`, which needs
-    /// to be called in a preemption disabled context.
-    pub unsafe fn load_interrupt_stack(&self) {
-        self.kstack.borrow().load_interrupt_stack();
-    }
-
-    pub fn get_kstack_bottom(&self) -> usize {
-        self.kstack.borrow().get_stack_bottom()
-    }
-
-    pub unsafe fn get_context_mut_ptr(&self) -> *mut TaskContext {
-        self.context.get()
-    }
-
     pub fn set_name(&self, name: Arc<[u8]>) {
         self.inner.lock().name = name;
     }
@@ -324,74 +269,115 @@ impl Thread {
     pub fn get_name(&self) -> Arc<[u8]> {
         self.inner.lock().name.clone()
     }
+}
 
-    pub fn usleep(&self) {
-        // No need to dequeue. We have proved that the thread is running so not in the queue.
-        let prev_state = self.state.swap(ThreadState::USLEEP);
-        assert_eq!(prev_state, ThreadState::RUNNING);
-    }
+pub struct ThreadRunnable {
+    thread: Arc<Thread>,
+    /// Interrupt context for the thread initialization.
+    /// We store the kernel stack pointer in one of the fields for now.
+    ///
+    /// TODO: A better way to store the interrupt context.
+    interrupt_context: InterruptContext,
+    return_context: TaskContext,
+}
 
-    pub fn uwake(self: &Arc<Self>) {
-        let prev_state = self.state.swap(ThreadState::RUNNING);
-        assert_eq!(prev_state, ThreadState::USLEEP);
+impl ThreadRunnable {
+    pub fn new(thread: Arc<Thread>, entry: VAddr, stack_pointer: VAddr) -> Self {
+        let (VAddr(entry), VAddr(stack_pointer)) = (entry, stack_pointer);
 
-        Scheduler::get().activate(self);
-    }
+        let mut interrupt_context = InterruptContext::default();
+        interrupt_context.set_return_address(entry as _, true);
+        interrupt_context.set_stack_pointer(stack_pointer as _, true);
+        interrupt_context.set_interrupt_enabled(true);
 
-    pub fn isleep(self: &Arc<Self>) {
-        // No need to dequeue. We have proved that the thread is running so not in the queue.
-        let prev_state = self.state.swap(ThreadState::ISLEEP);
-        assert_eq!(prev_state, ThreadState::RUNNING);
-    }
-
-    pub fn iwake(self: &Arc<Self>) {
-        match self
-            .state
-            .cmpxchg(ThreadState::ISLEEP, ThreadState::RUNNING)
-        {
-            ThreadState::RUNNING | ThreadState::USLEEP => return,
-            ThreadState::ISLEEP => Scheduler::get().activate(self),
-            state => panic!("Invalid transition from state {:?} to `Running`", state),
+        Self {
+            thread,
+            interrupt_context,
+            return_context: TaskContext::new(),
         }
     }
 
-    /// Set `Running` threads to the `Zombie` state.
-    pub fn set_zombie(self: &Arc<Self>) {
-        let prev_state = self.state.swap(ThreadState::ZOMBIE);
-        assert_eq!(prev_state, ThreadState::RUNNING);
+    pub fn from_context(thread: Arc<Thread>, interrupt_context: InterruptContext) -> Self {
+        Self {
+            thread,
+            interrupt_context,
+            return_context: TaskContext::new(),
+        }
+    }
+
+    /// # Safety
+    /// This function needs to be called with preempt count == 1.
+    pub unsafe fn exit(&self) -> ! {
+        self.return_context.switch_noreturn();
     }
 }
 
-#[naked]
-unsafe extern "C" fn fork_return() {
-    // We don't land on the typical `Scheduler::schedule()` function, so we need to
-    // manually enable preemption.
-    naked_asm! {
-        "
-        call {preempt_enable}
-        swapgs
-        pop %rax
-        pop %rbx
-        pop %rcx
-        pop %rdx
-        pop %rdi
-        pop %rsi
-        pop %r8
-        pop %r9
-        pop %r10
-        pop %r11
-        pop %r12
-        pop %r13
-        pop %r14
-        pop %r15
-        pop %rbp
-        add $16, %rsp
-        iretq
-        ",
-        preempt_enable = sym preempt::enable,
-        options(att_syntax),
+impl Contexted for ThreadRunnable {
+    fn load_running_context(&mut self) {
+        let thread = self.thread.as_ref();
+
+        unsafe {
+            // SAFETY: Preemption is disabled.
+            arch::load_interrupt_stack(current_cpu(), self.interrupt_context.int_no as u64);
+        }
+
+        // SAFETY: Preemption is disabled.
+        unsafe {
+            // SAFETY: `self` and `thread` are valid and non-null.
+            let current_thread = CurrentThread {
+                thread: NonNull::new_unchecked(thread as *const _ as *mut _),
+                runnable: NonNull::new_unchecked(self as *const _ as *mut _),
+            };
+
+            // SAFETY: Preemption is disabled.
+            CURRENT_THREAD.swap(Some(current_thread));
+        }
+
+        thread.process.mm_list.switch_page_table();
+
+        unsafe {
+            // SAFETY: Preemption is disabled.
+            thread.load_thread_area32();
+        }
     }
 }
 
-// TODO: Maybe we can find a better way instead of using `RefCell` for `KernelStack`?
-unsafe impl Sync for Thread {}
+impl PinRunnable for ThreadRunnable {
+    type Output = ();
+
+    fn pinned_run(mut self: Pin<&mut Self>, waker: &Waker) -> RunState<Self::Output> {
+        let mut task_context = TaskContext::new();
+        task_context.set_interrupt(false);
+        task_context.set_ip(_arch_fork_return as _);
+        task_context.set_sp(&mut self.interrupt_context as *mut _ as _);
+
+        self.thread.signal_list.set_signal_waker(waker.clone());
+
+        preempt::disable();
+
+        // TODO!!!!!: CHANGE THIS
+        unsafe {
+            asm!(
+                "mov %rsp, {0}",
+                out(reg) self.interrupt_context.int_no,
+                options(nomem, preserves_flags, att_syntax),
+            );
+            self.interrupt_context.int_no -= 512;
+            self.interrupt_context.int_no &= !0xf;
+        };
+
+        unsafe {
+            // SAFETY: Preemption is disabled.
+            arch::load_interrupt_stack(current_cpu(), self.interrupt_context.int_no as u64);
+        }
+
+        preempt::enable();
+
+        self.return_context.switch_to(&task_context);
+
+        // We return here with preempt count == 1.
+        preempt::enable();
+
+        RunState::Finished(())
+    }
+}

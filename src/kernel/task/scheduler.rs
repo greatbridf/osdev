@@ -175,6 +175,26 @@ impl Scheduler {
 
         Yield(false).await
     }
+
+    pub async fn sleep() {
+        struct Sleep(bool);
+
+        impl Future for Sleep {
+            type Output = ();
+
+            fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+                match *self {
+                    Sleep(true) => Poll::Ready(()),
+                    Sleep(false) => {
+                        self.set(Sleep(true));
+                        Poll::Pending
+                    }
+                }
+            }
+        }
+
+        Sleep(false).await
+    }
 }
 
 async fn idle_task() {
@@ -223,6 +243,9 @@ async fn idle_task() {
                     if task.is_runnable() {
                         rq.put(task);
                     } else {
+                        // TODO!!!!!!!!!: There is a race condition here if we reach here and there
+                        // is another thread waking the task up. They might read `on_rq` == true so
+                        // the task will never be waken up.
                         task.on_rq.store(false, Ordering::Release);
                     }
                 }

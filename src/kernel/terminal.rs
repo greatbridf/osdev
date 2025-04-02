@@ -358,8 +358,7 @@ struct TerminalInner {
 }
 
 pub struct Terminal {
-    /// Lock with IRQ disabled. We might use this in IRQ context.
-    inner: Spin<TerminalInner>,
+    inner: Mutex<TerminalInner>,
     device: Arc<dyn TerminalDevice>,
     cv: CondVar,
 }
@@ -401,7 +400,7 @@ impl core::fmt::Debug for Terminal {
 impl Terminal {
     pub fn new(device: Arc<dyn TerminalDevice>) -> Arc<Self> {
         Arc::new(Self {
-            inner: Spin::new(TerminalInner {
+            inner: Mutex::new(TerminalInner {
                 termio: Termios::new_standard(),
                 session: Weak::new(),
                 buffer: VecDeque::with_capacity(BUFFER_SIZE),
@@ -486,7 +485,7 @@ impl Terminal {
 
     // TODO: Find a better way to handle this.
     pub fn commit_char(&self, ch: u8) {
-        let mut inner = self.inner.lock_irq();
+        let mut inner = self.inner.lock();
         if inner.termio.isig() {
             match ch {
                 0xff => {}
@@ -534,7 +533,7 @@ impl Terminal {
     }
 
     pub fn poll_in(&self) -> KResult<()> {
-        let mut inner = self.inner.lock_irq();
+        let mut inner = self.inner.lock();
         if inner.buffer.is_empty() {
             self.cv.wait(&mut inner);
 
@@ -553,7 +552,7 @@ impl Terminal {
                 break 'block &tmp_buffer[..0];
             }
 
-            let mut inner = self.inner.lock_irq();
+            let mut inner = self.inner.lock();
             if inner.buffer.is_empty() {
                 self.cv.wait(&mut inner);
 

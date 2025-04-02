@@ -9,6 +9,10 @@ pub trait Contexted {
     /// # Safety
     /// This function will be called in a preemption disabled context.
     fn load_running_context(&mut self);
+
+    /// # Safety
+    /// This function will be called in a preemption disabled context.
+    fn restore_running_context(&mut self);
 }
 
 pub trait Runnable {

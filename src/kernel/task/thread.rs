@@ -12,6 +12,7 @@ use crate::{
 };
 
 use alloc::sync::Arc;
+use bindings::KERNEL_PML4;
 
 use super::{
     signal::{RaiseResult, Signal, SignalList},
@@ -339,6 +340,10 @@ impl Contexted for ThreadRunnable {
             // SAFETY: Preemption is disabled.
             thread.load_thread_area32();
         }
+    }
+
+    fn restore_running_context(&mut self) {
+        arch::set_root_page_table(KERNEL_PML4 as usize);
     }
 }
 

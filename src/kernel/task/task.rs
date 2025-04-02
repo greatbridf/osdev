@@ -11,7 +11,7 @@ use kstack::KernelStack;
 use core::{
     future::Future,
     pin::Pin,
-    sync::atomic::{fence, AtomicBool, AtomicU32, Ordering},
+    sync::atomic::{compiler_fence, fence, AtomicBool, AtomicU32, Ordering},
     task::{Context, Poll, Waker},
 };
 
@@ -47,6 +47,15 @@ enum TaskOutputState<Output: Send> {
 
 pub struct TaskOutput<Output: Send> {
     inner: TaskOutputState<Output>,
+}
+
+impl<Output> TaskHandle<Output>
+where
+    Output: Send,
+{
+    pub fn waker(&self) -> Waker {
+        Waker::from(self.task.clone())
+    }
 }
 
 impl<Output> TaskOutput<Output>
@@ -137,7 +146,7 @@ impl TaskState {
 
     pub fn cmpxchg(&self, current: u32, new: u32) -> u32 {
         self.0
-            .compare_exchange(current, new, Ordering::AcqRel, Ordering::Acquire)
+            .compare_exchange(current, new, Ordering::AcqRel, Ordering::Relaxed)
             .unwrap_or_else(|x| x)
     }
 
@@ -190,7 +199,12 @@ impl Task {
 
     pub(super) fn set_usleep(&self) {
         let prev_state = self.state.swap(TaskState::USLEEP);
-        assert_eq!(prev_state, TaskState::RUNNING);
+        assert_eq!(
+            prev_state,
+            TaskState::RUNNING,
+            "Trying to set task {} usleep that is not running",
+            self.id.0
+        );
     }
 
     pub fn usleep(self: &Arc<Self>) -> Arc<UniqueWaker> {
@@ -202,8 +216,14 @@ impl Task {
 
     pub fn isleep(self: &Arc<Self>) -> Arc<Self> {
         // No need to dequeue. We have proved that the task is running so not in the queue.
-        let prev_state = self.state.swap(TaskState::ISLEEP);
-        assert_eq!(prev_state, TaskState::RUNNING);
+        let prev_state = self.state.cmpxchg(TaskState::RUNNING, TaskState::ISLEEP);
+
+        assert_eq!(
+            prev_state,
+            TaskState::RUNNING,
+            "Trying to sleep task {} that is not running",
+            self.id.0
+        );
 
         self.clone()
     }
@@ -227,14 +247,33 @@ impl Task {
         // We get here with preempt count == 1.
         preempt::enable();
 
-        let output = Weak::from_raw(output);
         let executor = unsafe { executor.get_unchecked_mut() };
-        let runnable = unsafe { Pin::new_unchecked(&mut executor.runnable) };
+        let mut runnable = unsafe { Pin::new_unchecked(&mut executor.runnable) };
 
         {
             let waker = Waker::from(Task::current().clone());
-            let output_data = runnable.pinned_join(&waker);
 
+            let output_data = loop {
+                match runnable.as_mut().pinned_run(&waker) {
+                    RunState::Finished(output) => break output,
+                    RunState::Running => {
+                        if Task::current().is_runnable() {
+                            continue;
+                        }
+
+                        // We need to set the preempt count to 0 to allow preemption.
+                        preempt::disable();
+                        compiler_fence(Ordering::Release);
+
+                        Task::switch(&Task::current(), &Task::idle());
+
+                        compiler_fence(Ordering::Acquire);
+                        preempt::enable();
+                    }
+                }
+            };
+
+            let output = Weak::from_raw(output);
             if let Some(output) = output.upgrade() {
                 output.lock().commit_output(output_data);
             }
@@ -341,6 +380,8 @@ where
 
         fence(Ordering::SeqCst);
 
+        executor.runnable.restore_running_context();
+
         if executor.finished.load(Ordering::Relaxed) {
             return Poll::Ready(());
         }
@@ -362,6 +403,7 @@ where
 
 impl<F: Future + 'static> Contexted for FutureRunnable<F> {
     fn load_running_context(&mut self) {}
+    fn restore_running_context(&mut self) {}
 }
 
 impl<F: Future + 'static> PinRunnable for FutureRunnable<F> {

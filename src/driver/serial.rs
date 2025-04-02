@@ -1,22 +1,39 @@
-use alloc::{format, sync::Arc};
+use core::task::Waker;
+
+use alloc::{collections::vec_deque::VecDeque, format, sync::Arc};
+use atomic_unique_refcell::AtomicUniqueRefCell;
 use bindings::EIO;
+use bitflags::bitflags;
 
 use crate::{
     kernel::{
-        block::make_device, interrupt::register_irq_handler, CharDevice, CharDeviceType, Console,
-        Terminal, TerminalDevice,
+        block::make_device,
+        interrupt::register_irq_handler,
+        task::{FutureRunnable, Scheduler, Task},
+        CharDevice, CharDeviceType, Console, Terminal, TerminalDevice,
     },
     prelude::*,
 };
 
 use super::Port8;
 
+bitflags! {
+    struct LineStatus: u8 {
+        const RX_READY = 0x01;
+        const TX_READY = 0x20;
+    }
+}
+
 #[allow(dead_code)]
 struct Serial {
     id: u32,
     name: Arc<str>,
 
-    terminal: Option<Arc<Terminal>>,
+    terminal: Spin<Option<Arc<Terminal>>>,
+    worker: AtomicUniqueRefCell<Option<Waker>>,
+
+    working: Spin<bool>,
+    tx_buffer: Spin<VecDeque<u8>>,
 
     tx_rx: Port8,
     int_ena: Port8,
@@ -37,14 +54,76 @@ impl Serial {
 
     fn enable_interrupts(&self) {
         // Enable interrupt #0: Received data available
-        self.int_ena.write(0x01);
+        self.int_ena.write(0x03);
+    }
+
+    fn disable_interrupts(&self) {
+        // Disable interrupt #0: Received data available
+        self.int_ena.write(0x00);
+    }
+
+    fn line_status(&self) -> LineStatus {
+        LineStatus::from_bits_truncate(self.line_status.read())
+    }
+
+    async fn wait_for_interrupt(&self) {
+        {
+            let mut working = self.working.lock_irq();
+            self.enable_interrupts();
+            *working = false;
+            Task::current().isleep();
+        }
+
+        Scheduler::sleep().await;
+
+        *self.working.lock_irq() = true;
+        self.disable_interrupts();
+    }
+
+    async fn worker(port: Arc<Self>) {
+        let terminal = port.terminal.lock().clone();
+
+        loop {
+            while port.line_status().contains(LineStatus::RX_READY) {
+                let ch = port.tx_rx.read();
+
+                if let Some(terminal) = terminal.as_ref() {
+                    terminal.commit_char(ch);
+                }
+            }
+
+            let should_wait = {
+                let mut tx_buffer = port.tx_buffer.lock();
+
+                // Give it a chance to receive data.
+                let count = tx_buffer.len().min(64);
+                for ch in tx_buffer.drain(..count) {
+                    if port.line_status().contains(LineStatus::TX_READY) {
+                        port.tx_rx.write(ch);
+                    } else {
+                        break;
+                    }
+                }
+
+                tx_buffer.is_empty()
+            };
+
+            if should_wait {
+                port.wait_for_interrupt().await;
+            } else {
+                Scheduler::yield_now().await;
+            }
+        }
     }
 
     pub fn new(id: u32, base_port: u16) -> KResult<Self> {
         let port = Self {
             id,
             name: Arc::from(format!("ttyS{id}")),
-            terminal: None,
+            terminal: Spin::new(None),
+            worker: AtomicUniqueRefCell::new(None),
+            working: Spin::new(true),
+            tx_buffer: Spin::new(VecDeque::new()),
             tx_rx: Port8::new(base_port),
             int_ena: Port8::new(base_port + 1),
             int_ident: Port8::new(base_port + 2),
@@ -73,24 +152,30 @@ impl Serial {
         Ok(port)
     }
 
-    fn irq_handler(&self) {
-        let terminal = self.terminal.as_ref();
-        while self.line_status.read() & 0x01 != 0 {
-            let ch = self.tx_rx.read();
-
-            if let Some(terminal) = terminal {
-                terminal.commit_char(ch);
-            }
+    fn wakeup_worker(&self) {
+        let working = self.working.lock_irq();
+        if !*working {
+            self.worker
+                .borrow()
+                .as_ref()
+                .expect("Worker not initialized")
+                .wake_by_ref();
         }
     }
 
-    fn register_char_device(port: Self) -> KResult<()> {
-        let mut port = Arc::new(port);
-        let terminal = Terminal::new(port.clone());
+    fn irq_handler(&self) {
+        // Read the interrupt ID register to clear the interrupt.
+        self.int_ident.read();
+        self.wakeup_worker();
+    }
 
-        // TODO!!!!!!: This is unsafe, we should find a way to avoid this.
-        //             Under smp, we should make the publish of terminal atomic.
-        unsafe { Arc::get_mut_unchecked(&mut port) }.terminal = Some(terminal.clone());
+    fn register_char_device(port: Self) -> KResult<()> {
+        let port = Arc::new(port);
+        let terminal = Terminal::new(port.clone());
+        let task = Task::new(FutureRunnable::new(Self::worker(port.clone())));
+
+        port.terminal.lock().replace(terminal.clone());
+        port.worker.borrow().replace(task.waker());
 
         {
             let port = port.clone();
@@ -104,7 +189,8 @@ impl Serial {
                 port.irq_handler();
             })?;
         }
-        port.enable_interrupts();
+
+        Scheduler::get().spawn(task);
         dont_check!(Console::register_terminal(&terminal));
 
         CharDevice::register(
@@ -119,26 +205,18 @@ impl Serial {
 
 impl TerminalDevice for Serial {
     fn putchar(&self, ch: u8) {
-        loop {
-            // If we poll the status and get the corresponding bit, we should handle the action.
-            let status = self.line_status.read();
-            if status & 0x20 != 0 {
-                self.tx_rx.write(ch);
-                return;
-            }
-        }
+        let mut tx_buffer = self.tx_buffer.lock();
+        tx_buffer.push_back(ch);
+        self.wakeup_worker();
     }
 }
 
 pub fn init() -> KResult<()> {
-    let com0 = Serial::new(0, Serial::COM0_BASE);
-    let com1 = Serial::new(1, Serial::COM1_BASE);
-
-    if let Ok(port) = com0 {
+    if let Ok(port) = Serial::new(0, Serial::COM0_BASE) {
         Serial::register_char_device(port)?;
     }
 
-    if let Ok(port) = com1 {
+    if let Ok(port) = Serial::new(1, Serial::COM1_BASE) {
         Serial::register_char_device(port)?;
     }
 

@@ -28,14 +28,13 @@ impl Ticks {
 }
 
 pub fn timer_interrupt() {
+    end_of_interrupt();
     TICKS.fetch_add(1, Ordering::Relaxed);
+
     if preempt::count() == 0 {
         // To make scheduler satisfied.
         preempt::disable();
-        end_of_interrupt();
         Scheduler::schedule();
-    } else {
-        end_of_interrupt();
     }
 }
 

@@ -83,7 +83,10 @@ impl<const I: bool> CondVar<I> {
         // If the flag is already set, we don't need to sleep.
 
         unsafe { guard.force_unlock() };
+
+        might_sleep!(1);
         Scheduler::schedule();
+
         unsafe { guard.force_relock() };
 
         assert!(Task::current().is_runnable());

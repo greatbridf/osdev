@@ -1,6 +1,5 @@
 use core::{cell::UnsafeCell, marker::PhantomData};
-
-use super::{lock::Guard, strategy::LockStrategy};
+use eonix_sync::{Guard, LockStrategy};
 
 pub struct RefMutPosition<'pos, T: ?Sized> {
     address: *const T,
@@ -63,10 +62,11 @@ impl<'lock, 'pos, T: ?Sized> AsRefMutPosition<'lock, 'pos, T> for &'lock mut T {
     }
 }
 
-impl<'lock, 'pos, T, S> AsRefMutPosition<'lock, 'pos, T> for Guard<'lock, T, S, true>
+impl<'lock, 'pos, T, S, L> AsRefMutPosition<'lock, 'pos, T> for Guard<'lock, T, S, L, true>
 where
     T: ?Sized,
     S: LockStrategy + 'lock,
+    L: LockStrategy + 'lock,
 {
     fn as_pos_mut(&self) -> RefMutPosition<'pos, T>
     where
@@ -103,10 +103,11 @@ impl<'lock, 'pos, T: ?Sized> AsRefPosition<'lock, 'pos, T> for &'lock mut T {
     }
 }
 
-impl<'lock, 'pos, T, S, const B: bool> AsRefPosition<'lock, 'pos, T> for Guard<'lock, T, S, B>
+impl<'lock, 'pos, T, S, L, const B: bool> AsRefPosition<'lock, 'pos, T> for Guard<'lock, T, S, L, B>
 where
     T: ?Sized,
     S: LockStrategy + 'lock,
+    L: LockStrategy + 'lock,
 {
     fn as_pos(&self) -> RefPosition<'pos, T>
     where

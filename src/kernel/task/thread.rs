@@ -1,5 +1,7 @@
-use core::{arch::asm, pin::Pin, ptr::NonNull, task::Waker};
-
+use super::{
+    signal::{RaiseResult, Signal, SignalList},
+    Process, ProcessList,
+};
 use crate::{
     kernel::{
         cpu::current_cpu,
@@ -8,19 +10,23 @@ use crate::{
         vfs::{filearray::FileArray, FsContext},
     },
     prelude::*,
-    sync::{preempt, AsRefMutPosition as _},
+    sync::AsRefMutPosition as _,
 };
-
 use alloc::sync::Arc;
-use bindings::KERNEL_PML4;
-
-use super::{
-    signal::{RaiseResult, Signal, SignalList},
-    task::{Contexted, PinRunnable, RunState},
-    Process, ProcessList, TaskContext,
-};
-
 use arch::{InterruptContext, UserTLS, _arch_fork_return};
+use bindings::KERNEL_PML4;
+use core::{
+    arch::asm,
+    pin::Pin,
+    ptr::NonNull,
+    sync::atomic::{AtomicUsize, Ordering},
+    task::Waker,
+};
+use eonix_runtime::{
+    context::ExecutionContext,
+    run::{Contexted, PinRun, RunState},
+};
+use pointers::BorrowedArc;
 
 struct CurrentThread {
     thread: NonNull<Thread>,
@@ -63,6 +69,17 @@ pub struct Thread {
 
     pub signal_list: SignalList,
     inner: Spin<ThreadInner>,
+}
+
+pub struct ThreadRunnable {
+    thread: Arc<Thread>,
+    /// Interrupt context for the thread initialization.
+    /// We store the kernel stack pointer in one of the fields for now.
+    ///
+    /// TODO: A better way to store the interrupt context.
+    interrupt_context: InterruptContext,
+    interrupt_stack_pointer: AtomicUsize,
+    return_context: ExecutionContext,
 }
 
 #[repr(transparent)]
@@ -211,17 +228,9 @@ impl Thread {
         // we return here after some preemption.
         let current: &Option<CurrentThread> = unsafe { CURRENT_THREAD.as_ref() };
         let current = current.as_ref().expect("Current thread is not set");
-        BorrowedArc::from_raw(current.thread.as_ptr())
-    }
-
-    pub fn runnable<'lt>() -> &'lt ThreadRunnable {
-        // SAFETY: We won't change the thread pointer in the current CPU when
-        // we return here after some preemption.
-        let current: &Option<CurrentThread> = unsafe { CURRENT_THREAD.as_ref() };
-        let current = current.as_ref().expect("Current thread is not set");
 
         // SAFETY: We can only use the returned value when we are in the context of the thread.
-        unsafe { &*current.runnable.as_ptr() }
+        unsafe { BorrowedArc::from_raw(current.thread) }
     }
 
     pub fn raise(self: &Arc<Self>, signal: Signal) -> RaiseResult {
@@ -270,16 +279,21 @@ impl Thread {
     pub fn get_name(&self) -> Arc<[u8]> {
         self.inner.lock().name.clone()
     }
-}
 
-pub struct ThreadRunnable {
-    thread: Arc<Thread>,
-    /// Interrupt context for the thread initialization.
-    /// We store the kernel stack pointer in one of the fields for now.
-    ///
-    /// TODO: A better way to store the interrupt context.
-    interrupt_context: InterruptContext,
-    return_context: TaskContext,
+    /// # Safety
+    /// This function needs to be called with preempt count == 1.
+    /// We won't return so clean all the resources before calling this.
+    pub unsafe fn exit() -> ! {
+        // SAFETY: We won't change the thread pointer in the current CPU when
+        // we return here after some preemption.
+        let current: &Option<CurrentThread> = unsafe { CURRENT_THREAD.as_ref() };
+        let current = current.as_ref().expect("Current thread is not set");
+
+        // SAFETY: We can only use the `run_context` when we are in the context of the thread.
+        let runnable = unsafe { current.runnable.as_ref() };
+
+        runnable.return_context.switch_noreturn()
+    }
 }
 
 impl ThreadRunnable {
@@ -294,7 +308,8 @@ impl ThreadRunnable {
         Self {
             thread,
             interrupt_context,
-            return_context: TaskContext::new(),
+            interrupt_stack_pointer: AtomicUsize::new(0),
+            return_context: ExecutionContext::new(),
         }
     }
 
@@ -302,24 +317,22 @@ impl ThreadRunnable {
         Self {
             thread,
             interrupt_context,
-            return_context: TaskContext::new(),
+            interrupt_stack_pointer: AtomicUsize::new(0),
+            return_context: ExecutionContext::new(),
         }
-    }
-
-    /// # Safety
-    /// This function needs to be called with preempt count == 1.
-    pub unsafe fn exit(&self) -> ! {
-        self.return_context.switch_noreturn();
     }
 }
 
 impl Contexted for ThreadRunnable {
-    fn load_running_context(&mut self) {
-        let thread = self.thread.as_ref();
+    fn load_running_context(&self) {
+        let thread: &Thread = &self.thread;
 
-        unsafe {
-            // SAFETY: Preemption is disabled.
-            arch::load_interrupt_stack(current_cpu(), self.interrupt_context.int_no as u64);
+        match self.interrupt_stack_pointer.load(Ordering::Relaxed) {
+            0 => {}
+            sp => unsafe {
+                // SAFETY: Preemption is disabled.
+                arch::load_interrupt_stack(current_cpu(), sp as u64);
+            },
         }
 
         // SAFETY: Preemption is disabled.
@@ -342,46 +355,51 @@ impl Contexted for ThreadRunnable {
         }
     }
 
-    fn restore_running_context(&mut self) {
+    fn restore_running_context(&self) {
         arch::set_root_page_table(KERNEL_PML4 as usize);
     }
 }
 
-impl PinRunnable for ThreadRunnable {
+impl PinRun for ThreadRunnable {
     type Output = ();
 
-    fn pinned_run(mut self: Pin<&mut Self>, waker: &Waker) -> RunState<Self::Output> {
-        let mut task_context = TaskContext::new();
+    fn pinned_run(self: Pin<&mut Self>, waker: &Waker) -> RunState<Self::Output> {
+        let mut task_context = ExecutionContext::new();
         task_context.set_interrupt(false);
         task_context.set_ip(_arch_fork_return as _);
-        task_context.set_sp(&mut self.interrupt_context as *mut _ as _);
+        task_context.set_sp(&self.interrupt_context as *const _ as _);
 
         self.thread.signal_list.set_signal_waker(waker.clone());
 
-        preempt::disable();
+        eonix_preempt::disable();
 
         // TODO!!!!!: CHANGE THIS
-        unsafe {
+        let sp = unsafe {
+            let mut sp: usize;
             asm!(
                 "mov %rsp, {0}",
-                out(reg) self.interrupt_context.int_no,
+                out(reg) sp,
                 options(nomem, preserves_flags, att_syntax),
             );
-            self.interrupt_context.int_no -= 512;
-            self.interrupt_context.int_no &= !0xf;
+            sp -= 512;
+            sp &= !0xf;
+
+            sp
         };
+
+        self.interrupt_stack_pointer.store(sp, Ordering::Relaxed);
 
         unsafe {
             // SAFETY: Preemption is disabled.
-            arch::load_interrupt_stack(current_cpu(), self.interrupt_context.int_no as u64);
+            arch::load_interrupt_stack(current_cpu(), sp as u64);
         }
 
-        preempt::enable();
+        eonix_preempt::enable();
 
         self.return_context.switch_to(&task_context);
 
         // We return here with preempt count == 1.
-        preempt::enable();
+        eonix_preempt::enable();
 
         RunState::Finished(())
     }

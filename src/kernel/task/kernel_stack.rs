@@ -1,4 +1,5 @@
 use crate::kernel::mem::{paging::Page, phys::PhysPtr};
+use eonix_runtime::executor::Stack;
 
 #[derive(Debug)]
 pub struct KernelStack {
@@ -20,8 +21,15 @@ impl KernelStack {
             bottom,
         }
     }
+}
 
-    pub fn get_stack_bottom(&self) -> usize {
-        self.bottom
+impl Stack for KernelStack {
+    fn new() -> Self {
+        Self::new()
+    }
+
+    fn get_bottom(&self) -> &() {
+        // SAFETY: We hold the ownership of a valid stack.
+        unsafe { &*(self.bottom as *const ()) }
     }
 }

@@ -1,14 +1,7 @@
-use alloc::{
-    boxed::Box,
-    collections::btree_map::{BTreeMap, Entry},
-    sync::Arc,
-};
-use bindings::{EEXIST, EIO};
-
-use crate::{io::Buffer, kernel::console::CONSOLE, prelude::*, sync::AsRefPosition as _};
-
 use super::{
     block::make_device,
+    console::get_console,
+    constants::{EEXIST, EIO},
     task::{ProcessList, Thread},
     terminal::Terminal,
     vfs::{
@@ -16,7 +9,12 @@ use super::{
         DevId,
     },
 };
-
+use crate::{io::Buffer, prelude::*, sync::AsRefPosition as _};
+use alloc::{
+    boxed::Box,
+    collections::btree_map::{BTreeMap, Entry},
+    sync::Arc,
+};
 use lazy_static::lazy_static;
 
 pub trait VirtualCharDevice: Send + Sync {
@@ -120,12 +118,12 @@ impl VirtualCharDevice for ZeroDevice {
 struct ConsoleDevice;
 impl VirtualCharDevice for ConsoleDevice {
     fn read(&self, buffer: &mut dyn Buffer) -> KResult<usize> {
-        let console_terminal = CONSOLE.lock_irq().get_terminal().ok_or(EIO)?;
+        let console_terminal = get_console().ok_or(EIO)?;
         console_terminal.read(buffer)
     }
 
     fn write(&self, data: &[u8]) -> KResult<usize> {
-        let console_terminal = CONSOLE.lock_irq().get_terminal().ok_or(EIO)?;
+        let console_terminal = get_console().ok_or(EIO)?;
         for &ch in data.iter() {
             console_terminal.show_char(ch);
         }

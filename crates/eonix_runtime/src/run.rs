@@ -1,4 +1,7 @@
+mod future_run;
+
 use core::{pin::Pin, task::Waker};
+pub use future_run::FutureRun;
 
 pub enum RunState<Output> {
     Running,
@@ -7,15 +10,15 @@ pub enum RunState<Output> {
 
 pub trait Contexted {
     /// # Safety
-    /// This function will be called in a preemption disabled context.
-    fn load_running_context(&mut self);
+    /// This function should be called in a preemption disabled context.
+    fn load_running_context(&self) {}
 
     /// # Safety
-    /// This function will be called in a preemption disabled context.
-    fn restore_running_context(&mut self);
+    /// This function should be called in a preemption disabled context.
+    fn restore_running_context(&self) {}
 }
 
-pub trait Runnable {
+pub trait Run {
     type Output;
 
     fn run(&mut self, waker: &Waker) -> RunState<Self::Output>;
@@ -30,7 +33,7 @@ pub trait Runnable {
     }
 }
 
-pub trait PinRunnable {
+pub trait PinRun {
     type Output;
 
     fn pinned_run(self: Pin<&mut Self>, waker: &Waker) -> RunState<Self::Output>;
@@ -45,9 +48,9 @@ pub trait PinRunnable {
     }
 }
 
-impl<R> Runnable for R
+impl<R> Run for R
 where
-    R: PinRunnable + Unpin,
+    R: PinRun + Unpin,
 {
     type Output = R::Output;
 

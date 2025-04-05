@@ -1,16 +1,14 @@
-use arch::define_smp_bootstrap;
-
+use super::cpu::init_thiscpu;
 use crate::{
     kernel::{
         cpu::current_cpu,
         mem::{paging::Page, phys::PhysPtr as _},
-        task::Task,
+        task::KernelStack,
     },
     println_debug,
-    sync::preempt,
 };
-
-use super::{cpu::init_thiscpu, task::Scheduler};
+use arch::define_smp_bootstrap;
+use eonix_runtime::scheduler::Scheduler;
 
 define_smp_bootstrap!(4, ap_entry, {
     let page = Page::alloc_many(9);
@@ -21,14 +19,17 @@ define_smp_bootstrap!(4, ap_entry, {
 
 unsafe extern "C" fn ap_entry() -> ! {
     init_thiscpu();
-    Scheduler::init_scheduler_thiscpu();
+    Scheduler::init_local_scheduler::<KernelStack>();
     println_debug!("AP{} started", current_cpu().cpuid());
 
-    preempt::disable();
+    eonix_preempt::disable();
     arch::enable_irqs();
 
     // TODO!!!!!: Free the stack after having switched to idle task.
-    Task::switch_noreturn(&Task::idle());
+    unsafe {
+        // SAFETY: `preempt::count()` == 1.
+        Scheduler::goto_scheduler_noreturn()
+    }
 }
 
 pub unsafe fn bootstrap_smp() {

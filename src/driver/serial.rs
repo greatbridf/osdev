@@ -1,21 +1,15 @@
-use core::task::Waker;
-
-use alloc::{collections::vec_deque::VecDeque, format, sync::Arc};
-use atomic_unique_refcell::AtomicUniqueRefCell;
-use bindings::EIO;
-use bitflags::bitflags;
-
+use super::Port8;
 use crate::{
     kernel::{
-        block::make_device,
-        interrupt::register_irq_handler,
-        task::{FutureRunnable, Scheduler, Task},
-        CharDevice, CharDeviceType, Console, Terminal, TerminalDevice,
+        block::make_device, console::set_console, constants::EIO, interrupt::register_irq_handler,
+        task::KernelStack, CharDevice, CharDeviceType, Terminal, TerminalDevice,
     },
     prelude::*,
+    sync::UCondVar,
 };
-
-use super::Port8;
+use alloc::{collections::vec_deque::VecDeque, format, sync::Arc};
+use bitflags::bitflags;
+use eonix_runtime::{run::FutureRun, scheduler::Scheduler};
 
 bitflags! {
     struct LineStatus: u8 {
@@ -30,7 +24,7 @@ struct Serial {
     name: Arc<str>,
 
     terminal: Spin<Option<Arc<Terminal>>>,
-    worker: AtomicUniqueRefCell<Option<Waker>>,
+    cv_worker: UCondVar,
 
     working: Spin<bool>,
     tx_buffer: Spin<VecDeque<u8>>,
@@ -67,16 +61,13 @@ impl Serial {
     }
 
     async fn wait_for_interrupt(&self) {
-        {
-            let mut working = self.working.lock_irq();
-            self.enable_interrupts();
-            *working = false;
-            Task::current().isleep();
-        }
+        let mut working = self.working.lock_irq();
+        self.enable_interrupts();
+        *working = false;
 
-        Scheduler::sleep().await;
+        self.cv_worker.async_wait(&mut working).await;
 
-        *self.working.lock_irq() = true;
+        *working = true;
         self.disable_interrupts();
     }
 
@@ -121,7 +112,7 @@ impl Serial {
             id,
             name: Arc::from(format!("ttyS{id}")),
             terminal: Spin::new(None),
-            worker: AtomicUniqueRefCell::new(None),
+            cv_worker: UCondVar::new(),
             working: Spin::new(true),
             tx_buffer: Spin::new(VecDeque::new()),
             tx_rx: Port8::new(base_port),
@@ -155,11 +146,7 @@ impl Serial {
     fn wakeup_worker(&self) {
         let working = self.working.lock_irq();
         if !*working {
-            self.worker
-                .borrow()
-                .as_ref()
-                .expect("Worker not initialized")
-                .wake_by_ref();
+            self.cv_worker.notify_all();
         }
     }
 
@@ -172,10 +159,8 @@ impl Serial {
     fn register_char_device(port: Self) -> KResult<()> {
         let port = Arc::new(port);
         let terminal = Terminal::new(port.clone());
-        let task = Task::new(FutureRunnable::new(Self::worker(port.clone())));
 
         port.terminal.lock().replace(terminal.clone());
-        port.worker.borrow().replace(task.waker());
 
         {
             let port = port.clone();
@@ -190,8 +175,10 @@ impl Serial {
             })?;
         }
 
-        Scheduler::get().spawn(task);
-        dont_check!(Console::register_terminal(&terminal));
+        Scheduler::get().spawn::<KernelStack, _>(FutureRun::new(Self::worker(port.clone())));
+
+        let _ = set_console(terminal.clone());
+        eonix_log::set_console(terminal.clone());
 
         CharDevice::register(
             make_device(4, 64 + port.id),

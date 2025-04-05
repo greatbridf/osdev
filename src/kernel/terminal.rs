@@ -1,20 +1,19 @@
+use super::{
+    task::{ProcessList, Session, Signal, Thread},
+    user::{UserPointer, UserPointerMut},
+};
+use crate::{
+    io::Buffer,
+    prelude::*,
+    sync::{AsRefPosition as _, CondVar},
+};
 use alloc::{
     collections::vec_deque::VecDeque,
     sync::{Arc, Weak},
 };
 use bindings::{EINTR, ENOTTY, EPERM};
 use bitflags::bitflags;
-
-use crate::{
-    io::Buffer,
-    prelude::*,
-    sync::{AsRefPosition as _, CondVar},
-};
-
-use super::{
-    task::{ProcessList, Session, Signal, Thread},
-    user::{UserPointer, UserPointerMut},
-};
+use eonix_log::ConsoleWrite;
 
 const BUFFER_SIZE: usize = 4096;
 
@@ -676,5 +675,13 @@ impl Terminal {
 
     pub fn session(&self) -> Option<Arc<Session>> {
         self.inner.lock().session.upgrade()
+    }
+}
+
+impl ConsoleWrite for Terminal {
+    fn write(&self, s: &str) {
+        for &ch in s.as_bytes() {
+            self.show_char(ch);
+        }
     }
 }

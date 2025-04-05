@@ -1,5 +1,6 @@
 use alloc::collections::vec_deque::VecDeque;
 use bindings::{EINVAL, EIO};
+use eonix_preempt::assert_preempt_enabled;
 
 use crate::prelude::*;
 
@@ -286,7 +287,7 @@ impl AdapterPort {
     /// # Might Sleep
     /// This function **might sleep**, so call it in a preemptible context
     fn send_command(&self, cmd: &impl Command) -> KResult<()> {
-        might_sleep!();
+        assert_preempt_enabled!("AdapterPort::send_command");
 
         let pages = cmd.pages();
         let cmdtable_page = Page::alloc_one();

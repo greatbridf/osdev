@@ -1,5 +1,4 @@
-use core::{cmp::Reverse, task::Waker};
-
+use super::{ProcessList, Thread, WaitObject, WaitType};
 use crate::{
     io::BufferFill,
     kernel::{
@@ -7,14 +6,13 @@ use crate::{
         user::{dataflow::UserBuffer, UserPointer},
     },
     prelude::*,
-    sync::{preempt, AsRefPosition as _},
+    sync::AsRefPosition as _,
 };
-
 use alloc::collections::{binary_heap::BinaryHeap, btree_map::BTreeMap};
 use arch::{ExtendedContext, InterruptContext};
 use bindings::{EFAULT, EINVAL};
-
-use super::{ProcessList, Scheduler, Task, Thread, WaitObject, WaitType};
+use core::{cmp::Reverse, task::Waker};
+use eonix_runtime::{scheduler::Scheduler, task::Task};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Signal(u32);
@@ -419,7 +417,7 @@ impl SignalList {
                         );
                     }
 
-                    preempt::disable();
+                    eonix_preempt::disable();
 
                     // `SIGSTOP` can only be waken up by `SIGCONT` or `SIGKILL`.
                     // SAFETY: Preempt disabled above.

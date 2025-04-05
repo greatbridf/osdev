@@ -1,48 +1,30 @@
 use crate::prelude::*;
-
 use alloc::sync::Arc;
-use bindings::EEXIST;
 use lazy_static::lazy_static;
 
-pub struct Console {
-    terminal: Option<Arc<Terminal>>,
+lazy_static! {
+    pub static ref CONSOLE: Spin<Option<Arc<Terminal>>> = Spin::new(None);
 }
 
-impl Console {
-    pub fn get_terminal(&self) -> Option<Arc<Terminal>> {
-        self.terminal.clone()
-    }
-
-    pub fn register_terminal(terminal: &Arc<Terminal>) -> KResult<()> {
-        let mut console = CONSOLE.lock_irq();
-        if console.terminal.is_some() {
-            return Err(EEXIST);
-        }
-
-        console.terminal = Some(terminal.clone());
+pub fn set_console(terminal: Arc<Terminal>) -> KResult<()> {
+    let mut console = CONSOLE.lock();
+    if console.is_none() {
+        *console = Some(terminal);
         Ok(())
+    } else {
+        Err(EEXIST)
     }
 }
 
-impl Write for Console {
-    fn write_str(&mut self, s: &str) -> core::fmt::Result {
-        if let Some(console) = &self.terminal {
-            for &ch in s.as_bytes() {
-                console.show_char(ch)
-            }
-        }
-
-        Ok(())
-    }
+pub fn get_console() -> Option<Arc<Terminal>> {
+    let console = CONSOLE.lock();
+    console.clone()
 }
 
 #[doc(hidden)]
 pub fn _print(args: core::fmt::Arguments) {
-    dont_check!(CONSOLE.lock_irq().write_fmt(args))
-}
-
-lazy_static! {
-    pub static ref CONSOLE: Spin<Console> = Spin::new(Console { terminal: None });
+    // TODO!!!!!!!!!!!!!: REMOVE THIS AND USE `eonix_log`.
+    eonix_log::do_print(args);
 }
 
 macro_rules! print {
@@ -105,7 +87,7 @@ macro_rules! println_trace {
     }};
 }
 
-use super::terminal::Terminal;
+use super::{constants::EEXIST, terminal::Terminal};
 
 pub(crate) use {
     print, println, println_debug, println_fatal, println_info, println_trace, println_warn,

@@ -88,6 +88,42 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "60b1af1c220855b6ceac025d3f6ecdd2b7c4894bfe9cd9bda4fbb4bc7c0d4cf0"
 
 [[package]]
+name = "eonix_log"
+version = "0.1.0"
+dependencies = [
+ "eonix_sync",
+ "lazy_static",
+]
+
+[[package]]
+name = "eonix_preempt"
+version = "0.1.0"
+dependencies = [
+ "arch",
+]
+
+[[package]]
+name = "eonix_runtime"
+version = "0.1.0"
+dependencies = [
+ "arch",
+ "atomic_unique_refcell",
+ "eonix_log",
+ "eonix_preempt",
+ "eonix_sync",
+ "intrusive-collections",
+ "lazy_static",
+ "pointers",
+]
+
+[[package]]
+name = "eonix_sync"
+version = "0.1.0"
+dependencies = [
+ "eonix_preempt",
+]
+
+[[package]]
 name = "gbos-rust-part"
 version = "0.1.0"
 dependencies = [
@@ -95,9 +131,14 @@ dependencies = [
  "atomic_unique_refcell",
  "bindgen",
  "bitflags",
+ "eonix_log",
+ "eonix_preempt",
+ "eonix_runtime",
+ "eonix_sync",
  "intrusive-collections",
  "itertools",
  "lazy_static",
+ "pointers",
  "spin",
 ]
 
@@ -205,6 +246,10 @@ dependencies = [
  "quote",
  "syn",
 ]
+
+[[package]]
+name = "pointers"
+version = "0.1.0"
 
 [[package]]
 name = "prettyplease"

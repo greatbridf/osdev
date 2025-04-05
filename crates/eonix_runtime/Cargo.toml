@@ -1,0 +1,20 @@
+[package]
+name = "eonix_runtime"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+arch = { path = "../../arch" }
+atomic_unique_refcell = { path = "../atomic_unique_refcell" }
+eonix_log = { path = "../eonix_log" }
+eonix_preempt = { path = "../eonix_preempt" }
+eonix_sync = { path = "../eonix_sync" }
+pointers = { path = "../pointers" }
+
+intrusive-collections = "0.9.7"
+lazy_static = { version = "1.5.0", features = ["spin_no_std"] }
+
+[features]
+default = []
+trace_scheduler = []
+log_trace = ["trace_scheduler"]

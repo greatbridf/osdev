@@ -1,11 +1,10 @@
+use alloc::sync::Arc;
 use core::{
     fmt::{self, Debug, Formatter},
+    ptr::NonNull,
     sync::atomic::{AtomicPtr, Ordering},
 };
-
-use alloc::sync::Arc;
-
-use crate::BorrowedArc;
+use pointers::BorrowedArc;
 
 unsafe impl<T> Send for ArcSwap<T> where T: Send + Sync {}
 unsafe impl<T> Sync for ArcSwap<T> where T: Send + Sync {}
@@ -35,7 +34,12 @@ impl<T> ArcSwap<T> {
     }
 
     pub fn borrow(&self) -> BorrowedArc<T> {
-        BorrowedArc::from_raw(self.pointer.load(Ordering::Relaxed))
+        unsafe {
+            BorrowedArc::from_raw(
+                NonNull::new(self.pointer.load(Ordering::Relaxed))
+                    .expect("ArcSwap: pointer should not be null."),
+            )
+        }
     }
 }
 

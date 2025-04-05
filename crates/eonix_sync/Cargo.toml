@@ -5,3 +5,7 @@ edition = "2024"
 
 [dependencies]
 eonix_preempt = { path = "../eonix_preempt" }
+
+[features]
+default = []
+no_check_locked = []

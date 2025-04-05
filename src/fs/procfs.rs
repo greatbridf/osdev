@@ -1,12 +1,3 @@
-use alloc::{
-    collections::btree_map::BTreeMap,
-    sync::{Arc, Weak},
-};
-use bindings::{EACCES, ENOTDIR};
-use core::{ops::ControlFlow, sync::atomic::Ordering};
-use itertools::Itertools;
-use lazy_static::lazy_static;
-
 use crate::{
     io::Buffer,
     kernel::{
@@ -21,8 +12,16 @@ use crate::{
         },
     },
     prelude::*,
-    sync::{AsRefMutPosition as _, AsRefPosition as _, Locked},
 };
+use alloc::{
+    collections::btree_map::BTreeMap,
+    sync::{Arc, Weak},
+};
+use bindings::{EACCES, ENOTDIR};
+use core::{ops::ControlFlow, sync::atomic::Ordering};
+use eonix_sync::{AsProof as _, AsProofMut as _, Locked};
+use itertools::Itertools;
+use lazy_static::lazy_static;
 
 fn split_len_offset(data: &[u8], len: usize, offset: usize) -> Option<&[u8]> {
     let real_data = data.split_at_checked(len).map(|(data, _)| data)?;
@@ -137,7 +136,7 @@ impl Inode for DirInode {
         let lock = self.rwsem.lock_shared();
         Ok(self
             .entries
-            .access(lock.as_pos())
+            .access(lock.prove())
             .iter()
             .find_map(|(name, node)| {
                 name.as_ref()
@@ -153,7 +152,7 @@ impl Inode for DirInode {
     ) -> KResult<usize> {
         let lock = self.rwsem.lock_shared();
         self.entries
-            .access(lock.as_pos())
+            .access(lock.prove())
             .iter()
             .skip(offset)
             .map(|(name, node)| callback(name.as_ref(), node.ino()))
@@ -242,7 +241,7 @@ pub fn creat(
         let lock = parent.idata.rwsem.lock();
         parent
             .entries
-            .access_mut(lock.as_pos_mut())
+            .access_mut(lock.prove_mut())
             .push((name, ProcFsNode::File(inode.clone())));
     }
 
@@ -263,7 +262,7 @@ pub fn mkdir(parent: &ProcFsNode, name: &[u8]) -> KResult<ProcFsNode> {
 
     parent
         .entries
-        .access_mut(inode.rwsem.lock().as_pos_mut())
+        .access_mut(inode.rwsem.lock().prove_mut())
         .push((Arc::from(name), ProcFsNode::Dir(inode.clone())));
 
     Ok(ProcFsNode::Dir(inode))

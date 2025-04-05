@@ -15,7 +15,6 @@ use crate::kernel::user::{UserPointer, UserPointerMut};
 use crate::kernel::vfs::dentry::Dentry;
 use crate::kernel::vfs::{self, FsContext};
 use crate::path::Path;
-use crate::sync::AsRefPosition as _;
 use crate::{kernel::user::dataflow::UserBuffer, prelude::*};
 use alloc::borrow::ToOwned;
 use alloc::ffi::CString;
@@ -23,6 +22,7 @@ use arch::{ExtendedContext, InterruptContext};
 use bindings::{EINVAL, ENOENT, ENOTDIR, ERANGE, ESRCH};
 use bitflags::bitflags;
 use eonix_runtime::scheduler::Scheduler;
+use eonix_sync::AsProof as _;
 
 fn do_umask(mask: u32) -> KResult<u32> {
     let context = FsContext::get_current();
@@ -237,7 +237,7 @@ fn do_getsid(pid: u32) -> KResult<u32> {
         let procs = ProcessList::get().lock_shared();
         procs
             .try_find_process(pid)
-            .map(|proc| proc.session(procs.as_pos()).sid)
+            .map(|proc| proc.session(procs.prove()).sid)
             .ok_or(ESRCH)
     }
 }
@@ -249,7 +249,7 @@ fn do_getpgid(pid: u32) -> KResult<u32> {
         let procs = ProcessList::get().lock_shared();
         procs
             .try_find_process(pid)
-            .map(|proc| proc.pgroup(procs.as_pos()).pgid)
+            .map(|proc| proc.pgroup(procs.prove()).pgid)
             .ok_or(ESRCH)
     }
 }
@@ -332,18 +332,18 @@ fn do_kill(pid: i32, sig: u32) -> KResult<()> {
         // Send signal to every process in the process group.
         0 => Thread::current()
             .process
-            .pgroup(procs.as_pos())
-            .raise(Signal::try_from(sig)?, procs.as_pos()),
+            .pgroup(procs.prove())
+            .raise(Signal::try_from(sig)?, procs.prove()),
         // Send signal to the process with the specified pid.
         1.. => procs
             .try_find_process(pid as u32)
             .ok_or(ESRCH)?
-            .raise(Signal::try_from(sig)?, procs.as_pos()),
+            .raise(Signal::try_from(sig)?, procs.prove()),
         // Send signal to the process group with the specified pgid equals to `-pid`.
         ..-1 => procs
             .try_find_pgroup((-pid) as u32)
             .ok_or(ESRCH)?
-            .raise(Signal::try_from(sig)?, procs.as_pos()),
+            .raise(Signal::try_from(sig)?, procs.prove()),
     }
 
     Ok(())
@@ -586,8 +586,8 @@ fn sys_fork(int_stack: &mut InterruptContext, _: &mut ExtendedContext) -> usize 
 
     let current = Thread::current();
     let current_process = current.process.clone();
-    let current_pgroup = current_process.pgroup(procs.as_pos()).clone();
-    let current_session = current_process.session(procs.as_pos()).clone();
+    let current_pgroup = current_process.pgroup(procs.prove()).clone();
+    let current_session = current_process.session(procs.prove()).clone();
 
     let mut new_int_context = int_stack.clone();
     new_int_context.set_return_value(0);

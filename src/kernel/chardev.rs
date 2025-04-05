@@ -9,12 +9,13 @@ use super::{
         DevId,
     },
 };
-use crate::{io::Buffer, prelude::*, sync::AsRefPosition as _};
+use crate::{io::Buffer, prelude::*};
 use alloc::{
     boxed::Box,
     collections::btree_map::{BTreeMap, Entry},
     sync::Arc,
 };
+use eonix_sync::AsProof as _;
 use lazy_static::lazy_static;
 
 pub trait VirtualCharDevice: Send + Sync {
@@ -77,11 +78,11 @@ impl CharDevice {
             CharDeviceType::Terminal(terminal) => {
                 let procs = ProcessList::get().lock_shared();
                 let current = Thread::current();
-                let session = current.process.session(procs.as_pos());
+                let session = current.process.session(procs.prove());
                 // We only set the control terminal if the process is the session leader.
                 if session.sid == Thread::current().process.pid {
                     // Silently fail if we can't set the control terminal.
-                    dont_check!(session.set_control_terminal(&terminal, false, procs.as_pos()));
+                    dont_check!(session.set_control_terminal(&terminal, false, procs.prove()));
                 }
 
                 TerminalFile::new(terminal.clone())

@@ -6,10 +6,7 @@ use crate::{
     kernel::mem::MMList,
     prelude::*,
     rcu::{rcu_sync, RCUPointer, RCUReadGuard},
-    sync::{
-        AsRefMutPosition as _, AsRefPosition as _, CondVar, RefMutPosition, RefPosition,
-        RwSemReadGuard, SpinGuard,
-    },
+    sync::{CondVar, RwSemReadGuard, SpinGuard},
 };
 use alloc::{
     collections::{btree_map::BTreeMap, vec_deque::VecDeque},
@@ -17,6 +14,7 @@ use alloc::{
 };
 use bindings::{ECHILD, EINTR, EPERM, ESRCH};
 use core::sync::atomic::{AtomicU32, Ordering};
+use eonix_sync::{AsProof as _, AsProofMut as _, Locked, Proof, ProofMut};
 use pointers::BorrowedArc;
 
 pub struct ProcessBuilder {
@@ -206,7 +204,7 @@ impl ProcessBuilder {
 
         let pgroup = match self.pgroup {
             Some(pgroup) => {
-                pgroup.add_member(&process, process_list.as_pos_mut());
+                pgroup.add_member(&process, process_list.prove_mut());
                 pgroup
             }
             None => ProcessGroupBuilder::new()
@@ -216,7 +214,7 @@ impl ProcessBuilder {
         };
 
         if let Some(parent) = &self.parent {
-            parent.add_child(&process, process_list.as_pos_mut());
+            parent.add_child(&process, process_list.prove_mut());
         }
 
         // SAFETY: We are holding the process list lock.
@@ -231,7 +229,7 @@ impl ProcessBuilder {
 }
 
 impl Process {
-    pub fn raise(&self, signal: Signal, procs: RefPosition<'_, ProcessList>) {
+    pub fn raise(&self, signal: Signal, procs: Proof<'_, ProcessList>) {
         let inner = self.inner.access(procs);
         for thread in inner.threads.values().map(|t| t.upgrade().unwrap()) {
             if let RaiseResult::Finished = thread.raise(signal) {
@@ -240,7 +238,7 @@ impl Process {
         }
     }
 
-    pub(super) fn add_child(&self, child: &Arc<Process>, procs: RefMutPosition<'_, ProcessList>) {
+    pub(super) fn add_child(&self, child: &Arc<Process>, procs: ProofMut<'_, ProcessList>) {
         assert!(self
             .inner
             .access_mut(procs)
@@ -249,7 +247,7 @@ impl Process {
             .is_none());
     }
 
-    pub(super) fn add_thread(&self, thread: &Arc<Thread>, procs: RefMutPosition<'_, ProcessList>) {
+    pub(super) fn add_thread(&self, thread: &Arc<Thread>, procs: ProofMut<'_, ProcessList>) {
         assert!(self
             .inner
             .access_mut(procs)
@@ -273,7 +271,7 @@ impl Process {
 
                 if self
                     .inner
-                    .access(waits.process_list.as_pos())
+                    .access(waits.process_list.prove())
                     .children
                     .is_empty()
                 {
@@ -295,7 +293,7 @@ impl Process {
             procs.remove_process(wait_object.pid);
             assert!(self
                 .inner
-                .access_mut(procs.as_pos_mut())
+                .access_mut(procs.prove_mut())
                 .children
                 .remove(&wait_object.pid)
                 .is_some());
@@ -322,7 +320,7 @@ impl Process {
         {
             let _old_session = unsafe { self.session.swap(Some(session.clone())) }.unwrap();
             let old_pgroup = unsafe { self.pgroup.swap(Some(pgroup.clone())) }.unwrap();
-            old_pgroup.remove_member(self.pid, process_list.as_pos_mut());
+            old_pgroup.remove_member(self.pid, process_list.prove_mut());
             rcu_sync();
         }
 
@@ -354,7 +352,7 @@ impl Process {
                 return Ok(());
             }
 
-            new_pgroup.add_member(self, procs.as_pos_mut());
+            new_pgroup.add_member(self, procs.prove_mut());
 
             new_pgroup
         } else {
@@ -369,7 +367,7 @@ impl Process {
                 .build(procs)
         };
 
-        pgroup.remove_member(self.pid, procs.as_pos_mut());
+        pgroup.remove_member(self.pid, procs.prove_mut());
         {
             let _old_pgroup = unsafe { self.pgroup.swap(Some(new_pgroup)) }.unwrap();
             rcu_sync();
@@ -391,7 +389,7 @@ impl Process {
             let child = {
                 // If `pid` refers to one of our children, the thread leaders must be
                 // in out children list.
-                let children = &self.inner.access(procs.as_pos()).children;
+                let children = &self.inner.access(procs.prove()).children;
                 let child = {
                     let child = children.get(&pid);
                     child.and_then(Weak::upgrade).ok_or(ESRCH)?
@@ -399,7 +397,7 @@ impl Process {
 
                 // Changing the process group of a child is only allowed
                 // if we are in the same session.
-                if child.session(procs.as_pos()).sid != self.session(procs.as_pos()).sid {
+                if child.session(procs.prove()).sid != self.session(procs.prove()).sid {
                     return Err(EPERM);
                 }
 
@@ -413,22 +411,19 @@ impl Process {
     }
 
     /// Provide locked (consistent) access to the session.
-    pub fn session<'r>(&'r self, _procs: RefPosition<'r, ProcessList>) -> BorrowedArc<'r, Session> {
+    pub fn session<'r>(&'r self, _procs: Proof<'r, ProcessList>) -> BorrowedArc<'r, Session> {
         // SAFETY: We are holding the process list lock.
         unsafe { self.session.load_locked() }.unwrap()
     }
 
     /// Provide locked (consistent) access to the process group.
-    pub fn pgroup<'r>(
-        &'r self,
-        _procs: RefPosition<'r, ProcessList>,
-    ) -> BorrowedArc<'r, ProcessGroup> {
+    pub fn pgroup<'r>(&'r self, _procs: Proof<'r, ProcessList>) -> BorrowedArc<'r, ProcessGroup> {
         // SAFETY: We are holding the process list lock.
         unsafe { self.pgroup.load_locked() }.unwrap()
     }
 
     /// Provide locked (consistent) access to the parent process.
-    pub fn parent<'r>(&'r self, _procs: RefPosition<'r, ProcessList>) -> BorrowedArc<'r, Process> {
+    pub fn parent<'r>(&'r self, _procs: Proof<'r, ProcessList>) -> BorrowedArc<'r, Process> {
         // SAFETY: We are holding the process list lock.
         unsafe { self.parent.load_locked() }.unwrap()
     }
@@ -448,7 +443,7 @@ impl Process {
         self.parent.load()
     }
 
-    pub fn notify(&self, wait: WaitObject, procs: RefPosition<'_, ProcessList>) {
+    pub fn notify(&self, wait: WaitObject, procs: Proof<'_, ProcessList>) {
         self.wait_list.notify(wait);
         self.raise(Signal::SIGCHLD, procs);
     }
@@ -553,7 +548,7 @@ impl NotifyBatch<'_, '_, '_> {
     }
 
     /// Finish the batch and notify all if we have notified some processes.
-    pub fn finish(mut self, procs: RefPosition<'_, ProcessList>) {
+    pub fn finish(mut self, procs: Proof<'_, ProcessList>) {
         if self.needs_notify {
             self.cv.notify_all();
             self.process.raise(Signal::SIGCHLD, procs);

@@ -1,18 +1,12 @@
+use super::{Process, ProcessGroup, Session, Signal, Thread, WaitObject, WaitType};
+use crate::{prelude::*, rcu::rcu_sync};
 use alloc::{
     collections::btree_map::BTreeMap,
     sync::{Arc, Weak},
 };
 use bindings::KERNEL_PML4;
-
-use crate::{
-    prelude::*,
-    rcu::rcu_sync,
-    sync::{AsRefMutPosition as _, AsRefPosition as _},
-};
-
+use eonix_sync::{AsProof as _, AsProofMut as _};
 use lazy_static::lazy_static;
-
-use super::{Process, ProcessGroup, Session, Signal, Thread, WaitObject, WaitType};
 
 pub struct ProcessList {
     /// The init process.
@@ -84,7 +78,7 @@ impl ProcessList {
             let session = unsafe { thread.process.session.swap(None) }.unwrap();
             let pgroup = unsafe { thread.process.pgroup.swap(None) }.unwrap();
             let _parent = unsafe { thread.process.parent.swap(None) }.unwrap();
-            pgroup.remove_member(pid, self.as_pos_mut());
+            pgroup.remove_member(pid, self.prove_mut());
             rcu_sync();
 
             if Arc::strong_count(&pgroup) == 1 {
@@ -132,7 +126,7 @@ impl ProcessList {
             panic!("init exited");
         }
 
-        let inner = process.inner.access_mut(self.as_pos_mut());
+        let inner = process.inner.access_mut(self.prove_mut());
         // TODO!!!!!!: When we are killing multiple threads, we need to wait until all
         // the threads are stopped then proceed.
         for thread in inner.threads.values().map(|t| t.upgrade().unwrap()) {
@@ -142,8 +136,8 @@ impl ProcessList {
         }
 
         // If we are the session leader, we should drop the control terminal.
-        if process.session(self.as_pos()).sid == process.pid {
-            if let Some(terminal) = process.session(self.as_pos()).drop_control_terminal() {
+        if process.session(self.prove()).sid == process.pid {
+            if let Some(terminal) = process.session(self.prove()).drop_control_terminal() {
                 terminal.drop_session();
             }
         }
@@ -162,7 +156,7 @@ impl ProcessList {
                 let child = child.upgrade().unwrap();
                 // SAFETY: `child.parent` must be ourself. So we don't need to free it.
                 unsafe { child.parent.swap(Some(init.clone())) };
-                init.add_child(&child, self.as_pos_mut());
+                init.add_child(&child, self.prove_mut());
 
                 false
             });
@@ -174,14 +168,14 @@ impl ProcessList {
             .drain_exited()
             .into_iter()
             .for_each(|item| init_notify.notify(item));
-        init_notify.finish(self.as_pos());
+        init_notify.finish(self.prove());
 
-        process.parent(self.as_pos()).notify(
+        process.parent(self.prove()).notify(
             WaitObject {
                 pid: process.pid,
                 code: status,
             },
-            self.as_pos(),
+            self.prove(),
         );
     }
 }

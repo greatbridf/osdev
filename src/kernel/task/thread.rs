@@ -10,7 +10,6 @@ use crate::{
         vfs::{filearray::FileArray, FsContext},
     },
     prelude::*,
-    sync::AsRefMutPosition as _,
 };
 use alloc::sync::Arc;
 use arch::{InterruptContext, UserTLS, _arch_fork_return};
@@ -26,6 +25,7 @@ use eonix_runtime::{
     context::ExecutionContext,
     run::{Contexted, PinRun, RunState},
 };
+use eonix_sync::AsProofMut as _;
 use pointers::BorrowedArc;
 
 struct CurrentThread {
@@ -217,7 +217,7 @@ impl ThreadBuilder {
         });
 
         process_list.add_thread(&thread);
-        process.add_thread(&thread, process_list.as_pos_mut());
+        process.add_thread(&thread, process_list.prove_mut());
         thread
     }
 }

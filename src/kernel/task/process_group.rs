@@ -1,14 +1,9 @@
+use super::{Process, ProcessList, Session, Signal};
 use alloc::{
     collections::btree_map::BTreeMap,
     sync::{Arc, Weak},
 };
-
-use crate::{
-    prelude::*,
-    sync::{RefMutPosition, RefPosition},
-};
-
-use super::{Process, ProcessList, Session, Signal};
+use eonix_sync::{Locked, Proof, ProofMut};
 
 pub struct ProcessGroupBuilder {
     pgid: Option<u32>,
@@ -64,11 +59,7 @@ impl ProcessGroupBuilder {
 }
 
 impl ProcessGroup {
-    pub(super) fn add_member(
-        &self,
-        process: &Arc<Process>,
-        procs: RefMutPosition<'_, ProcessList>,
-    ) {
+    pub(super) fn add_member(&self, process: &Arc<Process>, procs: ProofMut<'_, ProcessList>) {
         assert!(self
             .processes
             .access_mut(procs)
@@ -76,7 +67,7 @@ impl ProcessGroup {
             .is_none());
     }
 
-    pub(super) fn remove_member(&self, pid: u32, procs: RefMutPosition<'_, ProcessList>) {
+    pub(super) fn remove_member(&self, pid: u32, procs: ProofMut<'_, ProcessList>) {
         let processes = self.processes.access_mut(procs);
         assert!(processes.remove(&pid).is_some());
         if processes.is_empty() {
@@ -87,7 +78,7 @@ impl ProcessGroup {
         }
     }
 
-    pub fn raise(&self, signal: Signal, procs: RefPosition<'_, ProcessList>) {
+    pub fn raise(&self, signal: Signal, procs: Proof<'_, ProcessList>) {
         let processes = self.processes.access(procs);
         for process in processes.values().map(|p| p.upgrade().unwrap()) {
             process.raise(signal, procs);

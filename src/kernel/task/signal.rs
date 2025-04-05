@@ -6,13 +6,13 @@ use crate::{
         user::{dataflow::UserBuffer, UserPointer},
     },
     prelude::*,
-    sync::AsRefPosition as _,
 };
 use alloc::collections::{binary_heap::BinaryHeap, btree_map::BTreeMap};
 use arch::{ExtendedContext, InterruptContext};
 use bindings::{EFAULT, EINVAL};
 use core::{cmp::Reverse, task::Waker};
 use eonix_runtime::{scheduler::Scheduler, task::Task};
+use eonix_sync::AsProof as _;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Signal(u32);
@@ -413,7 +413,7 @@ impl SignalList {
                                 pid: thread.process.pid,
                                 code: WaitType::Stopped(signal),
                             },
-                            ProcessList::get().lock_shared().as_pos(),
+                            ProcessList::get().lock_shared().prove(),
                         );
                     }
 
@@ -436,7 +436,7 @@ impl SignalList {
                                 pid: thread.process.pid,
                                 code: WaitType::Continued,
                             },
-                            ProcessList::get().lock_shared().as_pos(),
+                            ProcessList::get().lock_shared().prove(),
                         );
                     }
                 }

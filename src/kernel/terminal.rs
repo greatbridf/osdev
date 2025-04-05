@@ -2,11 +2,7 @@ use super::{
     task::{ProcessList, Session, Signal, Thread},
     user::{UserPointer, UserPointerMut},
 };
-use crate::{
-    io::Buffer,
-    prelude::*,
-    sync::{AsRefPosition as _, CondVar},
-};
+use crate::{io::Buffer, prelude::*, sync::CondVar};
 use alloc::{
     collections::vec_deque::VecDeque,
     sync::{Arc, Weak},
@@ -14,6 +10,7 @@ use alloc::{
 use bindings::{EINTR, ENOTTY, EPERM};
 use bitflags::bitflags;
 use eonix_log::ConsoleWrite;
+use eonix_sync::AsProof as _;
 
 const BUFFER_SIZE: usize = 4096;
 
@@ -614,7 +611,7 @@ impl Terminal {
                 let session = inner.session.upgrade();
 
                 if let Some(session) = session {
-                    session.set_foreground_pgid(pgid, procs.as_pos())
+                    session.set_foreground_pgid(pgid, procs.prove())
                 } else {
                     Err(ENOTTY)
                 }

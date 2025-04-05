@@ -1,8 +1,3 @@
-use alloc::sync::{Arc, Weak};
-use bindings::{EINVAL, EIO, EISDIR};
-use core::{ops::ControlFlow, sync::atomic::Ordering};
-use itertools::Itertools;
-
 use crate::{
     io::Buffer,
     kernel::constants::{S_IFBLK, S_IFCHR, S_IFDIR, S_IFLNK, S_IFREG},
@@ -15,8 +10,12 @@ use crate::{
         DevId,
     },
     prelude::*,
-    sync::{AsRefMutPosition as _, AsRefPosition as _, Locked, RefMutPosition},
 };
+use alloc::sync::{Arc, Weak};
+use bindings::{EINVAL, EIO, EISDIR};
+use core::{ops::ControlFlow, sync::atomic::Ordering};
+use eonix_sync::{AsProof as _, AsProofMut as _, Locked, ProofMut};
+use itertools::Itertools;
 
 fn acquire(vfs: &Weak<dyn Vfs>) -> KResult<Arc<dyn Vfs>> {
     vfs.upgrade().ok_or(EIO)
@@ -69,7 +68,7 @@ impl DirectoryInode {
         })
     }
 
-    fn link(&self, name: Arc<[u8]>, file: &dyn Inode, dlock: RefMutPosition<'_, ()>) {
+    fn link(&self, name: Arc<[u8]>, file: &dyn Inode, dlock: ProofMut<'_, ()>) {
         // SAFETY: Only `unlink` will do something based on `nlink` count
         //         No need to synchronize here
         file.nlink.fetch_add(1, Ordering::Relaxed);
@@ -89,7 +88,7 @@ impl Inode for DirectoryInode {
     ) -> KResult<usize> {
         let lock = self.rwsem.lock_shared();
         self.entries
-            .access(lock.as_pos())
+            .access(lock.prove())
             .iter()
             .skip(offset)
             .map(|(name, ino)| callback(&name, *ino))
@@ -107,7 +106,7 @@ impl Inode for DirectoryInode {
         let ino = vfs.assign_ino();
         let file = FileInode::new(ino, self.vfs.clone(), mode);
 
-        self.link(at.name().clone(), file.as_ref(), rwsem.as_pos_mut());
+        self.link(at.name().clone(), file.as_ref(), rwsem.prove_mut());
         at.save_reg(file)
     }
 
@@ -129,7 +128,7 @@ impl Inode for DirectoryInode {
             dev,
         );
 
-        self.link(at.name().clone(), file.as_ref(), rwsem.as_pos_mut());
+        self.link(at.name().clone(), file.as_ref(), rwsem.prove_mut());
         at.save_reg(file)
     }
 
@@ -142,7 +141,7 @@ impl Inode for DirectoryInode {
         let ino = vfs.assign_ino();
         let file = SymlinkInode::new(ino, self.vfs.clone(), target.into());
 
-        self.link(at.name().clone(), file.as_ref(), rwsem.as_pos_mut());
+        self.link(at.name().clone(), file.as_ref(), rwsem.prove_mut());
         at.save_symlink(file)
     }
 
@@ -155,7 +154,7 @@ impl Inode for DirectoryInode {
         let ino = vfs.assign_ino();
         let newdir = DirectoryInode::new(ino, self.vfs.clone(), mode);
 
-        self.link(at.name().clone(), newdir.as_ref(), rwsem.as_pos_mut());
+        self.link(at.name().clone(), newdir.as_ref(), rwsem.prove_mut());
         at.save_dir(newdir)
     }
 
@@ -172,7 +171,7 @@ impl Inode for DirectoryInode {
             return Err(EISDIR);
         }
 
-        let entries = self.entries.access_mut(dlock.as_pos_mut());
+        let entries = self.entries.access_mut(dlock.prove_mut());
         entries.retain(|(_, ino)| *ino != file.ino);
 
         assert_eq!(
@@ -268,7 +267,7 @@ impl Inode for FileInode {
         // TODO: We don't need that strong guarantee, find some way to avoid locks
         let lock = self.rwsem.lock_shared();
 
-        match self.filedata.access(lock.as_pos()).split_at_checked(offset) {
+        match self.filedata.access(lock.prove()).split_at_checked(offset) {
             Some((_, data)) => buffer.fill(data).map(|result| result.allow_partial()),
             None => Ok(0),
         }
@@ -277,7 +276,7 @@ impl Inode for FileInode {
     fn write(&self, buffer: &[u8], offset: WriteOffset) -> KResult<usize> {
         // TODO: We don't need that strong guarantee, find some way to avoid locks
         let lock = self.rwsem.lock();
-        let filedata = self.filedata.access_mut(lock.as_pos_mut());
+        let filedata = self.filedata.access_mut(lock.prove_mut());
 
         let offset = match offset {
             WriteOffset::Position(offset) => offset,
@@ -305,7 +304,7 @@ impl Inode for FileInode {
     fn truncate(&self, length: usize) -> KResult<()> {
         // TODO: We don't need that strong guarantee, find some way to avoid locks
         let lock = self.rwsem.lock();
-        let filedata = self.filedata.access_mut(lock.as_pos_mut());
+        let filedata = self.filedata.access_mut(lock.prove_mut());
 
         // SAFETY: `lock` has done the synchronization
         self.size.store(length as u64, Ordering::Relaxed);

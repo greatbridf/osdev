@@ -1,11 +1,11 @@
 use core::{cell::UnsafeCell, mem::transmute};
 
 #[derive(Debug)]
-pub struct TaskContext(UnsafeCell<arch::TaskContext>);
+pub struct ExecutionContext(UnsafeCell<arch::TaskContext>);
 
-unsafe impl Sync for TaskContext {}
+unsafe impl Sync for ExecutionContext {}
 
-impl TaskContext {
+impl ExecutionContext {
     pub const fn new() -> Self {
         Self(UnsafeCell::new(arch::TaskContext::new()))
     }
@@ -25,11 +25,11 @@ impl TaskContext {
         context.get_mut().interrupt(is_enabled);
     }
 
-    pub fn call2<T, U>(&mut self, func: unsafe extern "C" fn(T, U) -> !, args: [usize; 2]) {
+    pub fn call1<T>(&mut self, func: unsafe extern "C" fn(T) -> !, arg: usize) {
         let Self(context) = self;
         context
             .get_mut()
-            .call2(unsafe { transmute(func as *mut ()) }, args);
+            .call1(unsafe { transmute(func as *mut ()) }, [arg]);
     }
 
     pub fn switch_to(&self, to: &Self) {

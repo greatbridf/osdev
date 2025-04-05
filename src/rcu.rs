@@ -1,22 +1,16 @@
+use crate::{prelude::*, sync::RwSemReadGuard};
+use alloc::sync::Arc;
 use core::{
     ops::Deref,
     ptr::NonNull,
     sync::atomic::{AtomicPtr, Ordering},
 };
-
-use crate::{
-    prelude::*,
-    sync::{lock::Guard, semaphore::RwSemaphoreStrategy},
-};
-
-use alloc::sync::Arc;
-
 use lazy_static::lazy_static;
+use pointers::BorrowedArc;
 
-#[allow(dead_code)]
 pub struct RCUReadGuard<'data, T: 'data> {
     value: T,
-    guard: Guard<'data, (), RwSemaphoreStrategy, false>,
+    guard: RwSemReadGuard<'data, ()>,
     _phantom: PhantomData<&'data T>,
 }
 
@@ -156,29 +150,29 @@ impl<T: RCUNode<T>> RCUList<T> {
 
         RCUIterator {
             // SAFETY: We have a read lock, so the node is still alive.
-            cur: self.head.load(Ordering::SeqCst),
+            cur: NonNull::new(self.head.load(Ordering::SeqCst)),
             _lock: _lck,
         }
     }
 }
 
 pub struct RCUIterator<'lt, T: RCUNode<T>> {
-    cur: *const T,
-    _lock: Guard<'lt, (), RwSemaphoreStrategy, false>,
+    cur: Option<NonNull<T>>,
+    _lock: RwSemReadGuard<'lt, ()>,
 }
 
 impl<'lt, T: RCUNode<T>> Iterator for RCUIterator<'lt, T> {
     type Item = BorrowedArc<'lt, T>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        match unsafe { self.cur.as_ref() } {
+        match self.cur {
             None => None,
-            Some(real) => {
+            Some(pointer) => {
                 // SAFETY: We have a read lock, so the node is still alive.
-                let ret = self.cur;
-                self.cur = real.rcu_next().load(Ordering::SeqCst);
+                let reference = unsafe { pointer.as_ref() };
 
-                Some(BorrowedArc::from_raw(ret))
+                self.cur = NonNull::new(reference.rcu_next().load(Ordering::SeqCst));
+                Some(unsafe { BorrowedArc::from_raw(pointer) })
             }
         }
     }
@@ -190,7 +184,7 @@ impl<T: core::fmt::Debug> core::fmt::Debug for RCUPointer<T> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match NonNull::new(self.0.load(Ordering::Acquire)) {
             Some(pointer) => {
-                let borrowed = BorrowedArc::from_raw(pointer.as_ptr());
+                let borrowed = unsafe { BorrowedArc::from_raw(pointer) };
                 f.write_str("RCUPointer of ")?;
                 borrowed.fmt(f)
             }
@@ -209,24 +203,14 @@ impl<T> RCUPointer<T> {
     }
 
     pub fn load<'lt>(&self) -> Option<RCUReadGuard<'lt, BorrowedArc<'lt, T>>> {
-        let ptr = self.0.load(Ordering::Acquire);
-
-        if ptr.is_null() {
-            None
-        } else {
-            Some(RCUReadGuard::lock(BorrowedArc::from_raw(ptr)))
-        }
+        NonNull::new(self.0.load(Ordering::Acquire))
+            .map(|p| RCUReadGuard::lock(unsafe { BorrowedArc::from_raw(p) }))
     }
 
     /// # Safety
     /// Caller must ensure no writers are updating the pointer.
     pub unsafe fn load_locked<'lt>(&self) -> Option<BorrowedArc<'lt, T>> {
-        let ptr = self.0.load(Ordering::Acquire);
-        if ptr.is_null() {
-            None
-        } else {
-            Some(BorrowedArc::from_raw(ptr))
-        }
+        NonNull::new(self.0.load(Ordering::Acquire)).map(|p| unsafe { BorrowedArc::from_raw(p) })
     }
 
     /// # Safety

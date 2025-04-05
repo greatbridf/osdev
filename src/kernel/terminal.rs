@@ -1,20 +1,19 @@
+use super::{
+    task::{ProcessList, Session, Signal, Thread},
+    user::{UserPointer, UserPointerMut},
+};
+use crate::{
+    io::Buffer,
+    prelude::*,
+    sync::{AsRefPosition as _, CondVar},
+};
 use alloc::{
     collections::vec_deque::VecDeque,
     sync::{Arc, Weak},
 };
 use bindings::{EINTR, ENOTTY, EPERM};
 use bitflags::bitflags;
-
-use crate::{
-    io::Buffer,
-    prelude::*,
-    sync::{AsRefPosition as _, CondVar},
-};
-
-use super::{
-    task::{ProcessList, Session, Signal, Thread},
-    user::{UserPointer, UserPointerMut},
-};
+use eonix_log::ConsoleWrite;
 
 const BUFFER_SIZE: usize = 4096;
 
@@ -358,8 +357,7 @@ struct TerminalInner {
 }
 
 pub struct Terminal {
-    /// Lock with IRQ disabled. We might use this in IRQ context.
-    inner: Spin<TerminalInner>,
+    inner: Mutex<TerminalInner>,
     device: Arc<dyn TerminalDevice>,
     cv: CondVar,
 }
@@ -401,7 +399,7 @@ impl core::fmt::Debug for Terminal {
 impl Terminal {
     pub fn new(device: Arc<dyn TerminalDevice>) -> Arc<Self> {
         Arc::new(Self {
-            inner: Spin::new(TerminalInner {
+            inner: Mutex::new(TerminalInner {
                 termio: Termios::new_standard(),
                 session: Weak::new(),
                 buffer: VecDeque::with_capacity(BUFFER_SIZE),
@@ -486,7 +484,7 @@ impl Terminal {
 
     // TODO: Find a better way to handle this.
     pub fn commit_char(&self, ch: u8) {
-        let mut inner = self.inner.lock_irq();
+        let mut inner = self.inner.lock();
         if inner.termio.isig() {
             match ch {
                 0xff => {}
@@ -534,7 +532,7 @@ impl Terminal {
     }
 
     pub fn poll_in(&self) -> KResult<()> {
-        let mut inner = self.inner.lock_irq();
+        let mut inner = self.inner.lock();
         if inner.buffer.is_empty() {
             self.cv.wait(&mut inner);
 
@@ -553,7 +551,7 @@ impl Terminal {
                 break 'block &tmp_buffer[..0];
             }
 
-            let mut inner = self.inner.lock_irq();
+            let mut inner = self.inner.lock();
             if inner.buffer.is_empty() {
                 self.cv.wait(&mut inner);
 
@@ -677,5 +675,13 @@ impl Terminal {
 
     pub fn session(&self) -> Option<Arc<Session>> {
         self.inner.lock().session.upgrade()
+    }
+}
+
+impl ConsoleWrite for Terminal {
+    fn write(&self, s: &str) {
+        for &ch in s.as_bytes() {
+            self.show_char(ch);
+        }
     }
 }

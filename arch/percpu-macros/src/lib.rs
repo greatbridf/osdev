@@ -42,13 +42,13 @@ pub fn define_percpu(attrs: TokenStream, item: TokenStream) -> TokenStream {
     };
 
     let preempt_disable = if !is_atomic_like {
-        quote! { crate::sync::preempt::disable(); }
+        quote! { eonix_preempt::disable(); }
     } else {
         quote! {}
     };
 
     let preempt_enable = if !is_atomic_like {
-        quote! { crate::sync::preempt::enable(); }
+        quote! { eonix_preempt::enable(); }
     } else {
         quote! {}
     };

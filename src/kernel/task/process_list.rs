@@ -7,7 +7,7 @@ use bindings::KERNEL_PML4;
 use crate::{
     prelude::*,
     rcu::rcu_sync,
-    sync::{preempt, AsRefMutPosition as _, AsRefPosition as _},
+    sync::{AsRefMutPosition as _, AsRefPosition as _},
 };
 
 use lazy_static::lazy_static;
@@ -63,7 +63,7 @@ impl ProcessList {
     pub fn kill_current(signal: Signal) -> ! {
         unsafe {
             let mut process_list = ProcessList::get().lock();
-            preempt::disable();
+            eonix_preempt::disable();
 
             // SAFETY: Preemption disabled.
             process_list.do_kill_process(&Thread::current().process, WaitType::Signaled(signal));
@@ -71,7 +71,7 @@ impl ProcessList {
 
         unsafe {
             // SAFETY: Preempt count == 1.
-            Thread::runnable().exit();
+            Thread::exit();
         }
     }
 

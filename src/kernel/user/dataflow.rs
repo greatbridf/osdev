@@ -1,6 +1,7 @@
 use core::{arch::asm, ffi::CStr};
 
 use bindings::{EFAULT, EINVAL};
+use eonix_preempt::assert_preempt_enabled;
 
 use crate::{
     io::{Buffer, FillResult},
@@ -93,7 +94,7 @@ impl CheckedUserPointer {
 
     /// # Might Sleep
     pub fn read(&self, buffer: *mut (), total: usize) -> KResult<()> {
-        might_sleep!();
+        assert_preempt_enabled!("UserPointer::read");
 
         if total > self.len {
             return Err(EINVAL);
@@ -128,7 +129,7 @@ impl CheckedUserPointer {
 
     /// # Might Sleep
     pub fn write(&self, data: *mut (), total: usize) -> KResult<()> {
-        might_sleep!();
+        assert_preempt_enabled!("UserPointer::write");
 
         if total > self.len {
             return Err(EINVAL);
@@ -164,7 +165,7 @@ impl CheckedUserPointer {
 
     /// # Might Sleep
     pub fn zero(&self) -> KResult<()> {
-        might_sleep!();
+        assert_preempt_enabled!("CheckedUserPointer::zero");
 
         if self.len == 0 {
             return Ok(());
@@ -228,7 +229,7 @@ impl<'lt> Buffer for UserBuffer<'lt> {
 
     /// # Might Sleep
     fn fill(&mut self, data: &[u8]) -> KResult<FillResult> {
-        might_sleep!();
+        assert_preempt_enabled!("UserBuffer::fill");
 
         let to_write = data.len().min(self.remaining());
         if to_write == 0 {
@@ -250,7 +251,7 @@ impl<'lt> Buffer for UserBuffer<'lt> {
 impl<'lt> UserString<'lt> {
     /// # Might Sleep
     pub fn new(ptr: *const u8) -> KResult<Self> {
-        might_sleep!();
+        assert_preempt_enabled!("UserString::new");
 
         const MAX_LEN: usize = 4096;
         // TODO

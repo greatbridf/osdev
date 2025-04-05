@@ -28,12 +28,11 @@ mod sync;
 use alloc::{ffi::CString, sync::Arc};
 use core::alloc::{GlobalAlloc, Layout};
 use elf::ParsedElf32;
+use eonix_runtime::{run::FutureRun, scheduler::Scheduler};
 use kernel::{
     cpu::init_thiscpu,
     mem::Page,
-    task::{
-        FutureRunnable, ProcessBuilder, ProcessList, Scheduler, Task, ThreadBuilder, ThreadRunnable,
-    },
+    task::{KernelStack, ProcessBuilder, ProcessList, ThreadBuilder, ThreadRunnable},
     vfs::{
         dentry::Dentry,
         mount::{do_mount, MS_NOATIME, MS_NODEV, MS_NOSUID, MS_RDONLY},
@@ -43,7 +42,6 @@ use kernel::{
 };
 use path::Path;
 use prelude::*;
-use sync::preempt;
 
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
@@ -112,16 +110,18 @@ pub extern "C" fn rust_kinit(early_kstack_pfn: usize) -> ! {
     kernel::vfs::mount::init_vfs().unwrap();
 
     // To satisfy the `Scheduler` "preempt count == 0" assertion.
-    preempt::disable();
+    eonix_preempt::disable();
 
     // We need root dentry to be present in constructor of `FsContext`.
     // So call `init_vfs` first, then `init_multitasking`.
-    Scheduler::init_scheduler_thiscpu();
+    Scheduler::init_local_scheduler::<KernelStack>();
 
-    let runnable = FutureRunnable::new(init_process(early_kstack_pfn));
-    Scheduler::get().spawn(Task::new(runnable));
+    Scheduler::get().spawn::<KernelStack, _>(FutureRun::new(init_process(early_kstack_pfn)));
 
-    Task::switch_noreturn(&Task::idle());
+    unsafe {
+        // SAFETY: `preempt::count()` == 1.
+        Scheduler::goto_scheduler_noreturn()
+    }
 }
 
 async fn init_process(early_kstack_pfn: usize) {
@@ -190,6 +190,5 @@ async fn init_process(early_kstack_pfn: usize) {
     // TODO!!!: Remove this.
     thread.files.open_console();
 
-    let task = Task::new(ThreadRunnable::new(thread, ip, sp));
-    Scheduler::get().spawn(task);
+    Scheduler::get().spawn::<KernelStack, _>(ThreadRunnable::new(thread, ip, sp));
 }

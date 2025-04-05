@@ -1,11 +1,7 @@
-use core::sync::atomic::{AtomicU32, Ordering};
-
-use alloc::{
-    collections::{btree_map::BTreeMap, vec_deque::VecDeque},
-    sync::{Arc, Weak},
+use super::{
+    process_group::ProcessGroupBuilder, signal::RaiseResult, thread::ThreadBuilder, ProcessGroup,
+    ProcessList, Session, Signal, Thread,
 };
-use bindings::{ECHILD, EINTR, EPERM, ESRCH};
-
 use crate::{
     kernel::mem::MMList,
     prelude::*,
@@ -15,11 +11,13 @@ use crate::{
         RwSemReadGuard, SpinGuard,
     },
 };
-
-use super::{
-    process_group::ProcessGroupBuilder, signal::RaiseResult, thread::ThreadBuilder, ProcessGroup,
-    ProcessList, Session, Signal, Thread,
+use alloc::{
+    collections::{btree_map::BTreeMap, vec_deque::VecDeque},
+    sync::{Arc, Weak},
 };
+use bindings::{ECHILD, EINTR, EPERM, ESRCH};
+use core::sync::atomic::{AtomicU32, Ordering};
+use pointers::BorrowedArc;
 
 pub struct ProcessBuilder {
     mm_list: Option<MMList>,

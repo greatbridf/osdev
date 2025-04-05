@@ -1,5 +1,4 @@
-use core::{cmp::Reverse, task::Waker};
-
+use super::{ProcessList, Thread, WaitObject, WaitType};
 use crate::{
     io::BufferFill,
     kernel::{
@@ -7,14 +6,13 @@ use crate::{
         user::{dataflow::UserBuffer, UserPointer},
     },
     prelude::*,
-    sync::{preempt, AsRefPosition as _},
+    sync::AsRefPosition as _,
 };
-
 use alloc::collections::{binary_heap::BinaryHeap, btree_map::BTreeMap};
 use arch::{ExtendedContext, InterruptContext};
 use bindings::{EFAULT, EINVAL};
-
-use super::{ProcessList, Scheduler, Task, Thread, WaitObject, WaitType};
+use core::{cmp::Reverse, task::Waker};
+use eonix_runtime::{scheduler::Scheduler, task::Task};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Signal(u32);
@@ -78,7 +76,6 @@ struct SignalListInner {
 
 #[derive(Debug)]
 pub struct SignalList {
-    /// We might use this inside interrupt handler, so we need to use `lock_irq`.
     inner: Spin<SignalListInner>,
 }
 
@@ -266,12 +263,11 @@ impl SignalListInner {
                 self.stop_waker.take().map(|waker| waker.wake());
             }
             _ => {
-                let waker = self
-                    .signal_waker
+                // If we don't have a waker here, we might be at initialization step.
+                // We would run in the end anyway.
+                self.signal_waker
                     .as_ref()
-                    .expect("We should have a signal waker");
-
-                waker.wake_by_ref();
+                    .inspect(|waker| waker.wake_by_ref());
             }
         }
 
@@ -293,19 +289,19 @@ impl SignalList {
     }
 
     pub fn get_mask(&self) -> u64 {
-        self.inner.lock_irq().get_mask()
+        self.inner.lock().get_mask()
     }
 
     pub fn set_mask(&self, mask: u64) {
-        self.inner.lock_irq().set_mask(mask)
+        self.inner.lock().set_mask(mask)
     }
 
     pub fn mask(&self, mask: u64) {
-        self.inner.lock_irq().set_mask(mask)
+        self.inner.lock().set_mask(mask)
     }
 
     pub fn unmask(&self, mask: u64) {
-        self.inner.lock_irq().unmask(mask)
+        self.inner.lock().unmask(mask)
     }
 
     pub fn set_handler(&self, signal: Signal, action: &SignalAction) -> KResult<()> {
@@ -313,7 +309,7 @@ impl SignalList {
             return Err(EINVAL);
         }
 
-        let mut inner = self.inner.lock_irq();
+        let mut inner = self.inner.lock();
         if action.is_default() {
             inner.handlers.remove(&signal);
         } else {
@@ -325,7 +321,7 @@ impl SignalList {
 
     pub fn get_handler(&self, signal: Signal) -> SignalAction {
         self.inner
-            .lock_irq()
+            .lock()
             .handlers
             .get(&signal)
             .cloned()
@@ -334,7 +330,7 @@ impl SignalList {
 
     // TODO!!!: Find a better way.
     pub fn set_signal_waker(&self, waker: Waker) {
-        let mut inner = self.inner.lock_irq();
+        let mut inner = self.inner.lock();
         let old_waker = inner.signal_waker.replace(waker);
         assert!(old_waker.is_none(), "We should not have a waker here");
     }
@@ -343,7 +339,7 @@ impl SignalList {
     /// This is used when `execve` is called.
     pub fn clear_non_ignore(&self) {
         self.inner
-            .lock_irq()
+            .lock()
             .handlers
             .retain(|_, action| action.is_ignore());
     }
@@ -351,16 +347,16 @@ impl SignalList {
     /// Clear all pending signals.
     /// This is used when `fork` is called.
     pub fn clear_pending(&self) {
-        self.inner.lock_irq().pending.clear()
+        self.inner.lock().pending.clear()
     }
 
     pub fn has_pending_signal(&self) -> bool {
-        !self.inner.lock_irq().pending.is_empty()
+        !self.inner.lock().pending.is_empty()
     }
 
     /// Do not use this, use `Thread::raise` instead.
     pub(super) fn raise(&self, signal: Signal) -> RaiseResult {
-        self.inner.lock_irq().raise(signal)
+        self.inner.lock().raise(signal)
     }
 
     /// Handle signals in the context of `Thread::current()`.
@@ -371,27 +367,27 @@ impl SignalList {
     pub fn handle(&self, int_stack: &mut InterruptContext, ext_ctx: &mut ExtendedContext) {
         loop {
             let signal = {
-                let signal = match self.inner.lock_irq().pop() {
+                let signal = match self.inner.lock().pop() {
                     Some(signal) => signal,
                     None => return,
                 };
 
-                let handler = self.inner.lock_irq().handlers.get(&signal).cloned();
+                let handler = self.inner.lock().handlers.get(&signal).cloned();
                 if let Some(handler) = handler {
                     if !signal.is_now() {
                         let old_mask = {
-                            let mut inner = self.inner.lock_irq();
+                            let mut inner = self.inner.lock();
                             let old_mask = inner.mask;
                             inner.mask(handler.sa_mask as u64);
                             old_mask
                         };
                         let result = handler.handle(signal, old_mask, int_stack, ext_ctx);
                         if result.is_err() {
-                            self.inner.lock_irq().set_mask(old_mask);
+                            self.inner.lock().set_mask(old_mask);
                         }
                         match result {
-                            Err(EFAULT) => self.inner.lock_irq().raise(Signal::SIGSEGV),
-                            Err(_) => self.inner.lock_irq().raise(Signal::SIGSYS),
+                            Err(EFAULT) => self.inner.lock().raise(Signal::SIGSEGV),
+                            Err(_) => self.inner.lock().raise(Signal::SIGSYS),
                             Ok(()) => return,
                         };
                         continue;
@@ -403,7 +399,7 @@ impl SignalList {
                 // Default actions include stopping the thread, continuing the thread and
                 // terminating the process. All these actions will block the thread or return
                 // to the thread immediately. So we can unmask these signals now.
-                self.inner.lock_irq().unmask(signal.to_mask());
+                self.inner.lock().unmask(signal.to_mask());
                 signal
             };
 
@@ -421,12 +417,12 @@ impl SignalList {
                         );
                     }
 
-                    preempt::disable();
+                    eonix_preempt::disable();
 
                     // `SIGSTOP` can only be waken up by `SIGCONT` or `SIGKILL`.
                     // SAFETY: Preempt disabled above.
                     {
-                        let mut inner = self.inner.lock_irq();
+                        let mut inner = self.inner.lock();
                         let waker = Waker::from(Task::current().usleep());
                         let old_waker = inner.stop_waker.replace(waker);
                         assert!(old_waker.is_none(), "We should not have a waker here");
@@ -471,7 +467,7 @@ impl SignalList {
         *ext_ctx = UserPointer::<ExtendedContext>::new_vaddr(old_mmxregs_vaddr)?.read()?;
         *int_stack = UserPointer::<InterruptContext>::new_vaddr(old_int_stack_vaddr)?.read()?;
 
-        self.inner.lock_irq().set_mask(old_mask);
+        self.inner.lock().set_mask(old_mask);
         Ok(int_stack.rax as usize)
     }
 }

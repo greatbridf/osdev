@@ -1,9 +1,5 @@
-use alloc::borrow::ToOwned;
-use alloc::ffi::CString;
-use arch::{ExtendedContext, InterruptContext};
-use bindings::{EINVAL, ENOENT, ENOTDIR, ERANGE, ESRCH};
-use bitflags::bitflags;
-
+use super::sysinfo::TimeVal;
+use super::{define_syscall32, register_syscall};
 use crate::elf::ParsedElf32;
 use crate::io::Buffer;
 use crate::kernel::constants::{
@@ -11,20 +7,22 @@ use crate::kernel::constants::{
 };
 use crate::kernel::mem::{Page, PageBuffer, VAddr};
 use crate::kernel::task::{
-    ProcessBuilder, ProcessList, Scheduler, Signal, SignalAction, Task, Thread, ThreadBuilder,
+    KernelStack, ProcessBuilder, ProcessList, Signal, SignalAction, Thread, ThreadBuilder,
     ThreadRunnable, UserDescriptor, WaitObject, WaitType,
 };
 use crate::kernel::user::dataflow::UserString;
 use crate::kernel::user::{UserPointer, UserPointerMut};
 use crate::kernel::vfs::dentry::Dentry;
-use crate::path::Path;
-use crate::sync::{preempt, AsRefPosition as _};
-use crate::{kernel::user::dataflow::UserBuffer, prelude::*};
-
 use crate::kernel::vfs::{self, FsContext};
-
-use super::sysinfo::TimeVal;
-use super::{define_syscall32, register_syscall};
+use crate::path::Path;
+use crate::sync::AsRefPosition as _;
+use crate::{kernel::user::dataflow::UserBuffer, prelude::*};
+use alloc::borrow::ToOwned;
+use alloc::ffi::CString;
+use arch::{ExtendedContext, InterruptContext};
+use bindings::{EINVAL, ENOENT, ENOTDIR, ERANGE, ESRCH};
+use bitflags::bitflags;
+use eonix_runtime::scheduler::Scheduler;
 
 fn do_umask(mask: u32) -> KResult<u32> {
     let context = FsContext::get_current();
@@ -162,7 +160,7 @@ fn sys_exit(int_stack: &mut InterruptContext, _: &mut ExtendedContext) -> usize 
 
     unsafe {
         let mut procs = ProcessList::get().lock();
-        preempt::disable();
+        eonix_preempt::disable();
 
         // SAFETY: Preemption is disabled.
         procs.do_kill_process(&Thread::current().process, WaitType::Exited(status));
@@ -170,7 +168,7 @@ fn sys_exit(int_stack: &mut InterruptContext, _: &mut ExtendedContext) -> usize 
 
     unsafe {
         // SAFETY: Preempt count == 1.
-        Thread::runnable().exit();
+        Thread::exit();
     }
 }
 
@@ -292,9 +290,9 @@ fn do_set_thread_area(desc: *mut UserDescriptor) -> KResult<()> {
 
     // SAFETY: Preemption is disabled on calling `load_thread_area32()`.
     unsafe {
-        preempt::disable();
+        eonix_preempt::disable();
         Thread::current().load_thread_area32();
-        preempt::enable();
+        eonix_preempt::enable();
     }
 
     Ok(())
@@ -603,10 +601,8 @@ fn sys_fork(int_stack: &mut InterruptContext, _: &mut ExtendedContext) -> usize 
         .thread_builder(thread_builder)
         .build(&mut procs);
 
-    Scheduler::get().spawn(Task::new(ThreadRunnable::from_context(
-        new_thread,
-        new_int_context,
-    )));
+    Scheduler::get()
+        .spawn::<KernelStack, _>(ThreadRunnable::from_context(new_thread, new_int_context));
 
     new_process.pid as usize
 }

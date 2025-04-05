@@ -1,6 +1,9 @@
 mod page_fault;
 
-use core::sync::atomic::{AtomicUsize, Ordering};
+use core::{
+    ops::Sub as _,
+    sync::atomic::{AtomicUsize, Ordering},
+};
 
 use crate::{prelude::*, sync::ArcSwap};
 
@@ -362,7 +365,7 @@ impl MMList {
             .get(&break_start)
             .expect("Program break area should be valid");
 
-        let len = pos - current_break;
+        let len: usize = pos.sub(current_break);
         inner.page_table.set_anonymous(
             VRange::from(program_break.range().end()).grow(len),
             Permission {

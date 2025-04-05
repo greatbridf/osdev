@@ -1,4 +1,5 @@
-use super::{strategy::LockStrategy, Spin, UCondVar};
+use super::{Spin, UCondVar};
+use eonix_sync::LockStrategy;
 
 pub struct SemaphoreStrategy<const MAX: usize = { core::usize::MAX }>;
 
@@ -21,7 +22,7 @@ unsafe impl<const MAX: usize> LockStrategy for SemaphoreStrategy<MAX> {
     type GuardContext = ();
 
     #[inline(always)]
-    fn data() -> Self::StrategyData {
+    fn new_data() -> Self::StrategyData {
         SemaphoreData {
             counter: Spin::new(0),
             cv: UCondVar::new(),
@@ -123,7 +124,7 @@ unsafe impl<const READ_MAX: isize> LockStrategy for RwSemaphoreStrategy<READ_MAX
     }
 
     #[inline(always)]
-    fn data() -> Self::StrategyData {
+    fn new_data() -> Self::StrategyData {
         RwSemaphoreData {
             counter: Spin::new(0),
             read_cv: UCondVar::new(),

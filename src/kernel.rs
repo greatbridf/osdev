@@ -18,5 +18,4 @@ mod terminal;
 
 #[allow(unused_imports)]
 pub use chardev::{CharDevice, CharDeviceType, VirtualCharDevice};
-pub use console::Console;
 pub use terminal::{Terminal, TerminalDevice};

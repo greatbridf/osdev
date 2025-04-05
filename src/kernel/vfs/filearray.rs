@@ -1,8 +1,11 @@
-use core::sync::atomic::Ordering;
-
+use super::{
+    file::{File, InodeFile, TerminalFile},
+    inode::Mode,
+    s_ischr, FsContext, Spin,
+};
 use crate::{
     kernel::{
-        console::CONSOLE,
+        console::get_console,
         constants::ENXIO,
         task::Thread,
         vfs::{dentry::Dentry, file::Pipe, s_isdir, s_isreg},
@@ -11,7 +14,6 @@ use crate::{
     path::Path,
     prelude::*,
 };
-
 use alloc::{
     collections::btree_map::{BTreeMap, Entry},
     sync::Arc,
@@ -20,15 +22,10 @@ use bindings::{
     EBADF, EISDIR, ENOTDIR, FD_CLOEXEC, F_DUPFD, F_DUPFD_CLOEXEC, F_GETFD, F_SETFD, O_APPEND,
     O_CLOEXEC, O_DIRECTORY, O_RDWR, O_TRUNC, O_WRONLY,
 };
+use core::sync::atomic::Ordering;
 use itertools::{
     FoldWhile::{Continue, Done},
     Itertools,
-};
-
-use super::{
-    file::{File, InodeFile, TerminalFile},
-    inode::Mode,
-    s_ischr, FsContext, Spin,
 };
 
 type FD = u32;
@@ -246,7 +243,7 @@ impl FileArray {
     pub fn open_console(&self) {
         let mut inner = self.inner.lock();
         let (stdin, stdout, stderr) = (inner.next_fd(), inner.next_fd(), inner.next_fd());
-        let console_terminal = CONSOLE.lock_irq().get_terminal().unwrap();
+        let console_terminal = get_console().expect("No console terminal");
 
         inner.do_insert(
             stdin,

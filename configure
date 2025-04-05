@@ -135,14 +135,6 @@ else
     echo `which mkfs.fat`
 fi
 
-event "checking mtools"
-if ! which mcopy > /dev/null 2>&1; then
-    echo "no"
-    exit 1
-else
-    echo `which mcopy`
-fi
-
 cp Makefile.src Makefile
 sed -i '' -e "s|##PLACEHOLDER_1##|$QEMU|" Makefile > /dev/null 2>&1
 sed -i '' -e "s|##PLACEHOLDER_2##|$GDB|" Makefile > /dev/null 2>&1

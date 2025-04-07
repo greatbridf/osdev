@@ -1,6 +1,8 @@
-use super::{spin::IrqStrategy, strategy::LockStrategy};
+use super::strategy::LockStrategy;
 use crate::Guard;
-use core::{cell::UnsafeCell, fmt};
+use core::{arch::asm, cell::UnsafeCell, fmt, marker::PhantomData};
+
+pub struct IrqStrategy<Strategy: LockStrategy>(PhantomData<Strategy>);
 
 pub struct Lock<T, S>
 where
@@ -86,14 +88,6 @@ where
         }
     }
 
-    pub fn lock_shared_irq(&self) -> Guard<T, IrqStrategy<S>, S, false> {
-        Guard {
-            lock: self,
-            strategy_data: &self.strategy_data,
-            context: unsafe { IrqStrategy::<S>::do_lock_shared(&self.strategy_data) },
-        }
-    }
-
     pub fn get_mut(&mut self) -> &mut T {
         unsafe { &mut *self.value.get() }
     }
@@ -134,5 +128,69 @@ where
             strategy_data: S::new_data(),
             value: Default::default(),
         }
+    }
+}
+
+unsafe impl<Strategy: LockStrategy> LockStrategy for IrqStrategy<Strategy> {
+    type StrategyData = Strategy::StrategyData;
+    type GuardContext = (Strategy::GuardContext, usize);
+
+    fn new_data() -> Self::StrategyData {
+        Strategy::new_data()
+    }
+
+    unsafe fn do_lock(data: &Self::StrategyData) -> Self::GuardContext {
+        let mut context: usize;
+
+        unsafe {
+            asm!(
+                "pushf",
+                "pop {context}",
+                "cli",
+                context = out(reg) context,
+            );
+        }
+
+        unsafe { (Strategy::do_lock(data), context) }
+    }
+
+    unsafe fn do_unlock(data: &Self::StrategyData, context: &mut Self::GuardContext) {
+        unsafe {
+            Strategy::do_unlock(data, &mut context.0);
+
+            asm!(
+                "push {context}",
+                "popf",
+                context = in(reg) context.1,
+                options(nomem),
+            )
+        }
+    }
+
+    unsafe fn do_temporary_unlock(data: &Self::StrategyData, context: &mut Self::GuardContext) {
+        unsafe { Strategy::do_unlock(data, &mut context.0) }
+    }
+
+    unsafe fn do_relock(data: &Self::StrategyData, context: &mut Self::GuardContext) {
+        unsafe { Strategy::do_relock(data, &mut context.0) }
+    }
+
+    unsafe fn is_locked(data: &Self::StrategyData) -> bool {
+        unsafe { Strategy::is_locked(data) }
+    }
+
+    unsafe fn try_lock(data: &Self::StrategyData) -> Option<Self::GuardContext> {
+        let mut irq_context: usize;
+        unsafe {
+            asm!(
+                "pushf",
+                "pop {context}",
+                "cli",
+                context = out(reg) irq_context,
+            );
+        }
+
+        let lock_context = unsafe { Strategy::try_lock(data) };
+        lock_context.map(|lock_context| (lock_context, irq_context))
     }
 }

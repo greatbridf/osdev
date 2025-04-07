@@ -4,7 +4,7 @@ pub mod semaphore;
 
 use eonix_sync::WaitStrategy;
 
-pub use eonix_sync::{Guard, Lock, Spin, SpinStrategy};
+pub use eonix_sync::{Guard, Lock, Spin};
 
 #[doc(hidden)]
 pub struct Wait {
@@ -77,7 +77,6 @@ impl WaitStrategy for Wait {
 pub type Mutex<T> = Lock<T, semaphore::SemaphoreStrategy<1>>;
 pub type RwLock<T> = eonix_sync::RwLock<T, Wait>;
 
-pub type SpinGuard<'lock, T> = Guard<'lock, T, SpinStrategy, SpinStrategy, true>;
 pub type RwLockReadGuard<'lock, T> =
     Guard<'lock, T, eonix_sync::RwLockStrategy<Wait>, eonix_sync::RwLockStrategy<Wait>, false>;
 

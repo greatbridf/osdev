@@ -120,6 +120,7 @@ dependencies = [
 name = "eonix_sync"
 version = "0.1.0"
 dependencies = [
+ "arch",
  "eonix_preempt",
 ]
 

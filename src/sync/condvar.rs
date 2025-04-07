@@ -1,9 +1,9 @@
 use crate::prelude::*;
 use alloc::collections::vec_deque::VecDeque;
-use core::task::Waker;
+use core::{future::Future, task::Waker};
 use eonix_preempt::{assert_preempt_count_eq, assert_preempt_enabled};
 use eonix_runtime::{scheduler::Scheduler, task::Task};
-use eonix_sync::{Guard, LockStrategy};
+use eonix_sync::{ForceUnlockableGuard, UnlockableGuard, UnlockedGuard as _};
 
 pub struct CondVar<const INTERRUPTIBLE: bool> {
     waiters: Spin<VecDeque<Waker>>,
@@ -31,23 +31,17 @@ impl<const I: bool> CondVar<I> {
     }
 
     fn wake(waker: Waker) {
-        println_trace!("trace_condvar", "tid({}) is trying to wake", thread.tid);
         waker.wake();
-        println_trace!("trace_condvar", "tid({}) is awake", thread.tid);
     }
 
     fn sleep() -> Waker {
         let task = Task::current();
-
-        println_trace!("trace_condvar", "tid({}) is trying to sleep", task.id);
 
         let waker = if I {
             Waker::from(task.isleep())
         } else {
             Waker::from(task.usleep())
         };
-
-        println_trace!("trace_condvar", "tid({}) is sleeping", task.id);
 
         waker
     }
@@ -68,12 +62,7 @@ impl<const I: bool> CondVar<I> {
     ///
     /// # Might Sleep
     /// This function **might sleep**, so call it in a preemptible context.
-    pub fn wait<'a, T, S, L, const W: bool>(&self, guard: &mut Guard<'a, T, S, L, W>)
-    where
-        T: ?Sized,
-        S: LockStrategy,
-        L: LockStrategy,
-    {
+    pub fn wait(&self, guard: &mut impl ForceUnlockableGuard) {
         eonix_preempt::disable();
         let waker = Self::sleep();
         self.waiters.lock().push_back(waker);
@@ -94,15 +83,11 @@ impl<const I: bool> CondVar<I> {
         assert!(Task::current().is_runnable());
     }
 
-    /// Unlock the `guard`. Then wait until being waken up. Relock the `guard` before returning.
-    ///
-    /// # Might Sleep
-    /// This function **might sleep**, so call it in a preemptible context.
-    pub async fn async_wait<'a, T, S, L, const W: bool>(&self, guard: &mut Guard<'a, T, S, L, W>)
+    /// Unlock the `guard`. Then wait until being waken up. Relock the `guard` and return it.
+    pub fn async_wait<G>(&self, guard: G) -> impl Future<Output = G> + Send
     where
-        T: ?Sized,
-        S: LockStrategy,
-        L: LockStrategy,
+        G: UnlockableGuard,
+        G::Unlocked: Send,
     {
         let waker = Self::sleep();
         self.waiters.lock().push_back(waker);
@@ -113,13 +98,14 @@ impl<const I: bool> CondVar<I> {
         // Check the flag before doing `schedule()` but after we've unlocked the `guard`.
         // If the flag is already set, we don't need to sleep.
 
-        unsafe { guard.force_unlock() };
-
+        let guard = guard.unlock();
         assert_preempt_enabled!("CondVar::async_wait");
-        Scheduler::sleep().await;
 
-        unsafe { guard.force_relock() };
+        async {
+            Scheduler::sleep().await;
 
-        assert!(Task::current().is_runnable());
+            assert!(Task::current().is_runnable());
+            guard.relock()
+        }
     }
 }

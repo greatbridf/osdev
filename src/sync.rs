@@ -57,8 +57,7 @@ impl WaitStrategy for Wait {
         let _lock = data.lock.lock();
         if Self::has_write_waiting(data) {
             data.cv_write.notify_one();
-        }
-        if Self::has_read_waiting(data) {
+        } else if Self::has_read_waiting(data) {
             data.cv_read.notify_all();
         }
     }
@@ -67,8 +66,7 @@ impl WaitStrategy for Wait {
         let _lock = data.lock.lock();
         if Self::has_write_waiting(data) {
             data.cv_write.notify_one();
-        }
-        if Self::has_read_waiting(data) {
+        } else if Self::has_read_waiting(data) {
             data.cv_read.notify_all();
         }
     }

@@ -44,7 +44,7 @@ where
     ) -> <Self as LockStrategy>::GuardContext {
         loop {
             let mut counter = data.counter.load(Ordering::Relaxed);
-            while !W::has_write_waiting(&data.wait_data) && counter >= 0 {
+            while counter >= 0 {
                 match data.counter.compare_exchange_weak(
                     counter,
                     counter + 1,
@@ -57,7 +57,7 @@ where
             }
 
             W::read_wait(&data.wait_data, || {
-                !W::has_write_waiting(&data.wait_data) && data.counter.load(Ordering::Relaxed) >= 0
+                data.counter.load(Ordering::Relaxed) >= 0
             });
         }
     }

@@ -75,6 +75,7 @@ where
     }
 
     pub fn try_read(&self) -> Option<RwLockReadGuard<'_, T, W>> {
+        // We'll spin if we fail here anyway.
         if self.wait.has_write_waiting() {
             return None;
         }
@@ -91,9 +92,8 @@ where
     }
 
     fn try_read_weak(&self) -> Option<RwLockReadGuard<'_, T, W>> {
-        if self.wait.has_write_waiting() {
-            return None;
-        }
+        // TODO: If we check write waiters here, we would lose wakeups.
+        //       Try locking the wait lists to prevent this.
 
         let counter = self.counter.load(Ordering::Relaxed);
         if counter >= 0 {
@@ -121,18 +121,8 @@ where
     #[cold]
     fn read_slow_path(&self) -> RwLockReadGuard<'_, T, W> {
         loop {
-            // TODO: can we use `try_read_weak` here?
-            let mut counter = self.counter.load(Ordering::Relaxed);
-            while counter >= 0 {
-                match self.counter.compare_exchange_weak(
-                    counter,
-                    counter + 1,
-                    Ordering::Acquire,
-                    Ordering::Relaxed,
-                ) {
-                    Ok(_) => return unsafe { self.read_lock() },
-                    Err(previous) => counter = previous,
-                }
+            if let Some(guard) = self.try_read_weak() {
+                return guard;
             }
 
             self.wait

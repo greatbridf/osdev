@@ -61,11 +61,14 @@ impl Serial {
     }
 
     async fn wait_for_interrupt(&self) {
-        let mut working = self.working.lock_irq();
-        self.enable_interrupts();
-        *working = false;
+        let mut working = {
+            let mut working = self.working.lock_irq();
+            self.enable_interrupts();
+            *working = false;
 
-        self.cv_worker.async_wait(&mut working).await;
+            self.cv_worker.async_wait(working)
+        }
+        .await;
 
         *working = true;
         self.disable_interrupts();

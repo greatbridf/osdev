@@ -6,7 +6,7 @@ use crate::{
     kernel::mem::MMList,
     prelude::*,
     rcu::{rcu_sync, RCUPointer, RCUReadGuard},
-    sync::{CondVar, RwSemReadGuard, SpinGuard},
+    sync::{CondVar, RwSemReadGuard},
 };
 use alloc::{
     collections::{btree_map::BTreeMap, vec_deque::VecDeque},
@@ -14,7 +14,9 @@ use alloc::{
 };
 use bindings::{ECHILD, EINTR, EPERM, ESRCH};
 use core::sync::atomic::{AtomicU32, Ordering};
-use eonix_sync::{AsProof as _, AsProofMut as _, Locked, Proof, ProofMut};
+use eonix_sync::{
+    AsProof as _, AsProofMut as _, ForceUnlockableGuard as _, Locked, Proof, ProofMut, SpinGuard,
+};
 use pointers::BorrowedArc;
 
 pub struct ProcessBuilder {

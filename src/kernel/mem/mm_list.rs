@@ -47,8 +47,6 @@ struct MMListInner {
 
 #[derive(Debug)]
 pub struct MMList {
-    /// # Safety
-    /// This field might be used in IRQ context, so it should be locked with `lock_irq()`.
     inner: ArcSwap<Mutex<MMListInner>>,
     /// Only used in kernel space to switch page tables on context switch.
     root_page_table: AtomicUsize,
@@ -211,7 +209,7 @@ impl MMList {
 
     pub fn new_cloned(&self) -> Self {
         let inner = self.inner.borrow();
-        let inner = inner.lock_irq();
+        let inner = inner.lock();
 
         let page_table = PageTable::new();
         let list = Self {
@@ -287,7 +285,7 @@ impl MMList {
 
     /// No need to do invalidation manually, `PageTable` already does it.
     pub fn unmap(&self, start: VAddr, len: usize) -> KResult<()> {
-        self.inner.borrow().lock_irq().unmap(start, len)
+        self.inner.borrow().lock().unmap(start, len)
     }
 
     pub fn mmap_hint(
@@ -298,7 +296,7 @@ impl MMList {
         permission: Permission,
     ) -> KResult<VAddr> {
         let inner = self.inner.borrow();
-        let mut inner = inner.lock_irq();
+        let mut inner = inner.lock();
 
         if hint == VAddr::NULL {
             let at = inner.find_available(hint, len).ok_or(ENOMEM)?;
@@ -326,14 +324,14 @@ impl MMList {
     ) -> KResult<VAddr> {
         self.inner
             .borrow()
-            .lock_irq()
+            .lock()
             .mmap(at, len, mapping.clone(), permission)
             .map(|_| at)
     }
 
     pub fn set_break(&self, pos: Option<VAddr>) -> VAddr {
         let inner = self.inner.borrow();
-        let mut inner = inner.lock_irq();
+        let mut inner = inner.lock();
 
         // SAFETY: `set_break` is only called in syscalls, where program break should be valid.
         assert!(inner.break_start.is_some() && inner.break_pos.is_some());
@@ -383,7 +381,7 @@ impl MMList {
     /// This should be called only **once** for every thread.
     pub fn register_break(&self, start: VAddr) {
         let inner = self.inner.borrow();
-        let mut inner = inner.lock_irq();
+        let mut inner = inner.lock();
         assert!(inner.break_start.is_none() && inner.break_pos.is_none());
 
         inner.break_start = Some(start.into());
@@ -403,7 +401,7 @@ impl MMList {
         }
 
         let inner = self.inner.borrow();
-        let inner = inner.lock_irq();
+        let inner = inner.lock();
 
         let mut offset = 0;
         let mut remaining = len;

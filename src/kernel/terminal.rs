@@ -2,7 +2,11 @@ use super::{
     task::{ProcessList, Session, Signal, Thread},
     user::{UserPointer, UserPointerMut},
 };
-use crate::{io::Buffer, prelude::*, sync::CondVar};
+use crate::{
+    io::Buffer,
+    prelude::*,
+    sync::{mutex_new, CondVar},
+};
 use alloc::{
     collections::vec_deque::VecDeque,
     sync::{Arc, Weak},
@@ -396,7 +400,7 @@ impl core::fmt::Debug for Terminal {
 impl Terminal {
     pub fn new(device: Arc<dyn TerminalDevice>) -> Arc<Self> {
         Arc::new(Self {
-            inner: Mutex::new(TerminalInner {
+            inner: mutex_new(TerminalInner {
                 termio: Termios::new_standard(),
                 session: Weak::new(),
                 buffer: VecDeque::with_capacity(BUFFER_SIZE),

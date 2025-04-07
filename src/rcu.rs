@@ -1,6 +1,6 @@
 use crate::{
     prelude::*,
-    sync::{rwlock_new, RwLockReadGuard},
+    sync::{mutex_new, rwlock_new, RwLockReadGuard},
 };
 use alloc::sync::Arc;
 use core::{
@@ -58,7 +58,7 @@ impl<T: RCUNode<T>> RCUList<T> {
         Self {
             head: AtomicPtr::new(core::ptr::null_mut()),
             reader_lock: rwlock_new(()),
-            update_lock: Mutex::new(()),
+            update_lock: mutex_new(()),
         }
     }
 

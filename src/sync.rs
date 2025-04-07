@@ -1,19 +1,25 @@
 mod arcswap;
 mod condvar;
-pub mod semaphore;
 
-use eonix_sync::RwLockWait;
-pub use eonix_sync::{Lock, Spin};
+pub use eonix_sync::Spin;
+use eonix_sync::{MutexWait, RwLockWait};
 
 #[doc(hidden)]
 #[derive(Debug)]
-pub struct Wait {
+pub struct RwLockWaitImpl {
     lock: Spin<()>,
     cv_read: UCondVar,
     cv_write: UCondVar,
 }
 
-impl Wait {
+#[doc(hidden)]
+#[derive(Debug)]
+pub struct MutexWaitImpl {
+    lock: Spin<()>,
+    cv: UCondVar,
+}
+
+impl RwLockWaitImpl {
     const fn new() -> Self {
         Self {
             lock: Spin::new(()),
@@ -23,7 +29,16 @@ impl Wait {
     }
 }
 
-impl RwLockWait for Wait {
+impl MutexWaitImpl {
+    const fn new() -> Self {
+        Self {
+            lock: Spin::new(()),
+            cv: UCondVar::new(),
+        }
+    }
+}
+
+impl RwLockWait for RwLockWaitImpl {
     fn new() -> Self {
         Self::new()
     }
@@ -76,16 +91,45 @@ impl RwLockWait for Wait {
     }
 }
 
-pub const fn rwlock_new<T>(value: T) -> RwLock<T> {
-    RwLock::new(value, Wait::new())
+impl MutexWait for MutexWaitImpl {
+    fn new() -> Self {
+        Self::new()
+    }
+
+    fn has_waiting(&self) -> bool {
+        self.cv.has_waiters()
+    }
+
+    fn wait(&self, check: impl Fn() -> bool) {
+        let mut lock = self.lock.lock();
+        loop {
+            if check() {
+                break;
+            }
+            self.cv.wait(&mut lock);
+        }
+    }
+
+    fn notify(&self) {
+        let _lock = self.lock.lock();
+        if self.has_waiting() {
+            self.cv.notify_one();
+        }
+    }
 }
 
-pub type Mutex<T> = Lock<T, semaphore::SemaphoreStrategy<1>>;
-pub type RwLock<T> = eonix_sync::RwLock<T, Wait>;
+pub const fn rwlock_new<T>(value: T) -> RwLock<T> {
+    RwLock::new(value, RwLockWaitImpl::new())
+}
 
-pub type RwLockReadGuard<'a, T> = eonix_sync::RwLockReadGuard<'a, T, Wait>;
-#[allow(dead_code)]
-pub type RwLockWriteGuard<'a, T> = eonix_sync::RwLockWriteGuard<'a, T, Wait>;
+pub const fn mutex_new<T>(value: T) -> Mutex<T> {
+    Mutex::new(value, MutexWaitImpl::new())
+}
+
+pub type RwLock<T> = eonix_sync::RwLock<T, RwLockWaitImpl>;
+pub type Mutex<T> = eonix_sync::Mutex<T, MutexWaitImpl>;
+
+pub type RwLockReadGuard<'a, T> = eonix_sync::RwLockReadGuard<'a, T, RwLockWaitImpl>;
 
 pub type CondVar = condvar::CondVar<true>;
 pub type UCondVar = condvar::CondVar<false>;

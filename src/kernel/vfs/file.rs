@@ -1,5 +1,8 @@
-use core::{ops::ControlFlow, sync::atomic::Ordering};
-
+use super::{
+    dentry::Dentry,
+    inode::{Mode, WriteOffset},
+    s_isblk, s_isdir, s_isreg,
+};
 use crate::{
     io::{Buffer, BufferFill, ByteBuffer},
     kernel::{
@@ -11,20 +14,14 @@ use crate::{
         CharDevice,
     },
     prelude::*,
-    sync::CondVar,
+    sync::{mutex_new, CondVar},
 };
-
 use alloc::{collections::vec_deque::VecDeque, sync::Arc};
 use bindings::{
     statx, EBADF, EFAULT, EINTR, EINVAL, ENOTDIR, ENOTTY, EOVERFLOW, EPIPE, ESPIPE, S_IFMT,
 };
 use bitflags::bitflags;
-
-use super::{
-    dentry::Dentry,
-    inode::{Mode, WriteOffset},
-    s_isblk, s_isdir, s_isreg,
-};
+use core::{ops::ControlFlow, sync::atomic::Ordering};
 
 pub struct InodeFile {
     read: bool,
@@ -110,7 +107,7 @@ impl Pipe {
 
     pub fn new() -> Arc<Self> {
         Arc::new(Self {
-            inner: Mutex::new(PipeInner {
+            inner: mutex_new(PipeInner {
                 buffer: VecDeque::with_capacity(Self::PIPE_SIZE),
                 read_closed: false,
                 write_closed: false,
@@ -290,7 +287,7 @@ impl InodeFile {
             write: rwa.1,
             append: rwa.2,
             mode: cached_mode,
-            cursor: Mutex::new(0),
+            cursor: mutex_new(0),
         }))
     }
 
@@ -320,9 +317,7 @@ impl InodeFile {
 
         // TODO!!!: use `UserBuffer`
         if self.append {
-            let nwrote = self
-                .dentry
-                .write(buffer, WriteOffset::End(cursor.as_mut()))?;
+            let nwrote = self.dentry.write(buffer, WriteOffset::End(&mut cursor))?;
 
             Ok(nwrote)
         } else {

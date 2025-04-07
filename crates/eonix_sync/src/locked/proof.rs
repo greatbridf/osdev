@@ -1,4 +1,3 @@
-use crate::{Guard, LockStrategy};
 use core::{marker::PhantomData, ptr::NonNull};
 
 /// A proof of mutable access to a position in memory with lifetime `'pos`.
@@ -148,25 +147,6 @@ where
     }
 }
 
-/// SAFETY: The lock is held for the lifetime `'guard`. So the access must be
-/// valid for the lifetime `'pos` that is shorter than `'guard`.
-unsafe impl<'lock, 'pos, T, S, L> AsProofMut<'lock, 'pos, T> for Guard<'lock, T, S, L, true>
-where
-    T: ?Sized,
-    S: LockStrategy + 'lock,
-    L: LockStrategy + 'lock,
-{
-    fn prove_mut(&self) -> ProofMut<'pos, T>
-    where
-        'lock: 'pos,
-    {
-        ProofMut {
-            address: unsafe { NonNull::new_unchecked(&raw const **self as *mut _) },
-            _phantom: PhantomData,
-        }
-    }
-}
-
 /// SAFETY: The reference is valid for the lifetime `'guard`. So the access must be
 /// valid for the lifetime `'pos` that is shorter than `'guard`.
 unsafe impl<'guard, 'pos, T> AsProof<'guard, 'pos, T> for &'guard T
@@ -193,26 +173,6 @@ where
     fn prove(&self) -> Proof<'pos, T>
     where
         'guard: 'pos,
-    {
-        Proof {
-            address: unsafe { NonNull::new_unchecked(&raw const **self as *mut _) },
-            _phantom: PhantomData,
-        }
-    }
-}
-
-/// SAFETY: The lock is held for the lifetime `'guard`. So the access must be
-/// valid for the lifetime `'pos` that is shorter than `'guard`.
-unsafe impl<'lock, 'pos, T, S, L, const B: bool> AsProof<'lock, 'pos, T>
-    for Guard<'lock, T, S, L, B>
-where
-    T: ?Sized,
-    S: LockStrategy + 'lock,
-    L: LockStrategy + 'lock,
-{
-    fn prove(&self) -> Proof<'pos, T>
-    where
-        'lock: 'pos,
     {
         Proof {
             address: unsafe { NonNull::new_unchecked(&raw const **self as *mut _) },

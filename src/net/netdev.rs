@@ -1,8 +1,5 @@
+use crate::{bindings::root::EFAULT, prelude::*, sync::mutex_new};
 use alloc::{collections::btree_map::BTreeMap, sync::Arc};
-
-use crate::{bindings::root::EFAULT, prelude::*};
-
-use lazy_static::lazy_static;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LinkStatus {
@@ -53,10 +50,8 @@ impl Ord for dyn Netdev {
     }
 }
 
-lazy_static! {
-    static ref NETDEVS_ID: Spin<u32> = Spin::new(0);
-    static ref NETDEVS: Spin<BTreeMap<u32, Arc<Mutex<dyn Netdev>>>> = Spin::new(BTreeMap::new());
-}
+static NETDEVS_ID: Spin<u32> = Spin::new(0);
+static NETDEVS: Spin<BTreeMap<u32, Arc<Mutex<dyn Netdev>>>> = Spin::new(BTreeMap::new());
 
 pub fn alloc_id() -> u32 {
     let mut id = NETDEVS_ID.lock();
@@ -74,7 +69,7 @@ pub fn register_netdev(netdev: impl Netdev + 'static) -> Result<Arc<Mutex<dyn Ne
     use alloc::collections::btree_map::Entry;
     match netdevs.entry(devid) {
         Entry::Vacant(entry) => {
-            let netdev = Arc::new(Mutex::new(netdev));
+            let netdev = Arc::new(mutex_new(netdev));
             entry.insert(netdev.clone());
             Ok(netdev)
         }

@@ -386,7 +386,7 @@ impl Process {
         let mut procs = ProcessList::get().write();
         // We may set pgid of either the calling process or a child process.
         if pid == self.pid {
-            self.do_setpgid(pgid, procs.as_mut())
+            self.do_setpgid(pgid, &mut procs)
         } else {
             let child = {
                 // If `pid` refers to one of our children, the thread leaders must be
@@ -408,7 +408,7 @@ impl Process {
 
             // TODO: Check whether we, as a child, have already performed an `execve`.
             //       If so, we should return `Err(EACCES)`.
-            child.do_setpgid(pgid, procs.as_mut())
+            child.do_setpgid(pgid, &mut procs)
         }
     }
 

@@ -99,25 +99,28 @@ where
     }
 }
 
-impl<T, R> AsRef<T> for SpinGuard<'_, T, R>
+impl<T, U, R> AsRef<U> for SpinGuard<'_, T, R>
 where
     T: ?Sized,
+    U: ?Sized,
+    <Self as Deref>::Target: AsRef<U>,
 {
-    fn as_ref(&self) -> &T {
-        // SAFETY: We are holding the lock, so we can safely access the value.
-        self.value
+    fn as_ref(&self) -> &U {
+        self.deref().as_ref()
     }
 }
 
-impl<T, R> AsMut<T> for SpinGuard<'_, T, R>
+impl<T, U, R> AsMut<U> for SpinGuard<'_, T, R>
 where
     T: ?Sized,
+    U: ?Sized,
+    <Self as Deref>::Target: AsMut<U>,
 {
-    fn as_mut(&mut self) -> &mut T {
-        // SAFETY: We are holding the lock, so we can safely access the value.
-        self.value
+    fn as_mut(&mut self) -> &mut U {
+        self.deref_mut().as_mut()
     }
 }
+
 impl<T, R> Deref for SpinIrqGuard<'_, T, R>
 where
     T: ?Sized,
@@ -140,23 +143,25 @@ where
     }
 }
 
-impl<T, R> AsRef<T> for SpinIrqGuard<'_, T, R>
+impl<T, U, R> AsRef<U> for SpinIrqGuard<'_, T, R>
 where
     T: ?Sized,
+    U: ?Sized,
+    <Self as Deref>::Target: AsRef<U>,
 {
-    fn as_ref(&self) -> &T {
-        // SAFETY: We are holding the lock, so we can safely access the value.
-        self.value
+    fn as_ref(&self) -> &U {
+        self.deref().as_ref()
     }
 }
 
-impl<T, R> AsMut<T> for SpinIrqGuard<'_, T, R>
+impl<T, U, R> AsMut<U> for SpinIrqGuard<'_, T, R>
 where
     T: ?Sized,
+    U: ?Sized,
+    <Self as Deref>::Target: AsMut<U>,
 {
-    fn as_mut(&mut self) -> &mut T {
-        // SAFETY: We are holding the lock, so we can safely access the value.
-        self.value
+    fn as_mut(&mut self) -> &mut U {
+        self.deref_mut().as_mut()
     }
 }
 

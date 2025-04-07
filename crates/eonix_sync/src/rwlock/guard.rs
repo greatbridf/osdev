@@ -77,23 +77,27 @@ where
     }
 }
 
-impl<T, W> AsRef<T> for RwLockReadGuard<'_, T, W>
+impl<T, U, W> AsRef<U> for RwLockWriteGuard<'_, T, W>
 where
     T: ?Sized,
+    U: ?Sized,
+    <Self as Deref>::Target: AsRef<U>,
     W: Wait,
 {
-    fn as_ref(&self) -> &T {
-        self.value
+    fn as_ref(&self) -> &U {
+        self.deref().as_ref()
     }
 }
 
-impl<T, W> AsMut<T> for RwLockWriteGuard<'_, T, W>
+impl<T, U, W> AsMut<U> for RwLockWriteGuard<'_, T, W>
 where
     T: ?Sized,
+    U: ?Sized,
+    <Self as Deref>::Target: AsMut<U>,
     W: Wait,
 {
-    fn as_mut(&mut self) -> &mut T {
-        self.value
+    fn as_mut(&mut self) -> &mut U {
+        self.deref_mut().as_mut()
     }
 }
 
@@ -109,13 +113,15 @@ where
     }
 }
 
-impl<T, W> AsRef<T> for RwLockWriteGuard<'_, T, W>
+impl<T, U, W> AsRef<U> for RwLockReadGuard<'_, T, W>
 where
     T: ?Sized,
+    U: ?Sized,
+    <Self as Deref>::Target: AsRef<U>,
     W: Wait,
 {
-    fn as_ref(&self) -> &T {
-        self.value
+    fn as_ref(&self) -> &U {
+        self.deref().as_ref()
     }
 }
 

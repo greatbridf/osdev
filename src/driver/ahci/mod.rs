@@ -94,7 +94,7 @@ impl Device {
                     let port = port.clone();
                     let name = format!("ahci-p{}-stats", port.nport);
                     procfs::populate_root(name.into_bytes().into(), move |buffer| {
-                        writeln!(&mut buffer.get_writer(), "{:?}", port.stats.lock().as_ref())
+                        writeln!(&mut buffer.get_writer(), "{:?}", &*port.stats.lock())
                             .map_err(|_| EIO)
                     })?;
                 }

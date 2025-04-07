@@ -1,18 +1,17 @@
 mod page_fault;
 
+use super::{MMArea, Page, PageTable, VAddr, VRange};
+use crate::kernel::vfs::dentry::Dentry;
+use crate::{
+    prelude::*,
+    sync::{mutex_new, ArcSwap},
+};
+use alloc::{collections::btree_set::BTreeSet, sync::Arc};
+use bindings::{EEXIST, EFAULT, EINVAL, ENOMEM, KERNEL_PML4};
 use core::{
     ops::Sub as _,
     sync::atomic::{AtomicUsize, Ordering},
 };
-
-use crate::{prelude::*, sync::ArcSwap};
-
-use alloc::{collections::btree_set::BTreeSet, sync::Arc};
-use bindings::{EEXIST, EFAULT, EINVAL, ENOMEM, KERNEL_PML4};
-
-use crate::kernel::vfs::dentry::Dentry;
-
-use super::{MMArea, Page, PageTable, VAddr, VRange};
 
 pub use page_fault::handle_page_fault;
 
@@ -198,7 +197,7 @@ impl MMList {
         let page_table = PageTable::new();
         Self {
             root_page_table: AtomicUsize::from(page_table.root_page_table()),
-            inner: ArcSwap::new(Mutex::new(MMListInner {
+            inner: ArcSwap::new(mutex_new(MMListInner {
                 areas: BTreeSet::new(),
                 page_table,
                 break_start: None,
@@ -214,7 +213,7 @@ impl MMList {
         let page_table = PageTable::new();
         let list = Self {
             root_page_table: AtomicUsize::from(page_table.root_page_table()),
-            inner: ArcSwap::new(Mutex::new(MMListInner {
+            inner: ArcSwap::new(mutex_new(MMListInner {
                 areas: inner.areas.clone(),
                 page_table,
                 break_start: inner.break_start,

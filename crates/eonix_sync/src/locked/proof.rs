@@ -68,6 +68,36 @@ where
         'guard: 'pos;
 }
 
+impl<T> Proof<'_, T>
+where
+    T: ?Sized,
+{
+    /// # Safety
+    /// The caller must ensure valid access for at least the lifetime `'pos`.
+    pub const unsafe fn new(address: *const T) -> Self {
+        Self {
+            // SAFETY: The validity of the reference is guaranteed by the caller.
+            address: unsafe { NonNull::new_unchecked(address as *mut _) },
+            _phantom: PhantomData,
+        }
+    }
+}
+
+impl<T> ProofMut<'_, T>
+where
+    T: ?Sized,
+{
+    /// # Safety
+    /// The caller must ensure valid access for at least the lifetime `'pos`.
+    pub const unsafe fn new(address: *mut T) -> Self {
+        Self {
+            // SAFETY: The validity of the reference is guaranteed by the caller.
+            address: unsafe { NonNull::new_unchecked(address as *mut _) },
+            _phantom: PhantomData,
+        }
+    }
+}
+
 /// Proof of mutable access to a position in memory can be duplicated.
 impl<T> Copy for ProofMut<'_, T> where T: ?Sized {}
 

@@ -73,35 +73,3 @@ pub unsafe trait LockStrategy {
         *context = unsafe { Self::do_lock_shared(data) };
     }
 }
-
-pub trait WaitStrategy {
-    type Data;
-
-    fn new_data() -> Self::Data
-    where
-        Self: Sized;
-
-    fn has_write_waiting(data: &Self::Data) -> bool
-    where
-        Self: Sized;
-
-    fn has_read_waiting(data: &Self::Data) -> bool
-    where
-        Self: Sized;
-
-    fn write_wait(data: &Self::Data, check: impl Fn() -> bool)
-    where
-        Self: Sized;
-
-    fn read_wait(data: &Self::Data, check: impl Fn() -> bool)
-    where
-        Self: Sized;
-
-    fn write_notify(data: &Self::Data)
-    where
-        Self: Sized;
-
-    fn read_notify(data: &Self::Data)
-    where
-        Self: Sized;
-}

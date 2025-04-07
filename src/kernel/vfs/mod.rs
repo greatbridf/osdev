@@ -60,6 +60,12 @@ lazy_static! {
     });
 }
 
+impl TimeSpec {
+    pub const fn default() -> Self {
+        Self { sec: 0, nsec: 0 }
+    }
+}
+
 impl FsContext {
     pub fn get_current<'lt>() -> &'lt Arc<Self> {
         &Thread::current().borrow().fs_context

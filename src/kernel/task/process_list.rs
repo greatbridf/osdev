@@ -1,5 +1,5 @@
 use super::{Process, ProcessGroup, Session, Signal, Thread, WaitObject, WaitType};
-use crate::{prelude::*, rcu::rcu_sync};
+use crate::{prelude::*, rcu::rcu_sync, sync::rwlock_new};
 use alloc::{
     collections::btree_map::BTreeMap,
     sync::{Arc, Weak},
@@ -23,7 +23,7 @@ pub struct ProcessList {
 
 lazy_static! {
     static ref GLOBAL_PROC_LIST: RwLock<ProcessList> = {
-        RwLock::new(ProcessList {
+        rwlock_new(ProcessList {
             init: None,
             threads: BTreeMap::new(),
             processes: BTreeMap::new(),
@@ -56,7 +56,7 @@ impl ProcessList {
 
     pub fn kill_current(signal: Signal) -> ! {
         unsafe {
-            let mut process_list = ProcessList::get().lock();
+            let mut process_list = ProcessList::get().write();
             eonix_preempt::disable();
 
             // SAFETY: Preemption disabled.

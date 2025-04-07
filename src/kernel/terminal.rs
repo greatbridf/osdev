@@ -606,7 +606,7 @@ impl Terminal {
             TerminalIORequest::SetProcessGroup(pgid) => {
                 let pgid = pgid.read()?;
 
-                let procs = ProcessList::get().lock_shared();
+                let procs = ProcessList::get().read();
                 let inner = self.inner.lock();
                 let session = inner.session.upgrade();
 

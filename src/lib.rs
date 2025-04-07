@@ -179,7 +179,7 @@ async fn init_process(early_kstack_pfn: usize) {
 
     let thread_builder = ThreadBuilder::new().name(Arc::from(*b"busybox"));
 
-    let mut process_list = ProcessList::get().lock();
+    let mut process_list = ProcessList::get().write();
     let (thread, process) = ProcessBuilder::new()
         .mm_list(mm_list)
         .thread_builder(thread_builder)

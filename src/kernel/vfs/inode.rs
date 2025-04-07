@@ -1,3 +1,5 @@
+use super::{dentry::Dentry, s_isblk, s_ischr, vfs::Vfs, DevId, TimeSpec};
+use crate::{io::Buffer, prelude::*, sync::rwlock_new};
 use alloc::sync::{Arc, Weak};
 use bindings::{
     statx, EINVAL, EISDIR, ENOTDIR, EPERM, STATX_ATIME, STATX_BLOCKS, STATX_CTIME, STATX_GID,
@@ -10,9 +12,6 @@ use core::{
     ptr::addr_of_mut,
     sync::atomic::{AtomicU32, AtomicU64, Ordering},
 };
-
-use super::{dentry::Dentry, s_isblk, s_ischr, vfs::Vfs, DevId, TimeSpec};
-use crate::{io::Buffer, prelude::*};
 
 pub type Ino = u64;
 pub type AtomicIno = AtomicU64;
@@ -50,19 +49,19 @@ pub struct InodeData {
 }
 
 impl InodeData {
-    pub fn new(ino: Ino, vfs: Weak<dyn Vfs>) -> Self {
+    pub const fn new(ino: Ino, vfs: Weak<dyn Vfs>) -> Self {
         Self {
             ino,
             vfs,
             atime: Spin::new(TimeSpec::default()),
             ctime: Spin::new(TimeSpec::default()),
             mtime: Spin::new(TimeSpec::default()),
-            rwsem: RwLock::new(()),
-            size: Default::default(),
-            nlink: Default::default(),
-            uid: Default::default(),
-            gid: Default::default(),
-            mode: Default::default(),
+            rwsem: rwlock_new(()),
+            size: AtomicU64::new(0),
+            nlink: AtomicNlink::new(0),
+            uid: AtomicUid::new(0),
+            gid: AtomicGid::new(0),
+            mode: AtomicMode::new(0),
         }
     }
 }
@@ -249,7 +248,7 @@ pub trait Inode: Send + Sync + InodeInner {
         f(
             uninit_mut.as_mut_ptr(),
             // SAFETY: `idata` is initialized and we will never move the lock.
-            &unsafe { idata.assume_init_ref() }.rwsem.lock_shared(),
+            &unsafe { idata.assume_init_ref() }.rwsem.read(),
         );
 
         // Safety: `uninit` is initialized

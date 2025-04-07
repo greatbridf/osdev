@@ -1,5 +1,5 @@
 use super::{Process, ProcessGroup, ProcessList, Signal, Thread};
-use crate::{kernel::Terminal, prelude::*};
+use crate::{kernel::Terminal, prelude::*, sync::rwlock_new};
 use alloc::{
     collections::btree_map::BTreeMap,
     sync::{Arc, Weak},
@@ -30,7 +30,7 @@ impl Session {
         let session = Arc::new(Self {
             sid: leader.pid,
             leader: Arc::downgrade(leader),
-            job_control: RwLock::new(SessionJobControl {
+            job_control: rwlock_new(SessionJobControl {
                 foreground: Weak::new(),
                 control_terminal: None,
             }),
@@ -56,14 +56,14 @@ impl Session {
     }
 
     pub fn foreground(&self) -> Option<Arc<ProcessGroup>> {
-        self.job_control.lock_shared().foreground.upgrade()
+        self.job_control.read().foreground.upgrade()
     }
 
     /// Set the foreground process group identified by `pgid`.
     /// The process group must belong to the session.
     pub fn set_foreground_pgid(&self, pgid: u32, procs: Proof<'_, ProcessList>) -> KResult<()> {
         if let Some(group) = self.groups.access(procs).get(&pgid) {
-            self.job_control.lock().foreground = group.clone();
+            self.job_control.write().foreground = group.clone();
             Ok(())
         } else {
             // TODO: Check if the process group refers to an existing process group.
@@ -80,7 +80,7 @@ impl Session {
         forced: bool,
         procs: Proof<'_, ProcessList>,
     ) -> KResult<()> {
-        let mut job_control = self.job_control.lock();
+        let mut job_control = self.job_control.write();
         if let Some(_) = job_control.control_terminal.as_ref() {
             if let Some(session) = terminal.session().as_ref() {
                 if session.sid == self.sid {
@@ -98,14 +98,14 @@ impl Session {
     /// Drop the control terminal reference inside the session.
     /// DO NOT TOUCH THE TERMINAL'S SESSION FIELD.
     pub fn drop_control_terminal(&self) -> Option<Arc<Terminal>> {
-        let mut inner = self.job_control.lock();
+        let mut inner = self.job_control.write();
         inner.foreground = Weak::new();
         inner.control_terminal.take()
     }
 
     pub fn raise_foreground(&self, signal: Signal) {
         if let Some(fg) = self.foreground() {
-            let procs = ProcessList::get().lock_shared();
+            let procs = ProcessList::get().read();
             fg.raise(signal, procs.prove());
         }
     }

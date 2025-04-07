@@ -20,7 +20,7 @@ impl<const I: bool> core::fmt::Debug for CondVar<I> {
 }
 
 impl<const I: bool> CondVar<I> {
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             waiters: Spin::new(VecDeque::new()),
         }

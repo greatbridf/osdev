@@ -291,7 +291,7 @@ impl Process {
         if wait_object.stopped().is_some() || wait_object.is_continue() {
             Ok(Some(wait_object))
         } else {
-            let mut procs = ProcessList::get().lock();
+            let mut procs = ProcessList::get().write();
             procs.remove_process(wait_object.pid);
             assert!(self
                 .inner
@@ -306,7 +306,7 @@ impl Process {
 
     /// Create a new session for the process.
     pub fn setsid(self: &Arc<Self>) -> KResult<u32> {
-        let mut process_list = ProcessList::get().lock();
+        let mut process_list = ProcessList::get().write();
         // If there exists a session that has the same sid as our pid, we can't create a new
         // session. The standard says that we should create a new process group and be the
         // only process in the new process group and session.
@@ -383,7 +383,7 @@ impl Process {
     /// This function should be called on the process that issued the syscall in order to do
     /// permission checks.
     pub fn setpgid(self: &Arc<Self>, pid: u32, pgid: u32) -> KResult<()> {
-        let mut procs = ProcessList::get().lock();
+        let mut procs = ProcessList::get().write();
         // We may set pgid of either the calling process or a child process.
         if pid == self.pid {
             self.do_setpgid(pgid, procs.as_mut())
@@ -485,7 +485,7 @@ impl WaitList {
     /// releases the lock on `ProcessList` and `WaitList` and waits on `cv_wait_procs`.
     pub fn entry(&self, want_stop: bool, want_continue: bool) -> Entry {
         Entry {
-            process_list: ProcessList::get().lock_shared(),
+            process_list: ProcessList::get().read(),
             wait_procs: self.wait_procs.lock(),
             cv: &self.cv_wait_procs,
             want_stop,

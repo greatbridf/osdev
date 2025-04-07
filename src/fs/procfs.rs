@@ -133,7 +133,7 @@ impl DirInode {
 
 impl Inode for DirInode {
     fn lookup(&self, dentry: &Arc<Dentry>) -> KResult<Option<Arc<dyn Inode>>> {
-        let lock = self.rwsem.lock_shared();
+        let lock = self.rwsem.read();
         Ok(self
             .entries
             .access(lock.prove())
@@ -150,7 +150,7 @@ impl Inode for DirInode {
         offset: usize,
         callback: &mut dyn FnMut(&[u8], Ino) -> KResult<ControlFlow<(), ()>>,
     ) -> KResult<usize> {
-        let lock = self.rwsem.lock_shared();
+        let lock = self.rwsem.read();
         self.entries
             .access(lock.prove())
             .iter()
@@ -238,7 +238,7 @@ pub fn creat(
     let inode = FileInode::new(ino, Arc::downgrade(&fs), file);
 
     {
-        let lock = parent.idata.rwsem.lock();
+        let lock = parent.idata.rwsem.write();
         parent
             .entries
             .access_mut(lock.prove_mut())
@@ -262,7 +262,7 @@ pub fn mkdir(parent: &ProcFsNode, name: &[u8]) -> KResult<ProcFsNode> {
 
     parent
         .entries
-        .access_mut(inode.rwsem.lock().prove_mut())
+        .access_mut(inode.rwsem.write().prove_mut())
         .push((Arc::from(name), ProcFsNode::Dir(inode.clone())));
 
     Ok(ProcFsNode::Dir(inode))

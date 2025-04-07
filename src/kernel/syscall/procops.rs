@@ -159,7 +159,7 @@ fn sys_exit(int_stack: &mut InterruptContext, _: &mut ExtendedContext) -> usize 
     let status = int_stack.rbx as u32;
 
     unsafe {
-        let mut procs = ProcessList::get().lock();
+        let mut procs = ProcessList::get().write();
         eonix_preempt::disable();
 
         // SAFETY: Preemption is disabled.
@@ -180,7 +180,7 @@ bitflags! {
     }
 }
 
-fn do_waitpid(waitpid: u32, arg1: *mut u32, options: u32) -> KResult<u32> {
+fn do_waitpid(_waitpid: u32, arg1: *mut u32, options: u32) -> KResult<u32> {
     // if waitpid != u32::MAX {
     //     unimplemented!("waitpid with pid {waitpid}")
     // }
@@ -234,7 +234,7 @@ fn do_getsid(pid: u32) -> KResult<u32> {
     if pid == 0 {
         Ok(Thread::current().process.session_rcu().sid)
     } else {
-        let procs = ProcessList::get().lock_shared();
+        let procs = ProcessList::get().read();
         procs
             .try_find_process(pid)
             .map(|proc| proc.session(procs.prove()).sid)
@@ -246,7 +246,7 @@ fn do_getpgid(pid: u32) -> KResult<u32> {
     if pid == 0 {
         Ok(Thread::current().process.pgroup_rcu().pgid)
     } else {
-        let procs = ProcessList::get().lock_shared();
+        let procs = ProcessList::get().read();
         procs
             .try_find_process(pid)
             .map(|proc| proc.pgroup(procs.prove()).pgid)
@@ -324,7 +324,7 @@ fn do_prctl(option: u32, arg2: usize) -> KResult<()> {
 }
 
 fn do_kill(pid: i32, sig: u32) -> KResult<()> {
-    let procs = ProcessList::get().lock_shared();
+    let procs = ProcessList::get().read();
     match pid {
         // Send signal to every process for which the calling process has
         // permission to send signals.
@@ -351,7 +351,7 @@ fn do_kill(pid: i32, sig: u32) -> KResult<()> {
 
 fn do_tkill(tid: u32, sig: u32) -> KResult<()> {
     ProcessList::get()
-        .lock_shared()
+        .read()
         .try_find_thread(tid)
         .ok_or(ESRCH)?
         .raise(Signal::try_from(sig)?);
@@ -582,7 +582,7 @@ fn sys_vfork(int_stack: &mut InterruptContext, ext: &mut ExtendedContext) -> usi
 }
 
 fn sys_fork(int_stack: &mut InterruptContext, _: &mut ExtendedContext) -> usize {
-    let mut procs = ProcessList::get().lock();
+    let mut procs = ProcessList::get().write();
 
     let current = Thread::current();
     let current_process = current.process.clone();

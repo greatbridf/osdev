@@ -413,7 +413,7 @@ impl SignalList {
                                 pid: thread.process.pid,
                                 code: WaitType::Stopped(signal),
                             },
-                            ProcessList::get().lock_shared().prove(),
+                            ProcessList::get().read().prove(),
                         );
                     }
 
@@ -436,7 +436,7 @@ impl SignalList {
                                 pid: thread.process.pid,
                                 code: WaitType::Continued,
                             },
-                            ProcessList::get().lock_shared().prove(),
+                            ProcessList::get().read().prove(),
                         );
                     }
                 }

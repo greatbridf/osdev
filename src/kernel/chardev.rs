@@ -76,7 +76,7 @@ impl CharDevice {
     pub fn open(self: &Arc<Self>) -> KResult<Arc<File>> {
         Ok(match &self.device {
             CharDeviceType::Terminal(terminal) => {
-                let procs = ProcessList::get().lock_shared();
+                let procs = ProcessList::get().read();
                 let current = Thread::current();
                 let session = current.process.session(procs.prove());
                 // We only set the control terminal if the process is the session leader.

@@ -100,11 +100,7 @@ where
     R: Relax,
 {
     fn clone(&self) -> Self {
-        Self {
-            locked: AtomicBool::new(false),
-            value: UnsafeCell::new(self.lock().clone()),
-            _phantom: PhantomData,
-        }
+        Self::new(self.lock().clone())
     }
 }
 

@@ -11,6 +11,9 @@ use core::{
 pub use guard::{SpinGuard, SpinIrqGuard};
 pub use relax::{LoopRelax, Relax, SpinRelax};
 
+//// A spinlock is a lock that uses busy-waiting to acquire the lock.
+/// It is useful for short critical sections where the overhead of a context switch
+/// is too high.
 #[derive(Debug, Default)]
 pub struct Spin<T, R = SpinRelax>
 where

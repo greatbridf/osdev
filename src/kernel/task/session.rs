@@ -19,7 +19,7 @@ struct SessionJobControl {
 pub struct Session {
     pub sid: u32,
     pub leader: Weak<Process>,
-    job_control: RwSemaphore<SessionJobControl>,
+    job_control: RwLock<SessionJobControl>,
 
     groups: Locked<BTreeMap<u32, Weak<ProcessGroup>>, ProcessList>,
 }
@@ -30,7 +30,7 @@ impl Session {
         let session = Arc::new(Self {
             sid: leader.pid,
             leader: Arc::downgrade(leader),
-            job_control: RwSemaphore::new(SessionJobControl {
+            job_control: RwLock::new(SessionJobControl {
                 foreground: Weak::new(),
                 control_terminal: None,
             }),

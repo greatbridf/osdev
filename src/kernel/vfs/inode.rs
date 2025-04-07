@@ -44,7 +44,7 @@ pub struct InodeData {
     pub ctime: Spin<TimeSpec>,
     pub mtime: Spin<TimeSpec>,
 
-    pub rwsem: RwSemaphore<()>,
+    pub rwsem: RwLock<()>,
 
     pub vfs: Weak<dyn Vfs>,
 }
@@ -57,7 +57,7 @@ impl InodeData {
             atime: Spin::new(TimeSpec::default()),
             ctime: Spin::new(TimeSpec::default()),
             mtime: Spin::new(TimeSpec::default()),
-            rwsem: RwSemaphore::new(()),
+            rwsem: RwLock::new(()),
             size: Default::default(),
             nlink: Default::default(),
             uid: Default::default(),

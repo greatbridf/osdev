@@ -27,22 +27,19 @@ unsafe impl LockStrategy for SpinStrategy {
     }
 
     unsafe fn try_lock(data: &Self::StrategyData) -> Option<Self::GuardContext> {
-        use Ordering::{Acquire, Relaxed};
         eonix_preempt::disable();
 
-        if data.compare_exchange(false, true, Acquire, Relaxed).is_ok() {
-            Some(())
-        } else {
-            None
-        }
+        data.compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .map(|_| ())
+            .inspect_err(|_| eonix_preempt::enable())
+            .ok()
     }
 
     unsafe fn do_lock(data: &Self::StrategyData) -> Self::GuardContext {
-        use Ordering::{Acquire, Relaxed};
         eonix_preempt::disable();
 
         while data
-            .compare_exchange_weak(false, true, Acquire, Relaxed)
+            .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
             .is_err()
         {
             while Self::is_locked(data) {

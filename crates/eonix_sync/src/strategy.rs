@@ -22,11 +22,25 @@ pub unsafe trait LockStrategy {
     where
         Self: Sized;
 
+    unsafe fn try_lock_shared(data: &Self::StrategyData) -> Option<Self::GuardContext>
+    where
+        Self: Sized,
+    {
+        unsafe { Self::try_lock(data) }
+    }
+
     unsafe fn do_lock_shared(data: &Self::StrategyData) -> Self::GuardContext
     where
         Self: Sized,
     {
         unsafe { Self::do_lock(data) }
+    }
+
+    unsafe fn do_unlock_shared(data: &Self::StrategyData, context: &mut Self::GuardContext)
+    where
+        Self: Sized,
+    {
+        unsafe { Self::do_unlock(data, context) }
     }
 
     unsafe fn do_temporary_unlock(data: &Self::StrategyData, context: &mut Self::GuardContext)
@@ -36,10 +50,58 @@ pub unsafe trait LockStrategy {
         unsafe { Self::do_unlock(data, context) }
     }
 
+    unsafe fn do_temporary_unlock_shared(
+        data: &Self::StrategyData,
+        context: &mut Self::GuardContext,
+    ) where
+        Self: Sized,
+    {
+        unsafe { Self::do_unlock_shared(data, context) }
+    }
+
     unsafe fn do_relock(data: &Self::StrategyData, context: &mut Self::GuardContext)
     where
         Self: Sized,
     {
         *context = unsafe { Self::do_lock(data) };
     }
+
+    unsafe fn do_relock_shared(data: &Self::StrategyData, context: &mut Self::GuardContext)
+    where
+        Self: Sized,
+    {
+        *context = unsafe { Self::do_lock_shared(data) };
+    }
+}
+
+pub trait WaitStrategy {
+    type Data;
+
+    fn new_data() -> Self::Data
+    where
+        Self: Sized;
+
+    fn has_write_waiting(data: &Self::Data) -> bool
+    where
+        Self: Sized;
+
+    fn has_read_waiting(data: &Self::Data) -> bool
+    where
+        Self: Sized;
+
+    fn write_wait(data: &Self::Data, check: impl Fn() -> bool)
+    where
+        Self: Sized;
+
+    fn read_wait(data: &Self::Data, check: impl Fn() -> bool)
+    where
+        Self: Sized;
+
+    fn write_notify(data: &Self::Data)
+    where
+        Self: Sized;
+
+    fn read_notify(data: &Self::Data)
+    where
+        Self: Sized;
 }

@@ -26,6 +26,10 @@ impl<const I: bool> CondVar<I> {
         }
     }
 
+    pub fn has_waiters(&self) -> bool {
+        !self.waiters.lock().is_empty()
+    }
+
     fn wake(waker: Waker) {
         println_trace!("trace_condvar", "tid({}) is trying to wake", thread.tid);
         waker.wake();

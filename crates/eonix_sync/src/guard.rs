@@ -35,7 +35,9 @@ where
 {
     #[must_use = "The returned `UnlockedGuard` must be used to relock the lock."]
     pub fn unlock(mut self) -> UnlockedGuard<'a, T, S, L, W> {
-        unsafe { S::do_temporary_unlock(&self.strategy_data, &mut self.context) }
+        unsafe {
+            self.force_unlock();
+        }
 
         UnlockedGuard {
             lock: self.lock,
@@ -53,13 +55,21 @@ where
     /// dropping the guard. Using the guard after calling this function is
     /// undefined behavior.
     pub unsafe fn force_unlock(&mut self) {
-        unsafe { S::do_temporary_unlock(&self.strategy_data, &mut self.context) }
+        if W {
+            unsafe { S::do_temporary_unlock(&self.strategy_data, &mut self.context) }
+        } else {
+            unsafe { S::do_temporary_unlock_shared(&self.strategy_data, &mut self.context) }
+        }
     }
 
     /// # Safety
     /// Calling this function twice on a force unlocked guard will cause deadlocks.
     pub unsafe fn force_relock(&mut self) {
-        unsafe { S::do_relock(&self.strategy_data, &mut self.context) }
+        if W {
+            unsafe { S::do_relock(&self.strategy_data, &mut self.context) }
+        } else {
+            unsafe { S::do_relock_shared(&self.strategy_data, &mut self.context) }
+        }
     }
 }
 
@@ -71,7 +81,11 @@ where
 {
     #[must_use = "Throwing away the relocked guard is pointless."]
     pub fn relock(mut self) -> Guard<'a, T, S, L, W> {
-        unsafe { S::do_relock(&self.strategy_data, &mut self.context) }
+        if W {
+            unsafe { S::do_relock(&self.strategy_data, &mut self.context) }
+        } else {
+            unsafe { S::do_relock_shared(&self.strategy_data, &mut self.context) }
+        }
 
         Guard {
             lock: self.lock,
@@ -154,6 +168,10 @@ where
     L: LockStrategy,
 {
     fn drop(&mut self) {
-        unsafe { S::do_unlock(&self.strategy_data, &mut self.context) }
+        if WRITE {
+            unsafe { S::do_unlock(&self.strategy_data, &mut self.context) }
+        } else {
+            unsafe { S::do_unlock_shared(&self.strategy_data, &mut self.context) }
+        }
     }
 }

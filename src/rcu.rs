@@ -1,4 +1,4 @@
-use crate::{prelude::*, sync::RwSemReadGuard};
+use crate::{prelude::*, sync::RwLockReadGuard};
 use alloc::sync::Arc;
 use core::{
     ops::Deref,
@@ -10,12 +10,12 @@ use pointers::BorrowedArc;
 
 pub struct RCUReadGuard<'data, T: 'data> {
     value: T,
-    guard: RwSemReadGuard<'data, ()>,
+    guard: RwLockReadGuard<'data, ()>,
     _phantom: PhantomData<&'data T>,
 }
 
 lazy_static! {
-    static ref GLOBAL_RCU_SEM: RwSemaphore<()> = RwSemaphore::new(());
+    static ref GLOBAL_RCU_SEM: RwLock<()> = RwLock::new(());
 }
 
 impl<'data, T: 'data> RCUReadGuard<'data, T> {
@@ -48,7 +48,7 @@ pub trait RCUNode<MySelf> {
 pub struct RCUList<T: RCUNode<T>> {
     head: AtomicPtr<T>,
 
-    reader_lock: RwSemaphore<()>,
+    reader_lock: RwLock<()>,
     update_lock: Mutex<()>,
 }
 
@@ -56,7 +56,7 @@ impl<T: RCUNode<T>> RCUList<T> {
     pub fn new() -> Self {
         Self {
             head: AtomicPtr::new(core::ptr::null_mut()),
-            reader_lock: RwSemaphore::new(()),
+            reader_lock: RwLock::new(()),
             update_lock: Mutex::new(()),
         }
     }
@@ -158,7 +158,7 @@ impl<T: RCUNode<T>> RCUList<T> {
 
 pub struct RCUIterator<'lt, T: RCUNode<T>> {
     cur: Option<NonNull<T>>,
-    _lock: RwSemReadGuard<'lt, ()>,
+    _lock: RwLockReadGuard<'lt, ()>,
 }
 
 impl<'lt, T: RCUNode<T>> Iterator for RCUIterator<'lt, T> {

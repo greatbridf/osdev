@@ -79,7 +79,7 @@ struct FatFs {
     volume_label: [u8; 11],
 
     device: Arc<BlockDevice>,
-    fat: RwSemaphore<Vec<ClusterNo>>,
+    fat: RwLock<Vec<ClusterNo>>,
     weak: Weak<FatFs>,
     icache: BTreeMap<Ino, FatInode>,
 }
@@ -135,7 +135,7 @@ impl FatFs {
             sectors_per_cluster: 0,
             rootdir_cluster: 0,
             data_start: 0,
-            fat: RwSemaphore::new(Vec::new()),
+            fat: RwLock::new(Vec::new()),
             weak: weak.clone(),
             icache: BTreeMap::new(),
             volume_label: [0; 11],

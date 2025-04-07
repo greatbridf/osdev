@@ -6,7 +6,7 @@ use crate::{
     kernel::mem::MMList,
     prelude::*,
     rcu::{rcu_sync, RCUPointer, RCUReadGuard},
-    sync::{CondVar, RwSemReadGuard, SpinGuard},
+    sync::{CondVar, RwLockReadGuard, SpinGuard},
 };
 use alloc::{
     collections::{btree_map::BTreeMap, vec_deque::VecDeque},
@@ -79,7 +79,7 @@ pub struct NotifyBatch<'waitlist, 'process, 'cv> {
 
 pub struct Entry<'waitlist, 'proclist, 'cv> {
     wait_procs: SpinGuard<'waitlist, VecDeque<WaitObject>>,
-    process_list: RwSemReadGuard<'proclist, ProcessList>,
+    process_list: RwLockReadGuard<'proclist, ProcessList>,
     cv: &'cv CondVar,
     want_stop: bool,
     want_continue: bool,

@@ -22,8 +22,8 @@ pub struct ProcessList {
 }
 
 lazy_static! {
-    static ref GLOBAL_PROC_LIST: RwSemaphore<ProcessList> = {
-        RwSemaphore::new(ProcessList {
+    static ref GLOBAL_PROC_LIST: RwLock<ProcessList> = {
+        RwLock::new(ProcessList {
             init: None,
             threads: BTreeMap::new(),
             processes: BTreeMap::new(),
@@ -34,7 +34,7 @@ lazy_static! {
 }
 
 impl ProcessList {
-    pub fn get() -> &'static RwSemaphore<Self> {
+    pub fn get() -> &'static RwLock<Self> {
         &GLOBAL_PROC_LIST
     }
 

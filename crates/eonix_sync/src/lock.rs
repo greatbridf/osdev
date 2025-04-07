@@ -33,7 +33,6 @@ impl<T, S> Lock<T, S>
 where
     S: LockStrategy,
 {
-    #[inline(always)]
     pub fn new(value: T) -> Self {
         Self {
             strategy_data: S::new_data(),
@@ -91,7 +90,7 @@ where
         Guard {
             lock: self,
             strategy_data: &self.strategy_data,
-            context: unsafe { IrqStrategy::<S>::do_lock(&self.strategy_data) },
+            context: unsafe { IrqStrategy::<S>::do_lock_shared(&self.strategy_data) },
         }
     }
 

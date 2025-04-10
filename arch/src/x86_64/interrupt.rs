@@ -426,7 +426,7 @@ impl APICRegs {
 impl InterruptControl {
     /// # Return
     /// Returns a tuple of InterruptControl and the cpu id of the current cpu.
-    pub unsafe fn new() -> (Self, usize) {
+    pub(crate) fn new() -> (Self, usize) {
         extern "C" {
             static ISR_START_ADDR: usize;
         }

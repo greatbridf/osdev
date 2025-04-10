@@ -1,7 +1,7 @@
-use super::cpu::init_thiscpu;
+use super::cpu::init_localcpu;
 use crate::{
     kernel::{
-        cpu::current_cpu,
+        cpu::local_cpu,
         mem::{paging::Page, phys::PhysPtr as _},
         task::KernelStack,
     },
@@ -18,9 +18,9 @@ define_smp_bootstrap!(4, ap_entry, {
 });
 
 unsafe extern "C" fn ap_entry() -> ! {
-    init_thiscpu();
+    init_localcpu();
     Scheduler::init_local_scheduler::<KernelStack>();
-    println_debug!("AP{} started", current_cpu().cpuid());
+    println_debug!("AP{} started", local_cpu().cpuid());
 
     eonix_preempt::disable();
     arch::enable_irqs();
@@ -32,7 +32,12 @@ unsafe extern "C" fn ap_entry() -> ! {
     }
 }
 
-pub unsafe fn bootstrap_smp() {
-    current_cpu().bootstrap_cpus();
-    wait_cpus_online();
+pub fn bootstrap_smp() {
+    eonix_preempt::disable();
+    unsafe {
+        // SAFETY: Preemption is disabled.
+        local_cpu().bootstrap_cpus();
+        wait_cpus_online();
+    }
+    eonix_preempt::enable();
 }

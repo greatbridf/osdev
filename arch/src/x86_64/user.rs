@@ -1,6 +1,6 @@
 use core::pin::Pin;
 
-use super::{CPUStatus, GDTEntry};
+use super::{CPU, GDTEntry};
 
 #[derive(Debug, Clone)]
 pub enum UserTLS {
@@ -28,7 +28,7 @@ impl UserTLS {
         )
     }
 
-    pub fn load(&self, cpu_status: Pin<&mut CPUStatus>) {
+    pub fn load(&self, cpu_status: Pin<&mut CPU>) {
         match self {
             Self::TLS64(base) => {
                 const IA32_KERNEL_GS_BASE: u32 = 0xc0000102;
@@ -48,7 +48,7 @@ impl UserTLS {
     }
 }
 
-pub unsafe fn load_interrupt_stack(cpu_status: Pin<&mut CPUStatus>, stack: u64) {
+pub unsafe fn load_interrupt_stack(cpu_status: Pin<&mut CPU>, stack: u64) {
     // SAFETY: We don't move the CPUStatus object.
     cpu_status.get_unchecked_mut().set_rsp0(stack);
 }

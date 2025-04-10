@@ -1,10 +1,5 @@
-use core::{
-    alloc::Layout,
-    pin::Pin,
-    ptr::{addr_of, NonNull},
-};
-
-use super::{enable_sse, percpu::init_percpu_area_thiscpu, GDTEntry, InterruptControl, GDT};
+use super::{enable_sse, GDTEntry, InterruptControl, GDT};
+use core::{pin::Pin, ptr::addr_of};
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
@@ -15,7 +10,7 @@ struct TSS_SP {
 }
 
 #[repr(C)]
-pub struct TSS {
+pub(crate) struct TSS {
     _reserved1: u32,
     rsp: [TSS_SP; 3],
     _reserved2: u32,
@@ -48,46 +43,22 @@ impl TSS {
     }
 }
 
-/// Architecture-specific per-cpu status.
-#[allow(dead_code)]
-pub struct CPUStatus {
-    id: usize,
+/// Architecture-specific cpu status data.
+pub struct CPU {
+    cpuid: usize,
     gdt: GDT,
     tss: TSS,
-
-    percpu_area: NonNull<u8>,
     pub interrupt: InterruptControl,
 }
 
-impl CPUStatus {
-    pub unsafe fn new_thiscpu<F>(allocate: F) -> Self
-    where
-        F: FnOnce(Layout) -> NonNull<u8>,
-    {
-        const PAGE_SIZE: usize = 0x1000;
-        extern "C" {
-            static PERCPU_PAGES: usize;
-            fn _PERCPU_DATA_START();
-        }
-
-        let percpu_area = allocate(Layout::from_size_align_unchecked(
-            PERCPU_PAGES * PAGE_SIZE,
-            PAGE_SIZE,
-        ));
-
-        percpu_area.copy_from_nonoverlapping(
-            NonNull::new(_PERCPU_DATA_START as *mut u8).unwrap(),
-            PERCPU_PAGES * PAGE_SIZE,
-        );
-
+impl CPU {
+    pub fn new() -> Self {
         let (interrupt_control, cpuid) = InterruptControl::new();
 
-        init_percpu_area_thiscpu(percpu_area);
         Self {
-            id: cpuid,
+            cpuid,
             gdt: GDT::new(),
             tss: TSS::new(),
-            percpu_area,
             interrupt: interrupt_control,
         }
     }
@@ -126,7 +97,7 @@ impl CPUStatus {
     }
 
     pub fn cpuid(&self) -> usize {
-        self.id
+        self.cpuid
     }
 }
 

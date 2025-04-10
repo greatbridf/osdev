@@ -1,10 +1,9 @@
 use crate::task::Task;
 use alloc::{collections::VecDeque, sync::Arc};
-use eonix_sync::{LazyLock, Spin};
+use eonix_sync::Spin;
 
-#[arch::define_percpu]
-static READYQUEUE: LazyLock<Spin<FifoReadyQueue>> =
-    LazyLock::new(|| Spin::new(FifoReadyQueue::new()));
+#[arch::define_percpu_shared]
+static READYQUEUE: FifoReadyQueue = FifoReadyQueue::new();
 
 pub trait ReadyQueue {
     fn get(&mut self) -> Option<Arc<Task>>;
@@ -34,6 +33,5 @@ impl ReadyQueue for FifoReadyQueue {
 }
 
 pub fn local_rq() -> &'static Spin<dyn ReadyQueue> {
-    // SAFETY: The inner rq is protected by `Spin`.
-    unsafe { &**READYQUEUE.as_ref() }
+    &*READYQUEUE
 }

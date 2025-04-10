@@ -1,4 +1,4 @@
-use super::cpu::current_cpu;
+use super::cpu::local_cpu;
 use super::mem::handle_page_fault;
 use super::syscall::handle_syscall32;
 use super::task::{ProcessList, Signal};
@@ -95,5 +95,5 @@ pub fn init() -> KResult<()> {
 
 pub fn end_of_interrupt() {
     // SAFETY: We only use this function in irq context, where preemption is disabled.
-    unsafe { current_cpu() }.interrupt.end_of_interrupt();
+    unsafe { local_cpu() }.interrupt.end_of_interrupt();
 }

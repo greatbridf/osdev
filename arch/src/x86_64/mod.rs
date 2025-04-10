@@ -3,9 +3,9 @@ mod gdt;
 mod init;
 mod interrupt;
 mod io;
+mod mm;
+mod percpu;
 mod user;
-
-pub(self) mod percpu;
 
 pub use self::context::*;
 pub use self::gdt::*;
@@ -13,7 +13,9 @@ pub use self::init::*;
 pub use self::interrupt::*;
 pub use self::io::*;
 pub use self::user::*;
-pub use percpu_macros::define_percpu;
+pub use mm::*;
+pub use percpu::*;
+pub use percpu_macros::{define_percpu, define_percpu_shared};
 
 use core::arch::asm;
 

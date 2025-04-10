@@ -115,3 +115,67 @@ pub fn define_percpu(attrs: TokenStream, item: TokenStream) -> TokenStream {
     }
     .into()
 }
+
+#[proc_macro_attribute]
+pub fn define_percpu_shared(attrs: TokenStream, item: TokenStream) -> TokenStream {
+    if !attrs.is_empty() {
+        panic!("`define_percpu_shared` attribute does not take any arguments");
+    }
+
+    let item = parse_macro_input!(item as ItemStatic);
+    let vis = &item.vis;
+    let ident = &item.ident;
+    let ty = &item.ty;
+    let expr = &item.expr;
+
+    let inner_ident = format_ident!("_percpu_shared_inner_{}", ident);
+    let access_ident = format_ident!("_access_shared_{}", ident);
+
+    let as_ptr = arch::get_percpu_pointer(&inner_ident, &ty);
+
+    quote! {
+        #[link_section = ".percpu"]
+        #[allow(non_upper_case_globals)]
+        static #inner_ident: ::eonix_sync::Spin< #ty > = ::eonix_sync::Spin::new( #expr );
+        #[allow(non_camel_case_types)]
+        #vis struct #access_ident;
+        #vis static #ident: #access_ident = #access_ident;
+
+        impl #access_ident {
+            fn as_ptr(&self) -> *const ::eonix_sync::Spin< #ty > {
+                unsafe { ( #as_ptr ) as *const _ }
+            }
+
+            pub fn get_ref(&self) -> &::eonix_sync::Spin< #ty > {
+                // SAFETY: This is safe because `as_ptr()` is guaranteed to be valid.
+                unsafe { self.as_ptr().as_ref().unwrap() }
+            }
+
+            pub fn get_for_cpu(&self, cpuid: usize) -> Option<&::eonix_sync::Spin< #ty >> {
+                let offset = & #inner_ident as *const _ as usize;
+                let base = ::arch::PercpuArea::get_for(cpuid);
+                base.map(|base| unsafe { base.byte_add(offset).cast().as_ref() })
+            }
+        }
+
+        impl ::core::ops::Deref for #access_ident {
+            type Target = ::eonix_sync::Spin< #ty >;
+
+            fn deref(&self) -> &Self::Target {
+                self.get_ref()
+            }
+        }
+
+        impl<T> ::core::convert::AsRef<T> for #access_ident
+        where
+            <Self as ::core::ops::Deref>::Target: ::core::convert::AsRef<T>,
+        {
+            fn as_ref(&self) -> &T {
+                use ::core::ops::Deref;
+
+                self.deref().as_ref()
+            }
+        }
+    }
+    .into()
+}

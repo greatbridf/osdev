@@ -30,7 +30,7 @@ use core::alloc::{GlobalAlloc, Layout};
 use elf::ParsedElf32;
 use eonix_runtime::{run::FutureRun, scheduler::Scheduler};
 use kernel::{
-    cpu::init_thiscpu,
+    cpu::init_localcpu,
     mem::Page,
     task::{KernelStack, ProcessBuilder, ProcessList, ThreadBuilder, ThreadRunnable},
     vfs::{
@@ -98,7 +98,7 @@ extern "C" {
 pub extern "C" fn rust_kinit(early_kstack_pfn: usize) -> ! {
     // We don't call global constructors.
     // Rust doesn't need that, and we're not going to use global variables in C++.
-    unsafe { init_thiscpu() };
+    init_localcpu();
 
     unsafe { init_allocator() };
 
@@ -138,7 +138,7 @@ async fn init_process(early_kstack_pfn: usize) {
     fs::procfs::init();
     fs::fat32::init();
 
-    unsafe { kernel::smp::bootstrap_smp() };
+    kernel::smp::bootstrap_smp();
 
     let (ip, sp, mm_list) = {
         // mount fat32 /mnt directory

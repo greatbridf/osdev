@@ -4,7 +4,7 @@ use super::{
 };
 use crate::{
     kernel::{
-        cpu::current_cpu,
+        cpu::local_cpu,
         mem::VAddr,
         user::dataflow::CheckedUserPointer,
         vfs::{filearray::FileArray, FsContext},
@@ -243,7 +243,7 @@ impl Thread {
     pub unsafe fn load_thread_area32(&self) {
         if let Some(tls) = self.inner.lock().tls.as_ref() {
             // SAFETY: Preemption is disabled.
-            tls.load(current_cpu());
+            tls.load(local_cpu());
         }
     }
 
@@ -331,7 +331,7 @@ impl Contexted for ThreadRunnable {
             0 => {}
             sp => unsafe {
                 // SAFETY: Preemption is disabled.
-                arch::load_interrupt_stack(current_cpu(), sp as u64);
+                arch::load_interrupt_stack(local_cpu(), sp as u64);
             },
         }
 
@@ -391,7 +391,7 @@ impl PinRun for ThreadRunnable {
 
         unsafe {
             // SAFETY: Preemption is disabled.
-            arch::load_interrupt_stack(current_cpu(), sp as u64);
+            arch::load_interrupt_stack(local_cpu(), sp as u64);
         }
 
         eonix_preempt::enable();

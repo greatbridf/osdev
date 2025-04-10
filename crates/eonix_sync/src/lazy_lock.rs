@@ -123,6 +123,28 @@ where
                 .expect("Value should be initialized.")
         }
     }
+
+    pub fn get_mut(&mut self) -> &mut T {
+        match self.state.load(Ordering::Acquire) {
+            Self::UNINITIALIZED => {
+                self.state.swap(Self::INITIALIZING, Ordering::Acquire);
+                // SAFETY: We are the only thread doing initialization.
+                unsafe {
+                    self.do_initialization();
+                }
+                self.state.store(Self::INITIALIZED, Ordering::Release);
+            }
+            Self::INITIALIZED => {}
+            Self::INITIALIZING => unreachable!("We should be the only one initializing it."),
+            _ => unreachable!("Invalid LazyLock state."),
+        }
+
+        if let LazyState::Initialized(value) = self.value.get_mut() {
+            value
+        } else {
+            unreachable!("Invalid LazyLock state.");
+        }
+    }
 }
 
 impl<T, F, R> Deref for LazyLock<T, F, R>

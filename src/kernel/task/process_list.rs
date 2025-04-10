@@ -6,7 +6,6 @@ use alloc::{
 };
 use bindings::KERNEL_PML4;
 use eonix_sync::{AsProof as _, AsProofMut as _};
-use lazy_static::lazy_static;
 
 pub struct ProcessList {
     /// The init process.
@@ -21,17 +20,13 @@ pub struct ProcessList {
     sessions: BTreeMap<u32, Weak<Session>>,
 }
 
-lazy_static! {
-    static ref GLOBAL_PROC_LIST: RwLock<ProcessList> = {
-        rwlock_new(ProcessList {
-            init: None,
-            threads: BTreeMap::new(),
-            processes: BTreeMap::new(),
-            pgroups: BTreeMap::new(),
-            sessions: BTreeMap::new(),
-        })
-    };
-}
+static GLOBAL_PROC_LIST: RwLock<ProcessList> = rwlock_new(ProcessList {
+    init: None,
+    threads: BTreeMap::new(),
+    processes: BTreeMap::new(),
+    pgroups: BTreeMap::new(),
+    sessions: BTreeMap::new(),
+});
 
 impl ProcessList {
     pub fn get() -> &'static RwLock<Self> {

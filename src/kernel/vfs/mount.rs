@@ -1,18 +1,12 @@
-use crate::{fs::tmpfs, prelude::*};
-
-use alloc::{
-    collections::btree_map::{BTreeMap, Entry},
-    sync::Arc,
-};
-use bindings::{EEXIST, ENODEV, ENOTDIR};
-
-use lazy_static::lazy_static;
-
 use super::{
-    dentry::{dcache, Dentry},
+    dentry::{dcache, Dentry, DROOT},
     inode::Inode,
     vfs::Vfs,
 };
+use crate::prelude::*;
+use alloc::{collections::btree_map::BTreeMap, string::ToString as _, sync::Arc};
+use bindings::{EEXIST, ENODEV, ENOTDIR};
+use eonix_sync::LazyLock;
 
 pub const MS_RDONLY: u64 = 1 << 0;
 pub const MS_NOSUID: u64 = 1 << 1;
@@ -32,17 +26,11 @@ const MOUNT_FLAGS: [(u64, &str); 6] = [
     (MS_LAZYTIME, ",lazytime"),
 ];
 
-lazy_static! {
-    static ref MOUNT_CREATORS: Spin<BTreeMap<String, Arc<dyn MountCreator>>> =
-        Spin::new(BTreeMap::new());
-    static ref MOUNTS: Spin<Vec<(Arc<Dentry>, MountPointData)>> = Spin::new(vec![]);
-}
+static MOUNT_CREATORS: Spin<BTreeMap<String, Arc<dyn MountCreator>>> = Spin::new(BTreeMap::new());
+static MOUNTS: Spin<Vec<(Arc<Dentry>, MountPointData)>> = Spin::new(vec![]);
 
-static mut ROOTFS: Option<Arc<Dentry>> = None;
-
-#[allow(dead_code)]
 pub struct Mount {
-    vfs: Arc<dyn Vfs>,
+    _vfs: Arc<dyn Vfs>,
     root: Arc<Dentry>,
 }
 
@@ -52,7 +40,7 @@ impl Mount {
         root_dentry.save_dir(root_inode)?;
 
         Ok(Self {
-            vfs,
+            _vfs: vfs,
             root: root_dentry,
         })
     }
@@ -71,12 +59,11 @@ pub trait MountCreator: Send + Sync {
 
 pub fn register_filesystem(fstype: &str, creator: Arc<dyn MountCreator>) -> KResult<()> {
     let mut creators = MOUNT_CREATORS.lock();
-    match creators.entry(String::from(fstype)) {
-        Entry::Occupied(_) => Err(EEXIST),
-        Entry::Vacant(entry) => {
-            entry.insert(creator);
-            Ok(())
-        }
+    if !creators.contains_key(fstype) {
+        creators.insert(fstype.to_string(), creator);
+        Ok(())
+    } else {
+        Err(EEXIST)
     }
 }
 
@@ -164,45 +151,41 @@ pub fn dump_mounts(buffer: &mut dyn core::fmt::Write) {
     }
 }
 
-pub fn init_vfs() -> KResult<()> {
-    tmpfs::init();
-
-    let source = String::from("rootfs");
-    let fstype = String::from("tmpfs");
-    let flags = MS_NOATIME;
-
-    let mount = {
-        let creators = MOUNT_CREATORS.lock();
-        let creator = creators.get(&fstype).ok_or(ENODEV)?;
-
-        creator.create_mount(&source, flags, dcache::_looped_droot())?
-    };
-
-    let root_dentry = mount.root().clone();
-    dcache::d_add(&root_dentry);
-
-    unsafe { ROOTFS = Some(root_dentry) };
-
-    let mpdata = MountPointData {
-        mount,
-        source,
-        mountpoint: String::from("/"),
-        fstype,
-        flags,
-    };
-
-    MOUNTS
-        .lock()
-        .push((dcache::_looped_droot().clone(), mpdata));
-
-    Ok(())
-}
-
 impl Dentry {
-    pub fn kernel_root_dentry() -> Arc<Dentry> {
-        #[allow(static_mut_refs)]
-        unsafe {
-            ROOTFS.as_ref().cloned().unwrap()
-        }
+    pub fn root() -> &'static Arc<Dentry> {
+        static ROOT: LazyLock<Arc<Dentry>> = LazyLock::new(|| {
+            let source = String::from("(rootfs)");
+            let fstype = String::from("tmpfs");
+            let mount_flags = MS_NOATIME;
+
+            let creator = MOUNT_CREATORS
+                .lock()
+                .get(&fstype)
+                .cloned()
+                .expect("tmpfs not registered.");
+
+            let mount = creator
+                .create_mount(&source, mount_flags, &DROOT)
+                .expect("Failed to create root mount.");
+
+            let root_dentry = mount.root().clone();
+
+            dcache::d_add(&root_dentry);
+
+            MOUNTS.lock().push((
+                DROOT.clone(),
+                MountPointData {
+                    mount,
+                    source,
+                    mountpoint: String::from("/"),
+                    fstype,
+                    flags: mount_flags,
+                },
+            ));
+
+            root_dentry
+        });
+
+        &ROOT
     }
 }

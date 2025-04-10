@@ -7,7 +7,6 @@ use crate::{
     },
     prelude::*,
 };
-
 use alloc::{format, sync::Arc};
 use bindings::{
     kernel::hw::pci::{self, pci_device},
@@ -15,6 +14,7 @@ use bindings::{
 };
 use control::AdapterControl;
 use defs::*;
+use eonix_spin_irq::SpinIrq as _;
 use port::AdapterPort;
 
 mod command;

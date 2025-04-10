@@ -13,6 +13,7 @@ atomic_unique_refcell = { path = "./crates/atomic_unique_refcell", features = [
 ] }
 eonix_preempt = { path = "./crates/eonix_preempt" }
 eonix_runtime = { path = "./crates/eonix_runtime" }
+eonix_spin_irq = { path = "./crates/eonix_spin_irq" }
 eonix_sync = { path = "./crates/eonix_sync" }
 eonix_log = { path = "./crates/eonix_log" }
 pointers = { path = "./crates/pointers" }
@@ -20,8 +21,6 @@ pointers = { path = "./crates/pointers" }
 bitflags = "2.6.0"
 intrusive-collections = "0.9.7"
 itertools = { version = "0.13.0", default-features = false }
-lazy_static = { version = "1.5.0", features = ["spin_no_std"] }
-spin = "0.9.8"
 
 [features]
 default = ["smp"]

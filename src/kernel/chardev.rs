@@ -16,7 +16,6 @@ use alloc::{
     sync::Arc,
 };
 use eonix_sync::AsProof as _;
-use lazy_static::lazy_static;
 
 pub trait VirtualCharDevice: Send + Sync {
     fn read(&self, buffer: &mut dyn Buffer) -> KResult<usize>;
@@ -34,10 +33,7 @@ pub struct CharDevice {
     device: CharDeviceType,
 }
 
-lazy_static! {
-    pub static ref CHAR_DEVICES: Spin<BTreeMap<DevId, Arc<CharDevice>>> =
-        Spin::new(BTreeMap::new());
-}
+static CHAR_DEVICES: Spin<BTreeMap<DevId, Arc<CharDevice>>> = Spin::new(BTreeMap::new());
 
 impl CharDevice {
     pub fn read(&self, buffer: &mut dyn Buffer) -> KResult<usize> {

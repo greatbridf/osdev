@@ -1,20 +1,17 @@
-use alloc::collections::vec_deque::VecDeque;
-use bindings::{EINVAL, EIO};
-use eonix_preempt::assert_preempt_enabled;
-
-use crate::prelude::*;
-
-use crate::kernel::block::{BlockDeviceRequest, BlockRequestQueue};
-use crate::kernel::mem::paging::Page;
-
-use crate::kernel::mem::phys::{NoCachePP, PhysPtr};
-use crate::sync::UCondVar;
-
 use super::command::{Command, IdentifyCommand, ReadLBACommand};
 use super::{
     vread, vwrite, CommandHeader, PRDTEntry, FISH2D, PORT_CMD_CR, PORT_CMD_FR, PORT_CMD_FRE,
     PORT_CMD_ST, PORT_IE_DEFAULT,
 };
+use crate::kernel::block::{BlockDeviceRequest, BlockRequestQueue};
+use crate::kernel::mem::paging::Page;
+use crate::kernel::mem::phys::{NoCachePP, PhysPtr};
+use crate::prelude::*;
+use crate::sync::UCondVar;
+use alloc::collections::vec_deque::VecDeque;
+use bindings::{EINVAL, EIO};
+use eonix_preempt::assert_preempt_enabled;
+use eonix_spin_irq::SpinIrq as _;
 
 fn spinwait_clear(refval: *const u32, mask: u32) -> KResult<()> {
     const SPINWAIT_MAX: usize = 1000;

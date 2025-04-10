@@ -10,6 +10,7 @@ use crate::{
 use alloc::{collections::vec_deque::VecDeque, format, sync::Arc};
 use bitflags::bitflags;
 use eonix_runtime::{run::FutureRun, scheduler::Scheduler};
+use eonix_spin_irq::SpinIrq as _;
 
 bitflags! {
     struct LineStatus: u8 {

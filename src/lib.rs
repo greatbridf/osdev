@@ -67,7 +67,7 @@ extern "C" {
     fn init_pci();
 }
 
-struct Allocator {}
+struct Allocator;
 unsafe impl GlobalAlloc for Allocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         let result = _do_allocate(layout.size());
@@ -88,7 +88,7 @@ unsafe impl GlobalAlloc for Allocator {
 }
 
 #[global_allocator]
-static ALLOCATOR: Allocator = Allocator {};
+static ALLOCATOR: Allocator = Allocator;
 
 extern "C" {
     fn init_allocator();
@@ -106,8 +106,6 @@ pub extern "C" fn rust_kinit(early_kstack_pfn: usize) -> ! {
 
     // TODO: Move this to rust.
     unsafe { init_pci() };
-
-    kernel::vfs::mount::init_vfs().unwrap();
 
     // To satisfy the `Scheduler` "preempt count == 0" assertion.
     eonix_preempt::disable();
@@ -136,6 +134,7 @@ async fn init_process(early_kstack_pfn: usize) {
     driver::e1000e::register_e1000e_driver();
     driver::ahci::register_ahci_driver();
 
+    fs::tmpfs::init();
     fs::procfs::init();
     fs::fat32::init();
 

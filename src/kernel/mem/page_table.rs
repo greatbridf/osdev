@@ -1,15 +1,12 @@
-use lazy_static::lazy_static;
-
-use crate::prelude::*;
-
-use crate::bindings::root::{EINVAL, KERNEL_PML4};
-
 use super::{
     paging::Page,
     phys::{CachedPP, PhysPtr as _},
     VAddr, VRange,
 };
 use super::{MMArea, Permission};
+use crate::bindings::root::{EINVAL, KERNEL_PML4};
+use crate::prelude::*;
+use eonix_sync::LazyLock;
 
 const PA_P: usize = 0x001;
 const PA_RW: usize = 0x002;
@@ -55,13 +52,11 @@ pub struct PTEIterator<'lt, const KERNEL: bool> {
     _phantom: core::marker::PhantomData<&'lt ()>,
 }
 
-lazy_static! {
-    static ref EMPTY_PAGE: Page = {
-        let page = Page::alloc_one();
-        page.zero();
-        page
-    };
-}
+static EMPTY_PAGE: LazyLock<Page> = LazyLock::new(|| {
+    let page = Page::alloc_one();
+    page.zero();
+    page
+});
 
 impl PTE {
     pub fn is_user(&self) -> bool {

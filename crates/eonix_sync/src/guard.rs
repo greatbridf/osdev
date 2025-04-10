@@ -7,7 +7,7 @@ pub trait UnlockableGuard {
 
 /// # Safety
 /// Implementors of this trait MUST ensure that the lock is correctly unlocked if
-/// dropped accidentally.
+/// the lock is stateful and dropped accidentally.
 pub unsafe trait UnlockedGuard {
     type Guard: UnlockableGuard;
 

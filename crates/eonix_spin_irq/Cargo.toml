@@ -1,8 +1,8 @@
 [package]
-name = "eonix_log"
+name = "eonix_spin_irq"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-eonix_spin_irq = { path = "../eonix_spin_irq" }
+arch = { path = "../../arch" }
 eonix_sync = { path = "../eonix_sync" }

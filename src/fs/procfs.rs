@@ -13,15 +13,11 @@ use crate::{
     },
     prelude::*,
 };
-use alloc::{
-    collections::btree_map::BTreeMap,
-    sync::{Arc, Weak},
-};
+use alloc::sync::{Arc, Weak};
 use bindings::{EACCES, ENOTDIR};
 use core::{ops::ControlFlow, sync::atomic::Ordering};
-use eonix_sync::{AsProof as _, AsProofMut as _, Locked};
+use eonix_sync::{AsProof as _, AsProofMut as _, LazyLock, Locked};
 use itertools::Itertools;
-use lazy_static::lazy_static;
 
 fn split_len_offset(data: &[u8], len: usize, offset: usize) -> Option<&[u8]> {
     let real_data = data.split_at_checked(len).map(|(data, _)| data)?;
@@ -182,17 +178,12 @@ impl Vfs for ProcFs {
     }
 }
 
-lazy_static! {
-    static ref ICACHE: Spin<BTreeMap<Ino, ProcFsNode>> = Spin::new(BTreeMap::new());
-    static ref GLOBAL_PROCFS: Arc<ProcFs> = {
-        let fs: Arc<ProcFs> = Arc::new_cyclic(|weak: &Weak<ProcFs>| ProcFs {
-            root_node: DirInode::new(0, weak.clone()),
-            next_ino: AtomicIno::new(1),
-        });
-
-        fs
-    };
-}
+static GLOBAL_PROCFS: LazyLock<Arc<ProcFs>> = LazyLock::new(|| {
+    Arc::new_cyclic(|weak: &Weak<ProcFs>| ProcFs {
+        root_node: DirInode::new(0, weak.clone()),
+        next_ino: AtomicIno::new(1),
+    })
+});
 
 struct ProcFsMountCreator;
 

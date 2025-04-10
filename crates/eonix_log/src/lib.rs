@@ -3,8 +3,8 @@
 use core::fmt::{self, Write};
 
 use alloc::sync::Arc;
+use eonix_spin_irq::SpinIrq as _;
 use eonix_sync::Spin;
-use lazy_static::lazy_static;
 
 extern crate alloc;
 
@@ -17,9 +17,7 @@ struct Console {
 }
 
 // TODO!!!: We should use a `RwLock` here for better performance.
-lazy_static! {
-    static ref CONSOLE: Spin<Console> = Spin::new(Console::new());
-}
+static CONSOLE: Spin<Console> = Spin::new(Console::new());
 
 impl Console {
     const fn new() -> Self {

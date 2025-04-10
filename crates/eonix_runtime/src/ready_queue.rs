@@ -1,9 +1,10 @@
 use crate::task::Task;
 use alloc::{collections::VecDeque, sync::Arc};
-use eonix_sync::Spin;
+use eonix_sync::{LazyLock, Spin};
 
 #[arch::define_percpu]
-static READYQUEUE: Option<Spin<FifoReadyQueue>> = None;
+static READYQUEUE: LazyLock<Spin<FifoReadyQueue>> =
+    LazyLock::new(|| Spin::new(FifoReadyQueue::new()));
 
 pub trait ReadyQueue {
     fn get(&mut self) -> Option<Arc<Task>>;
@@ -33,14 +34,6 @@ impl ReadyQueue for FifoReadyQueue {
 }
 
 pub fn local_rq() -> &'static Spin<dyn ReadyQueue> {
-    // SAFETY: When we use ReadyQueue on this CPU, we will lock it with `lock_irq()`
-    //         and if we use ReadyQueue on other CPU, we won't be able to touch it on this CPU.
-    //         So no issue here.
-    unsafe { READYQUEUE.as_ref() }
-        .as_ref()
-        .expect("ReadyQueue should be initialized")
-}
-
-pub fn init_local_rq() {
-    READYQUEUE.set(Some(Spin::new(FifoReadyQueue::new())));
+    // SAFETY: The inner rq is protected by `Spin`.
+    unsafe { &**READYQUEUE.as_ref() }
 }

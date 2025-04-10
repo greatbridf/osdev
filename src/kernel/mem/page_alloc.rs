@@ -4,7 +4,6 @@ use crate::{container_of, prelude::*};
 use bitflags::bitflags;
 use core::sync::atomic::Ordering;
 use core::{ptr::NonNull, sync::atomic::AtomicU32};
-use lazy_static::lazy_static;
 
 const MAX_PAGE_ORDER: u32 = 10;
 const PAGE_ALLOC_COSTLY_ORDER: u32 = 3;
@@ -142,7 +141,7 @@ struct Zone {
 
 struct PerCpuPages {
     batch: u32,
-    high: u32,  // TODO: use in future
+    _high: u32, // TODO: use in future
     free_areas: [FreeArea; PAGE_ALLOC_COSTLY_ORDER as usize + 1],
 }
 
@@ -150,7 +149,7 @@ impl PerCpuPages {
     const fn new() -> Self {
         Self {
             batch: BATCH_SIZE,
-            high: 0,
+            _high: 0,
             free_areas: [const { FreeArea::new() }; PAGE_ALLOC_COSTLY_ORDER as usize + 1],
         }
     }
@@ -386,9 +385,7 @@ impl Zone {
 #[arch::define_percpu]
 static PER_CPU_PAGES: PerCpuPages = PerCpuPages::new();
 
-lazy_static! {
-    static ref ZONE: Spin<Zone> = Spin::new(Zone::new());
-}
+static ZONE: Spin<Zone> = Spin::new(Zone::new());
 
 fn __alloc_pages(order: u32) -> PagePtr {
     let pages_ptr;

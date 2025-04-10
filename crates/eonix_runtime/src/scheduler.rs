@@ -1,7 +1,7 @@
 use crate::{
     context::ExecutionContext,
     executor::{ExecuteStatus, OutputHandle, Stack},
-    ready_queue::{init_local_rq, local_rq, ReadyQueue},
+    ready_queue::{local_rq, ReadyQueue},
     run::{Contexted, PinRun},
     task::{Task, TaskAdapter, TaskHandle},
 };
@@ -16,9 +16,9 @@ use core::{
 };
 use eonix_log::println_trace;
 use eonix_preempt::assert_preempt_count_eq;
-use eonix_sync::Spin;
+use eonix_spin_irq::SpinIrq as _;
+use eonix_sync::{LazyLock, Spin};
 use intrusive_collections::RBTree;
-use lazy_static::lazy_static;
 use pointers::BorrowedArc;
 
 #[arch::define_percpu]
@@ -27,9 +27,8 @@ static CURRENT_TASK: Option<NonNull<Task>> = None;
 #[arch::define_percpu]
 static LOCAL_SCHEDULER_CONTEXT: ExecutionContext = ExecutionContext::new();
 
-lazy_static! {
-    static ref TASKS: Spin<RBTree<TaskAdapter>> = Spin::new(RBTree::new(TaskAdapter::new()));
-}
+static TASKS: LazyLock<Spin<RBTree<TaskAdapter>>> =
+    LazyLock::new(|| Spin::new(RBTree::new(TaskAdapter::new())));
 
 pub struct Scheduler;
 
@@ -88,8 +87,6 @@ impl Scheduler {
     where
         S: Stack,
     {
-        init_local_rq();
-
         let stack = S::new();
 
         unsafe {

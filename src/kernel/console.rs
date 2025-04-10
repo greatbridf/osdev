@@ -1,10 +1,7 @@
 use crate::prelude::*;
 use alloc::sync::Arc;
-use lazy_static::lazy_static;
 
-lazy_static! {
-    pub static ref CONSOLE: Spin<Option<Arc<Terminal>>> = Spin::new(None);
-}
+static CONSOLE: Spin<Option<Arc<Terminal>>> = Spin::new(None);
 
 pub fn set_console(terminal: Arc<Terminal>) -> KResult<()> {
     let mut console = CONSOLE.lock();

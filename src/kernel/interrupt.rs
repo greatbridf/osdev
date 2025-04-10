@@ -1,26 +1,21 @@
-use alloc::sync::Arc;
-
-use arch::{ExtendedContext, InterruptContext};
-use lazy_static::lazy_static;
-
-use crate::bindings::root::EINVAL;
-use crate::{driver::Port8, prelude::*};
-
 use super::cpu::current_cpu;
 use super::mem::handle_page_fault;
 use super::syscall::handle_syscall32;
 use super::task::{ProcessList, Signal};
 use super::timer::timer_interrupt;
+use crate::bindings::root::EINVAL;
+use crate::{driver::Port8, prelude::*};
+use alloc::sync::Arc;
+use arch::{ExtendedContext, InterruptContext};
+use eonix_spin_irq::SpinIrq as _;
 
 const PIC1_COMMAND: Port8 = Port8::new(0x20);
 const PIC1_DATA: Port8 = Port8::new(0x21);
 const PIC2_COMMAND: Port8 = Port8::new(0xA0);
 const PIC2_DATA: Port8 = Port8::new(0xA1);
 
-lazy_static! {
-    static ref IRQ_HANDLERS: Spin<[Option<Arc<dyn Fn() + Send + Sync>>; 16]> =
-        Spin::new([const { None }; 16]);
-}
+static IRQ_HANDLERS: Spin<[Option<Arc<dyn Fn() + Send + Sync>>; 16]> =
+    Spin::new([const { None }; 16]);
 
 fn irq_handler(irqno: usize) {
     assert!(irqno < 16);

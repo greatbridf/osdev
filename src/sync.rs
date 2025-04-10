@@ -1,8 +1,9 @@
 mod arcswap;
 mod condvar;
 
-pub use eonix_sync::Spin;
 use eonix_sync::{MutexWait, RwLockWait};
+
+pub use eonix_sync::Spin;
 
 #[doc(hidden)]
 #[derive(Debug)]

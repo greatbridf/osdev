@@ -54,7 +54,7 @@ pub struct RCUList<T: RCUNode<T>> {
 }
 
 impl<T: RCUNode<T>> RCUList<T> {
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             head: AtomicPtr::new(core::ptr::null_mut()),
             reader_lock: rwlock_new(()),
@@ -195,10 +195,6 @@ impl<T: core::fmt::Debug> core::fmt::Debug for RCUPointer<T> {
 }
 
 impl<T> RCUPointer<T> {
-    pub fn new_with(value: Arc<T>) -> Self {
-        Self(AtomicPtr::new(Arc::into_raw(value) as *mut _))
-    }
-
     pub fn empty() -> Self {
         Self(AtomicPtr::new(core::ptr::null_mut()))
     }

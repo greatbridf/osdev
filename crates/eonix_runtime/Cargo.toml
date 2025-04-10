@@ -8,11 +8,11 @@ arch = { path = "../../arch" }
 atomic_unique_refcell = { path = "../atomic_unique_refcell" }
 eonix_log = { path = "../eonix_log" }
 eonix_preempt = { path = "../eonix_preempt" }
+eonix_spin_irq = { path = "../eonix_spin_irq" }
 eonix_sync = { path = "../eonix_sync" }
 pointers = { path = "../pointers" }
 
 intrusive-collections = "0.9.7"
-lazy_static = { version = "1.5.0", features = ["spin_no_std"] }
 
 [features]
 default = []

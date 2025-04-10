@@ -4,11 +4,10 @@ mod relax;
 use core::{
     cell::UnsafeCell,
     marker::PhantomData,
-    mem::ManuallyDrop,
     sync::atomic::{AtomicBool, Ordering},
 };
 
-pub use guard::{SpinGuard, SpinIrqGuard};
+pub use guard::{SpinGuard, UnlockedSpinGuard};
 pub use relax::{LoopRelax, Relax, SpinRelax};
 
 //// A spinlock is a lock that uses busy-waiting to acquire the lock.
@@ -63,19 +62,6 @@ where
             lock: self,
             // SAFETY: We are holding the lock, so we can safely access the value.
             value: unsafe { &mut *self.value.get() },
-            _not_send: PhantomData,
-        }
-    }
-
-    pub fn lock_irq(&self) -> SpinIrqGuard<'_, T, R> {
-        let irq_state = arch::disable_irqs_save();
-        self.do_lock();
-
-        SpinIrqGuard {
-            lock: self,
-            // SAFETY: We are holding the lock, so we can safely access the value.
-            value: unsafe { &mut *self.value.get() },
-            irq_state: ManuallyDrop::new(irq_state),
             _not_send: PhantomData,
         }
     }

@@ -1,19 +1,14 @@
-use core::cmp::Ordering;
-
+use super::{constants::ENOENT, mem::paging::Page, vfs::DevId};
 use crate::{
     io::{Buffer, FillResult, UninitBuffer},
     prelude::*,
 };
-
 use alloc::{
     collections::btree_map::{BTreeMap, Entry},
     sync::Arc,
 };
-use bindings::{EEXIST, EINVAL, EIO, ENOENT};
-
-use lazy_static::lazy_static;
-
-use super::{mem::paging::Page, vfs::DevId};
+use bindings::{EEXIST, EINVAL, EIO};
+use core::cmp::Ordering;
 
 pub fn make_device(major: u32, minor: u32) -> DevId {
     (major << 8) & 0xff00u32 | minor & 0xffu32
@@ -72,10 +67,7 @@ impl Ord for BlockDevice {
     }
 }
 
-lazy_static! {
-    static ref BLOCK_DEVICE_LIST: Spin<BTreeMap<DevId, Arc<BlockDevice>>> =
-        Spin::new(BTreeMap::new());
-}
+static BLOCK_DEVICE_LIST: Spin<BTreeMap<DevId, Arc<BlockDevice>>> = Spin::new(BTreeMap::new());
 
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]

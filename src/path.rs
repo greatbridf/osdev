@@ -1,7 +1,4 @@
-use crate::prelude::*;
-
-use bindings::ENOENT;
-
+use crate::{kernel::constants::ENOENT, prelude::*};
 use core::fmt::{self, Debug, Formatter};
 
 pub struct Path<'lt> {

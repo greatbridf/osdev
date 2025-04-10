@@ -14,7 +14,7 @@ pub struct ProcessGroupBuilder {
 #[derive(Debug)]
 pub struct ProcessGroup {
     pub pgid: u32,
-    pub leader: Weak<Process>,
+    pub _leader: Weak<Process>,
     pub session: Weak<Session>,
 
     pub processes: Locked<BTreeMap<u32, Weak<Process>>, ProcessList>,
@@ -49,7 +49,7 @@ impl ProcessGroupBuilder {
             pgid,
             session: Arc::downgrade(&session),
             processes: Locked::new(BTreeMap::from([(pgid, leader.clone())]), process_list),
-            leader,
+            _leader: leader,
         });
 
         process_list.add_pgroup(&pgroup);

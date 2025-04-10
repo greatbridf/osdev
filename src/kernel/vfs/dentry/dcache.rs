@@ -1,46 +1,17 @@
-use core::{
-    mem::MaybeUninit,
-    sync::atomic::{AtomicPtr, Ordering},
-};
-
-use alloc::sync::Arc;
-use bindings::ENOENT;
-
+use super::{Dentry, Inode};
 use crate::{
     kernel::vfs::{s_isdir, s_islnk},
     prelude::*,
-    rcu::{RCUIterator, RCUList, RCUPointer},
+    rcu::{RCUIterator, RCUList},
 };
-
-use super::{Dentry, Inode};
-
-use lazy_static::lazy_static;
+use alloc::sync::Arc;
+use bindings::ENOENT;
+use core::sync::atomic::Ordering;
 
 const DCACHE_HASH_BITS: u32 = 8;
 
-lazy_static! {
-    static ref DCACHE: [RCUList<Dentry>; 1 << DCACHE_HASH_BITS] =
-        core::array::from_fn(|_| RCUList::new());
-    static ref DROOT: Arc<Dentry> = {
-        let dentry = Arc::new_uninit();
-        let fake_parent = unsafe { dentry.clone().assume_init() };
-
-        unsafe { &mut *(Arc::as_ptr(&dentry) as *mut MaybeUninit<Dentry>) }.write(Dentry {
-            parent: fake_parent,
-            name: b"[root]".as_slice().into(),
-            hash: 0,
-            prev: AtomicPtr::default(),
-            next: AtomicPtr::default(),
-            data: RCUPointer::empty(),
-        });
-
-        unsafe { dentry.assume_init() }
-    };
-}
-
-pub fn _looped_droot() -> &'static Arc<Dentry> {
-    &DROOT
-}
+static DCACHE: [RCUList<Dentry>; 1 << DCACHE_HASH_BITS] =
+    [const { RCUList::new() }; 1 << DCACHE_HASH_BITS];
 
 pub fn d_hinted(hash: u64) -> &'static RCUList<Dentry> {
     let hash = hash as usize & ((1 << DCACHE_HASH_BITS) - 1);

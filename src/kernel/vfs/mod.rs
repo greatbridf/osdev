@@ -1,13 +1,10 @@
+use super::task::Thread;
 use crate::prelude::*;
-
 use alloc::sync::Arc;
 use bindings::{dev_t, S_IFBLK, S_IFCHR, S_IFDIR, S_IFLNK, S_IFMT, S_IFREG};
 use dentry::Dentry;
+use eonix_sync::LazyLock;
 use inode::Mode;
-
-use super::task::Thread;
-
-use lazy_static::lazy_static;
 
 pub mod dentry;
 pub mod file;
@@ -52,13 +49,13 @@ pub struct FsContext {
     pub umask: Spin<Mode>,
 }
 
-lazy_static! {
-    static ref GLOBAL_FS_CONTEXT: Arc<FsContext> = Arc::new(FsContext {
-        fsroot: Dentry::kernel_root_dentry(),
-        cwd: Spin::new(Dentry::kernel_root_dentry()),
+static GLOBAL_FS_CONTEXT: LazyLock<Arc<FsContext>> = LazyLock::new(|| {
+    Arc::new(FsContext {
+        fsroot: Dentry::root().clone(),
+        cwd: Spin::new(Dentry::root().clone()),
         umask: Spin::new(0o022),
-    });
-}
+    })
+});
 
 impl TimeSpec {
     pub const fn default() -> Self {

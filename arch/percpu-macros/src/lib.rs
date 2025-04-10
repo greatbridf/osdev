@@ -136,22 +136,22 @@ pub fn define_percpu_shared(attrs: TokenStream, item: TokenStream) -> TokenStrea
     quote! {
         #[link_section = ".percpu"]
         #[allow(non_upper_case_globals)]
-        static #inner_ident: ::eonix_sync::Spin< #ty > = ::eonix_sync::Spin::new( #expr );
+        static #inner_ident: #ty = #expr;
         #[allow(non_camel_case_types)]
         #vis struct #access_ident;
         #vis static #ident: #access_ident = #access_ident;
 
         impl #access_ident {
-            fn as_ptr(&self) -> *const ::eonix_sync::Spin< #ty > {
-                unsafe { ( #as_ptr ) as *const _ }
+            fn as_ptr(&self) -> *const #ty {
+                unsafe { ( #as_ptr ) }
             }
 
-            pub fn get_ref(&self) -> &::eonix_sync::Spin< #ty > {
+            pub fn get_ref(&self) -> & #ty {
                 // SAFETY: This is safe because `as_ptr()` is guaranteed to be valid.
                 unsafe { self.as_ptr().as_ref().unwrap() }
             }
 
-            pub fn get_for_cpu(&self, cpuid: usize) -> Option<&::eonix_sync::Spin< #ty >> {
+            pub fn get_for_cpu(&self, cpuid: usize) -> Option<& #ty > {
                 let offset = & #inner_ident as *const _ as usize;
                 let base = ::arch::PercpuArea::get_for(cpuid);
                 base.map(|base| unsafe { base.byte_add(offset).cast().as_ref() })
@@ -159,7 +159,7 @@ pub fn define_percpu_shared(attrs: TokenStream, item: TokenStream) -> TokenStrea
         }
 
         impl ::core::ops::Deref for #access_ident {
-            type Target = ::eonix_sync::Spin< #ty >;
+            type Target = #ty;
 
             fn deref(&self) -> &Self::Target {
                 self.get_ref()

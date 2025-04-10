@@ -263,7 +263,7 @@ impl SignalListInner {
                 self.stop_waker.take().map(|waker| waker.wake());
             }
             _ => {
-                // If we don't have a waker here, we might be at initialization step.
+                // If we don't have a waker here, we are not permitted to be woken up.
                 // We would run in the end anyway.
                 self.signal_waker
                     .as_ref()
@@ -328,11 +328,9 @@ impl SignalList {
             .unwrap_or_else(SignalAction::default_action)
     }
 
-    // TODO!!!: Find a better way.
-    pub fn set_signal_waker(&self, waker: Waker) {
+    pub fn set_signal_waker(&self, waker: Option<Waker>) {
         let mut inner = self.inner.lock();
-        let old_waker = inner.signal_waker.replace(waker);
-        assert!(old_waker.is_none(), "We should not have a waker here");
+        inner.signal_waker = waker;
     }
 
     /// Clear all signals except for `SIG_IGN`.
@@ -423,7 +421,12 @@ impl SignalList {
                     // SAFETY: Preempt disabled above.
                     {
                         let mut inner = self.inner.lock();
-                        let waker = Waker::from(Task::current().usleep());
+                        let waker = Waker::from(Task::current().clone());
+
+                        unsafe {
+                            Task::current().sleep();
+                        }
+
                         let old_waker = inner.stop_waker.replace(waker);
                         assert!(old_waker.is_none(), "We should not have a waker here");
                     }

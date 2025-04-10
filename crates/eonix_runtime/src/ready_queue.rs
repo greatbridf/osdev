@@ -3,7 +3,7 @@ use alloc::{collections::VecDeque, sync::Arc};
 use eonix_sync::Spin;
 
 #[arch::define_percpu_shared]
-static READYQUEUE: FifoReadyQueue = FifoReadyQueue::new();
+static READYQUEUE: Spin<FifoReadyQueue> = Spin::new(FifoReadyQueue::new());
 
 pub trait ReadyQueue {
     fn get(&mut self) -> Option<Arc<Task>>;
@@ -34,4 +34,8 @@ impl ReadyQueue for FifoReadyQueue {
 
 pub fn local_rq() -> &'static Spin<dyn ReadyQueue> {
     &*READYQUEUE
+}
+
+pub fn cpu_rq(cpuid: usize) -> &'static Spin<dyn ReadyQueue> {
+    READYQUEUE.get_for_cpu(cpuid).expect("CPU not found")
 }

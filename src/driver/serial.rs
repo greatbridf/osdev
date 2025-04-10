@@ -5,12 +5,12 @@ use crate::{
         task::KernelStack, CharDevice, CharDeviceType, Terminal, TerminalDevice,
     },
     prelude::*,
-    sync::UCondVar,
 };
 use alloc::{collections::vec_deque::VecDeque, format, sync::Arc};
 use bitflags::bitflags;
-use eonix_runtime::{run::FutureRun, scheduler::Scheduler};
+use eonix_runtime::{run::FutureRun, scheduler::Scheduler, task::TaskWait};
 use eonix_spin_irq::SpinIrq as _;
+use eonix_sync::{yield_now, WaitList as _};
 
 bitflags! {
     struct LineStatus: u8 {
@@ -25,7 +25,7 @@ struct Serial {
     name: Arc<str>,
 
     terminal: Spin<Option<Arc<Terminal>>>,
-    cv_worker: UCondVar,
+    worker_wait: TaskWait,
 
     working: Spin<bool>,
     tx_buffer: Spin<VecDeque<u8>>,
@@ -67,7 +67,7 @@ impl Serial {
             self.enable_interrupts();
             *working = false;
 
-            self.cv_worker.async_wait(working)
+            self.worker_wait.wait(working)
         }
         .await;
 
@@ -106,7 +106,7 @@ impl Serial {
             if should_wait {
                 port.wait_for_interrupt().await;
             } else {
-                Scheduler::yield_now().await;
+                yield_now().await;
             }
         }
     }
@@ -116,7 +116,7 @@ impl Serial {
             id,
             name: Arc::from(format!("ttyS{id}")),
             terminal: Spin::new(None),
-            cv_worker: UCondVar::new(),
+            worker_wait: TaskWait::new(),
             working: Spin::new(true),
             tx_buffer: Spin::new(VecDeque::new()),
             tx_rx: Port8::new(base_port),
@@ -150,7 +150,7 @@ impl Serial {
     fn wakeup_worker(&self) {
         let working = self.working.lock_irq();
         if !*working {
-            self.cv_worker.notify_all();
+            self.worker_wait.notify_one();
         }
     }
 

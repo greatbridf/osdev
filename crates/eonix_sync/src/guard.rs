@@ -25,4 +25,17 @@ pub trait ForceUnlockableGuard {
     /// # Safety
     /// Calling this function twice on a force unlocked guard will cause deadlocks.
     unsafe fn force_relock(&mut self);
+
+    fn do_unlocked(&mut self, f: impl FnOnce())
+    where
+        Self: Sized,
+    {
+        // SAFETY: We unlock the lock before calling the function and relock it after
+        // calling the function. So we will end up with the lock being held again.
+        unsafe {
+            self.force_unlock();
+            f();
+            self.force_relock();
+        }
+    }
 }

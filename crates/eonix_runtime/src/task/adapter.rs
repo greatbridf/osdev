@@ -1,7 +1,6 @@
+use super::{Task, TaskId};
 use alloc::sync::Arc;
 use intrusive_collections::{intrusive_adapter, KeyAdapter, RBTreeAtomicLink};
-
-use super::{Task, TaskId};
 
 intrusive_adapter!(pub TaskAdapter = Arc<Task>: Task { link_task_list: RBTreeAtomicLink });
 

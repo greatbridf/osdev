@@ -1,7 +1,7 @@
 use super::{Executor, OutputHandle, RealExecutor, Stack};
 use crate::{
     context::ExecutionContext,
-    run::{Contexted, PinRun},
+    run::{Contexted, Run},
 };
 use alloc::{boxed::Box, sync::Arc};
 use core::{pin::Pin, sync::atomic::AtomicBool};
@@ -15,7 +15,7 @@ pub struct ExecutorBuilder<S, R> {
 impl<S, R> ExecutorBuilder<S, R>
 where
     S: Stack,
-    R: PinRun + Contexted + Send + 'static,
+    R: Run + Contexted + Send + 'static,
     R::Output: Send,
 {
     pub fn new() -> Self {

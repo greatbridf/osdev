@@ -1,10 +1,11 @@
 mod adapter;
 mod task_state;
+mod wait_list;
 
 use crate::{
     context::ExecutionContext,
     executor::{ExecuteStatus, Executor, ExecutorBuilder, OutputHandle, Stack},
-    run::{Contexted, PinRun},
+    run::{Contexted, Run},
     scheduler::Scheduler,
 };
 use alloc::{boxed::Box, sync::Arc, task::Wake};
@@ -19,11 +20,10 @@ use intrusive_collections::RBTreeAtomicLink;
 use task_state::TaskState;
 
 pub use adapter::TaskAdapter;
+pub use wait_list::TaskWait;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct TaskId(u32);
-
-pub struct UniqueWaker(Arc<Task>);
 
 pub struct TaskHandle<Output>
 where
@@ -34,17 +34,40 @@ where
 }
 
 /// A `Task` represents a schedulable unit.
+///
+/// ## Task Sleeping and Waking up
+///
+/// ### Waiters
+///
+/// lock => check condition no => save waker => set state sleep => unlock => return pending
+///
+/// executor check state -> if sleeping => goto scheduler => get rq lock => scheduler check state
+///
+///                                                                      -> if sleeping => on_rq = false
+///
+///                                                                      -> if running => enqueue
+///
+///                      -> if running => poll again
+///
+/// ### Wakers
+///
+/// lock => set condition yes => get waker => unlock => if has waker
+///
+/// set state running => swap on_rq true => get rq lock => check on_rq true again => if false enqueue
 pub struct Task {
     /// Unique identifier of the task.
     pub id: TaskId,
-    /// Whether the task is on some run queue.
+    /// Whether the task is on some run queue (a.k.a ready).
     pub(crate) on_rq: AtomicBool,
+    /// The last cpu that the task was executed on.
+    /// If `on_rq` is `false`, we can't assume that this task is still on the cpu.
+    pub(crate) cpu: AtomicU32,
+    /// Task state.
+    pub(crate) state: TaskState,
     /// Task execution context.
     pub(crate) execution_context: ExecutionContext,
     /// Executor object.
     executor: AtomicUniqueRefCell<Option<Pin<Box<dyn Executor>>>>,
-    /// Task state.
-    state: TaskState,
     /// Link in the global task list.
     link_task_list: RBTreeAtomicLink,
 }
@@ -62,7 +85,7 @@ impl Task {
     pub fn new<S, R>(runnable: R) -> TaskHandle<R::Output>
     where
         S: Stack + 'static,
-        R: PinRun + Contexted + Send + 'static,
+        R: Run + Contexted + Send + 'static,
         R::Output: Send + 'static,
     {
         static ID: AtomicU32 = AtomicU32::new(0);
@@ -75,9 +98,10 @@ impl Task {
         let task = Arc::new(Self {
             id: TaskId(ID.fetch_add(1, Ordering::Relaxed)),
             on_rq: AtomicBool::new(false),
+            cpu: AtomicU32::new(0),
+            state: TaskState::new(TaskState::RUNNING),
             executor: AtomicUniqueRefCell::new(Some(executor)),
             execution_context,
-            state: TaskState::new(TaskState::RUNNING),
             link_task_list: RBTreeAtomicLink::new(),
         });
 
@@ -85,41 +109,6 @@ impl Task {
             task,
             output_handle: output,
         }
-    }
-
-    pub fn is_runnable(&self) -> bool {
-        self.state.is_runnable()
-    }
-
-    pub(super) fn set_usleep(&self) {
-        let prev_state = self.state.swap(TaskState::USLEEP);
-        assert_eq!(
-            prev_state,
-            TaskState::RUNNING,
-            "Trying to set task {} usleep that is not running",
-            self.id.0
-        );
-    }
-
-    pub fn usleep(self: &Arc<Self>) -> Arc<UniqueWaker> {
-        // No need to dequeue. We have proved that the task is running so not in the queue.
-        self.set_usleep();
-
-        Arc::new(UniqueWaker(self.clone()))
-    }
-
-    pub fn isleep(self: &Arc<Self>) -> Arc<Self> {
-        // No need to dequeue. We have proved that the task is running so not in the queue.
-        let prev_state = self.state.cmpxchg(TaskState::RUNNING, TaskState::ISLEEP);
-
-        assert_eq!(
-            prev_state,
-            TaskState::RUNNING,
-            "Trying to sleep task {} that is not running",
-            self.id.0
-        );
-
-        self.clone()
     }
 
     pub fn run(&self) -> ExecuteStatus {
@@ -133,11 +122,15 @@ impl Task {
 
         if let ExecuteStatus::Finished = executor.progress() {
             executor_borrow.take();
-            self.set_usleep();
             ExecuteStatus::Finished
         } else {
             ExecuteStatus::Executing
         }
+    }
+
+    /// Temporary solution.
+    pub unsafe fn sleep(&self) {
+        self.state.swap(TaskState::SLEEPING);
     }
 }
 
@@ -147,25 +140,15 @@ impl Wake for Task {
     }
 
     fn wake_by_ref(self: &Arc<Self>) {
-        match self.state.cmpxchg(TaskState::ISLEEP, TaskState::RUNNING) {
-            TaskState::RUNNING | TaskState::USLEEP => return,
-            TaskState::ISLEEP => Scheduler::get().activate(self),
-            state => panic!("Invalid transition from state {:?} to `Running`", state),
+        // TODO: Check the fast path where we're waking up current.
+
+        // SAFETY: All the operations below should happen after we've read the sleeping state.
+        let old_state = self.state.swap(TaskState::RUNNING);
+        if old_state != TaskState::SLEEPING {
+            return;
         }
-    }
-}
 
-impl Wake for UniqueWaker {
-    fn wake(self: Arc<Self>) {
-        self.wake_by_ref();
-    }
-
-    fn wake_by_ref(self: &Arc<Self>) {
-        let Self(task) = &**self;
-
-        let prev_state = task.state.swap(TaskState::RUNNING);
-        assert_eq!(prev_state, TaskState::USLEEP);
-
-        Scheduler::get().activate(task);
+        // If we get here, we should be the only one waking up the task.
+        Scheduler::get().activate(self);
     }
 }

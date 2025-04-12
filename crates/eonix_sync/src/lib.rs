@@ -15,6 +15,6 @@ pub use locked::{AsProof, AsProofMut, Locked, Proof, ProofMut};
 pub use mutex::{Mutex, MutexGuard, Wait as MutexWait};
 pub use rwlock::{RwLock, RwLockReadGuard, RwLockWriteGuard, Wait as RwLockWait};
 pub use spin::{LoopRelax, Relax, Spin, SpinGuard, SpinRelax, UnlockedSpinGuard};
-pub use wait_list::{sleep, yield_now, WaitList};
+pub use wait_list::WaitList;
 
 extern crate alloc;

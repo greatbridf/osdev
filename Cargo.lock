@@ -129,6 +129,7 @@ name = "eonix_sync"
 version = "0.1.0"
 dependencies = [
  "eonix_preempt",
+ "intrusive-collections",
 ]
 
 [[package]]

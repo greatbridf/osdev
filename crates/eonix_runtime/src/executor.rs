@@ -61,18 +61,7 @@ where
 
                 match pinned_runnable.as_mut().run(&waker) {
                     RunState::Finished(output) => break output,
-                    RunState::Running => {
-                        eonix_preempt::disable();
-
-                        if !Task::current().state.is_running() {
-                            unsafe {
-                                // SAFETY: Preemption is disabled.
-                                Scheduler::goto_scheduler(&Task::current().execution_context)
-                            };
-                        }
-
-                        eonix_preempt::enable();
-                    }
+                    RunState::Running => Task::park(),
                 }
             };
 

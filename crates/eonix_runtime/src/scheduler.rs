@@ -140,6 +140,9 @@ impl Scheduler {
     }
 
     pub fn activate(&self, task: &Arc<Task>) {
+        // Only one cpu can be activating the task at a time.
+        // TODO: Add some checks.
+
         if task.on_rq.swap(true, Ordering::Acquire) {
             // Lock the rq and check whether the task is on the rq again.
             let cpuid = task.cpu.load(Ordering::Acquire);
@@ -249,7 +252,7 @@ extern "C" fn local_scheduler() -> ! {
 
                 debug_assert_ne!(previous.id, next.id, "Switching to the same task");
 
-                if previous.state.is_running() {
+                if previous.state.is_running() || !previous.state.try_park() {
                     rq.put(previous);
                 } else {
                     previous.on_rq.store(false, Ordering::Release);

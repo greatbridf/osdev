@@ -1,6 +1,5 @@
 mod adapter;
 mod task_state;
-mod wait_list;
 
 use crate::{
     context::ExecutionContext,
@@ -13,14 +12,12 @@ use atomic_unique_refcell::AtomicUniqueRefCell;
 use core::{
     pin::Pin,
     sync::atomic::{AtomicBool, AtomicU32, Ordering},
-    task::Waker,
 };
 use eonix_sync::Spin;
 use intrusive_collections::RBTreeAtomicLink;
 use task_state::TaskState;
 
 pub use adapter::TaskAdapter;
-pub use wait_list::TaskWait;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct TaskId(u32);
@@ -35,30 +32,30 @@ where
 
 /// A `Task` represents a schedulable unit.
 ///
-/// ## Task Sleeping and Waking up
+/// Initial: state = Running, unparked = false
 ///
-/// ### Waiters
+/// Task::park() => swap state <- Parking, assert prev == Running
+///              => swap unparked <- false
+///              -> true => store state <- Running => return
+///              -> false => goto scheduler => get rq lock => load state
+///                                                        -> Running => enqueue
+///                                                        -> Parking => cmpxchg Parking -> Parked
+///                                                                   -> Running => enqueue
+///                                                                   -> Parking => on_rq <- false
+///                                                                   -> Parked => ???
 ///
-/// lock => check condition no => save waker => set state sleep => unlock => return pending
-///
-/// executor check state -> if sleeping => goto scheduler => get rq lock => scheduler check state
-///
-///                                                                      -> if sleeping => on_rq = false
-///
-///                                                                      -> if running => enqueue
-///
-///                      -> if running => poll again
-///
-/// ### Wakers
-///
-/// lock => set condition yes => get waker => unlock => if has waker
-///
-/// set state running => swap on_rq true => get rq lock => check on_rq true again => if false enqueue
+/// Task::unpark() => swap unparked <- true
+///                -> true => return
+///                -> false => swap state <- Running
+///                         -> Running => return
+///                         -> Parking | Parked => Scheduler::activate
 pub struct Task {
     /// Unique identifier of the task.
     pub id: TaskId,
     /// Whether the task is on some run queue (a.k.a ready).
     pub(crate) on_rq: AtomicBool,
+    /// Whether someone has called `unpark` on this task.
+    pub(crate) unparked: AtomicBool,
     /// The last cpu that the task was executed on.
     /// If `on_rq` is `false`, we can't assume that this task is still on the cpu.
     pub(crate) cpu: AtomicU32,
@@ -70,15 +67,6 @@ pub struct Task {
     executor: AtomicUniqueRefCell<Option<Pin<Box<dyn Executor>>>>,
     /// Link in the global task list.
     link_task_list: RBTreeAtomicLink,
-}
-
-impl<Output> TaskHandle<Output>
-where
-    Output: Send,
-{
-    pub fn waker(&self) -> Waker {
-        Waker::from(self.task.clone())
-    }
 }
 
 impl Task {
@@ -98,6 +86,7 @@ impl Task {
         let task = Arc::new(Self {
             id: TaskId(ID.fetch_add(1, Ordering::Relaxed)),
             on_rq: AtomicBool::new(false),
+            unparked: AtomicBool::new(false),
             cpu: AtomicU32::new(0),
             state: TaskState::new(TaskState::RUNNING),
             executor: AtomicUniqueRefCell::new(Some(executor)),
@@ -128,9 +117,54 @@ impl Task {
         }
     }
 
-    /// Temporary solution.
-    pub unsafe fn sleep(&self) {
-        self.state.swap(TaskState::SLEEPING);
+    pub fn unpark(self: &Arc<Self>) {
+        if self.unparked.swap(true, Ordering::Release) {
+            return;
+        }
+
+        match self.state.swap(TaskState::RUNNING) {
+            TaskState::RUNNING => return,
+            TaskState::PARKED | TaskState::PARKING => {
+                // We are waking up from sleep or someone else is parking this task.
+                // Try to wake it up.
+                Scheduler::get().activate(self);
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    pub fn park() {
+        eonix_preempt::disable();
+        Self::park_preempt_disabled();
+    }
+
+    /// Park the current task with `preempt::count() == 1`.
+    pub fn park_preempt_disabled() {
+        let task = Task::current();
+
+        let old_state = task.state.swap(TaskState::PARKING);
+        assert_eq!(
+            old_state,
+            TaskState::RUNNING,
+            "Parking a task that is not running."
+        );
+
+        if task.unparked.swap(false, Ordering::Release) {
+            // Someone has called `unpark` on this task previously.
+            let old_state = task.state.swap(TaskState::RUNNING);
+            assert_eq!(
+                old_state,
+                TaskState::PARKING,
+                "We should have just swapped the state to RUNNING."
+            );
+        } else {
+            unsafe {
+                // SAFETY: Preemption is disabled.
+                Scheduler::goto_scheduler(&Task::current().execution_context)
+            };
+        }
+
+        eonix_preempt::enable();
     }
 }
 
@@ -140,15 +174,6 @@ impl Wake for Task {
     }
 
     fn wake_by_ref(self: &Arc<Self>) {
-        // TODO: Check the fast path where we're waking up current.
-
-        // SAFETY: All the operations below should happen after we've read the sleeping state.
-        let old_state = self.state.swap(TaskState::RUNNING);
-        if old_state != TaskState::SLEEPING {
-            return;
-        }
-
-        // If we get here, we should be the only one waking up the task.
-        Scheduler::get().activate(self);
+        self.unpark();
     }
 }

@@ -8,9 +8,10 @@ use crate::{
 };
 use alloc::{collections::vec_deque::VecDeque, format, sync::Arc};
 use bitflags::bitflags;
-use eonix_runtime::{run::FutureRun, scheduler::Scheduler, task::TaskWait};
+use core::pin::pin;
+use eonix_runtime::{run::FutureRun, scheduler::Scheduler};
 use eonix_spin_irq::SpinIrq as _;
-use eonix_sync::{yield_now, WaitList as _};
+use eonix_sync::WaitList;
 
 bitflags! {
     struct LineStatus: u8 {
@@ -25,7 +26,7 @@ struct Serial {
     name: Arc<str>,
 
     terminal: Spin<Option<Arc<Terminal>>>,
-    worker_wait: TaskWait,
+    worker_wait: WaitList,
 
     working: Spin<bool>,
     tx_buffer: Spin<VecDeque<u8>>,
@@ -54,7 +55,7 @@ impl Serial {
 
     fn disable_interrupts(&self) {
         // Disable interrupt #0: Received data available
-        self.int_ena.write(0x00);
+        self.int_ena.write(0x02);
     }
 
     fn line_status(&self) -> LineStatus {
@@ -62,16 +63,18 @@ impl Serial {
     }
 
     async fn wait_for_interrupt(&self) {
-        let mut working = {
+        let mut wait = pin!(self.worker_wait.prepare_to_wait());
+
+        {
             let mut working = self.working.lock_irq();
             self.enable_interrupts();
+            wait.as_mut().add_to_wait_list();
             *working = false;
+        };
 
-            self.worker_wait.wait(working)
-        }
-        .await;
+        wait.await;
 
-        *working = true;
+        *self.working.lock_irq() = true;
         self.disable_interrupts();
     }
 
@@ -89,24 +92,24 @@ impl Serial {
 
             let should_wait = {
                 let mut tx_buffer = port.tx_buffer.lock();
+                let mut count = 0;
 
                 // Give it a chance to receive data.
-                let count = tx_buffer.len().min(64);
-                for ch in tx_buffer.drain(..count) {
+                for &ch in tx_buffer.iter().take(64) {
                     if port.line_status().contains(LineStatus::TX_READY) {
                         port.tx_rx.write(ch);
                     } else {
                         break;
                     }
+                    count += 1;
                 }
+                tx_buffer.drain(..count);
 
                 tx_buffer.is_empty()
             };
 
             if should_wait {
                 port.wait_for_interrupt().await;
-            } else {
-                yield_now().await;
             }
         }
     }
@@ -116,7 +119,7 @@ impl Serial {
             id,
             name: Arc::from(format!("ttyS{id}")),
             terminal: Spin::new(None),
-            worker_wait: TaskWait::new(),
+            worker_wait: WaitList::new(),
             working: Spin::new(true),
             tx_buffer: Spin::new(VecDeque::new()),
             tx_rx: Port8::new(base_port),

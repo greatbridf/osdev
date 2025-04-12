@@ -1,9 +1,9 @@
 use crate::{kernel::task::Thread, prelude::*};
 use alloc::collections::vec_deque::VecDeque;
-use core::{future::Future, task::Waker};
-use eonix_preempt::{assert_preempt_count_eq, assert_preempt_enabled};
-use eonix_runtime::{scheduler::Scheduler, task::Task};
-use eonix_sync::{sleep, ForceUnlockableGuard, UnlockableGuard, UnlockedGuard as _};
+use core::task::Waker;
+use eonix_preempt::assert_preempt_count_eq;
+use eonix_runtime::task::Task;
+use eonix_sync::ForceUnlockableGuard;
 
 pub struct CondVar<const INTERRUPTIBLE: bool> {
     waiters: Spin<VecDeque<Waker>>,
@@ -62,10 +62,6 @@ impl<const I: bool> CondVar<I> {
 
         self.waiters.lock().push_back(waker.clone());
 
-        unsafe {
-            Task::current().sleep();
-        }
-
         // TODO!!!: Another way to do this:
         //
         // Store a flag in our entry in the waiting list.
@@ -75,7 +71,7 @@ impl<const I: bool> CondVar<I> {
         unsafe { guard.force_unlock() };
 
         assert_preempt_count_eq!(1, "CondVar::wait");
-        Scheduler::schedule();
+        Task::park_preempt_disabled();
 
         if I {
             // Allow the thread to be woken up by a signal again.

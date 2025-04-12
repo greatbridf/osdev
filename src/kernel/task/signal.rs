@@ -11,7 +11,7 @@ use alloc::collections::{binary_heap::BinaryHeap, btree_map::BTreeMap};
 use arch::{ExtendedContext, InterruptContext};
 use bindings::{EFAULT, EINVAL};
 use core::{cmp::Reverse, task::Waker};
-use eonix_runtime::{scheduler::Scheduler, task::Task};
+use eonix_runtime::task::Task;
 use eonix_sync::AsProof as _;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -423,15 +423,11 @@ impl SignalList {
                         let mut inner = self.inner.lock();
                         let waker = Waker::from(Task::current().clone());
 
-                        unsafe {
-                            Task::current().sleep();
-                        }
-
                         let old_waker = inner.stop_waker.replace(waker);
                         assert!(old_waker.is_none(), "We should not have a waker here");
                     }
 
-                    Scheduler::schedule();
+                    Task::park_preempt_disabled();
 
                     if let Some(parent) = thread.process.parent.load() {
                         parent.notify(

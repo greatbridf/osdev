@@ -149,19 +149,15 @@ impl Task {
             "Parking a task that is not running."
         );
 
-        if task.unparked.swap(false, Ordering::Release) {
+        if task.unparked.swap(false, Ordering::AcqRel) {
             // Someone has called `unpark` on this task previously.
-            let old_state = task.state.swap(TaskState::RUNNING);
-            assert_eq!(
-                old_state,
-                TaskState::PARKING,
-                "We should have just swapped the state to RUNNING."
-            );
+            task.state.swap(TaskState::RUNNING);
         } else {
             unsafe {
                 // SAFETY: Preemption is disabled.
                 Scheduler::goto_scheduler(&Task::current().execution_context)
             };
+            assert!(task.unparked.swap(false, Ordering::Acquire));
         }
 
         eonix_preempt::enable();

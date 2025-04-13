@@ -363,15 +363,11 @@ impl Contexted for ThreadRunnable {
 impl Run for ThreadRunnable {
     type Output = ();
 
-    fn run(self: Pin<&mut Self>, waker: &Waker) -> RunState<Self::Output> {
+    fn run(self: Pin<&mut Self>, _waker: &Waker) -> RunState<Self::Output> {
         let mut task_context = ExecutionContext::new();
         task_context.set_interrupt(false);
         task_context.set_ip(_arch_fork_return as _);
         task_context.set_sp(&self.interrupt_context as *const _ as _);
-
-        self.thread
-            .signal_list
-            .set_signal_waker(Some(waker.clone()));
 
         eonix_preempt::disable();
 

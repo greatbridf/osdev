@@ -28,7 +28,7 @@ mod sync;
 use alloc::{ffi::CString, sync::Arc};
 use core::alloc::{GlobalAlloc, Layout};
 use elf::ParsedElf32;
-use eonix_runtime::{run::FutureRun, scheduler::Scheduler};
+use eonix_runtime::{run::FutureRun, scheduler::Scheduler, task::Task};
 use kernel::{
     cpu::init_localcpu,
     mem::Page,
@@ -178,7 +178,7 @@ async fn init_process(early_kstack_pfn: usize) {
 
     let thread_builder = ThreadBuilder::new().name(Arc::from(*b"busybox"));
 
-    let mut process_list = ProcessList::get().write();
+    let mut process_list = Task::block_on(ProcessList::get().write());
     let (thread, process) = ProcessBuilder::new()
         .mm_list(mm_list)
         .thread_builder(thread_builder)

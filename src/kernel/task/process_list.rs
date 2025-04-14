@@ -1,11 +1,12 @@
 use super::{Process, ProcessGroup, Session, Signal, Thread, WaitObject, WaitType};
-use crate::{prelude::*, rcu::rcu_sync, sync::rwlock_new};
+use crate::{prelude::*, rcu::rcu_sync};
 use alloc::{
     collections::btree_map::BTreeMap,
     sync::{Arc, Weak},
 };
 use bindings::KERNEL_PML4;
-use eonix_sync::{AsProof as _, AsProofMut as _};
+use eonix_runtime::task::Task;
+use eonix_sync::{AsProof as _, AsProofMut as _, RwLock};
 
 pub struct ProcessList {
     /// The init process.
@@ -20,7 +21,7 @@ pub struct ProcessList {
     sessions: BTreeMap<u32, Weak<Session>>,
 }
 
-static GLOBAL_PROC_LIST: RwLock<ProcessList> = rwlock_new(ProcessList {
+static GLOBAL_PROC_LIST: RwLock<ProcessList> = RwLock::new(ProcessList {
     init: None,
     threads: BTreeMap::new(),
     processes: BTreeMap::new(),
@@ -51,14 +52,14 @@ impl ProcessList {
 
     pub fn kill_current(signal: Signal) -> ! {
         unsafe {
-            let mut process_list = ProcessList::get().write();
-            eonix_preempt::disable();
+            let mut process_list = Task::block_on(ProcessList::get().write());
 
-            // SAFETY: Preemption disabled.
             process_list.do_kill_process(&Thread::current().process, WaitType::Signaled(signal));
         }
 
         unsafe {
+            eonix_preempt::disable();
+
             // SAFETY: Preempt count == 1.
             Thread::exit();
         }
@@ -74,7 +75,7 @@ impl ProcessList {
             let pgroup = unsafe { thread.process.pgroup.swap(None) }.unwrap();
             let _parent = unsafe { thread.process.parent.swap(None) }.unwrap();
             pgroup.remove_member(pid, self.prove_mut());
-            rcu_sync();
+            Task::block_on(rcu_sync());
 
             if Arc::strong_count(&pgroup) == 1 {
                 self.pgroups.remove(&pgroup.pgid);
@@ -115,7 +116,9 @@ impl ProcessList {
 
     /// Make the process a zombie and notify the parent.
     /// # Safety
-    /// This function needs to be called with preemption disabled.
+    /// This function will destroy the process and all its threads.
+    /// It is the caller's responsibility to ensure that the process is not
+    /// running or will not run after this function is called.
     pub unsafe fn do_kill_process(&mut self, process: &Arc<Process>, status: WaitType) {
         if process.pid == 1 {
             panic!("init exited");
@@ -132,10 +135,14 @@ impl ProcessList {
 
         // If we are the session leader, we should drop the control terminal.
         if process.session(self.prove()).sid == process.pid {
-            if let Some(terminal) = process.session(self.prove()).drop_control_terminal() {
+            if let Some(terminal) =
+                Task::block_on(process.session(self.prove()).drop_control_terminal())
+            {
                 terminal.drop_session();
             }
         }
+
+        eonix_preempt::disable();
 
         // Release the MMList as well as the page table.
         // Before we release the page table, we need to switch to the kernel page table.
@@ -143,6 +150,8 @@ impl ProcessList {
         unsafe {
             process.mm_list.release();
         }
+
+        eonix_preempt::enable();
 
         // Make children orphans (adopted by init)
         {

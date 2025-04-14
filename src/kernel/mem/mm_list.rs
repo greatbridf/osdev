@@ -2,16 +2,15 @@ mod page_fault;
 
 use super::{MMArea, Page, PageTable, VAddr, VRange};
 use crate::kernel::vfs::dentry::Dentry;
-use crate::{
-    prelude::*,
-    sync::{mutex_new, ArcSwap},
-};
+use crate::{prelude::*, sync::ArcSwap};
 use alloc::{collections::btree_set::BTreeSet, sync::Arc};
 use bindings::{EEXIST, EFAULT, EINVAL, ENOMEM, KERNEL_PML4};
 use core::{
     ops::Sub as _,
     sync::atomic::{AtomicUsize, Ordering},
 };
+use eonix_runtime::task::Task;
+use eonix_sync::Mutex;
 
 pub use page_fault::handle_page_fault;
 
@@ -197,7 +196,7 @@ impl MMList {
         let page_table = PageTable::new();
         Self {
             root_page_table: AtomicUsize::from(page_table.root_page_table()),
-            inner: ArcSwap::new(mutex_new(MMListInner {
+            inner: ArcSwap::new(Mutex::new(MMListInner {
                 areas: BTreeSet::new(),
                 page_table,
                 break_start: None,
@@ -208,12 +207,12 @@ impl MMList {
 
     pub fn new_cloned(&self) -> Self {
         let inner = self.inner.borrow();
-        let inner = inner.lock();
+        let inner = Task::block_on(inner.lock());
 
         let page_table = PageTable::new();
         let list = Self {
             root_page_table: AtomicUsize::from(page_table.root_page_table()),
-            inner: ArcSwap::new(mutex_new(MMListInner {
+            inner: ArcSwap::new(Mutex::new(MMListInner {
                 areas: inner.areas.clone(),
                 page_table,
                 break_start: inner.break_start,
@@ -223,7 +222,7 @@ impl MMList {
 
         {
             let list_inner = list.inner.borrow();
-            let list_inner = list_inner.lock();
+            let list_inner = Task::block_on(list_inner.lock());
 
             for area in list_inner.areas.iter() {
                 let new_iter = list_inner.page_table.iter_user(area.range()).unwrap();
@@ -284,7 +283,7 @@ impl MMList {
 
     /// No need to do invalidation manually, `PageTable` already does it.
     pub fn unmap(&self, start: VAddr, len: usize) -> KResult<()> {
-        self.inner.borrow().lock().unmap(start, len)
+        Task::block_on(self.inner.borrow().lock()).unmap(start, len)
     }
 
     pub fn mmap_hint(
@@ -295,7 +294,7 @@ impl MMList {
         permission: Permission,
     ) -> KResult<VAddr> {
         let inner = self.inner.borrow();
-        let mut inner = inner.lock();
+        let mut inner = Task::block_on(inner.lock());
 
         if hint == VAddr::NULL {
             let at = inner.find_available(hint, len).ok_or(ENOMEM)?;
@@ -321,16 +320,14 @@ impl MMList {
         mapping: Mapping,
         permission: Permission,
     ) -> KResult<VAddr> {
-        self.inner
-            .borrow()
-            .lock()
+        Task::block_on(self.inner.borrow().lock())
             .mmap(at, len, mapping.clone(), permission)
             .map(|_| at)
     }
 
     pub fn set_break(&self, pos: Option<VAddr>) -> VAddr {
         let inner = self.inner.borrow();
-        let mut inner = inner.lock();
+        let mut inner = Task::block_on(inner.lock());
 
         // SAFETY: `set_break` is only called in syscalls, where program break should be valid.
         assert!(inner.break_start.is_some() && inner.break_pos.is_some());
@@ -380,7 +377,7 @@ impl MMList {
     /// This should be called only **once** for every thread.
     pub fn register_break(&self, start: VAddr) {
         let inner = self.inner.borrow();
-        let mut inner = inner.lock();
+        let mut inner = Task::block_on(inner.lock());
         assert!(inner.break_start.is_none() && inner.break_pos.is_none());
 
         inner.break_start = Some(start.into());
@@ -400,7 +397,7 @@ impl MMList {
         }
 
         let inner = self.inner.borrow();
-        let inner = inner.lock();
+        let inner = Task::block_on(inner.lock());
 
         let mut offset = 0;
         let mut remaining = len;

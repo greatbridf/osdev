@@ -1,5 +1,5 @@
 use super::{dentry::Dentry, s_isblk, s_ischr, vfs::Vfs, DevId, TimeSpec};
-use crate::{io::Buffer, prelude::*, sync::rwlock_new};
+use crate::{io::Buffer, prelude::*};
 use alloc::sync::{Arc, Weak};
 use bindings::{
     statx, EINVAL, EISDIR, ENOTDIR, EPERM, STATX_ATIME, STATX_BLOCKS, STATX_CTIME, STATX_GID,
@@ -12,6 +12,8 @@ use core::{
     ptr::addr_of_mut,
     sync::atomic::{AtomicU32, AtomicU64, Ordering},
 };
+use eonix_runtime::task::Task;
+use eonix_sync::RwLock;
 
 pub type Ino = u64;
 pub type AtomicIno = AtomicU64;
@@ -56,7 +58,7 @@ impl InodeData {
             atime: Spin::new(TimeSpec::default()),
             ctime: Spin::new(TimeSpec::default()),
             mtime: Spin::new(TimeSpec::default()),
-            rwsem: rwlock_new(()),
+            rwsem: RwLock::new(()),
             size: AtomicU64::new(0),
             nlink: AtomicNlink::new(0),
             uid: AtomicUid::new(0),
@@ -248,7 +250,7 @@ pub trait Inode: Send + Sync + InodeInner {
         f(
             uninit_mut.as_mut_ptr(),
             // SAFETY: `idata` is initialized and we will never move the lock.
-            &unsafe { idata.assume_init_ref() }.rwsem.read(),
+            &Task::block_on(unsafe { idata.assume_init_ref() }.rwsem.read()),
         );
 
         // Safety: `uninit` is initialized

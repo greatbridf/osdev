@@ -90,9 +90,12 @@ impl FileArray {
     }
 
     pub fn close(&self, fd: FD) -> KResult<()> {
-        let mut inner = self.inner.lock();
-        inner.files.remove(&fd).ok_or(EBADF)?;
-        inner.release_fd(fd);
+        let _file = {
+            let mut inner = self.inner.lock();
+            let file = inner.files.remove(&fd).ok_or(EBADF)?;
+            inner.release_fd(fd);
+            file
+        };
         Ok(())
     }
 
@@ -136,10 +139,12 @@ impl FileArray {
             Entry::Vacant(_) => {}
             Entry::Occupied(entry) => {
                 let new_file = entry.into_mut();
+                let mut file_swap = new_file_data;
 
                 new_file.flags = flags;
-                new_file.file = new_file_data;
+                core::mem::swap(&mut file_swap, &mut new_file.file);
 
+                drop(inner);
                 return Ok(new_fd);
             }
         }
@@ -196,20 +201,18 @@ impl FileArray {
             }
         }
 
-        let mut inner = self.inner.lock();
-        let fd = inner.next_fd();
+        let file;
 
         if s_ischr(filemode) {
             let device = CharDevice::get(inode.devid()?).ok_or(ENXIO)?;
-            let file = device.open()?;
-            inner.do_insert(fd, fdflag as u64, file);
+            file = device.open()?;
         } else {
-            inner.do_insert(
-                fd,
-                fdflag as u64,
-                InodeFile::new(dentry, (can_read, can_write, append)),
-            );
+            file = InodeFile::new(dentry, (can_read, can_write, append));
         }
+
+        let mut inner = self.inner.lock();
+        let fd = inner.next_fd();
+        inner.do_insert(fd, fdflag as u64, file);
 
         Ok(fd)
     }

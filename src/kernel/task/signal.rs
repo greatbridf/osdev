@@ -13,6 +13,7 @@ use bindings::{EFAULT, EINVAL};
 use core::{cmp::Reverse, task::Waker};
 use eonix_runtime::task::Task;
 use eonix_sync::AsProof as _;
+use intrusive_collections::UnsafeRef;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Signal(u32);
@@ -62,19 +63,17 @@ pub struct SignalAction {
     pub sa_mask: usize,
 }
 
-#[derive(Debug)]
 struct SignalListInner {
     mask: u64,
     pending: BinaryHeap<Reverse<Signal>>,
 
-    signal_waker: Option<Waker>,
+    signal_waker: Option<UnsafeRef<dyn Fn() + Send + Sync>>,
     stop_waker: Option<Waker>,
 
     // TODO!!!!!: Signal disposition should be per-process.
     handlers: BTreeMap<Signal, SignalAction>,
 }
 
-#[derive(Debug)]
 pub struct SignalList {
     inner: Spin<SignalListInner>,
 }
@@ -265,9 +264,9 @@ impl SignalListInner {
             _ => {
                 // If we don't have a waker here, we are not permitted to be woken up.
                 // We would run in the end anyway.
-                self.signal_waker
-                    .as_ref()
-                    .inspect(|waker| waker.wake_by_ref());
+                if let Some(waker) = self.signal_waker.take() {
+                    waker();
+                }
             }
         }
 
@@ -328,7 +327,7 @@ impl SignalList {
             .unwrap_or_else(SignalAction::default_action)
     }
 
-    pub fn set_signal_waker(&self, waker: Option<Waker>) {
+    pub fn set_signal_waker(&self, waker: Option<UnsafeRef<dyn Fn() + Send + Sync>>) {
         let mut inner = self.inner.lock();
         inner.signal_waker = waker;
     }
@@ -411,7 +410,7 @@ impl SignalList {
                                 pid: thread.process.pid,
                                 code: WaitType::Stopped(signal),
                             },
-                            ProcessList::get().read().prove(),
+                            Task::block_on(ProcessList::get().read()).prove(),
                         );
                     }
 
@@ -435,7 +434,7 @@ impl SignalList {
                                 pid: thread.process.pid,
                                 code: WaitType::Continued,
                             },
-                            ProcessList::get().read().prove(),
+                            Task::block_on(ProcessList::get().read()).prove(),
                         );
                     }
                 }

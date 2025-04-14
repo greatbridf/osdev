@@ -6,7 +6,7 @@ use crate::{
     kernel::mem::MMList,
     prelude::*,
     rcu::{rcu_sync, RCUPointer, RCUReadGuard},
-    sync::{CondVar, RwLockReadGuard},
+    sync::CondVar,
 };
 use alloc::{
     collections::{btree_map::BTreeMap, vec_deque::VecDeque},
@@ -14,8 +14,10 @@ use alloc::{
 };
 use bindings::{ECHILD, EINTR, EPERM, ESRCH};
 use core::sync::atomic::{AtomicU32, Ordering};
+use eonix_runtime::task::Task;
 use eonix_sync::{
-    AsProof as _, AsProofMut as _, ForceUnlockableGuard as _, Locked, Proof, ProofMut, SpinGuard,
+    AsProof as _, AsProofMut as _, Locked, Proof, ProofMut, RwLockReadGuard, SpinGuard,
+    UnlockableGuard as _, UnlockedGuard as _,
 };
 use pointers::BorrowedArc;
 
@@ -258,7 +260,7 @@ impl Process {
             .is_none());
     }
 
-    pub fn wait(
+    pub async fn wait(
         &self,
         no_block: bool,
         trace_stop: bool,
@@ -284,14 +286,14 @@ impl Process {
                     return Ok(None);
                 }
 
-                waits.wait()?;
+                waits = waits.wait().await?;
             }
         };
 
         if wait_object.stopped().is_some() || wait_object.is_continue() {
             Ok(Some(wait_object))
         } else {
-            let mut procs = ProcessList::get().write();
+            let mut procs = ProcessList::get().write().await;
             procs.remove_process(wait_object.pid);
             assert!(self
                 .inner
@@ -306,7 +308,7 @@ impl Process {
 
     /// Create a new session for the process.
     pub fn setsid(self: &Arc<Self>) -> KResult<u32> {
-        let mut process_list = ProcessList::get().write();
+        let mut process_list = Task::block_on(ProcessList::get().write());
         // If there exists a session that has the same sid as our pid, we can't create a new
         // session. The standard says that we should create a new process group and be the
         // only process in the new process group and session.
@@ -323,7 +325,7 @@ impl Process {
             let _old_session = unsafe { self.session.swap(Some(session.clone())) }.unwrap();
             let old_pgroup = unsafe { self.pgroup.swap(Some(pgroup.clone())) }.unwrap();
             old_pgroup.remove_member(self.pid, process_list.prove_mut());
-            rcu_sync();
+            Task::block_on(rcu_sync());
         }
 
         Ok(pgroup.pgid)
@@ -372,7 +374,7 @@ impl Process {
         pgroup.remove_member(self.pid, procs.prove_mut());
         {
             let _old_pgroup = unsafe { self.pgroup.swap(Some(new_pgroup)) }.unwrap();
-            rcu_sync();
+            Task::block_on(rcu_sync());
         }
 
         Ok(())
@@ -383,7 +385,7 @@ impl Process {
     /// This function should be called on the process that issued the syscall in order to do
     /// permission checks.
     pub fn setpgid(self: &Arc<Self>, pid: u32, pgid: u32) -> KResult<()> {
-        let mut procs = ProcessList::get().write();
+        let mut procs = Task::block_on(ProcessList::get().write());
         // We may set pgid of either the calling process or a child process.
         if pid == self.pid {
             self.do_setpgid(pgid, &mut procs)
@@ -485,7 +487,7 @@ impl WaitList {
     /// releases the lock on `ProcessList` and `WaitList` and waits on `cv_wait_procs`.
     pub fn entry(&self, want_stop: bool, want_continue: bool) -> Entry {
         Entry {
-            process_list: ProcessList::get().read(),
+            process_list: Task::block_on(ProcessList::get().read()),
             wait_procs: self.wait_procs.lock(),
             cv: &self.cv_wait_procs,
             want_stop,
@@ -518,19 +520,25 @@ impl Entry<'_, '_, '_> {
         }
     }
 
-    pub fn wait(&mut self) -> KResult<()> {
-        // SAFETY: We will lock it again after returning from `cv.wait`.
-        unsafe { self.wait_procs.force_unlock() };
+    pub fn wait(self) -> impl core::future::Future<Output = KResult<Self>> {
+        let wait_procs = self.wait_procs.unlock();
 
-        self.cv.wait(&mut self.process_list);
+        async move {
+            let process_list = self.cv.wait(self.process_list).await;
+            let wait_procs = wait_procs.relock().await;
 
-        // SAFETY: We will lock it again.
-        unsafe { self.wait_procs.force_relock() };
-
-        if Thread::current().signal_list.has_pending_signal() {
-            return Err(EINTR);
+            if Thread::current().signal_list.has_pending_signal() {
+                Err(EINTR)
+            } else {
+                Ok(Self {
+                    wait_procs,
+                    process_list,
+                    cv: self.cv,
+                    want_stop: self.want_stop,
+                    want_continue: self.want_continue,
+                })
+            }
         }
-        Ok(())
     }
 }
 

@@ -119,7 +119,9 @@ impl netdev::Netdev for E1000eDev {
         // setup interrupt handler
         let device = netdev::get_netdev(self.id).unwrap();
         let handler = move || {
-            device.lock().fire().unwrap();
+            eonix_runtime::task::Task::block_on(device.lock())
+                .fire()
+                .unwrap();
         };
 
         register_irq_handler(0xb, handler)?;

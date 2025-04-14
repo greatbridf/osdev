@@ -23,6 +23,7 @@ pub const ENOENT: u32 = 2;
 pub const EIO: u32 = 5;
 pub const ENXIO: u32 = 6;
 pub const ENOEXEC: u32 = 8;
+pub const EFAULT: u32 = 14;
 pub const EEXIST: u32 = 17;
 pub const ENOSYS: u32 = 38;
 

@@ -1,5 +1,11 @@
-use crate::{bindings::root::EFAULT, prelude::*, sync::mutex_new};
-use alloc::{collections::btree_map::BTreeMap, sync::Arc};
+use core::sync::atomic::{AtomicU32, Ordering};
+
+use crate::kernel::constants::EFAULT;
+use alloc::{
+    collections::btree_map::{BTreeMap, Entry},
+    sync::Arc,
+};
+use eonix_sync::{Mutex, Spin};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LinkStatus {
@@ -50,26 +56,17 @@ impl Ord for dyn Netdev {
     }
 }
 
-static NETDEVS_ID: Spin<u32> = Spin::new(0);
+static NETDEVS_ID: AtomicU32 = AtomicU32::new(0);
 static NETDEVS: Spin<BTreeMap<u32, Arc<Mutex<dyn Netdev>>>> = Spin::new(BTreeMap::new());
 
 pub fn alloc_id() -> u32 {
-    let mut id = NETDEVS_ID.lock();
-    let retval = *id;
-
-    *id += 1;
-    retval
+    NETDEVS_ID.fetch_add(1, Ordering::SeqCst)
 }
 
 pub fn register_netdev(netdev: impl Netdev + 'static) -> Result<Arc<Mutex<dyn Netdev>>, u32> {
-    let devid = netdev.id();
-
-    let mut netdevs = NETDEVS.lock();
-
-    use alloc::collections::btree_map::Entry;
-    match netdevs.entry(devid) {
+    match NETDEVS.lock().entry(netdev.id()) {
         Entry::Vacant(entry) => {
-            let netdev = Arc::new(mutex_new(netdev));
+            let netdev = Arc::new(Mutex::new(netdev));
             entry.insert(netdev.clone());
             Ok(netdev)
         }

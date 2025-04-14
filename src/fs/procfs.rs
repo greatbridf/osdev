@@ -16,6 +16,7 @@ use crate::{
 use alloc::sync::{Arc, Weak};
 use bindings::{EACCES, ENOTDIR};
 use core::{ops::ControlFlow, sync::atomic::Ordering};
+use eonix_runtime::task::Task;
 use eonix_sync::{AsProof as _, AsProofMut as _, LazyLock, Locked};
 use itertools::Itertools;
 
@@ -129,7 +130,7 @@ impl DirInode {
 
 impl Inode for DirInode {
     fn lookup(&self, dentry: &Arc<Dentry>) -> KResult<Option<Arc<dyn Inode>>> {
-        let lock = self.rwsem.read();
+        let lock = Task::block_on(self.rwsem.read());
         Ok(self
             .entries
             .access(lock.prove())
@@ -146,7 +147,7 @@ impl Inode for DirInode {
         offset: usize,
         callback: &mut dyn FnMut(&[u8], Ino) -> KResult<ControlFlow<(), ()>>,
     ) -> KResult<usize> {
-        let lock = self.rwsem.read();
+        let lock = Task::block_on(self.rwsem.read());
         self.entries
             .access(lock.prove())
             .iter()
@@ -229,7 +230,7 @@ pub fn creat(
     let inode = FileInode::new(ino, Arc::downgrade(&fs), file);
 
     {
-        let lock = parent.idata.rwsem.write();
+        let lock = Task::block_on(parent.idata.rwsem.write());
         parent
             .entries
             .access_mut(lock.prove_mut())
@@ -253,7 +254,7 @@ pub fn mkdir(parent: &ProcFsNode, name: &[u8]) -> KResult<ProcFsNode> {
 
     parent
         .entries
-        .access_mut(inode.rwsem.write().prove_mut())
+        .access_mut(Task::block_on(inode.rwsem.write()).prove_mut())
         .push((Arc::from(name), ProcFsNode::Dir(inode.clone())));
 
     Ok(ProcFsNode::Dir(inode))

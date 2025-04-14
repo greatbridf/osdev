@@ -1,11 +1,10 @@
-use arch::InterruptContext;
-use bitflags::bitflags;
-
+use super::{MMList, VAddr};
 use crate::kernel::mem::{Mapping, VRange};
 use crate::kernel::task::{ProcessList, Signal, Thread};
 use crate::prelude::*;
-
-use super::{MMList, VAddr};
+use arch::InterruptContext;
+use bitflags::bitflags;
+use eonix_runtime::task::Task;
 
 bitflags! {
     pub struct PageFaultError: u64 {
@@ -35,7 +34,7 @@ impl MMList {
         error: PageFaultError,
     ) -> Result<(), Signal> {
         let inner = self.inner.borrow();
-        let inner = inner.lock();
+        let inner = Task::block_on(inner.lock());
 
         let area = match inner.areas.get(&VRange::from(addr)) {
             Some(area) => area,

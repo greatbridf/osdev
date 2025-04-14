@@ -4,6 +4,7 @@ use bindings::{
     statx, AT_FDCWD, AT_STATX_SYNC_AS_STAT, AT_STATX_SYNC_TYPE, AT_SYMLINK_NOFOLLOW, EBADF, EFAULT,
     EINVAL, ENOENT, SEEK_CUR, SEEK_END, SEEK_SET, S_IFBLK, S_IFCHR,
 };
+use eonix_runtime::task::Task;
 
 use crate::{
     io::{Buffer, BufferFill},
@@ -31,14 +32,14 @@ fn do_read(fd: u32, buffer: *mut u8, bufsize: usize) -> KResult<usize> {
     let mut buffer = UserBuffer::new(buffer, bufsize)?;
     let files = FileArray::get_current();
 
-    files.get(fd).ok_or(EBADF)?.read(&mut buffer)
+    Task::block_on(files.get(fd).ok_or(EBADF)?.read(&mut buffer))
 }
 
 fn do_write(fd: u32, buffer: *const u8, count: usize) -> KResult<usize> {
     let data = unsafe { core::slice::from_raw_parts(buffer, count) };
     let files = FileArray::get_current();
 
-    files.get(fd).ok_or(EBADF)?.write(data)
+    Task::block_on(files.get(fd).ok_or(EBADF)?.write(data))
 }
 
 fn do_open(path: *const u8, flags: u32, mode: u32) -> KResult<u32> {
@@ -246,7 +247,7 @@ fn do_readv(fd: u32, iov_user: *const IoVec32, iovcnt: u32) -> KResult<usize> {
     let mut tot = 0usize;
     for mut buffer in iov_buffers.into_iter() {
         // TODO!!!: `readv`
-        let nread = file.read(&mut buffer)?;
+        let nread = Task::block_on(file.read(&mut buffer))?;
         tot += nread;
 
         if nread != buffer.total() {
@@ -283,7 +284,7 @@ fn do_writev(fd: u32, iov_user: *const u8, iovcnt: u32) -> KResult<usize> {
         // TODO!!!: atomic `writev`
         // TODO!!!!!: copy from user
         let slice = block.as_slice();
-        let nread = file.write(slice)?;
+        let nread = Task::block_on(file.write(slice))?;
         tot += nread;
 
         if nread == 0 || nread != slice.len() {
@@ -324,7 +325,7 @@ fn do_sendfile64(out_fd: u32, in_fd: u32, offset: *mut u8, count: usize) -> KRes
         unimplemented!("sendfile64 with offset");
     }
 
-    in_file.sendfile(&out_file, count)
+    Task::block_on(in_file.sendfile(&out_file, count))
 }
 
 fn do_ioctl(fd: u32, request: usize, arg3: usize) -> KResult<usize> {
@@ -359,7 +360,7 @@ fn do_poll(fds: *mut UserPollFd, nfds: u32, _timeout: u32) -> KResult<u32> {
             let mut fd = fds.read()?;
 
             let file = Thread::current().files.get(fd.fd).ok_or(EBADF)?;
-            fd.revents = file.poll(PollEvent::from_bits_retain(fd.events))?.bits();
+            fd.revents = Task::block_on(file.poll(PollEvent::from_bits_retain(fd.events)))?.bits();
 
             fds.write(fd)?;
             Ok(1)

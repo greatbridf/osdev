@@ -86,7 +86,7 @@ impl Serial {
                 let ch = port.tx_rx.read();
 
                 if let Some(terminal) = terminal.as_ref() {
-                    terminal.commit_char(ch);
+                    terminal.commit_char(ch).await;
                 }
             }
 
@@ -202,6 +202,10 @@ impl TerminalDevice for Serial {
         let mut tx_buffer = self.tx_buffer.lock();
         tx_buffer.push_back(ch);
         self.wakeup_worker();
+    }
+
+    fn putchar_direct(&self, ch: u8) {
+        self.tx_rx.write(ch);
     }
 }
 

@@ -14,6 +14,7 @@ use crate::{
 use alloc::sync::{Arc, Weak};
 use bindings::{EINVAL, EIO, EISDIR};
 use core::{ops::ControlFlow, sync::atomic::Ordering};
+use eonix_runtime::task::Task;
 use eonix_sync::{AsProof as _, AsProofMut as _, Locked, ProofMut};
 use itertools::Itertools;
 
@@ -86,7 +87,7 @@ impl Inode for DirectoryInode {
         offset: usize,
         callback: &mut dyn FnMut(&[u8], Ino) -> KResult<ControlFlow<(), ()>>,
     ) -> KResult<usize> {
-        let lock = self.rwsem.read();
+        let lock = Task::block_on(self.rwsem.read());
         self.entries
             .access(lock.prove())
             .iter()
@@ -101,7 +102,7 @@ impl Inode for DirectoryInode {
         let vfs = acquire(&self.vfs)?;
         let vfs = astmp(&vfs);
 
-        let rwsem = self.rwsem.write();
+        let rwsem = Task::block_on(self.rwsem.write());
 
         let ino = vfs.assign_ino();
         let file = FileInode::new(ino, self.vfs.clone(), mode);
@@ -118,7 +119,7 @@ impl Inode for DirectoryInode {
         let vfs = acquire(&self.vfs)?;
         let vfs = astmp(&vfs);
 
-        let rwsem = self.rwsem.write();
+        let rwsem = Task::block_on(self.rwsem.write());
 
         let ino = vfs.assign_ino();
         let file = NodeInode::new(
@@ -136,7 +137,7 @@ impl Inode for DirectoryInode {
         let vfs = acquire(&self.vfs)?;
         let vfs = astmp(&vfs);
 
-        let rwsem = self.rwsem.write();
+        let rwsem = Task::block_on(self.rwsem.write());
 
         let ino = vfs.assign_ino();
         let file = SymlinkInode::new(ino, self.vfs.clone(), target.into());
@@ -149,7 +150,7 @@ impl Inode for DirectoryInode {
         let vfs = acquire(&self.vfs)?;
         let vfs = astmp(&vfs);
 
-        let rwsem = self.rwsem.write();
+        let rwsem = Task::block_on(self.rwsem.write());
 
         let ino = vfs.assign_ino();
         let newdir = DirectoryInode::new(ino, self.vfs.clone(), mode);
@@ -161,7 +162,7 @@ impl Inode for DirectoryInode {
     fn unlink(&self, at: &Arc<Dentry>) -> KResult<()> {
         let _vfs = acquire(&self.vfs)?;
 
-        let dlock = self.rwsem.write();
+        let dlock = Task::block_on(self.rwsem.write());
 
         let file = at.get_inode()?;
         let _flock = file.rwsem.write();
@@ -205,7 +206,7 @@ impl Inode for DirectoryInode {
 
     fn chmod(&self, mode: Mode) -> KResult<()> {
         let _vfs = acquire(&self.vfs)?;
-        let _lock = self.rwsem.write();
+        let _lock = Task::block_on(self.rwsem.write());
 
         // SAFETY: `rwsem` has done the synchronization
         let old = self.mode.load(Ordering::Relaxed);
@@ -265,7 +266,7 @@ impl FileInode {
 impl Inode for FileInode {
     fn read(&self, buffer: &mut dyn Buffer, offset: usize) -> KResult<usize> {
         // TODO: We don't need that strong guarantee, find some way to avoid locks
-        let lock = self.rwsem.read();
+        let lock = Task::block_on(self.rwsem.read());
 
         match self.filedata.access(lock.prove()).split_at_checked(offset) {
             Some((_, data)) => buffer.fill(data).map(|result| result.allow_partial()),
@@ -275,7 +276,7 @@ impl Inode for FileInode {
 
     fn write(&self, buffer: &[u8], offset: WriteOffset) -> KResult<usize> {
         // TODO: We don't need that strong guarantee, find some way to avoid locks
-        let lock = self.rwsem.write();
+        let lock = Task::block_on(self.rwsem.write());
         let filedata = self.filedata.access_mut(lock.prove_mut());
 
         let offset = match offset {
@@ -303,7 +304,7 @@ impl Inode for FileInode {
 
     fn truncate(&self, length: usize) -> KResult<()> {
         // TODO: We don't need that strong guarantee, find some way to avoid locks
-        let lock = self.rwsem.write();
+        let lock = Task::block_on(self.rwsem.write());
         let filedata = self.filedata.access_mut(lock.prove_mut());
 
         // SAFETY: `lock` has done the synchronization
@@ -315,7 +316,7 @@ impl Inode for FileInode {
 
     fn chmod(&self, mode: Mode) -> KResult<()> {
         let _vfs = acquire(&self.vfs)?;
-        let _lock = self.rwsem.write();
+        let _lock = Task::block_on(self.rwsem.write());
 
         // SAFETY: `rwsem` has done the synchronization
         let old = self.mode.load(Ordering::Relaxed);

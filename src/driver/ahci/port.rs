@@ -1,3 +1,5 @@
+use core::pin::pin;
+
 use super::command::{Command, IdentifyCommand, ReadLBACommand};
 use super::{
     vread, vwrite, CommandHeader, PRDTEntry, FISH2D, PORT_CMD_CR, PORT_CMD_FR, PORT_CMD_FRE,
@@ -7,11 +9,11 @@ use crate::kernel::block::{BlockDeviceRequest, BlockRequestQueue};
 use crate::kernel::mem::paging::Page;
 use crate::kernel::mem::phys::{NoCachePP, PhysPtr};
 use crate::prelude::*;
-use crate::sync::UCondVar;
 use alloc::collections::vec_deque::VecDeque;
 use bindings::{EINVAL, EIO};
-use eonix_preempt::assert_preempt_enabled;
+use eonix_runtime::task::Task;
 use eonix_spin_irq::SpinIrq as _;
+use eonix_sync::WaitList;
 
 fn spinwait_clear(refval: *const u32, mask: u32) -> KResult<()> {
     const SPINWAIT_MAX: usize = 1000;
@@ -106,7 +108,7 @@ impl CommandSlotInner {
 
 struct CommandSlot {
     inner: Spin<CommandSlotInner>,
-    cv: UCondVar,
+    wait_list: WaitList,
 }
 
 impl CommandSlot {
@@ -116,7 +118,7 @@ impl CommandSlot {
                 state: SlotState::Idle,
                 cmdheader,
             }),
-            cv: UCondVar::new(),
+            wait_list: WaitList::new(),
         }
     }
 }
@@ -153,7 +155,7 @@ pub struct AdapterPort {
     page: Page,
     slots: [CommandSlot; 32],
     free_list: Spin<FreeList>,
-    free_list_cv: UCondVar,
+    free_list_wait: WaitList,
 
     /// Statistics for this port
     pub stats: Spin<AdapterPortStats>,
@@ -176,7 +178,7 @@ impl AdapterPort {
                 CommandSlot::new(unsafe { cmdheaders_start.offset(index as isize) })
             }),
             free_list: Spin::new(FreeList::new()),
-            free_list_cv: UCondVar::new(),
+            free_list_wait: WaitList::new(),
             page,
             stats: Spin::default(),
         }
@@ -217,13 +219,17 @@ impl AdapterPort {
     }
 
     fn get_free_slot(&self) -> u32 {
-        let mut free_list = self.free_list.lock_irq();
-
         loop {
-            match free_list.free.pop_front() {
-                Some(slot) => break slot,
-                None => self.free_list_cv.wait(&mut free_list),
-            };
+            let mut free_list = self.free_list.lock_irq();
+            let free_slot = free_list.free.pop_front();
+            if let Some(slot) = free_slot {
+                return slot;
+            }
+            let mut wait = pin!(self.free_list_wait.prepare_to_wait());
+            wait.as_mut().add_to_wait_list();
+            drop(free_list);
+
+            Task::block_on(wait);
         }
     }
 
@@ -233,7 +239,7 @@ impl AdapterPort {
 
     fn release_free_slot(&self, slot: u32) {
         self.free_list.lock().free.push_back(slot);
-        self.free_list_cv.notify_one();
+        self.free_list_wait.notify_one();
     }
 
     pub fn handle_interrupt(&self) {
@@ -253,7 +259,7 @@ impl AdapterPort {
             let mut slot_inner = slot.inner.lock();
             debug_assert_eq!(slot_inner.state, SlotState::Working);
             slot_inner.state = SlotState::Finished;
-            slot.cv.notify_all();
+            slot.wait_list.notify_all();
             self.stats.lock().int_fired += 1;
 
             false
@@ -281,11 +287,7 @@ impl AdapterPort {
         Ok(())
     }
 
-    /// # Might Sleep
-    /// This function **might sleep**, so call it in a preemptible context
     fn send_command(&self, cmd: &impl Command) -> KResult<()> {
-        assert_preempt_enabled!("AdapterPort::send_command");
-
         let pages = cmd.pages();
         let cmdtable_page = Page::alloc_one();
 
@@ -321,7 +323,11 @@ impl AdapterPort {
                     saved = true;
                     self.save_working(slot_index as u32);
                 }
-                slot_object.cv.wait(&mut slot);
+                let mut wait = pin!(slot_object.wait_list.prepare_to_wait());
+                wait.as_mut().add_to_wait_list();
+                drop(slot);
+                Task::block_on(wait);
+                slot = slot_object.inner.lock_irq();
             }
         } else {
             // TODO: check error

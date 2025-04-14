@@ -1,13 +1,12 @@
-use crate::{
-    prelude::*,
-    sync::{mutex_new, rwlock_new, RwLockReadGuard},
-};
+use crate::prelude::*;
 use alloc::sync::Arc;
 use core::{
     ops::Deref,
     ptr::NonNull,
     sync::atomic::{AtomicPtr, Ordering},
 };
+use eonix_runtime::task::Task;
+use eonix_sync::{Mutex, RwLock, RwLockReadGuard};
 use pointers::BorrowedArc;
 
 pub struct RCUReadGuard<'data, T: 'data> {
@@ -16,13 +15,13 @@ pub struct RCUReadGuard<'data, T: 'data> {
     _phantom: PhantomData<&'data T>,
 }
 
-static GLOBAL_RCU_SEM: RwLock<()> = rwlock_new(());
+static GLOBAL_RCU_SEM: RwLock<()> = RwLock::new(());
 
 impl<'data, T: 'data> RCUReadGuard<'data, T> {
     fn lock(value: T) -> Self {
         Self {
             value,
-            _guard: GLOBAL_RCU_SEM.read(),
+            _guard: Task::block_on(GLOBAL_RCU_SEM.read()),
             _phantom: PhantomData,
         }
     }
@@ -36,9 +35,9 @@ impl<'data, T: 'data> Deref for RCUReadGuard<'data, T> {
     }
 }
 
-pub fn rcu_sync() {
+pub async fn rcu_sync() {
     // Lock the global RCU semaphore to ensure that all readers are done.
-    let _ = GLOBAL_RCU_SEM.write();
+    let _ = GLOBAL_RCU_SEM.write().await;
 }
 
 pub trait RCUNode<MySelf> {
@@ -57,8 +56,8 @@ impl<T: RCUNode<T>> RCUList<T> {
     pub const fn new() -> Self {
         Self {
             head: AtomicPtr::new(core::ptr::null_mut()),
-            reader_lock: rwlock_new(()),
-            update_lock: mutex_new(()),
+            reader_lock: RwLock::new(()),
+            update_lock: Mutex::new(()),
         }
     }
 
@@ -147,7 +146,7 @@ impl<T: RCUNode<T>> RCUList<T> {
     }
 
     pub fn iter(&self) -> RCUIterator<T> {
-        let _lck = self.reader_lock.read();
+        let _lck = Task::block_on(self.reader_lock.read());
 
         RCUIterator {
             // SAFETY: We have a read lock, so the node is still alive.
@@ -233,7 +232,7 @@ impl<T> Drop for RCUPointer<T> {
         if let Some(arc) = unsafe { self.swap(None) } {
             // We only wait if there are other references.
             if Arc::strong_count(&arc) == 1 {
-                rcu_sync();
+                Task::block_on(rcu_sync());
             }
         }
     }

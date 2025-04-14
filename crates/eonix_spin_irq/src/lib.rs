@@ -6,8 +6,8 @@ use core::{
     ops::{Deref, DerefMut},
 };
 use eonix_sync::{
-    marker::NotSend, ForceUnlockableGuard, Relax, Spin, SpinGuard, SpinRelax, UnlockableGuard,
-    UnlockedGuard, UnlockedSpinGuard,
+    marker::NotSend, Relax, Spin, SpinGuard, SpinRelax, UnlockableGuard, UnlockedGuard,
+    UnlockedSpinGuard,
 };
 
 pub trait SpinIrq<T, R = SpinRelax>
@@ -121,7 +121,7 @@ where
 
 impl<'a, T, R> UnlockableGuard for SpinIrqGuard<'a, T, R>
 where
-    T: ?Sized,
+    T: ?Sized + Send,
     R: Relax,
 {
     type Unlocked = UnlockedSpinIrqGuard<'a, T, R>;
@@ -137,34 +137,16 @@ where
 // SAFETY: The guard is stateless so no more process needed.
 unsafe impl<'a, T, R> UnlockedGuard for UnlockedSpinIrqGuard<'a, T, R>
 where
-    T: ?Sized,
+    T: ?Sized + Send,
     R: Relax,
 {
     type Guard = SpinIrqGuard<'a, T, R>;
 
-    fn relock(self) -> Self::Guard {
+    async fn relock(self) -> Self::Guard {
         SpinIrqGuard {
-            guard: self.unlocked_guard.relock(),
+            guard: self.unlocked_guard.relock().await,
             irq_state: self.irq_state,
             _not_send: PhantomData,
-        }
-    }
-}
-
-impl<'a, T, R> ForceUnlockableGuard for SpinIrqGuard<'a, T, R>
-where
-    T: ?Sized,
-    R: Relax,
-{
-    unsafe fn force_unlock(&mut self) {
-        unsafe {
-            self.guard.force_unlock();
-        }
-    }
-
-    unsafe fn force_relock(&mut self) {
-        unsafe {
-            self.guard.force_relock();
         }
     }
 }

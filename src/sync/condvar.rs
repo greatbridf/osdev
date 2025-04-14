@@ -1,12 +1,10 @@
-use crate::{kernel::task::Thread, prelude::*};
-use alloc::collections::vec_deque::VecDeque;
-use core::task::Waker;
-use eonix_preempt::assert_preempt_count_eq;
-use eonix_runtime::task::Task;
-use eonix_sync::ForceUnlockableGuard;
+use crate::kernel::task::Thread;
+use core::pin::pin;
+use eonix_sync::{UnlockableGuard, UnlockedGuard as _, WaitList};
+use intrusive_collections::UnsafeRef;
 
 pub struct CondVar<const INTERRUPTIBLE: bool> {
-    waiters: Spin<VecDeque<Waker>>,
+    wait_list: WaitList,
 }
 
 impl<const I: bool> core::fmt::Debug for CondVar<I> {
@@ -22,62 +20,42 @@ impl<const I: bool> core::fmt::Debug for CondVar<I> {
 impl<const I: bool> CondVar<I> {
     pub const fn new() -> Self {
         Self {
-            waiters: Spin::new(VecDeque::new()),
-        }
-    }
-
-    pub fn has_waiters(&self) -> bool {
-        !self.waiters.lock().is_empty()
-    }
-
-    fn wake(waker: Waker) {
-        waker.wake();
-    }
-
-    pub fn notify_one(&self) {
-        if let Some(waker) = self.waiters.lock().pop_front() {
-            Self::wake(waker);
+            wait_list: WaitList::new(),
         }
     }
 
     pub fn notify_all(&self) {
-        for waker in self.waiters.lock().drain(..) {
-            Self::wake(waker);
-        }
+        self.wait_list.notify_all();
     }
 
-    /// Unlock the `guard`. Then wait until being waken up. Relock the `guard` before returning.
-    ///
-    /// # Might Sleep
-    /// This function **might sleep**, so call it in a preemptible context.
-    pub fn wait(&self, guard: &mut impl ForceUnlockableGuard) {
-        eonix_preempt::disable();
-        let waker = Waker::from(Task::current().clone());
+    /// Unlock the `guard`. Then wait until being waken up.
+    /// Return the relocked `guard`.
+    pub async fn wait<G>(&self, guard: G) -> G
+    where
+        G: UnlockableGuard + Send,
+        G::Unlocked: Send,
+    {
+        let mut wait_handle = pin!(self.wait_list.prepare_to_wait());
+        wait_handle.as_mut().add_to_wait_list();
+
+        let interrupt_waker = pin!(|| {});
+
         if I {
             // Prohibit the thread from being woken up by a signal.
-            Thread::current()
-                .signal_list
-                .set_signal_waker(Some(waker.clone()));
+            Thread::current().signal_list.set_signal_waker(Some(unsafe {
+                UnsafeRef::from_raw(interrupt_waker.as_ref().get_ref())
+            }));
         }
 
-        self.waiters.lock().push_back(waker.clone());
+        let unlocked_guard = guard.unlock();
 
-        // TODO!!!: Another way to do this:
-        //
-        // Store a flag in our entry in the waiting list.
-        // Check the flag before doing `schedule()` but after we've unlocked the `guard`.
-        // If the flag is already set, we don't need to sleep.
-
-        unsafe { guard.force_unlock() };
-
-        assert_preempt_count_eq!(1, "CondVar::wait");
-        Task::park_preempt_disabled();
+        wait_handle.await;
 
         if I {
             // Allow the thread to be woken up by a signal again.
             Thread::current().signal_list.set_signal_waker(None);
         }
 
-        unsafe { guard.force_relock() };
+        unlocked_guard.relock().await
     }
 }

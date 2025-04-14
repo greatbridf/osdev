@@ -9,11 +9,11 @@ mod rwlock;
 mod spin;
 mod wait_list;
 
-pub use guard::{ForceUnlockableGuard, UnlockableGuard, UnlockedGuard};
+pub use guard::{UnlockableGuard, UnlockedGuard};
 pub use lazy_lock::LazyLock;
 pub use locked::{AsProof, AsProofMut, Locked, Proof, ProofMut};
-pub use mutex::{Mutex, MutexGuard, Wait as MutexWait};
-pub use rwlock::{RwLock, RwLockReadGuard, RwLockWriteGuard, Wait as RwLockWait};
+pub use mutex::{Mutex, MutexGuard};
+pub use rwlock::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 pub use spin::{LoopRelax, Relax, Spin, SpinGuard, SpinRelax, UnlockedSpinGuard};
 pub use wait_list::WaitList;
 

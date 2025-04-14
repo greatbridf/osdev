@@ -1,25 +1,25 @@
-use crate::ForceUnlockableGuard;
-
-use super::{Mutex, Wait};
+use super::Mutex;
+use crate::{UnlockableGuard, UnlockedGuard};
 use core::{
-    mem::ManuallyDrop,
     ops::{Deref, DerefMut},
     sync::atomic::Ordering,
 };
 
-pub struct MutexGuard<'a, T, W>
+pub struct MutexGuard<'a, T>
 where
     T: ?Sized,
-    W: Wait,
 {
-    pub(super) lock: &'a Mutex<T, W>,
+    pub(super) lock: &'a Mutex<T>,
     pub(super) value: &'a mut T,
 }
 
-impl<T, W> Drop for MutexGuard<'_, T, W>
+pub struct UnlockedMutexGuard<'a, T>(&'a Mutex<T>)
+where
+    T: ?Sized;
+
+impl<T> Drop for MutexGuard<'_, T>
 where
     T: ?Sized,
-    W: Wait,
 {
     fn drop(&mut self) {
         let locked = self.lock.locked.swap(false, Ordering::Release);
@@ -27,14 +27,13 @@ where
             locked,
             "MutexGuard::drop(): unlock() called on an unlocked mutex.",
         );
-        self.lock.wait.notify();
+        self.lock.wait_list.notify_one();
     }
 }
 
-impl<T, W> Deref for MutexGuard<'_, T, W>
+impl<T> Deref for MutexGuard<'_, T>
 where
     T: ?Sized,
-    W: Wait,
 {
     type Target = T;
 
@@ -43,59 +42,57 @@ where
     }
 }
 
-impl<T, W> DerefMut for MutexGuard<'_, T, W>
+impl<T> DerefMut for MutexGuard<'_, T>
 where
     T: ?Sized,
-    W: Wait,
 {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.value
     }
 }
 
-impl<T, U, W> AsRef<U> for MutexGuard<'_, T, W>
+impl<T, U> AsRef<U> for MutexGuard<'_, T>
 where
     T: ?Sized,
     U: ?Sized,
     <Self as Deref>::Target: AsRef<U>,
-    W: Wait,
 {
     fn as_ref(&self) -> &U {
         self.deref().as_ref()
     }
 }
 
-impl<T, U, W> AsMut<U> for MutexGuard<'_, T, W>
+impl<T, U> AsMut<U> for MutexGuard<'_, T>
 where
     T: ?Sized + AsMut<U>,
     U: ?Sized,
     <Self as Deref>::Target: AsMut<U>,
-    W: Wait,
 {
     fn as_mut(&mut self) -> &mut U {
         self.deref_mut().as_mut()
     }
 }
 
-impl<T, W> ForceUnlockableGuard for MutexGuard<'_, T, W>
+impl<'a, T> UnlockableGuard for MutexGuard<'a, T>
 where
-    T: ?Sized,
-    W: Wait,
+    T: ?Sized + Send,
 {
-    unsafe fn force_unlock(&mut self) {
-        let locked = self.lock.locked.swap(false, Ordering::Release);
-        debug_assert!(
-            locked,
-            "MutexGuard::drop(): unlock() called on an unlocked mutex.",
-        );
-        self.lock.wait.notify();
-    }
+    type Unlocked = UnlockedMutexGuard<'a, T>;
 
-    unsafe fn force_relock(&mut self) {
-        let _ = ManuallyDrop::new(if let Some(guard) = self.lock.try_lock() {
-            guard
-        } else {
-            self.lock.lock_slow_path()
-        });
+    fn unlock(self) -> Self::Unlocked {
+        // The lock will be unlocked when the guard is dropped.
+        UnlockedMutexGuard(self.lock)
+    }
+}
+
+unsafe impl<'a, T> UnlockedGuard for UnlockedMutexGuard<'a, T>
+where
+    T: ?Sized + Send,
+{
+    type Guard = MutexGuard<'a, T>;
+
+    async fn relock(self) -> Self::Guard {
+        let Self(lock) = self;
+        lock.lock().await
     }
 }

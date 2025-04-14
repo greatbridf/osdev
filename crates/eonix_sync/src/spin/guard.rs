@@ -1,5 +1,5 @@
 use super::{Relax, Spin, SpinRelax};
-use crate::{marker::NotSend, ForceUnlockableGuard, UnlockableGuard, UnlockedGuard};
+use crate::{marker::NotSend, UnlockableGuard, UnlockedGuard};
 use core::{
     marker::PhantomData,
     mem::ManuallyDrop,
@@ -83,7 +83,7 @@ where
 
 impl<'a, T, R> UnlockableGuard for SpinGuard<'a, T, R>
 where
-    T: ?Sized,
+    T: ?Sized + Send,
     R: Relax,
 {
     type Unlocked = UnlockedSpinGuard<'a, T, R>;
@@ -102,30 +102,13 @@ where
 // SAFETY: The guard is stateless so no more process needed.
 unsafe impl<'a, T, R> UnlockedGuard for UnlockedSpinGuard<'a, T, R>
 where
-    T: ?Sized,
+    T: ?Sized + Send,
     R: Relax,
 {
     type Guard = SpinGuard<'a, T, R>;
 
-    fn relock(self) -> Self::Guard {
+    async fn relock(self) -> Self::Guard {
         let Self(lock) = self;
         lock.lock()
-    }
-}
-
-impl<'a, T, R> ForceUnlockableGuard for SpinGuard<'a, T, R>
-where
-    T: ?Sized,
-    R: Relax,
-{
-    unsafe fn force_unlock(&mut self) {
-        unsafe {
-            // SAFETY: The caller assures that the value is no longer accessed.
-            self.lock.do_unlock();
-        }
-    }
-
-    unsafe fn force_relock(&mut self) {
-        self.lock.do_lock();
     }
 }

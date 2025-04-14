@@ -10,9 +10,11 @@ use crate::{
 use alloc::{boxed::Box, sync::Arc, task::Wake};
 use atomic_unique_refcell::AtomicUniqueRefCell;
 use core::{
-    pin::Pin,
+    pin::{pin, Pin},
     sync::atomic::{AtomicBool, AtomicU32, Ordering},
+    task::{Context, Poll, Waker},
 };
+use eonix_preempt::assert_preempt_enabled;
 use eonix_sync::Spin;
 use intrusive_collections::RBTreeAtomicLink;
 use task_state::TaskState;
@@ -161,6 +163,25 @@ impl Task {
         }
 
         eonix_preempt::enable();
+    }
+
+    pub fn block_on<F>(future: F) -> F::Output
+    where
+        F: Future,
+    {
+        assert_preempt_enabled!("block_on() must be called with preemption enabled");
+
+        let waker = Waker::from(Task::current().clone());
+        let mut context = Context::from_waker(&waker);
+        let mut future = pin!(future);
+
+        loop {
+            if let Poll::Ready(output) = future.as_mut().poll(&mut context) {
+                break output;
+            }
+
+            Task::park();
+        }
     }
 }
 

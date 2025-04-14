@@ -1,64 +1,58 @@
-use crate::{AsProof, AsProofMut, ForceUnlockableGuard, Proof, ProofMut};
+use super::RwLock;
+use crate::{AsProof, AsProofMut, Proof, ProofMut, UnlockableGuard, UnlockedGuard};
+use core::ops::{Deref, DerefMut};
 
-use super::{RwLock, Wait};
-use core::{
-    mem::ManuallyDrop,
-    ops::{Deref, DerefMut},
-    sync::atomic::Ordering,
-};
-
-pub struct RwLockWriteGuard<'a, T, W>
+pub struct RwLockWriteGuard<'a, T>
 where
     T: ?Sized,
-    W: Wait,
 {
-    pub(super) lock: &'a RwLock<T, W>,
+    pub(super) lock: &'a RwLock<T>,
     pub(super) value: &'a mut T,
 }
 
-pub struct RwLockReadGuard<'a, T, W>
+pub struct RwLockReadGuard<'a, T>
 where
     T: ?Sized,
-    W: Wait,
 {
-    pub(super) lock: &'a RwLock<T, W>,
+    pub(super) lock: &'a RwLock<T>,
     pub(super) value: &'a T,
 }
 
-impl<T, W> Drop for RwLockWriteGuard<'_, T, W>
+pub struct UnlockedRwLockReadGuard<'a, T>(&'a RwLock<T>)
 where
-    T: ?Sized,
-    W: Wait,
-{
-    fn drop(&mut self) {
-        let old = self.lock.counter.swap(0, Ordering::Release);
-        assert_eq!(
-            old, -1,
-            "RwLockWriteGuard::drop(): erroneous counter value: {}",
-            old
-        );
-        self.lock.wait.write_notify();
-    }
-}
+    T: ?Sized;
 
-impl<T, W> Drop for RwLockReadGuard<'_, T, W>
+pub struct UnlockedRwLockWriteGuard<'a, T>(&'a RwLock<T>)
+where
+    T: ?Sized;
+
+impl<T> Drop for RwLockWriteGuard<'_, T>
 where
     T: ?Sized,
-    W: Wait,
 {
     fn drop(&mut self) {
-        match self.lock.counter.fetch_sub(1, Ordering::Release) {
-            2.. => {}
-            1 => self.lock.wait.read_notify(),
-            val => unreachable!("RwLockReadGuard::drop(): erroneous counter value: {}", val),
+        unsafe {
+            // SAFETY: We are dropping the guard.
+            self.lock.write_unlock();
         }
     }
 }
 
-impl<T, W> Deref for RwLockWriteGuard<'_, T, W>
+impl<T> Drop for RwLockReadGuard<'_, T>
 where
     T: ?Sized,
-    W: Wait,
+{
+    fn drop(&mut self) {
+        unsafe {
+            // SAFETY: We are dropping the guard.
+            self.lock.read_unlock();
+        }
+    }
+}
+
+impl<T> Deref for RwLockWriteGuard<'_, T>
+where
+    T: ?Sized,
 {
     type Target = T;
 
@@ -67,44 +61,40 @@ where
     }
 }
 
-impl<T, W> DerefMut for RwLockWriteGuard<'_, T, W>
+impl<T> DerefMut for RwLockWriteGuard<'_, T>
 where
     T: ?Sized,
-    W: Wait,
 {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.value
     }
 }
 
-impl<T, U, W> AsRef<U> for RwLockWriteGuard<'_, T, W>
+impl<T, U> AsRef<U> for RwLockWriteGuard<'_, T>
 where
     T: ?Sized,
     U: ?Sized,
     <Self as Deref>::Target: AsRef<U>,
-    W: Wait,
 {
     fn as_ref(&self) -> &U {
         self.deref().as_ref()
     }
 }
 
-impl<T, U, W> AsMut<U> for RwLockWriteGuard<'_, T, W>
+impl<T, U> AsMut<U> for RwLockWriteGuard<'_, T>
 where
     T: ?Sized,
     U: ?Sized,
     <Self as Deref>::Target: AsMut<U>,
-    W: Wait,
 {
     fn as_mut(&mut self) -> &mut U {
         self.deref_mut().as_mut()
     }
 }
 
-impl<T, W> Deref for RwLockReadGuard<'_, T, W>
+impl<T> Deref for RwLockReadGuard<'_, T>
 where
     T: ?Sized,
-    W: Wait,
 {
     type Target = T;
 
@@ -113,67 +103,90 @@ where
     }
 }
 
-impl<T, U, W> AsRef<U> for RwLockReadGuard<'_, T, W>
+impl<T, U> AsRef<U> for RwLockReadGuard<'_, T>
 where
     T: ?Sized,
     U: ?Sized,
     <Self as Deref>::Target: AsRef<U>,
-    W: Wait,
 {
     fn as_ref(&self) -> &U {
         self.deref().as_ref()
     }
 }
 
-unsafe impl<'guard, 'pos, T, W> AsProof<'guard, 'pos, T> for RwLockWriteGuard<'guard, T, W>
+unsafe impl<'guard, 'pos, T> AsProof<'guard, 'pos, T> for RwLockWriteGuard<'guard, T>
 where
     T: ?Sized,
-    W: Wait,
 {
     fn prove(&self) -> Proof<'pos, T> {
         unsafe { Proof::new(&raw const *self.value) }
     }
 }
 
-unsafe impl<'guard, 'pos, T, W> AsProofMut<'guard, 'pos, T> for RwLockWriteGuard<'guard, T, W>
+unsafe impl<'guard, 'pos, T> AsProofMut<'guard, 'pos, T> for RwLockWriteGuard<'guard, T>
 where
     T: ?Sized,
-    W: Wait,
 {
     fn prove_mut(&self) -> ProofMut<'pos, T> {
         unsafe { ProofMut::new(&raw const *self.value as *mut _) }
     }
 }
 
-unsafe impl<'guard, 'pos, T, W> AsProof<'guard, 'pos, T> for RwLockReadGuard<'guard, T, W>
+unsafe impl<'guard, 'pos, T> AsProof<'guard, 'pos, T> for RwLockReadGuard<'guard, T>
 where
     T: ?Sized,
-    W: Wait,
 {
     fn prove(&self) -> Proof<'pos, T> {
         unsafe { Proof::new(&raw const *self.value) }
     }
 }
 
-impl<'a, T, W> ForceUnlockableGuard for RwLockReadGuard<'_, T, W>
+impl<'a, T> UnlockableGuard for RwLockReadGuard<'a, T>
 where
-    T: ?Sized,
-    W: Wait,
+    T: ?Sized + Send + Sync,
 {
-    unsafe fn force_unlock(&mut self) {
-        match self.lock.counter.fetch_sub(1, Ordering::Release) {
-            2.. => {}
-            1 => self.lock.wait.read_notify(),
-            val => unreachable!("RwLockReadGuard::drop(): erroneous counter value: {}", val),
-        }
-    }
+    type Unlocked = UnlockedRwLockReadGuard<'a, T>;
 
-    unsafe fn force_relock(&mut self) {
-        let _ = ManuallyDrop::new(if let Some(guard) = self.lock.try_read() {
-            // Quick path
-            guard
-        } else {
-            self.lock.read_slow_path()
-        });
+    fn unlock(self) -> Self::Unlocked {
+        // The lock will be unlocked when the guard is dropped.
+        UnlockedRwLockReadGuard(self.lock)
+    }
+}
+
+// SAFETY: `UnlockedRwLockReadGuard` is stateless.
+unsafe impl<'a, T> UnlockedGuard for UnlockedRwLockReadGuard<'a, T>
+where
+    T: ?Sized + Send + Sync,
+{
+    type Guard = RwLockReadGuard<'a, T>;
+
+    async fn relock(self) -> Self::Guard {
+        let Self(lock) = self;
+        lock.read().await
+    }
+}
+
+impl<'a, T> UnlockableGuard for RwLockWriteGuard<'a, T>
+where
+    T: ?Sized + Send + Sync,
+{
+    type Unlocked = UnlockedRwLockWriteGuard<'a, T>;
+
+    fn unlock(self) -> Self::Unlocked {
+        // The lock will be unlocked when the guard is dropped.
+        UnlockedRwLockWriteGuard(self.lock)
+    }
+}
+
+// SAFETY: `UnlockedRwLockWriteGuard` is stateless.
+unsafe impl<'a, T> UnlockedGuard for UnlockedRwLockWriteGuard<'a, T>
+where
+    T: ?Sized + Send + Sync,
+{
+    type Guard = RwLockWriteGuard<'a, T>;
+
+    async fn relock(self) -> Self::Guard {
+        let Self(lock) = self;
+        lock.write().await
     }
 }

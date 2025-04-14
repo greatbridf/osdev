@@ -1,47 +1,42 @@
 mod guard;
-mod wait;
 
+use crate::WaitList;
 use core::{
     cell::UnsafeCell,
+    pin::pin,
     sync::atomic::{AtomicBool, Ordering},
 };
 
 pub use guard::MutexGuard;
-pub use wait::Wait;
 
 #[derive(Debug, Default)]
-pub struct Mutex<T, W>
+pub struct Mutex<T>
 where
     T: ?Sized,
-    W: Wait,
 {
     locked: AtomicBool,
-    wait: W,
+    wait_list: WaitList,
     value: UnsafeCell<T>,
 }
 
-impl<T, W> Mutex<T, W>
-where
-    W: Wait,
-{
-    pub const fn new(value: T, wait: W) -> Self {
+impl<T> Mutex<T> {
+    pub const fn new(value: T) -> Self {
         Self {
             locked: AtomicBool::new(false),
-            wait,
+            wait_list: WaitList::new(),
             value: UnsafeCell::new(value),
         }
     }
 }
 
-impl<T, W> Mutex<T, W>
+impl<T> Mutex<T>
 where
     T: ?Sized,
-    W: Wait,
 {
     /// # Safety
     /// This function is unsafe because the caller MUST ensure that we've got the
     /// exclusive access before calling this function.
-    unsafe fn get_lock(&self) -> MutexGuard<'_, T, W> {
+    unsafe fn get_lock(&self) -> MutexGuard<'_, T> {
         MutexGuard {
             lock: self,
             // SAFETY: We are holding the lock, so we can safely access the value.
@@ -49,14 +44,14 @@ where
         }
     }
 
-    pub fn try_lock(&self) -> Option<MutexGuard<'_, T, W>> {
+    pub fn try_lock(&self) -> Option<MutexGuard<'_, T>> {
         self.locked
             .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
             .ok()
             .map(|_| unsafe { self.get_lock() })
     }
 
-    fn try_lock_weak(&self) -> Option<MutexGuard<'_, T, W>> {
+    fn try_lock_weak(&self) -> Option<MutexGuard<'_, T>> {
         self.locked
             .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
             .ok()
@@ -64,22 +59,25 @@ where
     }
 
     #[cold]
-    fn lock_slow_path(&self) -> MutexGuard<'_, T, W> {
+    async fn lock_slow_path(&self) -> MutexGuard<'_, T> {
         loop {
+            let mut wait = pin!(self.wait_list.prepare_to_wait());
+            wait.as_mut().add_to_wait_list();
+
             if let Some(guard) = self.try_lock_weak() {
                 return guard;
             }
 
-            self.wait.wait(|| !self.locked.load(Ordering::Relaxed));
+            wait.await;
         }
     }
 
-    pub fn lock(&self) -> MutexGuard<'_, T, W> {
+    pub async fn lock(&self) -> MutexGuard<'_, T> {
         if let Some(guard) = self.try_lock() {
             // Quick path
             guard
         } else {
-            self.lock_slow_path()
+            self.lock_slow_path().await
         }
     }
 
@@ -89,30 +87,10 @@ where
     }
 }
 
-impl<T, W> Clone for Mutex<T, W>
-where
-    T: ?Sized + Clone,
-    W: Wait,
-{
-    fn clone(&self) -> Self {
-        Self::new(self.lock().clone(), W::new())
-    }
-}
-
 // SAFETY: As long as the value protected by the lock is able to be shared between threads,
 //         we can send the lock between threads.
-unsafe impl<T, W> Send for Mutex<T, W>
-where
-    T: ?Sized + Send,
-    W: Wait,
-{
-}
+unsafe impl<T> Send for Mutex<T> where T: ?Sized + Send {}
 
 // SAFETY: `RwLock` can provide exclusive access to the value it protects, so it is safe to
 //         implement `Sync` for it as long as the protected value is `Send`.
-unsafe impl<T, W> Sync for Mutex<T, W>
-where
-    T: ?Sized + Send,
-    W: Wait,
-{
-}
+unsafe impl<T> Sync for Mutex<T> where T: ?Sized + Send {}

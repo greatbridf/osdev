@@ -1,7 +1,7 @@
 mod prepare;
 mod wait_object;
 
-use crate::Spin;
+use crate::{LazyLock, Spin};
 use core::{fmt, sync::atomic::Ordering};
 use intrusive_collections::LinkedList;
 use wait_object::WaitObjectAdapter;
@@ -9,13 +9,13 @@ use wait_object::WaitObjectAdapter;
 pub use prepare::Prepare;
 
 pub struct WaitList {
-    waiters: Spin<LinkedList<WaitObjectAdapter>>,
+    waiters: LazyLock<Spin<LinkedList<WaitObjectAdapter>>>,
 }
 
 impl WaitList {
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
-            waiters: Spin::new(LinkedList::new(WaitObjectAdapter::new())),
+            waiters: LazyLock::new(|| Spin::new(LinkedList::new(WaitObjectAdapter::new()))),
         }
     }
 
@@ -43,7 +43,7 @@ impl WaitList {
     }
 
     pub fn notify_all(&self) -> usize {
-        let mut waiters = self.waiters.lock().take();
+        let mut waiters = self.waiters.lock();
         let mut waiter = waiters.front_mut();
         let mut count = 0;
 
@@ -73,6 +73,12 @@ impl WaitList {
 
     pub fn prepare_to_wait(&self) -> Prepare<'_> {
         Prepare::new(self)
+    }
+}
+
+impl Default for WaitList {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

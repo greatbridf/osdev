@@ -167,10 +167,29 @@ impl Future for Prepare<'_> {
 
 impl Drop for Prepare<'_> {
     fn drop(&mut self) {
-        assert_eq!(
-            self.state,
-            State::WokenUp,
-            "Prepare dropped before woken up."
-        );
+        match self.state {
+            State::Init | State::WokenUp => {}
+            State::OnList | State::WakerSet => {
+                let wait_object = self.wait_object();
+                if wait_object.woken_up.load(Ordering::Acquire) {
+                    // We've woken up by someone. It won't be long before they
+                    // remove us from the list. So spin until we are off the list.
+                    // And we're done.
+                    while wait_object.on_list() {}
+                } else {
+                    // Lock the list and try again.
+                    let mut waiters = self.wait_list.waiters.lock();
+
+                    if wait_object.on_list() {
+                        let mut cursor = unsafe {
+                            // SAFETY: The list is locked so no one could be polling nodes
+                            //         off while we are trying to remove it.
+                            waiters.cursor_mut_from_ptr(wait_object)
+                        };
+                        assert!(cursor.remove().is_some());
+                    }
+                }
+            }
+        }
     }
 }

@@ -392,7 +392,9 @@ fn __alloc_pages(order: u32) -> PagePtr {
 
     if order <= PAGE_ALLOC_COSTLY_ORDER {
         unsafe {
+            eonix_preempt::disable();
             pages_ptr = PER_CPU_PAGES.as_mut().get_free_pages(order);
+            eonix_preempt::enable();
         }
     } else {
         pages_ptr = ZONE.lock().get_free_pages(order);
@@ -408,7 +410,9 @@ fn __alloc_pages(order: u32) -> PagePtr {
 fn __free_pages(pages_ptr: PagePtr, order: u32) {
     if order <= PAGE_ALLOC_COSTLY_ORDER {
         unsafe {
+            eonix_preempt::disable();
             PER_CPU_PAGES.as_mut().free_pages(pages_ptr, order);
+            eonix_preempt::enable();
         }
     } else {
         ZONE.lock().free_pages(pages_ptr, order);

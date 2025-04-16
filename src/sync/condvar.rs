@@ -28,7 +28,7 @@ impl<const I: bool> CondVar<I> {
         self.wait_list.notify_all();
     }
 
-    /// Unlock the `guard`. Then wait until being waken up.
+    /// Unlock the `guard`. Then wait until being woken up.
     /// Return the relocked `guard`.
     pub async fn wait<G>(&self, guard: G) -> G
     where
@@ -38,7 +38,10 @@ impl<const I: bool> CondVar<I> {
         let mut wait_handle = pin!(self.wait_list.prepare_to_wait());
         wait_handle.as_mut().add_to_wait_list();
 
-        let interrupt_waker = pin!(|| {});
+        let interrupt_waker = pin!(unsafe {
+            // SAFETY: We won't use the waker after the wait_handle is dropped.
+            wait_handle.as_ref().get_waker_function()
+        });
 
         if I {
             // Prohibit the thread from being woken up by a signal.

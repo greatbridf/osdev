@@ -1,13 +1,13 @@
 use super::{wait_object::WaitObject, WaitList};
 use core::{
     cell::UnsafeCell,
+    hint::spin_loop,
     pin::Pin,
-    sync::atomic::Ordering,
     task::{Context, Poll, Waker},
 };
 use intrusive_collections::UnsafeRef;
 
-pub struct Prepare<'a> {
+pub struct WaitHandle<'a> {
     wait_list: &'a WaitList,
     wait_object: UnsafeCell<WaitObject>,
     state: State,
@@ -27,11 +27,14 @@ struct PrepareSplit<'a> {
     wait_object: Pin<&'a WaitObject>,
 }
 
-impl<'a> Prepare<'a> {
+// SAFETY: All access to `wait_object` is protected.
+unsafe impl Sync for WaitHandle<'_> {}
+
+impl<'a> WaitHandle<'a> {
     pub const fn new(wait_list: &'a WaitList) -> Self {
         Self {
             wait_list,
-            wait_object: UnsafeCell::new(WaitObject::new()),
+            wait_object: UnsafeCell::new(WaitObject::new(wait_list)),
             state: State::Init,
         }
     }
@@ -59,10 +62,16 @@ impl<'a> Prepare<'a> {
     }
 
     fn set_state(self: Pin<&mut Self>, state: State) {
-        // SAFETY: We only touch `state`, which is `Unpin`.
         unsafe {
+            // SAFETY: We only touch `state`, which is `Unpin`.
             let this = self.get_unchecked_mut();
             this.state = state;
+        }
+    }
+
+    fn wait_until_off_list(&self) {
+        while self.wait_object().on_list() {
+            spin_loop();
         }
     }
 
@@ -91,8 +100,7 @@ impl<'a> Prepare<'a> {
                 waiters.push_back(wait_object_ref);
 
                 if let Some(waker) = waker.cloned() {
-                    let old_waker = wait_object.waker.lock().replace(waker);
-                    assert!(old_waker.is_none(), "Waker already set");
+                    wait_object.save_waker(waker);
                     *state = State::WakerSet;
                 } else {
                     *state = State::OnList;
@@ -103,22 +111,22 @@ impl<'a> Prepare<'a> {
             // We are already on the wait list, so we can just set the waker.
             State::OnList => {
                 // If we are already woken up, we can just return.
-                if wait_object.woken_up.load(Ordering::Acquire) {
+                if wait_object.woken_up() {
                     *state = State::WokenUp;
                     return true;
                 }
 
                 if let Some(waker) = waker {
                     // Lock the waker and check if it is already set.
-                    let mut waker_lock = wait_object.waker.lock();
-                    if wait_object.woken_up.load(Ordering::Acquire) {
+                    let waker_set = wait_object.save_waker_if_not_woken_up(&waker);
+
+                    if waker_set {
+                        *state = State::WakerSet;
+                    } else {
+                        // We are already woken up, so we can just return.
                         *state = State::WokenUp;
                         return true;
                     }
-
-                    let old_waker = waker_lock.replace(waker.clone());
-                    assert!(old_waker.is_none(), "Waker already set");
-                    *state = State::WakerSet;
                 }
 
                 return false;
@@ -130,32 +138,51 @@ impl<'a> Prepare<'a> {
     pub fn add_to_wait_list(self: Pin<&mut Self>) {
         self.do_add_to_wait_list(None);
     }
+
+    /// # Safety
+    /// The caller MUST guarantee that the last use of the returned function
+    /// is before `self` is dropped. Otherwise the value referred to in this
+    /// function will be dangling and will cause undefined behavior.
+    pub unsafe fn get_waker_function(self: Pin<&Self>) -> impl Fn() + Send + Sync + 'static {
+        let wait_list: &WaitList = unsafe {
+            // SAFETY: The caller guarantees that the last use of returned function
+            //         is before `self` is dropped.
+            &*(self.wait_list as *const _)
+        };
+
+        let wait_object = unsafe {
+            // SAFETY: The caller guarantees that the last use of returned function
+            //         is before `self` is dropped.
+            &*self.wait_object.get()
+        };
+
+        move || {
+            wait_list.notify_waiter(wait_object);
+        }
+    }
 }
 
-impl Future for Prepare<'_> {
+impl Future for WaitHandle<'_> {
     type Output = ();
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match self.state {
             State::Init | State::OnList => {
                 if self.as_mut().do_add_to_wait_list(Some(cx.waker())) {
-                    // Make sure we're off the wait list.
-                    while self.wait_object().on_list() {}
+                    self.wait_until_off_list();
                     Poll::Ready(())
                 } else {
                     Poll::Pending
                 }
             }
             State::WakerSet => {
-                if !self.as_ref().wait_object().woken_up.load(Ordering::Acquire) {
+                if !self.as_ref().wait_object().woken_up() {
                     // If we read `woken_up == false`, we can guarantee that we have a spurious
                     // wakeup. In this case, we MUST be still on the wait list, so no more
                     // actions are required.
                     Poll::Pending
                 } else {
-                    // Make sure we're off the wait list.
-                    while self.wait_object().on_list() {}
-
+                    self.wait_until_off_list();
                     self.set_state(State::WokenUp);
                     Poll::Ready(())
                 }
@@ -165,30 +192,29 @@ impl Future for Prepare<'_> {
     }
 }
 
-impl Drop for Prepare<'_> {
+impl Drop for WaitHandle<'_> {
     fn drop(&mut self) {
-        match self.state {
-            State::Init | State::WokenUp => {}
-            State::OnList | State::WakerSet => {
-                let wait_object = self.wait_object();
-                if wait_object.woken_up.load(Ordering::Acquire) {
-                    // We've woken up by someone. It won't be long before they
-                    // remove us from the list. So spin until we are off the list.
-                    // And we're done.
-                    while wait_object.on_list() {}
-                } else {
-                    // Lock the list and try again.
-                    let mut waiters = self.wait_list.waiters.lock();
+        if matches!(self.state, State::Init | State::WokenUp) {
+            return;
+        }
 
-                    if wait_object.on_list() {
-                        let mut cursor = unsafe {
-                            // SAFETY: The list is locked so no one could be polling nodes
-                            //         off while we are trying to remove it.
-                            waiters.cursor_mut_from_ptr(wait_object)
-                        };
-                        assert!(cursor.remove().is_some());
-                    }
-                }
+        let wait_object = self.wait_object();
+        if wait_object.woken_up() {
+            // We've woken up by someone. It won't be long before they
+            // remove us from the list. So spin until we are off the list.
+            // And we're done.
+            self.wait_until_off_list();
+        } else {
+            // Lock the list and try again.
+            let mut waiters = self.wait_list.waiters.lock();
+
+            if wait_object.on_list() {
+                let mut cursor = unsafe {
+                    // SAFETY: The list is locked so no one could be polling nodes
+                    //         off while we are trying to remove it.
+                    waiters.cursor_mut_from_ptr(wait_object)
+                };
+                assert!(cursor.remove().is_some());
             }
         }
     }

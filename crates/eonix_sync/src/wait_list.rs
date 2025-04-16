@@ -1,12 +1,12 @@
-mod prepare;
+mod wait_handle;
 mod wait_object;
 
 use crate::{LazyLock, Spin};
-use core::{fmt, sync::atomic::Ordering};
-use intrusive_collections::LinkedList;
-use wait_object::WaitObjectAdapter;
+use core::fmt;
+use intrusive_collections::{linked_list::CursorMut, LinkedList};
+use wait_object::{WaitObject, WaitObjectAdapter};
 
-pub use prepare::Prepare;
+pub use wait_handle::WaitHandle;
 
 pub struct WaitList {
     waiters: LazyLock<Spin<LinkedList<WaitObjectAdapter>>>,
@@ -26,20 +26,17 @@ impl WaitList {
     pub fn notify_one(&self) -> bool {
         let mut waiters = self.waiters.lock();
         let mut waiter = waiters.front_mut();
-        if let Some(waiter) = waiter.get() {
-            // SAFETY: `wait_object` is a valid reference to a `WaitObject` because we
-            //         won't drop the wait object until the waiting thread will be woken
-            //         up and make sure that it is not on the list.
-            waiter.woken_up.store(true, Ordering::Release);
 
-            if let Some(waker) = waiter.waker.lock().take() {
-                waker.wake();
+        if !waiter.is_null() {
+            unsafe {
+                // SAFETY: `waiter` is not null.
+                self.notify_waiter_unchecked(&mut waiter);
             }
-        }
 
-        // We need to remove the node from the list AFTER we've finished accessing it so
-        // the waiter knows when it is safe to release the wait object node.
-        waiter.remove().is_some()
+            true
+        } else {
+            false
+        }
     }
 
     pub fn notify_all(&self) -> usize {
@@ -48,31 +45,64 @@ impl WaitList {
         let mut count = 0;
 
         while !waiter.is_null() {
-            if let Some(waiter) = waiter.get() {
-                // SAFETY: `wait_object` is a valid reference to a `WaitObject` because we
-                //         won't drop the wait object until the waiting thread will be woken
-                //         up and make sure that it is not on the list.
-                waiter.woken_up.store(true, Ordering::Release);
-
-                if let Some(waker) = waiter.waker.lock().take() {
-                    waker.wake();
-                }
-            } else {
-                unreachable!("Invalid state.");
+            unsafe {
+                // SAFETY: `waiter` is not null.
+                self.notify_waiter_unchecked(&mut waiter);
             }
-
             count += 1;
-
-            // We need to remove the node from the list AFTER we've finished accessing it so
-            // the waiter knows when it is safe to release the wait object node.
-            waiter.remove();
         }
 
         count
     }
 
-    pub fn prepare_to_wait(&self) -> Prepare<'_> {
-        Prepare::new(self)
+    pub fn prepare_to_wait(&self) -> WaitHandle<'_> {
+        WaitHandle::new(self)
+    }
+}
+
+impl WaitList {
+    unsafe fn notify_waiter_unchecked(&self, waiter: &mut CursorMut<'_, WaitObjectAdapter>) {
+        let wait_object = unsafe {
+            // SAFETY: The caller guarantees that `waiter` should be `Some`.
+            //         `wait_object` is a valid reference to a `WaitObject` because we
+            //         won't drop the wait object until the waiting thread will be woken
+            //         up and make sure that it is not on the list.
+            waiter.get().unwrap_unchecked()
+        };
+
+        wait_object.set_woken_up();
+
+        if let Some(waker) = wait_object.take_waker() {
+            waker.wake();
+        }
+
+        // Acknowledge the wait object that we're done.
+        unsafe {
+            waiter.remove().unwrap_unchecked().clear_wait_list();
+        }
+    }
+
+    pub(self) fn notify_waiter(&self, wait_object: &WaitObject) {
+        let mut waiters = self.waiters.lock();
+        if !wait_object.on_list() {
+            return;
+        }
+
+        assert_eq!(
+            wait_object.wait_list(),
+            self,
+            "Wait object is not in the wait list."
+        );
+
+        let mut waiter = unsafe {
+            // SAFETY: `wait_object` is on the `waiters` list.
+            waiters.cursor_mut_from_ptr(wait_object)
+        };
+
+        unsafe {
+            // SAFETY: We got the cursor from a valid wait object, which can't be null.
+            self.notify_waiter_unchecked(&mut waiter);
+        }
     }
 }
 

@@ -1,26 +1,26 @@
+use arch::PAGE_SIZE;
 use core::{
     cmp::Ordering,
     fmt::{self, Debug, Formatter},
     ops::{Add, RangeBounds, Sub},
 };
 
-#[repr(C)]
+#[repr(transparent)]
 #[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq)]
 pub struct PAddr(pub usize);
 
-#[repr(C)]
+#[repr(transparent)]
 #[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq)]
 pub struct VAddr(pub usize);
 
-#[repr(C)]
+#[repr(transparent)]
 #[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq)]
 pub struct PFN(pub usize);
 
-#[repr(C)]
+#[repr(transparent)]
 #[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq)]
 pub struct VPN(pub usize);
 
-const PAGE_SIZE: usize = 4096;
 const PAGE_SIZE_BITS: usize = 12;
 const USER_SPACE_MEMORY_TOP: VAddr = VAddr(0x8000_0000_0000);
 
@@ -129,32 +129,51 @@ impl PFN {
 impl VAddr {
     pub const NULL: Self = Self(0);
 
-    pub fn floor_vpn(&self) -> VPN {
+    pub const fn floor_vpn(&self) -> VPN {
         VPN(self.0 / PAGE_SIZE)
     }
 
-    pub fn ceil_vpn(&self) -> VPN {
+    pub const fn ceil_vpn(&self) -> VPN {
         VPN((self.0 - 1 + PAGE_SIZE) / PAGE_SIZE)
     }
 
-    pub fn page_offset(&self) -> usize {
-        self.0 & (PAGE_SIZE - 1)
+    pub const fn page_offset(self) -> usize {
+        let Self(addr) = self;
+        addr & (PAGE_SIZE - 1)
     }
 
-    pub fn is_aligned(&self) -> bool {
+    pub const fn is_aligned(&self) -> bool {
         self.page_offset() == 0
     }
 
-    pub fn is_user(&self) -> bool {
-        self.0 != 0 && self < &USER_SPACE_MEMORY_TOP
+    pub const fn is_user(self) -> bool {
+        const USER_SPACE_MEMORY_TOP_ADDR: usize = const { USER_SPACE_MEMORY_TOP.0 };
+
+        match self {
+            Self(0) => false,
+            Self(..USER_SPACE_MEMORY_TOP_ADDR) => true,
+            _ => false,
+        }
     }
 
-    pub fn floor(&self) -> Self {
-        VAddr(self.0 & !(PAGE_SIZE - 1))
+    pub const fn floor(self) -> Self {
+        self.floor_to(PAGE_SIZE)
     }
 
-    pub fn ceil(&self) -> Self {
-        VAddr((self.0 + (PAGE_SIZE - 1)) & !(PAGE_SIZE - 1))
+    pub const fn ceil(self) -> Self {
+        self.ceil_to(PAGE_SIZE)
+    }
+
+    /// Aligns the address to the nearest lower multiple of `size`.
+    pub const fn floor_to(self, size: usize) -> Self {
+        let Self(addr) = self;
+        Self(addr / size * size)
+    }
+
+    /// Aligns the address to the nearest lower multiple of `size`.
+    pub const fn ceil_to(self, size: usize) -> Self {
+        let Self(addr) = self;
+        Self(addr.div_ceil(size) * size)
     }
 }
 

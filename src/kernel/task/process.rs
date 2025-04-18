@@ -7,6 +7,7 @@ use crate::{
     prelude::*,
     rcu::{rcu_sync, RCUPointer, RCUReadGuard},
     sync::CondVar,
+    SIGNAL_COREDUMP,
 };
 use alloc::{
     collections::{btree_map::BTreeMap, vec_deque::VecDeque},
@@ -111,7 +112,7 @@ impl WaitType {
     pub fn to_wstatus(self) -> u32 {
         match self {
             WaitType::Exited(status) => (status & 0xff) << 8,
-            WaitType::Signaled(signal) if signal.is_coredump() => u32::from(signal) | 0x80,
+            WaitType::Signaled(signal @ SIGNAL_COREDUMP!()) => u32::from(signal) | 0x80,
             WaitType::Signaled(signal) => u32::from(signal),
             WaitType::Stopped(signal) => 0x7f | (u32::from(signal) << 8),
             WaitType::Continued => 0xffff,

@@ -1,12 +1,13 @@
 use super::cpu::local_cpu;
 use super::mem::handle_page_fault;
 use super::syscall::handle_syscall32;
-use super::task::{ProcessList, Signal};
+use super::task::{ProcessList, Signal, Thread};
 use super::timer::timer_interrupt;
 use crate::bindings::root::EINVAL;
 use crate::{driver::Port8, prelude::*};
 use alloc::sync::Arc;
 use arch::{ExtendedContext, InterruptContext};
+use eonix_runtime::task::Task;
 use eonix_spin_irq::SpinIrq as _;
 
 const PIC1_COMMAND: Port8 = Port8::new(0x20);
@@ -58,6 +59,12 @@ pub extern "C" fn interrupt_handler(
         0x40 => timer_interrupt(),
         // IRQ
         no => irq_handler(no as usize - 0x20),
+    }
+
+    if int_stack.cs & 0x3 != 0 {
+        if Thread::current().signal_list.has_pending_signal() {
+            Task::block_on(Thread::current().signal_list.handle(int_stack, ext_ctx));
+        }
     }
 }
 

@@ -124,8 +124,10 @@ impl Task {
             return;
         }
 
+        eonix_preempt::disable();
+
         match self.state.swap(TaskState::RUNNING) {
-            TaskState::RUNNING => return,
+            TaskState::RUNNING => {}
             TaskState::PARKED | TaskState::PARKING => {
                 // We are waking up from sleep or someone else is parking this task.
                 // Try to wake it up.
@@ -133,6 +135,8 @@ impl Task {
             }
             _ => unreachable!(),
         }
+
+        eonix_preempt::enable();
     }
 
     pub fn park() {

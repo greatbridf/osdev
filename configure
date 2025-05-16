@@ -1,10 +1,34 @@
 #!/bin/sh
-QEMU_EXECUTABLES="qemu-system-x86_64"
-GDB_EXECUTABLES="gdb x86_64-elf-gdb"
-
 event() {
     printf "$1... "
 }
+
+ARCH=${ARCH:-x86_64}
+
+# Define toolchain and QEMU/GDB settings for per architecture
+event "target architecture"
+echo "$ARCH"
+case "$ARCH" in
+    x86_64)
+        QEMU_EXECUTABLES="qemu-system-x86_64"
+        GDB_EXECUTABLES="gdb x86_64-elf-gdb"
+        : "${CROSS_COMPILE:=}"
+        ;;
+    riscv64)
+        QEMU_EXECUTABLES="qemu-system-riscv64"
+        GDB_EXECUTABLES="gdb riscv64-unknown-elf-gdb"
+        : "${CROSS_COMPILE:=riscv64-unknown-elf-}"
+        ;;
+    aarch64)
+        QEMU_EXECUTABLES="qemu-system-aarch64"
+        GDB_EXECUTABLES="gdb aarch64-none-elf-gdb"
+        : "${CROSS_COMPILE:=aarch64-none-elf-}"
+        ;;
+    *)
+        echo "Unsupported ARCH: $ARCH"
+        exit 1
+        ;;
+esac
 
 # $1: OS NAME
 # $2: CROSS COMPILE FLAG
@@ -46,7 +70,7 @@ check_gdb_arch() {
     local item="$1"
     if $item --init-eval-command 'set arch' \
              --init-eval-command 'q' 2>&1 \
-             | grep 'x86-64' >/dev/null 2>&1; then
+             | grep "$ARCH" >/dev/null 2>&1; then
         return 0
     else
         return 1
@@ -102,12 +126,12 @@ case "$OS" in
 esac
 
 event "checking util-linux fdisk"
-if [ "$FDISK_BIN" = "" -a "$CROSS_COMPILE" = "" ]; then
+if [ -z "$FDISK_BIN" ]; then
     if ! which fdisk > /dev/null 2>&1; then
         echo "no"
         exit 1
     fi
-    FDISK_BIN=`which fdisk`
+    FDISK_BIN=$(which fdisk)
 fi
 
 if ! $FDISK_BIN -v 2>&1 | grep util-linux > /dev/null 2>&1 ; then
@@ -141,4 +165,6 @@ sed -i '' -e "s|##PLACEHOLDER_2##|$GDB|" Makefile > /dev/null 2>&1
 sed -i '' -e "s|##PLACEHOLDER_3##|$QEMU_ACCEL|" Makefile > /dev/null 2>&1
 sed -i '' -e "s|##PLACEHOLDER_4##|$CROSS_COMPILE_FLAG|" Makefile > /dev/null 2>&1
 sed -i '' -e "s|##PLACEHOLDER_5##|$FDISK_BIN|" Makefile > /dev/null 2>&1
+
+echo "Configuration successful for architecture: $ARCH"
 exit 0

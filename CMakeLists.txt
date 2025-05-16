@@ -10,8 +10,8 @@ message(STATUS "Building for architecture: ${ARCH}")
 
 if(ARCH STREQUAL "x86_64")
     set(ARCH_C_CXX_FLAGS "-mno-sse -mno-mmx -mno-red-zone -mcmodel=kernel")
-    set(ARCH_ASM_FILES src/boot.s)
-    set(ARCH_LINKER_SCRIPT "${CMAKE_SOURCE_DIR}/src/kernel.ld")
+    set(ARCH_ASM_FILES arch/src/x86_64/boot.s)
+    set(ARCH_LINKER_SCRIPT "${CMAKE_SOURCE_DIR}/arch/src/x86_64/kernel.ld")
     set(RUST_TARGET "x86_64-unknown-none")
 elseif(ARCH STREQUAL "riscv64")
     set(ARCH_C_CXX_FLAGS "-march=rv64gc")
@@ -53,8 +53,8 @@ add_subdirectory(gblibstdc++)
 add_subdirectory(user-space-program)
 
 if(ARCH STREQUAL "x86_64")
-    set(BOOTLOADER_SOURCES src/boot.s
-                           src/mbr.S
+    set(BOOTLOADER_SOURCES arch/src/x86_64/boot.s
+                           arch/src/x86_64/mbr.S
                           )
 elseif(ARCH STREQUAL "riscv64")
     set(BOOTLOADER_SOURCES arch/src/riscv64/boot.s
@@ -110,7 +110,7 @@ target_link_options(kernel.out PRIVATE
 set_target_properties(kernel.out PROPERTIES LINK_DEPENDS "${ARCH_LINKER_SCRIPT}")
 
 if(ARCH STREQUAL "x86_64")
-    set_source_files_properties(src/mbr.S PROPERTIES OBJECT_DEPENDS
+    set_source_files_properties(arch/src/x86_64/mbr.S PROPERTIES OBJECT_DEPENDS
         "${CMAKE_BINARY_DIR}/${RUST_TARGET}/${CARGO_BUILD_TYPE}/libgbos_rust_part.a"
         )
 endif()

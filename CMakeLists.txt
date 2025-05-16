@@ -3,10 +3,29 @@ project(kernel_main C CXX ASM)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+if(NOT DEFINED ARCH)
+    set(ARCH "x86_64" CACHE STRING "Target architecture")
+endif()
+message(STATUS "Building for architecture: ${ARCH}")
+
+if(ARCH STREQUAL "x86_64")
+    set(ARCH_C_CXX_FLAGS "-mno-sse -mno-mmx -mno-red-zone -mcmodel=kernel")
+    set(ARCH_ASM_FILES src/boot.s)
+    set(ARCH_LINKER_SCRIPT "${CMAKE_SOURCE_DIR}/src/kernel.ld")
+    set(RUST_TARGET "x86_64-unknown-none")
+elseif(ARCH STREQUAL "riscv64")
+    set(ARCH_C_CXX_FLAGS "-march=rv64gc")
+    set(ARCH_ASM_FILES arch/src/riscv64/boot.s)
+    set(ARCH_LINKER_SCRIPT "${CMAKE_SOURCE_DIR}/arch/src/riscv64/kernel.ld")
+    set(RUST_TARGET "riscv64gc-unknown-none-elf")
+else()
+    message(FATAL_ERROR "Unsupported architecture: ${ARCH}")
+endif()
+
 set(CMAKE_CXX_LINK_EXECUTABLE
     "<CMAKE_LINKER> <CMAKE_CXX_LINK_FLAGS> <LINK_FLAGS> <OBJECTS> -o <TARGET> <LINK_LIBRARIES>")
 
-set(C_CXX_FLAGS "-nostdinc -nostdlib -mno-sse -mno-mmx -W -Wall -Wextra -Wno-stringop-overflow -Wno-builtin-declaration-mismatch -Wno-format -fverbose-asm -fno-exceptions -ffreestanding -fno-pic -mno-red-zone -mstack-protector-guard=global -mcmodel=kernel")
+set(C_CXX_FLAGS "-nostdinc -nostdlib ${ARCH_C_CXX_FLAGS} -W -Wall -Wextra -Wno-stringop-overflow -Wno-builtin-declaration-mismatch -Wno-format -fverbose-asm -fno-exceptions -ffreestanding -fno-pic -mstack-protector-guard=global")
 set(CMAKE_C_FLAGS "${C_CXX_FLAGS} -Werror=implicit-int -Werror=implicit-function-declaration -Werror=strict-aliasing")
 set(CMAKE_CXX_FLAGS "${C_CXX_FLAGS} -fno-use-cxa-atexit -fno-rtti")
 set(CMAKE_CXX_LINK_FLAGS "-z noexecstack --gc-sections")
@@ -33,9 +52,28 @@ add_subdirectory(gblibc)
 add_subdirectory(gblibstdc++)
 add_subdirectory(user-space-program)
 
-set(BOOTLOADER_SOURCES src/boot.s
-                       src/mbr.S
-                       )
+if(ARCH STREQUAL "x86_64")
+    set(BOOTLOADER_SOURCES src/boot.s
+                           src/mbr.S
+                          )
+elseif(ARCH STREQUAL "riscv64")
+    set(BOOTLOADER_SOURCES arch/src/riscv64/boot.s
+                           arch/src/riscv64/entry.S
+                          )
+endif()
+
+#[[set(KERNEL_ARCH_SOURCES "")
+if(ARCH STREQUAL "x86_64")
+    set(KERNEL_ARCH_SOURCES arch/src/x86_64/init.cpp
+                            arch/src/x86_64/interrupt.cpp
+                            # more
+                           )
+elseif(ARCH STREQUAL "riscv64")
+    set(KERNEL_ARCH_SOURCES arch/src/riscv64/init.cpp
+                            arch/src/riscv64/trap.cpp
+                            # more
+                           )
+endif()]]
 
 set(KERNEL_MAIN_SOURCES src/kinit.cpp
                         src/kernel/async/lock.cc
@@ -57,6 +95,7 @@ set(KERNEL_MAIN_SOURCES src/kinit.cpp
                         include/types/types.h
                         include/types/allocator.hpp
                         include/kernel/log.hpp
+                        #${KERNEL_ARCH_SOURCES}
                         )
 
 add_executable(kernel.out ${KERNEL_MAIN_SOURCES} ${BOOTLOADER_SOURCES})
@@ -64,17 +103,20 @@ add_dependencies(kernel.out rustpart)
 target_link_libraries(kernel.out gblibc gblibstdc++ gbos_rust_part)
 target_include_directories(kernel.out PRIVATE ${PROJECT_SOURCE_DIR}/include)
 target_link_options(kernel.out PRIVATE
-    -T "${CMAKE_SOURCE_DIR}/src/kernel.ld"
-    -L "${CMAKE_BINARY_DIR}/x86_64-unknown-none/${CARGO_BUILD_TYPE}"
+    -T "${ARCH_LINKER_SCRIPT}"
+    -L "${CMAKE_BINARY_DIR}/${RUST_TARGET}/${CARGO_BUILD_TYPE}"
     --no-check-sections
     )
-set_target_properties(kernel.out PROPERTIES LINK_DEPENDS "${CMAKE_SOURCE_DIR}/src/kernel.ld")
-set_source_files_properties(src/mbr.S PROPERTIES OBJECT_DEPENDS
-    "${CMAKE_BINARY_DIR}/x86_64-unknown-none/${CARGO_BUILD_TYPE}/libgbos_rust_part.a"
-    )
+set_target_properties(kernel.out PROPERTIES LINK_DEPENDS "${ARCH_LINKER_SCRIPT}")
+
+if(ARCH STREQUAL "x86_64")
+    set_source_files_properties(src/mbr.S PROPERTIES OBJECT_DEPENDS
+        "${CMAKE_BINARY_DIR}/${RUST_TARGET}/${CARGO_BUILD_TYPE}/libgbos_rust_part.a"
+        )
+endif()
 
 add_custom_target(rustpart
-    COMMAND cargo build ${CARGO_BUILD_FLAGS}
+    COMMAND cargo build ${CARGO_BUILD_FLAGS} --target=${RUST_TARGET}
 )
 
 add_custom_command(OUTPUT mbr_hole.bin

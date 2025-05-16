@@ -165,6 +165,7 @@ sed -i '' -e "s|##PLACEHOLDER_2##|$GDB|" Makefile > /dev/null 2>&1
 sed -i '' -e "s|##PLACEHOLDER_3##|$QEMU_ACCEL|" Makefile > /dev/null 2>&1
 sed -i '' -e "s|##PLACEHOLDER_4##|$CROSS_COMPILE_FLAG|" Makefile > /dev/null 2>&1
 sed -i '' -e "s|##PLACEHOLDER_5##|$FDISK_BIN|" Makefile > /dev/null 2>&1
+sed -i '' -e "s|##PLACEHOLDER_6##|$ARCH|" Makefile > /dev/null 2>&1
 
 echo "Configuration successful for architecture: $ARCH"
 exit 0

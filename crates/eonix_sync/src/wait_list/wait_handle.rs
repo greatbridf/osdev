@@ -96,7 +96,7 @@ impl<'a> WaitHandle<'a> {
 
         match *state {
             State::Init => {
-                let mut waiters = wait_list.waiters.lock();
+                let mut waiters = wait_list.waiters.lock_irq();
                 waiters.push_back(wait_object_ref);
 
                 if let Some(waker) = waker.cloned() {
@@ -206,7 +206,7 @@ impl Drop for WaitHandle<'_> {
             self.wait_until_off_list();
         } else {
             // Lock the list and try again.
-            let mut waiters = self.wait_list.waiters.lock();
+            let mut waiters = self.wait_list.waiters.lock_irq();
 
             if wait_object.on_list() {
                 let mut cursor = unsafe {

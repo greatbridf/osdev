@@ -3,7 +3,6 @@ use crate::{
     io::BufferFill as _,
     kernel::{
         constants::{EFAULT, EINVAL, ENOSYS},
-        mem::VAddr,
         user::UserBuffer,
     },
     SIGNAL_NOW,
@@ -11,6 +10,7 @@ use crate::{
 use alloc::collections::btree_map::BTreeMap;
 use arch::{ExtendedContext, InterruptContext};
 use core::num::NonZero;
+use eonix_mm::address::{Addr as _, AddrOps as _, VAddr};
 use posix_types::signal::{SigAction, TryFromSigAction};
 
 #[derive(Debug, Clone, Copy)]
@@ -93,9 +93,9 @@ impl SignalAction {
                 // TODO!!!: Determine the size of the return address
                 let sp = VAddr::from(int_stack.rsp as usize - 128 - CONTEXT_SIZE).floor_to(16)
                     - size_of::<u32>();
-                let restorer_address = usize::from(restorer) as u32;
+                let restorer_address = restorer.addr() as u32;
                 let mut stack =
-                    UserBuffer::new(usize::from(sp) as *mut u8, CONTEXT_SIZE + size_of::<u32>())?;
+                    UserBuffer::new(sp.addr() as *mut u8, CONTEXT_SIZE + size_of::<u32>())?;
 
                 stack.copy(&restorer_address)?.ok_or(EFAULT)?; // Restorer address
                 stack.copy(&u32::from(signal))?.ok_or(EFAULT)?; // `signum`
@@ -103,8 +103,8 @@ impl SignalAction {
                 stack.copy(ext_ctx)?.ok_or(EFAULT)?; // MMX registers
                 stack.copy(int_stack)?.ok_or(EFAULT)?; // Interrupt stack
 
-                int_stack.rip = usize::from(handler) as u64;
-                int_stack.rsp = usize::from(sp) as u64;
+                int_stack.rip = handler.addr() as u64;
+                int_stack.rsp = sp.addr() as u64;
                 Ok(())
             }
         }
@@ -138,7 +138,7 @@ impl TryFromSigAction for SignalAction {
 
     fn new() -> Self {
         Self::SimpleHandler {
-            handler: VAddr(0),
+            handler: VAddr::NULL,
             restorer: None,
             mask: SignalMask::empty(),
         }
@@ -150,7 +150,7 @@ impl TryFromSigAction for SignalAction {
 
     fn handler(mut self, handler_addr: usize) -> Result<Self, Self::Error> {
         if let Self::SimpleHandler { handler, .. } = &mut self {
-            *handler = VAddr(handler_addr);
+            *handler = VAddr::from(handler_addr);
             Ok(self)
         } else {
             unreachable!()
@@ -159,7 +159,7 @@ impl TryFromSigAction for SignalAction {
 
     fn restorer(mut self, restorer_addr: usize) -> Result<Self, Self::Error> {
         if let Self::SimpleHandler { restorer, .. } = &mut self {
-            *restorer = NonZero::new(restorer_addr).map(|x| VAddr(x.get()));
+            *restorer = NonZero::new(restorer_addr).map(|x| VAddr::from(x.get()));
             Ok(self)
         } else {
             unreachable!()
@@ -187,11 +187,11 @@ impl From<SignalAction> for SigAction {
                 mask,
             } => {
                 let action = SigAction::new()
-                    .handler(usize::from(handler))
+                    .handler(handler.addr())
                     .mask(u64::from(mask));
 
                 if let Some(restorer) = restorer {
-                    action.restorer(usize::from(restorer))
+                    action.restorer(restorer.addr())
                 } else {
                     action
                 }

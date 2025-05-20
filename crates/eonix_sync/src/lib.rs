@@ -14,7 +14,10 @@ pub use lazy_lock::LazyLock;
 pub use locked::{AsProof, AsProofMut, Locked, Proof, ProofMut};
 pub use mutex::{Mutex, MutexGuard};
 pub use rwlock::{RwLock, RwLockReadGuard, RwLockWriteGuard};
-pub use spin::{LoopRelax, Relax, Spin, SpinGuard, SpinRelax, UnlockedSpinGuard};
+pub use spin::{
+    LoopRelax, Relax, Spin, SpinGuard, SpinIrqGuard, SpinRelax, UnlockedSpinGuard,
+    UnlockedSpinIrqGuard,
+};
 pub use wait_list::WaitList;
 
 extern crate alloc;

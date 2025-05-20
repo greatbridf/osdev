@@ -1,8 +1,6 @@
-use bindings::EFAULT;
-
 use crate::prelude::*;
-
-use core::mem::MaybeUninit;
+use bindings::EFAULT;
+use core::{cmp, mem::MaybeUninit};
 
 #[must_use]
 pub enum FillResult {
@@ -185,5 +183,43 @@ impl Buffer for ByteBuffer<'_> {
 
     fn wrote(&self) -> usize {
         self.cur
+    }
+}
+
+/// Iterator that generates chunks of a given length from a start index
+/// until the end of the total length.
+///
+/// The iterator returns a tuple of (start, len) for each chunk.
+pub struct Chunks {
+    start: usize,
+    end: usize,
+    cur: usize,
+    chunk_len: usize,
+}
+
+impl Chunks {
+    pub const fn new(start: usize, total_len: usize, chunk_len: usize) -> Self {
+        Self {
+            start,
+            end: start + total_len,
+            cur: start,
+            chunk_len,
+        }
+    }
+}
+
+impl Iterator for Chunks {
+    type Item = (usize, usize);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.cur >= self.end {
+            return None;
+        }
+
+        let start = self.cur;
+        let len = cmp::min(self.chunk_len, self.end - start);
+
+        self.cur += self.chunk_len;
+        Some((start, len))
     }
 }

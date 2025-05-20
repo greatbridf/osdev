@@ -1,10 +1,9 @@
 use super::{Process, ProcessGroup, Session, Signal, Thread, WaitObject, WaitType};
-use crate::{prelude::*, rcu::rcu_sync};
+use crate::rcu::rcu_sync;
 use alloc::{
     collections::btree_map::BTreeMap,
     sync::{Arc, Weak},
 };
-use bindings::KERNEL_PML4;
 use eonix_runtime::task::Task;
 use eonix_sync::{AsProof as _, AsProofMut as _, RwLock};
 
@@ -142,16 +141,11 @@ impl ProcessList {
             }
         }
 
-        eonix_preempt::disable();
-
         // Release the MMList as well as the page table.
-        // Before we release the page table, we need to switch to the kernel page table.
-        arch::set_root_page_table(KERNEL_PML4 as usize);
         unsafe {
-            process.mm_list.release();
+            // SAFETY: We are exiting the process, so no one might be using it.
+            process.mm_list.replace(None);
         }
-
-        eonix_preempt::enable();
 
         // Make children orphans (adopted by init)
         {

@@ -48,7 +48,7 @@ where
         let mut execution_context = ExecutionContext::new();
         let output_handle = OutputHandle::new();
 
-        execution_context.set_sp(stack.get_bottom() as *const _ as _);
+        execution_context.set_sp(stack.get_bottom().addr().get() as _);
 
         let executor = Box::pin(RealExecutor {
             _stack: stack,

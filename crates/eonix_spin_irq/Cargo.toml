@@ -1,8 +1,0 @@
-[package]
-name = "eonix_spin_irq"
-version = "0.1.0"
-edition = "2024"
-
-[dependencies]
-arch = { path = "../../arch" }
-eonix_sync = { path = "../eonix_sync" }

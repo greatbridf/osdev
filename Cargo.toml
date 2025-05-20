@@ -11,9 +11,10 @@ arch = { path = "./arch" }
 atomic_unique_refcell = { path = "./crates/atomic_unique_refcell", features = [
     "no_std",
 ] }
+buddy_allocator = { path = "./crates/buddy_allocator" }
+eonix_mm = { path = "./crates/eonix_mm" }
 eonix_preempt = { path = "./crates/eonix_preempt" }
 eonix_runtime = { path = "./crates/eonix_runtime" }
-eonix_spin_irq = { path = "./crates/eonix_spin_irq" }
 eonix_sync = { path = "./crates/eonix_sync" }
 eonix_log = { path = "./crates/eonix_log" }
 pointers = { path = "./crates/pointers" }
@@ -47,7 +48,10 @@ opt-level = 2
 opt-level = 0
 
 [profile.dev.package.eonix_sync]
-opt-level = 0
+opt-level = 2
+
+[profile.dev.package.intrusive_list]
+opt-level = 2
 
 [profile.dev.package."*"]
 opt-level = "s"

@@ -306,6 +306,9 @@ pub struct InterruptControl {
     apic_base: APICRegs,
 }
 
+/// State of the interrupt flag.
+pub struct IrqState(u64);
+
 impl InterruptContext {
     pub fn set_return_value(&mut self, value: u64) {
         // The return value is stored in rax.
@@ -423,7 +426,7 @@ impl APICRegs {
 impl InterruptControl {
     /// # Return
     /// Returns a tuple of InterruptControl and the cpu id of the current cpu.
-    pub unsafe fn new() -> (Self, usize) {
+    pub(crate) fn new() -> (Self, usize) {
         extern "C" {
             static ISR_START_ADDR: usize;
         }
@@ -491,16 +494,46 @@ impl InterruptControl {
     }
 }
 
+impl IrqState {
+    pub fn restore(self) {
+        let Self(state) = self;
+
+        unsafe {
+            asm!(
+                "push {state}",
+                "popf",
+                state = in(reg) state,
+                options(att_syntax, nomem)
+            );
+        }
+    }
+}
+
 pub fn enable_irqs() {
     unsafe {
-        asm!("sti");
+        asm!("sti", options(att_syntax, nomem, nostack));
     }
 }
 
 pub fn disable_irqs() {
     unsafe {
-        asm!("cli");
+        asm!("cli", options(att_syntax, nomem, nostack));
     }
+}
+
+pub fn disable_irqs_save() -> IrqState {
+    let state: u64;
+    unsafe {
+        asm!(
+            "pushf",
+            "pop {state}",
+            "cli",
+            state = out(reg) state,
+            options(att_syntax, nomem)
+        );
+    }
+
+    IrqState(state)
 }
 
 extern "C" {

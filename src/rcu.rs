@@ -1,28 +1,27 @@
-use crate::{prelude::*, sync::RwSemReadGuard};
+use crate::prelude::*;
 use alloc::sync::Arc;
 use core::{
     ops::Deref,
     ptr::NonNull,
     sync::atomic::{AtomicPtr, Ordering},
 };
-use lazy_static::lazy_static;
+use eonix_runtime::task::Task;
+use eonix_sync::{Mutex, RwLock, RwLockReadGuard};
 use pointers::BorrowedArc;
 
 pub struct RCUReadGuard<'data, T: 'data> {
     value: T,
-    guard: RwSemReadGuard<'data, ()>,
+    _guard: RwLockReadGuard<'data, ()>,
     _phantom: PhantomData<&'data T>,
 }
 
-lazy_static! {
-    static ref GLOBAL_RCU_SEM: RwSemaphore<()> = RwSemaphore::new(());
-}
+static GLOBAL_RCU_SEM: RwLock<()> = RwLock::new(());
 
 impl<'data, T: 'data> RCUReadGuard<'data, T> {
     fn lock(value: T) -> Self {
         Self {
             value,
-            guard: GLOBAL_RCU_SEM.lock_shared(),
+            _guard: Task::block_on(GLOBAL_RCU_SEM.read()),
             _phantom: PhantomData,
         }
     }
@@ -36,8 +35,9 @@ impl<'data, T: 'data> Deref for RCUReadGuard<'data, T> {
     }
 }
 
-pub fn rcu_sync() {
-    GLOBAL_RCU_SEM.lock();
+pub async fn rcu_sync() {
+    // Lock the global RCU semaphore to ensure that all readers are done.
+    let _ = GLOBAL_RCU_SEM.write().await;
 }
 
 pub trait RCUNode<MySelf> {
@@ -48,15 +48,15 @@ pub trait RCUNode<MySelf> {
 pub struct RCUList<T: RCUNode<T>> {
     head: AtomicPtr<T>,
 
-    reader_lock: RwSemaphore<()>,
+    reader_lock: RwLock<()>,
     update_lock: Mutex<()>,
 }
 
 impl<T: RCUNode<T>> RCUList<T> {
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             head: AtomicPtr::new(core::ptr::null_mut()),
-            reader_lock: RwSemaphore::new(()),
+            reader_lock: RwLock::new(()),
             update_lock: Mutex::new(()),
         }
     }
@@ -101,7 +101,7 @@ impl<T: RCUNode<T>> RCUList<T> {
             unsafe { Arc::from_raw(me) };
         }
 
-        let _lck = self.reader_lock.lock();
+        let _lck = self.reader_lock.write();
         node.rcu_prev()
             .store(core::ptr::null_mut(), Ordering::Release);
         node.rcu_next()
@@ -136,7 +136,7 @@ impl<T: RCUNode<T>> RCUList<T> {
             unsafe { Arc::from_raw(old) };
         }
 
-        let _lck = self.reader_lock.lock();
+        let _lck = self.reader_lock.write();
         old_node
             .rcu_prev()
             .store(core::ptr::null_mut(), Ordering::Release);
@@ -146,7 +146,7 @@ impl<T: RCUNode<T>> RCUList<T> {
     }
 
     pub fn iter(&self) -> RCUIterator<T> {
-        let _lck = self.reader_lock.lock_shared();
+        let _lck = Task::block_on(self.reader_lock.read());
 
         RCUIterator {
             // SAFETY: We have a read lock, so the node is still alive.
@@ -158,7 +158,7 @@ impl<T: RCUNode<T>> RCUList<T> {
 
 pub struct RCUIterator<'lt, T: RCUNode<T>> {
     cur: Option<NonNull<T>>,
-    _lock: RwSemReadGuard<'lt, ()>,
+    _lock: RwLockReadGuard<'lt, ()>,
 }
 
 impl<'lt, T: RCUNode<T>> Iterator for RCUIterator<'lt, T> {
@@ -194,10 +194,6 @@ impl<T: core::fmt::Debug> core::fmt::Debug for RCUPointer<T> {
 }
 
 impl<T> RCUPointer<T> {
-    pub fn new_with(value: Arc<T>) -> Self {
-        Self(AtomicPtr::new(Arc::into_raw(value) as *mut _))
-    }
-
     pub fn empty() -> Self {
         Self(AtomicPtr::new(core::ptr::null_mut()))
     }
@@ -236,7 +232,7 @@ impl<T> Drop for RCUPointer<T> {
         if let Some(arc) = unsafe { self.swap(None) } {
             // We only wait if there are other references.
             if Arc::strong_count(&arc) == 1 {
-                rcu_sync();
+                Task::block_on(rcu_sync());
             }
         }
     }

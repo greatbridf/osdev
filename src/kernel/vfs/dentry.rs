@@ -1,11 +1,9 @@
 pub mod dcache;
 
-use core::{
-    hash::{BuildHasher, BuildHasherDefault, Hasher},
-    ops::ControlFlow,
-    sync::atomic::{AtomicPtr, Ordering},
+use super::{
+    inode::{Ino, Inode, Mode, WriteOffset},
+    s_isblk, s_ischr, s_isdir, s_isreg, DevId, FsContext,
 };
-
 use crate::{
     hash::KernelHasher,
     io::{Buffer, ByteBuffer},
@@ -14,16 +12,17 @@ use crate::{
     prelude::*,
     rcu::{RCUNode, RCUPointer},
 };
-
 use alloc::sync::Arc;
 use bindings::{
     statx, EEXIST, EINVAL, EISDIR, ELOOP, ENOENT, ENOTDIR, EPERM, ERANGE, O_CREAT, O_EXCL,
 };
-
-use super::{
-    inode::{Ino, Inode, Mode, WriteOffset},
-    s_isblk, s_ischr, s_isdir, s_isreg, DevId, FsContext,
+use core::{
+    fmt,
+    hash::{BuildHasher, BuildHasherDefault, Hasher},
+    ops::ControlFlow,
+    sync::atomic::{AtomicPtr, Ordering},
 };
+use eonix_sync::LazyLock;
 
 struct DentryData {
     inode: Arc<dyn Inode>,
@@ -50,8 +49,24 @@ pub struct Dentry {
     data: RCUPointer<DentryData>,
 }
 
-impl core::fmt::Debug for Dentry {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+pub(super) static DROOT: LazyLock<Arc<Dentry>> = LazyLock::new(|| unsafe {
+    let mut dentry = Arc::new_uninit();
+    let parent = dentry.clone().assume_init();
+
+    Arc::get_mut_unchecked(&mut dentry).write(Dentry {
+        parent,
+        name: Arc::from("[root]".as_ref()),
+        hash: 0,
+        prev: AtomicPtr::default(),
+        next: AtomicPtr::default(),
+        data: RCUPointer::empty(),
+    });
+
+    dentry.assume_init()
+});
+
+impl fmt::Debug for Dentry {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Dentry")
             .field("name", &String::from_utf8_lossy(&self.name))
             .field("parent", &String::from_utf8_lossy(&self.parent.name))

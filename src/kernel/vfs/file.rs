@@ -1,10 +1,13 @@
-use core::{ops::ControlFlow, sync::atomic::Ordering};
-
+use super::{
+    dentry::Dentry,
+    inode::{Mode, WriteOffset},
+    s_isblk, s_isdir, s_isreg,
+};
 use crate::{
-    io::{Buffer, BufferFill, ByteBuffer},
+    io::{Buffer, BufferFill, ByteBuffer, Chunks},
     kernel::{
         constants::{TCGETS, TCSETS, TIOCGPGRP, TIOCGWINSZ, TIOCSPGRP},
-        mem::paging::Page,
+        mem::{paging::Page, AsMemoryBlock as _},
         task::{Signal, Thread},
         terminal::{Terminal, TerminalIORequest},
         user::{UserPointer, UserPointerMut},
@@ -13,18 +16,14 @@ use crate::{
     prelude::*,
     sync::CondVar,
 };
-
 use alloc::{collections::vec_deque::VecDeque, sync::Arc};
 use bindings::{
     statx, EBADF, EFAULT, EINTR, EINVAL, ENOTDIR, ENOTTY, EOVERFLOW, EPIPE, ESPIPE, S_IFMT,
 };
 use bitflags::bitflags;
-
-use super::{
-    dentry::Dentry,
-    inode::{Mode, WriteOffset},
-    s_isblk, s_isdir, s_isreg,
-};
+use core::{ops::ControlFlow, sync::atomic::Ordering};
+use eonix_runtime::task::Task;
+use eonix_sync::Mutex;
 
 pub struct InodeFile {
     read: bool,
@@ -130,7 +129,7 @@ impl Pipe {
     }
 
     fn close_read(&self) {
-        let mut inner = self.inner.lock();
+        let mut inner = Task::block_on(self.inner.lock());
         if inner.read_closed {
             return;
         }
@@ -140,7 +139,7 @@ impl Pipe {
     }
 
     fn close_write(&self) {
-        let mut inner = self.inner.lock();
+        let mut inner = Task::block_on(self.inner.lock());
         if inner.write_closed {
             return;
         }
@@ -149,11 +148,11 @@ impl Pipe {
         self.cv_read.notify_all();
     }
 
-    fn read(&self, buffer: &mut dyn Buffer) -> KResult<usize> {
-        let mut inner = self.inner.lock();
+    async fn read(&self, buffer: &mut dyn Buffer) -> KResult<usize> {
+        let mut inner = self.inner.lock().await;
 
         while !inner.write_closed && inner.buffer.is_empty() {
-            self.cv_read.wait(&mut inner);
+            inner = self.cv_read.wait(inner).await;
             if Thread::current().signal_list.has_pending_signal() {
                 return Err(EINTR);
             }
@@ -167,8 +166,8 @@ impl Pipe {
         Ok(nread)
     }
 
-    fn write_atomic(&self, data: &[u8]) -> KResult<usize> {
-        let mut inner = self.inner.lock();
+    async fn write_atomic(&self, data: &[u8]) -> KResult<usize> {
+        let mut inner = self.inner.lock().await;
 
         if inner.read_closed {
             send_sigpipe_to_current();
@@ -176,7 +175,7 @@ impl Pipe {
         }
 
         while inner.buffer.len() + data.len() > Self::PIPE_SIZE {
-            self.cv_write.wait(&mut inner);
+            inner = self.cv_write.wait(inner).await;
             if Thread::current().signal_list.has_pending_signal() {
                 return Err(EINTR);
             }
@@ -193,8 +192,8 @@ impl Pipe {
         return Ok(data.len());
     }
 
-    fn write_non_atomic(&self, data: &[u8]) -> KResult<usize> {
-        let mut inner = self.inner.lock();
+    async fn write_non_atomic(&self, data: &[u8]) -> KResult<usize> {
+        let mut inner = self.inner.lock().await;
 
         if inner.read_closed {
             send_sigpipe_to_current();
@@ -217,7 +216,7 @@ impl Pipe {
                 break;
             }
 
-            self.cv_write.wait(&mut inner);
+            inner = self.cv_write.wait(inner).await;
             if Thread::current().signal_list.has_pending_signal() {
                 if data.len() != remaining.len() {
                     break;
@@ -234,12 +233,12 @@ impl Pipe {
         Ok(data.len() - remaining.len())
     }
 
-    fn write(&self, data: &[u8]) -> KResult<usize> {
+    async fn write(&self, data: &[u8]) -> KResult<usize> {
         // Writes those are smaller than the pipe size are atomic.
         if data.len() <= Self::PIPE_SIZE {
-            self.write_atomic(data)
+            self.write_atomic(data).await
         } else {
-            self.write_non_atomic(data)
+            self.write_non_atomic(data).await
         }
     }
 }
@@ -295,7 +294,7 @@ impl InodeFile {
     }
 
     fn seek(&self, option: SeekOption) -> KResult<usize> {
-        let mut cursor = self.cursor.lock();
+        let mut cursor = Task::block_on(self.cursor.lock());
 
         let new_cursor = match option {
             SeekOption::Current(off) => cursor.checked_add_signed(off).ok_or(EOVERFLOW)?,
@@ -316,13 +315,11 @@ impl InodeFile {
             return Err(EBADF);
         }
 
-        let mut cursor = self.cursor.lock();
+        let mut cursor = Task::block_on(self.cursor.lock());
 
         // TODO!!!: use `UserBuffer`
         if self.append {
-            let nwrote = self
-                .dentry
-                .write(buffer, WriteOffset::End(cursor.as_mut()))?;
+            let nwrote = self.dentry.write(buffer, WriteOffset::End(&mut cursor))?;
 
             Ok(nwrote)
         } else {
@@ -338,7 +335,7 @@ impl InodeFile {
             return Err(EBADF);
         }
 
-        let mut cursor = self.cursor.lock();
+        let mut cursor = Task::block_on(self.cursor.lock());
 
         let nread = self.dentry.read(buffer, *cursor)?;
 
@@ -347,7 +344,7 @@ impl InodeFile {
     }
 
     fn getdents64(&self, buffer: &mut dyn Buffer) -> KResult<()> {
-        let mut cursor = self.cursor.lock();
+        let mut cursor = Task::block_on(self.cursor.lock());
 
         let nread = self.dentry.readdir(*cursor, |filename, ino| {
             // Filename length + 1 for padding '\0'
@@ -377,7 +374,7 @@ impl InodeFile {
     }
 
     fn getdents(&self, buffer: &mut dyn Buffer) -> KResult<()> {
-        let mut cursor = self.cursor.lock();
+        let mut cursor = Task::block_on(self.cursor.lock());
 
         let nread = self.dentry.readdir(*cursor, |filename, ino| {
             // + 1 for filename length padding '\0', + 1 for d_type.
@@ -411,8 +408,8 @@ impl TerminalFile {
         Arc::new(File::TTY(TerminalFile { terminal: tty }))
     }
 
-    fn read(&self, buffer: &mut dyn Buffer) -> KResult<usize> {
-        self.terminal.read(buffer)
+    async fn read(&self, buffer: &mut dyn Buffer) -> KResult<usize> {
+        self.terminal.read(buffer).await
     }
 
     fn write(&self, buffer: &[u8]) -> KResult<usize> {
@@ -423,32 +420,32 @@ impl TerminalFile {
         Ok(buffer.len())
     }
 
-    fn poll(&self, event: PollEvent) -> KResult<PollEvent> {
+    async fn poll(&self, event: PollEvent) -> KResult<PollEvent> {
         if !event.contains(PollEvent::Readable) {
             unimplemented!("Poll event not supported.")
         }
 
-        self.terminal.poll_in().map(|_| PollEvent::Readable)
+        self.terminal.poll_in().await.map(|_| PollEvent::Readable)
     }
 
     fn ioctl(&self, request: usize, arg3: usize) -> KResult<()> {
-        self.terminal.ioctl(match request as u32 {
+        Task::block_on(self.terminal.ioctl(match request as u32 {
             TCGETS => TerminalIORequest::GetTermios(UserPointerMut::new_vaddr(arg3)?),
             TCSETS => TerminalIORequest::SetTermios(UserPointer::new_vaddr(arg3)?),
             TIOCGPGRP => TerminalIORequest::GetProcessGroup(UserPointerMut::new_vaddr(arg3)?),
             TIOCSPGRP => TerminalIORequest::SetProcessGroup(UserPointer::new_vaddr(arg3)?),
             TIOCGWINSZ => TerminalIORequest::GetWindowSize(UserPointerMut::new_vaddr(arg3)?),
             _ => return Err(EINVAL),
-        })
+        }))
     }
 }
 
 impl File {
-    pub fn read(&self, buffer: &mut dyn Buffer) -> KResult<usize> {
+    pub async fn read(&self, buffer: &mut dyn Buffer) -> KResult<usize> {
         match self {
             File::Inode(inode) => inode.read(buffer),
-            File::PipeRead(pipe) => pipe.pipe.read(buffer),
-            File::TTY(tty) => tty.read(buffer),
+            File::PipeRead(pipe) => pipe.pipe.read(buffer).await,
+            File::TTY(tty) => tty.read(buffer).await,
             File::CharDev(device) => device.read(buffer),
             _ => Err(EBADF),
         }
@@ -469,10 +466,10 @@ impl File {
     //     }
     // }
 
-    pub fn write(&self, buffer: &[u8]) -> KResult<usize> {
+    pub async fn write(&self, buffer: &[u8]) -> KResult<usize> {
         match self {
             File::Inode(inode) => inode.write(buffer),
-            File::PipeWrite(pipe) => pipe.pipe.write(buffer),
+            File::PipeWrite(pipe) => pipe.pipe.write(buffer).await,
             File::TTY(tty) => tty.write(buffer),
             File::CharDev(device) => device.write(buffer),
             _ => Err(EBADF),
@@ -500,39 +497,32 @@ impl File {
         }
     }
 
-    pub fn sendfile(&self, dest_file: &Self, count: usize) -> KResult<usize> {
-        let buffer_page = Page::alloc_one();
+    pub async fn sendfile(&self, dest_file: &Self, count: usize) -> KResult<usize> {
+        let buffer_page = Page::alloc();
+        // SAFETY: We are the only owner of the page.
+        let buffer = unsafe { buffer_page.as_memblk().as_bytes_mut() };
 
         match self {
             File::Inode(file) if s_isblk(file.mode) || s_isreg(file.mode) => (),
             _ => return Err(EINVAL),
         }
 
-        // TODO!!!: zero copy implementation with mmap
-        let mut tot = 0usize;
-        while tot < count {
+        for (cur, len) in Chunks::new(0, count, buffer.len()) {
             if Thread::current().signal_list.has_pending_signal() {
-                if tot == 0 {
-                    return Err(EINTR);
-                } else {
-                    return Ok(tot);
-                }
+                return if cur == 0 { Err(EINTR) } else { Ok(cur) };
             }
-
-            let batch_size = usize::min(count - tot, buffer_page.len());
-            let slice = &mut buffer_page.as_mut_slice()[..batch_size];
-            let mut buffer = ByteBuffer::new(slice);
-
-            let nwrote = self.read(&mut buffer)?;
-
-            if nwrote == 0 {
+            let nread = self.read(&mut ByteBuffer::new(&mut buffer[..len])).await?;
+            if nread == 0 {
                 break;
             }
 
-            tot += dest_file.write(&slice[..nwrote])?;
+            let nwrote = dest_file.write(&buffer[..nread]).await?;
+            if nwrote != nread {
+                return Ok(cur + nwrote);
+            }
         }
 
-        Ok(tot)
+        Ok(count)
     }
 
     pub fn ioctl(&self, request: usize, arg3: usize) -> KResult<usize> {
@@ -542,10 +532,10 @@ impl File {
         }
     }
 
-    pub fn poll(&self, event: PollEvent) -> KResult<PollEvent> {
+    pub async fn poll(&self, event: PollEvent) -> KResult<PollEvent> {
         match self {
             File::Inode(_) => Ok(event),
-            File::TTY(tty) => tty.poll(event),
+            File::TTY(tty) => tty.poll(event).await,
             _ => unimplemented!("Poll event not supported."),
         }
     }

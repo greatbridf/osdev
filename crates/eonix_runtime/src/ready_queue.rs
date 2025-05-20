@@ -2,8 +2,8 @@ use crate::task::Task;
 use alloc::{collections::VecDeque, sync::Arc};
 use eonix_sync::Spin;
 
-#[arch::define_percpu]
-static READYQUEUE: Option<Spin<FifoReadyQueue>> = None;
+#[arch::define_percpu_shared]
+static READYQUEUE: Spin<FifoReadyQueue> = Spin::new(FifoReadyQueue::new());
 
 pub trait ReadyQueue {
     fn get(&mut self) -> Option<Arc<Task>>;
@@ -33,14 +33,9 @@ impl ReadyQueue for FifoReadyQueue {
 }
 
 pub fn local_rq() -> &'static Spin<dyn ReadyQueue> {
-    // SAFETY: When we use ReadyQueue on this CPU, we will lock it with `lock_irq()`
-    //         and if we use ReadyQueue on other CPU, we won't be able to touch it on this CPU.
-    //         So no issue here.
-    unsafe { READYQUEUE.as_ref() }
-        .as_ref()
-        .expect("ReadyQueue should be initialized")
+    &*READYQUEUE
 }
 
-pub fn init_local_rq() {
-    READYQUEUE.set(Some(Spin::new(FifoReadyQueue::new())));
+pub fn cpu_rq(cpuid: usize) -> &'static Spin<dyn ReadyQueue> {
+    READYQUEUE.get_for_cpu(cpuid).expect("CPU not found")
 }

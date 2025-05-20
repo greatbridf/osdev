@@ -5,24 +5,28 @@ use crate::io::Buffer;
 use crate::kernel::constants::{
     ENOSYS, PR_GET_NAME, PR_SET_NAME, RLIMIT_STACK, SIG_BLOCK, SIG_SETMASK, SIG_UNBLOCK,
 };
-use crate::kernel::mem::{Page, PageBuffer, VAddr};
+use crate::kernel::mem::PageBuffer;
 use crate::kernel::task::{
-    KernelStack, ProcessBuilder, ProcessList, Signal, SignalAction, Thread, ThreadBuilder,
-    ThreadRunnable, UserDescriptor, WaitObject, WaitType,
+    KernelStack, ProcessBuilder, ProcessList, Signal, SignalAction, SignalMask, Thread,
+    ThreadBuilder, ThreadRunnable, UserDescriptor, WaitObject, WaitType,
 };
 use crate::kernel::user::dataflow::UserString;
 use crate::kernel::user::{UserPointer, UserPointerMut};
 use crate::kernel::vfs::dentry::Dentry;
 use crate::kernel::vfs::{self, FsContext};
 use crate::path::Path;
-use crate::sync::AsRefPosition as _;
+use crate::SIGNAL_NOW;
 use crate::{kernel::user::dataflow::UserBuffer, prelude::*};
 use alloc::borrow::ToOwned;
 use alloc::ffi::CString;
 use arch::{ExtendedContext, InterruptContext};
 use bindings::{EINVAL, ENOENT, ENOTDIR, ERANGE, ESRCH};
 use bitflags::bitflags;
+use eonix_mm::address::{Addr as _, VAddr};
 use eonix_runtime::scheduler::Scheduler;
+use eonix_runtime::task::Task;
+use eonix_sync::AsProof as _;
+use posix_types::signal::SigAction;
 
 fn do_umask(mask: u32) -> KResult<u32> {
     let context = FsContext::get_current();
@@ -36,11 +40,10 @@ fn do_umask(mask: u32) -> KResult<u32> {
 fn do_getcwd(buffer: *mut u8, bufsize: usize) -> KResult<usize> {
     let context = FsContext::get_current();
     let mut user_buffer = UserBuffer::new(buffer, bufsize)?;
+    let mut buffer = PageBuffer::new();
 
-    let page = Page::alloc_one();
-    let mut buffer = PageBuffer::new(page.clone());
     context.cwd.lock().get_path(&context, &mut buffer)?;
-    user_buffer.fill(page.as_slice())?.ok_or(ERANGE)?;
+    user_buffer.fill(buffer.data())?.ok_or(ERANGE)?;
 
     Ok(buffer.wrote())
 }
@@ -96,7 +99,10 @@ fn do_execve(exec: &[u8], argv: Vec<CString>, envp: Vec<CString>) -> KResult<(VA
     let elf = ParsedElf32::parse(dentry.clone())?;
     let result = elf.load(argv, envp);
     if let Ok((ip, sp, mm_list)) = result {
-        Thread::current().process.mm_list.replace(mm_list);
+        unsafe {
+            // SAFETY: We are doing execve, all other threads are terminated.
+            Thread::current().process.mm_list.replace(Some(mm_list));
+        }
         Thread::current().files.on_exec();
         Thread::current().signal_list.clear_non_ignore();
         Thread::current().set_name(dentry.name().clone());
@@ -146,8 +152,8 @@ fn sys_execve(int_stack: &mut InterruptContext, _: &mut ExtendedContext) -> usiz
 
         let (ip, sp) = do_execve(exec.as_cstr().to_bytes(), argv_vec, envp_vec)?;
 
-        int_stack.rip = ip.0 as u64;
-        int_stack.rsp = sp.0 as u64;
+        int_stack.rip = ip.addr() as u64;
+        int_stack.rsp = sp.addr() as u64;
         Ok(())
     })() {
         Ok(_) => 0,
@@ -159,14 +165,13 @@ fn sys_exit(int_stack: &mut InterruptContext, _: &mut ExtendedContext) -> usize 
     let status = int_stack.rbx as u32;
 
     unsafe {
-        let mut procs = ProcessList::get().lock();
-        eonix_preempt::disable();
-
-        // SAFETY: Preemption is disabled.
+        let mut procs = Task::block_on(ProcessList::get().write());
         procs.do_kill_process(&Thread::current().process, WaitType::Exited(status));
     }
 
     unsafe {
+        eonix_preempt::disable();
+
         // SAFETY: Preempt count == 1.
         Thread::exit();
     }
@@ -180,7 +185,7 @@ bitflags! {
     }
 }
 
-fn do_waitpid(waitpid: u32, arg1: *mut u32, options: u32) -> KResult<u32> {
+fn do_waitpid(_waitpid: u32, arg1: *mut u32, options: u32) -> KResult<u32> {
     // if waitpid != u32::MAX {
     //     unimplemented!("waitpid with pid {waitpid}")
     // }
@@ -189,11 +194,11 @@ fn do_waitpid(waitpid: u32, arg1: *mut u32, options: u32) -> KResult<u32> {
         Some(options) => options,
     };
 
-    let wait_object = Thread::current().process.wait(
+    let wait_object = Task::block_on(Thread::current().process.wait(
         options.contains(UserWaitOptions::WNOHANG),
         options.contains(UserWaitOptions::WUNTRACED),
         options.contains(UserWaitOptions::WCONTINUED),
-    )?;
+    ))?;
 
     match wait_object {
         None => Ok(0),
@@ -234,10 +239,10 @@ fn do_getsid(pid: u32) -> KResult<u32> {
     if pid == 0 {
         Ok(Thread::current().process.session_rcu().sid)
     } else {
-        let procs = ProcessList::get().lock_shared();
+        let procs = Task::block_on(ProcessList::get().read());
         procs
             .try_find_process(pid)
-            .map(|proc| proc.session(procs.as_pos()).sid)
+            .map(|proc| proc.session(procs.prove()).sid)
             .ok_or(ESRCH)
     }
 }
@@ -246,10 +251,10 @@ fn do_getpgid(pid: u32) -> KResult<u32> {
     if pid == 0 {
         Ok(Thread::current().process.pgroup_rcu().pgid)
     } else {
-        let procs = ProcessList::get().lock_shared();
+        let procs = Task::block_on(ProcessList::get().read());
         procs
             .try_find_process(pid)
-            .map(|proc| proc.pgroup(procs.as_pos()).pgid)
+            .map(|proc| proc.pgroup(procs.prove()).pgid)
             .ok_or(ESRCH)
     }
 }
@@ -324,7 +329,7 @@ fn do_prctl(option: u32, arg2: usize) -> KResult<()> {
 }
 
 fn do_kill(pid: i32, sig: u32) -> KResult<()> {
-    let procs = ProcessList::get().lock_shared();
+    let procs = Task::block_on(ProcessList::get().read());
     match pid {
         // Send signal to every process for which the calling process has
         // permission to send signals.
@@ -332,26 +337,25 @@ fn do_kill(pid: i32, sig: u32) -> KResult<()> {
         // Send signal to every process in the process group.
         0 => Thread::current()
             .process
-            .pgroup(procs.as_pos())
-            .raise(Signal::try_from(sig)?, procs.as_pos()),
+            .pgroup(procs.prove())
+            .raise(Signal::try_from(sig)?, procs.prove()),
         // Send signal to the process with the specified pid.
         1.. => procs
             .try_find_process(pid as u32)
             .ok_or(ESRCH)?
-            .raise(Signal::try_from(sig)?, procs.as_pos()),
+            .raise(Signal::try_from(sig)?, procs.prove()),
         // Send signal to the process group with the specified pgid equals to `-pid`.
         ..-1 => procs
             .try_find_pgroup((-pid) as u32)
             .ok_or(ESRCH)?
-            .raise(Signal::try_from(sig)?, procs.as_pos()),
+            .raise(Signal::try_from(sig)?, procs.prove()),
     }
 
     Ok(())
 }
 
 fn do_tkill(tid: u32, sig: u32) -> KResult<()> {
-    ProcessList::get()
-        .lock_shared()
+    Task::block_on(ProcessList::get().read())
         .try_find_thread(tid)
         .ok_or(ESRCH)?
         .raise(Signal::try_from(sig)?);
@@ -363,13 +367,13 @@ fn do_rt_sigprocmask(how: u32, set: *mut u64, oldset: *mut u64, sigsetsize: usiz
         return Err(EINVAL);
     }
 
-    let old_mask = Thread::current().signal_list.get_mask();
+    let old_mask = u64::from(Thread::current().signal_list.get_mask());
     if !oldset.is_null() {
         UserPointerMut::new(oldset)?.write(old_mask)?;
     }
 
     let new_mask = if !set.is_null() {
-        UserPointer::new(set)?.read()?
+        SignalMask::from(UserPointer::new(set)?.read()?)
     } else {
         return Ok(());
     };
@@ -384,58 +388,32 @@ fn do_rt_sigprocmask(how: u32, set: *mut u64, oldset: *mut u64, sigsetsize: usiz
     Ok(())
 }
 
-#[repr(C, packed)]
-#[derive(Debug, Clone, Copy)]
-struct UserSignalAction {
-    sa_handler: u32,
-    sa_flags: u32,
-    sa_restorer: u32,
-    sa_mask: u64,
-}
-
-impl From<UserSignalAction> for SignalAction {
-    fn from(from: UserSignalAction) -> SignalAction {
-        SignalAction {
-            sa_handler: from.sa_handler as usize,
-            sa_flags: from.sa_flags as usize,
-            sa_mask: from.sa_mask as usize,
-            sa_restorer: from.sa_restorer as usize,
-        }
-    }
-}
-
-impl From<SignalAction> for UserSignalAction {
-    fn from(from: SignalAction) -> UserSignalAction {
-        UserSignalAction {
-            sa_handler: from.sa_handler as u32,
-            sa_flags: from.sa_flags as u32,
-            sa_mask: from.sa_mask as u64,
-            sa_restorer: from.sa_restorer as u32,
-        }
-    }
-}
-
 fn do_rt_sigaction(
     signum: u32,
-    act: *const UserSignalAction,
-    oldact: *mut UserSignalAction,
+    act: *const SigAction,
+    oldact: *mut SigAction,
     sigsetsize: usize,
 ) -> KResult<()> {
     let signal = Signal::try_from(signum)?;
-    if sigsetsize != size_of::<u64>() || signal.is_now() {
+    if sigsetsize != size_of::<u64>() {
         return Err(EINVAL);
     }
 
-    let old_action = Thread::current().signal_list.get_handler(signal);
+    // SIGKILL and SIGSTOP MUST not be set for a handler.
+    if matches!(signal, SIGNAL_NOW!()) {
+        return Err(EINVAL);
+    }
+
+    let old_action = Thread::current().signal_list.get_action(signal);
     if !oldact.is_null() {
         UserPointerMut::new(oldact)?.write(old_action.into())?;
     }
 
     if !act.is_null() {
         let new_action = UserPointer::new(act)?.read()?;
-        Thread::current()
-            .signal_list
-            .set_handler(signal, &new_action.into())?;
+        let action: SignalAction = new_action.try_into()?;
+
+        Thread::current().signal_list.set_action(signal, action)?;
     }
 
     Ok(())
@@ -570,7 +548,7 @@ define_syscall32!(sys_tkill, do_tkill, tid: u32, sig: u32);
 define_syscall32!(sys_rt_sigprocmask, do_rt_sigprocmask,
     how: u32, set: *mut u64, oldset: *mut u64, sigsetsize: usize);
 define_syscall32!(sys_rt_sigaction, do_rt_sigaction,
-    signum: u32, act: *const UserSignalAction, oldact: *mut UserSignalAction, sigsetsize: usize);
+    signum: u32, act: *const SigAction, oldact: *mut SigAction, sigsetsize: usize);
 define_syscall32!(sys_prlimit64, do_prlimit64,
     pid: u32, resource: u32, new_limit: *const RLimit, old_limit: *mut RLimit);
 define_syscall32!(sys_getrlimit, do_getrlimit, resource: u32, rlimit: *mut RLimit);
@@ -582,19 +560,19 @@ fn sys_vfork(int_stack: &mut InterruptContext, ext: &mut ExtendedContext) -> usi
 }
 
 fn sys_fork(int_stack: &mut InterruptContext, _: &mut ExtendedContext) -> usize {
-    let mut procs = ProcessList::get().lock();
+    let mut procs = Task::block_on(ProcessList::get().write());
 
     let current = Thread::current();
     let current_process = current.process.clone();
-    let current_pgroup = current_process.pgroup(procs.as_pos()).clone();
-    let current_session = current_process.session(procs.as_pos()).clone();
+    let current_pgroup = current_process.pgroup(procs.prove()).clone();
+    let current_session = current_process.session(procs.prove()).clone();
 
     let mut new_int_context = int_stack.clone();
     new_int_context.set_return_value(0);
 
     let thread_builder = ThreadBuilder::new().fork_from(&current);
     let (new_thread, new_process) = ProcessBuilder::new()
-        .mm_list(current_process.mm_list.new_cloned())
+        .mm_list(Task::block_on(current_process.mm_list.new_cloned()))
         .parent(current_process)
         .pgroup(current_pgroup)
         .session(current_session)

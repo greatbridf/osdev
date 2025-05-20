@@ -36,7 +36,7 @@ impl<T> ArcSwap<T> {
     pub fn borrow(&self) -> BorrowedArc<T> {
         unsafe {
             BorrowedArc::from_raw(
-                NonNull::new(self.pointer.load(Ordering::Relaxed))
+                NonNull::new(self.pointer.load(Ordering::Acquire))
                     .expect("ArcSwap: pointer should not be null."),
             )
         }

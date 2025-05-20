@@ -1,12 +1,10 @@
-use crate::prelude::*;
-
-use bindings::PA_MMAP;
-
+use super::paging::AllocZeroed as _;
+use super::{AsMemoryBlock, Mapping, Page, Permission};
+use crate::io::ByteBuffer;
+use crate::KResult;
 use core::{borrow::Borrow, cell::UnsafeCell, cmp::Ordering};
-
-use crate::bindings::root::{PA_A, PA_ANON, PA_COW, PA_P, PA_RW};
-
-use super::{Mapping, Page, PageBuffer, Permission, VAddr, VRange, PTE};
+use eonix_mm::address::{AddrOps as _, VAddr, VRange};
+use eonix_mm::page_table::{PageAttribute, PTE};
 
 #[derive(Debug)]
 pub struct MMArea {
@@ -44,11 +42,6 @@ impl MMArea {
         *self.range_borrow()
     }
 
-    #[allow(dead_code)]
-    pub fn len(&self) -> usize {
-        self.range_borrow().len()
-    }
-
     /// # Safety
     /// This function should be called only when we can guarantee that the range
     /// won't overlap with any other range in some scope.
@@ -58,7 +51,7 @@ impl MMArea {
     }
 
     pub fn split(mut self, at: VAddr) -> (Option<Self>, Option<Self>) {
-        assert_eq!(at.floor(), at);
+        assert!(at.is_page_aligned());
 
         match self.range_borrow().cmp(&VRange::from(at)) {
             Ordering::Less => (Some(self), None),
@@ -86,83 +79,94 @@ impl MMArea {
 
     /// # Return
     /// Whether the whole handling process is done.
-    pub fn handle_cow(&self, pte: &mut PTE) -> bool {
-        let mut attributes = pte.attributes();
-        let mut pfn = pte.pfn();
+    pub fn handle_cow(&self, pte: &mut impl PTE) -> bool {
+        let mut page_attr = pte.get_attr();
+        let pfn = pte.get_pfn();
 
-        attributes &= !PA_COW as usize;
-        if self.permission.write {
-            attributes |= PA_RW as usize;
-        } else {
-            attributes &= !PA_RW as usize;
-        }
+        page_attr = page_attr.copy_on_write(false);
+        page_attr = page_attr.write(self.permission.write);
 
-        let page = unsafe { Page::take_pfn(pfn, 0) };
-        if unsafe { page.load_refcount() } == 1 {
+        let page = unsafe { Page::from_raw(pfn) };
+        if page.is_exclusive() {
             // SAFETY: This is actually safe. If we read `1` here and we have `MMList` lock
             // held, there couldn't be neither other processes sharing the page, nor other
             // threads making the page COW at the same time.
-            pte.set_attributes(attributes);
+            pte.set_attr(page_attr);
             core::mem::forget(page);
             return true;
         }
 
-        let new_page = Page::alloc_one();
-        if attributes & PA_ANON as usize != 0 {
-            new_page.zero();
+        let new_page;
+        if page_attr.is_anonymous() {
+            new_page = Page::zeroed();
         } else {
-            new_page.as_mut_slice().copy_from_slice(page.as_slice());
+            new_page = Page::alloc();
+
+            unsafe {
+                // SAFETY: `page` is CoW, which means that others won't write to it.
+                let old_page_data = page.as_memblk().as_bytes();
+
+                // SAFETY: `new_page` is exclusive owned by us.
+                let new_page_data = new_page.as_memblk().as_bytes_mut();
+
+                new_page_data.copy_from_slice(old_page_data);
+            };
         }
 
-        attributes &= !(PA_A | PA_ANON) as usize;
+        page_attr = page_attr.accessed(false);
+        page_attr = page_attr.anonymous(false);
 
-        pfn = new_page.into_pfn();
-        pte.set(pfn, attributes);
+        pte.set(new_page.into_raw(), page_attr);
 
         false
     }
 
     /// # Arguments
     /// * `offset`: The offset from the start of the mapping, aligned to 4KB boundary.
-    pub fn handle_mmap(&self, pte: &mut PTE, offset: usize) -> KResult<()> {
+    pub fn handle_mmap(&self, pte: &mut impl PTE, offset: usize) -> KResult<()> {
         // TODO: Implement shared mapping
-        let mut attributes = pte.attributes();
-        let pfn = pte.pfn();
-
-        attributes |= PA_P as usize;
+        let mut page_attr = pte.get_attr();
+        let pfn = pte.get_pfn();
 
         match &self.mapping {
             Mapping::File(mapping) if offset < mapping.length => {
-                // SAFETY: Since we are here, the `pfn` must refer to a valid buddy page.
-                let page = unsafe { Page::from_pfn(pfn, 0) };
-                let nread = mapping
-                    .file
-                    .read(&mut PageBuffer::new(page.clone()), mapping.offset + offset)?;
+                let page = unsafe {
+                    // SAFETY: Since we are here, the `pfn` must refer to a valid buddy page.
+                    Page::with_raw(pfn, |page| page.clone())
+                };
 
-                if nread < page.len() {
-                    page.as_mut_slice()[nread..].fill(0);
-                }
+                let page_data = unsafe {
+                    // SAFETY: `page` is marked as mapped, so others trying to read or write to
+                    //         it will be blocked and enter the page fault handler, where they will
+                    //         be blocked by the mutex held by us.
+                    page.as_memblk().as_bytes_mut()
+                };
 
-                if mapping.length - offset < 0x1000 {
-                    let length_to_end = mapping.length - offset;
-                    page.as_mut_slice()[length_to_end..].fill(0);
-                }
+                let cnt_to_read = (mapping.length - offset).min(0x1000);
+                let cnt_read = mapping.file.read(
+                    &mut ByteBuffer::new(&mut page_data[..cnt_to_read]),
+                    mapping.offset + offset,
+                )?;
+
+                page_data[cnt_read..].fill(0);
             }
             Mapping::File(_) => panic!("Offset out of range"),
             _ => panic!("Anonymous mapping should not be PA_MMAP"),
         }
 
-        attributes &= !PA_MMAP as usize;
-        pte.set_attributes(attributes);
+        page_attr = page_attr.present(true).mapped(false);
+        pte.set_attr(page_attr);
         Ok(())
     }
 
-    pub fn handle(&self, pte: &mut PTE, offset: usize) -> KResult<()> {
-        if pte.is_cow() {
+    pub fn handle(&self, pte: &mut impl PTE, offset: usize) -> KResult<()> {
+        let page_attr = pte.get_attr();
+
+        if page_attr.is_copy_on_write() {
             self.handle_cow(pte);
         }
 
-        if pte.is_mmap() {
+        if page_attr.is_mapped() {
             self.handle_mmap(pte, offset)?;
         }
 

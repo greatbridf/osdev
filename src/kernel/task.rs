@@ -11,5 +11,5 @@ pub use process::{Process, ProcessBuilder, WaitObject, WaitType};
 pub use process_group::ProcessGroup;
 pub use process_list::ProcessList;
 pub use session::Session;
-pub use signal::{Signal, SignalAction};
+pub use signal::{Signal, SignalAction, SignalMask};
 pub use thread::{Thread, ThreadBuilder, ThreadRunnable, UserDescriptor};

@@ -1,13 +1,23 @@
 #![no_std]
 
 mod guard;
-mod lock;
+mod lazy_lock;
+mod locked;
+pub mod marker;
+mod mutex;
+mod rwlock;
 mod spin;
-mod strategy;
+mod wait_list;
 
-pub use guard::Guard;
-pub use lock::Lock;
-pub use spin::{IrqStrategy, SpinStrategy};
-pub use strategy::LockStrategy;
+pub use guard::{UnlockableGuard, UnlockedGuard};
+pub use lazy_lock::LazyLock;
+pub use locked::{AsProof, AsProofMut, Locked, Proof, ProofMut};
+pub use mutex::{Mutex, MutexGuard};
+pub use rwlock::{RwLock, RwLockReadGuard, RwLockWriteGuard};
+pub use spin::{
+    LoopRelax, Relax, Spin, SpinGuard, SpinIrqGuard, SpinRelax, UnlockedSpinGuard,
+    UnlockedSpinIrqGuard,
+};
+pub use wait_list::WaitList;
 
-pub type Spin<T> = Lock<T, SpinStrategy>;
+extern crate alloc;

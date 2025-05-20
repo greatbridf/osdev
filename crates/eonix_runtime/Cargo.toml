@@ -12,7 +12,6 @@ eonix_sync = { path = "../eonix_sync" }
 pointers = { path = "../pointers" }
 
 intrusive-collections = "0.9.7"
-lazy_static = { version = "1.5.0", features = ["spin_no_std"] }
 
 [features]
 default = []

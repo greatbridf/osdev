@@ -4,5 +4,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-percpu-macros = { path="./percpu-macros" }
+eonix_mm = { path = "../crates/eonix_mm" }
+percpu-macros = { path = "./percpu-macros" }
 cfg-if = "1.0"

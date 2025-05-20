@@ -16,6 +16,7 @@ name = "arch"
 version = "0.1.0"
 dependencies = [
  "cfg-if",
+ "eonix_mm",
  "percpu-macros",
 ]
 
@@ -56,6 +57,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b048fb63fd8b5923fc5aa7b340d8e156aec7ec02f0c78fa8a6ddc2613f6f71de"
 
 [[package]]
+name = "buddy_allocator"
+version = "0.1.0"
+dependencies = [
+ "eonix_mm",
+ "eonix_sync",
+ "intrusive_list",
+]
+
+[[package]]
 name = "cexpr"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -92,7 +102,13 @@ name = "eonix_log"
 version = "0.1.0"
 dependencies = [
  "eonix_sync",
- "lazy_static",
+]
+
+[[package]]
+name = "eonix_mm"
+version = "0.1.0"
+dependencies = [
+ "intrusive_list",
 ]
 
 [[package]]
@@ -112,7 +128,6 @@ dependencies = [
  "eonix_preempt",
  "eonix_sync",
  "intrusive-collections",
- "lazy_static",
  "pointers",
 ]
 
@@ -120,7 +135,9 @@ dependencies = [
 name = "eonix_sync"
 version = "0.1.0"
 dependencies = [
+ "arch",
  "eonix_preempt",
+ "intrusive-collections",
 ]
 
 [[package]]
@@ -131,15 +148,16 @@ dependencies = [
  "atomic_unique_refcell",
  "bindgen",
  "bitflags",
+ "buddy_allocator",
  "eonix_log",
+ "eonix_mm",
  "eonix_preempt",
  "eonix_runtime",
  "eonix_sync",
  "intrusive-collections",
  "itertools",
- "lazy_static",
  "pointers",
- "spin",
+ "posix_types",
 ]
 
 [[package]]
@@ -158,21 +176,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "intrusive_list"
+version = "0.1.0"
+
+[[package]]
 name = "itertools"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "413ee7dfc52ee1a4949ceeb7dbc8a33f2d6c088194d9f922fb8318faf1f01186"
 dependencies = [
  "either",
-]
-
-[[package]]
-name = "lazy_static"
-version = "1.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
-dependencies = [
- "spin",
 ]
 
 [[package]]
@@ -189,16 +202,6 @@ checksum = "4979f22fdb869068da03c9f7528f8297c6fd2606bc3a4affe42e6a823fdb8da4"
 dependencies = [
  "cfg-if",
  "windows-targets",
-]
-
-[[package]]
-name = "lock_api"
-version = "0.4.12"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "07af8b9cdd281b7915f413fa73f29ebd5d55d0d3f0155584dade1ff18cea1b17"
-dependencies = [
- "autocfg",
- "scopeguard",
 ]
 
 [[package]]
@@ -249,6 +252,10 @@ dependencies = [
 
 [[package]]
 name = "pointers"
+version = "0.1.0"
+
+[[package]]
+name = "posix_types"
 version = "0.1.0"
 
 [[package]]
@@ -315,25 +322,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "08d43f7aa6b08d49f382cde6a7982047c3426db949b1424bc4b7ec9ae12c6ce2"
 
 [[package]]
-name = "scopeguard"
-version = "1.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
-
-[[package]]
 name = "shlex"
 version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
-
-[[package]]
-name = "spin"
-version = "0.9.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6980e8d7511241f8acf4aebddbb1ff938df5eebe98691418c4468d0b72a96a67"
-dependencies = [
- "lock_api",
-]
 
 [[package]]
 name = "syn"

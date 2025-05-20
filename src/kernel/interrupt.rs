@@ -1,26 +1,21 @@
-use alloc::sync::Arc;
-
-use arch::{ExtendedContext, InterruptContext};
-use lazy_static::lazy_static;
-
-use crate::bindings::root::EINVAL;
-use crate::{driver::Port8, prelude::*};
-
-use super::cpu::current_cpu;
+use super::cpu::local_cpu;
 use super::mem::handle_page_fault;
 use super::syscall::handle_syscall32;
-use super::task::{ProcessList, Signal};
+use super::task::{ProcessList, Signal, Thread};
 use super::timer::timer_interrupt;
+use crate::bindings::root::EINVAL;
+use crate::{driver::Port8, prelude::*};
+use alloc::sync::Arc;
+use arch::{ExtendedContext, InterruptContext};
+use eonix_runtime::task::Task;
 
 const PIC1_COMMAND: Port8 = Port8::new(0x20);
 const PIC1_DATA: Port8 = Port8::new(0x21);
 const PIC2_COMMAND: Port8 = Port8::new(0xA0);
 const PIC2_DATA: Port8 = Port8::new(0xA1);
 
-lazy_static! {
-    static ref IRQ_HANDLERS: Spin<[Option<Arc<dyn Fn() + Send + Sync>>; 16]> =
-        Spin::new([const { None }; 16]);
-}
+static IRQ_HANDLERS: Spin<[Option<Arc<dyn Fn() + Send + Sync>>; 16]> =
+    Spin::new([const { None }; 16]);
 
 fn irq_handler(irqno: usize) {
     assert!(irqno < 16);
@@ -64,6 +59,12 @@ pub extern "C" fn interrupt_handler(
         // IRQ
         no => irq_handler(no as usize - 0x20),
     }
+
+    if int_stack.cs & 0x3 != 0 {
+        if Thread::current().signal_list.has_pending_signal() {
+            Task::block_on(Thread::current().signal_list.handle(int_stack, ext_ctx));
+        }
+    }
 }
 
 pub fn register_irq_handler<F>(irqno: i32, handler: F) -> Result<(), u32>
@@ -100,5 +101,5 @@ pub fn init() -> KResult<()> {
 
 pub fn end_of_interrupt() {
     // SAFETY: We only use this function in irq context, where preemption is disabled.
-    unsafe { current_cpu() }.interrupt.end_of_interrupt();
+    unsafe { local_cpu() }.interrupt.end_of_interrupt();
 }

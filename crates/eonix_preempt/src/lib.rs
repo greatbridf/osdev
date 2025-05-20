@@ -65,3 +65,18 @@ macro_rules! assert_preempt_count_eq {
         );
     }};
 }
+
+#[unsafe(no_mangle)]
+pub extern "C" fn r_preempt_disable() {
+    disable();
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn r_preempt_enable() {
+    enable();
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn r_preempt_count() -> usize {
+    count()
+}

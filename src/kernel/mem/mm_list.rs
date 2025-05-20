@@ -1,29 +1,36 @@
+mod mapping;
 mod page_fault;
 
-use core::{
-    ops::Sub as _,
-    sync::atomic::{AtomicUsize, Ordering},
-};
-
+use super::access::KernelPageAccess;
+use super::address::{VAddrExt as _, VRangeExt as _};
+use super::page_alloc::GlobalPageAlloc;
+use super::paging::{AllocZeroed as _, PageUnmanaged};
+use super::{AsMemoryBlock, MMArea, Page};
 use crate::{prelude::*, sync::ArcSwap};
+use alloc::collections::btree_set::BTreeSet;
+use arch::DefaultPagingMode;
+use bindings::{EEXIST, EFAULT, EINVAL, ENOMEM};
+use core::fmt;
+use core::sync::atomic::{AtomicUsize, Ordering};
+use eonix_mm::address::{Addr as _, PAddr};
+use eonix_mm::page_table::PagingMode;
+use eonix_mm::paging::PFN;
+use eonix_mm::{
+    address::{AddrOps as _, VAddr, VRange},
+    page_table::{PageAttribute, PageTable, PTE},
+    paging::PAGE_SIZE,
+};
+use eonix_runtime::task::Task;
+use eonix_sync::{LazyLock, Mutex};
 
-use alloc::{collections::btree_set::BTreeSet, sync::Arc};
-use bindings::{EEXIST, EFAULT, EINVAL, ENOMEM, KERNEL_PML4};
-
-use crate::kernel::vfs::dentry::Dentry;
-
-use super::{MMArea, Page, PageTable, VAddr, VRange};
-
+pub use mapping::{FileMapping, Mapping};
 pub use page_fault::handle_page_fault;
 
-#[derive(Debug, Clone)]
-pub struct FileMapping {
-    pub file: Arc<Dentry>,
-    /// Offset in the file, aligned to 4KB boundary.
-    pub offset: usize,
-    /// Length of the mapping. Exceeding part will be zeroed.
-    pub length: usize,
-}
+static EMPTY_PAGE: LazyLock<Page> = LazyLock::new(|| Page::zeroed());
+static KERNEL_ROOT_TABLE_PAGE: LazyLock<PageUnmanaged> = LazyLock::new(|| unsafe {
+    // SAFETY: The kernel page table is always valid.
+    PageUnmanaged::from_raw_unchecked(DefaultPagingMode::KERNEL_ROOT_TABLE_PFN)
+});
 
 #[derive(Debug, Clone, Copy)]
 pub struct Permission {
@@ -31,53 +38,21 @@ pub struct Permission {
     pub execute: bool,
 }
 
-#[derive(Debug, Clone)]
-pub enum Mapping {
-    Anonymous,
-    File(FileMapping),
-}
-
-#[derive(Debug)]
-struct MMListInner {
+struct MMListInner<'a> {
     areas: BTreeSet<MMArea>,
-    page_table: PageTable,
+    page_table: PageTable<'a, DefaultPagingMode, GlobalPageAlloc, KernelPageAccess>,
     break_start: Option<VRange>,
     break_pos: Option<VAddr>,
 }
 
-#[derive(Debug)]
 pub struct MMList {
-    /// # Safety
-    /// This field might be used in IRQ context, so it should be locked with `lock_irq()`.
-    inner: ArcSwap<Mutex<MMListInner>>,
+    inner: ArcSwap<Mutex<MMListInner<'static>>>,
+    user_count: AtomicUsize,
     /// Only used in kernel space to switch page tables on context switch.
     root_page_table: AtomicUsize,
 }
 
-impl FileMapping {
-    pub fn new(file: Arc<Dentry>, offset: usize, length: usize) -> Self {
-        assert_eq!(offset & 0xfff, 0);
-        Self {
-            file,
-            offset,
-            length,
-        }
-    }
-
-    pub fn offset(&self, offset: usize) -> Self {
-        if self.length <= offset {
-            Self::new(self.file.clone(), self.offset + self.length, 0)
-        } else {
-            Self::new(
-                self.file.clone(),
-                self.offset + offset,
-                self.length - offset,
-            )
-        }
-    }
-}
-
-impl MMListInner {
+impl MMListInner<'_> {
     fn overlapping_addr(&self, addr: VAddr) -> Option<&MMArea> {
         self.areas.get(&VRange::from(addr))
     }
@@ -87,20 +62,27 @@ impl MMListInner {
     }
 
     fn overlapping_range(&self, range: VRange) -> impl DoubleEndedIterator<Item = &MMArea> + '_ {
-        self.areas.range(range.into_range())
+        self.areas.range(range.into_bounds())
     }
 
     fn check_overlapping_range(&self, range: VRange) -> bool {
         range.is_user() && self.overlapping_range(range).next().is_none()
     }
 
-    fn find_available(&self, hint: VAddr, len: usize) -> Option<VAddr> {
-        let mut range = if hint == VAddr::NULL {
-            VRange::new(VAddr(0x1234000), VAddr(0x1234000 + len).ceil())
+    fn random_start(&self) -> VAddr {
+        VAddr::from(0x1234000)
+    }
+
+    fn find_available(&self, mut hint: VAddr, len: usize) -> Option<VAddr> {
+        let len = len.div_ceil(PAGE_SIZE) * PAGE_SIZE;
+
+        if hint == VAddr::NULL {
+            hint = self.random_start();
         } else {
-            VRange::new(hint.floor(), (hint + len).ceil())
-        };
-        let len = range.len();
+            hint = hint.floor();
+        }
+
+        let mut range = VRange::from(hint).grow(len);
 
         loop {
             if !range.is_user() {
@@ -110,63 +92,85 @@ impl MMListInner {
             match self.overlapping_range(range).next_back() {
                 None => return Some(range.start()),
                 Some(area) => {
-                    range = VRange::new(area.range().end().ceil(), area.range().end().ceil() + len);
+                    range = VRange::from(area.range().end().ceil()).grow(len);
                 }
             }
         }
     }
 
-    fn unmap(&mut self, start: VAddr, len: usize) -> KResult<()> {
+    fn unmap(&mut self, start: VAddr, len: usize) -> KResult<Vec<Page>> {
         assert_eq!(start.floor(), start);
         let end = (start + len).ceil();
-        let range = VRange::new(start, end);
-        if !range.is_user() {
+        let range_to_unmap = VRange::new(start, end);
+        if !range_to_unmap.is_user() {
             return Err(EINVAL);
         }
 
-        let check_range = VRange::from(range.start())..VRange::from(range.end());
-        let mut front_remaining = None;
-        let mut back_remaining = None;
+        let mut left_remaining = None;
+        let mut right_remaining = None;
+
+        let mut pages_to_free = Vec::new();
+
+        // TODO: Write back dirty pages.
 
         self.areas.retain(|area| {
-            if !check_range.contains(&area.range()) {
+            let Some((left, mid, right)) = area.range().mask_with_checked(&range_to_unmap) else {
                 return true;
+            };
+
+            for pte in self.page_table.iter_user(mid) {
+                let (pfn, _) = pte.take();
+                pages_to_free.push(unsafe {
+                    // SAFETY: We got the pfn from a valid page table entry, so it should be valid.
+                    Page::from_raw(pfn)
+                });
             }
-            if area.range() == range.start().into() {
-                let (left, right) = area.clone().split(range.start());
-                self.page_table.unmap(&right.unwrap());
 
-                if let Some(left) = left {
-                    assert!(
-                        front_remaining.replace(left).is_none(),
-                        "There should be only one `front`."
-                    );
+            match (left, right) {
+                (None, None) => {}
+                (Some(left), None) => {
+                    assert!(left_remaining.is_none());
+                    let (Some(left), _) = area.clone().split(left.end()) else {
+                        unreachable!("`left.end()` is within the area");
+                    };
+
+                    left_remaining = Some(left);
                 }
-            } else if area.range() == range.end().into() {
-                let (left, right) = area.clone().split(range.end());
-                self.page_table.unmap(&left.unwrap());
+                (None, Some(right)) => {
+                    assert!(right_remaining.is_none());
+                    let (_, Some(right)) = area.clone().split(right.start()) else {
+                        unreachable!("`right.start()` is within the area");
+                    };
 
-                assert!(
-                    back_remaining
-                        .replace(right.expect("`right` should be valid"))
-                        .is_none(),
-                    "There should be only one `back`."
-                );
-            } else {
-                self.page_table.unmap(area);
+                    right_remaining = Some(right);
+                }
+                (Some(left), Some(right)) => {
+                    assert!(left_remaining.is_none());
+                    assert!(right_remaining.is_none());
+                    let (Some(left), Some(mid)) = area.clone().split(left.end()) else {
+                        unreachable!("`left.end()` is within the area");
+                    };
+
+                    let (_, Some(right)) = mid.split(right.start()) else {
+                        unreachable!("`right.start()` is within the area");
+                    };
+
+                    left_remaining = Some(left);
+                    right_remaining = Some(right);
+                }
             }
 
             false
         });
 
-        if let Some(front) = front_remaining {
+        if let Some(front) = left_remaining {
             self.areas.insert(front);
         }
-        if let Some(back) = back_remaining {
+        if let Some(back) = right_remaining {
             self.areas.insert(back);
         }
 
-        Ok(())
+        Ok(pages_to_free)
     }
 
     fn mmap(
@@ -196,10 +200,36 @@ impl MMListInner {
 }
 
 impl MMList {
+    async fn flush_user_tlbs(&self) {
+        match self.user_count.load(Ordering::Relaxed) {
+            0 => {
+                // If there are currently no users, we don't need to do anything.
+            }
+            1 => {
+                if PAddr::from(arch::get_root_page_table_pfn()).addr()
+                    == self.root_page_table.load(Ordering::Relaxed)
+                {
+                    // If there is only one user and we are using the page table,
+                    // flushing the TLB for the local cpu only is enough.
+                    arch::flush_tlb_all();
+                } else {
+                    // Send the TLB flush request to the core.
+                    todo!();
+                }
+            }
+            _ => {
+                // If there are more than one users, we broadcast the TLB flush
+                // to all cores.
+                todo!()
+            }
+        }
+    }
+
     pub fn new() -> Self {
-        let page_table = PageTable::new();
+        let page_table = PageTable::new(&KERNEL_ROOT_TABLE_PAGE);
         Self {
-            root_page_table: AtomicUsize::from(page_table.root_page_table()),
+            root_page_table: AtomicUsize::from(page_table.addr().addr()),
+            user_count: AtomicUsize::new(0),
             inner: ArcSwap::new(Mutex::new(MMListInner {
                 areas: BTreeSet::new(),
                 page_table,
@@ -209,13 +239,14 @@ impl MMList {
         }
     }
 
-    pub fn new_cloned(&self) -> Self {
+    pub async fn new_cloned(&self) -> Self {
         let inner = self.inner.borrow();
-        let inner = inner.lock_irq();
+        let inner = inner.lock().await;
 
-        let page_table = PageTable::new();
+        let page_table = PageTable::new(&KERNEL_ROOT_TABLE_PAGE);
         let list = Self {
-            root_page_table: AtomicUsize::from(page_table.root_page_table()),
+            root_page_table: AtomicUsize::from(page_table.addr().addr()),
+            user_count: AtomicUsize::new(0),
             inner: ArcSwap::new(Mutex::new(MMListInner {
                 areas: inner.areas.clone(),
                 page_table,
@@ -226,68 +257,111 @@ impl MMList {
 
         {
             let list_inner = list.inner.borrow();
-            let list_inner = list_inner.lock();
+            let list_inner = list_inner.lock().await;
 
             for area in list_inner.areas.iter() {
-                let new_iter = list_inner.page_table.iter_user(area.range()).unwrap();
-                let old_iter = inner.page_table.iter_user(area.range()).unwrap();
-
-                for (new, old) in new_iter.zip(old_iter) {
-                    new.setup_cow(old);
-                }
+                list_inner
+                    .page_table
+                    .set_copy_on_write(&inner.page_table, area.range());
             }
         }
 
-        // We set some pages as COW, so we need to invalidate TLB.
-        inner.page_table.lazy_invalidate_tlb_all();
+        // We've set some pages as CoW, so we need to invalidate all our users' TLB.
+        self.flush_user_tlbs().await;
 
         list
     }
 
-    pub fn switch_page_table(&self) {
+    pub fn activate(&self) {
+        self.user_count.fetch_add(1, Ordering::Acquire);
+
         let root_page_table = self.root_page_table.load(Ordering::Relaxed);
         assert_ne!(root_page_table, 0);
-        arch::set_root_page_table(root_page_table);
+        arch::set_root_page_table_pfn(PFN::from(PAddr::from(root_page_table)));
     }
 
-    pub fn replace(&self, new: Self) {
-        // Switch to kernel page table in case we are using the page table to be swapped and released.
-        let mut switched = false;
-        if arch::get_root_page_table() == self.root_page_table.load(Ordering::Relaxed) {
-            arch::set_root_page_table(KERNEL_PML4 as usize);
-            switched = true;
-        }
+    pub fn deactivate(&self) {
+        arch::set_root_page_table_pfn(DefaultPagingMode::KERNEL_ROOT_TABLE_PFN);
 
-        unsafe {
-            // SAFETY: Even if we're using the page table, we've switched to kernel page table.
-            // So it's safe to release the old memory list.
-            self.release();
-        }
+        let old_user_count = self.user_count.fetch_sub(1, Ordering::Release);
+        assert_ne!(old_user_count, 0);
+    }
 
-        // SAFETY: `self.inner` should be `None` after releasing.
-        self.inner.swap(Some(new.inner.borrow().clone()));
-        self.root_page_table.store(
-            new.root_page_table.load(Ordering::Relaxed),
-            Ordering::Relaxed,
+    /// Deactivate `self` and activate `to` with root page table changed only once.
+    /// This might reduce the overhead of switching page tables twice.
+    #[allow(dead_code)]
+    pub fn switch(&self, to: &Self) {
+        self.user_count.fetch_add(1, Ordering::Acquire);
+
+        let root_page_table = self.root_page_table.load(Ordering::Relaxed);
+        assert_ne!(root_page_table, 0);
+        arch::set_root_page_table_pfn(PFN::from(PAddr::from(root_page_table)));
+
+        let old_user_count = to.user_count.fetch_sub(1, Ordering::Release);
+        assert_ne!(old_user_count, 0);
+    }
+
+    /// Replace the current page table with a new one.
+    ///
+    /// # Safety
+    /// This function should be called only when we are sure that the `MMList` is not
+    /// being used by any other thread.
+    pub unsafe fn replace(&self, new: Option<Self>) {
+        eonix_preempt::disable();
+
+        assert_eq!(
+            self.user_count.load(Ordering::Relaxed),
+            1,
+            "We should be the only user"
         );
 
-        if switched {
-            self.switch_page_table();
-        }
-    }
+        assert_eq!(
+            new.as_ref()
+                .map(|new_mm| new_mm.user_count.load(Ordering::Relaxed))
+                .unwrap_or(0),
+            0,
+            "`new` must not be used by anyone"
+        );
 
-    /// # Safety
-    /// This function is unsafe because the caller should make sure that the `inner` is not currently used.
-    pub unsafe fn release(&self) {
-        // TODO: Check whether we should wake someone up if they've been put to sleep when calling `vfork`.
-        self.inner.swap(None);
+        let old_root_page_table = self.root_page_table.load(Ordering::Relaxed);
+        let current_root_page_table = arch::get_root_page_table_pfn();
+        assert_eq!(
+            PAddr::from(current_root_page_table).addr(),
+            old_root_page_table,
+            "We should be the only user"
+        );
+
+        let new_root_page_table = match &new {
+            Some(new_mm) => new_mm.root_page_table.load(Ordering::Relaxed),
+            None => PAddr::from(DefaultPagingMode::KERNEL_ROOT_TABLE_PFN).addr(),
+        };
+
+        arch::set_root_page_table_pfn(PFN::from(PAddr::from(new_root_page_table)));
+
         self.root_page_table
-            .swap(KERNEL_PML4 as _, Ordering::Relaxed);
+            .store(new_root_page_table, Ordering::Relaxed);
+
+        // TODO: Check whether we should wake someone up if they've been put
+        //       to sleep when calling `vfork`.
+        self.inner
+            .swap(new.map(|new_mm| new_mm.inner.swap(None)).flatten());
+
+        eonix_preempt::enable();
     }
 
     /// No need to do invalidation manually, `PageTable` already does it.
-    pub fn unmap(&self, start: VAddr, len: usize) -> KResult<()> {
-        self.inner.borrow().lock_irq().unmap(start, len)
+    pub async fn unmap(&self, start: VAddr, len: usize) -> KResult<()> {
+        let pages_to_free = self.inner.borrow().lock().await.unmap(start, len)?;
+
+        // We need to assure that the pages are not accessed anymore.
+        // The ones having these pages in their TLB could read from or write to them.
+        // So flush the TLBs first for all our users.
+        self.flush_user_tlbs().await;
+
+        // Then free the pages.
+        drop(pages_to_free);
+
+        Ok(())
     }
 
     pub fn mmap_hint(
@@ -298,7 +372,7 @@ impl MMList {
         permission: Permission,
     ) -> KResult<VAddr> {
         let inner = self.inner.borrow();
-        let mut inner = inner.lock_irq();
+        let mut inner = Task::block_on(inner.lock());
 
         if hint == VAddr::NULL {
             let at = inner.find_available(hint, len).ok_or(ENOMEM)?;
@@ -324,16 +398,14 @@ impl MMList {
         mapping: Mapping,
         permission: Permission,
     ) -> KResult<VAddr> {
-        self.inner
-            .borrow()
-            .lock_irq()
+        Task::block_on(self.inner.borrow().lock())
             .mmap(at, len, mapping.clone(), permission)
             .map(|_| at)
     }
 
     pub fn set_break(&self, pos: Option<VAddr>) -> VAddr {
         let inner = self.inner.borrow();
-        let mut inner = inner.lock_irq();
+        let mut inner = Task::block_on(inner.lock());
 
         // SAFETY: `set_break` is only called in syscalls, where program break should be valid.
         assert!(inner.break_start.is_some() && inner.break_pos.is_some());
@@ -365,16 +437,18 @@ impl MMList {
             .get(&break_start)
             .expect("Program break area should be valid");
 
-        let len: usize = pos.sub(current_break);
+        let len = pos - current_break;
+        let range_to_grow = VRange::from(program_break.range().end()).grow(len);
+
+        program_break.grow(len);
+
         inner.page_table.set_anonymous(
-            VRange::from(program_break.range().end()).grow(len),
+            range_to_grow,
             Permission {
                 write: true,
                 execute: false,
             },
         );
-
-        program_break.grow(len);
 
         inner.break_pos = Some(pos);
         pos
@@ -383,7 +457,7 @@ impl MMList {
     /// This should be called only **once** for every thread.
     pub fn register_break(&self, start: VAddr) {
         let inner = self.inner.borrow();
-        let mut inner = inner.lock_irq();
+        let mut inner = Task::block_on(inner.lock());
         assert!(inner.break_start.is_none() && inner.break_pos.is_none());
 
         inner.break_start = Some(start.into());
@@ -403,7 +477,7 @@ impl MMList {
         }
 
         let inner = self.inner.borrow();
-        let inner = inner.lock_irq();
+        let inner = Task::block_on(inner.lock());
 
         let mut offset = 0;
         let mut remaining = len;
@@ -421,7 +495,7 @@ impl MMList {
 
             for (idx, pte) in inner
                 .page_table
-                .iter_user(VRange::new(current, access_end))?
+                .iter_user(VRange::new(current, access_end))
                 .enumerate()
             {
                 let page_start = current.floor() + idx * 0x1000;
@@ -444,11 +518,15 @@ impl MMList {
                 }
 
                 unsafe {
-                    let page = Page::from_pfn(pte.pfn(), 0);
-                    func(
-                        offset + idx * 0x1000,
-                        &mut page.as_mut_slice()[start_offset..end_offset],
-                    );
+                    // SAFETY: We are sure that the page is valid and we have the right to access it.
+                    Page::with_raw(pte.get_pfn(), |page| {
+                        // SAFETY: The caller guarantees that no one else is using the page.
+                        let page_data = page.as_memblk().as_bytes_mut();
+                        func(
+                            offset + idx * 0x1000,
+                            &mut page_data[start_offset..end_offset],
+                        );
+                    });
                 }
             }
 
@@ -458,5 +536,94 @@ impl MMList {
         }
 
         Ok(())
+    }
+}
+
+impl fmt::Debug for MMList {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("MMList").finish()
+    }
+}
+
+trait PageTableExt {
+    fn set_anonymous(&self, range: VRange, permission: Permission);
+    fn set_mmapped(&self, range: VRange, permission: Permission);
+    fn set_copy_on_write(&self, from: &Self, range: VRange);
+}
+
+impl PageTableExt for PageTable<'_, DefaultPagingMode, GlobalPageAlloc, KernelPageAccess> {
+    fn set_anonymous(&self, range: VRange, permission: Permission) {
+        for pte in self.iter_user(range) {
+            pte.set_anonymous(permission.execute);
+        }
+    }
+
+    fn set_mmapped(&self, range: VRange, permission: Permission) {
+        for pte in self.iter_user(range) {
+            pte.set_mapped(permission.execute);
+        }
+    }
+
+    fn set_copy_on_write(&self, from: &Self, range: VRange) {
+        let to_iter = self.iter_user(range);
+        let from_iter = from.iter_user(range);
+
+        for (to, from) in to_iter.zip(from_iter) {
+            to.set_copy_on_write(from);
+        }
+    }
+}
+
+trait PTEExt {
+    fn set_anonymous(&mut self, execute: bool);
+    fn set_mapped(&mut self, execute: bool);
+    fn set_copy_on_write(&mut self, from: &mut Self);
+}
+
+impl<T> PTEExt for T
+where
+    T: PTE,
+{
+    fn set_anonymous(&mut self, execute: bool) {
+        // Writable flag is set during page fault handling while executable flag is
+        // preserved across page faults, so we set executable flag now.
+        let attr = <Self as PTE>::Attr::new()
+            .present(true)
+            .user(true)
+            .copy_on_write(true)
+            .anonymous(true)
+            .execute(execute);
+
+        self.set(EMPTY_PAGE.clone().into_raw(), attr);
+    }
+
+    fn set_mapped(&mut self, execute: bool) {
+        // Writable flag is set during page fault handling while executable flag is
+        // preserved across page faults, so we set executable flag now.
+        let attr = <Self as PTE>::Attr::new()
+            .user(true)
+            .copy_on_write(true)
+            .anonymous(true)
+            .mapped(true)
+            .execute(execute);
+
+        self.set(EMPTY_PAGE.clone().into_raw(), attr);
+    }
+
+    fn set_copy_on_write(&mut self, from: &mut Self) {
+        let mut from_attr = from.get_attr();
+        if !from_attr.is_present() {
+            return;
+        }
+
+        from_attr = from_attr.write(false).copy_on_write(true);
+
+        let pfn = unsafe {
+            // SAFETY: We get the pfn from a valid page table entry, so it should be valid as well.
+            Page::with_raw(from.get_pfn(), |page| page.clone().into_raw())
+        };
+
+        self.set(pfn, from_attr.accessed(false));
+        from.set_attr(from_attr);
     }
 }

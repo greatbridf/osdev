@@ -5,11 +5,12 @@ use crate::{
         task::KernelStack, CharDevice, CharDeviceType, Terminal, TerminalDevice,
     },
     prelude::*,
-    sync::UCondVar,
 };
 use alloc::{collections::vec_deque::VecDeque, format, sync::Arc};
 use bitflags::bitflags;
+use core::pin::pin;
 use eonix_runtime::{run::FutureRun, scheduler::Scheduler};
+use eonix_sync::WaitList;
 
 bitflags! {
     struct LineStatus: u8 {
@@ -24,7 +25,7 @@ struct Serial {
     name: Arc<str>,
 
     terminal: Spin<Option<Arc<Terminal>>>,
-    cv_worker: UCondVar,
+    worker_wait: WaitList,
 
     working: Spin<bool>,
     tx_buffer: Spin<VecDeque<u8>>,
@@ -53,7 +54,7 @@ impl Serial {
 
     fn disable_interrupts(&self) {
         // Disable interrupt #0: Received data available
-        self.int_ena.write(0x00);
+        self.int_ena.write(0x02);
     }
 
     fn line_status(&self) -> LineStatus {
@@ -61,13 +62,18 @@ impl Serial {
     }
 
     async fn wait_for_interrupt(&self) {
-        let mut working = self.working.lock_irq();
-        self.enable_interrupts();
-        *working = false;
+        let mut wait = pin!(self.worker_wait.prepare_to_wait());
 
-        self.cv_worker.async_wait(&mut working).await;
+        {
+            let mut working = self.working.lock_irq();
+            self.enable_interrupts();
+            wait.as_mut().add_to_wait_list();
+            *working = false;
+        };
 
-        *working = true;
+        wait.await;
+
+        *self.working.lock_irq() = true;
         self.disable_interrupts();
     }
 
@@ -79,30 +85,30 @@ impl Serial {
                 let ch = port.tx_rx.read();
 
                 if let Some(terminal) = terminal.as_ref() {
-                    terminal.commit_char(ch);
+                    terminal.commit_char(ch).await;
                 }
             }
 
             let should_wait = {
                 let mut tx_buffer = port.tx_buffer.lock();
+                let mut count = 0;
 
                 // Give it a chance to receive data.
-                let count = tx_buffer.len().min(64);
-                for ch in tx_buffer.drain(..count) {
+                for &ch in tx_buffer.iter().take(64) {
                     if port.line_status().contains(LineStatus::TX_READY) {
                         port.tx_rx.write(ch);
                     } else {
                         break;
                     }
+                    count += 1;
                 }
+                tx_buffer.drain(..count);
 
                 tx_buffer.is_empty()
             };
 
             if should_wait {
                 port.wait_for_interrupt().await;
-            } else {
-                Scheduler::yield_now().await;
             }
         }
     }
@@ -112,7 +118,7 @@ impl Serial {
             id,
             name: Arc::from(format!("ttyS{id}")),
             terminal: Spin::new(None),
-            cv_worker: UCondVar::new(),
+            worker_wait: WaitList::new(),
             working: Spin::new(true),
             tx_buffer: Spin::new(VecDeque::new()),
             tx_rx: Port8::new(base_port),
@@ -146,7 +152,7 @@ impl Serial {
     fn wakeup_worker(&self) {
         let working = self.working.lock_irq();
         if !*working {
-            self.cv_worker.notify_all();
+            self.worker_wait.notify_one();
         }
     }
 
@@ -195,6 +201,10 @@ impl TerminalDevice for Serial {
         let mut tx_buffer = self.tx_buffer.lock();
         tx_buffer.push_back(ch);
         self.wakeup_worker();
+    }
+
+    fn putchar_direct(&self, ch: u8) {
+        self.tx_rx.write(ch);
     }
 }
 

@@ -1,6 +1,8 @@
-use crate::{kernel::mem::Page, KResult};
-
 use super::{ClusterIterator, FatFs};
+use crate::{
+    kernel::mem::{AsMemoryBlock as _, Page},
+    KResult,
+};
 
 pub trait ClusterReadIterator<'data>: Iterator<Item = KResult<&'data [u8]>> + 'data {}
 impl<'a, I> ClusterReadIterator<'a> for I where I: Iterator<Item = KResult<&'a [u8]>> + 'a {}
@@ -22,11 +24,15 @@ impl<'data, 'fat: 'data> ClusterRead<'data> for ClusterIterator<'fat> {
         let skip_clusters = offset / cluster_size;
         let mut inner_offset = offset % cluster_size;
 
-        let buffer_page = Page::alloc_one();
+        // TODO: Use block cache.
+        let buffer_page = Page::alloc();
 
         self.skip(skip_clusters).map(move |cluster| {
             vfs.read_cluster(cluster, &buffer_page)?;
-            let data = &buffer_page.as_slice()[inner_offset..];
+            let data = unsafe {
+                // SAFETY: No one could be writing to it.
+                &buffer_page.as_memblk().as_bytes()[inner_offset..]
+            };
             inner_offset = 0;
             Ok(data)
         })

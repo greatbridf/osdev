@@ -5,4 +5,3 @@ edition = "2024"
 
 [dependencies]
 eonix_sync = { path = "../eonix_sync" }
-lazy_static = { version = "1.5.0", features = ["spin_no_std"] }

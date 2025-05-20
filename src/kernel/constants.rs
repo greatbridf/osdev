@@ -13,9 +13,6 @@ pub const SIG_BLOCK: u32 = 0;
 pub const SIG_UNBLOCK: u32 = 1;
 pub const SIG_SETMASK: u32 = 2;
 
-pub const SA_SIGINFO: u32 = 4;
-pub const SA_RESTORER: u32 = 0x04000000;
-
 pub const CLOCK_REALTIME: u32 = 0;
 pub const CLOCK_MONOTONIC: u32 = 1;
 
@@ -23,7 +20,9 @@ pub const ENOENT: u32 = 2;
 pub const EIO: u32 = 5;
 pub const ENXIO: u32 = 6;
 pub const ENOEXEC: u32 = 8;
+pub const EFAULT: u32 = 14;
 pub const EEXIST: u32 = 17;
+pub const EINVAL: u32 = 22;
 pub const ENOSYS: u32 = 38;
 
 #[allow(dead_code)]

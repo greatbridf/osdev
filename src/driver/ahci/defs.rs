@@ -1,6 +1,8 @@
 #![allow(dead_code)]
 
 use crate::kernel::mem::paging::Page;
+use eonix_mm::address::Addr as _;
+
 pub const VENDOR_INTEL: u16 = 0x8086;
 pub const DEVICE_AHCI: u16 = 0x2922;
 
@@ -51,6 +53,7 @@ pub const PORT_IS_ERROR: u32 =
 /// `clear_busy_upon_ok` and `bytes_transferred` are volatile
 ///
 #[repr(C)]
+#[derive(Clone, Copy)]
 pub struct CommandHeader {
     // [0:4]: Command FIS length
     // [5]: ATAPI
@@ -237,7 +240,7 @@ pub struct PRDTEntry {
 
 impl PRDTEntry {
     pub fn setup(&mut self, page: &Page) {
-        self.base = page.as_phys() as u64;
+        self.base = page.start().addr() as u64;
         self._reserved1 = 0;
 
         // The last bit MUST be set to 1 according to the AHCI spec

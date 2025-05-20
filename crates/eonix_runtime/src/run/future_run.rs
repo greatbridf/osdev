@@ -1,4 +1,4 @@
-use super::{Contexted, PinRun, RunState};
+use super::{Contexted, Run, RunState};
 use core::{
     pin::Pin,
     task::{Context, Poll, Waker},
@@ -16,13 +16,13 @@ where
 }
 
 impl<F> Contexted for FutureRun<F> where F: Future {}
-impl<F> PinRun for FutureRun<F>
+impl<F> Run for FutureRun<F>
 where
     F: Future + 'static,
 {
     type Output = F::Output;
 
-    fn pinned_run(self: Pin<&mut Self>, waker: &Waker) -> RunState<Self::Output> {
+    fn run(self: Pin<&mut Self>, waker: &Waker) -> RunState<Self::Output> {
         let mut future = unsafe { self.map_unchecked_mut(|me| &mut me.0) };
         let mut context = Context::from_waker(waker);
 

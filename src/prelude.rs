@@ -22,7 +22,7 @@ pub(crate) use alloc::{boxed::Box, string::String, vec, vec::Vec};
 
 pub(crate) use core::{any::Any, fmt::Write, marker::PhantomData, str};
 
-pub use crate::sync::{Locked, Mutex, RwSemaphore, Spin};
+pub use crate::sync::Spin;
 
 #[allow(dead_code)]
 pub trait AsAny: Send + Sync {

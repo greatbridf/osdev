@@ -1,14 +1,5 @@
-use core::{ops::ControlFlow, sync::atomic::Ordering};
-
-use alloc::{
-    collections::btree_map::BTreeMap,
-    sync::{Arc, Weak},
-    vec::Vec,
-};
-use bindings::EIO;
-
-use dir::Dirs as _;
-use file::ClusterRead;
+mod dir;
+mod file;
 
 use crate::{
     io::{Buffer, ByteBuffer, UninitBuffer},
@@ -27,9 +18,17 @@ use crate::{
     prelude::*,
     KResult,
 };
-
-mod dir;
-mod file;
+use alloc::{
+    collections::btree_map::BTreeMap,
+    sync::{Arc, Weak},
+    vec::Vec,
+};
+use bindings::EIO;
+use core::{ops::ControlFlow, sync::atomic::Ordering};
+use dir::Dirs as _;
+use eonix_runtime::task::Task;
+use eonix_sync::RwLock;
+use file::ClusterRead;
 
 type ClusterNo = u32;
 
@@ -79,7 +78,7 @@ struct FatFs {
     volume_label: [u8; 11],
 
     device: Arc<BlockDevice>,
-    fat: RwSemaphore<Vec<ClusterNo>>,
+    fat: RwLock<Vec<ClusterNo>>,
     weak: Weak<FatFs>,
     icache: BTreeMap<Ino, FatInode>,
 }
@@ -135,7 +134,7 @@ impl FatFs {
             sectors_per_cluster: 0,
             rootdir_cluster: 0,
             data_start: 0,
-            fat: RwSemaphore::new(Vec::new()),
+            fat: RwLock::new(Vec::new()),
             weak: weak.clone(),
             icache: BTreeMap::new(),
             volume_label: [0; 11],
@@ -247,7 +246,7 @@ impl Inode for FileInode {
     fn read(&self, buffer: &mut dyn Buffer, offset: usize) -> KResult<usize> {
         let vfs = self.vfs.upgrade().ok_or(EIO)?;
         let vfs = vfs.as_any().downcast_ref::<FatFs>().unwrap();
-        let fat = vfs.fat.lock_shared();
+        let fat = Task::block_on(vfs.fat.read());
 
         if self.size.load(Ordering::Relaxed) as usize == 0 {
             return Ok(0);
@@ -288,7 +287,7 @@ impl Inode for DirInode {
     fn lookup(&self, dentry: &Arc<Dentry>) -> KResult<Option<Arc<dyn Inode>>> {
         let vfs = self.vfs.upgrade().ok_or(EIO)?;
         let vfs = vfs.as_any().downcast_ref::<FatFs>().unwrap();
-        let fat = vfs.fat.lock_shared();
+        let fat = Task::block_on(vfs.fat.read());
 
         let mut entries = ClusterIterator::new(fat.as_ref(), self.ino as ClusterNo)
             .read(vfs, 0)
@@ -319,7 +318,7 @@ impl Inode for DirInode {
     ) -> KResult<usize> {
         let vfs = self.vfs.upgrade().ok_or(EIO)?;
         let vfs = vfs.as_any().downcast_ref::<FatFs>().unwrap();
-        let fat = vfs.fat.lock_shared();
+        let fat = Task::block_on(vfs.fat.read());
 
         let cluster_iter = ClusterIterator::new(fat.as_ref(), self.ino as ClusterNo)
             .read(vfs, offset)

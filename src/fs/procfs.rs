@@ -1,17 +1,8 @@
-use alloc::{
-    collections::btree_map::BTreeMap,
-    sync::{Arc, Weak},
-};
-use bindings::{EACCES, ENOTDIR};
-use core::{ops::ControlFlow, sync::atomic::Ordering};
-use itertools::Itertools;
-use lazy_static::lazy_static;
-
 use crate::{
     io::Buffer,
     kernel::{
         constants::{S_IFDIR, S_IFREG},
-        mem::paging::{Page, PageBuffer},
+        mem::paging::PageBuffer,
         vfs::{
             dentry::Dentry,
             inode::{define_struct_inode, AtomicIno, Ino, Inode, InodeData},
@@ -21,8 +12,13 @@ use crate::{
         },
     },
     prelude::*,
-    sync::{AsRefMutPosition as _, AsRefPosition as _, Locked},
 };
+use alloc::sync::{Arc, Weak};
+use bindings::{EACCES, ENOTDIR};
+use core::{ops::ControlFlow, sync::atomic::Ordering};
+use eonix_runtime::task::Task;
+use eonix_sync::{AsProof as _, AsProofMut as _, LazyLock, Locked};
+use itertools::Itertools;
 
 fn split_len_offset(data: &[u8], len: usize, offset: usize) -> Option<&[u8]> {
     let real_data = data.split_at_checked(len).map(|(data, _)| data)?;
@@ -104,10 +100,13 @@ impl Inode for FileInode {
             return Err(EACCES);
         }
 
-        let mut page_buffer = PageBuffer::new(Page::alloc_one());
-        let nread = self.file.read(&mut page_buffer)?;
+        let mut page_buffer = PageBuffer::new();
+        self.file.read(&mut page_buffer)?;
 
-        let data = split_len_offset(page_buffer.as_slice(), nread, offset);
+        let data = page_buffer
+            .data()
+            .split_at_checked(offset)
+            .map(|(_, data)| data);
 
         match data {
             None => Ok(0),
@@ -134,10 +133,10 @@ impl DirInode {
 
 impl Inode for DirInode {
     fn lookup(&self, dentry: &Arc<Dentry>) -> KResult<Option<Arc<dyn Inode>>> {
-        let lock = self.rwsem.lock_shared();
+        let lock = Task::block_on(self.rwsem.read());
         Ok(self
             .entries
-            .access(lock.as_pos())
+            .access(lock.prove())
             .iter()
             .find_map(|(name, node)| {
                 name.as_ref()
@@ -151,9 +150,9 @@ impl Inode for DirInode {
         offset: usize,
         callback: &mut dyn FnMut(&[u8], Ino) -> KResult<ControlFlow<(), ()>>,
     ) -> KResult<usize> {
-        let lock = self.rwsem.lock_shared();
+        let lock = Task::block_on(self.rwsem.read());
         self.entries
-            .access(lock.as_pos())
+            .access(lock.prove())
             .iter()
             .skip(offset)
             .map(|(name, node)| callback(name.as_ref(), node.ino()))
@@ -183,17 +182,12 @@ impl Vfs for ProcFs {
     }
 }
 
-lazy_static! {
-    static ref ICACHE: Spin<BTreeMap<Ino, ProcFsNode>> = Spin::new(BTreeMap::new());
-    static ref GLOBAL_PROCFS: Arc<ProcFs> = {
-        let fs: Arc<ProcFs> = Arc::new_cyclic(|weak: &Weak<ProcFs>| ProcFs {
-            root_node: DirInode::new(0, weak.clone()),
-            next_ino: AtomicIno::new(1),
-        });
-
-        fs
-    };
-}
+static GLOBAL_PROCFS: LazyLock<Arc<ProcFs>> = LazyLock::new(|| {
+    Arc::new_cyclic(|weak: &Weak<ProcFs>| ProcFs {
+        root_node: DirInode::new(0, weak.clone()),
+        next_ino: AtomicIno::new(1),
+    })
+});
 
 struct ProcFsMountCreator;
 
@@ -239,10 +233,10 @@ pub fn creat(
     let inode = FileInode::new(ino, Arc::downgrade(&fs), file);
 
     {
-        let lock = parent.idata.rwsem.lock();
+        let lock = Task::block_on(parent.idata.rwsem.write());
         parent
             .entries
-            .access_mut(lock.as_pos_mut())
+            .access_mut(lock.prove_mut())
             .push((name, ProcFsNode::File(inode.clone())));
     }
 
@@ -263,7 +257,7 @@ pub fn mkdir(parent: &ProcFsNode, name: &[u8]) -> KResult<ProcFsNode> {
 
     parent
         .entries
-        .access_mut(inode.rwsem.lock().as_pos_mut())
+        .access_mut(Task::block_on(inode.rwsem.write()).prove_mut())
         .push((Arc::from(name), ProcFsNode::Dir(inode.clone())));
 
     Ok(ProcFsNode::Dir(inode))
@@ -278,7 +272,7 @@ impl ProcFsFile for DumpMountsFile {
     fn read(&self, buffer: &mut PageBuffer) -> KResult<usize> {
         dump_mounts(&mut buffer.get_writer());
 
-        Ok(buffer.len())
+        Ok(buffer.data().len())
     }
 }
 
@@ -309,7 +303,7 @@ where
     }
 
     fn read(&self, buffer: &mut PageBuffer) -> KResult<usize> {
-        self.read_fn.as_ref().ok_or(EACCES)?(buffer).map(|_| buffer.len())
+        self.read_fn.as_ref().ok_or(EACCES)?(buffer).map(|_| buffer.data().len())
     }
 }
 

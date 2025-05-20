@@ -1,11 +1,16 @@
 mod context;
+mod fence;
 mod gdt;
 mod init;
 mod interrupt;
 mod io;
+mod mm;
+mod percpu;
 mod user;
 
-pub(self) mod percpu;
+use core::arch::asm;
+use eonix_mm::address::{Addr as _, PAddr, VAddr};
+use eonix_mm::paging::PFN;
 
 pub use self::context::*;
 pub use self::gdt::*;
@@ -13,9 +18,10 @@ pub use self::init::*;
 pub use self::interrupt::*;
 pub use self::io::*;
 pub use self::user::*;
-pub use percpu_macros::define_percpu;
-
-use core::arch::asm;
+pub use fence::*;
+pub use mm::*;
+pub use percpu::*;
+pub use percpu_macros::{define_percpu, define_percpu_shared};
 
 #[inline(always)]
 pub fn flush_tlb(vaddr: usize) {
@@ -41,7 +47,7 @@ pub fn flush_tlb_all() {
 }
 
 #[inline(always)]
-pub fn get_root_page_table() -> usize {
+pub fn get_root_page_table_pfn() -> PFN {
     let cr3: usize;
     unsafe {
         asm!(
@@ -50,22 +56,22 @@ pub fn get_root_page_table() -> usize {
             options(att_syntax)
         );
     }
-    cr3
+    PFN::from(PAddr::from(cr3))
 }
 
 #[inline(always)]
-pub fn set_root_page_table(pfn: usize) {
+pub fn set_root_page_table_pfn(pfn: PFN) {
     unsafe {
         asm!(
             "mov {0}, %cr3",
-            in(reg) pfn,
+            in(reg) PAddr::from(pfn).addr(),
             options(att_syntax)
         );
     }
 }
 
 #[inline(always)]
-pub fn get_page_fault_address() -> usize {
+pub fn get_page_fault_address() -> VAddr {
     let cr2: usize;
     unsafe {
         asm!(
@@ -74,7 +80,7 @@ pub fn get_page_fault_address() -> usize {
             options(att_syntax)
         );
     }
-    cr2
+    VAddr::from(cr2)
 }
 
 #[inline(always)]

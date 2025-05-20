@@ -7,20 +7,27 @@ use crate::{
     },
     prelude::*,
 };
-
 use alloc::{format, sync::Arc};
 use bindings::{
     kernel::hw::pci::{self, pci_device},
     EIO,
 };
 use control::AdapterControl;
+use core::ptr::NonNull;
 use defs::*;
+use eonix_mm::address::{AddrOps as _, PAddr};
 use port::AdapterPort;
 
+pub(self) use register::Register;
+
 mod command;
+mod command_table;
 mod control;
 mod defs;
 mod port;
+mod register;
+pub(self) mod slot;
+mod stats;
 
 pub struct BitsIterator {
     data: u32,
@@ -53,32 +60,79 @@ impl Iterator for BitsIterator {
     }
 }
 
-fn vread<T: Sized + Copy>(refval: *const T) -> T {
-    unsafe { refval.read_volatile() }
-}
-
-fn vwrite<T: Sized + Copy>(refval: *mut T, val: T) {
-    unsafe { refval.write_volatile(val) }
-}
-
-#[allow(dead_code)]
-struct Device {
-    control_base: usize,
+struct Device<'a> {
+    control_base: PAddr,
     control: AdapterControl,
     // TODO: impl Drop to free pci device
-    pcidev: *mut pci_device,
+    pcidev: NonNull<pci_device>,
     /// # Lock
     /// Might be accessed from irq handler, use with `lock_irq()`
-    ports: Spin<[Option<Arc<AdapterPort>>; 32]>,
+    ports: Spin<[Option<Arc<AdapterPort<'a>>>; 32]>,
 }
 
 /// # Safety
 /// `pcidev` is never accessed from Rust code
 /// TODO!!!: place *mut pci_device in a safe wrapper
-unsafe impl Send for Device {}
-unsafe impl Sync for Device {}
+unsafe impl Send for Device<'_> {}
+unsafe impl Sync for Device<'_> {}
 
-impl Device {
+impl Device<'_> {
+    fn handle_interrupt(&self) {
+        // Safety
+        // `self.ports` is accessed inside irq handler
+        let ports = self.ports.lock();
+        for nport in self.control.pending_interrupts() {
+            if let None = ports[nport as usize] {
+                println_warn!("port {nport} not found");
+                continue;
+            }
+
+            let port = ports[nport as usize].as_ref().unwrap();
+            let status = port.interrupt_status().read_once();
+
+            if status & PORT_IS_ERROR != 0 {
+                println_warn!("port {nport} SATA error");
+                continue;
+            }
+
+            debug_assert!(status & PORT_IS_DHRS != 0);
+            port.interrupt_status().write_once(PORT_IS_DHRS);
+
+            self.control.clear_interrupt(nport);
+
+            port.handle_interrupt();
+        }
+    }
+}
+
+impl Device<'static> {
+    pub fn new(pcidev: NonNull<pci_device>) -> KResult<Arc<Self>> {
+        let base =
+            PAddr::from(unsafe { *pcidev.as_ref().header_type0() }.bars[PCI_REG_ABAR] as usize);
+        let irqno = unsafe { *pcidev.as_ref().header_type0() }.interrupt_line;
+
+        // use MMIO
+        if !base.is_aligned_to(16) {
+            return Err(EIO);
+        }
+
+        let device = Arc::new(Device {
+            control_base: base,
+            control: AdapterControl::new(base),
+            pcidev,
+            ports: Spin::new([const { None }; 32]),
+        });
+
+        device.control.enable_interrupts();
+
+        let device_irq = device.clone();
+        register_irq_handler(irqno as i32, move || device_irq.handle_interrupt())?;
+
+        device.probe_ports()?;
+
+        Ok(device)
+    }
+
     fn probe_ports(&self) -> KResult<()> {
         for nport in self.control.implemented_ports() {
             let port = Arc::new(AdapterPort::new(self.control_base, nport));
@@ -94,8 +148,7 @@ impl Device {
                     let port = port.clone();
                     let name = format!("ahci-p{}-stats", port.nport);
                     procfs::populate_root(name.into_bytes().into(), move |buffer| {
-                        writeln!(&mut buffer.get_writer(), "{:?}", port.stats.lock().as_ref())
-                            .map_err(|_| EIO)
+                        port.print_stats(&mut buffer.get_writer())
                     })?;
                 }
 
@@ -116,65 +169,10 @@ impl Device {
 
         Ok(())
     }
-
-    fn handle_interrupt(&self) {
-        // Safety
-        // `self.ports` is accessed inside irq handler
-        let ports = self.ports.lock();
-        for nport in self.control.pending_interrupts() {
-            if let None = ports[nport as usize] {
-                println_warn!("port {nport} not found");
-                continue;
-            }
-
-            let port = ports[nport as usize].as_ref().unwrap();
-            let status = vread(port.interrupt_status());
-
-            if status & PORT_IS_ERROR != 0 {
-                println_warn!("port {nport} SATA error");
-                continue;
-            }
-
-            debug_assert!(status & PORT_IS_DHRS != 0);
-            vwrite(port.interrupt_status(), PORT_IS_DHRS);
-
-            self.control.clear_interrupt(nport);
-
-            port.handle_interrupt();
-        }
-    }
-}
-
-impl Device {
-    pub fn new(pcidev: *mut pci_device) -> KResult<Arc<Self>> {
-        let base = unsafe { *(*pcidev).header_type0() }.bars[PCI_REG_ABAR];
-        let irqno = unsafe { *(*pcidev).header_type0() }.interrupt_line;
-
-        // use MMIO
-        if base & 0xf != 0 {
-            return Err(EIO);
-        }
-
-        let device = Arc::new(Device {
-            control_base: base as usize,
-            control: AdapterControl::new(base as usize),
-            pcidev,
-            ports: Spin::new([const { None }; 32]),
-        });
-
-        device.control.enable_interrupts();
-
-        let device_irq = device.clone();
-        register_irq_handler(irqno as i32, move || device_irq.handle_interrupt())?;
-
-        device.probe_ports()?;
-
-        Ok(device)
-    }
 }
 
 unsafe extern "C" fn probe_device(pcidev: *mut pci_device) -> i32 {
-    match Device::new(pcidev) {
+    match Device::new(NonNull::new(pcidev).expect("NULL `pci_device` pointer")) {
         Ok(device) => {
             // TODO!!!: save device to pci_device
             Box::leak(Box::new(device));

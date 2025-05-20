@@ -2,11 +2,7 @@ use super::{
     task::{ProcessList, Session, Signal, Thread},
     user::{UserPointer, UserPointerMut},
 };
-use crate::{
-    io::Buffer,
-    prelude::*,
-    sync::{AsRefPosition as _, CondVar},
-};
+use crate::{io::Buffer, prelude::*, sync::CondVar};
 use alloc::{
     collections::vec_deque::VecDeque,
     sync::{Arc, Weak},
@@ -14,6 +10,8 @@ use alloc::{
 use bindings::{EINTR, ENOTTY, EPERM};
 use bitflags::bitflags;
 use eonix_log::ConsoleWrite;
+use eonix_runtime::task::Task;
+use eonix_sync::{AsProof as _, Mutex};
 
 const BUFFER_SIZE: usize = 4096;
 
@@ -348,6 +346,8 @@ impl Termios {
 
 pub trait TerminalDevice: Send + Sync {
     fn putchar(&self, ch: u8);
+
+    fn putchar_direct(&self, ch: u8);
 }
 
 struct TerminalInner {
@@ -456,7 +456,7 @@ impl Terminal {
 
     fn signal(&self, inner: &mut TerminalInner, signal: Signal) {
         if let Some(session) = inner.session.upgrade() {
-            session.raise_foreground(signal);
+            Task::block_on(session.raise_foreground(signal));
         }
         if !inner.termio.noflsh() {
             self.clear_read_buffer(inner);
@@ -483,8 +483,8 @@ impl Terminal {
     }
 
     // TODO: Find a better way to handle this.
-    pub fn commit_char(&self, ch: u8) {
-        let mut inner = self.inner.lock();
+    pub async fn commit_char(&self, ch: u8) {
+        let mut inner = self.inner.lock().await;
         if inner.termio.isig() {
             match ch {
                 0xff => {}
@@ -531,10 +531,10 @@ impl Terminal {
         }
     }
 
-    pub fn poll_in(&self) -> KResult<()> {
-        let mut inner = self.inner.lock();
+    pub async fn poll_in(&self) -> KResult<()> {
+        let inner = self.inner.lock().await;
         if inner.buffer.is_empty() {
-            self.cv.wait(&mut inner);
+            let _inner = self.cv.wait(inner).await;
 
             if Thread::current().signal_list.has_pending_signal() {
                 return Err(EINTR);
@@ -543,7 +543,7 @@ impl Terminal {
         Ok(())
     }
 
-    pub fn read(&self, buffer: &mut dyn Buffer) -> KResult<usize> {
+    pub async fn read(&self, buffer: &mut dyn Buffer) -> KResult<usize> {
         let mut tmp_buffer = [0u8; 32];
 
         let data = 'block: {
@@ -551,9 +551,9 @@ impl Terminal {
                 break 'block &tmp_buffer[..0];
             }
 
-            let mut inner = self.inner.lock();
+            let mut inner = self.inner.lock().await;
             if inner.buffer.is_empty() {
-                self.cv.wait(&mut inner);
+                inner = self.cv.wait(inner).await;
 
                 if Thread::current().signal_list.has_pending_signal() {
                     return Err(EINTR);
@@ -594,27 +594,26 @@ impl Terminal {
         buffer.fill(data).map(|result| result.allow_partial())
     }
 
-    pub fn ioctl(&self, request: TerminalIORequest) -> KResult<()> {
+    pub async fn ioctl(&self, request: TerminalIORequest<'_>) -> KResult<()> {
         match request {
             TerminalIORequest::GetProcessGroup(pgid_pointer) => {
-                let session = self.inner.lock().session.upgrade();
-                let pgroup = session.map(|session| session.foreground()).flatten();
-
-                if let Some(pgroup) = pgroup {
-                    pgid_pointer.write(pgroup.pgid)
-                } else {
-                    Err(ENOTTY)
+                if let Some(session) = self.inner.lock().await.session.upgrade() {
+                    if let Some(pgroup) = session.foreground().await {
+                        return pgid_pointer.write(pgroup.pgid);
+                    }
                 }
+
+                Err(ENOTTY)
             }
             TerminalIORequest::SetProcessGroup(pgid) => {
                 let pgid = pgid.read()?;
 
-                let procs = ProcessList::get().lock_shared();
-                let inner = self.inner.lock();
+                let procs = ProcessList::get().read().await;
+                let inner = self.inner.lock().await;
                 let session = inner.session.upgrade();
 
                 if let Some(session) = session {
-                    session.set_foreground_pgid(pgid, procs.as_pos())
+                    session.set_foreground_pgid(pgid, procs.prove()).await
                 } else {
                     Err(ENOTTY)
                 }
@@ -631,12 +630,12 @@ impl Terminal {
                 ptr.write(window_size)
             }
             TerminalIORequest::GetTermios(ptr) => {
-                let termios = self.inner.lock().termio.get_user();
+                let termios = Task::block_on(self.inner.lock()).termio.get_user();
                 ptr.write(termios)
             }
             TerminalIORequest::SetTermios(ptr) => {
                 let user_termios = ptr.read()?;
-                let mut inner = self.inner.lock();
+                let mut inner = Task::block_on(self.inner.lock());
 
                 // TODO: We ignore unknown bits for now.
                 inner.termio.iflag = TermioIFlags::from_bits_truncate(user_termios.iflag as u16);
@@ -653,12 +652,12 @@ impl Terminal {
 
     /// Assign the `session` to this terminal. Drop the previous session if `forced` is true.
     pub fn set_session(&self, session: &Arc<Session>, forced: bool) -> KResult<()> {
-        let mut inner = self.inner.lock();
+        let mut inner = Task::block_on(self.inner.lock());
         if let Some(session) = inner.session.upgrade() {
             if !forced {
                 Err(EPERM)
             } else {
-                session.drop_control_terminal();
+                Task::block_on(session.drop_control_terminal());
                 inner.session = Arc::downgrade(&session);
                 Ok(())
             }
@@ -670,18 +669,18 @@ impl Terminal {
     }
 
     pub fn drop_session(&self) {
-        self.inner.lock().session = Weak::new();
+        Task::block_on(self.inner.lock()).session = Weak::new();
     }
 
     pub fn session(&self) -> Option<Arc<Session>> {
-        self.inner.lock().session.upgrade()
+        Task::block_on(self.inner.lock()).session.upgrade()
     }
 }
 
 impl ConsoleWrite for Terminal {
     fn write(&self, s: &str) {
         for &ch in s.as_bytes() {
-            self.show_char(ch);
+            self.device.putchar_direct(ch);
         }
     }
 }

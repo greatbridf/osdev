@@ -4,7 +4,7 @@ mod output_handle;
 mod stack;
 
 use crate::{
-    run::{Contexted, PinRun, RunState},
+    run::{Contexted, Run, RunState},
     scheduler::Scheduler,
     task::Task,
 };
@@ -21,7 +21,7 @@ pub use execute_status::ExecuteStatus;
 pub use output_handle::OutputHandle;
 pub use stack::Stack;
 
-/// An `Executor` executes a `PinRun` object in a separate thread of execution
+/// An `Executor` executes a `Run` object in a separate thread of execution
 /// where we have a dedicated stack and context.
 pub trait Executor: Send {
     fn progress(&self) -> ExecuteStatus;
@@ -29,7 +29,7 @@ pub trait Executor: Send {
 
 struct RealExecutor<S, R>
 where
-    R: PinRun + Send + Contexted + 'static,
+    R: Run + Send + Contexted + 'static,
     R::Output: Send,
 {
     _stack: S,
@@ -40,7 +40,7 @@ where
 
 impl<S, R> RealExecutor<S, R>
 where
-    R: PinRun + Send + Contexted + 'static,
+    R: Run + Send + Contexted + 'static,
     R::Output: Send,
 {
     extern "C" fn execute(self: Pin<&Self>) -> ! {
@@ -59,21 +59,9 @@ where
                 let mut pinned_runnable =
                     unsafe { Pin::new_unchecked(&mut *(runnable_pointer as *mut R)) };
 
-                match pinned_runnable.as_mut().pinned_run(&waker) {
+                match pinned_runnable.as_mut().run(&waker) {
                     RunState::Finished(output) => break output,
-                    RunState::Running => {
-                        if Task::current().is_runnable() {
-                            continue;
-                        }
-
-                        // We need to set the preempt count to 0 to allow preemption.
-                        eonix_preempt::disable();
-
-                        // SAFETY: We are in the scheduler context and preemption is disabled.
-                        unsafe { Scheduler::goto_scheduler(&Task::current().execution_context) };
-
-                        eonix_preempt::enable();
-                    }
+                    RunState::Running => Task::park(),
                 }
             };
 
@@ -96,7 +84,7 @@ where
 impl<S, R> Executor for RealExecutor<S, R>
 where
     S: Send,
-    R: PinRun + Contexted + Send,
+    R: Run + Contexted + Send,
     R::Output: Send,
 {
     fn progress(&self) -> ExecuteStatus {

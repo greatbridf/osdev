@@ -11,30 +11,24 @@ arch = { path = "./arch" }
 atomic_unique_refcell = { path = "./crates/atomic_unique_refcell", features = [
     "no_std",
 ] }
+buddy_allocator = { path = "./crates/buddy_allocator" }
+eonix_mm = { path = "./crates/eonix_mm" }
 eonix_preempt = { path = "./crates/eonix_preempt" }
 eonix_runtime = { path = "./crates/eonix_runtime" }
 eonix_sync = { path = "./crates/eonix_sync" }
 eonix_log = { path = "./crates/eonix_log" }
 pointers = { path = "./crates/pointers" }
+posix_types = { path = "./crates/posix_types" }
 
 bitflags = "2.6.0"
 intrusive-collections = "0.9.7"
 itertools = { version = "0.13.0", default-features = false }
-lazy_static = { version = "1.5.0", features = ["spin_no_std"] }
-spin = "0.9.8"
 
 [features]
-default = ["smp", "trace_future"]
-trace_condvar = []
+default = ["smp"]
 trace_syscall = []
 trace_scheduler = []
-trace_future = []
-log_trace = [
-    "trace_condvar",
-    "trace_syscall",
-    "trace_scheduler",
-    "trace_future",
-]
+log_trace = ["trace_syscall", "trace_scheduler"]
 log_debug = []
 smp = []
 
@@ -48,17 +42,19 @@ panic = "abort"
 opt-level = 0
 
 [profile.dev.package.eonix_preempt]
-opt-level = 0
+opt-level = 2
 
 [profile.dev.package.eonix_runtime]
 opt-level = 0
 
 [profile.dev.package.eonix_sync]
-opt-level = 0
+opt-level = 2
+
+[profile.dev.package.intrusive_list]
+opt-level = 2
 
 [profile.dev.package."*"]
-opt-level = 2
-debug = false
+opt-level = "s"
 
 [profile.dev.build-override]
 opt-level = 0

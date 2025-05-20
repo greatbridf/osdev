@@ -1,122 +1,116 @@
-use super::strategy::LockStrategy;
+mod guard;
+mod relax;
+mod spin_irq;
+
 use core::{
-    arch::asm,
+    cell::UnsafeCell,
     marker::PhantomData,
     sync::atomic::{AtomicBool, Ordering},
 };
+use spin_irq::IrqStateGuard;
 
-pub struct SpinStrategy;
-pub struct IrqStrategy<Strategy: LockStrategy>(PhantomData<Strategy>);
+pub use guard::{SpinGuard, UnlockedSpinGuard};
+pub use relax::{LoopRelax, Relax, SpinRelax};
+pub use spin_irq::{SpinIrqGuard, UnlockedSpinIrqGuard};
 
-impl SpinStrategy {
-    fn is_locked(data: &<Self as LockStrategy>::StrategyData) -> bool {
-        data.load(Ordering::Relaxed)
+//// A spinlock is a lock that uses busy-waiting to acquire the lock.
+/// It is useful for short critical sections where the overhead of a context switch
+/// is too high.
+#[derive(Debug, Default)]
+pub struct Spin<T, R = SpinRelax>
+where
+    T: ?Sized,
+{
+    _phantom: PhantomData<R>,
+    locked: AtomicBool,
+    value: UnsafeCell<T>,
+}
+
+impl<T, R> Spin<T, R>
+where
+    R: Relax,
+{
+    pub const fn new(value: T) -> Self {
+        Self {
+            locked: AtomicBool::new(false),
+            value: UnsafeCell::new(value),
+            _phantom: PhantomData,
+        }
     }
 }
 
-unsafe impl LockStrategy for SpinStrategy {
-    type StrategyData = AtomicBool;
-    type GuardContext = ();
-
-    fn new_data() -> Self::StrategyData {
-        AtomicBool::new(false)
-    }
-
-    unsafe fn is_locked(data: &Self::StrategyData) -> bool {
-        data.load(Ordering::Relaxed)
-    }
-
-    unsafe fn try_lock(data: &Self::StrategyData) -> Option<Self::GuardContext> {
-        use Ordering::{Acquire, Relaxed};
-        eonix_preempt::disable();
-
-        if data.compare_exchange(false, true, Acquire, Relaxed).is_ok() {
-            Some(())
-        } else {
-            None
-        }
-    }
-
-    unsafe fn do_lock(data: &Self::StrategyData) -> Self::GuardContext {
-        use Ordering::{Acquire, Relaxed};
-        eonix_preempt::disable();
-
-        while data
-            .compare_exchange_weak(false, true, Acquire, Relaxed)
-            .is_err()
-        {
-            while Self::is_locked(data) {
-                core::hint::spin_loop();
-            }
-        }
-    }
-
-    unsafe fn do_unlock(data: &Self::StrategyData, _: &mut Self::GuardContext) {
-        data.store(false, Ordering::Release);
+impl<T, R> Spin<T, R>
+where
+    T: ?Sized,
+{
+    /// # Safety
+    /// This function is unsafe because the caller MUST ensure that the protected
+    /// value is no longer accessed after calling this function.
+    unsafe fn do_unlock(&self) {
+        let locked = self.locked.swap(false, Ordering::Release);
+        debug_assert!(locked, "Spin::unlock(): Unlocking an unlocked lock");
         eonix_preempt::enable();
     }
 }
 
-unsafe impl<Strategy: LockStrategy> LockStrategy for IrqStrategy<Strategy> {
-    type StrategyData = Strategy::StrategyData;
-    type GuardContext = (Strategy::GuardContext, usize);
+impl<T, R> Spin<T, R>
+where
+    T: ?Sized,
+    R: Relax,
+{
+    pub fn lock(&self) -> SpinGuard<'_, T, R> {
+        self.do_lock();
 
-    fn new_data() -> Self::StrategyData {
-        Strategy::new_data()
-    }
-
-    unsafe fn do_lock(data: &Self::StrategyData) -> Self::GuardContext {
-        let mut context: usize;
-
-        unsafe {
-            asm!(
-                "pushf",
-                "pop {context}",
-                "cli",
-                context = out(reg) context,
-            );
-        }
-
-        unsafe { (Strategy::do_lock(data), context) }
-    }
-
-    unsafe fn do_unlock(data: &Self::StrategyData, context: &mut Self::GuardContext) {
-        unsafe {
-            Strategy::do_unlock(data, &mut context.0);
-
-            asm!(
-                "push {context}",
-                "popf",
-                context = in(reg) context.1,
-                options(nomem),
-            )
+        SpinGuard {
+            lock: self,
+            // SAFETY: We are holding the lock, so we can safely access the value.
+            value: unsafe { &mut *self.value.get() },
+            _not_send: PhantomData,
         }
     }
 
-    unsafe fn do_temporary_unlock(data: &Self::StrategyData, context: &mut Self::GuardContext) {
-        unsafe { Strategy::do_unlock(data, &mut context.0) }
-    }
+    pub fn lock_irq(&self) -> SpinIrqGuard<'_, T, R> {
+        let irq_state = arch::disable_irqs_save();
+        let guard = self.lock();
 
-    unsafe fn do_relock(data: &Self::StrategyData, context: &mut Self::GuardContext) {
-        unsafe { Strategy::do_relock(data, &mut context.0) }
-    }
-
-    unsafe fn is_locked(data: &Self::StrategyData) -> bool {
-        unsafe { Strategy::is_locked(data) }
-    }
-
-    unsafe fn try_lock(data: &Self::StrategyData) -> Option<Self::GuardContext> {
-        let mut irq_context: usize;
-        unsafe {
-            asm!(
-                "pushf",
-                "pop {context}",
-                "cli",
-                context = out(reg) irq_context,
-            );
+        SpinIrqGuard {
+            guard,
+            irq_state: IrqStateGuard::new(irq_state),
+            _not_send: PhantomData,
         }
+    }
 
-        let lock_context = unsafe { Strategy::try_lock(data) };
-        lock_context.map(|lock_context| (lock_context, irq_context))
+    pub fn get_mut(&mut self) -> &mut T {
+        // SAFETY: The exclusive access to the lock is guaranteed by the borrow checker.
+        unsafe { &mut *self.value.get() }
+    }
+
+    fn do_lock(&self) {
+        eonix_preempt::disable();
+
+        while let Err(_) =
+            self.locked
+                .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
+        {
+            R::relax();
+        }
     }
 }
+
+impl<T, R> Clone for Spin<T, R>
+where
+    T: ?Sized + Clone,
+    R: Relax,
+{
+    fn clone(&self) -> Self {
+        Self::new(self.lock().clone())
+    }
+}
+
+// SAFETY: As long as the value protected by the lock is able to be shared between threads,
+//         we can send the lock between threads.
+unsafe impl<T, R> Send for Spin<T, R> where T: ?Sized + Send {}
+
+// SAFETY: As long as the value protected by the lock is able to be shared between threads,
+//         we can provide exclusive access guarantees to the lock.
+unsafe impl<T, R> Sync for Spin<T, R> where T: ?Sized + Send {}

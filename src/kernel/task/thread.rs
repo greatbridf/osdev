@@ -4,17 +4,14 @@ use super::{
 };
 use crate::{
     kernel::{
-        cpu::current_cpu,
-        mem::VAddr,
+        cpu::local_cpu,
         user::dataflow::CheckedUserPointer,
         vfs::{filearray::FileArray, FsContext},
     },
     prelude::*,
-    sync::AsRefMutPosition as _,
 };
 use alloc::sync::Arc;
 use arch::{InterruptContext, UserTLS, _arch_fork_return};
-use bindings::KERNEL_PML4;
 use core::{
     arch::asm,
     pin::Pin,
@@ -22,10 +19,12 @@ use core::{
     sync::atomic::{AtomicUsize, Ordering},
     task::Waker,
 };
+use eonix_mm::address::{Addr as _, VAddr};
 use eonix_runtime::{
     context::ExecutionContext,
-    run::{Contexted, PinRun, RunState},
+    run::{Contexted, Run, RunState},
 };
+use eonix_sync::AsProofMut as _;
 use pointers::BorrowedArc;
 
 struct CurrentThread {
@@ -217,7 +216,7 @@ impl ThreadBuilder {
         });
 
         process_list.add_thread(&thread);
-        process.add_thread(&thread, process_list.as_pos_mut());
+        process.add_thread(&thread, process_list.prove_mut());
         thread
     }
 }
@@ -243,7 +242,7 @@ impl Thread {
     pub unsafe fn load_thread_area32(&self) {
         if let Some(tls) = self.inner.lock().tls.as_ref() {
             // SAFETY: Preemption is disabled.
-            tls.load(current_cpu());
+            tls.load(local_cpu());
         }
     }
 
@@ -298,11 +297,9 @@ impl Thread {
 
 impl ThreadRunnable {
     pub fn new(thread: Arc<Thread>, entry: VAddr, stack_pointer: VAddr) -> Self {
-        let (VAddr(entry), VAddr(stack_pointer)) = (entry, stack_pointer);
-
         let mut interrupt_context = InterruptContext::default();
-        interrupt_context.set_return_address(entry as _, true);
-        interrupt_context.set_stack_pointer(stack_pointer as _, true);
+        interrupt_context.set_return_address(entry.addr() as _, true);
+        interrupt_context.set_stack_pointer(stack_pointer.addr() as _, true);
         interrupt_context.set_interrupt_enabled(true);
 
         Self {
@@ -331,7 +328,7 @@ impl Contexted for ThreadRunnable {
             0 => {}
             sp => unsafe {
                 // SAFETY: Preemption is disabled.
-                arch::load_interrupt_stack(current_cpu(), sp as u64);
+                arch::load_interrupt_stack(local_cpu(), sp as u64);
             },
         }
 
@@ -347,7 +344,7 @@ impl Contexted for ThreadRunnable {
             CURRENT_THREAD.swap(Some(current_thread));
         }
 
-        thread.process.mm_list.switch_page_table();
+        thread.process.mm_list.activate();
 
         unsafe {
             // SAFETY: Preemption is disabled.
@@ -356,20 +353,18 @@ impl Contexted for ThreadRunnable {
     }
 
     fn restore_running_context(&self) {
-        arch::set_root_page_table(KERNEL_PML4 as usize);
+        self.thread.process.mm_list.deactivate();
     }
 }
 
-impl PinRun for ThreadRunnable {
+impl Run for ThreadRunnable {
     type Output = ();
 
-    fn pinned_run(self: Pin<&mut Self>, waker: &Waker) -> RunState<Self::Output> {
+    fn run(self: Pin<&mut Self>, _waker: &Waker) -> RunState<Self::Output> {
         let mut task_context = ExecutionContext::new();
         task_context.set_interrupt(false);
         task_context.set_ip(_arch_fork_return as _);
         task_context.set_sp(&self.interrupt_context as *const _ as _);
-
-        self.thread.signal_list.set_signal_waker(waker.clone());
 
         eonix_preempt::disable();
 
@@ -391,7 +386,7 @@ impl PinRun for ThreadRunnable {
 
         unsafe {
             // SAFETY: Preemption is disabled.
-            arch::load_interrupt_stack(current_cpu(), sp as u64);
+            arch::load_interrupt_stack(local_cpu(), sp as u64);
         }
 
         eonix_preempt::enable();

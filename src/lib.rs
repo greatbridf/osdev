@@ -28,9 +28,10 @@ mod sync;
 use alloc::{ffi::CString, sync::Arc};
 use core::alloc::{GlobalAlloc, Layout};
 use elf::ParsedElf32;
-use eonix_runtime::{run::FutureRun, scheduler::Scheduler};
+use eonix_mm::{address::PAddr, paging::PFN};
+use eonix_runtime::{run::FutureRun, scheduler::Scheduler, task::Task};
 use kernel::{
-    cpu::init_thiscpu,
+    cpu::init_localcpu,
     mem::Page,
     task::{KernelStack, ProcessBuilder, ProcessList, ThreadBuilder, ThreadRunnable},
     vfs::{
@@ -67,7 +68,7 @@ extern "C" {
     fn init_pci();
 }
 
-struct Allocator {}
+struct Allocator;
 unsafe impl GlobalAlloc for Allocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         let result = _do_allocate(layout.size());
@@ -88,17 +89,17 @@ unsafe impl GlobalAlloc for Allocator {
 }
 
 #[global_allocator]
-static ALLOCATOR: Allocator = Allocator {};
+static ALLOCATOR: Allocator = Allocator;
 
 extern "C" {
     fn init_allocator();
 }
 
 #[no_mangle]
-pub extern "C" fn rust_kinit(early_kstack_pfn: usize) -> ! {
+pub extern "C" fn rust_kinit(early_kstack_paddr: PAddr) -> ! {
     // We don't call global constructors.
     // Rust doesn't need that, and we're not going to use global variables in C++.
-    unsafe { init_thiscpu() };
+    init_localcpu();
 
     unsafe { init_allocator() };
 
@@ -107,8 +108,6 @@ pub extern "C" fn rust_kinit(early_kstack_pfn: usize) -> ! {
     // TODO: Move this to rust.
     unsafe { init_pci() };
 
-    kernel::vfs::mount::init_vfs().unwrap();
-
     // To satisfy the `Scheduler` "preempt count == 0" assertion.
     eonix_preempt::disable();
 
@@ -116,7 +115,8 @@ pub extern "C" fn rust_kinit(early_kstack_pfn: usize) -> ! {
     // So call `init_vfs` first, then `init_multitasking`.
     Scheduler::init_local_scheduler::<KernelStack>();
 
-    Scheduler::get().spawn::<KernelStack, _>(FutureRun::new(init_process(early_kstack_pfn)));
+    Scheduler::get()
+        .spawn::<KernelStack, _>(FutureRun::new(init_process(PFN::from(early_kstack_paddr))));
 
     unsafe {
         // SAFETY: `preempt::count()` == 1.
@@ -124,8 +124,8 @@ pub extern "C" fn rust_kinit(early_kstack_pfn: usize) -> ! {
     }
 }
 
-async fn init_process(early_kstack_pfn: usize) {
-    unsafe { Page::take_pfn(early_kstack_pfn, 9) };
+async fn init_process(early_kstack_pfn: PFN) {
+    unsafe { Page::from_raw(early_kstack_pfn) };
 
     kernel::syscall::register_syscalls();
     CharDevice::init().unwrap();
@@ -136,10 +136,11 @@ async fn init_process(early_kstack_pfn: usize) {
     driver::e1000e::register_e1000e_driver();
     driver::ahci::register_ahci_driver();
 
+    fs::tmpfs::init();
     fs::procfs::init();
     fs::fat32::init();
 
-    unsafe { kernel::smp::bootstrap_smp() };
+    kernel::smp::bootstrap_smp();
 
     let (ip, sp, mm_list) = {
         // mount fat32 /mnt directory
@@ -179,7 +180,7 @@ async fn init_process(early_kstack_pfn: usize) {
 
     let thread_builder = ThreadBuilder::new().name(Arc::from(*b"busybox"));
 
-    let mut process_list = ProcessList::get().lock();
+    let mut process_list = Task::block_on(ProcessList::get().write());
     let (thread, process) = ProcessBuilder::new()
         .mm_list(mm_list)
         .thread_builder(thread_builder)

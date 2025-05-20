@@ -178,8 +178,6 @@ macro_rules! register_syscall {
     };
 }
 
-use super::task::Thread;
-
 pub(self) use {arg_register, define_syscall32, format_expand, register_syscall, syscall32_call};
 
 #[allow(dead_code)]
@@ -244,9 +242,5 @@ pub fn handle_syscall32(
             int_stack.r14 = 0;
             int_stack.r15 = 0;
         }
-    }
-
-    if Thread::current().signal_list.has_pending_signal() {
-        Thread::current().signal_list.handle(int_stack, ext_ctx);
     }
 }

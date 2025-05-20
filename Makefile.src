@@ -5,6 +5,8 @@ QEMU_ACCELERATION_FLAG=##PLACEHOLDER_3##
 QEMU_DEBUG_FLAG=#-d cpu_reset,int -D build/qemu.log
 ARCH=##PLACEHOLDER_6##
 
+## TODO: 感觉有些地方写的不太对，等到别的地方都写完了再看看。。。
+
 ifeq ($(ARCH),x86_64)
 MACHINE_TYPE=q35
 QEMU_ARGS=-machine $(MACHINE_TYPE) -drive id=disk,file=build/boot.img,format=raw,if=none \
@@ -80,7 +82,7 @@ build/boot.img: build/fs.img build/mbr_hole.bin
 ifeq ($(ARCH),x86_64)
 	dd if=build/fs.img of=build/boot.img bs=$(shell expr 4 \* 1024 \* 1024) seek=1 conv=notrunc
 	sh -c 'echo n; echo; echo; echo 8192; echo; echo a; echo w' | $(FDISK_BIN) build/boot.img
-else
+else ifeq ($(ARCH),riscv64)
 	dd if=build/fs.img of=build/boot.img bs=$(shell expr 4 \* 1024 \* 1024) seek=1 conv=notrunc
 	@echo "Note: Using default partitioning for $(ARCH)"
 endif

@@ -1,34 +1,23 @@
-#![no_std]
-
+use super::{Relax, SpinGuard, SpinRelax, UnlockedSpinGuard};
+use crate::{marker::NotSend, UnlockableGuard, UnlockedGuard};
 use core::{
     marker::PhantomData,
     mem::ManuallyDrop,
     ops::{Deref, DerefMut},
 };
-use eonix_sync::{
-    marker::NotSend, Relax, Spin, SpinGuard, SpinRelax, UnlockableGuard, UnlockedGuard,
-    UnlockedSpinGuard,
-};
 
-pub trait SpinIrq<T, R = SpinRelax>
-where
-    T: ?Sized,
-{
-    fn lock_irq(&self) -> SpinIrqGuard<'_, T, R>;
-}
-
-struct IrqStateGuard(ManuallyDrop<arch::IrqState>);
+pub(super) struct IrqStateGuard(ManuallyDrop<arch::IrqState>);
 
 pub struct SpinIrqGuard<'a, T, R = SpinRelax>
 where
     T: ?Sized,
 {
-    guard: SpinGuard<'a, T, R>,
-    irq_state: IrqStateGuard,
+    pub(super) guard: SpinGuard<'a, T, R>,
+    pub(super) irq_state: IrqStateGuard,
     /// We don't want this to be `Send` because we don't want to allow the guard to be
     /// transferred to another thread since we have disabled the preemption and saved
     /// IRQ states on the local cpu.
-    _not_send: PhantomData<NotSend>,
+    pub(super) _not_send: PhantomData<NotSend>,
 }
 
 pub struct UnlockedSpinIrqGuard<'a, T, R>
@@ -42,23 +31,6 @@ where
 // SAFETY: As long as the value protected by the lock is able to be shared between threads,
 //         we can access the guard from multiple threads.
 unsafe impl<T, R> Sync for SpinIrqGuard<'_, T, R> where T: ?Sized + Sync {}
-
-impl<T, R> SpinIrq<T, R> for Spin<T, R>
-where
-    T: ?Sized,
-    R: Relax,
-{
-    fn lock_irq(&self) -> SpinIrqGuard<'_, T, R> {
-        let irq_state = arch::disable_irqs_save();
-        let guard = self.lock();
-
-        SpinIrqGuard {
-            guard,
-            irq_state: IrqStateGuard::new(irq_state),
-            _not_send: PhantomData,
-        }
-    }
-}
 
 impl IrqStateGuard {
     pub const fn new(irq_state: arch::IrqState) -> Self {

@@ -1,15 +1,15 @@
-use bindings::{EINVAL, ENOMEM};
-
+use super::{define_syscall32, register_syscall, MapArgument, MapArgumentImpl};
 use crate::{
     kernel::{
         constants::{UserMmapFlags, UserMmapProtocol},
-        mem::{Mapping, Permission, VAddr},
+        mem::{Mapping, Permission},
         task::Thread,
     },
     prelude::*,
 };
-
-use super::{define_syscall32, register_syscall, MapArgument, MapArgumentImpl};
+use bindings::{EINVAL, ENOMEM};
+use eonix_mm::address::{Addr as _, AddrOps as _, VAddr};
+use eonix_runtime::task::Task;
 
 /// Check whether we are doing an implemented function.
 /// If `condition` is false, return `Err(err)`.
@@ -29,8 +29,8 @@ fn do_mmap_pgoff(
     fd: u32,
     pgoffset: usize,
 ) -> KResult<usize> {
-    let addr = VAddr(addr);
-    if addr.floor() != addr || len == 0 {
+    let addr = VAddr::from(addr);
+    if !addr.is_page_aligned() || len == 0 {
         return Err(EINVAL);
     }
 
@@ -45,7 +45,7 @@ fn do_mmap_pgoff(
 
     // PROT_NONE, we do unmapping.
     if prot.is_empty() {
-        mm_list.unmap(addr, len).map(|_| 0)?;
+        Task::block_on(mm_list.unmap(addr, len)).map(|_| 0)?;
         return Ok(0);
     }
     // Otherwise, do mmapping.
@@ -74,26 +74,22 @@ fn do_mmap_pgoff(
         )
     };
 
-    addr.map(|addr| addr.0)
+    addr.map(|addr| addr.addr())
 }
 
 fn do_munmap(addr: usize, len: usize) -> KResult<usize> {
-    let addr = VAddr(addr);
-    if addr.floor() != addr || len == 0 {
+    let addr = VAddr::from(addr);
+    if !addr.is_page_aligned() || len == 0 {
         return Err(EINVAL);
     }
 
     let len = (len + 0xfff) & !0xfff;
-    Thread::current()
-        .process
-        .mm_list
-        .unmap(addr, len)
-        .map(|_| 0)
+    Task::block_on(Thread::current().process.mm_list.unmap(addr, len)).map(|_| 0)
 }
 
 fn do_brk(addr: usize) -> KResult<usize> {
-    let vaddr = if addr == 0 { None } else { Some(VAddr(addr)) };
-    Ok(Thread::current().process.mm_list.set_break(vaddr).0)
+    let vaddr = if addr == 0 { None } else { Some(VAddr::from(addr)) };
+    Ok(Thread::current().process.mm_list.set_break(vaddr).addr())
 }
 
 impl MapArgument<'_, UserMmapProtocol> for MapArgumentImpl {

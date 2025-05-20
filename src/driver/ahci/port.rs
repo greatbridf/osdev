@@ -1,34 +1,20 @@
-use core::pin::pin;
-
 use super::command::{Command, IdentifyCommand, ReadLBACommand};
+use super::slot::CommandSlot;
+use super::stats::AdapterPortStats;
 use super::{
-    vread, vwrite, CommandHeader, PRDTEntry, FISH2D, PORT_CMD_CR, PORT_CMD_FR, PORT_CMD_FRE,
-    PORT_CMD_ST, PORT_IE_DEFAULT,
+    CommandHeader, Register, PORT_CMD_CR, PORT_CMD_FR, PORT_CMD_FRE, PORT_CMD_ST, PORT_IE_DEFAULT,
 };
+use crate::driver::ahci::command_table::CommandTable;
 use crate::kernel::block::{BlockDeviceRequest, BlockRequestQueue};
 use crate::kernel::mem::paging::Page;
-use crate::kernel::mem::phys::{NoCachePP, PhysPtr};
+use crate::kernel::mem::AsMemoryBlock as _;
 use crate::prelude::*;
 use alloc::collections::vec_deque::VecDeque;
 use bindings::{EINVAL, EIO};
+use core::pin::pin;
+use eonix_mm::address::{Addr as _, PAddr};
 use eonix_runtime::task::Task;
-use eonix_spin_irq::SpinIrq as _;
 use eonix_sync::WaitList;
-
-fn spinwait_clear(refval: *const u32, mask: u32) -> KResult<()> {
-    const SPINWAIT_MAX: usize = 1000;
-
-    let mut spins = 0;
-    while vread(refval) & mask != 0 {
-        if spins == SPINWAIT_MAX {
-            return Err(EIO);
-        }
-
-        spins += 1;
-    }
-
-    Ok(())
-}
 
 /// An `AdapterPort` is an HBA device in AHCI mode.
 ///
@@ -66,63 +52,6 @@ pub struct AdapterPortData {
     vendor: [u32; 4],
 }
 
-#[allow(dead_code)]
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
-enum SlotState {
-    Idle,
-    Working,
-    Finished,
-    Error,
-}
-
-struct CommandSlotInner {
-    state: SlotState,
-    /// # Usage
-    /// `cmdheader` might be used in irq handler. So in order to wait for
-    /// commands to finish, we should use `lock_irq` on `cmdheader`
-    cmdheader: *mut CommandHeader,
-}
-
-/// # Safety
-/// This is safe because the `cmdheader` is not shared between threads
-unsafe impl Send for CommandSlotInner {}
-
-impl CommandSlotInner {
-    pub fn setup(&mut self, cmdtable_base: u64, prdtlen: u16, write: bool) {
-        let cmdheader = unsafe { self.cmdheader.as_mut().unwrap() };
-        cmdheader.first = 0x05; // FIS type
-
-        if write {
-            cmdheader.first |= 0x40;
-        }
-
-        cmdheader.second = 0x00;
-
-        cmdheader.prdt_length = prdtlen;
-        cmdheader.bytes_transferred = 0;
-        cmdheader.command_table_base = cmdtable_base;
-
-        cmdheader._reserved = [0; 4];
-    }
-}
-
-struct CommandSlot {
-    inner: Spin<CommandSlotInner>,
-    wait_list: WaitList,
-}
-
-impl CommandSlot {
-    fn new(cmdheader: *mut CommandHeader) -> Self {
-        Self {
-            inner: Spin::new(CommandSlotInner {
-                state: SlotState::Idle,
-                cmdheader,
-            }),
-            wait_list: WaitList::new(),
-        }
-    }
-}
-
 struct FreeList {
     free: VecDeque<u32>,
     working: VecDeque<u32>,
@@ -137,85 +66,83 @@ impl FreeList {
     }
 }
 
-#[derive(Default, Debug)]
-pub struct AdapterPortStats {
-    /// Number of commands sent
-    cmd_sent: u64,
-
-    /// Number of transmission errors
-    cmd_error: u64,
-
-    /// Number of interrupts fired
-    int_fired: u64,
-}
-
-pub struct AdapterPort {
+pub struct AdapterPort<'a> {
     pub nport: u32,
-    regs: *mut (),
-    page: Page,
-    slots: [CommandSlot; 32],
+    regs_base: PAddr,
+
+    slots: [CommandSlot<'a>; 32],
     free_list: Spin<FreeList>,
     free_list_wait: WaitList,
 
-    /// Statistics for this port
-    pub stats: Spin<AdapterPortStats>,
+    /// Holds the command list.
+    /// **DO NOT USE IT DIRECTLY**
+    _page: Page,
+
+    cmdlist_base: PAddr,
+    fis_base: PAddr,
+
+    stats: AdapterPortStats,
 }
 
-/// # Safety
-/// This is safe because the `AdapterPort` can be accessed by only one thread at the same time
-unsafe impl Send for AdapterPort {}
-unsafe impl Sync for AdapterPort {}
+impl<'a> AdapterPort<'a> {
+    pub fn new(base: PAddr, nport: u32) -> Self {
+        let page = Page::alloc();
+        let cmdlist_base = page.start();
+        let cmdlist_size = 32 * size_of::<CommandHeader>();
+        let fis_base = cmdlist_base + cmdlist_size;
 
-impl AdapterPort {
-    pub fn new(base: usize, nport: u32) -> Self {
-        let page = Page::alloc_one();
-        let cmdheaders_start = page.as_cached().as_ptr::<CommandHeader>();
+        let (mut cmdheaders, _) = page.as_memblk().split_at(cmdlist_size);
+        let slots = core::array::from_fn(move |_| {
+            let (cmdheader, next) = cmdheaders.split_at(size_of::<CommandHeader>());
+            cmdheaders = next;
+            CommandSlot::new(unsafe { cmdheader.as_ptr().as_mut() })
+        });
 
         Self {
             nport,
-            regs: NoCachePP::new(base + 0x100 + 0x80 * nport as usize).as_ptr(),
-            slots: core::array::from_fn(|index| {
-                CommandSlot::new(unsafe { cmdheaders_start.offset(index as isize) })
-            }),
+            regs_base: base + 0x100 + 0x80 * nport as usize,
+            slots,
             free_list: Spin::new(FreeList::new()),
             free_list_wait: WaitList::new(),
-            page,
-            stats: Spin::default(),
+            _page: page,
+            stats: AdapterPortStats::new(),
+            cmdlist_base,
+            fis_base,
         }
     }
 }
 
-impl AdapterPort {
-    fn command_list_base(&self) -> *mut u64 {
-        unsafe { self.regs.byte_offset(0x00).cast() }
+impl AdapterPort<'_> {
+    fn command_list_base(&self) -> Register<u64> {
+        Register::new(self.regs_base + 0x00)
     }
 
-    fn fis_base(&self) -> *mut u64 {
-        unsafe { self.regs.byte_offset(0x08).cast() }
+    fn fis_base(&self) -> Register<u64> {
+        Register::new(self.regs_base + 0x08)
     }
 
-    fn sata_status(&self) -> *mut u32 {
-        unsafe { self.regs.byte_offset(0x28).cast() }
+    fn sata_status(&self) -> Register<u32> {
+        Register::new(self.regs_base + 0x28)
     }
 
-    fn command_status(&self) -> *mut u32 {
-        unsafe { self.regs.byte_offset(0x18).cast() }
+    fn command_status(&self) -> Register<u32> {
+        Register::new(self.regs_base + 0x18)
     }
 
-    fn command_issue(&self) -> *mut u32 {
-        unsafe { self.regs.byte_offset(0x38).cast() }
+    fn command_issue(&self) -> Register<u32> {
+        Register::new(self.regs_base + 0x38)
     }
 
-    pub fn interrupt_status(&self) -> *mut u32 {
-        unsafe { self.regs.byte_offset(0x10).cast() }
+    pub fn interrupt_status(&self) -> Register<u32> {
+        Register::new(self.regs_base + 0x10)
     }
 
-    pub fn interrupt_enable(&self) -> *mut u32 {
-        unsafe { self.regs.byte_offset(0x14).cast() }
+    fn interrupt_enable(&self) -> Register<u32> {
+        Register::new(self.regs_base + 0x14)
     }
 
     pub fn status_ok(&self) -> bool {
-        vread(self.sata_status()) & 0xf == 0x3
+        self.sata_status().read_once() & 0xf == 0x3
     }
 
     fn get_free_slot(&self) -> u32 {
@@ -234,16 +161,16 @@ impl AdapterPort {
     }
 
     fn save_working(&self, slot: u32) {
-        self.free_list.lock().working.push_back(slot);
+        self.free_list.lock_irq().working.push_back(slot);
     }
 
     fn release_free_slot(&self, slot: u32) {
-        self.free_list.lock().free.push_back(slot);
+        self.free_list.lock_irq().free.push_back(slot);
         self.free_list_wait.notify_one();
     }
 
     pub fn handle_interrupt(&self) {
-        let ci = vread(self.command_issue());
+        let ci = self.command_issue().read_once();
 
         // no need to use `lock_irq()` inside interrupt handler
         let mut free_list = self.free_list.lock();
@@ -253,104 +180,55 @@ impl AdapterPort {
                 return true;
             }
 
-            let slot = &self.slots[n as usize];
-
-            // TODO: check error
-            let mut slot_inner = slot.inner.lock();
-            debug_assert_eq!(slot_inner.state, SlotState::Working);
-            slot_inner.state = SlotState::Finished;
-            slot.wait_list.notify_all();
-            self.stats.lock().int_fired += 1;
+            self.slots[n as usize].handle_irq();
+            self.stats.inc_int_fired();
 
             false
         });
     }
 
     fn stop_command(&self) -> KResult<()> {
-        vwrite(
-            self.command_status(),
-            vread(self.command_status()) & !(PORT_CMD_ST | PORT_CMD_FRE),
-        );
-
-        spinwait_clear(self.command_status(), PORT_CMD_CR | PORT_CMD_FR)
+        let status_reg = self.command_status();
+        let status = status_reg.read();
+        status_reg.write_once(status & !(PORT_CMD_ST | PORT_CMD_FRE));
+        status_reg.spinwait_clear(PORT_CMD_CR | PORT_CMD_FR)
     }
 
     fn start_command(&self) -> KResult<()> {
-        spinwait_clear(self.command_status(), PORT_CMD_CR)?;
+        let status_reg = self.command_status();
+        status_reg.spinwait_clear(PORT_CMD_CR)?;
 
-        let cmd_status = vread(self.command_status());
-        vwrite(
-            self.command_status(),
-            cmd_status | PORT_CMD_ST | PORT_CMD_FRE,
-        );
+        let status = status_reg.read();
+        status_reg.write_once(status | PORT_CMD_ST | PORT_CMD_FRE);
 
         Ok(())
     }
 
     fn send_command(&self, cmd: &impl Command) -> KResult<()> {
-        let pages = cmd.pages();
-        let cmdtable_page = Page::alloc_one();
+        let mut cmdtable = CommandTable::new();
+        cmdtable.setup(cmd);
 
-        let command_fis: &mut FISH2D = cmdtable_page.as_cached().as_mut();
-        command_fis.setup(cmd.cmd(), cmd.lba(), cmd.count());
+        let slot_index = self.get_free_slot();
+        let slot = &self.slots[slot_index as usize];
 
-        let prdt: &mut [PRDTEntry; 248] = cmdtable_page.as_cached().offset(0x80).as_mut();
+        slot.prepare_command(&cmdtable, cmd.write());
+        self.save_working(slot_index);
 
-        for (idx, page) in pages.iter().enumerate() {
-            prdt[idx].setup(page);
-        }
-
-        let slot_index = self.get_free_slot() as usize;
-        let slot_object = &self.slots[slot_index];
-
-        let mut slot = slot_object.inner.lock_irq();
-
-        slot.setup(
-            cmdtable_page.as_phys() as u64,
-            pages.len() as u16,
-            cmd.write(),
-        );
-        slot.state = SlotState::Working;
+        let cmdissue_reg = self.command_issue();
 
         // should we clear received fis here?
-        debug_assert!(vread(self.command_issue()) & (1 << slot_index) == 0);
-        vwrite(self.command_issue(), 1 << slot_index);
+        debug_assert!(cmdissue_reg.read_once() & (1 << slot_index) == 0);
+        cmdissue_reg.write_once(1 << slot_index);
 
-        if spinwait_clear(self.command_issue(), 1 << slot_index).is_err() {
-            let mut saved = false;
-            while slot.state == SlotState::Working {
-                if !saved {
-                    saved = true;
-                    self.save_working(slot_index as u32);
-                }
-                let mut wait = pin!(slot_object.wait_list.prepare_to_wait());
-                wait.as_mut().add_to_wait_list();
-                drop(slot);
-                Task::block_on(wait);
-                slot = slot_object.inner.lock_irq();
-            }
-        } else {
-            // TODO: check error
-            slot.state = SlotState::Finished;
-        }
+        self.stats.inc_cmd_sent();
 
-        let state = slot.state;
-        slot.state = SlotState::Idle;
+        if let Err(_) = Task::block_on(slot.wait_finish()) {
+            self.stats.inc_cmd_error();
+            return Err(EIO);
+        };
 
-        debug_assert_ne!(state, SlotState::Working);
-        self.release_free_slot(slot_index as u32);
-
-        match state {
-            SlotState::Finished => {
-                self.stats.lock().cmd_sent += 1;
-                Ok(())
-            }
-            SlotState::Error => {
-                self.stats.lock().cmd_error += 1;
-                Err(EIO)
-            }
-            _ => panic!("Invalid slot state"),
-        }
+        self.release_free_slot(slot_index);
+        Ok(())
     }
 
     fn identify(&self) -> KResult<()> {
@@ -365,10 +243,11 @@ impl AdapterPort {
     pub fn init(&self) -> KResult<()> {
         self.stop_command()?;
 
-        vwrite(self.interrupt_enable(), PORT_IE_DEFAULT);
+        self.command_list_base()
+            .write(self.cmdlist_base.addr() as u64);
+        self.fis_base().write(self.fis_base.addr() as u64);
 
-        vwrite(self.command_list_base(), self.page.as_phys() as u64);
-        vwrite(self.fis_base(), self.page.as_phys() as u64 + 0x400);
+        self.interrupt_enable().write_once(PORT_IE_DEFAULT);
 
         self.start_command()?;
 
@@ -380,9 +259,17 @@ impl AdapterPort {
             Ok(_) => Ok(()),
         }
     }
+
+    pub fn print_stats(&self, writer: &mut impl Write) -> KResult<()> {
+        writeln!(writer, "cmd_sent: {}", self.stats.get_cmd_sent()).map_err(|_| EIO)?;
+        writeln!(writer, "cmd_error: {}", self.stats.get_cmd_error()).map_err(|_| EIO)?;
+        writeln!(writer, "int_fired: {}", self.stats.get_int_fired()).map_err(|_| EIO)?;
+
+        Ok(())
+    }
 }
 
-impl BlockRequestQueue for AdapterPort {
+impl BlockRequestQueue for AdapterPort<'_> {
     fn max_request_pages(&self) -> u64 {
         1024
     }

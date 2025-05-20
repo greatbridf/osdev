@@ -9,6 +9,9 @@ use wait_object::{WaitObject, WaitObjectAdapter};
 pub use wait_handle::WaitHandle;
 
 pub struct WaitList {
+    /// # Lock
+    /// `WaitList`s might be used in IRQ handlers, so `lock_irq` should
+    /// be used on `waiters`.
     waiters: LazyLock<Spin<LinkedList<WaitObjectAdapter>>>,
 }
 
@@ -20,11 +23,11 @@ impl WaitList {
     }
 
     pub fn has_waiters(&self) -> bool {
-        !self.waiters.lock().is_empty()
+        !self.waiters.lock_irq().is_empty()
     }
 
     pub fn notify_one(&self) -> bool {
-        let mut waiters = self.waiters.lock();
+        let mut waiters = self.waiters.lock_irq();
         let mut waiter = waiters.front_mut();
 
         if !waiter.is_null() {
@@ -40,7 +43,7 @@ impl WaitList {
     }
 
     pub fn notify_all(&self) -> usize {
-        let mut waiters = self.waiters.lock();
+        let mut waiters = self.waiters.lock_irq();
         let mut waiter = waiters.front_mut();
         let mut count = 0;
 
@@ -83,7 +86,7 @@ impl WaitList {
     }
 
     pub(self) fn notify_waiter(&self, wait_object: &WaitObject) {
-        let mut waiters = self.waiters.lock();
+        let mut waiters = self.waiters.lock_irq();
         if !wait_object.on_list() {
             return;
         }

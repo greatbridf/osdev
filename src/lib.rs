@@ -28,6 +28,7 @@ mod sync;
 use alloc::{ffi::CString, sync::Arc};
 use core::alloc::{GlobalAlloc, Layout};
 use elf::ParsedElf32;
+use eonix_mm::{address::PAddr, paging::PFN};
 use eonix_runtime::{run::FutureRun, scheduler::Scheduler, task::Task};
 use kernel::{
     cpu::init_localcpu,
@@ -95,7 +96,7 @@ extern "C" {
 }
 
 #[no_mangle]
-pub extern "C" fn rust_kinit(early_kstack_pfn: usize) -> ! {
+pub extern "C" fn rust_kinit(early_kstack_paddr: PAddr) -> ! {
     // We don't call global constructors.
     // Rust doesn't need that, and we're not going to use global variables in C++.
     init_localcpu();
@@ -114,7 +115,8 @@ pub extern "C" fn rust_kinit(early_kstack_pfn: usize) -> ! {
     // So call `init_vfs` first, then `init_multitasking`.
     Scheduler::init_local_scheduler::<KernelStack>();
 
-    Scheduler::get().spawn::<KernelStack, _>(FutureRun::new(init_process(early_kstack_pfn)));
+    Scheduler::get()
+        .spawn::<KernelStack, _>(FutureRun::new(init_process(PFN::from(early_kstack_paddr))));
 
     unsafe {
         // SAFETY: `preempt::count()` == 1.
@@ -122,8 +124,8 @@ pub extern "C" fn rust_kinit(early_kstack_pfn: usize) -> ! {
     }
 }
 
-async fn init_process(early_kstack_pfn: usize) {
-    unsafe { Page::take_pfn(early_kstack_pfn, 9) };
+async fn init_process(early_kstack_pfn: PFN) {
+    unsafe { Page::from_raw(early_kstack_pfn) };
 
     kernel::syscall::register_syscalls();
     CharDevice::init().unwrap();

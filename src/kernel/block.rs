@@ -1,4 +1,8 @@
-use super::{constants::ENOENT, mem::paging::Page, vfs::DevId};
+use super::{
+    constants::ENOENT,
+    mem::{paging::Page, AsMemoryBlock as _},
+    vfs::DevId,
+};
 use crate::{
     io::{Buffer, FillResult, UninitBuffer},
     prelude::*,
@@ -218,14 +222,14 @@ impl BlockDevice {
                 count if count <= 8 => {
                     nread = count;
 
-                    let _page = Page::alloc_one();
+                    let _page = Page::alloc();
                     page = Some(_page);
                     pages = core::slice::from_ref(page.as_ref().unwrap());
                 }
                 count if count <= 16 => {
                     nread = count;
 
-                    let _pages = Page::alloc_many(1);
+                    let _pages = Page::alloc_order(1);
                     page = Some(_pages);
                     pages = core::slice::from_ref(page.as_ref().unwrap());
                 }
@@ -235,7 +239,7 @@ impl BlockDevice {
                     let npages = (nread + 15) / 16;
                     let mut _page_vec = Vec::with_capacity(npages as usize);
                     for _ in 0..npages {
-                        _page_vec.push(Page::alloc_many(1));
+                        _page_vec.push(Page::alloc_order(1));
                     }
                     page_vec = Some(_page_vec);
                     pages = page_vec.as_ref().unwrap().as_slice();
@@ -251,7 +255,8 @@ impl BlockDevice {
             self.read_raw(req)?;
 
             for page in pages.iter() {
-                let data = &page.as_slice()[first_sector_offset as usize..];
+                // SAFETY: We are the only owner of the page so no one could be mutating it.
+                let data = unsafe { &page.as_memblk().as_bytes()[first_sector_offset as usize..] };
                 first_sector_offset = 0;
 
                 match buffer.fill(data)? {

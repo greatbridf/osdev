@@ -1,15 +1,15 @@
-use alloc::{ffi::CString, sync::Arc};
-use bitflags::bitflags;
-
 use crate::{
     io::{ByteBuffer, UninitBuffer},
     kernel::{
         constants::ENOEXEC,
-        mem::{FileMapping, MMList, Mapping, Permission, VAddr},
+        mem::{FileMapping, MMList, Mapping, Permission},
         vfs::dentry::Dentry,
     },
     prelude::*,
 };
+use alloc::{ffi::CString, sync::Arc};
+use bitflags::bitflags;
+use eonix_mm::address::{Addr as _, AddrOps as _, VAddr};
 
 #[repr(u8)]
 #[allow(dead_code)]
@@ -244,13 +244,13 @@ impl ParsedElf32 {
     pub fn load(self, args: Vec<CString>, envs: Vec<CString>) -> KResult<(VAddr, VAddr, MMList)> {
         let mm_list = MMList::new();
 
-        let mut data_segment_end = VAddr(0);
+        let mut data_segment_end = VAddr::NULL;
         for phent in self
             .phents
             .into_iter()
             .filter(|ent| ent.ph_type == Elf32PhType::Load)
         {
-            let vaddr_start = VAddr(phent.vaddr as usize);
+            let vaddr_start = VAddr::from(phent.vaddr as usize);
             let vmem_vaddr_end = vaddr_start + phent.mem_size as usize;
             let load_vaddr_end = vaddr_start + phent.file_size as usize;
 
@@ -296,8 +296,8 @@ impl ParsedElf32 {
 
         // Map stack area
         mm_list.mmap_fixed(
-            VAddr(0xc0000000 - 0x800000), // Stack bottom is at 0xc0000000
-            0x800000,                     // 8MB stack size
+            VAddr::from(0xc0000000 - 0x800000), // Stack bottom is at 0xc0000000
+            0x800000,                           // 8MB stack size
             Mapping::Anonymous,
             Permission {
                 write: true,
@@ -319,7 +319,7 @@ impl ParsedElf32 {
         longs.push(0); // AT_NULL
 
         sp = sp - longs.len() * size_of::<u32>();
-        sp = VAddr::from(usize::from(sp) & !0xf); // Align to 16 bytes
+        sp = sp.floor_to(16);
 
         mm_list.access_mut(sp, longs.len() * size_of::<u32>(), |offset, data| {
             data.copy_from_slice(unsafe {
@@ -330,7 +330,7 @@ impl ParsedElf32 {
             })
         })?;
 
-        Ok((VAddr(self.entry as usize), sp, mm_list))
+        Ok((VAddr::from(self.entry as usize), sp, mm_list))
     }
 }
 
@@ -342,7 +342,7 @@ fn push_strings(mm_list: &MMList, sp: &mut VAddr, strings: Vec<CString>) -> KRes
         mm_list.access_mut(*sp, len, |offset, data| {
             data.copy_from_slice(&string.as_bytes_with_nul()[offset..offset + data.len()])
         })?;
-        addrs.push(usize::from(*sp) as u32);
+        addrs.push(sp.addr() as u32);
     }
 
     Ok(addrs)

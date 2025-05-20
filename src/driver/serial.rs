@@ -10,7 +10,6 @@ use alloc::{collections::vec_deque::VecDeque, format, sync::Arc};
 use bitflags::bitflags;
 use core::pin::pin;
 use eonix_runtime::{run::FutureRun, scheduler::Scheduler};
-use eonix_spin_irq::SpinIrq as _;
 use eonix_sync::WaitList;
 
 bitflags! {

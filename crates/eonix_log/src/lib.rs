@@ -3,7 +3,6 @@
 use core::fmt::{self, Write};
 
 use alloc::sync::Arc;
-use eonix_spin_irq::SpinIrq as _;
 use eonix_sync::Spin;
 
 extern crate alloc;

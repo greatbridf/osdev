@@ -5,7 +5,7 @@ use crate::io::Buffer;
 use crate::kernel::constants::{
     ENOSYS, PR_GET_NAME, PR_SET_NAME, RLIMIT_STACK, SIG_BLOCK, SIG_SETMASK, SIG_UNBLOCK,
 };
-use crate::kernel::mem::{Page, PageBuffer, VAddr};
+use crate::kernel::mem::PageBuffer;
 use crate::kernel::task::{
     KernelStack, ProcessBuilder, ProcessList, Signal, SignalAction, SignalMask, Thread,
     ThreadBuilder, ThreadRunnable, UserDescriptor, WaitObject, WaitType,
@@ -22,6 +22,7 @@ use alloc::ffi::CString;
 use arch::{ExtendedContext, InterruptContext};
 use bindings::{EINVAL, ENOENT, ENOTDIR, ERANGE, ESRCH};
 use bitflags::bitflags;
+use eonix_mm::address::{Addr as _, VAddr};
 use eonix_runtime::scheduler::Scheduler;
 use eonix_runtime::task::Task;
 use eonix_sync::AsProof as _;
@@ -39,11 +40,10 @@ fn do_umask(mask: u32) -> KResult<u32> {
 fn do_getcwd(buffer: *mut u8, bufsize: usize) -> KResult<usize> {
     let context = FsContext::get_current();
     let mut user_buffer = UserBuffer::new(buffer, bufsize)?;
+    let mut buffer = PageBuffer::new();
 
-    let page = Page::alloc_one();
-    let mut buffer = PageBuffer::new(page.clone());
     context.cwd.lock().get_path(&context, &mut buffer)?;
-    user_buffer.fill(page.as_slice())?.ok_or(ERANGE)?;
+    user_buffer.fill(buffer.data())?.ok_or(ERANGE)?;
 
     Ok(buffer.wrote())
 }
@@ -99,7 +99,10 @@ fn do_execve(exec: &[u8], argv: Vec<CString>, envp: Vec<CString>) -> KResult<(VA
     let elf = ParsedElf32::parse(dentry.clone())?;
     let result = elf.load(argv, envp);
     if let Ok((ip, sp, mm_list)) = result {
-        Thread::current().process.mm_list.replace(mm_list);
+        unsafe {
+            // SAFETY: We are doing execve, all other threads are terminated.
+            Thread::current().process.mm_list.replace(Some(mm_list));
+        }
         Thread::current().files.on_exec();
         Thread::current().signal_list.clear_non_ignore();
         Thread::current().set_name(dentry.name().clone());
@@ -149,8 +152,8 @@ fn sys_execve(int_stack: &mut InterruptContext, _: &mut ExtendedContext) -> usiz
 
         let (ip, sp) = do_execve(exec.as_cstr().to_bytes(), argv_vec, envp_vec)?;
 
-        int_stack.rip = ip.0 as u64;
-        int_stack.rsp = sp.0 as u64;
+        int_stack.rip = ip.addr() as u64;
+        int_stack.rsp = sp.addr() as u64;
         Ok(())
     })() {
         Ok(_) => 0,
@@ -569,7 +572,7 @@ fn sys_fork(int_stack: &mut InterruptContext, _: &mut ExtendedContext) -> usize 
 
     let thread_builder = ThreadBuilder::new().fork_from(&current);
     let (new_thread, new_process) = ProcessBuilder::new()
-        .mm_list(current_process.mm_list.new_cloned())
+        .mm_list(Task::block_on(current_process.mm_list.new_cloned()))
         .parent(current_process)
         .pgroup(current_pgroup)
         .session(current_session)

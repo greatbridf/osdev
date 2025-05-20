@@ -1,8 +1,6 @@
-use crate::prelude::*;
-
-use crate::kernel::mem::paging::Page;
-
 use super::bindings::EINVAL;
+use crate::kernel::mem::paging::Page;
+use crate::prelude::*;
 
 pub trait Command {
     fn pages(&self) -> &[Page];
@@ -22,7 +20,7 @@ pub struct IdentifyCommand {
 impl IdentifyCommand {
     pub fn new() -> Self {
         Self {
-            page: Page::alloc_one(),
+            page: Page::alloc(),
         }
     }
 }

@@ -1,6 +1,7 @@
-use crate::kernel::mem::phys::{NoCachePP, PhysPtr};
-
 use super::{BitsIterator, GHC_IE};
+use crate::{kernel::mem::PhysAccess as _, sync::fence::memory_barrier};
+use core::ptr::NonNull;
+use eonix_mm::address::PAddr;
 
 /// An `AdapterControl` is an HBA device Global Host Control block
 ///
@@ -34,7 +35,7 @@ const CONTROL_IS: usize = 2;
 const CONTROL_PI: usize = 3;
 
 pub struct AdapterControl {
-    inner: *mut u32,
+    control_data: NonNull<u32>,
 }
 
 /// # Safety
@@ -42,25 +43,26 @@ pub struct AdapterControl {
 unsafe impl Send for AdapterControl {}
 
 impl AdapterControl {
-    pub fn new(addr: usize) -> Self {
+    pub fn new(addr: PAddr) -> Self {
         Self {
-            inner: NoCachePP::new(addr).as_ptr(),
+            control_data: unsafe { addr.as_ptr() },
         }
     }
 }
 
 impl AdapterControl {
     fn read(&self, off: usize) -> u32 {
-        unsafe { self.inner.offset(off as isize).read_volatile() }
+        unsafe { self.control_data.offset(off as isize).read_volatile() }
     }
 
     fn write(&self, off: usize, value: u32) {
-        unsafe { self.inner.offset(off as isize).write_volatile(value) }
+        unsafe { self.control_data.offset(off as isize).write_volatile(value) }
     }
 
     pub fn enable_interrupts(&self) {
         let ghc = self.read(CONTROL_GHC);
         self.write(CONTROL_GHC, ghc | GHC_IE);
+        memory_barrier();
     }
 
     pub fn implemented_ports(&self) -> BitsIterator {
@@ -72,6 +74,7 @@ impl AdapterControl {
     }
 
     pub fn clear_interrupt(&self, no: u32) {
-        self.write(CONTROL_IS, 1 << no)
+        self.write(CONTROL_IS, 1 << no);
+        memory_barrier();
     }
 }

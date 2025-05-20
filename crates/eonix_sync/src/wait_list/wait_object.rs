@@ -17,6 +17,10 @@ intrusive_adapter!(
 
 pub struct WaitObject {
     woken_up: AtomicBool,
+    /// Separation of the field `waker` from its lock is basically due to the
+    /// consideration of space. We hope that the object can fit into a cacheline
+    /// and `woken_up` takes only 1 byte where the rest 7 bytes can accomodate 1
+    /// extra byte required for a spinlock.
     waker_lock: Spin<()>,
     waker: UnsafeCell<Option<Waker>>,
     wait_list: AtomicPtr<WaitList>,
@@ -40,7 +44,7 @@ impl WaitObject {
     }
 
     pub fn save_waker(&self, waker: Waker) {
-        let _lock = self.waker_lock.lock();
+        let _lock = self.waker_lock.lock_irq();
         unsafe {
             // SAFETY: We're holding the waker lock.
             let old_waker = (*self.waker.get()).replace(waker);
@@ -53,7 +57,7 @@ impl WaitObject {
     /// # Returns
     /// Whether the waker was saved.
     pub fn save_waker_if_not_woken_up(&self, waker: &Waker) -> bool {
-        let _lock = self.waker_lock.lock();
+        let _lock = self.waker_lock.lock_irq();
         if self.woken_up() {
             return false;
         }
@@ -68,7 +72,7 @@ impl WaitObject {
     }
 
     pub fn take_waker(&self) -> Option<Waker> {
-        let _lock = self.waker_lock.lock();
+        let _lock = self.waker_lock.lock_irq();
         unsafe {
             // SAFETY: We're holding the waker lock.
             self.waker.get().as_mut().unwrap().take()

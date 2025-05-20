@@ -4,10 +4,10 @@ use super::{
     s_isblk, s_isdir, s_isreg,
 };
 use crate::{
-    io::{Buffer, BufferFill, ByteBuffer},
+    io::{Buffer, BufferFill, ByteBuffer, Chunks},
     kernel::{
         constants::{TCGETS, TCSETS, TIOCGPGRP, TIOCGWINSZ, TIOCSPGRP},
-        mem::paging::Page,
+        mem::{paging::Page, AsMemoryBlock as _},
         task::{Signal, Thread},
         terminal::{Terminal, TerminalIORequest},
         user::{UserPointer, UserPointerMut},
@@ -498,38 +498,31 @@ impl File {
     }
 
     pub async fn sendfile(&self, dest_file: &Self, count: usize) -> KResult<usize> {
-        let buffer_page = Page::alloc_one();
+        let buffer_page = Page::alloc();
+        // SAFETY: We are the only owner of the page.
+        let buffer = unsafe { buffer_page.as_memblk().as_bytes_mut() };
 
         match self {
             File::Inode(file) if s_isblk(file.mode) || s_isreg(file.mode) => (),
             _ => return Err(EINVAL),
         }
 
-        // TODO!!!: zero copy implementation with mmap
-        let mut tot = 0usize;
-        while tot < count {
+        for (cur, len) in Chunks::new(0, count, buffer.len()) {
             if Thread::current().signal_list.has_pending_signal() {
-                if tot == 0 {
-                    return Err(EINTR);
-                } else {
-                    return Ok(tot);
-                }
+                return if cur == 0 { Err(EINTR) } else { Ok(cur) };
             }
-
-            let batch_size = usize::min(count - tot, buffer_page.len());
-            let slice = &mut buffer_page.as_mut_slice()[..batch_size];
-            let mut buffer = ByteBuffer::new(slice);
-
-            let nwrote = self.read(&mut buffer).await?;
-
-            if nwrote == 0 {
+            let nread = self.read(&mut ByteBuffer::new(&mut buffer[..len])).await?;
+            if nread == 0 {
                 break;
             }
 
-            tot += dest_file.write(&slice[..nwrote]).await?;
+            let nwrote = dest_file.write(&buffer[..nread]).await?;
+            if nwrote != nread {
+                return Ok(cur + nwrote);
+            }
         }
 
-        Ok(tot)
+        Ok(count)
     }
 
     pub fn ioctl(&self, request: usize, arg3: usize) -> KResult<usize> {

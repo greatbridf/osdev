@@ -1,6 +1,8 @@
-use super::mem::{paging::Page, phys::PhysPtr as _};
+use super::mem::AsMemoryBlock;
 use arch::{PercpuArea, CPU};
-use core::{alloc::Layout, mem::ManuallyDrop, pin::Pin, ptr::NonNull};
+use buddy_allocator::BuddyAllocator;
+use core::{alloc::Layout, pin::Pin, ptr::NonNull};
+use eonix_mm::paging::Page;
 use eonix_sync::LazyLock;
 
 #[arch::define_percpu]
@@ -16,10 +18,11 @@ pub unsafe fn local_cpu() -> Pin<&'static mut CPU> {
 pub fn percpu_allocate(layout: Layout) -> NonNull<u8> {
     // TODO: Use page size defined in `arch`.
     let page_count = layout.size().div_ceil(arch::PAGE_SIZE);
-    let page = ManuallyDrop::new(Page::early_alloc_ceil(page_count));
-    let pointer = page.as_cached().as_ptr();
+    let page = Page::<BuddyAllocator>::alloc_at_least(page_count);
+    let page_data = page.as_memblk().as_byte_ptr();
+    core::mem::forget(page);
 
-    NonNull::new(pointer).expect("Allocated page pfn should be non-null.")
+    page_data
 }
 
 pub fn init_localcpu() {

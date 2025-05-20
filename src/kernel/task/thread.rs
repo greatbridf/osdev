@@ -5,7 +5,6 @@ use super::{
 use crate::{
     kernel::{
         cpu::local_cpu,
-        mem::VAddr,
         user::dataflow::CheckedUserPointer,
         vfs::{filearray::FileArray, FsContext},
     },
@@ -13,7 +12,6 @@ use crate::{
 };
 use alloc::sync::Arc;
 use arch::{InterruptContext, UserTLS, _arch_fork_return};
-use bindings::KERNEL_PML4;
 use core::{
     arch::asm,
     pin::Pin,
@@ -21,6 +19,7 @@ use core::{
     sync::atomic::{AtomicUsize, Ordering},
     task::Waker,
 };
+use eonix_mm::address::{Addr as _, VAddr};
 use eonix_runtime::{
     context::ExecutionContext,
     run::{Contexted, Run, RunState},
@@ -298,11 +297,9 @@ impl Thread {
 
 impl ThreadRunnable {
     pub fn new(thread: Arc<Thread>, entry: VAddr, stack_pointer: VAddr) -> Self {
-        let (VAddr(entry), VAddr(stack_pointer)) = (entry, stack_pointer);
-
         let mut interrupt_context = InterruptContext::default();
-        interrupt_context.set_return_address(entry as _, true);
-        interrupt_context.set_stack_pointer(stack_pointer as _, true);
+        interrupt_context.set_return_address(entry.addr() as _, true);
+        interrupt_context.set_stack_pointer(stack_pointer.addr() as _, true);
         interrupt_context.set_interrupt_enabled(true);
 
         Self {
@@ -347,7 +344,7 @@ impl Contexted for ThreadRunnable {
             CURRENT_THREAD.swap(Some(current_thread));
         }
 
-        thread.process.mm_list.switch_page_table();
+        thread.process.mm_list.activate();
 
         unsafe {
             // SAFETY: Preemption is disabled.
@@ -356,7 +353,7 @@ impl Contexted for ThreadRunnable {
     }
 
     fn restore_running_context(&self) {
-        arch::set_root_page_table(KERNEL_PML4 as usize);
+        self.thread.process.mm_list.deactivate();
     }
 }
 

@@ -1,9 +1,11 @@
 use super::{MMList, VAddr};
-use crate::kernel::mem::{Mapping, VRange};
+use crate::kernel::mem::Mapping;
 use crate::kernel::task::{ProcessList, Signal, Thread};
 use crate::prelude::*;
 use arch::InterruptContext;
 use bitflags::bitflags;
+use eonix_mm::address::{AddrOps as _, VRange};
+use eonix_mm::paging::PAGE_SIZE;
 use eonix_runtime::task::Task;
 
 bitflags! {
@@ -61,8 +63,7 @@ impl MMList {
 
         let pte = inner
             .page_table
-            .iter_user(VRange::new(addr.floor(), addr.floor() + 0x1000))
-            .unwrap()
+            .iter_user(VRange::from(addr.floor()).grow(PAGE_SIZE))
             .next()
             .expect("If we can find the mapped area, we should be able to find the PTE");
 
@@ -109,14 +110,14 @@ fn try_page_fault_fix(int_stack: &mut InterruptContext, addr: VAddr) {
 
 fn kernel_page_fault_die(vaddr: VAddr, ip: usize) -> ! {
     panic!(
-        "Invalid kernel mode memory access to {:#8x} while executing the instruction at {:#8x}",
-        vaddr.0, ip
+        "Invalid kernel mode memory access to {:?} while executing the instruction at {:#8x}",
+        vaddr, ip
     )
 }
 
 pub fn handle_page_fault(int_stack: &mut InterruptContext) {
     let error = PageFaultError::from_bits_truncate(int_stack.error_code);
-    let vaddr = VAddr(arch::get_page_fault_address());
+    let vaddr = arch::get_page_fault_address();
 
     let result = Thread::current()
         .process
@@ -125,8 +126,8 @@ pub fn handle_page_fault(int_stack: &mut InterruptContext) {
 
     if let Err(signal) = result {
         println_debug!(
-            "Page fault on {:#x} in user space at {:#x}",
-            vaddr.0,
+            "Page fault on {:?} in user space at {:#x}",
+            vaddr,
             int_stack.rip
         );
         ProcessList::kill_current(signal)

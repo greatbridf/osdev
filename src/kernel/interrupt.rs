@@ -8,7 +8,6 @@ use crate::{driver::Port8, prelude::*};
 use alloc::sync::Arc;
 use arch::{ExtendedContext, InterruptContext};
 use eonix_runtime::task::Task;
-use eonix_spin_irq::SpinIrq as _;
 
 const PIC1_COMMAND: Port8 = Port8::new(0x20);
 const PIC1_DATA: Port8 = Port8::new(0x21);

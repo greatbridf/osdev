@@ -2,7 +2,7 @@ use crate::{
     io::Buffer,
     kernel::{
         constants::{S_IFDIR, S_IFREG},
-        mem::paging::{Page, PageBuffer},
+        mem::paging::PageBuffer,
         vfs::{
             dentry::Dentry,
             inode::{define_struct_inode, AtomicIno, Ino, Inode, InodeData},
@@ -100,10 +100,13 @@ impl Inode for FileInode {
             return Err(EACCES);
         }
 
-        let mut page_buffer = PageBuffer::new(Page::alloc_one());
-        let nread = self.file.read(&mut page_buffer)?;
+        let mut page_buffer = PageBuffer::new();
+        self.file.read(&mut page_buffer)?;
 
-        let data = split_len_offset(page_buffer.as_slice(), nread, offset);
+        let data = page_buffer
+            .data()
+            .split_at_checked(offset)
+            .map(|(_, data)| data);
 
         match data {
             None => Ok(0),
@@ -269,7 +272,7 @@ impl ProcFsFile for DumpMountsFile {
     fn read(&self, buffer: &mut PageBuffer) -> KResult<usize> {
         dump_mounts(&mut buffer.get_writer());
 
-        Ok(buffer.len())
+        Ok(buffer.data().len())
     }
 }
 
@@ -300,7 +303,7 @@ where
     }
 
     fn read(&self, buffer: &mut PageBuffer) -> KResult<usize> {
-        self.read_fn.as_ref().ok_or(EACCES)?(buffer).map(|_| buffer.len())
+        self.read_fn.as_ref().ok_or(EACCES)?(buffer).map(|_| buffer.data().len())
     }
 }
 

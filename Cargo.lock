@@ -16,6 +16,7 @@ name = "arch"
 version = "0.1.0"
 dependencies = [
  "cfg-if",
+ "eonix_mm",
  "percpu-macros",
 ]
 
@@ -56,6 +57,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b048fb63fd8b5923fc5aa7b340d8e156aec7ec02f0c78fa8a6ddc2613f6f71de"
 
 [[package]]
+name = "buddy_allocator"
+version = "0.1.0"
+dependencies = [
+ "eonix_mm",
+ "eonix_sync",
+ "intrusive_list",
+]
+
+[[package]]
 name = "cexpr"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -91,8 +101,14 @@ checksum = "60b1af1c220855b6ceac025d3f6ecdd2b7c4894bfe9cd9bda4fbb4bc7c0d4cf0"
 name = "eonix_log"
 version = "0.1.0"
 dependencies = [
- "eonix_spin_irq",
  "eonix_sync",
+]
+
+[[package]]
+name = "eonix_mm"
+version = "0.1.0"
+dependencies = [
+ "intrusive_list",
 ]
 
 [[package]]
@@ -110,24 +126,16 @@ dependencies = [
  "atomic_unique_refcell",
  "eonix_log",
  "eonix_preempt",
- "eonix_spin_irq",
  "eonix_sync",
  "intrusive-collections",
  "pointers",
 ]
 
 [[package]]
-name = "eonix_spin_irq"
-version = "0.1.0"
-dependencies = [
- "arch",
- "eonix_sync",
-]
-
-[[package]]
 name = "eonix_sync"
 version = "0.1.0"
 dependencies = [
+ "arch",
  "eonix_preempt",
  "intrusive-collections",
 ]
@@ -140,10 +148,11 @@ dependencies = [
  "atomic_unique_refcell",
  "bindgen",
  "bitflags",
+ "buddy_allocator",
  "eonix_log",
+ "eonix_mm",
  "eonix_preempt",
  "eonix_runtime",
- "eonix_spin_irq",
  "eonix_sync",
  "intrusive-collections",
  "itertools",
@@ -165,6 +174,10 @@ checksum = "189d0897e4cbe8c75efedf3502c18c887b05046e59d28404d4d8e46cbc4d1e86"
 dependencies = [
  "memoffset",
 ]
+
+[[package]]
+name = "intrusive_list"
+version = "0.1.0"
 
 [[package]]
 name = "itertools"

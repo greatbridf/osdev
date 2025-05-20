@@ -14,7 +14,6 @@ use core::{
 };
 use eonix_log::println_trace;
 use eonix_preempt::assert_preempt_count_eq;
-use eonix_spin_irq::SpinIrq as _;
 use eonix_sync::{LazyLock, Spin};
 use intrusive_collections::RBTree;
 use pointers::BorrowedArc;
@@ -92,7 +91,7 @@ impl Scheduler {
             // SAFETY: Preemption is disabled.
             let context: &mut ExecutionContext = LOCAL_SCHEDULER_CONTEXT.as_mut();
             context.set_ip(local_scheduler as _);
-            context.set_sp(stack.get_bottom() as *const _ as usize);
+            context.set_sp(stack.get_bottom().addr().get() as usize);
             eonix_preempt::enable();
         }
 

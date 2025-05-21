@@ -52,12 +52,6 @@ impl PTE for PTE64 {
             PageAttribute64(self.0 & PA_MASK),
         )
     }
-
-    fn take(&mut self) -> (PFN, Self::Attr) {
-        let pfn_attr = self.get();
-        self.0 = 0;
-        pfn_attr
-    }
 }
 
 impl PagingMode for PagingMode4Levels {

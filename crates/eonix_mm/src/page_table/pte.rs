@@ -30,7 +30,12 @@ pub trait PTE: Sized {
 
     fn set(&mut self, pfn: PFN, attr: Self::Attr);
     fn get(&self) -> (PFN, Self::Attr);
-    fn take(&mut self) -> (PFN, Self::Attr);
+
+    fn take(&mut self) -> (PFN, Self::Attr) {
+        let pfn_attr = self.get();
+        self.set(PFN::from_val(0), Self::Attr::new());
+        pfn_attr
+    }
 
     fn set_pfn(&mut self, pfn: PFN) {
         self.set(pfn, self.get_attr());

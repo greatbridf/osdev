@@ -82,6 +82,12 @@ impl PerCpuPageAlloc {
     }
 }
 
+impl GlobalPageAlloc {
+    pub const fn buddy_alloc() -> &'static BuddyAllocator<RawPagePtr> {
+        BUDDY_ALLOC
+    }
+}
+
 impl PageAlloc for GlobalPageAlloc {
     type RawPage = RawPagePtr;
 

@@ -167,14 +167,6 @@ impl PageAttribute for PageAttribute64 {
         }
     }
 
-    fn anonymous(self, anon: bool) -> Self {
-        if anon {
-            Self(self.0 | PA_ANON)
-        } else {
-            Self(self.0 & !PA_ANON)
-        }
-    }
-
     fn is_present(&self) -> bool {
         self.0 & PA_P != 0
     }
@@ -209,10 +201,6 @@ impl PageAttribute for PageAttribute64 {
 
     fn is_mapped(&self) -> bool {
         self.0 & PA_MMAP != 0
-    }
-
-    fn is_anonymous(&self) -> bool {
-        self.0 & PA_ANON != 0
     }
 }
 

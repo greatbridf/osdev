@@ -7,14 +7,14 @@ use eonix_mm::{
     address::{AddrOps as _, PAddr},
     paging::{GlobalPageAlloc as GlobalPageAllocTrait, PageAlloc, PFN},
 };
+use eonix_sync::Spin;
 use intrusive_list::List;
 use raw_page::{PageFlags, RawPage, RawPagePtr};
 
 const COSTLY_ORDER: u32 = 3;
 const BATCH_SIZE: u32 = 64;
 
-static REAL_BUDDY_ALLOC: BuddyAllocator<RawPagePtr> = BuddyAllocator::new();
-static BUDDY_ALLOC: &'static BuddyAllocator<RawPagePtr> = &REAL_BUDDY_ALLOC;
+static BUDDY_ALLOC: Spin<BuddyAllocator<RawPagePtr>> = Spin::new(BuddyAllocator::new());
 
 #[arch::define_percpu]
 static PERCPU_PAGE_ALLOC: PerCpuPageAlloc = PerCpuPageAlloc::new();
@@ -24,6 +24,9 @@ pub struct NoAlloc;
 
 #[derive(Clone)]
 pub struct GlobalPageAlloc;
+
+#[derive(Clone)]
+pub struct BuddyPageAlloc;
 
 struct PerCpuPageAlloc {
     batch: u32,
@@ -62,7 +65,7 @@ impl PerCpuPageAlloc {
 
         let batch = self.batch >> order;
         for _ in 0..batch {
-            if let Some(pages_ptr) = BUDDY_ALLOC.alloc_order(order) {
+            if let Some(pages_ptr) = BUDDY_ALLOC.lock().alloc_order(order) {
                 pages_ptr.flags().set(PageFlags::LOCAL);
                 self.insert_free_pages(pages_ptr, order);
             } else {
@@ -83,8 +86,8 @@ impl PerCpuPageAlloc {
 }
 
 impl GlobalPageAlloc {
-    pub const fn buddy_alloc() -> &'static BuddyAllocator<RawPagePtr> {
-        BUDDY_ALLOC
+    pub const fn buddy_alloc() -> BuddyPageAlloc {
+        BuddyPageAlloc
     }
 }
 
@@ -93,7 +96,7 @@ impl PageAlloc for GlobalPageAlloc {
 
     fn alloc_order(&self, order: u32) -> Option<RawPagePtr> {
         if order > COSTLY_ORDER {
-            BUDDY_ALLOC.alloc_order(order)
+            BUDDY_ALLOC.lock().alloc_order(order)
         } else {
             unsafe {
                 eonix_preempt::disable();
@@ -106,7 +109,7 @@ impl PageAlloc for GlobalPageAlloc {
 
     unsafe fn dealloc(&self, page_ptr: RawPagePtr) {
         if page_ptr.order() > COSTLY_ORDER {
-            BUDDY_ALLOC.dealloc(page_ptr);
+            BUDDY_ALLOC.lock().dealloc(page_ptr);
         } else {
             let order = page_ptr.order();
             unsafe {
@@ -118,7 +121,7 @@ impl PageAlloc for GlobalPageAlloc {
     }
 
     fn has_management_over(&self, page_ptr: RawPagePtr) -> bool {
-        BUDDY_ALLOC.has_management_over(page_ptr)
+        BuddyAllocator::has_management_over(page_ptr)
             && (page_ptr.order() > COSTLY_ORDER || page_ptr.flags().has(PageFlags::LOCAL))
     }
 }
@@ -151,6 +154,22 @@ impl GlobalPageAllocTrait for NoAlloc {
     }
 }
 
+impl PageAlloc for BuddyPageAlloc {
+    type RawPage = RawPagePtr;
+
+    fn alloc_order(&self, order: u32) -> Option<RawPagePtr> {
+        BUDDY_ALLOC.lock().alloc_order(order)
+    }
+
+    unsafe fn dealloc(&self, page_ptr: RawPagePtr) {
+        BUDDY_ALLOC.lock().dealloc(page_ptr);
+    }
+
+    fn has_management_over(&self, page_ptr: RawPagePtr) -> bool {
+        BuddyAllocator::has_management_over(page_ptr)
+    }
+}
+
 #[no_mangle]
 pub extern "C" fn mark_present(start: usize, end: usize) {
     let mut start_pfn = PFN::from(PAddr::from(start).ceil());
@@ -164,7 +183,7 @@ pub extern "C" fn mark_present(start: usize, end: usize) {
 
 #[no_mangle]
 pub extern "C" fn create_pages(start: PAddr, end: PAddr) {
-    REAL_BUDDY_ALLOC.create_pages(start, end);
+    BUDDY_ALLOC.lock().create_pages(start, end);
 }
 
 #[no_mangle]

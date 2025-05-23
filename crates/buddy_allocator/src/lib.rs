@@ -6,9 +6,8 @@ mod zone;
 use core::sync::atomic::Ordering;
 use eonix_mm::{
     address::PAddr,
-    paging::{PageAlloc, RawPage, PFN},
+    paging::{RawPage, PFN},
 };
-use eonix_sync::Spin;
 use intrusive_list::Link;
 use zone::Zone;
 
@@ -45,7 +44,7 @@ pub struct BuddyAllocator<T>
 where
     T: BuddyRawPage,
 {
-    zone: Spin<Zone<T, ZONE_AREAS>>,
+    zone: Zone<T, ZONE_AREAS>,
 }
 
 impl<T> BuddyAllocator<T>
@@ -53,24 +52,15 @@ where
     T: BuddyRawPage,
 {
     pub const fn new() -> Self {
-        Self {
-            zone: Spin::new(Zone::new()),
-        }
+        Self { zone: Zone::new() }
     }
 
-    pub fn create_pages(&self, start: PAddr, end: PAddr) {
-        self.zone.lock().create_pages(start, end);
+    pub fn create_pages(&mut self, start: PAddr, end: PAddr) {
+        self.zone.create_pages(start, end);
     }
-}
 
-impl<T> PageAlloc for &'static BuddyAllocator<T>
-where
-    T: BuddyRawPage,
-{
-    type RawPage = T;
-
-    fn alloc_order(&self, order: u32) -> Option<Self::RawPage> {
-        let pages_ptr = self.zone.lock().get_free_pages(order);
+    pub fn alloc_order(&mut self, order: u32) -> Option<T> {
+        let pages_ptr = self.zone.get_free_pages(order);
 
         if let Some(pages_ptr) = pages_ptr {
             // SAFETY: Memory order here can be Relaxed is for the same reason as that
@@ -82,11 +72,11 @@ where
         pages_ptr
     }
 
-    unsafe fn dealloc(&self, page_ptr: Self::RawPage) {
-        self.zone.lock().free_pages(page_ptr);
+    pub unsafe fn dealloc(&mut self, page_ptr: T) {
+        self.zone.free_pages(page_ptr);
     }
 
-    fn has_management_over(&self, page_ptr: Self::RawPage) -> bool {
+    pub fn has_management_over(page_ptr: T) -> bool {
         !page_ptr.is_free() && page_ptr.is_buddy()
     }
 }

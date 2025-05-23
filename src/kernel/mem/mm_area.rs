@@ -5,6 +5,8 @@ use crate::KResult;
 use core::{borrow::Borrow, cell::UnsafeCell, cmp::Ordering};
 use eonix_mm::address::{AddrOps as _, VAddr, VRange};
 use eonix_mm::page_table::{PageAttribute, PTE};
+use eonix_mm::paging::PFN;
+use super::mm_list::EMPTY_PAGE;
 
 #[derive(Debug)]
 pub struct MMArea {
@@ -97,7 +99,7 @@ impl MMArea {
         }
 
         let new_page;
-        if page_attr.is_anonymous() {
+        if is_anonymous(pfn) {
             new_page = Page::zeroed();
         } else {
             new_page = Page::alloc();
@@ -114,7 +116,6 @@ impl MMArea {
         }
 
         page_attr = page_attr.accessed(false);
-        page_attr = page_attr.anonymous(false);
 
         pte.set(new_page.into_raw(), page_attr);
 
@@ -172,6 +173,12 @@ impl MMArea {
 
         Ok(())
     }
+}
+
+/// check pfn with EMPTY_PAGE's pfn
+fn is_anonymous(pfn: PFN) -> bool {
+    let empty_pfn = EMPTY_PAGE.pfn();
+    pfn == empty_pfn
 }
 
 impl Eq for MMArea {}

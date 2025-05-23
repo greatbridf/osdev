@@ -13,7 +13,6 @@ pub trait PageAttribute: Copy {
     fn global(self, global: bool) -> Self;
     fn copy_on_write(self, cow: bool) -> Self;
     fn mapped(self, mmap: bool) -> Self;
-    fn anonymous(self, anon: bool) -> Self;
 
     fn is_present(&self) -> bool;
     fn is_write(&self) -> bool;
@@ -24,7 +23,6 @@ pub trait PageAttribute: Copy {
     fn is_global(&self) -> bool;
     fn is_copy_on_write(&self) -> bool;
     fn is_mapped(&self) -> bool;
-    fn is_anonymous(&self) -> bool;
 }
 
 pub trait PTE: Sized {

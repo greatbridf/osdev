@@ -107,9 +107,6 @@ dependencies = [
 [[package]]
 name = "eonix_mm"
 version = "0.1.0"
-dependencies = [
- "intrusive_list",
-]
 
 [[package]]
 name = "eonix_preempt"
@@ -155,6 +152,7 @@ dependencies = [
  "eonix_runtime",
  "eonix_sync",
  "intrusive-collections",
+ "intrusive_list",
  "itertools",
  "pointers",
  "posix_types",

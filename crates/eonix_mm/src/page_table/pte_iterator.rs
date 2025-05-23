@@ -11,7 +11,7 @@ pub struct UserIterator;
 pub trait IteratorType<M: PagingMode> {
     fn page_table_attributes() -> <M::Entry as PTE>::Attr;
 
-    fn get_page_table<'a, A, X>(pte: &mut M::Entry) -> M::RawTable<'a>
+    fn get_page_table<'a, A, X>(pte: &mut M::Entry, alloc: &A) -> M::RawTable<'a>
     where
         A: PageAlloc,
         X: PageAccess,
@@ -28,7 +28,7 @@ pub trait IteratorType<M: PagingMode> {
                 M::RawTable::from_ptr(page_table_ptr)
             }
         } else {
-            let page = Page::<A>::alloc();
+            let page = Page::alloc_in(alloc.clone());
             let page_table_ptr = X::get_ptr_for_page(&page);
 
             unsafe {
@@ -59,7 +59,8 @@ where
     indicies: [u16; 8],
     tables: [Option<M::RawTable<'a>>; 8],
 
-    _phantom: PhantomData<&'a (A, X, K)>,
+    alloc: A,
+    _phantom: PhantomData<&'a (X, K)>,
 }
 
 impl<'a, M, A, X, K> PageTableIterator<'a, M, A, X, K>
@@ -88,11 +89,11 @@ where
             };
             let parent_table = parent_table.as_mut().expect("Parent table is None");
             let next_pte = parent_table.index_mut(pt_idx);
-            child_table.replace(K::get_page_table::<A, X>(next_pte));
+            child_table.replace(K::get_page_table::<A, X>(next_pte, &self.alloc));
         }
     }
 
-    pub fn new(page_table: M::RawTable<'a>, range: VRange) -> Self {
+    pub fn new(page_table: M::RawTable<'a>, range: VRange, alloc: A) -> Self {
         let start = range.start().floor();
         let end = range.end().ceil();
 
@@ -100,6 +101,7 @@ where
             remaining: (end - start) / PAGE_SIZE,
             indicies: [0; 8],
             tables: [const { None }; 8],
+            alloc,
             _phantom: PhantomData,
         };
 

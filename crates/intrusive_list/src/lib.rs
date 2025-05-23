@@ -2,9 +2,45 @@
 
 use core::ptr::NonNull;
 
+pub struct List {
+    head: Link,
+    count: usize,
+}
+
 pub struct Link {
     prev: Option<NonNull<Link>>,
     next: Option<NonNull<Link>>,
+}
+
+impl List {
+    pub const fn new() -> Self {
+        Self {
+            head: Link::new(),
+            count: 0,
+        }
+    }
+
+    pub const fn count(&self) -> usize {
+        self.count
+    }
+
+    pub fn insert(&mut self, node: &mut Link) {
+        self.head.insert(node);
+        self.count += 1;
+    }
+
+    pub fn remove(&mut self, node: &mut Link) {
+        node.remove();
+        self.count -= 1;
+    }
+
+    pub fn pop(&mut self) -> Option<&mut Link> {
+        self.head.next_mut().map(|node| {
+            self.count -= 1;
+            node.remove();
+            node
+        })
+    }
 }
 
 impl Link {

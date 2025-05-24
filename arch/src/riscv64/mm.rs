@@ -6,26 +6,27 @@ use eonix_mm::{
 };
 
 pub const PAGE_SIZE: usize = 0x1000;
+const PAGE_TABLE_BASE: PFN = PFN::from_val(0x8030_0000 >> 12);
 
-const KERNEL_PML4_PFN: PFN = PFN::from_val(0x2000 >> 12);
+const PA_V: u64 = 0b1 << 0;
+const PA_R: u64 = 0b1 << 1;
+const PA_W: u64 = 0b1 << 2;
+const PA_X: u64 = 0b1 << 3;
+const PA_U: u64 = 0b1 << 4;
+const PA_G: u64 = 0b1 << 5;
+const PA_A: u64 = 0b1 << 6;
+const PA_D: u64 = 0b1 << 7;
 
-const PA_P: u64 = 0x001;
-const PA_RW: u64 = 0x002;
-const PA_US: u64 = 0x004;
-#[allow(dead_code)]
-const PA_PWT: u64 = 0x008;
-#[allow(dead_code)]
-const PA_PCD: u64 = 0x010;
-const PA_A: u64 = 0x020;
-const PA_D: u64 = 0x040;
-#[allow(dead_code)]
-const PA_PS: u64 = 0x080;
-const PA_G: u64 = 0x100;
-const PA_COW: u64 = 0x200;
-const PA_MMAP: u64 = 0x400;
-const PA_ANON: u64 = 0x800;
-const PA_NXE: u64 = 0x8000_0000_0000_0000;
-const PA_MASK: u64 = 0xfff0_0000_0000_0fff;
+// in RSW
+const PA_COW: u64 = 0b1 << 8;
+const PA_MMAP: u64 = 0b1 << 9;
+
+const PA_SHIFT: u64 = 10;
+const PA_MASK: u64 = 0xFFC0_0000_0000_03FF; // 44 bit PPN, from 10 to 53
+// Bit 0-9 (V, R, W, X, U, G, A, D, RSW)
+const PA_FLAGS_MASK: u64 = 0x3FF; // 0b11_1111_1111
+
+
 
 #[repr(transparent)]
 pub struct PTE64(u64);
@@ -33,17 +34,15 @@ pub struct PTE64(u64);
 #[derive(Clone, Copy)]
 pub struct PageAttribute64(u64);
 
-pub struct RawPageTable4Levels<'a>(NonNull<PTE64>, PhantomData<&'a ()>);
+pub struct RawPageTableSv39<'a>(NonNull<PTE64>, PhantomData<&'a ()>);
 
-pub struct PagingMode4Levels;
+pub struct PagingModeSv39;
 
 impl PTE for PTE64 {
     type Attr = PageAttribute64;
 
     fn set(&mut self, pfn: PFN, attr: Self::Attr) {
-        let paddr = PAddr::from(pfn).addr();
-
-        self.0 = (paddr as u64 & !PA_MASK) | (attr.0 & PA_MASK);
+        self.0 = (PAddr::from(pfn).addr() as u64 & !PA_MASK) | (attr.0 & PA_MASK);
     }
 
     fn get(&self) -> (PFN, Self::Attr) {
@@ -60,21 +59,18 @@ impl PTE for PTE64 {
     }
 }
 
-impl PagingMode for PagingMode4Levels {
+impl PagingMode for PagingModeSv39 {
     type Entry = PTE64;
-    type RawTable<'a> = RawPageTable4Levels<'a>;
-
+    type RawTable<'a> = RawPageTableSv39<'a>;
     const LEVELS: &'static [PageTableLevel] = &[
-        PageTableLevel::new(39, 9),
         PageTableLevel::new(30, 9),
         PageTableLevel::new(21, 9),
         PageTableLevel::new(12, 9),
     ];
-
-    const KERNEL_ROOT_TABLE_PFN: PFN = KERNEL_PML4_PFN;
+    const KERNEL_ROOT_TABLE_PFN: PFN = PAGE_TABLE_BASE;
 }
 
-impl<'a> RawPageTable<'a> for RawPageTable4Levels<'a> {
+impl<'a> RawPageTable<'a> for RawPageTableSv39<'a> {
     type Entry = PTE64;
 
     fn index(&self, index: u16) -> &'a Self::Entry {
@@ -92,38 +88,38 @@ impl<'a> RawPageTable<'a> for RawPageTable4Levels<'a> {
 
 impl PageAttribute for PageAttribute64 {
     fn new() -> Self {
-        Self(PA_NXE)
+        Self(PA_R)
     }
 
     fn present(self, present: bool) -> Self {
         if present {
-            Self(self.0 | PA_P)
+            Self(self.0 | PA_V)
         } else {
-            Self(self.0 & !PA_P)
+            Self(self.0 & !PA_V)
         }
     }
 
     fn write(self, write: bool) -> Self {
         if write {
-            Self(self.0 | PA_RW)
+            Self(self.0 | PA_W)
         } else {
-            Self(self.0 & !PA_RW)
+            Self(self.0 & !PA_W)
         }
     }
 
     fn execute(self, execute: bool) -> Self {
         if execute {
-            Self(self.0 & !PA_NXE)
+            Self(self.0 | PA_X)
         } else {
-            Self(self.0 | PA_NXE)
+            Self(self.0 & !PA_X)
         }
     }
 
     fn user(self, user: bool) -> Self {
         if user {
-            Self(self.0 | PA_US)
+            Self(self.0 | PA_U)
         } else {
-            Self(self.0 & !PA_US)
+            Self(self.0 & !PA_U)
         }
     }
 
@@ -168,19 +164,19 @@ impl PageAttribute for PageAttribute64 {
     }
 
     fn is_present(&self) -> bool {
-        self.0 & PA_P != 0
+        self.0 & PA_V != 0
     }
 
     fn is_write(&self) -> bool {
-        self.0 & PA_RW != 0
+        self.0 & PA_W != 0
     }
 
     fn is_execute(&self) -> bool {
-        self.0 & PA_NXE == 0
+        self.0 & PA_X != 0
     }
 
     fn is_user(&self) -> bool {
-        self.0 & PA_US != 0
+        self.0 & PA_U != 0
     }
 
     fn is_accessed(&self) -> bool {
@@ -204,4 +200,4 @@ impl PageAttribute for PageAttribute64 {
     }
 }
 
-pub type DefaultPagingMode = PagingMode4Levels;
+pub type DefaultPagingMode = PagingModeSv39;

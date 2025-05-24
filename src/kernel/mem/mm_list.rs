@@ -26,7 +26,7 @@ use eonix_sync::{LazyLock, Mutex};
 pub use mapping::{FileMapping, Mapping};
 pub use page_fault::handle_page_fault;
 
-static EMPTY_PAGE: LazyLock<Page> = LazyLock::new(|| Page::zeroed());
+pub static EMPTY_PAGE: LazyLock<Page> = LazyLock::new(|| Page::zeroed());
 static KERNEL_ROOT_TABLE_PAGE: LazyLock<PageUnmanaged> = LazyLock::new(|| unsafe {
     // SAFETY: The kernel page table is always valid.
     PageUnmanaged::from_raw_unchecked(DefaultPagingMode::KERNEL_ROOT_TABLE_PFN)
@@ -591,7 +591,6 @@ where
             .present(true)
             .user(true)
             .copy_on_write(true)
-            .anonymous(true)
             .execute(execute);
 
         self.set(EMPTY_PAGE.clone().into_raw(), attr);
@@ -603,7 +602,6 @@ where
         let attr = <Self as PTE>::Attr::new()
             .user(true)
             .copy_on_write(true)
-            .anonymous(true)
             .mapped(true)
             .execute(execute);
 

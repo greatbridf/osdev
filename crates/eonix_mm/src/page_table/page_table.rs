@@ -1,7 +1,8 @@
 use super::{
     paging_mode::PageTableLevel,
+    pte::{RawAttribute, TableAttribute},
     pte_iterator::{KernelIterator, UserIterator},
-    PageAttribute, PagingMode, PTE,
+    PagingMode, PTE,
 };
 use crate::{
     address::{PAddr, VRange},
@@ -58,7 +59,7 @@ where
         };
 
         let level0 = M::LEVELS[0];
-        for idx in 0..level0.max_index() / 2 {
+        for idx in 0..=level0.max_index() / 2 {
             // We consider the first half of the page table as user space.
             // Clear all (potential) user space mappings.
             root_page_table.index_mut(idx).take();
@@ -109,7 +110,11 @@ where
 
         for pte in (0..=level.max_index()).map(|i| page_table.index_mut(i)) {
             let (pfn, attr) = pte.take();
-            if !attr.is_present() || !attr.is_user() {
+            let Some(attr) = attr.as_table_attr() else {
+                continue;
+            };
+
+            if !attr.contains(TableAttribute::PRESENT | TableAttribute::USER) {
                 continue;
             }
 

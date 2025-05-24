@@ -1,12 +1,12 @@
+use super::mm_list::EMPTY_PAGE;
 use super::paging::AllocZeroed as _;
 use super::{AsMemoryBlock, Mapping, Page, Permission};
 use crate::io::ByteBuffer;
 use crate::KResult;
 use core::{borrow::Borrow, cell::UnsafeCell, cmp::Ordering};
 use eonix_mm::address::{AddrOps as _, VAddr, VRange};
-use eonix_mm::page_table::{PageAttribute, PTE};
+use eonix_mm::page_table::{PageAttribute, RawAttribute, PTE};
 use eonix_mm::paging::PFN;
-use super::mm_list::EMPTY_PAGE;
 
 #[derive(Debug)]
 pub struct MMArea {
@@ -81,25 +81,28 @@ impl MMArea {
 
     /// # Return
     /// Whether the whole handling process is done.
-    pub fn handle_cow(&self, pte: &mut impl PTE) -> bool {
-        let mut page_attr = pte.get_attr();
+    pub fn handle_cow<E>(&self, pte: &mut E) -> bool
+    where
+        E: PTE,
+    {
+        let mut page_attr = pte.get_attr().as_page_attr().expect("Not a page attribute");
         let pfn = pte.get_pfn();
 
-        page_attr = page_attr.copy_on_write(false);
-        page_attr = page_attr.write(self.permission.write);
+        page_attr.remove(PageAttribute::COPY_ON_WRITE);
+        page_attr.set(PageAttribute::WRITE, self.permission.write);
 
         let page = unsafe { Page::from_raw(pfn) };
         if page.is_exclusive() {
             // SAFETY: This is actually safe. If we read `1` here and we have `MMList` lock
             // held, there couldn't be neither other processes sharing the page, nor other
             // threads making the page COW at the same time.
-            pte.set_attr(page_attr);
+            pte.set_attr(E::Attr::from_page_attr(page_attr));
             core::mem::forget(page);
             return true;
         }
 
         let new_page;
-        if is_anonymous(pfn) {
+        if is_empty_page(pfn) {
             new_page = Page::zeroed();
         } else {
             new_page = Page::alloc();
@@ -115,18 +118,21 @@ impl MMArea {
             };
         }
 
-        page_attr = page_attr.accessed(false);
+        page_attr.remove(PageAttribute::ACCESSED);
 
-        pte.set(new_page.into_raw(), page_attr);
+        pte.set(new_page.into_raw(), E::Attr::from_page_attr(page_attr));
 
         false
     }
 
     /// # Arguments
     /// * `offset`: The offset from the start of the mapping, aligned to 4KB boundary.
-    pub fn handle_mmap(&self, pte: &mut impl PTE, offset: usize) -> KResult<()> {
+    pub fn handle_mmap<E>(&self, pte: &mut E, offset: usize) -> KResult<()>
+    where
+        E: PTE,
+    {
         // TODO: Implement shared mapping
-        let mut page_attr = pte.get_attr();
+        let mut page_attr = pte.get_attr().as_page_attr().expect("Not a page attribute");
         let pfn = pte.get_pfn();
 
         match &self.mapping {
@@ -155,19 +161,21 @@ impl MMArea {
             _ => panic!("Anonymous mapping should not be PA_MMAP"),
         }
 
-        page_attr = page_attr.present(true).mapped(false);
-        pte.set_attr(page_attr);
+        page_attr.insert(PageAttribute::PRESENT);
+        page_attr.remove(PageAttribute::MAPPED);
+
+        pte.set_attr(E::Attr::from_page_attr(page_attr));
         Ok(())
     }
 
     pub fn handle(&self, pte: &mut impl PTE, offset: usize) -> KResult<()> {
-        let page_attr = pte.get_attr();
+        let page_attr = pte.get_attr().as_page_attr().expect("Not a page attribute");
 
-        if page_attr.is_copy_on_write() {
+        if page_attr.contains(PageAttribute::COPY_ON_WRITE) {
             self.handle_cow(pte);
         }
 
-        if page_attr.is_mapped() {
+        if page_attr.contains(PageAttribute::MAPPED) {
             self.handle_mmap(pte, offset)?;
         }
 
@@ -176,7 +184,7 @@ impl MMArea {
 }
 
 /// check pfn with EMPTY_PAGE's pfn
-fn is_anonymous(pfn: PFN) -> bool {
+fn is_empty_page(pfn: PFN) -> bool {
     let empty_pfn = EMPTY_PAGE.pfn();
     pfn == empty_pfn
 }

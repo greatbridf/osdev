@@ -106,6 +106,9 @@ dependencies = [
 [[package]]
 name = "eonix_mm"
 version = "0.1.0"
+dependencies = [
+ "bitflags",
+]
 
 [[package]]
 name = "eonix_preempt"

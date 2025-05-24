@@ -1,39 +1,71 @@
 use crate::paging::PFN;
+use bitflags::bitflags;
 
-pub trait PageAttribute: Copy {
-    /// Create a new instance of the attribute with all attributes set to false.
-    fn new() -> Self;
+bitflags! {
+    #[derive(Clone, Copy, PartialEq)]
+    pub struct TableAttribute: usize {
+        const PRESENT = 1;
+        const USER = 2;
+        const ACCESSED = 4;
+        const GLOBAL = 8;
+    }
 
-    fn present(self, present: bool) -> Self;
-    fn write(self, write: bool) -> Self;
-    fn execute(self, execute: bool) -> Self;
-    fn user(self, user: bool) -> Self;
-    fn accessed(self, accessed: bool) -> Self;
-    fn dirty(self, dirty: bool) -> Self;
-    fn global(self, global: bool) -> Self;
-    fn copy_on_write(self, cow: bool) -> Self;
-    fn mapped(self, mmap: bool) -> Self;
+    #[derive(Clone, Copy, PartialEq)]
+    pub struct PageAttribute: usize {
+        const PRESENT = 1;
+        const READ = 2;
+        const WRITE = 4;
+        const EXECUTE = 8;
+        const USER = 16;
+        const ACCESSED = 32;
+        const DIRTY = 64;
+        const GLOBAL = 128;
+        const COPY_ON_WRITE = 256;
+        const MAPPED = 512;
+        const ANONYMOUS = 1024;
+    }
+}
 
-    fn is_present(&self) -> bool;
-    fn is_write(&self) -> bool;
-    fn is_execute(&self) -> bool;
-    fn is_user(&self) -> bool;
-    fn is_accessed(&self) -> bool;
-    fn is_dirty(&self) -> bool;
-    fn is_global(&self) -> bool;
-    fn is_copy_on_write(&self) -> bool;
-    fn is_mapped(&self) -> bool;
+pub trait RawAttribute: Copy {
+    /// Create a new attribute representing a non-present page.
+    fn null() -> Self;
+
+    /// Interpret the attribute as a page table attribute. Return `None` if it is
+    /// not an attribute for a page table.
+    ///
+    /// # Panic
+    /// The implementor should panic if invalid combinations of flags are present.
+    fn as_table_attr(self) -> Option<TableAttribute>;
+
+    /// Interpret the attribute as a page attribute. Return `None` if it is not
+    /// an attribute for a page.
+    ///
+    /// # Panic
+    /// The implementor should panic if invalid combinations of flags are present.
+    fn as_page_attr(self) -> Option<PageAttribute>;
+
+    /// Convert the attribute to a raw value.
+    ///
+    /// # Panic
+    /// The implementor should panic if invalid combinations of flags are present.
+    fn from_table_attr(table_attr: TableAttribute) -> Self;
+
+    /// Convert the attribute to a raw value.
+    ///
+    /// # Panic
+    /// The implementor should panic if invalid combinations of flags are present.
+    fn from_page_attr(page_attr: PageAttribute) -> Self;
 }
 
 pub trait PTE: Sized {
-    type Attr: PageAttribute;
+    type Attr: RawAttribute;
 
     fn set(&mut self, pfn: PFN, attr: Self::Attr);
     fn get(&self) -> (PFN, Self::Attr);
 
     fn take(&mut self) -> (PFN, Self::Attr) {
         let pfn_attr = self.get();
-        self.set(PFN::from_val(0), Self::Attr::new());
+        self.set(PFN::from_val(0), Self::Attr::null());
         pfn_attr
     }
 

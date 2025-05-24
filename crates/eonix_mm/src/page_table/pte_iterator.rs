@@ -1,4 +1,7 @@
-use super::{PageAttribute as _, PagingMode, RawPageTable as _, PTE};
+use super::{
+    pte::{RawAttribute, TableAttribute},
+    PagingMode, RawPageTable as _, PTE,
+};
 use crate::{
     address::{AddrOps as _, VRange},
     paging::{Page, PageAccess, PageAlloc, PAGE_SIZE},
@@ -9,16 +12,16 @@ pub struct KernelIterator;
 pub struct UserIterator;
 
 pub trait IteratorType<M: PagingMode> {
-    fn page_table_attributes() -> <M::Entry as PTE>::Attr;
+    fn page_table_attributes() -> TableAttribute;
 
     fn get_page_table<'a, A, X>(pte: &mut M::Entry, alloc: &A) -> M::RawTable<'a>
     where
         A: PageAlloc,
         X: PageAccess,
     {
-        let attr = pte.get_attr();
+        let attr = pte.get_attr().as_table_attr().expect("Not a page table");
 
-        if attr.is_present() {
+        if attr.contains(TableAttribute::PRESENT) {
             let pfn = pte.get_pfn();
             unsafe {
                 // SAFETY: We are creating a pointer to a page referenced to in
@@ -36,7 +39,10 @@ pub trait IteratorType<M: PagingMode> {
                 page_table_ptr.write_bytes(0, 1);
             }
 
-            pte.set(page.into_raw(), Self::page_table_attributes());
+            pte.set(
+                page.into_raw(),
+                <M::Entry as PTE>::Attr::from_table_attr(Self::page_table_attributes()),
+            );
 
             unsafe {
                 // SAFETY: `page_table_ptr` is a valid pointer to a page table.
@@ -159,21 +165,13 @@ where
 }
 
 impl<M: PagingMode> IteratorType<M> for KernelIterator {
-    fn page_table_attributes() -> <M::Entry as PTE>::Attr {
-        <M::Entry as PTE>::Attr::new()
-            .present(true)
-            .write(true)
-            .execute(true)
-            .global(true)
+    fn page_table_attributes() -> TableAttribute {
+        TableAttribute::PRESENT | TableAttribute::GLOBAL
     }
 }
 
 impl<M: PagingMode> IteratorType<M> for UserIterator {
-    fn page_table_attributes() -> <M::Entry as PTE>::Attr {
-        <M::Entry as PTE>::Attr::new()
-            .present(true)
-            .write(true)
-            .execute(true)
-            .user(true)
+    fn page_table_attributes() -> TableAttribute {
+        TableAttribute::PRESENT | TableAttribute::USER
     }
 }

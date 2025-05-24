@@ -16,7 +16,6 @@ mod driver;
 mod elf;
 mod fs;
 mod hash;
-mod intrusive_list;
 mod io;
 mod kernel;
 mod net;

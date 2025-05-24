@@ -17,6 +17,7 @@ eonix_preempt = { path = "./crates/eonix_preempt" }
 eonix_runtime = { path = "./crates/eonix_runtime" }
 eonix_sync = { path = "./crates/eonix_sync" }
 eonix_log = { path = "./crates/eonix_log" }
+intrusive_list = { path = "./crates/intrusive_list" }
 pointers = { path = "./crates/pointers" }
 posix_types = { path = "./crates/posix_types" }
 

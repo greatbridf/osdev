@@ -61,7 +61,6 @@ name = "buddy_allocator"
 version = "0.1.0"
 dependencies = [
  "eonix_mm",
- "eonix_sync",
  "intrusive_list",
 ]
 
@@ -108,7 +107,7 @@ dependencies = [
 name = "eonix_mm"
 version = "0.1.0"
 dependencies = [
- "intrusive_list",
+ "bitflags",
 ]
 
 [[package]]
@@ -155,6 +154,7 @@ dependencies = [
  "eonix_runtime",
  "eonix_sync",
  "intrusive-collections",
+ "intrusive_list",
  "itertools",
  "pointers",
  "posix_types",

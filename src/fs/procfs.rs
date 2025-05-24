@@ -20,12 +20,6 @@ use eonix_runtime::task::Task;
 use eonix_sync::{AsProof as _, AsProofMut as _, LazyLock, Locked};
 use itertools::Itertools;
 
-fn split_len_offset(data: &[u8], len: usize, offset: usize) -> Option<&[u8]> {
-    let real_data = data.split_at_checked(len).map(|(data, _)| data)?;
-
-    real_data.split_at_checked(offset).map(|(_, data)| data)
-}
-
 #[allow(dead_code)]
 pub trait ProcFsFile: Send + Sync {
     fn can_read(&self) -> bool {

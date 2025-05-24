@@ -1,12 +1,13 @@
 use super::{
     paging_mode::PageTableLevel,
+    pte::{RawAttribute, TableAttribute},
     pte_iterator::{KernelIterator, UserIterator},
-    PageAttribute, PagingMode, PTE,
+    PagingMode, PTE,
 };
 use crate::{
     address::{PAddr, VRange},
     page_table::PageTableIterator,
-    paging::{Page, PageAccess, PageAlloc, PageBlock},
+    paging::{GlobalPageAlloc, Page, PageAccess, PageAlloc, PageBlock},
 };
 use core::{marker::PhantomData, ptr::NonNull};
 
@@ -41,8 +42,8 @@ where
     A: PageAlloc,
     X: PageAccess,
 {
-    pub fn new<A1: PageAlloc>(kernel_root_table_page: &Page<A1>) -> Self {
-        let new_root_table_page = Page::<A>::alloc();
+    pub fn new_in<A1: PageAlloc>(kernel_root_table_page: &Page<A1>, alloc: A) -> Self {
+        let new_root_table_page = Page::alloc_in(alloc);
         let new_table_data = X::get_ptr_for_page(&new_root_table_page);
         let kernel_table_data = X::get_ptr_for_page(kernel_root_table_page);
 
@@ -58,7 +59,7 @@ where
         };
 
         let level0 = M::LEVELS[0];
-        for idx in 0..level0.max_index() / 2 {
+        for idx in 0..=level0.max_index() / 2 {
             // We consider the first half of the page table as user space.
             // Clear all (potential) user space mappings.
             root_page_table.index_mut(idx).take();
@@ -75,27 +76,31 @@ where
     }
 
     pub fn iter_user(&self, range: VRange) -> impl Iterator<Item = &mut M::Entry> {
+        let alloc = self.root_table_page.allocator();
         let page_table_ptr = X::get_ptr_for_page(&self.root_table_page);
         let root_page_table = unsafe {
             // SAFETY: `page_table_ptr` is a valid pointer to a page table.
             M::RawTable::from_ptr(page_table_ptr)
         };
 
-        PageTableIterator::<M, A, X, UserIterator>::new(root_page_table, range)
+        PageTableIterator::<M, A, X, UserIterator>::new(root_page_table, range, alloc.clone())
     }
 
     pub fn iter_kernel(&self, range: VRange) -> impl Iterator<Item = &mut M::Entry> {
+        let alloc = self.root_table_page.allocator();
         let page_table_ptr = X::get_ptr_for_page(&self.root_table_page);
         let root_page_table = unsafe {
             // SAFETY: `page_table_ptr` is a valid pointer to a page table.
             M::RawTable::from_ptr(page_table_ptr)
         };
 
-        PageTableIterator::<M, A, X, KernelIterator>::new(root_page_table, range)
+        PageTableIterator::<M, A, X, KernelIterator>::new(root_page_table, range, alloc.clone())
     }
 
     fn drop_page_table_recursive(page_table: &Page<A>, levels: &[PageTableLevel]) {
         let [level, remaining_levels @ ..] = levels else { return };
+
+        let alloc = page_table.allocator();
 
         let page_table_ptr = X::get_ptr_for_page(page_table);
         let mut page_table = unsafe {
@@ -105,17 +110,33 @@ where
 
         for pte in (0..=level.max_index()).map(|i| page_table.index_mut(i)) {
             let (pfn, attr) = pte.take();
-            if !attr.is_present() || !attr.is_user() {
+            let Some(attr) = attr.as_table_attr() else {
+                continue;
+            };
+
+            if !attr.contains(TableAttribute::PRESENT | TableAttribute::USER) {
                 continue;
             }
 
             let page_table = unsafe {
                 // SAFETY: We got the pfn from a valid page table entry, so it should be valid.
-                Page::<A>::from_raw(pfn)
+                Page::from_raw_in(pfn, alloc.clone())
             };
 
             Self::drop_page_table_recursive(&page_table, remaining_levels);
         }
+    }
+}
+
+impl<'a, M, A, X> PageTable<'a, M, A, X>
+where
+    M: PagingMode,
+    M::Entry: 'a,
+    A: GlobalPageAlloc,
+    X: PageAccess,
+{
+    pub fn new<A1: PageAlloc>(kernel_root_table_page: &Page<A1>) -> Self {
+        Self::new_in(kernel_root_table_page, A::global())
     }
 }
 

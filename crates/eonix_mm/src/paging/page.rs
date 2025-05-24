@@ -1,6 +1,6 @@
-use super::{raw_page::RawPagePtr, PageAlloc, PFN};
+use super::{GlobalPageAlloc, PageAlloc, RawPage as _, PFN};
 use crate::address::{AddrRange, PAddr};
-use core::{fmt, marker::PhantomData, mem::ManuallyDrop, ptr::NonNull, sync::atomic::Ordering};
+use core::{fmt, mem::ManuallyDrop, ptr::NonNull, sync::atomic::Ordering};
 
 pub const PAGE_SIZE: usize = 4096;
 pub const PAGE_SIZE_BITS: u32 = PAGE_SIZE.trailing_zeros();
@@ -35,35 +35,180 @@ pub trait PageAccess {
 /// A Page allocated in allocator `A`.
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
 pub struct Page<A: PageAlloc> {
-    raw_page: RawPagePtr,
-    _phantom: PhantomData<A>,
+    raw_page: A::RawPage,
+    alloc: A,
 }
 
 unsafe impl<A: PageAlloc> Send for Page<A> {}
 unsafe impl<A: PageAlloc> Sync for Page<A> {}
 
-impl<A: PageAlloc> Page<A> {
+impl<A> Page<A>
+where
+    A: GlobalPageAlloc,
+{
     /// Allocate a page of the given *order*.
     pub fn alloc_order(order: u32) -> Self {
-        Self {
-            raw_page: A::alloc_order(order).expect("Out of memory"),
-            _phantom: PhantomData,
-        }
+        Self::alloc_order_in(order, A::global())
     }
 
     /// Allocate exactly one page.
     pub fn alloc() -> Self {
-        Self {
-            raw_page: A::alloc().expect("Out of memory"),
-            _phantom: PhantomData,
-        }
+        Self::alloc_in(A::global())
     }
 
     /// Allocate a contiguous block of pages that can contain at least `count` pages.
     pub fn alloc_at_least(count: usize) -> Self {
+        Self::alloc_at_least_in(count, A::global())
+    }
+
+    /// Acquire the ownership of the page pointed to by `pfn`, leaving `refcount` untouched.
+    ///
+    /// # Safety
+    /// This function is unsafe because it assumes that the caller has ensured that
+    /// `pfn` points to a valid page allocated through `alloc_order()` and that the
+    /// page have not been freed or deallocated yet.
+    ///
+    /// No checks are done. Any violation of this assumption may lead to undefined behavior.
+    pub unsafe fn from_raw_unchecked(pfn: PFN) -> Self {
+        unsafe { Self::from_raw_unchecked_in(pfn, A::global()) }
+    }
+
+    /// Acquire the ownership of the page pointed to by `pfn`, leaving `refcount` untouched.
+    ///
+    /// This function is a safe wrapper around `from_paddr_unchecked()` that does **some sort
+    /// of** checks to ensure that the page is valid and managed by the allocator.
+    ///
+    /// # Panic
+    /// This function will panic if the page is not valid or if the page is not managed by
+    /// the allocator.
+    ///
+    /// # Safety
+    /// This function is unsafe because it assumes that the caller has ensured that
+    /// `pfn` points to an existing page (A.K.A. inside the global page array) and the
+    /// page will not be freed or deallocated during the call.
+    pub unsafe fn from_raw(pfn: PFN) -> Self {
+        unsafe { Self::from_raw_in(pfn, A::global()) }
+    }
+
+    /// Do some work with the page without touching the reference count with the same
+    /// restrictions as `from_raw_in()`.
+    ///
+    /// # Safety
+    /// Check `from_raw()` for the safety requirements.
+    pub unsafe fn with_raw<F, O>(pfn: PFN, func: F) -> O
+    where
+        F: FnOnce(&Self) -> O,
+    {
+        unsafe { Self::with_raw_in(pfn, func, A::global()) }
+    }
+
+    /// Do some work with the page without touching the reference count with the same
+    /// restrictions as `from_raw_unchecked_in()`.
+    ///
+    /// # Safety
+    /// Check `from_raw_unchecked()` for the safety requirements.
+    pub unsafe fn with_raw_unchecked<F, O>(pfn: PFN, func: F, alloc: A) -> O
+    where
+        F: FnOnce(&Self) -> O,
+    {
+        unsafe { Self::with_raw_unchecked_in(pfn, func, alloc) }
+    }
+}
+
+impl<A> Page<A>
+where
+    A: PageAlloc,
+{
+    /// Allocate a page of the given *order*.
+    pub fn alloc_order_in(order: u32, alloc: A) -> Self {
         Self {
-            raw_page: A::alloc_at_least(count).expect("Out of memory"),
-            _phantom: PhantomData,
+            raw_page: alloc.alloc_order(order).expect("Out of memory"),
+            alloc,
+        }
+    }
+
+    /// Allocate exactly one page.
+    pub fn alloc_in(alloc: A) -> Self {
+        Self {
+            raw_page: alloc.alloc().expect("Out of memory"),
+            alloc,
+        }
+    }
+
+    /// Allocate a contiguous block of pages that can contain at least `count` pages.
+    pub fn alloc_at_least_in(count: usize, alloc: A) -> Self {
+        Self {
+            raw_page: alloc.alloc_at_least(count).expect("Out of memory"),
+            alloc,
+        }
+    }
+
+    /// Acquire the ownership of the page pointed to by `pfn`, leaving `refcount` untouched.
+    ///
+    /// # Safety
+    /// This function is unsafe because it assumes that the caller has ensured that
+    /// `pfn` points to a valid page managed by `alloc` and that the page have not
+    /// been freed or deallocated yet.
+    ///
+    /// No checks are done. Any violation of this assumption may lead to undefined behavior.
+    pub unsafe fn from_raw_unchecked_in(pfn: PFN, alloc: A) -> Self {
+        Self {
+            raw_page: A::RawPage::from(pfn),
+            alloc,
+        }
+    }
+
+    /// Acquire the ownership of the page pointed to by `pfn`, leaving `refcount` untouched.
+    ///
+    /// This function is a safe wrapper around `from_paddr_unchecked()` that does **some sort
+    /// of** checks to ensure that the page is valid and managed by the allocator.
+    ///
+    /// # Panic
+    /// This function will panic if the page is not valid or if the page is not managed by
+    /// the allocator.
+    ///
+    /// # Safety
+    /// This function is unsafe because it assumes that the caller has ensured that
+    /// `pfn` points to an existing page (A.K.A. inside the global page array) and the
+    /// page will not be freed or deallocated during the call.
+    pub unsafe fn from_raw_in(pfn: PFN, alloc: A) -> Self {
+        unsafe {
+            // SAFETY: The caller guarantees that the page is inside the global page array.
+            assert!(alloc.has_management_over(A::RawPage::from(pfn)));
+
+            // SAFETY: We've checked that the validity of the page. And the caller guarantees
+            //         that the page will not be freed or deallocated during the call.
+            Self::from_raw_unchecked_in(pfn, alloc)
+        }
+    }
+
+    /// Do some work with the page without touching the reference count with the same
+    /// restrictions as `from_raw_in()`.
+    ///
+    /// # Safety
+    /// Check `from_raw_in()` for the safety requirements.
+    pub unsafe fn with_raw_in<F, O>(pfn: PFN, func: F, alloc: A) -> O
+    where
+        F: FnOnce(&Self) -> O,
+    {
+        unsafe {
+            let me = ManuallyDrop::new(Self::from_raw_in(pfn, alloc));
+            func(&me)
+        }
+    }
+
+    /// Do some work with the page without touching the reference count with the same
+    /// restrictions as `from_raw_unchecked_in()`.
+    ///
+    /// # Safety
+    /// Check `from_raw_unchecked_in()` for the safety requirements.
+    pub unsafe fn with_raw_unchecked_in<F, O>(pfn: PFN, func: F, alloc: A) -> O
+    where
+        F: FnOnce(&Self) -> O,
+    {
+        unsafe {
+            let me = ManuallyDrop::new(Self::from_raw_unchecked_in(pfn, alloc));
+            func(&me)
         }
     }
 
@@ -83,75 +228,6 @@ impl<A: PageAlloc> Page<A> {
         1 << (self.order() + PAGE_SIZE_BITS)
     }
 
-    /// Acquire the ownership of the page pointed to by `pfn`, leaving `refcount` untouched.
-    ///
-    /// # Safety
-    /// This function is unsafe because it assumes that the caller has ensured that
-    /// `pfn` points to a valid page allocated through `alloc_order()` and that the
-    /// page have not been freed or deallocated yet.
-    ///
-    /// No checks are done. Any violation of this assumption may lead to undefined behavior.
-    pub unsafe fn from_raw_unchecked(pfn: PFN) -> Self {
-        Self {
-            raw_page: RawPagePtr::from(pfn),
-            _phantom: PhantomData,
-        }
-    }
-
-    /// Acquire the ownership of the page pointed to by `pfn`, leaving `refcount` untouched.
-    ///
-    /// This function is a safe wrapper around `from_paddr_unchecked()` that does **some sort
-    /// of** checks to ensure that the page is valid and managed by the allocator.
-    ///
-    /// # Panic
-    /// This function will panic if the page is not valid or if the page is not managed by
-    /// the allocator.
-    ///
-    /// # Safety
-    /// This function is unsafe because it assumes that the caller has ensured that
-    /// `pfn` points to an existing page (A.K.A. inside the global page array) and the
-    /// page will not be freed or deallocated during the call.
-    pub unsafe fn from_raw(pfn: PFN) -> Self {
-        unsafe {
-            // SAFETY: The caller guarantees that the page is inside the global page array.
-            assert!(A::has_management_over(RawPagePtr::from(pfn)));
-
-            // SAFETY: We've checked that the validity of the page. And the caller guarantees
-            //         that the page will not be freed or deallocated during the call.
-            Self::from_raw_unchecked(pfn)
-        }
-    }
-
-    /// Do some work with the page without touching the reference count with the same
-    /// restrictions as `from_raw()`.
-    ///
-    /// # Safety
-    /// Check `from_raw()` for the safety requirements.
-    pub unsafe fn with_raw<F, O>(pfn: PFN, func: F) -> O
-    where
-        F: FnOnce(&Self) -> O,
-    {
-        unsafe {
-            let me = ManuallyDrop::new(Self::from_raw(pfn));
-            func(&me)
-        }
-    }
-
-    /// Do some work with the page without touching the reference count with the same
-    /// restrictions as `from_raw_unchecked()`.
-    ///
-    /// # Safety
-    /// Check `from_raw_unchecked()` for the safety requirements.
-    pub unsafe fn with_raw_unchecked<F, O>(pfn: PFN, func: F) -> O
-    where
-        F: FnOnce(&Self) -> O,
-    {
-        unsafe {
-            let me = ManuallyDrop::new(Self::from_raw_unchecked(pfn));
-            func(&me)
-        }
-    }
-
     /// Consumes the `Page` and returns the physical frame number without dropping
     /// the reference count the page holds.
     pub fn into_raw(self) -> PFN {
@@ -162,7 +238,7 @@ impl<A: PageAlloc> Page<A> {
     /// Returns the physical frame number of the page, which is aligned with the
     /// page size and valid.
     pub fn pfn(&self) -> PFN {
-        PFN::from(self.raw_page)
+        Into::<PFN>::into(self.raw_page)
     }
 
     /// Returns the start physical address of the page, which is guaranteed to be
@@ -176,9 +252,17 @@ impl<A: PageAlloc> Page<A> {
     pub fn range(&self) -> AddrRange<PAddr> {
         AddrRange::from(self.start()).grow(self.len())
     }
+
+    /// Get the allocator that manages this page.
+    pub fn allocator(&self) -> &A {
+        &self.alloc
+    }
 }
 
-impl<A: PageAlloc> Clone for Page<A> {
+impl<A> Clone for Page<A>
+where
+    A: PageAlloc,
+{
     fn clone(&self) -> Self {
         // SAFETY: Memory order here can be Relaxed is for the same reason as that
         // in the copy constructor of `std::shared_ptr`.
@@ -186,21 +270,24 @@ impl<A: PageAlloc> Clone for Page<A> {
 
         Self {
             raw_page: self.raw_page,
-            _phantom: PhantomData,
+            alloc: self.alloc.clone(),
         }
     }
 }
 
-impl<A: PageAlloc> Drop for Page<A> {
+impl<A> Drop for Page<A>
+where
+    A: PageAlloc,
+{
     fn drop(&mut self) {
         match self.raw_page.refcount().fetch_sub(1, Ordering::AcqRel) {
             0 => panic!("Refcount for an in-use page is 0"),
             1 => unsafe {
                 // SAFETY: `self.raw_page` points to a valid page inside the global page array.
-                assert!(A::has_management_over(self.raw_page));
+                assert!(self.alloc.has_management_over(self.raw_page));
 
                 // SAFETY: `self.raw_page` is managed by the allocator and we're dropping the page.
-                A::dealloc(self.raw_page)
+                self.alloc.dealloc(self.raw_page)
             },
             _ => {}
         }
@@ -212,7 +299,7 @@ impl<A: PageAlloc> fmt::Debug for Page<A> {
         write!(
             f,
             "Page({:?}, order={})",
-            usize::from(PFN::from(self.raw_page)),
+            Into::<PFN>::into(self.raw_page),
             self.order()
         )
     }

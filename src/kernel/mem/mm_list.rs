@@ -13,11 +13,11 @@ use bindings::{EEXIST, EFAULT, EINVAL, ENOMEM};
 use core::fmt;
 use core::sync::atomic::{AtomicUsize, Ordering};
 use eonix_mm::address::{Addr as _, PAddr};
-use eonix_mm::page_table::PagingMode;
+use eonix_mm::page_table::{PageAttribute, PagingMode};
 use eonix_mm::paging::PFN;
 use eonix_mm::{
     address::{AddrOps as _, VAddr, VRange},
-    page_table::{PageAttribute, PageTable, PTE},
+    page_table::{PageTable, RawAttribute, PTE},
     paging::PAGE_SIZE,
 };
 use eonix_runtime::task::Task;
@@ -587,41 +587,44 @@ where
     fn set_anonymous(&mut self, execute: bool) {
         // Writable flag is set during page fault handling while executable flag is
         // preserved across page faults, so we set executable flag now.
-        let attr = <Self as PTE>::Attr::new()
-            .present(true)
-            .user(true)
-            .copy_on_write(true)
-            .execute(execute);
+        let mut attr = PageAttribute::PRESENT | PageAttribute::USER | PageAttribute::COPY_ON_WRITE;
+        attr.set(PageAttribute::EXECUTE, execute);
 
-        self.set(EMPTY_PAGE.clone().into_raw(), attr);
+        self.set(EMPTY_PAGE.clone().into_raw(), T::Attr::from_page_attr(attr));
     }
 
     fn set_mapped(&mut self, execute: bool) {
         // Writable flag is set during page fault handling while executable flag is
         // preserved across page faults, so we set executable flag now.
-        let attr = <Self as PTE>::Attr::new()
-            .user(true)
-            .copy_on_write(true)
-            .mapped(true)
-            .execute(execute);
+        let mut attr = PageAttribute::MAPPED | PageAttribute::USER | PageAttribute::COPY_ON_WRITE;
+        attr.set(PageAttribute::EXECUTE, execute);
 
-        self.set(EMPTY_PAGE.clone().into_raw(), attr);
+        self.set(EMPTY_PAGE.clone().into_raw(), T::Attr::from_page_attr(attr));
     }
 
     fn set_copy_on_write(&mut self, from: &mut Self) {
-        let mut from_attr = from.get_attr();
-        if !from_attr.is_present() {
+        let mut from_attr = from
+            .get_attr()
+            .as_page_attr()
+            .expect("Not a page attribute");
+
+        if !from_attr.contains(PageAttribute::PRESENT) {
             return;
         }
 
-        from_attr = from_attr.write(false).copy_on_write(true);
+        from_attr.remove(PageAttribute::WRITE);
+        from_attr.insert(PageAttribute::COPY_ON_WRITE);
 
         let pfn = unsafe {
             // SAFETY: We get the pfn from a valid page table entry, so it should be valid as well.
             Page::with_raw(from.get_pfn(), |page| page.clone().into_raw())
         };
 
-        self.set(pfn, from_attr.accessed(false));
-        from.set_attr(from_attr);
+        self.set(
+            pfn,
+            T::Attr::from_page_attr(from_attr & !PageAttribute::ACCESSED),
+        );
+
+        from.set_attr(T::Attr::from_page_attr(from_attr));
     }
 }

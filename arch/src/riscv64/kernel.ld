@@ -12,7 +12,7 @@ MEMORY
 
 SECTIONS
 {
-    .text : AT(0x80200000)
+    .text : AT(0x80000000)
     {
         TEXT_START = .;
         *(.text.entry)
@@ -78,6 +78,14 @@ SECTIONS
         DATA_END = .;
     } > KIMAGE
 
+    .data.root_page_tables : AT(0x80300000) {
+        . = ALIGN(0x1000);
+        *(.data.root_page_tables)
+        *(.data.boot_page_tables_lvl)
+
+        . = ALIGN(0x1000);
+    }
+
     DATA_PAGES = (DATA_END - DATA_START) / 0x1000;
 
     _PERCPU_DATA_START = .;
@@ -98,6 +106,7 @@ SECTIONS
 
     .bss :
     {
+        BSS_STACK = .;
         *(.bss.stack)
         BSS_START = .;
         *(.bss)

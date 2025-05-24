@@ -8,28 +8,35 @@ use eonix_mm::{
 pub const PAGE_SIZE: usize = 0x1000;
 const PAGE_TABLE_BASE: PFN = PFN::from_val(0x8030_0000 >> 12);
 
-const PA_V: u64 = 0b1 << 0;
-const PA_R: u64 = 0b1 << 1;
-const PA_W: u64 = 0b1 << 2;
-const PA_X: u64 = 0b1 << 3;
-const PA_U: u64 = 0b1 << 4;
-const PA_G: u64 = 0b1 << 5;
-const PA_A: u64 = 0b1 << 6;
-const PA_D: u64 = 0b1 << 7;
+pub const PA_V: u64 = 0b1 << 0;
+pub const PA_R: u64 = 0b1 << 1;
+pub const PA_W: u64 = 0b1 << 2;
+pub const PA_X: u64 = 0b1 << 3;
+pub const PA_U: u64 = 0b1 << 4;
+pub const PA_G: u64 = 0b1 << 5;
+pub const PA_A: u64 = 0b1 << 6;
+pub const PA_D: u64 = 0b1 << 7;
 
 // in RSW
-const PA_COW: u64 = 0b1 << 8;
-const PA_MMAP: u64 = 0b1 << 9;
+pub const PA_COW: u64 = 0b1 << 8;
+pub const PA_MMAP: u64 = 0b1 << 9;
 
-const PA_SHIFT: u64 = 10;
-const PA_MASK: u64 = 0xFFC0_0000_0000_03FF; // 44 bit PPN, from 10 to 53
+pub const PA_SHIFT: u64 = 10;
+pub const PA_MASK: u64 = 0xFFC0_0000_0000_03FF; // 44 bit PPN, from 10 to 53
 // Bit 0-9 (V, R, W, X, U, G, A, D, RSW)
-const PA_FLAGS_MASK: u64 = 0x3FF; // 0b11_1111_1111
+pub const PA_FLAGS_MASK: u64 = 0x3FF; // 0b11_1111_1111
 
+pub const PA_KERNEL_RWX: u64 = PA_V | PA_R | PA_W | PA_X | PA_G;
+pub const PA_KERNEL_RW: u64 = PA_V | PA_R | PA_W | PA_G;
+pub const PA_KERNEL_RO: u64 = PA_V | PA_R | PA_G;
 
+pub const LEVEL0_PAGE_SIZE: usize = 4096; // 4KB page
+pub const LEVEL1_PAGE_SIZE: usize = 2 * 1024 * 1024; // 2MB huge page
+pub const LEVEL2_PAGE_SIZE: usize = 1 * 1024 * 1024 * 1024; // 1GB huge page
 
 #[repr(transparent)]
-pub struct PTE64(u64);
+#[derive(Clone, Copy)]
+pub struct PTE64(pub u64);
 
 #[derive(Clone, Copy)]
 pub struct PageAttribute64(u64);

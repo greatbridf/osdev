@@ -1,7 +1,7 @@
     .section .text.entry
     .global _start
 _start:
-    la sp, _stack_start
+    la sp, stack_top
 
     la a0, BSS_START
     la a1, BSS_END

@@ -15,7 +15,6 @@ if(ARCH STREQUAL "x86_64")
     set(RUST_TARGET "x86_64-unknown-none")
 elseif(ARCH STREQUAL "riscv64")
     set(ARCH_C_CXX_FLAGS "-march=rv64gc")
-    set(ARCH_ASM_FILES arch/src/riscv64/boot.s)
     set(ARCH_LINKER_SCRIPT "${CMAKE_SOURCE_DIR}/arch/src/riscv64/kernel.ld")
     set(RUST_TARGET "riscv64gc-unknown-none-elf")
 else()
@@ -55,10 +54,6 @@ add_subdirectory(user-space-program)
 if(ARCH STREQUAL "x86_64")
     set(BOOTLOADER_SOURCES arch/src/x86_64/boot.s
                            arch/src/x86_64/mbr.S
-                          )
-elseif(ARCH STREQUAL "riscv64")
-    set(BOOTLOADER_SOURCES arch/src/riscv64/boot.s
-                           arch/src/riscv64/entry.S
                           )
 endif()
 

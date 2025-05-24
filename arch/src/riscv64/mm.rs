@@ -1,7 +1,9 @@
 use core::{marker::PhantomData, ptr::NonNull};
 use eonix_mm::{
     address::{Addr as _, PAddr},
-    page_table::{PageAttribute, PageTableLevel, PagingMode, RawPageTable, PTE},
+    page_table::{
+        PageAttribute, PageTableLevel, PagingMode, RawAttribute, RawPageTable, TableAttribute, PTE,
+    },
     paging::{PageBlock, PFN},
 };
 
@@ -21,9 +23,11 @@ pub const PA_D: u64 = 0b1 << 7;
 pub const PA_COW: u64 = 0b1 << 8;
 pub const PA_MMAP: u64 = 0b1 << 9;
 
+#[allow(dead_code)]
 pub const PA_SHIFT: u64 = 10;
 pub const PA_MASK: u64 = 0xFFC0_0000_0000_03FF; // 44 bit PPN, from 10 to 53
 // Bit 0-9 (V, R, W, X, U, G, A, D, RSW)
+#[allow(dead_code)]
 pub const PA_FLAGS_MASK: u64 = 0x3FF; // 0b11_1111_1111
 
 pub const PA_KERNEL_RWX: u64 = PA_V | PA_R | PA_W | PA_X | PA_G;
@@ -58,12 +62,6 @@ impl PTE for PTE64 {
             PageAttribute64(self.0 & PA_MASK),
         )
     }
-
-    fn take(&mut self) -> (PFN, Self::Attr) {
-        let pfn_attr = self.get();
-        self.0 = 0;
-        pfn_attr
-    }
 }
 
 impl PagingMode for PagingModeSv39 {
@@ -93,117 +91,121 @@ impl<'a> RawPageTable<'a> for RawPageTableSv39<'a> {
     }
 }
 
-impl PageAttribute for PageAttribute64 {
-    fn new() -> Self {
-        Self(PA_R)
+impl RawAttribute for PageAttribute64 {
+    fn null() -> Self {
+        Self(0)
     }
 
-    fn present(self, present: bool) -> Self {
-        if present {
-            Self(self.0 | PA_V)
-        } else {
-            Self(self.0 & !PA_V)
+    fn as_table_attr(self) -> Option<TableAttribute> {
+        let mut table_attr = TableAttribute::empty();
+
+        if self.0 & (PA_R | PA_W | PA_X) != 0 {
+            panic!("Encountered a huge page while parsing table attributes");
         }
-    }
 
-    fn write(self, write: bool) -> Self {
-        if write {
-            Self(self.0 | PA_W)
-        } else {
-            Self(self.0 & !PA_W)
+        if self.0 & PA_V != 0 {
+            table_attr |= TableAttribute::PRESENT;
         }
-    }
-
-    fn execute(self, execute: bool) -> Self {
-        if execute {
-            Self(self.0 | PA_X)
-        } else {
-            Self(self.0 & !PA_X)
+        if self.0 & PA_G != 0 {
+            table_attr |= TableAttribute::GLOBAL;
         }
-    }
-
-    fn user(self, user: bool) -> Self {
-        if user {
-            Self(self.0 | PA_U)
-        } else {
-            Self(self.0 & !PA_U)
+        if self.0 & PA_U != 0 {
+            table_attr |= TableAttribute::USER;
         }
-    }
-
-    fn accessed(self, accessed: bool) -> Self {
-        if accessed {
-            Self(self.0 | PA_A)
-        } else {
-            Self(self.0 & !PA_A)
+        if self.0 & PA_A != 0 {
+            table_attr |= TableAttribute::ACCESSED;
         }
+
+        Some(table_attr)
     }
 
-    fn dirty(self, dirty: bool) -> Self {
-        if dirty {
-            Self(self.0 | PA_D)
-        } else {
-            Self(self.0 & !PA_D)
+    fn as_page_attr(self) -> Option<PageAttribute> {
+        let mut page_attr = PageAttribute::READ;
+
+        if self.0 & PA_V != 0 {
+            page_attr |= PageAttribute::PRESENT;
         }
-    }
 
-    fn global(self, global: bool) -> Self {
-        if global {
-            Self(self.0 | PA_G)
-        } else {
-            Self(self.0 & !PA_G)
+        if self.0 & PA_R != 0 {
+            page_attr |= PageAttribute::READ;
         }
-    }
 
-    fn copy_on_write(self, cow: bool) -> Self {
-        if cow {
-            Self(self.0 | PA_COW)
-        } else {
-            Self(self.0 & !PA_COW)
+        if self.0 & PA_W != 0 {
+            page_attr |= PageAttribute::WRITE;
         }
-    }
 
-    fn mapped(self, mmap: bool) -> Self {
-        if mmap {
-            Self(self.0 | PA_MMAP)
-        } else {
-            Self(self.0 & !PA_MMAP)
+        if self.0 & PA_X != 0 {
+            page_attr |= PageAttribute::EXECUTE;
         }
+
+        if self.0 & PA_U != 0 {
+            page_attr |= PageAttribute::USER;
+        }
+
+        if self.0 & PA_A != 0 {
+            page_attr |= PageAttribute::ACCESSED;
+        }
+
+        if self.0 & PA_D != 0 {
+            page_attr |= PageAttribute::DIRTY;
+        }
+
+        if self.0 & PA_G != 0 {
+            page_attr |= PageAttribute::GLOBAL;
+        }
+
+        if self.0 & PA_COW != 0 {
+            page_attr |= PageAttribute::COPY_ON_WRITE;
+        }
+
+        if self.0 & PA_MMAP != 0 {
+            page_attr |= PageAttribute::MAPPED;
+        }
+
+        /*if self.0 & PA_ANON != 0 {
+            page_attr |= PageAttribute::ANONYMOUS;
+        }*/
+
+        Some(page_attr)
     }
 
-    fn is_present(&self) -> bool {
-        self.0 & PA_V != 0
+    fn from_table_attr(table_attr: TableAttribute) -> Self {
+        let mut raw_attr = PA_W | PA_R;
+
+        for attr in table_attr.iter() {
+            match attr {
+                TableAttribute::PRESENT => raw_attr |= PA_V,
+                TableAttribute::GLOBAL => raw_attr |= PA_G,
+                TableAttribute::USER => raw_attr |= PA_U,
+                TableAttribute::ACCESSED => raw_attr |= PA_A,
+                _ => unreachable!("Invalid table attribute"),
+            }
+        }
+
+        Self(raw_attr)
     }
 
-    fn is_write(&self) -> bool {
-        self.0 & PA_W != 0
-    }
+    fn from_page_attr(page_attr: PageAttribute) -> Self {
+        let mut raw_attr = 0;
 
-    fn is_execute(&self) -> bool {
-        self.0 & PA_X != 0
-    }
+        for attr in page_attr.iter() {
+            match attr {
+                PageAttribute::PRESENT => raw_attr |= PA_V,
+                PageAttribute::READ => raw_attr |= PA_R,
+                PageAttribute::WRITE => raw_attr |= PA_W,
+                PageAttribute::EXECUTE => raw_attr |= PA_X,
+                PageAttribute::USER => raw_attr |= PA_U,
+                PageAttribute::ACCESSED => raw_attr |= PA_A,
+                PageAttribute::DIRTY => raw_attr |= PA_D,
+                PageAttribute::GLOBAL => raw_attr |= PA_G,
+                PageAttribute::COPY_ON_WRITE => raw_attr |= PA_COW,
+                PageAttribute::MAPPED => raw_attr |= PA_MMAP,
+                PageAttribute::ANONYMOUS => {},
+                _ => unreachable!("Invalid page attribute"),
+            }
+        }
 
-    fn is_user(&self) -> bool {
-        self.0 & PA_U != 0
-    }
-
-    fn is_accessed(&self) -> bool {
-        self.0 & PA_A != 0
-    }
-
-    fn is_dirty(&self) -> bool {
-        self.0 & PA_D != 0
-    }
-
-    fn is_global(&self) -> bool {
-        self.0 & PA_G != 0
-    }
-
-    fn is_copy_on_write(&self) -> bool {
-        self.0 & PA_COW != 0
-    }
-
-    fn is_mapped(&self) -> bool {
-        self.0 & PA_MMAP != 0
+        Self(raw_attr)
     }
 }
 

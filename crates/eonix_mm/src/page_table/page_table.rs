@@ -7,7 +7,7 @@ use super::{
 use crate::{
     address::{PAddr, VRange},
     page_table::PageTableIterator,
-    paging::{GlobalPageAlloc, Page, PageAccess, PageAlloc, PageBlock, PageSize},
+    paging::{GlobalPageAlloc, Page, PageAccess, PageAlloc, PageBlock},
 };
 use core::{marker::PhantomData, ptr::NonNull};
 
@@ -83,11 +83,14 @@ where
             M::RawTable::from_ptr(page_table_ptr)
         };
 
-        // default 3 level
-        PageTableIterator::<M, A, X, UserIterator>::new(root_page_table, range, alloc.clone(), PageSize::_4KbPage)
+        PageTableIterator::<M, A, X, UserIterator>::new(root_page_table, range, alloc.clone())
     }
 
-    pub fn iter_kernel(&self, range: VRange, page_size: PageSize) -> impl Iterator<Item = &mut M::Entry> {
+    pub fn iter_kernel(&self, range: VRange) -> impl Iterator<Item = &mut M::Entry> {
+        Self::iter_kernel_levels(self, range, M::LEVELS)
+    }
+
+    pub fn iter_kernel_levels(&self, range: VRange, levels: &'static [PageTableLevel]) -> impl Iterator<Item = &mut M::Entry> {
         let alloc = self.root_table_page.allocator();
         let page_table_ptr = X::get_ptr_for_page(&self.root_table_page);
         let root_page_table = unsafe {
@@ -95,7 +98,7 @@ where
             M::RawTable::from_ptr(page_table_ptr)
         };
 
-        PageTableIterator::<M, A, X, KernelIterator>::new(root_page_table, range, alloc.clone(), page_size)
+        PageTableIterator::<M, A, X, KernelIterator>::new_levels(root_page_table, range, alloc.clone(), levels)
     }
 
     fn drop_page_table_recursive(page_table: &Page<A>, levels: &[PageTableLevel]) {

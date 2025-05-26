@@ -3,13 +3,6 @@ use crate::address::{AddrRange, PAddr};
 use core::{fmt, mem::ManuallyDrop, ptr::NonNull, sync::atomic::Ordering};
 
 pub const PAGE_SIZE: usize = 4096;
-
-#[derive(Clone, Copy)]
-pub enum PageSize {
-    _4KbPage = 4096,
-    _2MbPage = 2 * 1024 * 1024,
-    _1GbPage = 1 * 1024 * 1024 * 1024,
-}
 pub const PAGE_SIZE_BITS: u32 = PAGE_SIZE.trailing_zeros();
 
 /// A block of memory that is aligned to the page size and can be used for

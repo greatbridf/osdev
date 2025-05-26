@@ -4,9 +4,9 @@ use super::{
 };
 use crate::{
     address::{AddrOps as _, VRange},
-    paging::{Page, PageAccess, PageAlloc, LEVEL0_PAGE_SIZE, LEVEL1_PAGE_SIZE, LEVEL2_PAGE_SIZE},
+    paging::{Page, PageAccess, PageAlloc, PageSize},
 };
-use core::{marker::PhantomData, panic};
+use core::{marker::PhantomData};
 
 pub struct KernelIterator;
 pub struct UserIterator;
@@ -60,8 +60,7 @@ where
     X: PageAccess,
     K: IteratorType<M>,
 {
-    // from root to down: 0 1 2 3
-    level_in_array: usize,
+    page_size: PageSize,
     remaining: usize,
 
     indicies: [u16; 8],
@@ -79,13 +78,22 @@ where
     X: PageAccess,
     K: IteratorType<M>,
 {
+    fn table_level(&self) -> usize {
+        match self.page_size {
+            PageSize::_4KbPage => 3,
+            PageSize::_2MbPage => 2,
+            PageSize::_1GbPage => 1,
+        }
+    }
+
     fn parse_tables_starting_from(&mut self, idx_level: usize) {
+        let table_level = self.table_level();
 
         for (idx, &pt_idx) in self
             .indicies
             .iter()
             .enumerate()
-            .take(self.level_in_array)
+            .take(table_level)
             .skip(idx_level)
         {
             let [parent_table, child_table] = unsafe {
@@ -100,20 +108,13 @@ where
         }
     }
 
-    pub fn new(page_table: M::RawTable<'a>, range: VRange, alloc: A, level_in_array: usize) -> Self {
+    pub fn new(page_table: M::RawTable<'a>, range: VRange, alloc: A, page_size: PageSize) -> Self {
         let start = range.start().floor();
         let end = range.end().ceil();
 
-        // not allow to modify root page table
-        let page_size = match level_in_array {
-            1 => LEVEL2_PAGE_SIZE,
-            2 => LEVEL1_PAGE_SIZE,
-            3 => LEVEL0_PAGE_SIZE,
-            _ => panic!("Out of index"),
-        };
         let mut me = Self {
-            level_in_array,
-            remaining: (end - start) / page_size,
+            page_size,
+            remaining: (end - start) / (page_size as usize),
             indicies: [0; 8],
             tables: [const { None }; 8],
             alloc,
@@ -148,10 +149,11 @@ where
             self.remaining -= 1;
         }
 
-        let retval = self.tables[self.level_in_array]
+        let table_level = self.table_level();
+        let retval = self.tables[self.table_level()]
             .as_mut()
             .unwrap()
-            .index_mut(self.indicies[self.level_in_array]);
+            .index_mut(self.indicies[table_level]);
 
         let idx_level_start_updating = M::LEVELS
             .iter()
@@ -159,14 +161,14 @@ where
             .enumerate()
             .rev()
             .skip_while(|(i, (level, idx))| {
-                *i >= self.level_in_array && **idx == level.max_index()
+                *i >= table_level && **idx == level.max_index()
             })
             .map(|(i, _)| i)
             .next()
             .expect("Index out of bounds");
 
         self.indicies[idx_level_start_updating] += 1;
-        self.indicies[idx_level_start_updating + 1..self.level_in_array].fill(0);
+        self.indicies[idx_level_start_updating + 1..table_level].fill(0);
         self.parse_tables_starting_from(idx_level_start_updating);
 
         Some(retval)

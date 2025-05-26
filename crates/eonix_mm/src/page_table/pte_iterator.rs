@@ -4,7 +4,7 @@ use super::{
 };
 use crate::{
     address::{AddrOps as _, VRange},
-    paging::{Page, PageAccess, PageAlloc, PAGE_SIZE},
+    paging::{Page, PageAccess, PageAlloc},
 };
 use core::marker::PhantomData;
 

@@ -3,6 +3,9 @@ use crate::address::{AddrRange, PAddr};
 use core::{fmt, mem::ManuallyDrop, ptr::NonNull, sync::atomic::Ordering};
 
 pub const PAGE_SIZE: usize = 4096;
+pub const LEVEL0_PAGE_SIZE: usize = 4096;
+pub const LEVEL1_PAGE_SIZE: usize = 2 * 1024 * 1024;
+pub const LEVEL2_PAGE_SIZE: usize = 1 * 1024 * 1024 * 1024;
 pub const PAGE_SIZE_BITS: u32 = PAGE_SIZE.trailing_zeros();
 
 /// A block of memory that is aligned to the page size and can be used for

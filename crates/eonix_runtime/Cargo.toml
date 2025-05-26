@@ -7,6 +7,7 @@ edition = "2024"
 arch = { path = "../../arch" }
 atomic_unique_refcell = { path = "../atomic_unique_refcell" }
 eonix_log = { path = "../eonix_log" }
+eonix_percpu = { path = "../eonix_percpu" }
 eonix_preempt = { path = "../eonix_preempt" }
 eonix_sync = { path = "../eonix_sync" }
 pointers = { path = "../pointers" }

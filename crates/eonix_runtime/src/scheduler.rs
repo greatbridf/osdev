@@ -18,10 +18,10 @@ use eonix_sync::{LazyLock, Spin};
 use intrusive_collections::RBTree;
 use pointers::BorrowedArc;
 
-#[arch::define_percpu]
+#[eonix_percpu::define_percpu]
 static CURRENT_TASK: Option<NonNull<Task>> = None;
 
-#[arch::define_percpu]
+#[eonix_percpu::define_percpu]
 static LOCAL_SCHEDULER_CONTEXT: ExecutionContext = ExecutionContext::new();
 
 static TASKS: LazyLock<Spin<RBTree<TaskAdapter>>> =

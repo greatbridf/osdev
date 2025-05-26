@@ -16,7 +16,7 @@ const BATCH_SIZE: u32 = 64;
 
 static BUDDY_ALLOC: Spin<BuddyAllocator<RawPagePtr>> = Spin::new(BuddyAllocator::new());
 
-#[arch::define_percpu]
+#[eonix_percpu::define_percpu]
 static PERCPU_PAGE_ALLOC: PerCpuPageAlloc = PerCpuPageAlloc::new();
 
 #[derive(Clone)]

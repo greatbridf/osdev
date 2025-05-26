@@ -1,18 +1,19 @@
 extern crate proc_macro;
 
-use proc_macro::TokenStream;
+use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
-use syn::{parse_macro_input, ItemStatic};
+use syn::{parse2, Ident, ItemStatic, Type};
 
-mod arch;
-
-#[proc_macro_attribute]
-pub fn define_percpu(attrs: TokenStream, item: TokenStream) -> TokenStream {
+fn define_percpu_impl(
+    attrs: TokenStream,
+    item: TokenStream,
+    get_percpu_pointer: fn(&Ident, &Type) -> TokenStream,
+) -> TokenStream {
     if !attrs.is_empty() {
         panic!("`define_percpu` attribute does not take any arguments");
     }
 
-    let item = parse_macro_input!(item as ItemStatic);
+    let item = parse2::<ItemStatic>(item).unwrap();
     let vis = &item.vis;
     let ident = &item.ident;
     let ty = &item.ty;
@@ -53,7 +54,7 @@ pub fn define_percpu(attrs: TokenStream, item: TokenStream) -> TokenStream {
         quote! {}
     };
 
-    let as_ptr = arch::get_percpu_pointer(&inner_ident, &ty);
+    let as_ptr = get_percpu_pointer(&inner_ident, &ty);
 
     quote! {
         #[link_section = ".percpu"]
@@ -116,13 +117,16 @@ pub fn define_percpu(attrs: TokenStream, item: TokenStream) -> TokenStream {
     .into()
 }
 
-#[proc_macro_attribute]
-pub fn define_percpu_shared(attrs: TokenStream, item: TokenStream) -> TokenStream {
+fn define_percpu_shared_impl(
+    attrs: TokenStream,
+    item: TokenStream,
+    get_percpu_pointer: fn(&Ident, &Type) -> TokenStream,
+) -> TokenStream {
     if !attrs.is_empty() {
         panic!("`define_percpu_shared` attribute does not take any arguments");
     }
 
-    let item = parse_macro_input!(item as ItemStatic);
+    let item = parse2::<ItemStatic>(item).unwrap();
     let vis = &item.vis;
     let ident = &item.ident;
     let ty = &item.ty;
@@ -131,7 +135,7 @@ pub fn define_percpu_shared(attrs: TokenStream, item: TokenStream) -> TokenStrea
     let inner_ident = format_ident!("_percpu_shared_inner_{}", ident);
     let access_ident = format_ident!("_access_shared_{}", ident);
 
-    let as_ptr = arch::get_percpu_pointer(&inner_ident, &ty);
+    let as_ptr = get_percpu_pointer(&inner_ident, &ty);
 
     quote! {
         #[link_section = ".percpu"]
@@ -177,5 +181,30 @@ pub fn define_percpu_shared(attrs: TokenStream, item: TokenStream) -> TokenStrea
             }
         }
     }
+}
+
+#[proc_macro_attribute]
+pub fn define_percpu_x86_64(
+    attrs: proc_macro::TokenStream,
+    item: proc_macro::TokenStream,
+) -> proc_macro::TokenStream {
+    define_percpu_impl(
+        attrs.into(),
+        item.into(),
+        arch_macros::x86_64::percpu::get_percpu_pointer,
+    )
+    .into()
+}
+
+#[proc_macro_attribute]
+pub fn define_percpu_shared_x86_64(
+    attrs: proc_macro::TokenStream,
+    item: proc_macro::TokenStream,
+) -> proc_macro::TokenStream {
+    define_percpu_shared_impl(
+        attrs.into(),
+        item.into(),
+        arch_macros::x86_64::percpu::get_percpu_pointer,
+    )
     .into()
 }

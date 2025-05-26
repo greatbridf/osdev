@@ -32,7 +32,7 @@ struct CurrentThread {
     runnable: NonNull<ThreadRunnable>,
 }
 
-#[arch::define_percpu]
+#[eonix_percpu::define_percpu]
 static CURRENT_THREAD: Option<CurrentThread> = None;
 
 pub struct ThreadBuilder {

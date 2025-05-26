@@ -4,7 +4,7 @@ use core::{alloc::Layout, pin::Pin, ptr::NonNull};
 use eonix_mm::paging::Page;
 use eonix_sync::LazyLock;
 
-#[arch::define_percpu]
+#[eonix_percpu::define_percpu]
 static CPU: LazyLock<CPU> = LazyLock::new(CPU::new);
 
 /// # Safety

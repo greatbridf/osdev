@@ -7,6 +7,13 @@ use eonix_mm::{
     paging::{PageBlock, PFN},
 };
 
+#[derive(Clone, Copy)]
+pub enum PageSize {
+    _4KbPage = 4096,
+    _2MbPage = 2 * 1024 * 1024,
+    _1GbPage = 1 * 1024 * 1024 * 1024,
+}
+
 pub const ROOT_PAGE_TABLE_PHYS_ADDR: usize = 0x8040_0000;
 pub const PAGE_TABLE_END: usize = 0x8080_0000;
 pub const KIMAGE_PHYS_BASE: usize = 0x8020_0000;

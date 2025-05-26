@@ -7,8 +7,12 @@ use eonix_mm::{
     paging::{PageBlock, PFN},
 };
 
+pub const ROOT_PAGE_TABLE_PHYS_ADDR: usize = 0x8040_0000;
+pub const PAGE_TABLE_END: usize = 0x8080_0000;
+pub const KIMAGE_PHYS_BASE: usize = 0x8020_0000;
+pub const KIMAGE_VIRT_BASE: usize = 0xFFFF_FFFF_FFC0_0000;
 pub const PAGE_SIZE: usize = 0x1000;
-const PAGE_TABLE_BASE: PFN = PFN::from_val(0x8030_0000 >> 12);
+const PAGE_TABLE_BASE: PFN = PFN::from_val(ROOT_PAGE_TABLE_PHYS_ADDR >> 12);
 
 pub const PA_V: u64 = 0b1 << 0;
 pub const PA_R: u64 = 0b1 << 1;
@@ -45,9 +49,9 @@ pub struct PTE64(pub u64);
 #[derive(Clone, Copy)]
 pub struct PageAttribute64(u64);
 
-pub struct RawPageTableSv39<'a>(NonNull<PTE64>, PhantomData<&'a ()>);
+pub struct RawPageTableSv48<'a>(NonNull<PTE64>, PhantomData<&'a ()>);
 
-pub struct PagingModeSv39;
+pub struct PagingModeSv48;
 
 impl PTE for PTE64 {
     type Attr = PageAttribute64;
@@ -64,10 +68,11 @@ impl PTE for PTE64 {
     }
 }
 
-impl PagingMode for PagingModeSv39 {
+impl PagingMode for PagingModeSv48 {
     type Entry = PTE64;
-    type RawTable<'a> = RawPageTableSv39<'a>;
+    type RawTable<'a> = RawPageTableSv48<'a>;
     const LEVELS: &'static [PageTableLevel] = &[
+        PageTableLevel::new(39, 9),
         PageTableLevel::new(30, 9),
         PageTableLevel::new(21, 9),
         PageTableLevel::new(12, 9),
@@ -75,7 +80,7 @@ impl PagingMode for PagingModeSv39 {
     const KERNEL_ROOT_TABLE_PFN: PFN = PAGE_TABLE_BASE;
 }
 
-impl<'a> RawPageTable<'a> for RawPageTableSv39<'a> {
+impl<'a> RawPageTable<'a> for RawPageTableSv48<'a> {
     type Entry = PTE64;
 
     fn index(&self, index: u16) -> &'a Self::Entry {
@@ -209,4 +214,4 @@ impl RawAttribute for PageAttribute64 {
     }
 }
 
-pub type DefaultPagingMode = PagingModeSv39;
+pub type DefaultPagingMode = PagingModeSv48;

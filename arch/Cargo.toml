@@ -6,4 +6,9 @@ edition = "2021"
 [dependencies]
 eonix_mm = { path = "../crates/eonix_mm" }
 percpu-macros = { path = "./percpu-macros" }
+buddy_allocator = { path = "../crates/buddy_allocator" }
+intrusive_list = { path = "../crates/intrusive_list" }
 cfg-if = "1.0"
+sbi = "0.3.0"
+riscv = { version = "0.13.0", features = ["s-mode"] }
+spin = "0.10.0"

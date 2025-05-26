@@ -1,8 +1,6 @@
 #![no_std]
 #![feature(naked_functions)]
 
-// for dev
-mod riscv64;
 
 cfg_if::cfg_if! {
     if #[cfg(target_arch = "x86_64")] {

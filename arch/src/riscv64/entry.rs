@@ -10,7 +10,7 @@ use riscv::register::satp;
 use eonix_mm::{
     address::{Addr as _, PAddr, VAddr, VRange},
     page_table::{PageAttribute, RawAttribute, PTE as _},
-    paging::{Page, PageAccess, PageAlloc, PageBlock, RawPage as RawPageTrait, PFN},
+    paging::{Page, PageAccess, PageAlloc, PageBlock, RawPage as RawPageTrait, PFN, PageSize},
 };
 use spin::Mutex;
 
@@ -165,16 +165,16 @@ fn setup_page_tables() {
 
     // Map 0x80200000-0x81200000 16MB identically, use 2MB page
     for (idx, pte) in page_table
-        .iter_kernel(VRange::from(VAddr::from(0x80200000)).grow(0x1000000), 2)
+        .iter_kernel(VRange::from(VAddr::from(0x80200000)).grow(0x1000000), PageSize::_2MbPage)
         .enumerate()
     {
         pte.set(PFN::from(idx * 0x200 + 0x80200), PageAttribute64::from_page_attr(attr));
     }
 
-    // Map 0x0000_0000_0000_0000-0x0000_007F_FFFF_FFFF 256GB
+    // Map 0x0000_0000_0000_0000-0x0000_007F_FFFF_FFFF 512GB
     // to 0xFFFF_FF00_0000_0000 to 0xFFFF_FF7F_FFFF_FFFF, use 1 GB page
     for (idx, pte) in page_table
-        .iter_kernel(VRange::from(VAddr::from(0xFFFF_FF00_0000_0000)).grow(0x80_0000_0000), 1)
+        .iter_kernel(VRange::from(VAddr::from(0xFFFF_FF00_0000_0000)).grow(0x80_0000_0000), PageSize::_1GbPage)
         .enumerate()
     {
         pte.set(PFN::from(idx * 0x40000), PageAttribute64::from_page_attr(attr));
@@ -182,7 +182,7 @@ fn setup_page_tables() {
 
     // Map kernel image
     for (idx, pte) in page_table
-        .iter_kernel(VRange::from(VAddr::from(0xFFFF_FFFF_FFC0_0000)).grow(0x20_0000), 3)
+        .iter_kernel(VRange::from(VAddr::from(0xFFFF_FFFF_FFC0_0000)).grow(0x20_0000), PageSize::_4KbPage)
         .enumerate()
     {
         pte.set(PFN::from(idx + 0x80200), PageAttribute64::from_page_attr(attr));

@@ -100,10 +100,10 @@ where
     }
 
     pub fn new(page_table: M::RawTable<'a>, range: VRange, alloc: A) -> Self {
-        Self::new_levels(page_table, range, alloc, M::LEVELS)
+        Self::with_levels(page_table, range, alloc, M::LEVELS)
     }
 
-    pub fn new_levels(page_table: M::RawTable<'a>, range: VRange, alloc: A, levels: &'static [PageTableLevel]) -> Self {
+    pub fn with_levels(page_table: M::RawTable<'a>, range: VRange, alloc: A, levels: &'static [PageTableLevel]) -> Self {
         let start = range.start().floor();
         let end = range.end().ceil();
 

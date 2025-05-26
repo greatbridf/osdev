@@ -1,10 +1,10 @@
 use super::{
     pte::{RawAttribute, TableAttribute},
-    PagingMode, RawPageTable as _, PTE,
+    PageTableLevel, PagingMode, RawPageTable as _, PTE,
 };
 use crate::{
     address::{AddrOps as _, VRange},
-    paging::{Page, PageAccess, PageAlloc, PAGE_SIZE},
+    paging::{Page, PageAccess, PageAlloc},
 };
 use core::marker::PhantomData;
 
@@ -58,8 +58,12 @@ where
     M::Entry: 'a,
     A: PageAlloc,
     X: PageAccess,
-    K: IteratorType<M>,
 {
+    /// Specifies the hierarchy of page table levels to iterate over.
+    /// This field determines the sequence of levels in the page table
+    /// hierarchy that the iterator will traverse, starting from the
+    /// highest level and moving down to the lowest.
+    levels: &'static [PageTableLevel],
     remaining: usize,
 
     indicies: [u16; 8],
@@ -78,13 +82,11 @@ where
     K: IteratorType<M>,
 {
     fn parse_tables_starting_from(&mut self, idx_level: usize) {
-        let levels_len = M::LEVELS.len();
-
         for (idx, &pt_idx) in self
             .indicies
             .iter()
             .enumerate()
-            .take(levels_len - 1)
+            .take(self.levels.len() - 1)
             .skip(idx_level)
         {
             let [parent_table, child_table] = unsafe {
@@ -100,18 +102,30 @@ where
     }
 
     pub fn new(page_table: M::RawTable<'a>, range: VRange, alloc: A) -> Self {
+        Self::with_levels(page_table, range, alloc, M::LEVELS)
+    }
+
+    pub fn with_levels(
+        page_table: M::RawTable<'a>,
+        range: VRange,
+        alloc: A,
+        levels: &'static [PageTableLevel],
+    ) -> Self {
         let start = range.start().floor();
         let end = range.end().ceil();
 
+        let [.., last_level] = levels else { unreachable!() };
+
         let mut me = Self {
-            remaining: (end - start) / PAGE_SIZE,
+            levels,
+            remaining: (end - start) / last_level.page_size(),
             indicies: [0; 8],
             tables: [const { None }; 8],
             alloc,
             _phantom: PhantomData,
         };
 
-        for (i, level) in M::LEVELS.iter().enumerate() {
+        for (i, level) in levels.iter().enumerate() {
             me.indicies[i] = level.index_of(start);
         }
 
@@ -139,14 +153,14 @@ where
             self.remaining -= 1;
         }
 
-        let len_levels = M::LEVELS.len();
-
-        let retval = self.tables[len_levels - 1]
+        let table_level = self.levels.len() - 1;
+        let retval = self.tables[table_level]
             .as_mut()
             .unwrap()
-            .index_mut(self.indicies[len_levels - 1]);
+            .index_mut(self.indicies[table_level]);
 
-        let idx_level_start_updating = M::LEVELS
+        let idx_level_start_updating = self
+            .levels
             .iter()
             .zip(self.indicies.iter_mut())
             .enumerate()
@@ -157,7 +171,7 @@ where
             .expect("Index out of bounds");
 
         self.indicies[idx_level_start_updating] += 1;
-        self.indicies[idx_level_start_updating + 1..len_levels].fill(0);
+        self.indicies[idx_level_start_updating + 1..=table_level].fill(0);
         self.parse_tables_starting_from(idx_level_start_updating);
 
         Some(retval)

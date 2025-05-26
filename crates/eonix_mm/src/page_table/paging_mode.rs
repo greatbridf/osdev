@@ -28,6 +28,10 @@ impl PageTableLevel {
         self.1
     }
 
+    pub const fn page_size(self) -> usize {
+        1 << self.nth_bit()
+    }
+
     pub const fn max_index(self) -> u16 {
         (1 << self.len()) - 1
     }

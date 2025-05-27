@@ -14,8 +14,6 @@ use eonix_mm::{
 };
 use spin::Mutex;
 
-const ROOT_PAGE_TABLE_PFN: usize = ROOT_PAGE_TABLE_PHYS_ADDR >> 12;
-
 #[link_section = ".bss.stack"]
 static mut BOOT_STACK: [u8; 4096 * 16] = [0; 4096 * 16];
 
@@ -158,14 +156,14 @@ fn setup_page_tables() {
         | PageAttribute::GLOBAL
         | PageAttribute::PRESENT;
 
-    BUDDY.lock().create_pages(PAddr::from(0x80400000), PAddr::from(0x80800000));
+    BUDDY.lock().create_pages(PAddr::from(ROOT_PAGE_TABLE_PHYS_ADDR), PAddr::from(PAGE_TABLE_PHYS_END));
 
     let root_table_page = Page::alloc_in(BuddyPageAlloc);
     let page_table = PageTable::new_in(&root_table_page, BuddyPageAlloc);
 
     // Map 0x80200000-0x81200000 16MB identically, use 2MB page
     for (idx, pte) in page_table
-        .iter_kernel_levels(VRange::from(VAddr::from(0x80200000)).grow(0x1000000), &PagingModeSv48::LEVELS[..2])
+        .iter_kernel_levels(VRange::from(VAddr::from(KIMAGE_PHYS_BASE)).grow(0x1000000), &PagingModeSv48::LEVELS[..2])
         .enumerate()
     {
         pte.set(PFN::from(idx * 0x200 + 0x80200), PageAttribute64::from_page_attr(attr));
@@ -174,15 +172,15 @@ fn setup_page_tables() {
     // Map 0x0000_0000_0000_0000-0x0000_007F_FFFF_FFFF 512GB
     // to 0xFFFF_FF00_0000_0000 to 0xFFFF_FF7F_FFFF_FFFF, use 1 GB page
     for (idx, pte) in page_table
-        .iter_kernel_levels(VRange::from(VAddr::from(0xFFFF_FF00_0000_0000)).grow(0x80_0000_0000), &PagingModeSv48::LEVELS[..1])
+        .iter_kernel_levels(VRange::from(VAddr::from(PHYS_MAP_VIRT)).grow(0x80_0000_0000), &PagingModeSv48::LEVELS[..1])
         .enumerate()
     {
         pte.set(PFN::from(idx * 0x40000), PageAttribute64::from_page_attr(attr));
     }
 
-    // Map kernel image
+    // Map 2 MB kernel image
     for (idx, pte) in page_table
-        .iter_kernel_levels(VRange::from(VAddr::from(0xFFFF_FFFF_FFC0_0000)).grow(0x20_0000), &PagingModeSv48::LEVELS[..3])
+        .iter_kernel_levels(VRange::from(VAddr::from(KIMAGE_VIRT_BASE)).grow(0x20_0000), &PagingModeSv48::LEVELS[..3])
         .enumerate()
     {
         pte.set(PFN::from(idx + 0x80200), PageAttribute64::from_page_attr(attr));

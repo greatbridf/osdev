@@ -1,9 +1,10 @@
 use super::{
-    pte::{RawAttribute, TableAttribute}, PageTableLevel, PagingMode, RawPageTable as _, PTE
+    pte::{RawAttribute, TableAttribute},
+    PageTableLevel, PagingMode, RawPageTable as _, PTE,
 };
 use crate::{
     address::{AddrOps as _, VRange},
-    paging::{Page, PageAccess, PageAlloc, PAGE_SIZE},
+    paging::{Page, PageAccess, PageAlloc},
 };
 use core::{marker::PhantomData};
 
@@ -57,8 +58,11 @@ where
     M::Entry: 'a,
     A: PageAlloc,
     X: PageAccess,
-    K: IteratorType<M>,
 {
+    /// Specifies the hierarchy of page table levels to iterate over.
+    /// This field determines the sequence of levels in the page table
+    /// hierarchy that the iterator will traverse, starting from the
+    /// highest level and moving down to the lowest.
     levels: &'static [PageTableLevel],
     remaining: usize,
 
@@ -79,7 +83,6 @@ where
 {
 
     fn parse_tables_starting_from(&mut self, idx_level: usize) {
-
         for (idx, &pt_idx) in self
             .indicies
             .iter()
@@ -100,16 +103,23 @@ where
     }
 
     pub fn new(page_table: M::RawTable<'a>, range: VRange, alloc: A) -> Self {
-        Self::new_levels(page_table, range, alloc, M::LEVELS)
+        Self::with_levels(page_table, range, alloc, M::LEVELS)
     }
 
-    pub fn new_levels(page_table: M::RawTable<'a>, range: VRange, alloc: A, levels: &'static [PageTableLevel]) -> Self {
+    pub fn with_levels(
+        page_table: M::RawTable<'a>,
+        range: VRange,
+        alloc: A,
+        levels: &'static [PageTableLevel],
+    ) -> Self {
         let start = range.start().floor();
         let end = range.end().ceil();
 
+        let [.., last_level] = levels else { unreachable!() };
+
         let mut me = Self {
             levels,
-            remaining: (end - start) / PAGE_SIZE,
+            remaining: (end - start) / last_level.page_size(),
             indicies: [0; 8],
             tables: [const { None }; 8],
             alloc,
@@ -141,7 +151,7 @@ where
         if self.remaining == 0 {
             return None;
         } else {
-            self.remaining -= (1 << (self.levels.last()?.nth_bit())) / PAGE_SIZE;
+            self.remaining -= 1;
         }
 
         let table_level = self.levels.len() - 1;
@@ -150,7 +160,8 @@ where
             .unwrap()
             .index_mut(self.indicies[table_level]);
 
-        let idx_level_start_updating = self.levels
+        let idx_level_start_updating = self
+            .levels
             .iter()
             .zip(self.indicies.iter_mut())
             .enumerate()

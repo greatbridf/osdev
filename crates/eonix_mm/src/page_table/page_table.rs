@@ -90,7 +90,31 @@ where
         Self::iter_kernel_levels(self, range, M::LEVELS)
     }
 
-    pub fn iter_kernel_levels(&self, range: VRange, levels: &'static [PageTableLevel]) -> impl Iterator<Item = &mut M::Entry> {
+    /// Iterates over the kernel space entries in the page table for the specified levels.
+    ///
+    /// # Parameters
+    /// - `range`: The virtual address range to iterate over.
+    /// - `levels`: A slice of `PageTableLevel` that specifies which levels of the page table
+    ///   should be included in the iteration. Each level corresponds to a level in the page
+    ///   table hierarchy, and the iterator will traverse entries at these levels.
+    ///
+    /// # Returns
+    /// An iterator over mutable references to the page table entries (`M::Entry`) within the
+    /// specified range and levels.
+    ///
+    /// # Example
+    /// ```
+    /// let range = VRange::new(0x1234000, 0x1300000);
+    /// let levels = &M::LEVELS[..2];
+    /// for pte in page_table.iter_kernel_levels(range, levels) {
+    ///     // Process each entry
+    /// }
+    /// ```
+    pub fn iter_kernel_levels(
+        &self,
+        range: VRange,
+        levels: &'static [PageTableLevel],
+    ) -> impl Iterator<Item = &mut M::Entry> {
         let alloc = self.root_table_page.allocator();
         let page_table_ptr = X::get_ptr_for_page(&self.root_table_page);
         let root_page_table = unsafe {
@@ -98,7 +122,12 @@ where
             M::RawTable::from_ptr(page_table_ptr)
         };
 
-        PageTableIterator::<M, A, X, KernelIterator>::new_levels(root_page_table, range, alloc.clone(), levels)
+        PageTableIterator::<M, A, X, KernelIterator>::with_levels(
+            root_page_table,
+            range,
+            alloc.clone(),
+            levels,
+        )
     }
 
     fn drop_page_table_recursive(page_table: &Page<A>, levels: &[PageTableLevel]) {

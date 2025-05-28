@@ -482,7 +482,7 @@ impl InterruptControl {
             pause();
         }
 
-        icr.write(0xc4601);
+        icr.write(0xc4607);
         while icr.read() & 0x1000 != 0 {
             pause();
         }

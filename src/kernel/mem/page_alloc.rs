@@ -4,12 +4,14 @@ use super::{paging::AllocZeroed as _, Page};
 use buddy_allocator::{BuddyAllocator, BuddyRawPage as _};
 use core::{ptr::NonNull, sync::atomic::Ordering};
 use eonix_mm::{
-    address::{AddrOps as _, PAddr},
+    address::{AddrOps as _, PAddr, PRange},
     paging::{GlobalPageAlloc as GlobalPageAllocTrait, PageAlloc, PFN},
 };
-use eonix_sync::Spin;
+use eonix_sync::{NoContext, Spin};
 use intrusive_list::List;
-use raw_page::{PageFlags, RawPage, RawPagePtr};
+use raw_page::{PageFlags, RawPagePtr};
+
+pub use raw_page::RawPage;
 
 const COSTLY_ORDER: u32 = 3;
 const BATCH_SIZE: u32 = 64;
@@ -20,13 +22,15 @@ static BUDDY_ALLOC: Spin<BuddyAllocator<RawPagePtr>> = Spin::new(BuddyAllocator:
 static PERCPU_PAGE_ALLOC: PerCpuPageAlloc = PerCpuPageAlloc::new();
 
 #[derive(Clone)]
-pub struct NoAlloc;
-
-#[derive(Clone)]
 pub struct GlobalPageAlloc;
 
 #[derive(Clone)]
-pub struct BuddyPageAlloc;
+pub struct BuddyPageAlloc();
+
+/// Allocator that allocates pages from the buddy allocator while we are still in
+/// the early stage of the kernel when the preemption is both disabled and not functioning.
+#[derive(Clone)]
+pub struct EarlyPageAlloc();
 
 struct PerCpuPageAlloc {
     batch: u32,
@@ -86,8 +90,37 @@ impl PerCpuPageAlloc {
 }
 
 impl GlobalPageAlloc {
+    #[allow(dead_code)]
     pub const fn buddy_alloc() -> BuddyPageAlloc {
-        BuddyPageAlloc
+        BuddyPageAlloc()
+    }
+
+    pub const fn early_alloc() -> EarlyPageAlloc {
+        EarlyPageAlloc()
+    }
+
+    pub fn mark_present(range: PRange) {
+        let mut pfn = PFN::from(range.start().ceil());
+        let end_pfn = PFN::from(range.end().floor());
+
+        while pfn < end_pfn {
+            RawPagePtr::from(pfn).flags().set(PageFlags::PRESENT);
+            pfn = pfn + 1;
+        }
+    }
+
+    /// Add the pages in the PAddr range `range` to the global allocator.
+    ///
+    /// This function is only to be called on system initialization when `eonix_preempt`
+    /// is not functioning due to the absence of percpu area.
+    ///
+    /// # Safety
+    /// This function is unsafe because calling this function in preemptible context
+    /// might involve dead locks.
+    pub unsafe fn add_pages(range: PRange) {
+        BUDDY_ALLOC
+            .lock_with_context(NoContext)
+            .create_pages(range.start(), range.end())
     }
 }
 
@@ -126,31 +159,9 @@ impl PageAlloc for GlobalPageAlloc {
     }
 }
 
-impl PageAlloc for NoAlloc {
-    type RawPage = RawPagePtr;
-
-    fn alloc_order(&self, _order: u32) -> Option<RawPagePtr> {
-        panic!("NoAlloc cannot allocate pages");
-    }
-
-    unsafe fn dealloc(&self, _: RawPagePtr) {
-        panic!("NoAlloc cannot deallocate pages");
-    }
-
-    fn has_management_over(&self, _: RawPagePtr) -> bool {
-        true
-    }
-}
-
 impl GlobalPageAllocTrait for GlobalPageAlloc {
     fn global() -> Self {
         GlobalPageAlloc
-    }
-}
-
-impl GlobalPageAllocTrait for NoAlloc {
-    fn global() -> Self {
-        NoAlloc
     }
 }
 
@@ -170,20 +181,20 @@ impl PageAlloc for BuddyPageAlloc {
     }
 }
 
-#[no_mangle]
-pub extern "C" fn mark_present(start: usize, end: usize) {
-    let mut start_pfn = PFN::from(PAddr::from(start).ceil());
-    let end_pfn = PFN::from(PAddr::from(end).floor());
+impl PageAlloc for EarlyPageAlloc {
+    type RawPage = RawPagePtr;
 
-    while start_pfn < end_pfn {
-        RawPagePtr::from(start_pfn).flags().set(PageFlags::PRESENT);
-        start_pfn = start_pfn + 1;
+    fn alloc_order(&self, order: u32) -> Option<Self::RawPage> {
+        BUDDY_ALLOC.lock_with_context(NoContext).alloc_order(order)
     }
-}
 
-#[no_mangle]
-pub extern "C" fn create_pages(start: PAddr, end: PAddr) {
-    BUDDY_ALLOC.lock().create_pages(start, end);
+    unsafe fn dealloc(&self, raw_page: Self::RawPage) {
+        BUDDY_ALLOC.lock_with_context(NoContext).dealloc(raw_page);
+    }
+
+    fn has_management_over(&self, page_ptr: Self::RawPage) -> bool {
+        BuddyAllocator::has_management_over(page_ptr)
+    }
 }
 
 #[no_mangle]

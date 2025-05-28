@@ -104,16 +104,13 @@ impl CPU {
 #[macro_export]
 macro_rules! define_smp_bootstrap {
     ($cpu_count:literal, $ap_entry:ident, $alloc_kstack:tt) => {
-        #[no_mangle]
         static BOOT_SEMAPHORE: core::sync::atomic::AtomicU64 =
             core::sync::atomic::AtomicU64::new(0);
-        #[no_mangle]
         static BOOT_STACK: core::sync::atomic::AtomicU64 =
             core::sync::atomic::AtomicU64::new(0);
 
-        #[no_mangle]
         static CPU_COUNT: core::sync::atomic::AtomicU64 =
-            core::sync::atomic::AtomicU64::new(0);
+            core::sync::atomic::AtomicU64::new(1);
 
         core::arch::global_asm!(
             r#"
@@ -122,11 +119,11 @@ macro_rules! define_smp_bootstrap {
         .globl ap_bootstrap
         .type ap_bootstrap, @function
         ap_bootstrap:
-            ljmp $0x0, $.Lap1
+            ljmp $0x0, $2f
 
-        .Lap1:
+        2:
             # we use the shared gdt for cpu bootstrapping
-            lgdt .Lshared_gdt_desc
+            lgdt EARLY_GDT_DESCRIPTOR
 
             # set msr
             mov $0xc0000080, %ecx
@@ -148,14 +145,10 @@ macro_rules! define_smp_bootstrap {
             or $0x80010001, %eax
             mov %eax, %cr0
 
-            ljmp $0x08, $.Lap_bootstrap_end
-
-        .align 16
-        .Lshared_gdt_desc:
-            .8byte 0x0000000000005f
+            ljmp $0x08, $2f
 
         .code64
-        .Lap_bootstrap_end:
+        2:
             mov $0x10, %ax
             mov %ax, %ds
             mov %ax, %es
@@ -164,21 +157,21 @@ macro_rules! define_smp_bootstrap {
             xor %rsp, %rsp
             xor %rax, %rax
             inc %rax
-        1:
+        2:
             xchg %rax, {BOOT_SEMAPHORE}
             cmp $0, %rax
-            je 1f
+            je 2f
             pause
-            jmp 1b
+            jmp 2b
 
-        1:
+        2:
             mov {BOOT_STACK}, %rsp # Acquire
             cmp $0, %rsp
-            jne 1f
+            jne 2f
             pause
-            jmp 1b
+            jmp 2b
 
-        1:
+        2:
             xor %rax, %rax
             mov %rax, {BOOT_STACK} # Release
             xchg %rax, {BOOT_SEMAPHORE}
@@ -190,7 +183,7 @@ macro_rules! define_smp_bootstrap {
             jmp {AP_ENTRY}
             .popsection
             "#,
-            KERNEL_PML4 = const 0x2000,
+            KERNEL_PML4 = const 0x1000,
             BOOT_SEMAPHORE = sym BOOT_SEMAPHORE,
             BOOT_STACK = sym BOOT_STACK,
             CPU_COUNT = sym CPU_COUNT,
@@ -200,7 +193,7 @@ macro_rules! define_smp_bootstrap {
 
         pub unsafe fn wait_cpus_online() {
             use core::sync::atomic::Ordering;
-            while CPU_COUNT.load(Ordering::Acquire) != $cpu_count - 1 {
+            while CPU_COUNT.load(Ordering::Acquire) != $cpu_count {
                 if BOOT_STACK.load(Ordering::Acquire) == 0 {
                     let stack_bottom = $alloc_kstack as u64;
                     BOOT_STACK.store(stack_bottom, Ordering::Release);

@@ -18,6 +18,7 @@ mod fs;
 mod hash;
 mod io;
 mod kernel;
+mod kernel_init;
 mod net;
 mod path;
 mod prelude;
@@ -27,10 +28,9 @@ mod sync;
 use alloc::{ffi::CString, sync::Arc};
 use core::alloc::{GlobalAlloc, Layout};
 use elf::ParsedElf32;
-use eonix_mm::{address::PAddr, paging::PFN};
+use eonix_mm::paging::PFN;
 use eonix_runtime::{run::FutureRun, scheduler::Scheduler, task::Task};
 use kernel::{
-    cpu::init_localcpu,
     mem::Page,
     task::{KernelStack, ProcessBuilder, ProcessList, ThreadBuilder, ThreadRunnable},
     vfs::{
@@ -64,7 +64,6 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
 extern "C" {
     fn _do_allocate(size: usize) -> *mut core::ffi::c_void;
     fn _do_deallocate(ptr: *mut core::ffi::c_void, size: core::ffi::c_size_t) -> i32;
-    fn init_pci();
 }
 
 struct Allocator;
@@ -90,19 +89,11 @@ unsafe impl GlobalAlloc for Allocator {
 #[global_allocator]
 static ALLOCATOR: Allocator = Allocator;
 
-extern "C" {
-    fn init_allocator();
-}
-
 #[no_mangle]
-pub extern "C" fn rust_kinit(early_kstack_paddr: PAddr) -> ! {
-    // We don't call global constructors.
-    // Rust doesn't need that, and we're not going to use global variables in C++.
-    init_localcpu();
-
-    unsafe { init_allocator() };
-
-    kernel::interrupt::init().unwrap();
+pub extern "C" fn kernel_init(early_kstack_pfn: PFN) -> ! {
+    extern "C" {
+        fn init_pci();
+    }
 
     // TODO: Move this to rust.
     unsafe { init_pci() };
@@ -114,8 +105,7 @@ pub extern "C" fn rust_kinit(early_kstack_paddr: PAddr) -> ! {
     // So call `init_vfs` first, then `init_multitasking`.
     Scheduler::init_local_scheduler::<KernelStack>();
 
-    Scheduler::get()
-        .spawn::<KernelStack, _>(FutureRun::new(init_process(PFN::from(early_kstack_paddr))));
+    Scheduler::get().spawn::<KernelStack, _>(FutureRun::new(init_process(early_kstack_pfn)));
 
     unsafe {
         // SAFETY: `preempt::count()` == 1.

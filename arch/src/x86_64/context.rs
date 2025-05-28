@@ -142,7 +142,8 @@ impl TaskContext {
             "mov %r15, %rcx",
             "mov %rbx, %r8",
             "mov %rbp, %rax",
-            "xor %rbp, %rbp",
+            "xor %rbp, %rbp", // NULL previous stack frame
+            "push %rbp",      // NULL return address.
             "jmp *%rax",
             options(att_syntax),
         );

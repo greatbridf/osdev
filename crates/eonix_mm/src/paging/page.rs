@@ -99,7 +99,7 @@ where
     where
         F: FnOnce(&Self) -> O,
     {
-        unsafe { Self::with_raw_in(pfn, func, A::global()) }
+        unsafe { Self::with_raw_in(pfn, A::global(), func) }
     }
 
     /// Do some work with the page without touching the reference count with the same
@@ -187,7 +187,7 @@ where
     ///
     /// # Safety
     /// Check `from_raw_in()` for the safety requirements.
-    pub unsafe fn with_raw_in<F, O>(pfn: PFN, func: F, alloc: A) -> O
+    pub unsafe fn with_raw_in<F, O>(pfn: PFN, alloc: A, func: F) -> O
     where
         F: FnOnce(&Self) -> O,
     {

@@ -9,7 +9,7 @@ use eonix_mm::{
 
 pub const PAGE_SIZE: usize = 0x1000;
 
-const KERNEL_PML4_PFN: PFN = PFN::from_val(0x2000 >> 12);
+const KERNEL_PML4_PFN: PFN = PFN::from_val(0x1000 >> 12);
 
 const PA_P: u64 = 0x001;
 const PA_RW: u64 = 0x002;
@@ -156,26 +156,16 @@ impl RawAttribute for PageAttribute64 {
             page_attr |= PageAttribute::ANONYMOUS;
         }
 
-        Some(page_attr)
-    }
-
-    fn from_table_attr(table_attr: TableAttribute) -> Self {
-        let mut raw_attr = PA_RW;
-
-        for attr in table_attr.iter() {
-            match attr {
-                TableAttribute::PRESENT => raw_attr |= PA_P,
-                TableAttribute::GLOBAL => raw_attr |= PA_G,
-                TableAttribute::USER => raw_attr |= PA_US,
-                TableAttribute::ACCESSED => raw_attr |= PA_A,
-                _ => unreachable!("Invalid table attribute"),
-            }
+        if self.0 & PA_PS != 0 {
+            page_attr |= PageAttribute::HUGE;
         }
 
-        Self(raw_attr)
+        Some(page_attr)
     }
+}
 
-    fn from_page_attr(page_attr: PageAttribute) -> Self {
+impl From<PageAttribute> for PageAttribute64 {
+    fn from(page_attr: PageAttribute) -> Self {
         let mut raw_attr = PA_NXE;
 
         for attr in page_attr.iter() {
@@ -191,7 +181,26 @@ impl RawAttribute for PageAttribute64 {
                 PageAttribute::COPY_ON_WRITE => raw_attr |= PA_COW,
                 PageAttribute::MAPPED => raw_attr |= PA_MMAP,
                 PageAttribute::ANONYMOUS => raw_attr |= PA_ANON,
+                PageAttribute::HUGE => raw_attr |= PA_PS,
                 _ => unreachable!("Invalid page attribute"),
+            }
+        }
+
+        Self(raw_attr)
+    }
+}
+
+impl From<TableAttribute> for PageAttribute64 {
+    fn from(table_attr: TableAttribute) -> Self {
+        let mut raw_attr = PA_RW;
+
+        for attr in table_attr.iter() {
+            match attr {
+                TableAttribute::PRESENT => raw_attr |= PA_P,
+                TableAttribute::GLOBAL => raw_attr |= PA_G,
+                TableAttribute::USER => raw_attr |= PA_US,
+                TableAttribute::ACCESSED => raw_attr |= PA_A,
+                _ => unreachable!("Invalid table attribute"),
             }
         }
 

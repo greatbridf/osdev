@@ -37,8 +37,7 @@ set(BOOTLOADER_SOURCES src/boot.s
                        src/mbr.S
                        )
 
-set(KERNEL_MAIN_SOURCES src/kinit.cpp
-                        src/kernel/async/lock.cc
+set(KERNEL_MAIN_SOURCES src/kernel/async/lock.cc
                         src/kernel/allocator.cc
                         src/kernel/mem/slab.cc
                         src/kernel/hw/acpi.cc
@@ -48,15 +47,12 @@ set(KERNEL_MAIN_SOURCES src/kinit.cpp
                         include/kernel/async/lock.hpp
                         include/kernel/mem/paging.hpp
                         include/kernel/mem/slab.hpp
-                        include/kernel/mem/types.hpp
-                        include/kernel/utsname.hpp
                         include/kernel/hw/acpi.hpp
                         include/kernel/hw/pci.hpp
                         include/kernel/hw/port.hpp
                         include/types/list.hpp
                         include/types/types.h
                         include/types/allocator.hpp
-                        include/kernel/log.hpp
                         )
 
 add_executable(kernel.out ${KERNEL_MAIN_SOURCES} ${BOOTLOADER_SOURCES})

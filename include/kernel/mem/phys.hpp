@@ -7,8 +7,6 @@
 
 #include <types/types.h>
 
-#include <kernel/mem/types.hpp>
-
 namespace kernel::mem {
 
 template <typename T, bool Cached = true>

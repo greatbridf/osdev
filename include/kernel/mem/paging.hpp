@@ -83,17 +83,6 @@ constexpr unsigned long PAGE_PRESENT = 0x00010000;
 constexpr unsigned long PAGE_BUDDY = 0x00020000;
 constexpr unsigned long PAGE_SLAB = 0x00040000;
 
-struct page {
-    // TODO: use atomic
-    unsigned long refcount;
-    unsigned long flags;
-
-    page* next;
-    page* prev;
-};
-
-inline page* PAGE_ARRAY;
-
 constexpr unsigned long PAGE_FAULT_P = 0x00000001;
 constexpr unsigned long PAGE_FAULT_W = 0x00000002;
 constexpr unsigned long PAGE_FAULT_U = 0x00000004;

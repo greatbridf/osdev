@@ -4,46 +4,39 @@
 
 .code16
 
-.align 4
-.Lbios_idt_desc:
-    .word 0x03ff     # size
-    .long 0x00000000 # base
-
-.align 4
-.Lnull_idt_desc:
-    .word 0 # size
-    .long 0 # base
-
-.Lhalt16:
+.Lhalt:
     hlt
-    jmp .Lhalt16
+    jmp .
 
 # scratch %eax
 # return address should be of 2 bytes, and will be zero extended to 4 bytes
 go_32bit:
     cli
-    lidt .Lnull_idt_desc
+    # borrow the null entry from the early gdt
+    lidt EARLY_GDT
 
     # set PE bit
     mov %cr0, %eax
     or $1, %eax
     mov %eax, %cr0
 
-    ljmp $0x08, $.Lgo_32bit0
+    ljmp $0x18, $.Lgo_32bit0
 
 .Lgo_16bit0:
-    mov $0x20, %ax
+    mov $0x30, %ax
     mov %ax, %ds
+    mov %ax, %es
     mov %ax, %ss
 
-    lidt .Lbios_idt_desc
+    lidt BIOS_IDT_DESCRIPTOR
 
     mov %cr0, %eax
     and $0xfffffffe, %eax
     mov %eax, %cr0
 
-    ljmp $0x00, $.Lgo_16bit1
-.Lgo_16bit1:
+    ljmp $0x00, $2f
+
+2:
     xor %ax, %ax
     mov %ax, %ds
     mov %ax, %ss
@@ -60,10 +53,10 @@ go_32bit:
 # return address should be of 4 bytes, and extra 2 bytes will be popped from the stack
 go_16bit:
     cli
-    ljmp $0x18, $.Lgo_16bit0
+    ljmp $0x28, $.Lgo_16bit0
 
 .Lgo_32bit0:
-    mov $0x10, %ax
+    mov $0x20, %ax
     mov %ax, %ds
     mov %ax, %es
     mov %ax, %ss
@@ -75,7 +68,7 @@ go_16bit:
 
 # build read disk packet on the stack and perform read operation
 #
-# read 32k to 0x2000 and then copy to destination
+# read 16k to 0x8000 and then copy to destination
 #
 # %edi: lba start
 # %esi: destination
@@ -86,10 +79,10 @@ read_disk:
 
     lea -24(%esp), %esp
 
-    mov $0x00400010, %eax # packet size 0, sector count 64
+    mov $0x00200010, %eax # packet size 0, sector count 64
     mov %eax, (%esp)
 
-    mov $0x02000000, %eax # destination address 0x0200:0x0000
+    mov $0x08000000, %eax # destination address 0x0800:0x0000
     mov %eax, 4(%esp)
 
     mov %edi, 8(%esp)  # lba low 4bytes
@@ -105,18 +98,27 @@ read_disk:
     mov $0x42, %ah
     mov $0x80, %dl
     int $0x13
-    jc .Lhalt16
+    jc .Lhalt
 
     call go_32bit
 .code32
     # move data to destination
-    mov $0x2000, %esi
-    mov $8192, %ecx
+    mov $0x8000, %esi
+    mov $4096, %ecx
     rep movsl
 
     mov %ebp, %esp
     pop %ebp
     ret
+
+.align 8
+.Lgdt_data:
+    .8byte 0x00209a0000000000 # 64bit code selector
+    .8byte 0x0000920000000000 # 64bit data selector
+    .8byte 0x00cf9a000000ffff # 32bit code selector
+    .8byte 0x00cf92000000ffff # 32bit data selector
+    .8byte 0x000f9a000000ffff # 16bit code selector
+    .8byte 0x000f92000000ffff # 16bit data selector
 
 .globl start_32bit
 start_32bit:
@@ -125,13 +127,47 @@ start_32bit:
     mov %ax, %es
     mov %ax, %ss
 
+    mov $EARLY_GDT_DESCRIPTOR, %edi
+    mov $0x37, %ax
+    mov %ax, (%edi)
+
+    mov $EARLY_GDT, %eax
+    mov %eax, 2(%edi)
+
+    # fill in early kernel GDT
+    xchg %eax, %edi
+    xor %eax, %eax
+    mov $2, %ecx
+
+    # null segment
+    rep stosl
+
+    # other data
+    mov $.Lgdt_data, %esi
+    mov $12, %ecx
+
+    rep movsl
+
+    lgdt EARLY_GDT_DESCRIPTOR
+    ljmp $0x18, $2f
+
+2:
+    mov $0x20, %ax
+    mov %ax, %ds
+    mov %ax, %es
+    mov %ax, %ss
+
+    # temporary kernel stack
+    mov $0x1000, %esp
+
     # read kimage into memory
 	lea -16(%esp), %esp
     mov $KIMAGE_32K_COUNT, %ecx
+    shl $1, %ecx
     movl $KERNEL_IMAGE_PADDR, 4(%esp) # destination address
 	movl $9, (%esp) # LBA
 
-.Lread_kimage:
+2:
 	mov (%esp), %edi
 	mov 4(%esp), %esi
 
@@ -139,10 +175,10 @@ start_32bit:
     call read_disk
 	mov %ebx, %ecx
 
-    addl $0x8000, 4(%esp)
-	addl $64, (%esp)
+    addl $0x4000, 4(%esp)
+	addl $32, (%esp)
 
-    loop .Lread_kimage
+    loop 2b
 
 	lea 16(%esp), %esp
 
@@ -150,7 +186,7 @@ start_32bit:
     xor %eax, %eax
 
     # clear paging structures
-    mov $0x2000, %edi
+    mov $0x1000, %edi
     mov $0x6000, %ecx
     shr $2, %ecx # %ecx /= 4
     rep stosl
@@ -180,12 +216,12 @@ start_32bit:
     or $PA_PS, %ebx
     mov $256, %ecx
     xor %esi, %esi
-.Lfill1:
+2:
     call fill_pxe
     lea 8(%edi), %edi
     add $0x40000000, %esi # 1GB
     adc $0, %edx
-    loop .Lfill1
+    loop 2b
 
     mov $(PA_NXE >> 32), %edx
 
@@ -193,12 +229,12 @@ start_32bit:
     or $(PA_PCD | PA_PWT), %ebx
     mov $256, %ecx
     xor %esi, %esi
-.Lfill2:
+2:
     call fill_pxe
     lea 8(%edi), %edi
     add $0x40000000, %esi # 1GB
     adc $0, %edx
-    loop .Lfill2
+    loop 2b
 
     xor %edx, %edx
 
@@ -210,9 +246,14 @@ start_32bit:
     and $(~(PA_PCD | PA_PWT | PA_PS)), %ebx
     call fill_pxe
 
-    # PDPTE 0xff8
+    # PDPTE 0x008
     mov $KERNEL_PDPT_KERNEL_SPACE, %edi
-    lea 0xff8(%edi), %edi
+    lea 0x8(%edi), %edi
+    mov $KERNEL_PD_STRUCT_PAGE_ARR, %esi
+    call fill_pxe
+
+    # PDPTE 0xff8
+    lea 0xff0(%edi), %edi
     mov $KERNEL_PD_KIMAGE, %esi
     call fill_pxe
 
@@ -228,11 +269,11 @@ start_32bit:
 
     mov $KIMAGE_PAGES, %ecx
 
-.Lfill3:
+2:
     call fill_pxe
     lea 8(%edi), %edi
     lea 0x1000(%esi), %esi
-    loop .Lfill3
+    loop 2b
 
     # set msr
     mov $0xc0000080, %ecx
@@ -254,29 +295,7 @@ start_32bit:
     or $0x80010001, %eax
     mov %eax, %cr0
 
-    # create gdt
-    xor %eax, %eax # at 0x0000
-    mov %eax, 0x00(%eax)
-    mov %eax, 0x04(%eax) # null descriptor
-    mov %eax, 0x08(%eax) # code segment lower
-    mov %eax, 0x10(%eax) # data segment lower
-    mov $0x00209a00, %ecx
-    mov %ecx, 0x0c(%eax) # code segment higher
-    mov $0x00009200, %ecx
-    mov %ecx, 0x14(%eax) # data segment higher
-
-    # gdt descriptor
-    push %eax
-    push %eax
-
-    # pad with a word
-    mov $0x00170000, %eax
-    push %eax
-
-    lgdt 2(%esp)
-    add $12, %esp
-
-    ljmp $0x08, $.L64bit_entry
+    ljmp $0x08, $2f
 
 # %ebx: attribute low
 # %edx: attribute high
@@ -290,34 +309,31 @@ fill_pxe:
     ret
 
 .code64
-.L64bit_entry:
-    jmp start_64bit
+2:
+    jmp 2f
 
 .section .text
-start_64bit:
-    # We map the first 1GB identically to the first 1GB of physical memory,
-    # move sp to the correct position in identically mapped area of kernel space.
-    mov %rsp, %rdi
-    xor %rsp, %rsp
-    inc %rsp
-    neg %rsp
-    shr $40, %rsp
-    shl $40, %rsp
+2:
+    mov $0x10, %ax
+    mov %ax, %ds
+    mov %ax, %es
+    mov %ax, %ss
 
-    add %rdi, %rsp
-    mov %rsp, %rdi
+    # load kernel identically mapped base address
+    mov $0xffffff, %rax
+    shl $40, %rax
 
-    # make stack frame
-    lea -16(%rsp), %rsp
-    mov %rsp, %rbp
+    # place the stack at physical address 0x80000
+    mov $0x80000, %rsp
+    add %rax, %rsp
 
-    xor %rax, %rax
-    mov %rax, (%rsp)
-    mov %rax, 8(%rsp)
+    # clear the previous stack frame base, setting the return address to 0
+    xor %rbp, %rbp
+    push %rbp
 
-    call kernel_init
+    # argument 1: the pointer to the bootloader data (paddr 0x0 + kernel space offset)
+    mov $E820_MEM_MAP_DATA, %rdi
+    add %rax, %rdi
 
-.L64bit_hlt:
-    cli
-    hlt
-    jmp .L64bit_hlt
+    # we use jmp instead of call since we've set the return address above
+    jmp _kernel_init

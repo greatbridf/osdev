@@ -590,7 +590,7 @@ where
         let mut attr = PageAttribute::PRESENT | PageAttribute::USER | PageAttribute::COPY_ON_WRITE;
         attr.set(PageAttribute::EXECUTE, execute);
 
-        self.set(EMPTY_PAGE.clone().into_raw(), T::Attr::from_page_attr(attr));
+        self.set(EMPTY_PAGE.clone().into_raw(), T::Attr::from(attr));
     }
 
     fn set_mapped(&mut self, execute: bool) {
@@ -599,7 +599,7 @@ where
         let mut attr = PageAttribute::MAPPED | PageAttribute::USER | PageAttribute::COPY_ON_WRITE;
         attr.set(PageAttribute::EXECUTE, execute);
 
-        self.set(EMPTY_PAGE.clone().into_raw(), T::Attr::from_page_attr(attr));
+        self.set(EMPTY_PAGE.clone().into_raw(), T::Attr::from(attr));
     }
 
     fn set_copy_on_write(&mut self, from: &mut Self) {
@@ -620,11 +620,8 @@ where
             Page::with_raw(from.get_pfn(), |page| page.clone().into_raw())
         };
 
-        self.set(
-            pfn,
-            T::Attr::from_page_attr(from_attr & !PageAttribute::ACCESSED),
-        );
+        self.set(pfn, T::Attr::from(from_attr & !PageAttribute::ACCESSED));
 
-        from.set_attr(T::Attr::from_page_attr(from_attr));
+        from.set_attr(T::Attr::from(from_attr));
     }
 }

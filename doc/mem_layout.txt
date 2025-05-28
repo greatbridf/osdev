@@ -1,13 +1,13 @@
 physical memory
 
-0x0000 - 0x1000 : GDT for kernel initialization use and some early kernel data
-0x1000 - 0x2000 : kernel stage1
-0x2000 - 0x3000 : kernel space PML4
-0x3000 - 0x4000 : kernel PDPT for physical memory mappings
-0x4000 - 0x5000 : kernel PDPT for kernel space
-0x5000 - 0x6000 : kernel PD for kernel image
-0x6000 - 0x7000 : kernel PT for kernel image
-0x7000 - 0x8000 : kernel PD for struct page array#1
+0x0000 - 0x1000 : Some early kernel data
+0x1000 - 0x2000 : kernel space PML4
+0x2000 - 0x3000 : kernel PDPT for physical memory mappings
+0x3000 - 0x4000 : kernel PDPT for kernel space
+0x4000 - 0x5000 : kernel PD for kernel image
+0x5000 - 0x6000 : kernel PT for kernel image
+0x6000 - 0x7000 : kernel PD for struct page array#1
+0x7000 - 0x8000 : kernel stage1
 
 0x100000 - 0x200000 : unused
 0x200000 - 0x400000 : first kernel bss page (2MB)

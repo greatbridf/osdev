@@ -7,17 +7,16 @@ move_mbr:
     mov %ax, %es
     mov %ax, %ss
 
-    # build a temporary stack
-    xor %esp, %esp
-    mov $0x0e00, %sp
-
+    # move the MBR to 0xe00
     mov $128, %cx # 512 bytes
     mov $0x7c00, %si
     mov $0x0e00, %di
     rep movsl
 
-    lgdt .Learly_gdt_descriptor
+    ljmp $0x00, $2f
 
+2:
+    # read the kernel stage1
     mov $.Lread_data_packet, %si
     mov $0x42, %ah
     mov $0x80, %dl
@@ -34,12 +33,12 @@ move_mbr:
     cmp $0x80, %ah # invalid command
     je .Lhalt
 
-    jcxz .Lax
+    jcxz 2f
     mov %cx, %ax
     mov %dx, %bx
 
-.Lax:
-    sub $1024, %esp
+2:
+    mov $E820_MEM_MAP_DATA, %esp
     movzw %ax, %eax
     mov %eax, 8(%esp)  # 1k blocks
     movzw %bx, %ebx
@@ -56,7 +55,7 @@ move_mbr:
     xor %ebx, %ebx
     mov %ebx, (%esp)
 
-.Le820_read_mem_map:
+2:
     # set the magic number to edx
     mov $0x534D4150, %edx
 
@@ -79,12 +78,23 @@ move_mbr:
     cmovnz 4(%esp), %ecx
     mov %ecx, 4(%esp)
 
-    jmp .Le820_read_mem_map
+    jmp 2b
 
 .Lsave_mem_fin:
-    cli
-    lidt .Lnull_idt_descriptor
+    mov $0x3ff, %ax
+    mov $BIOS_IDT_DESCRIPTOR, %di
+    mov %ax, (%di)
 
+    xor %eax, %eax
+    mov %eax, 2(%di)
+
+    lgdt .Learly_gdt_descriptor
+
+    cli
+    # IDT descriptor is 6 0's. borrow the null gdt entry
+    lidt .Learly_gdt
+
+    # enable protection mode
     mov %cr0, %eax
     or $1, %eax
     mov %eax, %cr0
@@ -93,30 +103,21 @@ move_mbr:
 
 .Lhalt:
     hlt
-    jmp .Lhalt
+    jmp .
 
 .align 16
 .Learly_gdt:
     .8byte 0x0                # null selector
-    .8byte 0x00cf9a000000ffff # code selector
-    .8byte 0x00cf92000000ffff # data selector
-    .8byte 0x000f9a000000ffff # 16 bit code selector
-    .8byte 0x000f92000000ffff # 16 bit data selector
-
-# null IDT descriptor
-# so that exceptions will cause the system to reset
-.align 4
-.Lnull_idt_descriptor:
-    .word 0 # size
-    .long 0 # base
+    .8byte 0x00cf9a000000ffff # 32bit code selector
+    .8byte 0x00cf92000000ffff # 32bit data selector
 
 .align 4
 .Learly_gdt_descriptor:
-    .word 0x27 # size
+    .word 0x17 # size
     .long .Learly_gdt  # address
 
 .align 16
 .Lread_data_packet:
     .long  0x00080010 # .stage1 takes up 4K, or 8 sectors
-    .long  0x00001000 # read to 0000:1000
+    .long  0x00007000 # read to 0000:7000
     .8byte 1          # read from LBA 1

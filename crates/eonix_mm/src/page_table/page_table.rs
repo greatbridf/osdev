@@ -42,6 +42,13 @@ where
     A: PageAlloc,
     X: PageAccess,
 {
+    pub fn with_root_table(root_table_page: Page<A>) -> Self {
+        Self {
+            root_table_page,
+            phantom: PhantomData,
+        }
+    }
+
     pub fn new_in<A1: PageAlloc>(kernel_root_table_page: &Page<A1>, alloc: A) -> Self {
         let new_root_table_page = Page::alloc_in(alloc);
         let new_table_data = X::get_ptr_for_page(&new_root_table_page);
@@ -65,10 +72,7 @@ where
             root_page_table.index_mut(idx).take();
         }
 
-        Self {
-            root_table_page: new_root_table_page,
-            phantom: PhantomData,
-        }
+        Self::with_root_table(new_root_table_page)
     }
 
     pub fn addr(&self) -> PAddr {
@@ -87,7 +91,7 @@ where
     }
 
     pub fn iter_kernel(&self, range: VRange) -> impl Iterator<Item = &mut M::Entry> {
-        Self::iter_kernel_levels(self, range, M::LEVELS)
+        self.iter_kernel_levels(range, M::LEVELS)
     }
 
     /// Iterates over the kernel space entries in the page table for the specified levels.

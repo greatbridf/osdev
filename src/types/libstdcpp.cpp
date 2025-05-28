@@ -2,16 +2,12 @@
 
 #include <types/types.h>
 
-#include <kernel/log.hpp>
-
 extern "C" void NORETURN __stack_chk_fail(void) {
-    assert(false);
     for (;;)
         ;
 }
 
 extern "C" void NORETURN __cxa_pure_virtual(void) {
-    assert(false);
     for (;;)
         ;
 }

@@ -1,4 +1,6 @@
-use super::{Relax, Spin, SpinRelax};
+use super::{
+    ContextUnlock, DisablePreemption, Relax, Spin, SpinContext, SpinRelax, UnlockedContext,
+};
 use crate::{marker::NotSend, UnlockableGuard, UnlockedGuard};
 use core::{
     marker::PhantomData,
@@ -6,40 +8,70 @@ use core::{
     ops::{Deref, DerefMut},
 };
 
-pub struct SpinGuard<'a, T, R = SpinRelax>
+pub struct SpinGuard<'a, T, C = DisablePreemption, R = SpinRelax>
 where
     T: ?Sized,
+    C: SpinContext,
 {
-    pub(super) lock: &'a Spin<T, R>,
-    pub(super) value: &'a mut T,
+    lock: &'a Spin<T, R>,
+    value: &'a mut T,
+    context: Option<C>,
     /// We don't want this to be `Send` because we don't want to allow the guard to be
     /// transferred to another thread since we have disabled the preemption on the local cpu.
-    pub(super) _not_send: PhantomData<NotSend>,
+    _not_send: PhantomData<NotSend>,
 }
 
-pub struct UnlockedSpinGuard<'a, T, R>(&'a Spin<T, R>)
+pub struct UnlockedSpinGuard<'a, T, C, R>(&'a Spin<T, R>, C::Unlocked)
 where
-    T: ?Sized;
+    T: ?Sized,
+    C: ContextUnlock;
 
 // SAFETY: As long as the value protected by the lock is able to be shared between threads,
 //         we can access the guard from multiple threads.
-unsafe impl<T, R> Sync for SpinGuard<'_, T, R> where T: ?Sized + Sync {}
+unsafe impl<T, C, R> Sync for SpinGuard<'_, T, C, R>
+where
+    T: ?Sized + Sync,
+    C: SpinContext,
+{
+}
 
-impl<T, R> Drop for SpinGuard<'_, T, R>
+impl<'a, T, C, R> SpinGuard<'a, T, C, R>
 where
     T: ?Sized,
+    C: SpinContext,
+{
+    pub(super) fn new(lock: &'a Spin<T, R>, value: &'a mut T, context: C) -> Self {
+        Self {
+            lock,
+            value,
+            context: Some(context),
+            _not_send: PhantomData,
+        }
+    }
+}
+
+impl<T, C, R> Drop for SpinGuard<'_, T, C, R>
+where
+    T: ?Sized,
+    C: SpinContext,
 {
     fn drop(&mut self) {
         unsafe {
             // SAFETY: We are dropping the guard, so we are not holding the lock anymore.
             self.lock.do_unlock();
+
+            self.context
+                .take()
+                .expect("We should have a context here")
+                .restore();
         }
     }
 }
 
-impl<T, R> Deref for SpinGuard<'_, T, R>
+impl<T, C, R> Deref for SpinGuard<'_, T, C, R>
 where
     T: ?Sized,
+    C: SpinContext,
 {
     type Target = T;
 
@@ -49,9 +81,10 @@ where
     }
 }
 
-impl<T, R> DerefMut for SpinGuard<'_, T, R>
+impl<T, C, R> DerefMut for SpinGuard<'_, T, C, R>
 where
     T: ?Sized,
+    C: SpinContext,
 {
     fn deref_mut(&mut self) -> &mut Self::Target {
         // SAFETY: We are holding the lock, so we can safely access the value.
@@ -59,9 +92,10 @@ where
     }
 }
 
-impl<T, U, R> AsRef<U> for SpinGuard<'_, T, R>
+impl<T, U, C, R> AsRef<U> for SpinGuard<'_, T, C, R>
 where
     T: ?Sized,
+    C: SpinContext,
     U: ?Sized,
     <Self as Deref>::Target: AsRef<U>,
 {
@@ -70,9 +104,10 @@ where
     }
 }
 
-impl<T, U, R> AsMut<U> for SpinGuard<'_, T, R>
+impl<T, U, C, R> AsMut<U> for SpinGuard<'_, T, C, R>
 where
     T: ?Sized,
+    C: SpinContext,
     U: ?Sized,
     <Self as Deref>::Target: AsMut<U>,
 {
@@ -81,34 +116,48 @@ where
     }
 }
 
-impl<'a, T, R> UnlockableGuard for SpinGuard<'a, T, R>
+impl<'a, T, C, R> UnlockableGuard for SpinGuard<'a, T, C, R>
 where
     T: ?Sized + Send,
+    C: ContextUnlock,
+    C::Unlocked: Send,
     R: Relax,
 {
-    type Unlocked = UnlockedSpinGuard<'a, T, R>;
+    type Unlocked = UnlockedSpinGuard<'a, T, C, R>;
 
     fn unlock(self) -> Self::Unlocked {
-        let me = ManuallyDrop::new(self);
+        let mut me = ManuallyDrop::new(self);
         unsafe {
             // SAFETY: No access is possible after unlocking.
             me.lock.do_unlock();
         }
 
-        UnlockedSpinGuard(me.lock)
+        let unlocked_context = me
+            .context
+            .take()
+            .expect("We should have a context here")
+            .unlock();
+
+        UnlockedSpinGuard(me.lock, unlocked_context)
     }
 }
 
 // SAFETY: The guard is stateless so no more process needed.
-unsafe impl<'a, T, R> UnlockedGuard for UnlockedSpinGuard<'a, T, R>
+unsafe impl<'a, T, C, R> UnlockedGuard for UnlockedSpinGuard<'a, T, C, R>
 where
     T: ?Sized + Send,
+    C: ContextUnlock,
+    C::Unlocked: Send,
     R: Relax,
 {
-    type Guard = SpinGuard<'a, T, R>;
+    type Guard = SpinGuard<'a, T, C, R>;
 
     async fn relock(self) -> Self::Guard {
-        let Self(lock) = self;
-        lock.lock()
+        let Self(lock, context) = self;
+
+        let context = context.relock();
+        lock.do_lock();
+
+        SpinGuard::new(lock, unsafe { &mut *lock.value.get() }, context)
     }
 }

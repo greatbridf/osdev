@@ -74,7 +74,7 @@ impl FileArray {
 
     pub fn new_cloned(other: &Self) -> Arc<Self> {
         Arc::new(Self {
-            inner: Spin::clone(&other.inner),
+            inner: Spin::new(other.inner.lock().clone()),
         })
     }
 

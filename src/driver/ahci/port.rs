@@ -14,7 +14,7 @@ use bindings::{EINVAL, EIO};
 use core::pin::pin;
 use eonix_mm::address::{Addr as _, PAddr};
 use eonix_runtime::task::Task;
-use eonix_sync::WaitList;
+use eonix_sync::{SpinIrq as _, WaitList};
 
 /// An `AdapterPort` is an HBA device in AHCI mode.
 ///

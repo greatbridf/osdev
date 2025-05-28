@@ -16,6 +16,7 @@ use control::AdapterControl;
 use core::ptr::NonNull;
 use defs::*;
 use eonix_mm::address::{AddrOps as _, PAddr};
+use eonix_sync::SpinIrq as _;
 use port::AdapterPort;
 
 pub(self) use register::Register;

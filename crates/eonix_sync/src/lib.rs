@@ -15,8 +15,8 @@ pub use locked::{AsProof, AsProofMut, Locked, Proof, ProofMut};
 pub use mutex::{Mutex, MutexGuard};
 pub use rwlock::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 pub use spin::{
-    LoopRelax, Relax, Spin, SpinGuard, SpinIrqGuard, SpinRelax, UnlockedSpinGuard,
-    UnlockedSpinIrqGuard,
+    ContextUnlock, DisablePreemption, LoopRelax, NoContext, Relax, Spin, SpinContext, SpinGuard,
+    SpinIrq, SpinRelax, UnlockedContext, UnlockedSpinGuard,
 };
 pub use wait_list::WaitList;
 

@@ -7,7 +7,7 @@ fn main() {
     println!("cargo:rustc-link-search=native=./build/gblibstdc++");
     println!("cargo:rustc-link-lib=static=gblibstdc++");
 
-    let headers = ["rust-headers.hpp", "include/kernel/hw/pci.hpp"];
+    let headers = ["rust-headers.hpp"];
 
     let bindings = bindgen::Builder::default()
         .use_core()

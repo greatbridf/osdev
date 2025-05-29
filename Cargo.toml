@@ -24,6 +24,7 @@ posix_types = { path = "./crates/posix_types" }
 bitflags = "2.6.0"
 intrusive-collections = "0.9.7"
 itertools = { version = "0.13.0", default-features = false }
+acpi = "5.2.0"
 
 [features]
 default = ["smp"]

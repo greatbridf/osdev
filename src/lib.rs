@@ -32,6 +32,7 @@ use eonix_mm::paging::PFN;
 use eonix_runtime::{run::FutureRun, scheduler::Scheduler, task::Task};
 use kernel::{
     mem::Page,
+    pcie::init_pcie,
     task::{KernelStack, ProcessBuilder, ProcessList, ThreadBuilder, ThreadRunnable},
     vfs::{
         dentry::Dentry,
@@ -91,12 +92,7 @@ static ALLOCATOR: Allocator = Allocator;
 
 #[no_mangle]
 pub extern "C" fn kernel_init(early_kstack_pfn: PFN) -> ! {
-    extern "C" {
-        fn init_pci();
-    }
-
-    // TODO: Move this to rust.
-    unsafe { init_pci() };
+    init_pcie().expect("Unable to initialize PCIe bus");
 
     // To satisfy the `Scheduler` "preempt count == 0" assertion.
     eonix_preempt::disable();

@@ -40,16 +40,10 @@ set(BOOTLOADER_SOURCES src/boot.s
 set(KERNEL_MAIN_SOURCES src/kernel/async/lock.cc
                         src/kernel/allocator.cc
                         src/kernel/mem/slab.cc
-                        src/kernel/hw/acpi.cc
-                        src/kernel/hw/pci.cc
                         src/types/libstdcpp.cpp
-                        include/defs.hpp
                         include/kernel/async/lock.hpp
                         include/kernel/mem/paging.hpp
                         include/kernel/mem/slab.hpp
-                        include/kernel/hw/acpi.hpp
-                        include/kernel/hw/pci.hpp
-                        include/kernel/hw/port.hpp
                         include/types/list.hpp
                         include/types/types.h
                         include/types/allocator.hpp

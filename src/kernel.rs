@@ -4,6 +4,7 @@ pub mod constants;
 pub mod cpu;
 pub mod interrupt;
 pub mod mem;
+pub mod pcie;
 pub mod syscall;
 pub mod task;
 pub mod timer;

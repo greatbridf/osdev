@@ -3,17 +3,15 @@ use crate::{
     io::Buffer as _,
     kernel::{
         block::{make_device, BlockDevice},
+        constants::EINVAL,
         interrupt::register_irq_handler,
+        pcie::{self, Header, PCIDevice, PCIDriver, PciError},
     },
     prelude::*,
 };
 use alloc::{format, sync::Arc};
-use bindings::{
-    kernel::hw::pci::{self, pci_device},
-    EIO,
-};
+use bindings::EIO;
 use control::AdapterControl;
-use core::ptr::NonNull;
 use defs::*;
 use eonix_mm::address::{AddrOps as _, PAddr};
 use eonix_sync::SpinIrq as _;
@@ -29,6 +27,10 @@ mod port;
 mod register;
 pub(self) mod slot;
 mod stats;
+
+pub struct AHCIDriver {
+    devices: Spin<Vec<Arc<Device<'static>>>>,
+}
 
 pub struct BitsIterator {
     data: u32,
@@ -64,8 +66,7 @@ impl Iterator for BitsIterator {
 struct Device<'a> {
     control_base: PAddr,
     control: AdapterControl,
-    // TODO: impl Drop to free pci device
-    pcidev: NonNull<pci_device>,
+    _pcidev: Arc<PCIDevice<'static>>,
     /// # Lock
     /// Might be accessed from irq handler, use with `lock_irq()`
     ports: Spin<[Option<Arc<AdapterPort<'a>>>; 32]>,
@@ -107,33 +108,6 @@ impl Device<'_> {
 }
 
 impl Device<'static> {
-    pub fn new(pcidev: NonNull<pci_device>) -> KResult<Arc<Self>> {
-        let base =
-            PAddr::from(unsafe { *pcidev.as_ref().header_type0() }.bars[PCI_REG_ABAR] as usize);
-        let irqno = unsafe { *pcidev.as_ref().header_type0() }.interrupt_line;
-
-        // use MMIO
-        if !base.is_aligned_to(16) {
-            return Err(EIO);
-        }
-
-        let device = Arc::new(Device {
-            control_base: base,
-            control: AdapterControl::new(base),
-            pcidev,
-            ports: Spin::new([const { None }; 32]),
-        });
-
-        device.control.enable_interrupts();
-
-        let device_irq = device.clone();
-        register_irq_handler(irqno as i32, move || device_irq.handle_interrupt())?;
-
-        device.probe_ports()?;
-
-        Ok(device)
-    }
-
     fn probe_ports(&self) -> KResult<()> {
         for nport in self.control.implemented_ports() {
             let port = Arc::new(AdapterPort::new(self.control_base, nport));
@@ -172,19 +146,56 @@ impl Device<'static> {
     }
 }
 
-unsafe extern "C" fn probe_device(pcidev: *mut pci_device) -> i32 {
-    match Device::new(NonNull::new(pcidev).expect("NULL `pci_device` pointer")) {
-        Ok(device) => {
-            // TODO!!!: save device to pci_device
-            Box::leak(Box::new(device));
-            0
+impl AHCIDriver {
+    pub fn new() -> Self {
+        Self {
+            devices: Spin::new(Vec::new()),
         }
-        Err(e) => -(e as i32),
+    }
+}
+
+impl PCIDriver for AHCIDriver {
+    fn vendor_id(&self) -> u16 {
+        VENDOR_INTEL
+    }
+
+    fn device_id(&self) -> u16 {
+        DEVICE_AHCI
+    }
+
+    fn handle_device(&self, pcidev: Arc<PCIDevice<'static>>) -> Result<(), PciError> {
+        let Header::Endpoint(header) = pcidev.header else {
+            Err(EINVAL)?
+        };
+
+        let base = PAddr::from(header.bars[PCI_REG_ABAR] as usize);
+        let irqno = header.interrupt_line;
+
+        // use MMIO
+        if !base.is_aligned_to(16) {
+            Err(EIO)?;
+        }
+
+        let device = Arc::new(Device {
+            control_base: base,
+            control: AdapterControl::new(base),
+            _pcidev: pcidev,
+            ports: Spin::new([const { None }; 32]),
+        });
+
+        device.control.enable_interrupts();
+
+        let device_irq = device.clone();
+        register_irq_handler(irqno as i32, move || device_irq.handle_interrupt())?;
+
+        device.probe_ports()?;
+
+        self.devices.lock().push(device);
+
+        Ok(())
     }
 }
 
 pub fn register_ahci_driver() {
-    let ret = unsafe { pci::register_driver_r(VENDOR_INTEL, DEVICE_AHCI, Some(probe_device)) };
-
-    assert_eq!(ret, 0);
+    pcie::register_driver(AHCIDriver::new()).expect("Register ahci driver failed");
 }

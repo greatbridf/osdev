@@ -2,7 +2,7 @@
 
 use core::sync::atomic::{compiler_fence, Ordering};
 
-#[arch::define_percpu]
+#[eonix_percpu::define_percpu]
 static PREEMPT_COUNT: usize = 0;
 
 #[inline(always)]

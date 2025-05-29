@@ -6,6 +6,7 @@ mod interrupt;
 mod io;
 mod mm;
 mod percpu;
+// mod trap;
 mod user;
 
 use core::arch::asm;
@@ -21,7 +22,7 @@ pub use self::user::*;
 pub use fence::*;
 pub use mm::*;
 pub use percpu::*;
-pub use percpu_macros::{define_percpu, define_percpu_shared};
+// pub use trap::*;
 
 #[inline(always)]
 pub fn flush_tlb(vaddr: usize) {

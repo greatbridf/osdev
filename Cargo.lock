@@ -28,7 +28,15 @@ version = "0.1.0"
 dependencies = [
  "cfg-if",
  "eonix_mm",
- "percpu-macros",
+]
+
+[[package]]
+name = "arch_macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]
@@ -128,10 +136,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "eonix_percpu"
+version = "0.1.0"
+dependencies = [
+ "eonix_percpu_macros",
+]
+
+[[package]]
+name = "eonix_percpu_macros"
+version = "0.1.0"
+dependencies = [
+ "arch_macros",
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "eonix_preempt"
 version = "0.1.0"
 dependencies = [
- "arch",
+ "eonix_percpu",
 ]
 
 [[package]]
@@ -141,6 +166,7 @@ dependencies = [
  "arch",
  "atomic_unique_refcell",
  "eonix_log",
+ "eonix_percpu",
  "eonix_preempt",
  "eonix_sync",
  "intrusive-collections",
@@ -168,6 +194,7 @@ dependencies = [
  "buddy_allocator",
  "eonix_log",
  "eonix_mm",
+ "eonix_percpu",
  "eonix_preempt",
  "eonix_runtime",
  "eonix_sync",
@@ -257,15 +284,6 @@ checksum = "d273983c5a657a70a3e8f2a01329822f3b8c8172b73826411a55751e404a0a4a"
 dependencies = [
  "memchr",
  "minimal-lexical",
-]
-
-[[package]]
-name = "percpu-macros"
-version = "0.1.0"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
 ]
 
 [[package]]

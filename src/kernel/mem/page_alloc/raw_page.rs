@@ -3,13 +3,98 @@ use core::{
     ptr::NonNull,
     sync::atomic::{AtomicU32, AtomicUsize, Ordering},
 };
-use eonix_mm::paging::{RawPage as RawPageTrait, PFN};
+use eonix_mm::{
+    address::{PAddr, VAddr},
+    paging::{RawPage as RawPageTrait, PAGE_SIZE, PFN},
+};
 use intrusive_list::{container_of, Link};
+use slab_allocator::SlabRawPage;
+
+use crate::kernel::mem::access::RawPageAccess;
+use crate::kernel::mem::PhysAccess;
 
 const PAGE_ARRAY: NonNull<RawPage> =
     unsafe { NonNull::new_unchecked(0xffffff8040000000 as *mut _) };
 
 pub struct PageFlags(AtomicU32);
+
+pub struct SlabPageInner {
+    pub object_size: u32,
+    pub allocated_count: u32,
+    pub free_next: Option<NonNull<usize>>,
+}
+
+pub struct BuddyPageInner {}
+
+pub enum PageType {
+    Buddy(BuddyPageInner),
+    Slab(SlabPageInner),
+}
+
+impl PageType {
+    // slab
+    pub fn new_slab(&mut self, object_size: u32) {
+        *self = PageType::Slab(SlabPageInner {
+            object_size,
+            allocated_count: 0,
+            free_next: None,
+        })
+    }
+
+    pub fn object_size(&self) -> u32 {
+        assert!(matches!(self, PageType::Slab(_)));
+
+        match self {
+            PageType::Slab(inner) => inner.object_size,
+            _ => unsafe { core::hint::unreachable_unchecked() },
+        }
+    }
+
+    pub fn allocated_count(&self) -> u32 {
+        assert!(matches!(self, PageType::Slab(_)));
+
+        match self {
+            PageType::Slab(inner) => inner.allocated_count,
+            _ => unsafe { core::hint::unreachable_unchecked() },
+        }
+    }
+
+    pub fn allocated_count_add(&mut self, val: u32) {
+        assert!(matches!(self, PageType::Slab(_)));
+
+        match self {
+            PageType::Slab(inner) => inner.allocated_count += val,
+            _ => unsafe { core::hint::unreachable_unchecked() },
+        }
+    }
+
+    pub fn allocated_count_sub(&mut self, val: u32) {
+        assert!(matches!(self, PageType::Slab(_)));
+
+        match self {
+            PageType::Slab(inner) => inner.allocated_count -= val,
+            _ => unsafe { core::hint::unreachable_unchecked() },
+        }
+    }
+
+    pub fn free_next(&self) -> Option<NonNull<usize>> {
+        assert!(matches!(self, PageType::Slab(_)));
+
+        match self {
+            PageType::Slab(inner) => inner.free_next,
+            _ => unsafe { core::hint::unreachable_unchecked() },
+        }
+    }
+
+    pub fn set_free_next(&mut self, free_next: Option<NonNull<usize>>) {
+        assert!(matches!(self, PageType::Slab(_)));
+
+        match self {
+            PageType::Slab(inner) => inner.free_next = free_next,
+            _ => unsafe { core::hint::unreachable_unchecked() },
+        }
+    }
+}
 
 pub struct RawPage {
     /// This can be used for LRU page swap in the future.
@@ -21,6 +106,8 @@ pub struct RawPage {
     pub order: u32,
     pub flags: PageFlags,
     pub refcount: AtomicUsize,
+
+    pub type_: PageType,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -79,6 +166,12 @@ impl RawPagePtr {
 
     pub const fn refcount(&self) -> &AtomicUsize {
         &self.as_ref().refcount
+    }
+
+    // return the ptr point to the actually raw page
+    pub fn real_ptr<T>(&self) -> NonNull<T> {
+        let pfn = unsafe { PFN::from(RawPagePtr(NonNull::new_unchecked(self.as_ptr()))) };
+        unsafe { PAddr::from(pfn).as_ptr::<T>() }
     }
 }
 
@@ -146,5 +239,82 @@ impl BuddyRawPage for RawPagePtr {
 
     fn clear_free(&self) {
         self.flags().clear(PageFlags::FREE);
+    }
+}
+
+impl SlabRawPage for RawPagePtr {
+    unsafe fn from_link(link: &mut Link) -> Self {
+        let raw_page_ptr = container_of!(link, RawPage, link);
+        Self(raw_page_ptr)
+    }
+
+    unsafe fn get_link(&self) -> &mut Link {
+        &mut self.as_mut().link
+    }
+
+    fn is_emtpy(&self) -> bool {
+        self.as_ref().type_.allocated_count() == 0
+    }
+
+    fn is_full(&self) -> bool {
+        self.as_ref().type_.free_next().is_none()
+    }
+
+    fn alloc_slot(&self) -> *mut u8 {
+        let ptr = self.as_ref().type_.free_next();
+
+        match ptr {
+            Some(ptr) => {
+                let next_free = unsafe { ptr.read() as *mut usize };
+                self.as_mut().type_.set_free_next(NonNull::new(next_free));
+                self.as_mut().type_.allocated_count_add(1);
+                return ptr.as_ptr() as *mut u8;
+            }
+            None => unreachable!(),
+        }
+    }
+
+    fn in_which(ptr: *mut u8) -> RawPagePtr {
+        let vaddr = VAddr::from(ptr as usize & !(PAGE_SIZE - 1));
+
+        unsafe { vaddr.as_raw_page() }
+    }
+
+    fn dealloc_slot(&self, ptr: *mut u8) {
+        let ptr = ptr as *mut usize;
+
+        if let Some(last_free) = self.as_ref().type_.free_next() {
+            unsafe { *ptr = last_free.as_ptr() as usize }
+        } else {
+            unsafe { *ptr = 0 }
+        }
+
+        self.as_mut().type_.allocated_count_sub(1);
+        self.as_mut().type_.set_free_next(NonNull::new(ptr));
+    }
+
+    fn slab_init(&self, object_size: u32) {
+        assert!(object_size >= core::mem::size_of::<usize>() as u32);
+
+        self.as_mut().type_.new_slab(object_size);
+
+        let mut slot_count = PAGE_SIZE / object_size as usize;
+        let mut ptr = self.real_ptr::<usize>().as_ptr();
+        self.as_mut().type_.set_free_next(NonNull::new(ptr));
+
+        // SAFETY: carefully ptr operate
+        unsafe {
+            loop {
+                if slot_count == 1 {
+                    *ptr = 0;
+                    break;
+                }
+
+                let next_ptr = ptr.byte_add(object_size as usize);
+                *ptr = next_ptr as usize;
+                ptr = next_ptr;
+                slot_count -= 1;
+            }
+        }
     }
 }

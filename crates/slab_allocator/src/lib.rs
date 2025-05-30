@@ -2,7 +2,7 @@
 
 mod slab_cache;
 
-use core::cmp::max;
+use core::{cmp::max, ptr::NonNull};
 
 use eonix_mm::paging::{PageAlloc, RawPage};
 use eonix_sync::Spin;
@@ -23,18 +23,16 @@ pub trait SlabRawPage: RawPage {
     /// to the link exists.
     unsafe fn get_link(&self) -> &mut Link;
 
-    fn slab_init(&self, object_size: u32);
-
-    fn is_emtpy(&self) -> bool;
-
-    fn is_full(&self) -> bool;
+    fn slab_init(&self, first_free: Option<NonNull<usize>>);
 
     // which slab page the ptr belong
     fn in_which(ptr: *mut u8) -> Self;
 
-    fn alloc_slot(&self) -> *mut u8;
+    fn real_page_ptr(&self) -> *mut u8;
 
-    fn dealloc_slot(&self, ptr: *mut u8);
+    fn allocated_count(&self) -> &mut u32;
+
+    fn next_free(&self) -> &mut Option<NonNull<usize>>;
 }
 
 pub struct SlabAllocator<T, A, const SLAB_CACHE_COUNT: usize> {

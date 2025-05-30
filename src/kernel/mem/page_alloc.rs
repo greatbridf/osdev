@@ -9,7 +9,9 @@ use eonix_mm::{
 };
 use eonix_sync::Spin;
 use intrusive_list::List;
-use raw_page::{PageFlags, RawPage, RawPagePtr};
+use raw_page::{PageFlags, RawPage};
+
+pub use raw_page::RawPagePtr;
 
 const COSTLY_ORDER: u32 = 3;
 const BATCH_SIZE: u32 = 64;

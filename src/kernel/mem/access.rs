@@ -1,6 +1,8 @@
 use core::{num::NonZero, ptr::NonNull};
-use eonix_mm::address::{Addr as _, PAddr};
+use eonix_mm::address::{Addr as _, PAddr, VAddr};
 use eonix_mm::paging::{PageAccess, PageBlock, PFN};
+
+use super::page_alloc::RawPagePtr;
 
 const PHYS_OFFSET: usize = 0xffff_ff00_0000_0000;
 
@@ -154,5 +156,24 @@ impl PageAccess for KernelPageAccess {
             // SAFETY: The physical address of a page must be aligned to the page size.
             PAddr::from(pfn).as_ptr()
         }
+    }
+}
+
+pub trait RawPageAccess {
+    /// Translate the address belonged RawPage ptr
+    /// Use it with care.
+    ///
+    /// # Panic
+    /// If the address is not properly aligned.
+    ///
+    /// # Safety
+    /// the address must be kernel accessible pointer
+    unsafe fn as_raw_page(&self) -> RawPagePtr;
+}
+
+impl RawPageAccess for VAddr {
+    unsafe fn as_raw_page(&self) -> RawPagePtr {
+        let pfn: PFN = PAddr::from(self.addr() - PHYS_OFFSET).into();
+        RawPagePtr::from(pfn)
     }
 }

@@ -17,7 +17,17 @@ pub mod mm {
 
 /// smp
 pub mod smp {
-    pub const MAX_HART: usize = 4;
+    use spin::Once;
+
+    pub static NUM_HARTS: Once<usize> = Once::new();
+
+    pub fn set_num_harts(num: usize) {
+        NUM_HARTS.call_once(|| num);
+    }
+
+    pub fn get_num_harts() -> usize {
+        *NUM_HARTS.get().expect("NUM_HARTS should be initialized by now")
+    }
 }
 
 pub mod platform {

@@ -14,3 +14,4 @@ cfg-if = "1.0"
 sbi = "0.3.0"
 riscv = { version = "0.13.0", features = ["s-mode"] }
 spin = "0.10.0"
+fdt = "0.1.5"

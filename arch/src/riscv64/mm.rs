@@ -214,7 +214,7 @@ impl RawAttribute for PageAttribute64 {
 
 pub type DefaultPagingMode = PagingModeSv48;
 
-pub fn setup_kernel_page_table() {
+pub fn setup_kernel_satp() {
     unsafe {
         satp::set(satp::Mode::Sv48, 0, PFN::from(ROOT_PAGE_TABLE_PFN).into());
     }

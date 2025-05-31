@@ -7,6 +7,7 @@ mod fence;
 mod config;
 mod init;
 mod interrupt;
+mod fdt;
 
 pub use self::mm::*;
 pub use self::entry::*;
@@ -17,3 +18,4 @@ pub use self::fence::*;
 pub use self::config::*;
 pub use self::init::*;
 pub use self::interrupt::*;
+pub use self::fdt::*;

@@ -5,10 +5,10 @@ use riscv::{asm::sfence_vma_all, register::{
 use sbi::PhysicalAddress;
 
 /// TODO:
-/// 解析设备树
+/// 中断handler
 /// 
 
-use super::{config::smp::MAX_HART, enable_sse, setup_kernel_page_table, InterruptControl};
+use super::{config::smp::get_num_harts, enable_sse, setup_kernel_satp, InterruptControl};
 
 /// RISC-V Hart
 pub struct CPU {
@@ -54,7 +54,7 @@ impl CPU {
         sstatus::write(current_sstatus);
 
         // setup kernel page table and flush tlb
-        setup_kernel_page_table();
+        setup_kernel_satp();
     }
 
     /// Boot all other hart.
@@ -62,8 +62,7 @@ impl CPU {
         extern "C" {
         fn ap_boot_entry();
         }
-        // TODO: 获取系统中的总 Hart 数量
-        let total_harts = MAX_HART;
+        let total_harts = get_num_harts();
 
         let ap_entry_point = PhysicalAddress::new(ap_boot_entry as usize);
 

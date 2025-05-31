@@ -318,13 +318,14 @@ unsafe extern "C" fn captured_trap_handler() {
     unsafe {
         naked_asm!(
             "mov ${from_context}, %rdi",
-            "mov ${to_context}, %rsi",
+            "mov %gs:0, %rsi",
+            "add ${to_context}, %rsi",
             "",
             "mov %rdi, %rsp", // We need a temporary stack to use `switch()`.
             "",
             "jmp {switch}",
             from_context = sym DIRTY_TRAP_CONTEXT,
-            to_context = sym CAPTURER_CONTEXT,
+            to_context = sym _percpu_inner_CAPTURER_CONTEXT,
             switch = sym arch::TaskContext::switch,
             options(att_syntax),
         );
@@ -335,8 +336,6 @@ unsafe extern "C" fn captured_trap_handler() {
 unsafe extern "C" fn captured_trap_return(trap_context: usize) -> ! {
     unsafe {
         naked_asm!(
-            "mov %rdi, %rsp",
-            "",
             "jmp {trap_return}",
             trap_return = sym _raw_trap_return,
             options(att_syntax),
@@ -347,11 +346,12 @@ unsafe extern "C" fn captured_trap_return(trap_context: usize) -> ! {
 impl TrapContextExt for TrapContext {
     unsafe fn trap_return(&mut self) {
         let irq_states = arch::disable_irqs_save();
-        let old_handler = TRAP_HANDLER.swap(&captured_trap_handler as *const _ as usize);
+        let old_handler = TRAP_HANDLER.swap(captured_trap_handler as *const () as usize);
 
         let mut to_ctx = arch::TaskContext::new();
+        to_ctx.ip(captured_trap_return as _);
+        to_ctx.sp(&raw mut *self as usize);
         to_ctx.interrupt(false);
-        to_ctx.call1(captured_trap_return, [&raw mut *self as usize]);
 
         unsafe {
             arch::TaskContext::switch(CAPTURER_CONTEXT.as_mut(), &mut to_ctx);

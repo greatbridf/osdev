@@ -1,4 +1,3 @@
-use super::task::Thread;
 use crate::prelude::*;
 use alloc::sync::Arc;
 use bindings::{dev_t, S_IFBLK, S_IFCHR, S_IFDIR, S_IFLNK, S_IFMT, S_IFREG};
@@ -63,10 +62,6 @@ impl TimeSpec {
 }
 
 impl FsContext {
-    pub fn get_current<'lt>() -> &'lt Arc<Self> {
-        &Thread::current().borrow().fs_context
-    }
-
     pub fn global() -> &'static Arc<Self> {
         &GLOBAL_FS_CONTEXT
     }

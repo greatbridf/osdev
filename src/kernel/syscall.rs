@@ -1,10 +1,4 @@
-use crate::{
-    kernel::task::{ProcessList, Signal},
-    println_warn,
-};
-use arch::{ExtendedContext, InterruptContext};
-
-extern crate arch;
+use crate::kernel::task::Thread;
 
 mod file_rw;
 mod mm;
@@ -12,235 +6,103 @@ mod net;
 mod procops;
 mod sysinfo;
 
-pub(self) struct MapArgumentImpl;
-pub(self) trait MapArgument<'a, T: 'a> {
-    fn map_arg(value: u64) -> T;
+const MAX_SYSCALL_NO: usize = 512;
+
+pub struct SyscallNoReturn;
+
+pub struct SyscallHandler {
+    pub handler: fn(&Thread, [usize; 6]) -> Option<usize>,
+    pub name: &'static str,
 }
 
-pub(self) trait MapReturnValue {
-    fn map_ret(self) -> usize;
+pub trait FromSyscallArg {
+    fn from_arg(value: usize) -> Self;
 }
 
-impl MapReturnValue for () {
-    fn map_ret(self) -> usize {
-        0
+pub trait SyscallRetVal {
+    fn into_retval(self) -> Option<usize>;
+}
+
+impl<T> SyscallRetVal for Result<T, u32>
+where
+    T: SyscallRetVal,
+{
+    fn into_retval(self) -> Option<usize> {
+        match self {
+            Ok(v) => v.into_retval(),
+            Err(e) => Some((-(e as isize)) as usize),
+        }
     }
 }
 
-impl MapReturnValue for u32 {
-    fn map_ret(self) -> usize {
-        self as usize
+impl SyscallRetVal for () {
+    fn into_retval(self) -> Option<usize> {
+        Some(0)
     }
 }
 
-impl MapReturnValue for usize {
-    fn map_ret(self) -> usize {
-        self
+impl SyscallRetVal for u32 {
+    fn into_retval(self) -> Option<usize> {
+        Some(self as usize)
     }
 }
 
-impl MapArgument<'_, u64> for MapArgumentImpl {
-    fn map_arg(value: u64) -> u64 {
+impl SyscallRetVal for usize {
+    fn into_retval(self) -> Option<usize> {
+        Some(self)
+    }
+}
+
+impl SyscallRetVal for SyscallNoReturn {
+    fn into_retval(self) -> Option<usize> {
+        None
+    }
+}
+
+impl FromSyscallArg for u64 {
+    fn from_arg(value: usize) -> u64 {
         value as u64
     }
 }
 
-impl MapArgument<'_, u32> for MapArgumentImpl {
-    fn map_arg(value: u64) -> u32 {
+impl FromSyscallArg for u32 {
+    fn from_arg(value: usize) -> u32 {
         value as u32
     }
 }
 
-impl MapArgument<'_, i32> for MapArgumentImpl {
-    fn map_arg(value: u64) -> i32 {
+impl FromSyscallArg for i32 {
+    fn from_arg(value: usize) -> i32 {
         value as i32
     }
 }
 
-impl MapArgument<'_, usize> for MapArgumentImpl {
-    fn map_arg(value: u64) -> usize {
-        value as usize
+impl FromSyscallArg for usize {
+    fn from_arg(value: usize) -> usize {
+        value
     }
 }
 
-impl<'a, T: 'a> MapArgument<'a, *const T> for MapArgumentImpl {
-    fn map_arg(value: u64) -> *const T {
-        value as *const _
+impl<T> FromSyscallArg for *const T {
+    fn from_arg(value: usize) -> *const T {
+        value as *const T
     }
 }
 
-impl<'a, T: 'a> MapArgument<'a, *mut T> for MapArgumentImpl {
-    fn map_arg(value: u64) -> *mut T {
-        value as *mut _
+impl<T> FromSyscallArg for *mut T {
+    fn from_arg(value: usize) -> *mut T {
+        value as *mut T
     }
 }
 
-macro_rules! arg_register {
-    (0, $is:ident) => {
-        $is.rbx
-    };
-    (1, $is:ident) => {
-        $is.rcx
-    };
-    (2, $is:ident) => {
-        $is.rdx
-    };
-    (3, $is:ident) => {
-        $is.rsi
-    };
-    (4, $is:ident) => {
-        $is.rdi
-    };
-    (5, $is:ident) => {
-        $is.rbp
-    };
-}
-
-#[allow(unused_macros)]
-macro_rules! format_expand {
-    ($name:ident, $arg:tt) => {
-        format_args!("{}: {:x?}", stringify!($name), $arg)
-    };
-    ($name1:ident, $arg1:tt, $($name:ident, $arg:tt),*) => {
-        format_args!("{}: {:x?}, {}", stringify!($name1), $arg1, format_expand!($($name, $arg),*))
+pub fn syscall_handlers() -> &'static [SyscallHandler; MAX_SYSCALL_NO] {
+    extern "C" {
+        #[allow(improper_ctypes)]
+        static SYSCALL_HANDLERS: [SyscallHandler; MAX_SYSCALL_NO];
     }
-}
 
-macro_rules! syscall32_call {
-    ($is:ident, $handler:ident, $($arg:ident: $type:ty),*) => {{
-        use $crate::kernel::syscall::{MapArgument, MapArgumentImpl, arg_register};
-        #[allow(unused_imports)]
-        use $crate::kernel::syscall::{MapReturnValue, format_expand};
-        #[allow(unused_imports)]
-        use $crate::{kernel::task::Thread, println_trace};
-
-        $(
-            let $arg: $type =
-                MapArgumentImpl::map_arg(arg_register!(${index()}, $is));
-        )*
-
-        println_trace!(
-            "trace_syscall",
-            "tid{}: {}({}) => {{",
-            Thread::current().tid,
-            stringify!($handler),
-            format_expand!($($arg, $arg),*),
-        );
-
-        let result = $handler($($arg),*);
-
-        println_trace!(
-            "trace_syscall",
-            "tid{}: {}({}) => }} = {:x?}",
-            Thread::current().tid,
-            stringify!($handler),
-            format_expand!($($arg, $arg),*),
-            result
-        );
-
-        match result {
-            Ok(val) => MapReturnValue::map_ret(val),
-            Err(err) => (-(err as i32)) as usize,
-        }
-    }};
-}
-
-macro_rules! define_syscall32 {
-    ($name:ident, $handler:ident) => {
-        fn $name(_int_stack: &mut $crate::kernel::syscall::arch::InterruptContext,
-            _: &mut ::arch::ExtendedContext) -> usize {
-            use $crate::kernel::syscall::MapReturnValue;
-
-            match $handler() {
-                Ok(val) => MapReturnValue::map_ret(val),
-                Err(err) => (-(err as i32)) as usize,
-            }
-        }
-    };
-    ($name:ident, $handler:ident, $($arg:ident: $argt:ty),*) => {
-        fn $name(
-            int_stack: &mut $crate::kernel::syscall::arch::InterruptContext,
-            _: &mut ::arch::ExtendedContext) -> usize {
-            use $crate::kernel::syscall::syscall32_call;
-
-            syscall32_call!(int_stack, $handler, $($arg: $argt),*)
-        }
-    };
-}
-
-macro_rules! register_syscall {
-    ($no:expr, $name:ident) => {
-        $crate::kernel::syscall::register_syscall_handler(
-            $no,
-            concat_idents!(sys_, $name),
-            stringify!($name),
-        );
-    };
-}
-
-pub(self) use {arg_register, define_syscall32, format_expand, register_syscall, syscall32_call};
-
-#[allow(dead_code)]
-pub(self) struct SyscallHandler {
-    handler: fn(&mut InterruptContext, &mut ExtendedContext) -> usize,
-    name: &'static str,
-}
-
-pub(self) fn register_syscall_handler(
-    no: usize,
-    handler: fn(&mut InterruptContext, &mut ExtendedContext) -> usize,
-    name: &'static str,
-) {
-    // SAFETY: `SYSCALL_HANDLERS` is never modified after initialization.
-    #[allow(static_mut_refs)]
-    let syscall = unsafe { SYSCALL_HANDLERS.get_mut(no) }.unwrap();
-    assert!(
-        syscall.replace(SyscallHandler { handler, name }).is_none(),
-        "Syscall {} is already registered",
-        no
-    );
-}
-
-pub fn register_syscalls() {
-    file_rw::register();
-    procops::register();
-    mm::register();
-    net::register();
-    sysinfo::register();
-}
-
-const SYSCALL_HANDLERS_SIZE: usize = 404;
-static mut SYSCALL_HANDLERS: [Option<SyscallHandler>; SYSCALL_HANDLERS_SIZE] =
-    [const { None }; SYSCALL_HANDLERS_SIZE];
-
-pub fn handle_syscall32(
-    no: usize,
-    int_stack: &mut InterruptContext,
-    ext_ctx: &mut ExtendedContext,
-) {
-    // SAFETY: `SYSCALL_HANDLERS` are never modified after initialization.
-    #[allow(static_mut_refs)]
-    let syscall = unsafe { SYSCALL_HANDLERS.get(no) }.and_then(Option::as_ref);
-
-    match syscall {
-        None => {
-            println_warn!("Syscall {no}({no:#x}) isn't implemented.");
-            ProcessList::kill_current(Signal::SIGSYS);
-        }
-        Some(handler) => {
-            arch::enable_irqs();
-            let retval = (handler.handler)(int_stack, ext_ctx);
-
-            // SAFETY: `int_stack` is always valid.
-            int_stack.rax = retval as u64;
-            int_stack.r8 = 0;
-            int_stack.r9 = 0;
-            int_stack.r10 = 0;
-            int_stack.r11 = 0;
-            int_stack.r12 = 0;
-            int_stack.r13 = 0;
-            int_stack.r14 = 0;
-            int_stack.r15 = 0;
-        }
+    unsafe {
+        // SAFETY: `SYSCALL_HANDLERS` is defined in linker script.
+        &SYSCALL_HANDLERS
     }
 }

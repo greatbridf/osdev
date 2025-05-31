@@ -96,6 +96,10 @@ SECTIONS
         end_ctors = .;
 
         . = ALIGN(16);
+        SYSCALL_HANDLERS = .;
+        KEEP(*(SORT_BY_NAME(.syscalls*)));
+
+        . = ALIGN(16);
         _fix_start = .;
         KEEP(*(.fix));
         _fix_end = .;

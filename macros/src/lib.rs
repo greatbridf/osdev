@@ -75,9 +75,8 @@ fn define_syscall_impl(attrs: TokenStream, item: TokenStream) -> TokenStream {
 
         fn #helper_fn (
             thd: &crate::kernel::task::Thread,
-            trap_ctx: &mut arch::TrapContext,
             args: [usize; 6]
-        ) -> usize {
+        ) -> Option<usize> {
             use crate::kernel::syscall::{FromSyscallArg, SyscallRetVal};
 
             #(#args_mapped)*
@@ -90,7 +89,7 @@ fn define_syscall_impl(attrs: TokenStream, item: TokenStream) -> TokenStream {
             //     crate::kernel::syscall::format_expand!($($arg, $arg),*),
             // );
 
-            let retval = #real_fn(thd, trap_ctx, #(#args_call),*).into_retval();
+            let retval = #real_fn(thd, #(#args_call),*).into_retval();
 
             // eonix_log::println_trace!(
             //     "trace_syscall",
@@ -106,7 +105,6 @@ fn define_syscall_impl(attrs: TokenStream, item: TokenStream) -> TokenStream {
         #(#attrs)*
         #vis fn #real_fn(
             thread: &crate::kernel::task::Thread,
-            trap_ctx: &mut arch::TrapContext,
             #(#args),*
         ) #ty_ret #body
     }
@@ -115,9 +113,8 @@ fn define_syscall_impl(attrs: TokenStream, item: TokenStream) -> TokenStream {
 /// Define a syscall used by the kernel. The syscall handler will be generated in the
 /// `.syscalls` section and then linked into the kernel binary.
 ///
-/// Two hidden parameters will be passed to the syscall handler:
+/// One hidden parameter will be passed to the syscall handler:
 /// - `thread: &Thread`
-/// - `trap_ctx: &mut TrapContext`
 ///
 /// The arguments of the syscall MUST implement `FromSyscallArg` trait and the return value
 /// types MUST implement `SyscallRetVal` trait.

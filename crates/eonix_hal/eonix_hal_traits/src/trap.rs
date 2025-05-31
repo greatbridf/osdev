@@ -6,7 +6,7 @@ use core::marker::PhantomData;
 /// This should be implemented by the architecture-specific trap context
 /// and will be used in the HAL crates.
 #[doc(notable_trait)]
-pub trait RawTrapContext {
+pub trait RawTrapContext: Copy {
     fn new() -> Self;
 
     fn trap_type(&self) -> TrapType;
@@ -21,6 +21,8 @@ pub trait RawTrapContext {
     fn set_interrupt_enabled(&mut self, enabled: bool);
 
     fn is_user_mode(&self) -> bool;
+    fn set_user_mode(&mut self, user: bool);
+
     fn set_user_return_value(&mut self, retval: usize);
 }
 

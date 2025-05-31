@@ -24,7 +24,7 @@ use eonix_runtime::task::Task;
 use eonix_sync::{LazyLock, Mutex};
 
 pub use mapping::{FileMapping, Mapping};
-pub use page_fault::handle_page_fault;
+pub use page_fault::handle_kernel_page_fault;
 
 pub static EMPTY_PAGE: LazyLock<Page> = LazyLock::new(|| Page::zeroed());
 static KERNEL_ROOT_TABLE_PAGE: LazyLock<PageUnmanaged> = LazyLock::new(|| unsafe {

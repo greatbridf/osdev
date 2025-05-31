@@ -1,4 +1,6 @@
-use super::{Process, ProcessGroup, Session, Signal, Thread, WaitObject, WaitType};
+use core::sync::atomic::Ordering;
+
+use super::{Process, ProcessGroup, Session, Thread, WaitObject, WaitType};
 use crate::rcu::rcu_sync;
 use alloc::{
     collections::btree_map::BTreeMap,
@@ -47,21 +49,6 @@ impl ProcessList {
 
     pub fn add_thread(&mut self, thread: &Arc<Thread>) {
         self.threads.insert(thread.tid, thread.clone());
-    }
-
-    pub fn kill_current(signal: Signal) -> ! {
-        unsafe {
-            let mut process_list = Task::block_on(ProcessList::get().write());
-
-            process_list.do_kill_process(&Thread::current().process, WaitType::Signaled(signal));
-        }
-
-        unsafe {
-            eonix_preempt::disable();
-
-            // SAFETY: Preempt count == 1.
-            Thread::exit();
-        }
     }
 
     pub fn remove_process(&mut self, pid: u32) {
@@ -130,6 +117,7 @@ impl ProcessList {
             assert!(thread.tid == Thread::current().tid);
             // TODO: Send SIGKILL to all threads.
             thread.files.close_all();
+            thread.dead.store(true, Ordering::SeqCst);
         }
 
         // If we are the session leader, we should drop the control terminal.

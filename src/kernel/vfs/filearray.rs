@@ -7,7 +7,6 @@ use crate::{
     kernel::{
         console::get_console,
         constants::ENXIO,
-        task::Thread,
         vfs::{dentry::Dentry, file::Pipe, s_isdir, s_isreg},
         CharDevice,
     },
@@ -54,10 +53,6 @@ impl OpenFile {
 }
 
 impl FileArray {
-    pub fn get_current<'lt>() -> &'lt Arc<Self> {
-        &Thread::current().borrow().files
-    }
-
     pub fn new() -> Arc<Self> {
         Arc::new(FileArray {
             inner: Spin::new(FileArrayInner {

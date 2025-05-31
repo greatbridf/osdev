@@ -1,4 +1,4 @@
-use super::{KResult, Signal, SignalMask};
+use super::{KResult, Signal, SignalMask, SAVED_DATA_SIZE};
 use crate::{
     io::BufferFill as _,
     kernel::{
@@ -8,8 +8,9 @@ use crate::{
     SIGNAL_NOW,
 };
 use alloc::collections::btree_map::BTreeMap;
-use arch::{ExtendedContext, InterruptContext};
+use arch::{FpuState, TrapContext};
 use core::num::NonZero;
+use eonix_hal::traits::trap::RawTrapContext;
 use eonix_mm::address::{Addr as _, AddrOps as _, VAddr};
 use posix_types::signal::{SigAction, TryFromSigAction};
 
@@ -68,46 +69,45 @@ impl SignalAction {
         self,
         signal: Signal,
         old_mask: SignalMask,
-        int_stack: &mut InterruptContext,
-        ext_ctx: &mut ExtendedContext,
+        trap_ctx: &mut TrapContext,
+        fpu_state: &mut FpuState,
     ) -> KResult<()> {
-        // TODO: The sizes of the context structures should be arch-specific.
-        const CONTEXT_SIZE: usize = size_of::<InterruptContext>()
-            + size_of::<ExtendedContext>()
-            + size_of::<SignalMask>() // old_mask
-            + size_of::<u32>(); // `sa_handler` argument: `signum`
+        let SignalAction::SimpleHandler {
+            handler, restorer, ..
+        } = self
+        else {
+            unreachable!("Default and Ignore actions should not be handled here");
+        };
 
-        match self {
-            SignalAction::Default | SignalAction::Ignore => {
-                unreachable!("Default and Ignore actions should not be handled here")
-            }
+        let Some(restorer) = restorer else {
             // We don't accept signal handlers with no signal restorers for now.
-            SignalAction::SimpleHandler { restorer: None, .. } => Err(ENOSYS),
-            SignalAction::SimpleHandler {
-                handler,
-                restorer: Some(restorer),
-                ..
-            } => {
-                // Save current interrupt context to 128 bytes above current user stack
-                // and align to 16 bytes. Then we push the return address of the restorer.
-                // TODO!!!: Determine the size of the return address
-                let sp = VAddr::from(int_stack.rsp as usize - 128 - CONTEXT_SIZE).floor_to(16)
-                    - size_of::<u32>();
-                let restorer_address = restorer.addr() as u32;
-                let mut stack =
-                    UserBuffer::new(sp.addr() as *mut u8, CONTEXT_SIZE + size_of::<u32>())?;
+            return Err(ENOSYS)?;
+        };
 
-                stack.copy(&restorer_address)?.ok_or(EFAULT)?; // Restorer address
-                stack.copy(&u32::from(signal))?.ok_or(EFAULT)?; // `signum`
-                stack.copy(&old_mask)?.ok_or(EFAULT)?; // Original signal mask
-                stack.copy(ext_ctx)?.ok_or(EFAULT)?; // MMX registers
-                stack.copy(int_stack)?.ok_or(EFAULT)?; // Interrupt stack
+        let current_sp = VAddr::from(trap_ctx.get_stack_pointer());
 
-                int_stack.rip = handler.addr() as u64;
-                int_stack.rsp = sp.addr() as u64;
-                Ok(())
-            }
-        }
+        // Save current interrupt context to 128 bytes above current user stack
+        // (in order to keep away from x86 red zone) and align to 16 bytes.
+        let saved_data_addr = (current_sp - 128 - SAVED_DATA_SIZE).floor_to(16);
+
+        let mut saved_data_buffer =
+            UserBuffer::new(saved_data_addr.addr() as *mut u8, SAVED_DATA_SIZE)?;
+
+        saved_data_buffer.copy(trap_ctx)?.ok_or(EFAULT)?;
+        saved_data_buffer.copy(fpu_state)?.ok_or(EFAULT)?;
+        saved_data_buffer.copy(&old_mask)?.ok_or(EFAULT)?;
+
+        // We need to push the arguments to the handler and then save the return address.
+        let new_sp = saved_data_addr - 16 - 4;
+        let restorer_address = restorer.addr() as u32;
+
+        let mut stack = UserBuffer::new(new_sp.addr() as *mut u8, 4 + 4)?;
+        stack.copy(&restorer_address)?.ok_or(EFAULT)?; // Restorer address
+        stack.copy(&u32::from(signal))?.ok_or(EFAULT)?; // The argument to the handler
+
+        trap_ctx.set_program_counter(handler.addr());
+        trap_ctx.set_stack_pointer(new_sp.addr());
+        Ok(())
     }
 }
 

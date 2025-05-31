@@ -112,7 +112,6 @@ pub extern "C" fn kernel_init(early_kstack_pfn: PFN) -> ! {
 async fn init_process(early_kstack_pfn: PFN) {
     unsafe { Page::from_raw(early_kstack_pfn) };
 
-    kernel::syscall::register_syscalls();
     CharDevice::init().unwrap();
 
     // We might want the serial initialized as soon as possible.
@@ -163,7 +162,9 @@ async fn init_process(early_kstack_pfn: PFN) {
         elf.load(argv, envp).unwrap()
     };
 
-    let thread_builder = ThreadBuilder::new().name(Arc::from(*b"busybox"));
+    let thread_builder = ThreadBuilder::new()
+        .name(Arc::from(&b"busybox"[..]))
+        .entry(ip, sp);
 
     let mut process_list = Task::block_on(ProcessList::get().write());
     let (thread, process) = ProcessBuilder::new()
@@ -176,5 +177,5 @@ async fn init_process(early_kstack_pfn: PFN) {
     // TODO!!!: Remove this.
     thread.files.open_console();
 
-    Scheduler::get().spawn::<KernelStack, _>(ThreadRunnable::new(thread, ip, sp));
+    Scheduler::get().spawn::<KernelStack, _>(ThreadRunnable::new(thread));
 }

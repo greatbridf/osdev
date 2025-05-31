@@ -3,7 +3,7 @@ use eonix_hal_traits::{
     trap::{RawTrapContext, TrapType},
 };
 
-#[derive(Default)]
+#[derive(Clone, Copy, Default)]
 #[repr(C, align(16))]
 pub struct TrapContext {
     rax: u64,
@@ -117,6 +117,11 @@ impl RawTrapContext for TrapContext {
 
     fn is_user_mode(&self) -> bool {
         self.cs & 3 == 3
+    }
+
+    fn set_user_mode(&mut self, user: bool) {
+        self.cs = if user { 0x2b } else { 0x08 };
+        self.ss = if user { 0x33 } else { 0x10 };
     }
 
     fn set_user_return_value(&mut self, retval: usize) {

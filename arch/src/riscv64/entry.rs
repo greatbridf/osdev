@@ -4,9 +4,10 @@ use core::{
     sync::atomic::AtomicUsize,
 };
 use intrusive_list::{container_of, Link};
+use super::config::mm::*;
 use super::mm::*;
 use buddy_allocator::{BuddyAllocator, BuddyRawPage};
-use riscv::register::satp;
+use riscv::{asm::sfence_vma_all, register::satp};
 use eonix_mm::{
     address::{Addr as _, PAddr, VAddr, VRange},
     page_table::{PageAttribute, PagingMode, RawAttribute, PTE as _},
@@ -190,6 +191,7 @@ fn setup_page_tables() {
     unsafe {
         satp::set(satp::Mode::Sv48, 0, PFN::from(page_table.addr()).into());
     }
+    sfence_vma_all();
 }
 
 extern "C" {
@@ -200,7 +202,7 @@ extern "C" {
 #[naked]
 #[no_mangle]
 #[link_section = ".text.entry"]
-unsafe extern "C" fn _start() -> ! {
+unsafe extern "C" fn _start(hart_id: usize, dtb_addr: usize) -> ! {
     naked_asm!(
         "la sp, {stack_top}",
         // TODO: set up page table, somewhere may be wrong

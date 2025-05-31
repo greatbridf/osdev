@@ -6,21 +6,10 @@ use eonix_mm::{
     },
     paging::{PageBlock, PFN},
 };
+use riscv::{asm::sfence_vma_all, register::satp};
 
-#[derive(Clone, Copy)]
-pub enum PageSize {
-    _4KbPage = 4096,
-    _2MbPage = 2 * 1024 * 1024,
-    _1GbPage = 1 * 1024 * 1024 * 1024,
-}
+use super::config::mm::ROOT_PAGE_TABLE_PFN;
 
-pub const ROOT_PAGE_TABLE_PHYS_ADDR: usize = 0x8040_0000;
-pub const ROOT_PAGE_TABLE_PFN: usize = ROOT_PAGE_TABLE_PHYS_ADDR >> 12;
-pub const PAGE_TABLE_PHYS_END: usize = 0x8080_0000;
-pub const PHYS_MAP_VIRT: usize = 0xFFFF_FF00_0000_0000;
-pub const KIMAGE_PHYS_BASE: usize = 0x8020_0000;
-pub const KIMAGE_VIRT_BASE: usize = 0xFFFF_FFFF_FFC0_0000;
-pub const PAGE_SIZE: usize = 0x1000;
 pub const PAGE_TABLE_BASE: PFN = PFN::from_val(ROOT_PAGE_TABLE_PFN);
 
 pub const PA_V: u64 = 0b1 << 0;
@@ -224,3 +213,10 @@ impl RawAttribute for PageAttribute64 {
 }
 
 pub type DefaultPagingMode = PagingModeSv48;
+
+pub fn setup_kernel_page_table() {
+    unsafe {
+        satp::set(satp::Mode::Sv48, 0, PFN::from(ROOT_PAGE_TABLE_PFN).into());
+    }
+    sfence_vma_all();
+}

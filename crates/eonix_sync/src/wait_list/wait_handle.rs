@@ -1,4 +1,5 @@
 use super::{wait_object::WaitObject, WaitList};
+use crate::SpinIrq as _;
 use core::{
     cell::UnsafeCell,
     hint::spin_loop,

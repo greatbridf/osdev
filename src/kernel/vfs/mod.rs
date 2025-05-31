@@ -42,7 +42,6 @@ pub struct TimeSpec {
     pub nsec: u64,
 }
 
-#[derive(Clone)]
 pub struct FsContext {
     pub fsroot: Arc<Dentry>,
     pub cwd: Spin<Arc<Dentry>>,
@@ -75,8 +74,8 @@ impl FsContext {
     pub fn new_cloned(other: &Self) -> Arc<Self> {
         Arc::new(Self {
             fsroot: other.fsroot.clone(),
-            cwd: other.cwd.clone(),
-            umask: other.umask.clone(),
+            cwd: Spin::new(other.cwd.lock().clone()),
+            umask: Spin::new(other.umask.lock().clone()),
         })
     }
 

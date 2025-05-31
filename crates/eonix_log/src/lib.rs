@@ -1,9 +1,8 @@
 #![no_std]
 
-use core::fmt::{self, Write};
-
 use alloc::sync::Arc;
-use eonix_sync::Spin;
+use core::fmt::{self, Write};
+use eonix_sync::{Spin, SpinIrq as _};
 
 extern crate alloc;
 

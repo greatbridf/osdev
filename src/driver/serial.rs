@@ -10,7 +10,7 @@ use alloc::{collections::vec_deque::VecDeque, format, sync::Arc};
 use bitflags::bitflags;
 use core::pin::pin;
 use eonix_runtime::{run::FutureRun, scheduler::Scheduler};
-use eonix_sync::WaitList;
+use eonix_sync::{SpinIrq as _, WaitList};
 
 bitflags! {
     struct LineStatus: u8 {

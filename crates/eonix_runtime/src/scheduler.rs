@@ -14,7 +14,7 @@ use core::{
 };
 use eonix_log::println_trace;
 use eonix_preempt::assert_preempt_count_eq;
-use eonix_sync::{LazyLock, Spin};
+use eonix_sync::{LazyLock, Spin, SpinIrq as _};
 use intrusive_collections::RBTree;
 use pointers::BorrowedArc;
 

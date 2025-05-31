@@ -1,5 +1,5 @@
 use super::WaitList;
-use crate::Spin;
+use crate::{Spin, SpinIrq as _};
 use core::{
     cell::UnsafeCell,
     marker::PhantomPinned,

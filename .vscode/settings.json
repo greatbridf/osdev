@@ -1,0 +1,4 @@
+{
+    "makefile.configureOnOpen": false,
+    "rust-analyzer.check.allTargets": false,
+}

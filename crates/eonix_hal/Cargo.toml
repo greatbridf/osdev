@@ -1,0 +1,12 @@
+[package]
+name = "eonix_hal"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+eonix_hal_traits = { path = "./eonix_hal_traits" }
+eonix_hal_macros = { path = "./eonix_hal_macros" }
+
+arch = { path = "../../arch" }
+eonix_percpu = { path = "../eonix_percpu" }
+eonix_preempt = { path = "../eonix_preempt" }

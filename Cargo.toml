@@ -12,6 +12,8 @@ atomic_unique_refcell = { path = "./crates/atomic_unique_refcell", features = [
     "no_std",
 ] }
 buddy_allocator = { path = "./crates/buddy_allocator" }
+eonix_hal = { path = "./crates/eonix_hal" }
+eonix_macros = { path = "./macros" }
 eonix_mm = { path = "./crates/eonix_mm" }
 eonix_percpu = { path = "./crates/eonix_percpu" }
 eonix_preempt = { path = "./crates/eonix_preempt" }

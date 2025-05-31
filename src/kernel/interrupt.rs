@@ -42,7 +42,7 @@ fn fault_handler(int_stack: &mut InterruptContext) {
     }
 }
 
-#[no_mangle]
+#[eonix_hal::default_trap_handler]
 pub extern "C" fn interrupt_handler(
     int_stack: *mut InterruptContext,
     ext_ctx: *mut ExtendedContext,

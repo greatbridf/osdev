@@ -220,6 +220,8 @@ extern "C" fn _init_on_new_stack(early_kernel_stack_pfn: PFN) -> ! {
 
     unsafe { init_allocator() };
 
+    eonix_hal::trap::init();
+
     kernel::interrupt::init().unwrap();
 
     kernel_init(early_kernel_stack_pfn)

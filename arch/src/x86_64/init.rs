@@ -52,8 +52,8 @@ pub struct CPU {
 }
 
 impl CPU {
-    pub fn new() -> Self {
-        let (interrupt_control, cpuid) = InterruptControl::new();
+    pub fn new(base: usize) -> Self {
+        let (interrupt_control, cpuid) = InterruptControl::new(base);
 
         Self {
             cpuid,

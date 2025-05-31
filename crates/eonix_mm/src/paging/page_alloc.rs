@@ -6,6 +6,7 @@ use super::{raw_page::UnmanagedRawPage, RawPage};
 /// behavior, meaning that the allocators are to be passed around by value and stored in
 /// managed data structures. This is because the allocator may be used to deallocate the
 /// pages it allocates.
+#[doc(notable_trait)]
 pub trait PageAlloc: Clone {
     type RawPage: RawPage;
 
@@ -37,6 +38,7 @@ pub trait PageAlloc: Clone {
 /// A trait for global page allocators.
 ///
 /// Global means that we can get an instance of the allocator from anywhere in the kernel.
+#[doc(notable_trait)]
 pub trait GlobalPageAlloc: PageAlloc + 'static {
     /// Get the global page allocator.
     fn global() -> Self;

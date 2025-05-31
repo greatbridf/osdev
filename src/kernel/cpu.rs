@@ -5,7 +5,8 @@ use eonix_mm::paging::Page;
 use eonix_sync::LazyLock;
 
 #[eonix_percpu::define_percpu]
-static CPU: LazyLock<CPU> = LazyLock::new(CPU::new);
+static CPU: LazyLock<CPU> =
+    LazyLock::new(|| CPU::new(unsafe { eonix_hal::trap::TRAP_STUBS_START }));
 
 /// # Safety
 /// This function is unsafe because it needs preemption to be disabled.

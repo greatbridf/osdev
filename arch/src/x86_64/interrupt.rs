@@ -90,7 +90,6 @@ global_asm!(
 
         mov %rbx, %rdi
         mov %rsp, %rsi
-        call interrupt_handler
 
     ISR_stub_restore:
         fxrstor (%rsp)
@@ -126,117 +125,13 @@ global_asm!(
         iretq
         .cfi_endproc
 
-    .altmacro
-    .macro build_isr_no_err name
-        .align 8
-        .globl ISR\name
-        .type  ISR\name @function
-        ISR\name:
-            .cfi_startproc
-            .cfi_signal_frame
-            .cfi_def_cfa_offset 0x08
-            .cfi_offset %rsp, 0x10
-
-            .cfi_same_value %rax
-            .cfi_same_value %rbx
-            .cfi_same_value %rcx
-            .cfi_same_value %rdx
-            .cfi_same_value %rdi
-            .cfi_same_value %rsi
-            .cfi_same_value %r8
-            .cfi_same_value %r9
-            .cfi_same_value %r10
-            .cfi_same_value %r11
-            .cfi_same_value %r12
-            .cfi_same_value %r13
-            .cfi_same_value %r14
-            .cfi_same_value %r15
-            .cfi_same_value %rbp
-
-            push %rbp # push placeholder for error code
-            .cfi_def_cfa_offset 0x10
-
-            call ISR_stub
-            .cfi_endproc
-    .endm
-
-    .altmacro
-    .macro build_isr_err name
-        .align 8
-        .globl ISR\name
-        .type  ISR\name @function
-        ISR\name:
-            .cfi_startproc
-            .cfi_signal_frame
-            .cfi_def_cfa_offset 0x10
-            .cfi_offset %rsp, 0x10
-
-            .cfi_same_value %rax
-            .cfi_same_value %rbx
-            .cfi_same_value %rcx
-            .cfi_same_value %rdx
-            .cfi_same_value %rdi
-            .cfi_same_value %rsi
-            .cfi_same_value %r8
-            .cfi_same_value %r9
-            .cfi_same_value %r10
-            .cfi_same_value %r11
-            .cfi_same_value %r12
-            .cfi_same_value %r13
-            .cfi_same_value %r14
-            .cfi_same_value %r15
-            .cfi_same_value %rbp
-
-            call ISR_stub
-            .cfi_endproc
-    .endm
-
-    build_isr_no_err 0
-    build_isr_no_err 1
-    build_isr_no_err 2
-    build_isr_no_err 3
-    build_isr_no_err 4
-    build_isr_no_err 5
-    build_isr_no_err 6
-    build_isr_no_err 7
-    build_isr_err    8
-    build_isr_no_err 9
-    build_isr_err    10
-    build_isr_err    11
-    build_isr_err    12
-    build_isr_err    13
-    build_isr_err    14
-    build_isr_no_err 15
-    build_isr_no_err 16
-    build_isr_err    17
-    build_isr_no_err 18
-    build_isr_no_err 19
-    build_isr_no_err 20
-    build_isr_err    21
-    build_isr_no_err 22
-    build_isr_no_err 23
-    build_isr_no_err 24
-    build_isr_no_err 25
-    build_isr_no_err 26
-    build_isr_no_err 27
-    build_isr_no_err 28
-    build_isr_err    29
-    build_isr_err    30
-    build_isr_no_err 31
-
-    .set i, 32
-    .rept 0x80+1
-        build_isr_no_err %i
-        .set i, i+1
-    .endr
-
     .section .rodata
 
     .align 8
     .globl ISR_START_ADDR
     .type  ISR_START_ADDR @object
     ISR_START_ADDR:
-        .quad ISR0
+        .quad 0
     ",
     options(att_syntax),
 );
@@ -426,14 +321,10 @@ impl APICRegs {
 impl InterruptControl {
     /// # Return
     /// Returns a tuple of InterruptControl and the cpu id of the current cpu.
-    pub(crate) fn new() -> (Self, usize) {
-        extern "C" {
-            static ISR_START_ADDR: usize;
-        }
-
+    pub(crate) fn new(base: usize) -> (Self, usize) {
         let idt = core::array::from_fn(|idx| match idx {
-            0..0x80 => IDTEntry::new(unsafe { ISR_START_ADDR } + 8 * idx, 0x08, 0x8e),
-            0x80 => IDTEntry::new(unsafe { ISR_START_ADDR } + 8 * idx, 0x08, 0xee),
+            0..0x80 => IDTEntry::new(base + 8 * idx, 0x08, 0x8e),
+            0x80 => IDTEntry::new(base + 8 * idx, 0x08, 0xee),
             _ => IDTEntry::null(),
         });
 

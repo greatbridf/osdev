@@ -27,6 +27,7 @@ bitflags! {
     }
 }
 
+#[doc(notable_trait)]
 pub trait RawAttribute: Copy + From<PageAttribute> + From<TableAttribute> {
     /// Create a new attribute representing a non-present page.
     fn null() -> Self;
@@ -46,6 +47,7 @@ pub trait RawAttribute: Copy + From<PageAttribute> + From<TableAttribute> {
     fn as_page_attr(self) -> Option<PageAttribute>;
 }
 
+#[doc(notable_trait)]
 pub trait PTE: Sized {
     type Attr: RawAttribute;
 

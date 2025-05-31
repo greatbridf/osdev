@@ -1,12 +1,13 @@
 mod context;
 mod fence;
+mod fpu;
 mod gdt;
 mod init;
 mod interrupt;
 mod io;
 mod mm;
 mod percpu;
-// mod trap;
+mod trap;
 mod user;
 
 use core::arch::asm;
@@ -20,9 +21,10 @@ pub use self::interrupt::*;
 pub use self::io::*;
 pub use self::user::*;
 pub use fence::*;
+pub use fpu::*;
 pub use mm::*;
 pub use percpu::*;
-// pub use trap::*;
+pub use trap::*;
 
 #[inline(always)]
 pub fn flush_tlb(vaddr: usize) {

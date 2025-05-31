@@ -27,6 +27,7 @@ name = "arch"
 version = "0.1.0"
 dependencies = [
  "cfg-if",
+ "eonix_hal_traits",
  "eonix_mm",
 ]
 
@@ -122,10 +123,46 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "60b1af1c220855b6ceac025d3f6ecdd2b7c4894bfe9cd9bda4fbb4bc7c0d4cf0"
 
 [[package]]
+name = "eonix_hal"
+version = "0.1.0"
+dependencies = [
+ "arch",
+ "eonix_hal_macros",
+ "eonix_hal_traits",
+ "eonix_percpu",
+ "eonix_preempt",
+]
+
+[[package]]
+name = "eonix_hal_macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "eonix_hal_traits"
+version = "0.1.0"
+dependencies = [
+ "bitflags",
+]
+
+[[package]]
 name = "eonix_log"
 version = "0.1.0"
 dependencies = [
  "eonix_sync",
+]
+
+[[package]]
+name = "eonix_macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]
@@ -192,7 +229,9 @@ dependencies = [
  "bindgen",
  "bitflags",
  "buddy_allocator",
+ "eonix_hal",
  "eonix_log",
+ "eonix_macros",
  "eonix_mm",
  "eonix_percpu",
  "eonix_preempt",

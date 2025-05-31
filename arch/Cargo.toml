@@ -4,5 +4,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+eonix_hal_traits = { path = "../crates/eonix_hal/eonix_hal_traits" }
 eonix_mm = { path = "../crates/eonix_mm" }
 cfg-if = "1.0"

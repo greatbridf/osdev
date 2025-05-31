@@ -1,13 +1,14 @@
 use super::cpu::local_cpu;
-use super::mem::handle_page_fault;
-use super::syscall::handle_syscall32;
-use super::task::{ProcessList, Signal, Thread};
+use super::mem::handle_kernel_page_fault;
 use super::timer::timer_interrupt;
 use crate::bindings::root::EINVAL;
 use crate::{driver::Port8, prelude::*};
 use alloc::sync::Arc;
-use arch::{ExtendedContext, InterruptContext};
-use eonix_runtime::task::Task;
+use arch::TrapContext;
+use eonix_hal::traits::fault::Fault;
+use eonix_hal::traits::trap::{RawTrapContext, TrapType};
+use eonix_mm::address::{Addr as _, VAddr};
+use eonix_runtime::scheduler::Scheduler;
 use eonix_sync::SpinIrq as _;
 
 const PIC1_COMMAND: Port8 = Port8::new(0x20);
@@ -18,7 +19,7 @@ const PIC2_DATA: Port8 = Port8::new(0xA1);
 static IRQ_HANDLERS: Spin<[Option<Arc<dyn Fn() + Send + Sync>>; 16]> =
     Spin::new([const { None }; 16]);
 
-fn irq_handler(irqno: usize) {
+pub fn default_irq_handler(irqno: usize) {
     assert!(irqno < 16);
 
     let handler = IRQ_HANDLERS.lock()[irqno as usize].as_ref().cloned();
@@ -32,38 +33,38 @@ fn irq_handler(irqno: usize) {
     }
 }
 
-fn fault_handler(int_stack: &mut InterruptContext) {
-    match int_stack.int_no {
-        // Invalid Op or Double Fault
-        14 => handle_page_fault(int_stack),
-        13 if int_stack.cs & 0x3 != 0 => ProcessList::kill_current(Signal::SIGILL),
-        6 | 8 if int_stack.cs & 0x3 != 0 => ProcessList::kill_current(Signal::SIGSEGV),
-        _ => panic!("Unhandled fault: {}", int_stack.int_no),
+pub fn default_fault_handler(fault_type: Fault, trap_ctx: &mut TrapContext) {
+    if trap_ctx.is_user_mode() {
+        unimplemented!("Unhandled user space fault");
+    }
+
+    match fault_type {
+        Fault::PageFault(error_code) => {
+            let fault_pc = VAddr::from(trap_ctx.get_program_counter());
+            let vaddr = arch::get_page_fault_address();
+
+            if let Some(new_pc) = handle_kernel_page_fault(fault_pc, vaddr, error_code) {
+                trap_ctx.set_program_counter(new_pc.addr());
+            }
+        }
+        fault => panic!("Unhandled kernel space fault: {fault:?}"),
     }
 }
 
 #[eonix_hal::default_trap_handler]
-pub extern "C" fn interrupt_handler(
-    int_stack: *mut InterruptContext,
-    ext_ctx: *mut ExtendedContext,
-) {
-    let int_stack = unsafe { &mut *int_stack };
-    let ext_ctx = unsafe { &mut *ext_ctx };
+pub fn interrupt_handler(trap_ctx: &mut TrapContext) {
+    match trap_ctx.trap_type() {
+        TrapType::Syscall { no, .. } => unreachable!("Syscall {} in kernel space.", no),
+        TrapType::Fault(fault) => default_fault_handler(fault, trap_ctx),
+        TrapType::Irq(no) => default_irq_handler(no),
+        TrapType::Timer => {
+            timer_interrupt();
 
-    match int_stack.int_no {
-        // Fault
-        0..0x20 => fault_handler(int_stack),
-        // Syscall
-        0x80 => handle_syscall32(int_stack.rax as usize, int_stack, ext_ctx),
-        // Timer
-        0x40 => timer_interrupt(),
-        // IRQ
-        no => irq_handler(no as usize - 0x20),
-    }
-
-    if int_stack.cs & 0x3 != 0 {
-        if Thread::current().signal_list.has_pending_signal() {
-            Task::block_on(Thread::current().signal_list.handle(int_stack, ext_ctx));
+            if eonix_preempt::count() == 0 {
+                // To make scheduler satisfied.
+                eonix_preempt::disable();
+                Scheduler::schedule();
+            }
         }
     }
 }

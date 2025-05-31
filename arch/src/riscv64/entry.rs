@@ -1,11 +1,15 @@
+use super::{
+    config::{self, mm::*},
+    mm::*,
+    fdt::get_num_harts,
+};
+
 use core::{
     arch::naked_asm,
     ptr::NonNull,
     sync::atomic::AtomicUsize,
 };
 use intrusive_list::{container_of, Link};
-use super::config::mm::*;
-use super::mm::*;
 use buddy_allocator::{BuddyAllocator, BuddyRawPage};
 use riscv::{asm::sfence_vma_all, register::satp};
 use eonix_mm::{
@@ -150,7 +154,7 @@ impl PageAlloc for BuddyPageAlloc {
 
 type PageTable<'a> = eonix_mm::page_table::PageTable<'a, PagingModeSv48, BuddyPageAlloc, DirectPageAccess>;
 
-fn setup_page_tables() {
+fn setup_kernel_page_table() {
     let attr = PageAttribute::WRITE
         | PageAttribute::READ
         | PageAttribute::EXECUTE
@@ -205,11 +209,15 @@ extern "C" {
 unsafe extern "C" fn _start(hart_id: usize, dtb_addr: usize) -> ! {
     naked_asm!(
         "la sp, {stack_top}",
-        // TODO: set up page table, somewhere may be wrong
-        "call {setup_page_tables_fn}",
-        "jr {kernel_init_fn}",
+        "jr {start_fn}",
         stack_top = sym BOOT_STACK,
-        setup_page_tables_fn = sym setup_page_tables,
-        kernel_init_fn = sym kernel_init,
+        start_fn = sym riscv64_start,
     )
+}
+
+fn riscv64_start(hart_id: usize, dtb_addr: usize) {
+    let num_harts = get_num_harts(dtb_addr);
+    config::smp::set_num_harts(num_harts);
+    setup_kernel_page_table();
+    unsafe { kernel_init() };
 }

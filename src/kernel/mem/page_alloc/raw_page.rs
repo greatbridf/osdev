@@ -34,13 +34,13 @@ impl SlabPageInner {
 
 pub struct BuddyPageInner {}
 
-pub enum PageType {
+enum PageType {
     Buddy(BuddyPageInner),
     Slab(SlabPageInner),
 }
 
 impl PageType {
-    pub fn slab_data(&mut self) -> &mut SlabPageInner {
+    fn slab_data(&mut self) -> &mut SlabPageInner {
         if let PageType::Slab(slab_data) = self {
             return slab_data;
         } else {
@@ -53,14 +53,14 @@ pub struct RawPage {
     /// This can be used for LRU page swap in the future.
     ///
     /// Now only used for free page links in the buddy system.
-    pub link: Link,
+    link: Link,
     /// # Safety
     /// This field is only used in buddy system and is protected by the global lock.
-    pub order: u32,
-    pub flags: PageFlags,
-    pub refcount: AtomicUsize,
+    order: u32,
+    flags: PageFlags,
+    refcount: AtomicUsize,
 
-    pub shared_data: PageType,
+    shared_data: PageType,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]

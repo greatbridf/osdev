@@ -1,7 +1,12 @@
 use core::pin::Pin;
-use riscv::{asm::sfence_vma_all, register::{
-    mhartid, sscratch, sstatus, stvec::{self, Stvec}
-}};
+use riscv::{
+    asm::sfence_vma_all, register::{
+        mhartid,
+        sscratch,
+        sstatus,
+        stvec::{self, Stvec}
+    }
+};
 use sbi::PhysicalAddress;
 
 /// TODO:

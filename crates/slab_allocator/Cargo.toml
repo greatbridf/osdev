@@ -1,0 +1,10 @@
+[package]
+name = "slab_allocator"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+eonix_mm = { path = "../eonix_mm" }
+eonix_sync = { path = "../eonix_sync" }
+intrusive_list = { path = "../intrusive_list" }
+

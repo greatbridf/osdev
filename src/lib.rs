@@ -25,7 +25,6 @@ mod rcu;
 mod sync;
 
 use alloc::{ffi::CString, sync::Arc};
-use core::alloc::{GlobalAlloc, Layout};
 use elf::ParsedElf32;
 use eonix_mm::{address::PAddr, paging::PFN};
 use eonix_runtime::{run::FutureRun, scheduler::Scheduler, task::Task};
@@ -62,36 +61,8 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
 }
 
 extern "C" {
-    fn _do_allocate(size: usize) -> *mut core::ffi::c_void;
-    fn _do_deallocate(ptr: *mut core::ffi::c_void, size: core::ffi::c_size_t) -> i32;
-    fn init_pci();
-}
-
-struct Allocator;
-unsafe impl GlobalAlloc for Allocator {
-    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        let result = _do_allocate(layout.size());
-
-        if result.is_null() {
-            core::ptr::null_mut()
-        } else {
-            result as *mut u8
-        }
-    }
-
-    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        match _do_deallocate(ptr as *mut core::ffi::c_void, layout.size()) {
-            0 => (),
-            _ => panic!("Failed to deallocate memory"),
-        }
-    }
-}
-
-#[global_allocator]
-static ALLOCATOR: Allocator = Allocator;
-
-extern "C" {
     fn init_allocator();
+    fn init_pci();
 }
 
 #[no_mangle]

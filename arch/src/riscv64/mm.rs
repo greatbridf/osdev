@@ -1,6 +1,5 @@
 use core::{marker::PhantomData, ptr::NonNull};
 use eonix_mm::{
-    address::{Addr as _, PAddr},
     page_table::{
         PageAttribute, PageTableLevel, PagingMode, RawAttribute, RawPageTable, TableAttribute, PTE,
     },
@@ -27,18 +26,9 @@ pub const PA_MMAP: u64 = 0b1 << 9;
 
 #[allow(dead_code)]
 pub const PA_SHIFT: u64 = 10;
-pub const PA_MASK: u64 = 0xFFC0_0000_0000_03FF; // 44 bit PPN, from 10 to 53
 // Bit 0-9 (V, R, W, X, U, G, A, D, RSW)
 #[allow(dead_code)]
 pub const PA_FLAGS_MASK: u64 = 0x3FF; // 0b11_1111_1111
-
-pub const PA_KERNEL_RWX: u64 = PA_V | PA_R | PA_W | PA_X | PA_G;
-pub const PA_KERNEL_RW: u64 = PA_V | PA_R | PA_W | PA_G;
-pub const PA_KERNEL_RO: u64 = PA_V | PA_R | PA_G;
-
-pub const LEVEL0_PAGE_SIZE: usize = 4096; // 4KB page
-pub const LEVEL1_PAGE_SIZE: usize = 2 * 1024 * 1024; // 2MB huge page
-pub const LEVEL2_PAGE_SIZE: usize = 1 * 1024 * 1024 * 1024; // 1GB huge page
 
 #[repr(transparent)]
 #[derive(Clone, Copy)]
@@ -55,14 +45,13 @@ impl PTE for PTE64 {
     type Attr = PageAttribute64;
 
     fn set(&mut self, pfn: PFN, attr: Self::Attr) {
-        self.0 = (PAddr::from(pfn).addr() as u64 & !PA_MASK) | (attr.0 & PA_MASK);
+        self.0 = (usize::from(pfn) << PA_SHIFT) as u64 | attr.0;
     }
 
     fn get(&self) -> (PFN, Self::Attr) {
-        (
-            PFN::from(PAddr::from((self.0 & !PA_MASK) as usize)),
-            PageAttribute64(self.0 & PA_MASK),
-        )
+        let pfn = PFN::from(self.0 as usize >> PA_SHIFT);
+        let attr = PageAttribute64(self.0 & PA_FLAGS_MASK);
+        (pfn, attr)
     }
 }
 
@@ -82,11 +71,11 @@ impl<'a> RawPageTable<'a> for RawPageTableSv48<'a> {
     type Entry = PTE64;
 
     fn index(&self, index: u16) -> &'a Self::Entry {
-        unsafe { &self.0.cast::<[PTE64; 512]>().as_ref()[index as usize] }
+        unsafe { self.0.add(index as usize).as_ref() }
     }
 
     fn index_mut(&mut self, index: u16) -> &'a mut Self::Entry {
-        unsafe { &mut self.0.cast::<[PTE64; 512]>().as_mut()[index as usize] }
+        unsafe { self.0.add(index as usize).as_mut() }
     }
 
     unsafe fn from_ptr(ptr: NonNull<PageBlock>) -> Self {
@@ -123,7 +112,11 @@ impl RawAttribute for PageAttribute64 {
     }
 
     fn as_page_attr(self) -> Option<PageAttribute> {
-        let mut page_attr = PageAttribute::READ;
+        let mut page_attr = PageAttribute::empty();
+
+        if self.0 & (PA_R | PA_W | PA_X) == 0 {
+            panic!("Invalid page attribute combination");
+        }
 
         if self.0 & PA_V != 0 {
             page_attr |= PageAttribute::PRESENT;
@@ -173,7 +166,7 @@ impl RawAttribute for PageAttribute64 {
     }
 
     fn from_table_attr(table_attr: TableAttribute) -> Self {
-        let mut raw_attr = PA_W | PA_R;
+        let mut raw_attr = 0;
 
         for attr in table_attr.iter() {
             match attr {

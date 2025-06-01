@@ -168,7 +168,7 @@ fn setup_kernel_page_table() {
 
     // Map 0x80200000-0x81200000 16MB identically, use 2MB page
     for (idx, pte) in page_table
-        .iter_kernel_levels(VRange::from(VAddr::from(KIMAGE_PHYS_BASE)).grow(0x1000000), &PagingModeSv48::LEVELS[..2])
+        .iter_kernel_levels(VRange::from(VAddr::from(KIMAGE_PHYS_BASE)).grow(0x1000000), &PagingModeSv48::LEVELS[..=2])
         .enumerate()
     {
         pte.set(PFN::from(idx * 0x200 + 0x80200), PageAttribute64::from_page_attr(attr));
@@ -177,7 +177,7 @@ fn setup_kernel_page_table() {
     // Map 0x0000_0000_0000_0000-0x0000_007F_FFFF_FFFF 512GB
     // to 0xFFFF_FF00_0000_0000 to 0xFFFF_FF7F_FFFF_FFFF, use 1 GB page
     for (idx, pte) in page_table
-        .iter_kernel_levels(VRange::from(VAddr::from(PHYS_MAP_VIRT)).grow(0x80_0000_0000), &PagingModeSv48::LEVELS[..1])
+        .iter_kernel_levels(VRange::from(VAddr::from(PHYS_MAP_VIRT)).grow(0x80_0000_0000), &PagingModeSv48::LEVELS[..=1])
         .enumerate()
     {
         pte.set(PFN::from(idx * 0x40000), PageAttribute64::from_page_attr(attr));
@@ -185,7 +185,7 @@ fn setup_kernel_page_table() {
 
     // Map 2 MB kernel image
     for (idx, pte) in page_table
-        .iter_kernel_levels(VRange::from(VAddr::from(KIMAGE_VIRT_BASE)).grow(0x20_0000), &PagingModeSv48::LEVELS[..3])
+        .iter_kernel(VRange::from(VAddr::from(KIMAGE_VIRT_BASE)).grow(0x20_0000))
         .enumerate()
     {
         pte.set(PFN::from(idx + 0x80200), PageAttribute64::from_page_attr(attr));
@@ -209,7 +209,7 @@ extern "C" {
 unsafe extern "C" fn _start(hart_id: usize, dtb_addr: usize) -> ! {
     naked_asm!(
         "la sp, {stack_top}",
-        "jr {start_fn}",
+        "j {start_fn}",
         stack_top = sym BOOT_STACK,
         start_fn = sym riscv64_start,
     )

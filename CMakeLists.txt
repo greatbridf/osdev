@@ -9,7 +9,7 @@ set(CMAKE_CXX_LINK_EXECUTABLE
 set(C_CXX_FLAGS "-nostdinc -nostdlib -mno-sse -mno-mmx -W -Wall -Wextra -Wno-stringop-overflow -Wno-builtin-declaration-mismatch -Wno-format -fverbose-asm -fno-exceptions -ffreestanding -fno-pic -mno-red-zone -mstack-protector-guard=global -mcmodel=kernel")
 set(CMAKE_C_FLAGS "${C_CXX_FLAGS} -Werror=implicit-int -Werror=implicit-function-declaration -Werror=strict-aliasing")
 set(CMAKE_CXX_FLAGS "${C_CXX_FLAGS} -fno-use-cxa-atexit -fno-rtti")
-set(CMAKE_CXX_LINK_FLAGS "-z noexecstack --gc-sections")
+set(CMAKE_CXX_LINK_FLAGS "-z noexecstack --gc-sections --no-check-sections")
 SET(CMAKE_ASM_FLAGS "${CFLAGS} -x assembler-with-cpp")
 set(CMAKE_CXX_STANDARD 20)
 
@@ -30,24 +30,13 @@ if (NOT DEFINED FDISK_BIN)
 endif()
 
 add_subdirectory(gblibc)
-add_subdirectory(gblibstdc++)
 add_subdirectory(user-space-program)
 
-set(BOOTLOADER_SOURCES src/boot.s
-                       src/mbr.S
-                       )
+set(BOOTLOADER_SOURCES src/mbr.S)
 
-set(KERNEL_MAIN_SOURCES include/kernel/async/lock.hpp
-                        include/kernel/mem/paging.hpp
-                        include/kernel/mem/slab.hpp
-                        include/types/list.hpp
-                        include/types/types.h
-                        include/types/allocator.hpp
-                        )
-
-add_executable(kernel.out ${KERNEL_MAIN_SOURCES} ${BOOTLOADER_SOURCES})
+add_executable(kernel.out ${BOOTLOADER_SOURCES})
 add_dependencies(kernel.out rustpart)
-target_link_libraries(kernel.out gblibc gblibstdc++ gbos_rust_part)
+target_link_libraries(kernel.out gblibc gbos_rust_part)
 target_include_directories(kernel.out PRIVATE ${PROJECT_SOURCE_DIR}/include)
 target_link_options(kernel.out PRIVATE
     -T "${CMAKE_SOURCE_DIR}/src/kernel.ld"
@@ -55,6 +44,7 @@ target_link_options(kernel.out PRIVATE
     --no-check-sections
     )
 set_target_properties(kernel.out PROPERTIES LINK_DEPENDS "${CMAKE_SOURCE_DIR}/src/kernel.ld")
+set_target_properties(kernel.out PROPERTIES LINKER_LANGUAGE CXX)
 set_source_files_properties(src/mbr.S PROPERTIES OBJECT_DEPENDS
     "${CMAKE_BINARY_DIR}/x86_64-unknown-none/${CARGO_BUILD_TYPE}/libgbos_rust_part.a"
     )

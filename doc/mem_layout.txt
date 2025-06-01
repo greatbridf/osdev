@@ -17,14 +17,10 @@ physical memory
 
 virtual address space
 
-0xffff ff0 000 000 000 - 0xffff ff3 fff fff fff  256GB physical memory (cached)
-0xffff ff4 000 000 000 - 0xffff ff7 fff fff fff  256GB physical memory (not cached)
+0xffff ff0 000 000 000 - 0xffff ff7 fff fff fff  512GB physical memory
 0xffff ff8 000 000 000 - 0xffff ff8 03f fff fff    1GB unused
 0xffff ff8 040 000 000 - 0xffff ff8 13f fff fff    4GB struct page array
-0xffff ff8 140 000 000 - 0xffff ff8 17f fff fff    1GB unused
-0xffff ff8 180 000 000 - 0xffff ffb fff fff fff  250GB kernel heap
-
-0xffff ffc 000 000 000 - 0xffff fff fbf fff fff  255GB unused
+0xffff ff8 140 000 000 - 0xffff fff fbf fff fff    506GB unused
 
 0xffff fff fc0 000 000 - 0xffff fff fc0 1ff fff    2MB unused
 0xffff fff fc0 200 000 - 0xffff fff fff 9ff fff 1016MB kernel bss

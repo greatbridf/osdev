@@ -1,3 +1,4 @@
+mod bootstrap;
 mod context;
 mod fence;
 mod fpu;
@@ -20,6 +21,7 @@ pub use self::init::*;
 pub use self::interrupt::*;
 pub use self::io::*;
 pub use self::user::*;
+pub use bootstrap::*;
 pub use fence::*;
 pub use fpu::*;
 pub use mm::*;

@@ -9,24 +9,24 @@ use eonix_mm::{
 
 pub const PAGE_SIZE: usize = 0x1000;
 
-const KERNEL_PML4_PFN: PFN = PFN::from_val(0x1000 >> 12);
+pub const KERNEL_PML4_PFN: PFN = PFN::from_val(0x1000 >> 12);
 
-const PA_P: u64 = 0x001;
-const PA_RW: u64 = 0x002;
-const PA_US: u64 = 0x004;
+pub const PA_P: u64 = 0x001;
+pub const PA_RW: u64 = 0x002;
+pub const PA_US: u64 = 0x004;
 #[allow(dead_code)]
-const PA_PWT: u64 = 0x008;
+pub const PA_PWT: u64 = 0x008;
 #[allow(dead_code)]
-const PA_PCD: u64 = 0x010;
-const PA_A: u64 = 0x020;
-const PA_D: u64 = 0x040;
-const PA_PS: u64 = 0x080;
-const PA_G: u64 = 0x100;
-const PA_COW: u64 = 0x200;
-const PA_MMAP: u64 = 0x400;
-const PA_ANON: u64 = 0x800;
-const PA_NXE: u64 = 0x8000_0000_0000_0000;
-const PA_MASK: u64 = 0xfff0_0000_0000_0fff;
+pub const PA_PCD: u64 = 0x010;
+pub const PA_A: u64 = 0x020;
+pub const PA_D: u64 = 0x040;
+pub const PA_PS: u64 = 0x080;
+pub const PA_G: u64 = 0x100;
+pub const PA_COW: u64 = 0x200;
+pub const PA_MMAP: u64 = 0x400;
+pub const PA_ANON: u64 = 0x800;
+pub const PA_NXE: u64 = 0x8000_0000_0000_0000;
+pub const PA_MASK: u64 = 0xfff0_0000_0000_0fff;
 
 #[repr(transparent)]
 pub struct PTE64(u64);

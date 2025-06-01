@@ -41,6 +41,14 @@ impl List {
             node
         })
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.count == 0
+    }
+
+    pub fn head(&mut self) -> Option<&mut Link> {
+        self.head.next_mut()
+    }
 }
 
 impl Link {

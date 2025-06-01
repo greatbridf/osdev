@@ -37,11 +37,7 @@ set(BOOTLOADER_SOURCES src/boot.s
                        src/mbr.S
                        )
 
-set(KERNEL_MAIN_SOURCES src/kernel/async/lock.cc
-                        src/kernel/allocator.cc
-                        src/kernel/mem/slab.cc
-                        src/types/libstdcpp.cpp
-                        include/kernel/async/lock.hpp
+set(KERNEL_MAIN_SOURCES include/kernel/async/lock.hpp
                         include/kernel/mem/paging.hpp
                         include/kernel/mem/slab.hpp
                         include/types/list.hpp

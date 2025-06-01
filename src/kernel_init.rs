@@ -214,12 +214,6 @@ extern "C" fn _init_on_new_stack(early_kernel_stack_pfn: PFN) -> ! {
 
     init_localcpu();
 
-    extern "C" {
-        fn init_allocator();
-    }
-
-    unsafe { init_allocator() };
-
     eonix_hal::trap::init();
 
     kernel::interrupt::init().unwrap();

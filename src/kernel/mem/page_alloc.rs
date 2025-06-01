@@ -1,17 +1,16 @@
 mod raw_page;
 
-use super::{paging::AllocZeroed as _, Page};
 use buddy_allocator::{BuddyAllocator, BuddyRawPage as _};
-use core::{ptr::NonNull, sync::atomic::Ordering};
+use core::sync::atomic::Ordering;
 use eonix_mm::{
-    address::{AddrOps as _, PAddr, PRange},
+    address::{AddrOps as _, PRange},
     paging::{GlobalPageAlloc as GlobalPageAllocTrait, PageAlloc, PFN},
 };
 use eonix_sync::{NoContext, Spin};
 use intrusive_list::List;
-use raw_page::{PageFlags, RawPagePtr};
+use raw_page::PageFlags;
 
-pub use raw_page::RawPage;
+pub use raw_page::{RawPage, RawPagePtr};
 
 const COSTLY_ORDER: u32 = 3;
 const BATCH_SIZE: u32 = 64;
@@ -195,28 +194,4 @@ impl PageAlloc for EarlyPageAlloc {
     fn has_management_over(&self, page_ptr: Self::RawPage) -> bool {
         BuddyAllocator::has_management_over(page_ptr)
     }
-}
-
-#[no_mangle]
-pub extern "C" fn page_to_pfn(page: *const ()) -> PFN {
-    let page_ptr = RawPagePtr::new(NonNull::new(page as *mut _).unwrap());
-    PFN::from(page_ptr)
-}
-
-#[no_mangle]
-pub extern "C" fn c_alloc_page() -> *const RawPage {
-    GlobalPageAlloc.alloc().expect("Out of memory").as_ref()
-}
-
-#[no_mangle]
-pub extern "C" fn c_alloc_pages(order: u32) -> *const RawPage {
-    GlobalPageAlloc
-        .alloc_order(order)
-        .expect("Out of memory")
-        .as_ref()
-}
-
-#[no_mangle]
-pub extern "C" fn c_alloc_page_table() -> PAddr {
-    PAddr::from(Page::zeroed().into_raw())
 }

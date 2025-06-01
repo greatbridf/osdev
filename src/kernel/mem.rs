@@ -2,6 +2,7 @@ pub mod paging;
 
 mod access;
 mod address;
+mod allocator;
 mod mm_area;
 mod mm_list;
 mod page_alloc;

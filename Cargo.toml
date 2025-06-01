@@ -23,6 +23,7 @@ eonix_log = { path = "./crates/eonix_log" }
 intrusive_list = { path = "./crates/intrusive_list" }
 pointers = { path = "./crates/pointers" }
 posix_types = { path = "./crates/posix_types" }
+slab_allocator = { path = "./crates/slab_allocator" }
 
 bitflags = "2.6.0"
 intrusive-collections = "0.9.7"

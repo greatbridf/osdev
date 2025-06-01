@@ -507,6 +507,7 @@ impl File {
             _ => return Err(EINVAL),
         }
 
+        let mut nsent = 0;
         for (cur, len) in Chunks::new(0, count, buffer.len()) {
             if Thread::current().signal_list.has_pending_signal() {
                 return if cur == 0 { Err(EINTR) } else { Ok(cur) };
@@ -517,12 +518,14 @@ impl File {
             }
 
             let nwrote = dest_file.write(&buffer[..nread]).await?;
-            if nwrote != nread {
-                return Ok(cur + nwrote);
+            nsent += nwrote;
+
+            if nwrote != len {
+                break;
             }
         }
 
-        Ok(count)
+        Ok(nsent)
     }
 
     pub fn ioctl(&self, request: usize, arg3: usize) -> KResult<usize> {

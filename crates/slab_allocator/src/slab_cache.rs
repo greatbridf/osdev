@@ -8,8 +8,7 @@ pub(crate) struct SlabCache<T, A> {
     partial_list: List,
     full_list: List,
     object_size: u32,
-    alloc: A,
-    _phantom: PhantomData<T>,
+    _phantom: PhantomData<(T, A)>,
 }
 
 trait SlabRawPageExt {
@@ -89,7 +88,7 @@ where
     Raw: SlabRawPage,
     Allocator: PageAlloc<RawPage = Raw>,
 {
-    pub(crate) const fn new_in(object_size: u32, alloc: Allocator) -> Self {
+    pub(crate) const fn new_in(object_size: u32) -> Self {
         // avoid uncessary branch in alloc and dealloc
         assert!(object_size <= PAGE_SIZE as u32 / 2);
 
@@ -97,13 +96,12 @@ where
             empty_list: List::new(),
             partial_list: List::new(),
             full_list: List::new(),
-            alloc,
             object_size: object_size,
             _phantom: PhantomData,
         }
     }
 
-    pub(crate) fn alloc(&mut self) -> *mut u8 {
+    pub(crate) fn alloc(&mut self, alloc: &Allocator) -> *mut u8 {
         if !self.partial_list.is_empty() {
             let page_ptr = unsafe {
                 Raw::from_link(
@@ -137,7 +135,7 @@ where
             return ptr.as_ptr() as *mut u8;
         }
 
-        let new_page_ptr = self.alloc.alloc().expect("slab_cache get page fail!");
+        let new_page_ptr = alloc.alloc().expect("slab_cache get page fail!");
         let first_free = new_page_ptr.slab_page_init(self.object_size);
         new_page_ptr.slab_init(first_free);
         let ptr = new_page_ptr.alloc_slot().expect("should get slot");
@@ -145,7 +143,7 @@ where
         ptr.as_ptr() as *mut u8
     }
 
-    pub(crate) fn dealloc(&mut self, ptr: *mut u8) {
+    pub(crate) fn dealloc(&mut self, ptr: *mut u8, _alloc: &Allocator) {
         let page_ptr = Raw::in_which(ptr);
 
         if page_ptr.is_full() {
@@ -159,5 +157,8 @@ where
             self.partial_list.remove(unsafe { page_ptr.get_link() });
             self.empty_list.insert(unsafe { page_ptr.get_link() });
         }
+
+        // TODO: Check whether we should place some pages back with `alloc` if the global
+        //       free page count is below the watermark.
     }
 }

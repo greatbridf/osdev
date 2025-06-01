@@ -37,6 +37,7 @@ pub trait SlabRawPage: RawPage {
 
 pub struct SlabAllocator<T, A, const SLAB_CACHE_COUNT: usize> {
     slabs: [Spin<SlabCache<T, A>>; SLAB_CACHE_COUNT],
+    alloc: A,
 }
 
 unsafe impl<T, A, const SLAB_CACHE_COUNT: usize> Send for SlabAllocator<T, A, SLAB_CACHE_COUNT> {}
@@ -45,25 +46,24 @@ unsafe impl<T, A, const SLAB_CACHE_COUNT: usize> Sync for SlabAllocator<T, A, SL
 impl<Raw, Allocator, const SLAB_CACHE_COUNT: usize> SlabAllocator<Raw, Allocator, SLAB_CACHE_COUNT>
 where
     Raw: SlabRawPage,
-    Allocator: PageAlloc<RawPage = Raw> + Clone,
+    Allocator: PageAlloc<RawPage = Raw>,
 {
     pub fn new_in(alloc: Allocator) -> Self {
         Self {
-            slabs: core::array::from_fn(|i| {
-                Spin::new(SlabCache::new_in(1 << (i + 3), alloc.clone()))
-            }),
+            slabs: core::array::from_fn(|i| Spin::new(SlabCache::new_in(1 << (i + 3)))),
+            alloc,
         }
     }
 
     pub fn alloc(&self, mut size: usize) -> *mut u8 {
         size = max(8, size);
         let idx = size.next_power_of_two().trailing_zeros() - 3;
-        self.slabs[idx as usize].lock().alloc()
+        self.slabs[idx as usize].lock().alloc(&self.alloc)
     }
 
     pub fn dealloc(&self, ptr: *mut u8, mut size: usize) {
         size = max(8, size);
         let idx = size.next_power_of_two().trailing_zeros() - 3;
-        self.slabs[idx as usize].lock().dealloc(ptr);
+        self.slabs[idx as usize].lock().dealloc(ptr, &self.alloc);
     }
 }

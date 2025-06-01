@@ -9,9 +9,6 @@
 
 extern crate alloc;
 
-#[allow(warnings)]
-mod bindings;
-
 mod driver;
 mod elf;
 mod fs;

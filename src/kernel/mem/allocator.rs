@@ -1,10 +1,12 @@
 use core::alloc::{GlobalAlloc, Layout};
-use eonix_mm::paging::{PageAlloc, PAGE_SIZE_BITS};
+use eonix_mm::address::VAddr;
+use eonix_mm::paging::{PAGE_SIZE_BITS, PFN};
 use eonix_sync::LazyLock;
-use slab_allocator::{SlabAllocator, SlabRawPage};
+use slab_allocator::SlabAllocator;
 
+use super::access::RawPageAccess;
 use super::page_alloc::RawPagePtr;
-use super::GlobalPageAlloc;
+use super::{AsMemoryBlock, GlobalPageAlloc, Page};
 
 static SLAB_ALLOCATOR: LazyLock<SlabAllocator<RawPagePtr, GlobalPageAlloc, 9>> =
     LazyLock::new(|| SlabAllocator::new_in(GlobalPageAlloc));
@@ -18,12 +20,13 @@ unsafe impl GlobalAlloc for Allocator {
         let result = if size <= 2048 {
             SLAB_ALLOCATOR.alloc(size)
         } else {
-            let page_num = size >> PAGE_SIZE_BITS;
-            let order = page_num.next_power_of_two().trailing_zeros();
-            let raw_page = GlobalPageAlloc
-                .alloc_order(order)
-                .expect("allocate page failed!");
-            raw_page.real_ptr().as_ptr()
+            let page_count = size >> PAGE_SIZE_BITS;
+            let page = Page::alloc_at_least(page_count);
+
+            let ptr = page.as_memblk().as_ptr();
+            page.into_raw();
+
+            ptr.as_ptr()
         };
 
         if result.is_null() {
@@ -39,12 +42,10 @@ unsafe impl GlobalAlloc for Allocator {
         if size <= 2048 {
             SLAB_ALLOCATOR.dealloc(ptr, size)
         } else {
-            let page_ptr: RawPagePtr = SlabRawPage::in_which(ptr);
-            page_ptr
-                .as_mut()
-                .refcount
-                .fetch_sub(1, core::sync::atomic::Ordering::Relaxed);
-            GlobalPageAlloc.dealloc(page_ptr);
+            let vaddr = VAddr::from(ptr as usize);
+            let page_ptr = vaddr.as_raw_page();
+            let pfn = PFN::from(page_ptr);
+            Page::from_raw(pfn);
         };
     }
 }

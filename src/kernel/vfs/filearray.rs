@@ -3,6 +3,10 @@ use super::{
     inode::Mode,
     s_ischr, FsContext, Spin,
 };
+use crate::kernel::constants::{
+    EBADF, EISDIR, ENOTDIR, FD_CLOEXEC, F_DUPFD, F_DUPFD_CLOEXEC, F_GETFD, F_SETFD, O_APPEND,
+    O_CLOEXEC, O_DIRECTORY, O_RDWR, O_TRUNC, O_WRONLY,
+};
 use crate::{
     kernel::{
         console::get_console,
@@ -16,10 +20,6 @@ use crate::{
 use alloc::{
     collections::btree_map::{BTreeMap, Entry},
     sync::Arc,
-};
-use bindings::{
-    EBADF, EISDIR, ENOTDIR, FD_CLOEXEC, F_DUPFD, F_DUPFD_CLOEXEC, F_GETFD, F_SETFD, O_APPEND,
-    O_CLOEXEC, O_DIRECTORY, O_RDWR, O_TRUNC, O_WRONLY,
 };
 use core::sync::atomic::Ordering;
 use itertools::{

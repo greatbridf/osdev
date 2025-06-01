@@ -1,4 +1,4 @@
-use super::bindings::EINVAL;
+use crate::kernel::constants::EINVAL;
 use crate::kernel::mem::paging::Page;
 use crate::prelude::*;
 

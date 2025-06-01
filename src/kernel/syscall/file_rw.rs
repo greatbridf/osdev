@@ -1,3 +1,7 @@
+use crate::kernel::constants::{
+    AT_FDCWD, AT_STATX_SYNC_AS_STAT, AT_STATX_SYNC_TYPE, AT_SYMLINK_NOFOLLOW, EBADF, SEEK_CUR,
+    SEEK_END, SEEK_SET, S_IFBLK, S_IFCHR,
+};
 use crate::{
     io::{Buffer, BufferFill},
     kernel::{
@@ -14,12 +18,43 @@ use crate::{
     path::Path,
     prelude::*,
 };
-use bindings::{
-    statx, AT_FDCWD, AT_STATX_SYNC_AS_STAT, AT_STATX_SYNC_TYPE, AT_SYMLINK_NOFOLLOW, EBADF,
-    SEEK_CUR, SEEK_END, SEEK_SET, S_IFBLK, S_IFCHR,
-};
 use core::mem::MaybeUninit;
 use eonix_runtime::task::Task;
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct StatXTimestamp {
+    pub tv_sec: i64,
+    pub tv_nsec: u32,
+    pub __reserved: i32,
+}
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct StatX {
+    pub stx_mask: u32,
+    pub stx_blksize: u32,
+    pub stx_attributes: u64,
+    pub stx_nlink: u32,
+    pub stx_uid: u32,
+    pub stx_gid: u32,
+    pub stx_mode: u16,
+    pub __spare0: [u16; 1usize],
+    pub stx_ino: u64,
+    pub stx_size: u64,
+    pub stx_blocks: u64,
+    pub stx_attributes_mask: u64,
+    pub stx_atime: StatXTimestamp,
+    pub stx_btime: StatXTimestamp,
+    pub stx_ctime: StatXTimestamp,
+    pub stx_mtime: StatXTimestamp,
+    pub stx_rdev_major: u32,
+    pub stx_rdev_minor: u32,
+    pub stx_dev_major: u32,
+    pub stx_dev_minor: u32,
+    pub stx_mnt_id: u64,
+    pub stx_dio_alignment: [u64; 13usize],
+}
 
 #[eonix_macros::define_syscall(0x03)]
 fn read(fd: u32, buffer: *mut u8, bufsize: usize) -> KResult<usize> {
@@ -95,8 +130,8 @@ fn statx(dirfd: u32, path: *const u8, flags: u32, mask: u32, buffer: *mut u8) ->
         unimplemented!("AT_STATX_SYNC_TYPE={:x}", flags & AT_STATX_SYNC_TYPE);
     }
 
-    let mut stat: statx = unsafe { MaybeUninit::zeroed().assume_init() };
-    let mut buffer = UserBuffer::new(buffer, core::mem::size_of::<statx>())?;
+    let mut stat: StatX = unsafe { MaybeUninit::zeroed().assume_init() };
+    let mut buffer = UserBuffer::new(buffer, core::mem::size_of::<StatX>())?;
 
     if (flags & AT_EMPTY_PATH) != 0 {
         let file = thread.files.get(dirfd).ok_or(EBADF)?;

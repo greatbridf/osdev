@@ -12,8 +12,6 @@ macro_rules! dont_check {
 
 pub(crate) use dont_check;
 
-pub use crate::bindings::root as bindings;
-
 pub(crate) use crate::kernel::console::{
     print, println, println_debug, println_fatal, println_info, println_trace, println_warn,
 };

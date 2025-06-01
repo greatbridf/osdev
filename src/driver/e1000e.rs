@@ -1,16 +1,12 @@
 // use crate::prelude::*;
 //
-// use crate::bindings::root::kernel::hw::pci;
 // use crate::kernel::interrupt::register_irq_handler;
 // use crate::kernel::mem::{paging, phys};
 // use crate::net::netdev;
 // use alloc::boxed::Box;
 // use alloc::vec::Vec;
-// use bindings::EFAULT;
 // use paging::Page;
 // use phys::{NoCachePP, PhysPtr};
-//
-// use crate::bindings::root::{EAGAIN, EINVAL, EIO};
 //
 // mod defs;
 //

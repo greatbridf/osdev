@@ -1,6 +1,5 @@
+use crate::kernel::constants::{EFAULT, EINVAL};
 use core::{arch::asm, ffi::CStr};
-
-use bindings::{EFAULT, EINVAL};
 use eonix_preempt::assert_preempt_enabled;
 
 use crate::{

@@ -38,9 +38,6 @@ log_trace = ["trace_syscall", "trace_scheduler"]
 log_debug = []
 smp = []
 
-[build-dependencies]
-bindgen = "0.70.1"
-
 [profile.dev]
 panic = "abort"
 

@@ -1,7 +1,7 @@
 use super::cpu::local_cpu;
 use super::mem::handle_kernel_page_fault;
 use super::timer::timer_interrupt;
-use crate::bindings::root::EINVAL;
+use crate::kernel::constants::EINVAL;
 use crate::{driver::Port8, prelude::*};
 use alloc::sync::Arc;
 use arch::TrapContext;

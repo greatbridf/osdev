@@ -1,6 +1,6 @@
+use crate::kernel::constants::{S_IFBLK, S_IFCHR, S_IFDIR, S_IFLNK, S_IFMT, S_IFREG};
 use crate::prelude::*;
 use alloc::sync::Arc;
-use bindings::{dev_t, S_IFBLK, S_IFCHR, S_IFDIR, S_IFLNK, S_IFMT, S_IFREG};
 use dentry::Dentry;
 use eonix_sync::LazyLock;
 use inode::Mode;
@@ -12,7 +12,7 @@ pub mod inode;
 pub mod mount;
 pub mod vfs;
 
-pub type DevId = dev_t;
+pub type DevId = u32;
 
 pub fn s_isreg(mode: Mode) -> bool {
     (mode & S_IFMT) == S_IFREG

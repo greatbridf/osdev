@@ -1,11 +1,11 @@
 use super::{Dentry, Inode};
+use crate::kernel::constants::ENOENT;
 use crate::{
     kernel::vfs::{s_isdir, s_islnk},
     prelude::*,
     rcu::{RCUIterator, RCUList},
 };
 use alloc::sync::Arc;
-use bindings::ENOENT;
 use core::sync::atomic::Ordering;
 
 const DCACHE_HASH_BITS: u32 = 8;

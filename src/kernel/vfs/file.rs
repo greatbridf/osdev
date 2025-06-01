@@ -3,6 +3,10 @@ use super::{
     inode::{Mode, WriteOffset},
     s_isblk, s_isdir, s_isreg,
 };
+use crate::kernel::{
+    constants::{EBADF, EFAULT, EINTR, EINVAL, ENOTDIR, ENOTTY, EOVERFLOW, EPIPE, ESPIPE, S_IFMT},
+    syscall::file_rw::StatX,
+};
 use crate::{
     io::{Buffer, BufferFill, ByteBuffer, Chunks},
     kernel::{
@@ -17,9 +21,6 @@ use crate::{
     sync::CondVar,
 };
 use alloc::{collections::vec_deque::VecDeque, sync::Arc};
-use bindings::{
-    statx, EBADF, EFAULT, EINTR, EINVAL, ENOTDIR, ENOTTY, EOVERFLOW, EPIPE, ESPIPE, S_IFMT,
-};
 use bitflags::bitflags;
 use core::{ops::ControlFlow, sync::atomic::Ordering};
 use eonix_runtime::task::Task;
@@ -543,7 +544,7 @@ impl File {
         }
     }
 
-    pub fn statx(&self, buffer: &mut statx, mask: u32) -> KResult<()> {
+    pub fn statx(&self, buffer: &mut StatX, mask: u32) -> KResult<()> {
         match self {
             File::Inode(inode) => inode.dentry.statx(buffer, mask),
             _ => Err(EBADF),

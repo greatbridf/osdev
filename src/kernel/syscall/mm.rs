@@ -1,4 +1,5 @@
 use super::FromSyscallArg;
+use crate::kernel::constants::{EINVAL, ENOMEM};
 use crate::{
     kernel::{
         constants::{UserMmapFlags, UserMmapProtocol},
@@ -6,7 +7,6 @@ use crate::{
     },
     prelude::*,
 };
-use bindings::{EINVAL, ENOMEM};
 use eonix_mm::address::{Addr as _, AddrOps as _, VAddr};
 use eonix_runtime::task::Task;
 

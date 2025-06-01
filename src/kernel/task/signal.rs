@@ -3,10 +3,10 @@ mod signal_action;
 mod signal_mask;
 
 use super::{ProcessList, Thread, WaitObject, WaitType};
+use crate::kernel::constants::{EFAULT, EINVAL};
 use crate::{kernel::user::UserPointer, prelude::*};
 use alloc::collections::binary_heap::BinaryHeap;
 use arch::{FpuState, TrapContext};
-use bindings::{EFAULT, EINVAL};
 use core::{cmp::Reverse, task::Waker};
 use eonix_hal::traits::trap::RawTrapContext;
 use eonix_runtime::task::Task;

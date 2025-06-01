@@ -1,3 +1,4 @@
+use crate::kernel::constants::{EACCES, ENOTDIR};
 use crate::{
     io::Buffer,
     kernel::{
@@ -14,7 +15,6 @@ use crate::{
     prelude::*,
 };
 use alloc::sync::{Arc, Weak};
-use bindings::{EACCES, ENOTDIR};
 use core::{ops::ControlFlow, sync::atomic::Ordering};
 use eonix_runtime::task::Task;
 use eonix_sync::{AsProof as _, AsProofMut as _, LazyLock, Locked};

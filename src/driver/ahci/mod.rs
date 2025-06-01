@@ -3,14 +3,13 @@ use crate::{
     io::Buffer as _,
     kernel::{
         block::{make_device, BlockDevice},
-        constants::EINVAL,
+        constants::{EINVAL, EIO},
         interrupt::register_irq_handler,
         pcie::{self, Header, PCIDevice, PCIDriver, PciError},
     },
     prelude::*,
 };
 use alloc::{format, sync::Arc};
-use bindings::EIO;
 use control::AdapterControl;
 use defs::*;
 use eonix_mm::address::{AddrOps as _, PAddr};

@@ -2,6 +2,7 @@ use super::sysinfo::TimeVal;
 use super::SyscallNoReturn;
 use crate::elf::ParsedElf32;
 use crate::io::Buffer;
+use crate::kernel::constants::{EINVAL, ENOENT, ENOTDIR, ERANGE, ESRCH};
 use crate::kernel::constants::{
     ENOSYS, PR_GET_NAME, PR_SET_NAME, RLIMIT_STACK, SIG_BLOCK, SIG_SETMASK, SIG_UNBLOCK,
 };
@@ -18,7 +19,6 @@ use crate::SIGNAL_NOW;
 use crate::{kernel::user::dataflow::UserBuffer, prelude::*};
 use alloc::borrow::ToOwned;
 use alloc::ffi::CString;
-use bindings::{EINVAL, ENOENT, ENOTDIR, ERANGE, ESRCH};
 use bitflags::bitflags;
 use eonix_hal::traits::trap::RawTrapContext;
 use eonix_mm::address::Addr as _;

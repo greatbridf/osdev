@@ -256,11 +256,16 @@ impl SignalList {
 
     /// Load the signal mask, fpu state and trap context from the user stack.
     pub fn restore(&self, trap_ctx: &mut TrapContext, fpu_state: &mut FpuState) -> KResult<()> {
-        let old_trap_ctx_vaddr = trap_ctx.get_stack_pointer();
+        let old_trap_ctx_vaddr = trap_ctx.get_stack_pointer() + 16 - 4;
         let old_fpu_state_vaddr = old_trap_ctx_vaddr + size_of::<TrapContext>();
         let old_mask_vaddr = old_fpu_state_vaddr + size_of::<FpuState>();
 
         *trap_ctx = UserPointer::<TrapContext>::new_vaddr(old_trap_ctx_vaddr)?.read()?;
+
+        if !trap_ctx.is_user_mode() || !trap_ctx.is_interrupt_enabled() {
+            return Err(EFAULT)?;
+        }
+
         *fpu_state = UserPointer::<FpuState>::new_vaddr(old_fpu_state_vaddr)?.read()?;
         self.inner.lock().mask = UserPointer::<SignalMask>::new_vaddr(old_mask_vaddr)?.read()?;
 

@@ -5,3 +5,5 @@ use crate::prelude::*;
 fn socket(_domain: u32, _socket_type: u32, _protocol: u32) -> KResult<u32> {
     Err(EINVAL)
 }
+
+pub fn keep_alive() {}

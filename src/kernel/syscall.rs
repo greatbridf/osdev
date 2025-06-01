@@ -1,14 +1,22 @@
 use crate::kernel::task::Thread;
+use eonix_sync::LazyLock;
 
-mod file_rw;
-mod mm;
-mod net;
-mod procops;
-mod sysinfo;
+pub mod file_rw;
+pub mod mm;
+pub mod net;
+pub mod procops;
+pub mod sysinfo;
 
 const MAX_SYSCALL_NO: usize = 512;
 
 pub struct SyscallNoReturn;
+
+#[repr(C)]
+pub(self) struct RawSyscallHandler {
+    no: usize,
+    handler: fn(&Thread, [usize; 6]) -> Option<usize>,
+    name: &'static str,
+}
 
 pub struct SyscallHandler {
     pub handler: fn(&Thread, [usize; 6]) -> Option<usize>,
@@ -95,14 +103,43 @@ impl<T> FromSyscallArg for *mut T {
     }
 }
 
-pub fn syscall_handlers() -> &'static [SyscallHandler; MAX_SYSCALL_NO] {
+static SYSCALL_HANDLERS: LazyLock<[Option<SyscallHandler>; MAX_SYSCALL_NO]> = LazyLock::new(|| {
     extern "C" {
-        #[allow(improper_ctypes)]
-        static SYSCALL_HANDLERS: [SyscallHandler; MAX_SYSCALL_NO];
+        // SAFETY: `SYSCALL_HANDLERS` is defined in linker script.
+        fn RAW_SYSCALL_HANDLERS();
+        fn RAW_SYSCALL_HANDLERS_SIZE();
     }
 
-    unsafe {
-        // SAFETY: `SYSCALL_HANDLERS` is defined in linker script.
-        &SYSCALL_HANDLERS
+    // DO NOT TOUCH THESE FUNCTIONS!!!
+    // THEY ARE USED FOR KEEPING THE OBJECTS NOT STRIPPED BY THE LINKER!!!
+    file_rw::keep_alive();
+    mm::keep_alive();
+    net::keep_alive();
+    procops::keep_alive();
+    sysinfo::keep_alive();
+
+    let raw_handlers_addr = RAW_SYSCALL_HANDLERS as *const ();
+    let raw_handlers_size_byte = RAW_SYSCALL_HANDLERS_SIZE as usize;
+    assert!(raw_handlers_size_byte % size_of::<RawSyscallHandler>() == 0);
+
+    let raw_handlers_count = raw_handlers_size_byte / size_of::<RawSyscallHandler>();
+
+    let raw_handlers = unsafe {
+        core::slice::from_raw_parts(
+            raw_handlers_addr as *const RawSyscallHandler,
+            raw_handlers_count,
+        )
+    };
+
+    let mut handlers = [const { None }; MAX_SYSCALL_NO];
+
+    for &RawSyscallHandler { no, handler, name } in raw_handlers.iter() {
+        handlers[no] = Some(SyscallHandler { handler, name })
     }
+
+    handlers
+});
+
+pub fn syscall_handlers() -> &'static [Option<SyscallHandler>] {
+    SYSCALL_HANDLERS.as_ref()
 }

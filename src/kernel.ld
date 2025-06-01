@@ -73,12 +73,15 @@ SECTIONS
         TEXT_START = .;
         *(.text)
         *(.text*)
+        KEEP(*(.syscall_fns*))
 
         . = ALIGN(0x1000);
         TEXT_END = .;
     } > KIMAGE
 
     TEXT_PAGES = (TEXT_END - TEXT_START) / 0x1000;
+
+    RAW_SYSCALL_HANDLERS_SIZE = (_raw_syscall_handlers_end - RAW_SYSCALL_HANDLERS);
 
     .rodata :
         AT(LOADADDR(.text) + SIZEOF(.text))
@@ -96,8 +99,10 @@ SECTIONS
         end_ctors = .;
 
         . = ALIGN(16);
-        SYSCALL_HANDLERS = .;
-        KEEP(*(SORT_BY_NAME(.syscalls*)));
+        RAW_SYSCALL_HANDLERS = .;
+        KEEP(*(.raw_syscalls*));
+
+        _raw_syscall_handlers_end = .;
 
         . = ALIGN(16);
         _fix_start = .;

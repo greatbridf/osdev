@@ -57,22 +57,32 @@ fn define_syscall_impl(attrs: TokenStream, item: TokenStream) -> TokenStream {
 
     let helper_fn = Ident::new(&format!("_do_syscall_{}", syscall_name), Span::call_site());
     let helper_fn_pointer = Ident::new(
-        &format!("SYSCALL_ENTRY_{:03}", syscall_no),
+        &format!("_SYSCALL_ENTRY_{:03}", syscall_no),
         Span::call_site(),
     );
 
     let real_fn = Ident::new(&format!("sys_{}", syscall_name), Span::call_site());
 
+    let raw_syscall_section = LitStr::new(
+        &format!(".raw_syscalls.{}", syscall_name),
+        Span::call_site(),
+    );
+    let syscall_fn_section =
+        LitStr::new(&format!(".syscall_fns.{}", syscall_name), Span::call_site());
+
     quote! {
         #[used]
         #[doc(hidden)]
-        #[link_section = ".syscalls"]
-        static #helper_fn_pointer: crate::kernel::syscall::SyscallHandler =
-            crate::kernel::syscall::SyscallHandler {
+        #[no_mangle]
+        #[link_section = #raw_syscall_section]
+        static #helper_fn_pointer: crate::kernel::syscall::RawSyscallHandler =
+            crate::kernel::syscall::RawSyscallHandler {
+                no: #syscall_no,
                 handler: #helper_fn,
                 name: #syscall_name_str,
             };
 
+        #[link_section = #syscall_fn_section]
         fn #helper_fn (
             thd: &crate::kernel::task::Thread,
             args: [usize; 6]
@@ -103,6 +113,7 @@ fn define_syscall_impl(attrs: TokenStream, item: TokenStream) -> TokenStream {
         }
 
         #(#attrs)*
+        #[link_section = #syscall_fn_section]
         #vis fn #real_fn(
             thread: &crate::kernel::task::Thread,
             #(#args),*

@@ -370,3 +370,5 @@ fn poll(fds: *mut UserPollFd, nfds: u32, _timeout: u32) -> KResult<u32> {
         }
     }
 }
+
+pub fn keep_alive() {}

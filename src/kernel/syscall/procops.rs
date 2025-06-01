@@ -7,8 +7,8 @@ use crate::kernel::constants::{
 };
 use crate::kernel::mem::PageBuffer;
 use crate::kernel::task::{
-    KernelStack, ProcessBuilder, ProcessList, Signal, SignalAction, SignalMask, ThreadBuilder,
-    ThreadRunnable, UserDescriptor, WaitObject, WaitType,
+    new_thread_runnable, KernelStack, ProcessBuilder, ProcessList, Signal, SignalAction,
+    SignalMask, ThreadBuilder, UserDescriptor, WaitObject, WaitType,
 };
 use crate::kernel::user::dataflow::UserString;
 use crate::kernel::user::{UserPointer, UserPointerMut};
@@ -167,17 +167,17 @@ fn execve(exec: *const u8, argv: *const u32, envp: *const u32) -> KResult<()> {
 }
 
 #[eonix_macros::define_syscall(0x01)]
-fn exit(status: u32) {
+fn exit(status: u32) -> SyscallNoReturn {
     unsafe {
         let mut procs = Task::block_on(ProcessList::get().write());
         procs.do_kill_process(&thread.process, WaitType::Exited(status));
     }
 
-    todo!()
+    SyscallNoReturn
 }
 
 #[eonix_macros::define_syscall(0xfc)]
-fn exit_group(status: u32) {
+fn exit_group(status: u32) -> SyscallNoReturn {
     sys_exit(thread, status)
 }
 
@@ -277,7 +277,7 @@ fn getuid() -> KResult<u32> {
     Ok(0)
 }
 
-#[eonix_macros::define_syscall(0xca)]
+#[eonix_macros::define_syscall(0xc9)]
 fn geteuid() -> KResult<u32> {
     // All users are root for now.
     Ok(0)
@@ -560,7 +560,7 @@ fn fork() -> u32 {
         .thread_builder(thread_builder)
         .build(&mut procs);
 
-    Scheduler::get().spawn::<KernelStack, _>(ThreadRunnable::new(new_thread));
+    Scheduler::get().spawn::<KernelStack, _>(new_thread_runnable(new_thread));
 
     new_process.pid
 }
@@ -578,7 +578,7 @@ fn sigreturn() -> KResult<SyscallNoReturn> {
                 "`sigreturn` failed in thread {} with error {err}!",
                 thread.tid
             );
-            thread.raise(Signal::SIGSEGV);
+            Task::block_on(thread.process.force_kill(Signal::SIGSEGV));
         })?;
 
     Ok(SyscallNoReturn)
@@ -589,3 +589,5 @@ fn sigreturn() -> KResult<SyscallNoReturn> {
 fn arch_prctl(option: u32, addr: u32) -> KResult<u32> {
     sys_arch_prctl(thread, option, addr)
 }
+
+pub fn keep_alive() {}

@@ -23,7 +23,8 @@ fn copy_cstr_to_array(cstr: &[u8], array: &mut [u8]) {
     array[len] = 0;
 }
 
-fn do_newuname(buffer: *mut NewUTSName) -> KResult<()> {
+#[eonix_macros::define_syscall(0x7a)]
+fn newuname(buffer: *mut NewUTSName) -> KResult<()> {
     let buffer = UserPointerMut::new(buffer)?;
     let mut uname = NewUTSName {
         sysname: [0; 65],
@@ -148,3 +149,5 @@ fn times(tms: *mut TMS) -> KResult<()> {
         tms_cstime: 0,
     })
 }
+
+pub fn keep_alive() {}

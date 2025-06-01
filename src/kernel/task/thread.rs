@@ -17,10 +17,11 @@ use alloc::sync::Arc;
 use arch::{FpuState, TrapContext, UserTLS};
 use atomic_unique_refcell::AtomicUniqueRefCell;
 use core::{
+    future::Future,
     pin::Pin,
     ptr::NonNull,
     sync::atomic::{AtomicBool, Ordering},
-    task::Waker,
+    task::{Context, Poll, Waker},
 };
 use eonix_hal::{
     traits::{
@@ -38,8 +39,9 @@ use pointers::BorrowedArc;
 #[eonix_percpu::define_percpu]
 static CURRENT_THREAD: Option<NonNull<Thread>> = None;
 
-pub struct ThreadRunnable {
+pub struct ThreadRunnable<F: Future> {
     thread: Arc<Thread>,
+    future: F,
 }
 
 pub struct ThreadBuilder {
@@ -318,8 +320,19 @@ impl Thread {
 
     pub fn handle_syscall(&self, no: usize, args: [usize; 6]) -> Option<usize> {
         match syscall_handlers().get(no) {
-            Some(SyscallHandler { handler, .. }) => handler(self, args),
-            None => {
+            Some(Some(SyscallHandler {
+                handler,
+                name: _name,
+                ..
+            })) => {
+                println_trace!(
+                    "trace_syscall",
+                    "Syscall {_name}({no:#x}) on tid {:#x}",
+                    self.tid
+                );
+                handler(self, args)
+            }
+            _ => {
                 println_warn!("Syscall {no}({no:#x}) isn't implemented.");
                 self.raise(Signal::SIGSYS);
                 None
@@ -330,15 +343,115 @@ impl Thread {
     pub fn is_dead(&self) -> bool {
         self.dead.load(Ordering::SeqCst)
     }
-}
 
-impl ThreadRunnable {
-    pub fn new(thread: Arc<Thread>) -> Self {
-        Self { thread }
+    async fn real_run(&self) {
+        while !self.is_dead() {
+            if self.signal_list.has_pending_signal() {
+                self.signal_list
+                    .handle(&mut self.trap_ctx.borrow(), &mut self.fpu_state.borrow())
+                    .await;
+            }
+
+            if self.is_dead() {
+                return;
+            }
+
+            self.fpu_state.borrow().restore();
+
+            unsafe {
+                // SAFETY: We are returning to the context of the user thread.
+                self.trap_ctx.borrow().trap_return();
+            }
+
+            self.fpu_state.borrow().save();
+
+            let trap_type = self.trap_ctx.borrow().trap_type();
+            match trap_type {
+                TrapType::Fault(Fault::PageFault(err_code)) => {
+                    let addr = arch::get_page_fault_address();
+                    let mms = &self.process.mm_list;
+                    if let Err(signal) = mms.handle_user_page_fault(addr, err_code).await {
+                        self.signal_list.raise(signal);
+                    }
+                }
+                TrapType::Fault(Fault::BadAccess) => {
+                    self.signal_list.raise(Signal::SIGSEGV);
+                }
+                TrapType::Fault(Fault::InvalidOp) => {
+                    self.signal_list.raise(Signal::SIGILL);
+                }
+                TrapType::Fault(Fault::Unknown(_)) => unimplemented!("Unhandled fault"),
+                TrapType::Irq(irqno) => default_irq_handler(irqno),
+                TrapType::Timer => {
+                    timer_interrupt();
+                    yield_now().await;
+                }
+                TrapType::Syscall { no, args } => {
+                    if let Some(retval) = self.handle_syscall(no, args) {
+                        self.trap_ctx.borrow().set_user_return_value(retval);
+                    }
+                }
+            }
+        }
+    }
+
+    pub async fn run(self: Arc<Thread>) {
+        struct ContextedRun<'a, F: Future>(F, &'a Thread);
+
+        impl<F: Future> Future for ContextedRun<'_, F> {
+            type Output = F::Output;
+
+            fn poll(mut self: Pin<&mut Self>, ctx: &mut Context<'_>) -> Poll<Self::Output> {
+                let irq_state = arch::disable_irqs_save();
+                let (future, _) = unsafe {
+                    // SAFETY: We construct a pinned future and `&Thread` is `Unpin`.
+                    let me = self.as_mut().get_unchecked_mut();
+                    (Pin::new_unchecked(&mut me.0), me.1)
+                };
+
+                let retval = future.poll(ctx);
+
+                irq_state.restore();
+                retval
+            }
+        }
+
+        ContextedRun(self.real_run(), &self).await
     }
 }
 
-impl Contexted for ThreadRunnable {
+async fn yield_now() {
+    struct Yield {
+        yielded: bool,
+    }
+
+    impl Future for Yield {
+        type Output = ();
+
+        fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+            if self.as_mut().yielded {
+                Poll::Ready(())
+            } else {
+                self.as_mut().yielded = true;
+                cx.waker().wake_by_ref();
+                Poll::Pending
+            }
+        }
+    }
+
+    Yield { yielded: false }.await;
+}
+
+pub fn new_thread_runnable(
+    thread: Arc<Thread>,
+) -> ThreadRunnable<impl Future<Output = impl Send + 'static> + Send + 'static> {
+    ThreadRunnable {
+        thread: thread.clone(),
+        future: thread.run(),
+    }
+}
+
+impl<F: Future> Contexted for ThreadRunnable<F> {
     fn load_running_context(&self) {
         self.thread.process.mm_list.activate();
 
@@ -364,62 +477,19 @@ impl Contexted for ThreadRunnable {
     }
 }
 
-impl Run for ThreadRunnable {
-    type Output = ();
+impl<F: Future> Run for ThreadRunnable<F> {
+    type Output = F::Output;
 
-    fn run(self: Pin<&mut Self>, _waker: &Waker) -> RunState<Self::Output> {
-        let irq_state = arch::disable_irqs_save();
+    fn run(mut self: Pin<&mut Self>, waker: &Waker) -> RunState<Self::Output> {
+        let mut ctx = Context::from_waker(waker);
 
-        let run_state = loop {
-            if self.thread.is_dead() {
-                break RunState::Finished(());
-            }
-
-            if self.thread.signal_list.has_pending_signal() {
-                self.thread.signal_list.handle(
-                    &mut self.thread.trap_ctx.borrow(),
-                    &mut self.thread.fpu_state.borrow(),
-                );
-            }
-
-            if self.thread.is_dead() {
-                break RunState::Finished(());
-            }
-
-            unsafe {
-                // SAFETY: We are returning to the context of the user thread.
-                self.thread.trap_ctx.borrow().trap_return();
-            }
-
-            let trap_type = self.thread.trap_ctx.borrow().trap_type();
-            match trap_type {
-                TrapType::Fault(Fault::PageFault(err_code)) => {
-                    let addr = arch::get_page_fault_address();
-                    let mms = &self.thread.process.mm_list;
-                    mms.handle_user_page_fault(addr, err_code);
-                }
-                TrapType::Fault(Fault::BadAccess) => {
-                    self.thread.signal_list.raise(Signal::SIGSEGV);
-                }
-                TrapType::Fault(Fault::InvalidOp) => {
-                    self.thread.signal_list.raise(Signal::SIGILL);
-                }
-                TrapType::Fault(Fault::Unknown(_)) => unimplemented!("Unhandled fault"),
-                TrapType::Irq(irqno) => default_irq_handler(irqno),
-                TrapType::Timer => {
-                    timer_interrupt();
-
-                    break RunState::Running;
-                }
-                TrapType::Syscall { no, args } => {
-                    if let Some(retval) = self.thread.handle_syscall(no, args) {
-                        self.thread.trap_ctx.borrow().set_user_return_value(retval);
-                    }
-                }
-            }
-        };
-
-        irq_state.restore();
-        run_state
+        match unsafe {
+            self.as_mut()
+                .map_unchecked_mut(|me| &mut me.future)
+                .poll(&mut ctx)
+        } {
+            Poll::Ready(output) => RunState::Finished(output),
+            Poll::Pending => RunState::Running,
+        }
     }
 }

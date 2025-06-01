@@ -33,7 +33,7 @@ use eonix_runtime::{run::FutureRun, scheduler::Scheduler, task::Task};
 use kernel::{
     mem::Page,
     pcie::init_pcie,
-    task::{KernelStack, ProcessBuilder, ProcessList, ThreadBuilder, ThreadRunnable},
+    task::{new_thread_runnable, KernelStack, ProcessBuilder, ProcessList, ThreadBuilder},
     vfs::{
         dentry::Dentry,
         mount::{do_mount, MS_NOATIME, MS_NODEV, MS_NOSUID, MS_RDONLY},
@@ -177,5 +177,5 @@ async fn init_process(early_kstack_pfn: PFN) {
     // TODO!!!: Remove this.
     thread.files.open_console();
 
-    Scheduler::get().spawn::<KernelStack, _>(ThreadRunnable::new(thread));
+    Scheduler::get().spawn::<KernelStack, _>(new_thread_runnable(thread));
 }

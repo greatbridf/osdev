@@ -107,6 +107,8 @@ fn brk(addr: usize) -> KResult<usize> {
 }
 
 #[eonix_macros::define_syscall(0xdb)]
-fn do_madvise(_addr: usize, _len: usize, _advice: u32) -> KResult<()> {
+fn madvise(_addr: usize, _len: usize, _advice: u32) -> KResult<()> {
     Ok(())
 }
+
+pub fn keep_alive() {}

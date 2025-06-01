@@ -12,4 +12,4 @@ pub use process_group::ProcessGroup;
 pub use process_list::ProcessList;
 pub use session::Session;
 pub use signal::{Signal, SignalAction, SignalMask};
-pub use thread::{Thread, ThreadBuilder, ThreadRunnable, UserDescriptor};
+pub use thread::{new_thread_runnable, Thread, ThreadBuilder, UserDescriptor};

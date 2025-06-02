@@ -10,3 +10,5 @@ eonix_hal_macros = { path = "./eonix_hal_macros" }
 arch = { path = "../../arch" }
 eonix_percpu = { path = "../eonix_percpu" }
 eonix_preempt = { path = "../eonix_preempt" }
+
+cfg-if = "1.0"

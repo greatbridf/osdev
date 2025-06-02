@@ -14,7 +14,7 @@ use crate::{
     prelude::*,
 };
 use alloc::sync::Arc;
-use arch::{FpuState, TrapContext, UserTLS};
+use arch::{FpuState, UserTLS};
 use atomic_unique_refcell::AtomicUniqueRefCell;
 use core::{
     future::Future,
@@ -27,9 +27,9 @@ use eonix_hal::{
     traits::{
         fault::Fault,
         fpu::RawFpuState as _,
-        trap::{RawTrapContext, TrapType},
+        trap::{RawTrapContext, TrapReturn, TrapType},
     },
-    trap::TrapContextExt,
+    trap::TrapContext,
 };
 use eonix_mm::address::{Addr as _, VAddr};
 use eonix_runtime::run::{Contexted, Run, RunState};

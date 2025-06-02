@@ -18,7 +18,6 @@ define_smp_bootstrap!(4, ap_entry, {
 
 unsafe extern "C" fn ap_entry() -> ! {
     init_localcpu();
-    eonix_hal::trap::init();
 
     Scheduler::init_local_scheduler::<KernelStack>();
     println_debug!("AP{} started", local_cpu().cpuid());

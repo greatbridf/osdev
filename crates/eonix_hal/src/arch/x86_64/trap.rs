@@ -1,23 +1,10 @@
-use arch::{TaskContext, TrapContext};
-use core::{
-    arch::{global_asm, naked_asm},
-    mem::transmute,
-};
-use eonix_hal_traits::trap::IsRawTrapContext;
+mod trap_context;
 
-#[doc(notable_trait)]
-pub trait TrapContextExt {
-    /// Return to the context before the trap occurred.
-    ///
-    /// # Safety
-    /// This function is unsafe because the caller MUST ensure that the
-    /// context before the trap is valid, that is, that the stack pointer
-    /// points to a valid stack frame and the program counter points to some
-    /// valid instruction.
-    unsafe fn trap_return(&mut self);
-}
+use super::TaskContext;
+use core::arch::{global_asm, naked_asm};
+use eonix_hal_traits::{context::RawTaskContext, trap::TrapReturn};
 
-struct _CheckTrapContext(IsRawTrapContext<TrapContext>);
+pub use trap_context::TrapContext;
 
 unsafe extern "C" {
     fn _default_trap_handler(trap_context: &mut TrapContext);
@@ -26,7 +13,7 @@ unsafe extern "C" {
 }
 
 #[eonix_percpu::define_percpu]
-static TRAP_HANDLER: usize = 0;
+static TRAP_HANDLER: unsafe extern "C" fn() = default_trap_handler;
 
 #[eonix_percpu::define_percpu]
 static CAPTURER_CONTEXT: TaskContext = TaskContext::new();
@@ -288,81 +275,70 @@ global_asm!(
 
 /// Default handler handles the trap on the current stack and returns
 /// to the context before interrut.
-#[naked]
+#[unsafe(naked)]
 unsafe extern "C" fn default_trap_handler() {
-    unsafe {
-        naked_asm!(
-            ".cfi_startproc",
-            "mov %rsp, %rbx",
-            ".cfi_def_cfa_register %rbx",
-            "",
-            "and $~0xf, %rsp",
-            "",
-            "mov %rbx, %rdi",
-            "call {handle_trap}",
-            "",
-            "mov %rbx, %rsp",
-            ".cfi_def_cfa_register %rsp",
-            "",
-            "jmp {trap_return}",
-            ".cfi_endproc",
-            handle_trap = sym _default_trap_handler,
-            trap_return = sym _raw_trap_return,
-            options(att_syntax),
-        );
-    }
+    naked_asm!(
+        ".cfi_startproc",
+        "mov %rsp, %rbx",
+        ".cfi_def_cfa_register %rbx",
+        "",
+        "and $~0xf, %rsp",
+        "",
+        "mov %rbx, %rdi",
+        "call {handle_trap}",
+        "",
+        "mov %rbx, %rsp",
+        ".cfi_def_cfa_register %rsp",
+        "",
+        "jmp {trap_return}",
+        ".cfi_endproc",
+        handle_trap = sym _default_trap_handler,
+        trap_return = sym _raw_trap_return,
+        options(att_syntax),
+    );
 }
 
-#[naked]
+#[unsafe(naked)]
 unsafe extern "C" fn captured_trap_handler() {
-    unsafe {
-        naked_asm!(
-            "mov ${from_context}, %rdi",
-            "mov %gs:0, %rsi",
-            "add ${to_context}, %rsi",
-            "",
-            "mov %rdi, %rsp", // We need a temporary stack to use `switch()`.
-            "",
-            "jmp {switch}",
-            from_context = sym DIRTY_TRAP_CONTEXT,
-            to_context = sym _percpu_inner_CAPTURER_CONTEXT,
-            switch = sym arch::TaskContext::switch,
-            options(att_syntax),
-        );
-    }
+    naked_asm!(
+        "mov ${from_context}, %rdi",
+        "mov %gs:0, %rsi",
+        "add ${to_context}, %rsi",
+        "",
+        "mov %rdi, %rsp", // We need a temporary stack to use `switch()`.
+        "",
+        "jmp {switch}",
+        from_context = sym DIRTY_TRAP_CONTEXT,
+        to_context = sym _percpu_inner_CAPTURER_CONTEXT,
+        switch = sym TaskContext::switch,
+        options(att_syntax),
+    );
 }
 
-#[naked]
+#[unsafe(naked)]
 unsafe extern "C" fn captured_trap_return(trap_context: usize) -> ! {
-    unsafe {
-        naked_asm!(
-            "jmp {trap_return}",
-            trap_return = sym _raw_trap_return,
-            options(att_syntax),
-        );
-    }
+    naked_asm!(
+        "jmp {trap_return}",
+        trap_return = sym _raw_trap_return,
+        options(att_syntax),
+    );
 }
 
-impl TrapContextExt for TrapContext {
+impl TrapReturn for TrapContext {
     unsafe fn trap_return(&mut self) {
         let irq_states = arch::disable_irqs_save();
-        let old_handler = TRAP_HANDLER.swap(captured_trap_handler as *const () as usize);
+        let old_handler = TRAP_HANDLER.swap(captured_trap_handler);
 
-        let mut to_ctx = arch::TaskContext::new();
-        to_ctx.ip(captured_trap_return as _);
-        to_ctx.sp(&raw mut *self as usize);
-        to_ctx.interrupt(false);
+        let mut to_ctx = TaskContext::new();
+        to_ctx.set_program_counter(captured_trap_return as _);
+        to_ctx.set_stack_pointer(&raw mut *self as usize);
+        to_ctx.set_interrupt_enabled(false);
 
         unsafe {
-            arch::TaskContext::switch(CAPTURER_CONTEXT.as_mut(), &mut to_ctx);
+            TaskContext::switch(CAPTURER_CONTEXT.as_mut(), &mut to_ctx);
         }
 
         TRAP_HANDLER.set(old_handler);
         irq_states.restore();
     }
-}
-
-pub fn init() {
-    let addr = unsafe { transmute::<_, usize>(default_trap_handler as *const ()) };
-    TRAP_HANDLER.set(addr as usize);
 }

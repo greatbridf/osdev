@@ -1,5 +1,4 @@
 mod bootstrap;
-mod context;
 mod fence;
 mod fpu;
 mod gdt;
@@ -8,14 +7,12 @@ mod interrupt;
 mod io;
 mod mm;
 mod percpu;
-mod trap;
 mod user;
 
 use core::arch::asm;
 use eonix_mm::address::{Addr as _, PAddr, VAddr};
 use eonix_mm::paging::PFN;
 
-pub use self::context::*;
 pub use self::gdt::*;
 pub use self::init::*;
 pub use self::interrupt::*;
@@ -26,7 +23,6 @@ pub use fence::*;
 pub use fpu::*;
 pub use mm::*;
 pub use percpu::*;
-pub use trap::*;
 
 #[inline(always)]
 pub fn flush_tlb(vaddr: usize) {

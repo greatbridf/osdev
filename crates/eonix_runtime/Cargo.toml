@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 arch = { path = "../../arch" }
 atomic_unique_refcell = { path = "../atomic_unique_refcell" }
+eonix_hal = { path = "../eonix_hal" }
 eonix_log = { path = "../eonix_log" }
 eonix_percpu = { path = "../eonix_percpu" }
 eonix_preempt = { path = "../eonix_preempt" }

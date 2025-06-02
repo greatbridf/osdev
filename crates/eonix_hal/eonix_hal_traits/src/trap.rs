@@ -26,6 +26,18 @@ pub trait RawTrapContext: Copy {
     fn set_user_return_value(&mut self, retval: usize);
 }
 
+#[doc(notable_trait)]
+pub trait TrapReturn {
+    /// Return to the context before the trap occurred.
+    ///
+    /// # Safety
+    /// This function is unsafe because the caller MUST ensure that the
+    /// context before the trap is valid, that is, that the stack pointer
+    /// points to a valid stack frame and the program counter points to some
+    /// valid instruction.
+    unsafe fn trap_return(&mut self);
+}
+
 /// The reason that caused the trap.
 pub enum TrapType {
     Syscall { no: usize, args: [usize; 6] },
@@ -52,26 +64,23 @@ pub enum TrapType {
 ///
 /// While the following code should compile:
 ///
-/// ```
+/// ```no_run
 /// # use eonix_hal_traits::trap::IsRawTrapContext;
 /// struct RawTrapContextType;
 ///
 /// impl RawTrapContext for RawTrapContextType {
 ///     // ...
-/// #   fn trap_no(&self) -> usize {
-/// #       0
-/// #   }
-/// #   fn get_program_counter(&self) -> usize {
-/// #       0
-/// #   }
-/// #   fn get_stack_pointer(&self) -> usize {
-/// #       0
-/// #   }
-/// #   fn set_program_counter(&mut self, pc: usize) {}
-/// #   fn set_stack_pointer(&mut self, sp: usize) {}
-/// #   fn is_user_mode(&self) -> bool {
-/// #       false
-/// #   }
+/// #   fn new() -> Self { todo!() }
+/// #   fn trap_type() -> TrapType { todo!() }
+/// #   fn get_program_counter(&self) -> usize { todo!() }
+/// #   fn get_stack_pointer(&self) -> usize { todo!() }
+/// #   fn set_program_counter(&mut self, _: usize) { todo!() }
+/// #   fn set_stack_pointer(&mut self, _: usize) { todo!() }
+/// #   fn is_interrupt_enabled(&self) -> bool { todo!() }
+/// #   fn set_interrupt_enabled(&mut self, _: bool) { todo!() }
+/// #   fn is_user_mode(&self) -> bool { todo!() }
+/// #   fn set_user_mode(&mut self, _: bool) { todo!() }
+/// #   fn set_user_return_value(&mut self, _: usize) { todo!() }
 /// }
 ///
 /// struct UserStruct(RawTrapContextType, IsRawTrapContext<RawTrapContextType>);

@@ -217,10 +217,6 @@ pub fn disable_irqs_save() -> IrqState {
     IrqState(state)
 }
 
-extern "C" {
-    pub fn _arch_fork_return();
-}
-
 fn lidt(base: usize, limit: u16) {
     let mut idt_descriptor = [0u16; 5];
 

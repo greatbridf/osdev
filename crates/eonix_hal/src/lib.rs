@@ -1,7 +1,9 @@
 #![no_std]
 #![feature(doc_notable_trait)]
-#![feature(naked_functions)]
 
+pub(crate) mod arch;
+
+pub mod context;
 pub mod processor;
 pub mod trap;
 

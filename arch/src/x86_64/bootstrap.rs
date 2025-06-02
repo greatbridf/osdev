@@ -342,7 +342,7 @@ global_asm!(
     options(att_syntax),
 );
 
-#[naked]
+#[unsafe(naked)]
 pub unsafe extern "C" fn start_64bit() {
     naked_asm!(
         "mov $0x10, %ax",

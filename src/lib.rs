@@ -5,7 +5,6 @@
 #![feature(arbitrary_self_types)]
 #![feature(get_mut_unchecked)]
 #![feature(macro_metavar_expr)]
-#![feature(naked_functions)]
 
 extern crate alloc;
 

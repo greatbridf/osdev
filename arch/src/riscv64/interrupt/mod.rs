@@ -10,6 +10,8 @@ use trap::*;
 
 /// TODO:
 /// 切换回到user的入口函数
+/// percpu
+/// user?
 
 use riscv::{
     asm::sfence_vma_all,

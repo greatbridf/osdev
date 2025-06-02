@@ -15,3 +15,4 @@ sbi = "0.3.0"
 riscv = { version = "0.13.0", features = ["s-mode"] }
 spin = "0.10.0"
 fdt = "0.1.5"
+bitflags = "2.6.0"

@@ -1,7 +1,9 @@
 use core::arch::asm;
-
-use riscv::register::sstatus::{Sstatus, SPP};
-
+use riscv::{
+    interrupt::{Exception, Interrupt, Trap}, register::{
+        scause, sie, sstatus::{self, Sstatus, SPP}, stval
+    }, ExceptionNumber, InterruptNumber
+};
 
 /// Floating-point registers context.
 #[repr(C)]
@@ -134,34 +136,184 @@ impl FpuRegisters {
     }
 }
 
-impl TrapContext {
-    pub fn set_return_value(&mut self, value: usize) {
-        // a0, x10
-        self.x[10] = value;
+
+/// TODO: will be displaced after origin's branch be mergered.
+use bitflags::bitflags;
+bitflags! {
+    #[derive(Debug)]
+    pub struct PageFaultErrorCode: u32 {
+        const NonPresent = 1;
+        const Read = 2;
+        const Write = 4;
+        const InstructionFetch = 8;
+        const UserAccess = 16;
     }
+}
 
-    pub fn set_return_address(&mut self, addr: usize, user: bool) {
-        self.sepc = addr; // set Supervisor Exception Program Counter
+#[derive(Debug)]
+pub enum Fault {
+    InvalidOp,
+    BadAccess,
+    PageFault(PageFaultErrorCode),
+    Unknown(usize),
+}
 
-        // if user==true,set SPP to U-mode (0)
-        // if user==false, set SPP to S-mode (1)
-        if user {
-            self.sstatus.set_spp(SPP::User);
-        } else {
-            self.sstatus.set_spp(SPP::Supervisor);
+pub enum TrapType {
+    Syscall { no: usize, args: [usize; 6] },
+    Fault(Fault),
+    Irq(usize),
+    Timer,
+}
+
+impl TrapContext {
+    /// TODO: temporarily all zero, may change in future
+    pub fn new() -> Self {
+        Self {
+            x: [0; 32],
+            sstatus: sstatus::read(),
+            sepc: 0,
+            kernel_sp: 0,
+            kernel_ra: 0,
+            kernel_s: [0; 12],
+            kernel_fp: 0,
+            kernel_tp: 0
         }
     }
 
-    pub fn set_stack_pointer(&mut self, sp: usize, _user: bool) {
+    fn syscall_no(&self) -> usize {
+        self.x[17]
+    }
+
+    fn syscall_args(&self) -> [usize; 6] {
+        [
+            self.x[10],
+            self.x[11],
+            self.x[12],
+            self.x[13],
+            self.x[14],
+            self.x[15],
+        ]
+    }
+
+    pub fn trap_type(&self) -> TrapType {
+        let scause = scause::read();
+        let cause = scause.cause();
+        match cause {
+            Trap::Interrupt(i) => {
+                match Interrupt::from_number(i).unwrap() {
+                    Interrupt::SupervisorTimer => TrapType::Timer,
+                    Interrupt::SupervisorExternal => TrapType::Irq(0),
+                    // soft interrupt
+                    _ => TrapType::Fault(Fault::Unknown(i)),
+                }
+            }
+            Trap::Exception(e) => {
+                match Exception::from_number(e).unwrap() {
+                    Exception::InstructionMisaligned |
+                    Exception::LoadMisaligned |
+                    Exception::InstructionFault |
+                    Exception::LoadFault |
+                    Exception::StoreFault |
+                    Exception::StoreMisaligned => {
+                        TrapType::Fault(Fault::BadAccess)
+                    },
+                    Exception::IllegalInstruction => {
+                        TrapType::Fault(Fault::InvalidOp)
+                    }
+                    Exception::UserEnvCall => {
+                        TrapType::Syscall { 
+                            no: self.syscall_no(),
+                            args: self.syscall_args()
+                        }
+                    },
+                    Exception::InstructionPageFault |
+                    Exception::LoadPageFault |
+                    Exception::StorePageFault => {
+                        let e = Exception::from_number(e).unwrap();
+                        TrapType::Fault(Fault::PageFault(get_page_fault_error_code(e)))
+                    },
+                    // breakpoint and supervisor env call
+                    _ => TrapType::Fault(Fault::Unknown(e)),
+                }
+            },
+        }
+    }
+
+    pub fn get_program_counter(&self) -> usize {
+        self.sepc
+    }
+
+    pub fn get_stack_pointer(&self) -> usize {
+        self.x[2]
+    }
+
+    pub fn set_program_counter(&mut self, pc: usize) {
+        self.sepc = pc;
+    }
+
+    pub fn set_stack_pointer(&mut self, sp: usize) {
         self.x[2] = sp;
     }
 
+    pub fn is_interrupt_enabled(&self) -> bool {
+        self.sstatus.sie()
+    }
+
+    /// TODO: may need more precise control
     pub fn set_interrupt_enabled(&mut self, enabled: bool) {
-        // S mode Previous Interrupt Enable (SPIE)
         if enabled {
-            self.sstatus.set_spie(true);
+            self.sstatus.set_sie(enabled);
+            unsafe { 
+                sie::set_sext();
+                sie::set_ssoft();
+                sie::set_stimer();
+            };
         } else {
-            self.sstatus.set_spie(false);
+            self.sstatus.set_sie(enabled);
+            unsafe { 
+                sie::clear_sext();
+                sie::clear_ssoft();
+                sie::clear_stimer();
+            };
         }
     }
+
+    pub fn is_user_mode(&self) -> bool {
+        self.sstatus.spp() == SPP::User
+    }
+
+    pub fn set_user_mode(&mut self, user: bool) {
+        match user {
+            true => self.sstatus.set_spp(SPP::User),
+            false => self.sstatus.set_spp(SPP::Supervisor),
+        }
+    }
+
+    pub fn set_user_return_value(&mut self, retval: usize) {
+        self.sepc = retval;
+    }
+}
+
+/// TODO: get PageFaultErrorCode also need check pagetable
+fn get_page_fault_error_code(exception_type: Exception) -> PageFaultErrorCode {
+    let scause_val = stval::read();
+    let mut error_code = PageFaultErrorCode::empty();
+
+    match exception_type {
+        Exception::InstructionPageFault => {
+            error_code |= PageFaultErrorCode::InstructionFetch;
+            error_code |= PageFaultErrorCode::Read;
+        }
+        Exception::LoadPageFault => {
+            error_code |= PageFaultErrorCode::Read;
+        }
+        Exception::StorePageFault => {
+            error_code |= PageFaultErrorCode::Write;
+        }
+        _ => {
+            unreachable!();
+        }
+    }
+    // TODO: here need check pagetable to confirm NonPresent and UserAccess
+    error_code
 }

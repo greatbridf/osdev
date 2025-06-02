@@ -1,76 +1,29 @@
 mod plic;
 mod clint;
+mod context;
+mod trap;
 
-pub use plic::*;
-pub use clint::*;
+use plic::*;
+use clint::*;
+use context::*;
+use trap::*;
 
 /// TODO:
-/// 一开始的中断汇编
+/// 切换回到user的入口函数
 
-use riscv::register::sstatus::{self, Sstatus};
+use riscv::{
+    asm::sfence_vma_all,
+    register::{
+        sstatus::{self, Sstatus},
+        stvec::{self, Stvec}
+    }
+};
 use sbi::SbiError;
+use core::arch::global_asm;
 
 use super::platform::virt::*;
 
-/// Floating-point registers context.
-#[repr(C)]
-#[derive(Debug, Clone, Copy, Default)]
-pub struct FpuRegisters {
-    pub f: [u64; 32],
-    pub fcsr: u32,
-}
-
-/// Saved CPU context when a trap (interrupt or exception) occurs on RISC-V 64.
-#[repr(C)]
-#[derive(Debug, Clone, Copy, Default)]
-pub struct TrapContext {
-    pub x: [usize; 32],
-
-    // CSRs
-    pub sstatus: usize, // sstatus CSR value. Contains privilege mode, interrupt enable, FPU state.
-    pub sepc: usize,    // sepc (Supervisor Exception Program Counter). Program counter at trap.
-    pub scause: usize,  // scause (Supervisor Cause). Describes the cause of the trap.
-    pub stval: usize,   // stval (Supervisor Trap Value). Contains faulting address for exceptions.
-    pub satp: usize,    // satp (Supervisor Address Translation and Protection). Page table base.
-
-    // may need to save
-    // pub sscratch: usize, // sscratch (Supervisor Scratch).
-
-    // FPU
-    // pub fpu_regs: FpuRegisters,
-}
-
-impl TrapContext {
-    pub fn set_return_value(&mut self, value: usize) {
-        // a0, x10
-        self.x[10] = value;
-    }
-
-    pub fn set_return_address(&mut self, addr: usize, user: bool) {
-        self.sepc = addr; // 设置 Supervisor Exception Program Counter
-
-        // if user==true,set SPP to U-mode (0)
-        // if user==false, set SPP to S-mode (1)
-        if user {
-            self.sstatus &= !(1 << 8); // clear SPP bit
-        } else {
-            self.sstatus |= 1 << 8;  // set SPP bit
-        }
-    }
-
-    pub fn set_stack_pointer(&mut self, sp: usize, _user: bool) {
-        self.x[2] = sp;
-    }
-
-    pub fn set_interrupt_enabled(&mut self, enabled: bool) {
-        // S mode Previous Interrupt Enable (SPIE)
-        if enabled {
-            self.sstatus |= 1 << 5;
-        } else {
-            self.sstatus &= !(1 << 5);
-        }
-    }
-}
+global_asm!(include_str!("trap.S"));
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct IrqState(usize);
@@ -183,4 +136,24 @@ impl InterruptControl {
     pub fn plic_claim_interrupt(&self) -> u32 {
         self.plic.claim_interrupt()
     }
+}
+
+extern "C" {
+    fn trap_from_kernel();
+    fn trap_from_user();
+}
+
+fn setup_trap_handler(trap_entry_addr: usize) {
+    unsafe {
+        stvec::write(Stvec::from_bits(trap_entry_addr));
+    }
+    sfence_vma_all();
+}
+
+pub fn setup_kernel_trap() {
+    setup_trap_handler(trap_from_kernel as usize);
+}
+
+pub fn setup_user_trap() {
+    setup_trap_handler(trap_from_user as usize);
 }

@@ -1,11 +1,8 @@
 use core::pin::Pin;
-use riscv::{
-    asm::sfence_vma_all, register::{
-        mhartid,
-        sscratch,
-        sstatus,
-        stvec::{self, Stvec}
-    }
+use riscv::register::{
+    mhartid,
+    sscratch,
+    sstatus
 };
 use sbi::PhysicalAddress;
 
@@ -13,7 +10,7 @@ use sbi::PhysicalAddress;
 /// 中断handler
 /// 
 
-use super::{config::smp::get_num_harts, enable_sse, setup_kernel_satp, InterruptControl};
+use super::{config::smp::get_num_harts, enable_sse, setup_kernel_satp, setup_kernel_trap, InterruptControl};
 
 /// RISC-V Hart
 pub struct CPU {
@@ -41,8 +38,7 @@ impl CPU {
 
         sscratch::write(self_mut.hart_id as usize);
 
-        // TODO: in somewhere
-        setup_trap_vector(__trap_handler_entry as usize);
+        setup_kernel_trap();
 
         // CLINT, 10_000 ms
         self_mut.interrupt.setup_timer(10_000);
@@ -147,9 +143,3 @@ macro_rules! define_smp_bootstrap {
     };
 }
 
-fn setup_trap_vector(trap_entry_addr: usize) {
-    unsafe {
-        stvec::write(Stvec::from_bits(trap_entry_addr));
-    }
-    sfence_vma_all();
-}

@@ -114,7 +114,7 @@ macro_rules! define_smp_bootstrap {
 
         core::arch::global_asm!(
             r#"
-        .pushsection .stage1.smp
+        .pushsection .stage1.smp, "ax", @progbits
         .code16
         .globl ap_bootstrap
         .type ap_bootstrap, @function
@@ -180,7 +180,8 @@ macro_rules! define_smp_bootstrap {
 
             xor %rbp, %rbp
             push %rbp # NULL return address
-            jmp {AP_ENTRY}
+            mov ${AP_ENTRY}, %rax
+            jmp *%rax
             .popsection
             "#,
             KERNEL_PML4 = const 0x1000,

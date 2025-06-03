@@ -74,6 +74,31 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "60b1af1c220855b6ceac025d3f6ecdd2b7c4894bfe9cd9bda4fbb4bc7c0d4cf0"
 
 [[package]]
+name = "eonix-kernel"
+version = "0.1.0"
+dependencies = [
+ "acpi",
+ "arch",
+ "atomic_unique_refcell",
+ "bitflags",
+ "buddy_allocator",
+ "eonix_hal",
+ "eonix_log",
+ "eonix_macros",
+ "eonix_mm",
+ "eonix_percpu",
+ "eonix_preempt",
+ "eonix_runtime",
+ "eonix_sync",
+ "intrusive-collections",
+ "intrusive_list",
+ "itertools",
+ "pointers",
+ "posix_types",
+ "slab_allocator",
+]
+
+[[package]]
 name = "eonix_hal"
 version = "0.1.0"
 dependencies = [
@@ -81,6 +106,7 @@ dependencies = [
  "cfg-if",
  "eonix_hal_macros",
  "eonix_hal_traits",
+ "eonix_mm",
  "eonix_percpu",
  "eonix_preempt",
 ]
@@ -170,31 +196,6 @@ dependencies = [
  "arch",
  "eonix_preempt",
  "intrusive-collections",
-]
-
-[[package]]
-name = "gbos-rust-part"
-version = "0.1.0"
-dependencies = [
- "acpi",
- "arch",
- "atomic_unique_refcell",
- "bitflags",
- "buddy_allocator",
- "eonix_hal",
- "eonix_log",
- "eonix_macros",
- "eonix_mm",
- "eonix_percpu",
- "eonix_preempt",
- "eonix_runtime",
- "eonix_sync",
- "intrusive-collections",
- "intrusive_list",
- "itertools",
- "pointers",
- "posix_types",
- "slab_allocator",
 ]
 
 [[package]]

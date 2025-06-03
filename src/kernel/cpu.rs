@@ -1,6 +1,7 @@
 use super::mem::{AsMemoryBlock, GlobalPageAlloc};
 use arch::{PercpuArea, CPU};
 use core::{alloc::Layout, pin::Pin, ptr::NonNull};
+use eonix_hal::mm::PAGE_SIZE;
 use eonix_mm::paging::Page;
 use eonix_sync::LazyLock;
 
@@ -17,7 +18,7 @@ pub unsafe fn local_cpu() -> Pin<&'static mut CPU> {
 
 pub fn percpu_allocate(layout: Layout) -> NonNull<u8> {
     // TODO: Use page size defined in `arch`.
-    let page_count = layout.size().div_ceil(arch::PAGE_SIZE);
+    let page_count = layout.size().div_ceil(PAGE_SIZE);
     let page = Page::alloc_at_least_in(page_count, GlobalPageAlloc::early_alloc());
     let page_data = page.as_memblk().as_byte_ptr();
     core::mem::forget(page);

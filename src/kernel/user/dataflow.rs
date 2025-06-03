@@ -106,7 +106,7 @@ impl CheckedUserPointer {
                 "rep movsb",
                 "3:",
                 "nop",
-                ".pushsection .fix",
+                ".pushsection .fix, \"a\", @progbits",
                 ".align 32",
                 ".quad 2b",  // instruction address
                 ".quad 3b - 2b",  // instruction length
@@ -142,7 +142,7 @@ impl CheckedUserPointer {
                 "rep movsb",
                 "3:",
                 "nop",
-                ".pushsection .fix",
+                ".pushsection .fix, \"a\", @progbits",
                 ".align 32",
                 ".quad 2b",  // instruction address
                 ".quad 3b - 2b",  // instruction length
@@ -178,7 +178,7 @@ impl CheckedUserPointer {
                 "rep stosb",
                 "3:",
                 "nop",
-                ".pushsection .fix",
+                ".pushsection .fix, \"a\", @progbits",
                 ".align 32",
                 ".quad 2b",  // instruction address
                 ".quad 3b - 2b",  // instruction length
@@ -268,7 +268,7 @@ impl<'lt> UserString<'lt> {
                 "loop 2b",
                 "3:",
                 "nop",
-                ".pushsection .fix",
+                ".pushsection .fix, \"a\", @progbits",
                 ".align 32",
                 ".quad 2b",  // instruction address
                 ".quad 4b - 2b",  // instruction length

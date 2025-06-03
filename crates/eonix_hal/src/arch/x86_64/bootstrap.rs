@@ -9,20 +9,168 @@ const KERNEL_PD_KIMAGE: usize = 0x4000;
 const KERNEL_PT_KIMAGE: usize = 0x5000;
 const KERNEL_PD_STRUCT_PAGE_ARR: usize = 0x6000;
 
-extern "C" {
-    static EARLY_GDT: [u64; 7];
-    static EARLY_GDT_DESCRIPTOR: [u8; 6];
-    static BIOS_IDT_DESCRIPTOR: [u8; 6];
-    static E820_MEM_MAP_DATA: [u8; 1024];
+#[unsafe(link_section = ".low")]
+static EARLY_GDT: [u64; 7] = [0; 7];
+
+#[unsafe(no_mangle)]
+#[unsafe(link_section = ".low")]
+static EARLY_GDT_DESCRIPTOR: (u16, u32) = (0, 0);
+
+#[unsafe(link_section = ".low")]
+static BIOS_IDT_DESCRIPTOR: (u16, u32) = (0, 0);
+
+#[unsafe(link_section = ".low")]
+static E820_MEM_MAP_DATA: [u64; 128] = [0; 128];
+
+unsafe extern "C" {
     fn _kernel_init() -> !;
 
     fn KIMAGE_32K_COUNT();
     fn KIMAGE_PAGES();
+
+    fn STAGE1_MAGIC();
+    fn STAGE1_MAGIC_VALUE();
+
+    fn start_32bit() -> !;
 }
 
 global_asm!(
-    r"
-    .pushsection .stage1
+    r#"
+    .pushsection .mbr, "ax", @progbits
+    .code16
+
+    .globl move_mbr
+    move_mbr:
+        xor %ax, %ax
+        mov %ax, %ds
+        mov %ax, %es
+        mov %ax, %ss
+
+        # move the MBR to 0xe00
+        mov $128, %cx # 512 bytes
+        mov $0x7c00, %si
+        mov $0x0e00, %di
+        rep movsl
+
+        ljmp $0x00, $2f
+
+    2:
+        # read the kernel stage1
+        mov $.Lread_data_packet, %si
+        mov $0x42, %ah
+        mov $0x80, %dl
+        int $0x13
+        jc .Lhalt16
+
+        # get memory size info and storage it
+        mov $0xe801, %ax
+        int $0x15
+        jc .Lhalt16
+
+        cmp $0x86, %ah # unsupported function
+        je .Lhalt16
+        cmp $0x80, %ah # invalid command
+        je .Lhalt16
+
+        jcxz 2f
+        mov %cx, %ax
+        mov %dx, %bx
+
+    2:
+        mov ${e820_data_addr}, %esp
+        movzw %ax, %eax
+        mov %eax, 8(%esp)  # 1k blocks
+        movzw %bx, %ebx
+        mov %ebx, 12(%esp) # 64k blocks
+
+        # save the destination address to es:di
+        mov %sp, %di
+        add $16, %di # buffer is 1024 - 16 bytes
+
+        # set default entry size
+        movl $20, 4(%esp)
+
+        # clear %ebx, len
+        xor %ebx, %ebx
+        mov %ebx, (%esp)
+
+    2:
+        # set the magic number to edx
+        mov $0x534D4150, %edx
+
+        # set function number to eax
+        mov $0xe820, %eax
+
+        # set default entry size
+        mov $24, %ecx
+
+        int $0x15
+
+        incl (%esp)
+        add $24, %edi
+
+        jc .Lsave_mem_fin
+        cmp $0, %ebx
+        jz .Lsave_mem_fin
+
+        cmp $24, %ecx
+        cmovnz 4(%esp), %ecx
+        mov %ecx, 4(%esp)
+
+        jmp 2b
+
+    .Lsave_mem_fin:
+        mov $0x3ff, %ax
+        mov ${bios_idt_descriptor}, %di
+        mov %ax, (%di)
+
+        xor %eax, %eax
+        mov %eax, 2(%di)
+
+        lgdt .Learly_gdt_descriptor
+
+        cli
+        # IDT descriptor is 6 0's. borrow the null gdt entry
+        lidt .Learly_gdt
+
+        # enable protection mode
+        mov %cr0, %eax
+        or $1, %eax
+        mov %eax, %cr0
+
+        ljmp $0x08, ${start_32bit}
+
+    .Lhalt16:
+        hlt
+        jmp .
+
+    .align 16
+    .Learly_gdt:
+        .8byte 0x0                # null selector
+        .8byte 0x00cf9a000000ffff # 32bit code selector
+        .8byte 0x00cf92000000ffff # 32bit data selector
+
+    .align 4
+    .Learly_gdt_descriptor:
+        .word 0x17 # size
+        .long .Learly_gdt  # address
+
+    .align 16
+    .Lread_data_packet:
+        .long  0x00070010 # .stage1 takes up 3.5K, or 7 sectors
+        .long  0x00007000 # read to 0000:7000
+        .8byte 1          # read from LBA 1
+    .popsection
+    "#,
+    start_32bit = sym start_32bit,
+    bios_idt_descriptor = sym BIOS_IDT_DESCRIPTOR,
+    e820_data_addr = sym E820_MEM_MAP_DATA,
+    options(att_syntax),
+);
+
+global_asm!(
+    r#"
+    .pushsection .stage1, "ax", @progbits
     .code16
     .Lhalt:
         hlt
@@ -140,12 +288,17 @@ global_asm!(
         .8byte 0x000f9a000000ffff # 16bit code selector
         .8byte 0x000f92000000ffff # 16bit data selector
 
-    .globl start_32bit
-    start_32bit:
+    {start_32bit}:
         mov $0x10, %ax
         mov %ax, %ds
         mov %ax, %es
         mov %ax, %ss
+
+        mov ${STAGE1_MAGIC}, %edi
+        mov (%edi), %edi
+
+        cmp ${STAGE1_MAGIC_VALUE}, %edi
+        jne .Lhalt
 
         mov ${EARLY_GDT_DESCRIPTOR}, %edi
         mov $0x37, %ax
@@ -185,7 +338,7 @@ global_asm!(
         mov ${KIMAGE_32K_COUNT}, %ecx
         shl $1, %ecx
         movl ${KERNEL_IMAGE_PADDR}, 4(%esp) # destination address
-        movl $9, (%esp) # LBA
+        movl $8, (%esp) # LBA
 
     2:
         mov (%esp), %edi
@@ -320,12 +473,14 @@ global_asm!(
         jmp {start_64bit}
     
     .popsection
-    ",
+    "#,
     EARLY_GDT = sym EARLY_GDT,
     EARLY_GDT_DESCRIPTOR = sym EARLY_GDT_DESCRIPTOR,
     BIOS_IDT_DESCRIPTOR = sym BIOS_IDT_DESCRIPTOR,
     KIMAGE_32K_COUNT = sym KIMAGE_32K_COUNT,
     KIMAGE_PAGES = sym KIMAGE_PAGES,
+    STAGE1_MAGIC = sym STAGE1_MAGIC,
+    STAGE1_MAGIC_VALUE = sym STAGE1_MAGIC_VALUE,
     KERNEL_IMAGE_PADDR = const KERNEL_IMAGE_PADDR,
     KERNEL_PML4 = const KERNEL_PML4,
     PA_P = const PA_P,
@@ -339,6 +494,7 @@ global_asm!(
     KERNEL_PD_KIMAGE = const KERNEL_PD_KIMAGE,
     KERNEL_PT_KIMAGE = const KERNEL_PT_KIMAGE,
     start_64bit = sym start_64bit,
+    start_32bit = sym start_32bit,
     options(att_syntax),
 );
 

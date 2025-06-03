@@ -6,7 +6,7 @@ use crate::{
     },
     kernel_init,
 };
-use arch::DefaultPagingMode;
+use eonix_hal::mm::DefaultPagingMode;
 use eonix_mm::{
     address::{Addr as _, AddrOps as _, PAddr, PRange, VAddr, VRange},
     page_table::{PageAttribute, PagingMode as _, PTE},

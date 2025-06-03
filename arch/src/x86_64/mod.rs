@@ -1,11 +1,9 @@
-mod bootstrap;
 mod fence;
 mod fpu;
 mod gdt;
 mod init;
 mod interrupt;
 mod io;
-mod mm;
 mod percpu;
 mod user;
 
@@ -18,10 +16,8 @@ pub use self::init::*;
 pub use self::interrupt::*;
 pub use self::io::*;
 pub use self::user::*;
-pub use bootstrap::*;
 pub use fence::*;
 pub use fpu::*;
-pub use mm::*;
 pub use percpu::*;
 
 #[inline(always)]

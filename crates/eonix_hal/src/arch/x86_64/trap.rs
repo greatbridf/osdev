@@ -1,6 +1,6 @@
 mod trap_context;
 
-use super::TaskContext;
+use super::context::TaskContext;
 use core::arch::{global_asm, naked_asm};
 use eonix_hal_traits::{context::RawTaskContext, trap::TrapReturn};
 

@@ -4,6 +4,7 @@
 pub(crate) mod arch;
 
 pub mod context;
+pub mod mm;
 pub mod processor;
 pub mod trap;
 

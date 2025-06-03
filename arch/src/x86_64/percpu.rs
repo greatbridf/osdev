@@ -1,5 +1,4 @@
 use super::wrmsr;
-use crate::x86_64::mm::PAGE_SIZE;
 use core::{
     alloc::Layout,
     arch::asm,
@@ -7,6 +6,7 @@ use core::{
     ptr::{null_mut, NonNull},
     sync::atomic::{AtomicPtr, Ordering},
 };
+use eonix_mm::paging::PAGE_SIZE;
 
 pub const MAX_CPUS: usize = 256;
 
@@ -21,23 +21,27 @@ static PERCPU_POINTERS: [AtomicPtr<PercpuData>; MAX_CPUS] =
     [const { AtomicPtr::new(null_mut()) }; MAX_CPUS];
 
 impl PercpuArea {
-    fn page_count() -> usize {
+    fn len() -> usize {
         extern "C" {
-            static PERCPU_PAGES: usize;
+            fn PERCPU_LENGTH();
         }
-        // SAFETY: `PERCPU_PAGES` is defined in linker script and never change.
-        let page_count = unsafe { PERCPU_PAGES };
-        assert_ne!(page_count, 0);
-        page_count
+        let len = PERCPU_LENGTH as usize;
+
+        assert_ne!(len, 0, "Percpu length should not be zero.");
+        len
+    }
+
+    fn page_count() -> usize {
+        Self::len().div_ceil(PAGE_SIZE)
     }
 
     fn data_start() -> NonNull<u8> {
         extern "C" {
-            fn _PERCPU_DATA_START();
+            fn PERCPU_DATA_START();
         }
 
-        NonNull::new(_PERCPU_DATA_START as usize as *mut _)
-            .expect("Percpu data should not be null.")
+        let addr = PERCPU_DATA_START as usize;
+        NonNull::new(addr as *mut _).expect("Percpu data should not be null.")
     }
 
     fn layout() -> Layout {
@@ -52,8 +56,7 @@ impl PercpuArea {
 
         unsafe {
             // SAFETY: The `data_pointer` is of valid length and properly aligned.
-            data_pointer
-                .copy_from_nonoverlapping(Self::data_start(), Self::page_count() * PAGE_SIZE);
+            data_pointer.copy_from_nonoverlapping(Self::data_start(), Self::len());
         }
 
         Self {

@@ -5,9 +5,7 @@ use super::{
 };
 
 use core::{
-    arch::naked_asm,
-    ptr::NonNull,
-    sync::atomic::AtomicUsize,
+    arch::global_asm, ptr::NonNull, sync::atomic::AtomicUsize
 };
 use intrusive_list::{container_of, Link};
 use buddy_allocator::{BuddyAllocator, BuddyRawPage};
@@ -19,8 +17,7 @@ use eonix_mm::{
 };
 use spin::Mutex;
 
-#[link_section = ".bss.stack"]
-static mut BOOT_STACK: [u8; 4096 * 16] = [0; 4096 * 16];
+global_asm!("start.S");
 
 static mut PAGES: [RawPage; 1024] = [const { RawPage::new() }; 1024];
 
@@ -202,22 +199,15 @@ extern "C" {
     fn kernel_init();
 }
 
-/// bootstrap in rust
-#[naked]
+/// TODO: 
+/// linker，现在VMA和LMA不对
+/// 现在的地址空间可能要改一改，改回Sv39的，Sv48有点大了
 #[no_mangle]
-#[link_section = ".text.entry"]
-unsafe extern "C" fn _start(hart_id: usize, dtb_addr: usize) -> ! {
-    naked_asm!(
-        "la sp, {stack_top}",
-        "j {start_fn}",
-        stack_top = sym BOOT_STACK,
-        start_fn = sym riscv64_start,
-    )
-}
-
-fn riscv64_start(hart_id: usize, dtb_addr: usize) {
+pub unsafe extern "C" fn riscv64_start(hart_id: usize, dtb_addr: usize) -> ! {
     let num_harts = get_num_harts(dtb_addr);
     config::smp::set_num_harts(num_harts);
     setup_kernel_page_table();
     unsafe { kernel_init() };
+
+    unreachable!();
 }

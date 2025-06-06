@@ -11,15 +11,18 @@ use eonix_mm::address::{Addr as _, VAddr};
 use eonix_runtime::scheduler::Scheduler;
 use eonix_sync::SpinIrq as _;
 
-static IRQ_HANDLERS: Spin<[Option<Arc<dyn Fn() + Send + Sync>>; 16]> =
-    Spin::new([const { None }; 16]);
+static IRQ_HANDLERS: Spin<[Vec<Arc<dyn Fn() + Send + Sync>>; 16]> =
+    Spin::new([const { Vec::new() }; 16]);
 
 pub fn default_irq_handler(irqno: usize) {
     assert!(irqno < 16);
 
-    let handler = IRQ_HANDLERS.lock()[irqno as usize].as_ref().cloned();
-    if let Some(handler) = handler {
-        handler();
+    {
+        let handlers = IRQ_HANDLERS.lock();
+
+        for handler in handlers[irqno].iter() {
+            handler();
+        }
     }
 
     const PIC1_COMMAND: Port8 = Port8::new(0x20);
@@ -75,8 +78,7 @@ where
         return Err(EINVAL);
     }
 
-    let old = IRQ_HANDLERS.lock_irq()[irqno as usize].replace(Arc::new(handler));
-    assert!(old.is_none(), "IRQ handler already registered");
+    IRQ_HANDLERS.lock_irq()[irqno as usize].push(Arc::new(handler));
     Ok(())
 }
 

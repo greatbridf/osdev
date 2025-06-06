@@ -5,7 +5,7 @@ use alloc::{
     collections::btree_map::{BTreeMap, Entry},
     sync::Arc,
 };
-use eonix_sync::{Mutex, Spin};
+use eonix_sync::Spin;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LinkStatus {
@@ -57,16 +57,16 @@ impl Ord for dyn Netdev {
 }
 
 static NETDEVS_ID: AtomicU32 = AtomicU32::new(0);
-static NETDEVS: Spin<BTreeMap<u32, Arc<Mutex<dyn Netdev>>>> = Spin::new(BTreeMap::new());
+static NETDEVS: Spin<BTreeMap<u32, Arc<Spin<dyn Netdev>>>> = Spin::new(BTreeMap::new());
 
 pub fn alloc_id() -> u32 {
     NETDEVS_ID.fetch_add(1, Ordering::SeqCst)
 }
 
-pub fn register_netdev(netdev: impl Netdev + 'static) -> Result<Arc<Mutex<dyn Netdev>>, u32> {
+pub fn register_netdev(netdev: impl Netdev + 'static) -> Result<Arc<Spin<dyn Netdev>>, u32> {
     match NETDEVS.lock().entry(netdev.id()) {
         Entry::Vacant(entry) => {
-            let netdev = Arc::new(Mutex::new(netdev));
+            let netdev = Arc::new(Spin::new(netdev));
             entry.insert(netdev.clone());
             Ok(netdev)
         }
@@ -74,6 +74,6 @@ pub fn register_netdev(netdev: impl Netdev + 'static) -> Result<Arc<Mutex<dyn Ne
     }
 }
 
-pub fn get_netdev(id: u32) -> Option<Arc<Mutex<dyn Netdev>>> {
+pub fn get_netdev(id: u32) -> Option<Arc<Spin<dyn Netdev>>> {
     NETDEVS.lock().get(&id).map(|netdev| netdev.clone())
 }

@@ -1,12 +1,21 @@
 /// mm
 pub mod mm {
     pub const ROOT_PAGE_TABLE_PHYS_ADDR: usize = 0x8040_0000;
+    pub const PHYS_MAP_VIRT: usize = 0xffff_ffc0_0000_0000;
+    pub const KIMAGE_PHYS_BASE: usize = 0x8020_0000;
+    pub const KIMAGE_OFFSET: usize = 0xffff_ffff_0000_0000;
+    pub const MMIO_VIRT_BASE: usize = KIMAGE_OFFSET;
+    pub const KIMAGE_VIRT_BASE: usize = KIMAGE_OFFSET + KIMAGE_PHYS_BASE;
+    pub const PAGE_SIZE: usize = 1 << PAGE_SIZE_BITS;
+    pub const PAGE_SIZE_BITS: usize = 12;
+    // 127GB
+    pub const MEMORY_SIZE: usize = 0x1F_C000_0000;
+
+    pub const PTE_SIZE: usize = 8;
+    pub const PTES_PER_PAGE: usize = PAGE_SIZE / PTE_SIZE;
     pub const ROOT_PAGE_TABLE_PFN: usize = ROOT_PAGE_TABLE_PHYS_ADDR >> 12;
     pub const PAGE_TABLE_PHYS_END: usize = 0x8080_0000;
-    pub const PHYS_MAP_VIRT: usize = 0xFFFF_FF00_0000_0000;
-    pub const KIMAGE_PHYS_BASE: usize = 0x8020_0000;
-    pub const KIMAGE_VIRT_BASE: usize = 0xFFFF_FFFF_FFC0_0000;
-    pub const PAGE_SIZE: usize = 0x1000;
+
     #[derive(Clone, Copy)]
     pub enum PageSize {
         _4KbPage = 4096,

@@ -1,5 +1,5 @@
 mod mm;
-mod start;
+mod entry;
 mod context;
 mod console;
 mod io;
@@ -10,7 +10,7 @@ mod interrupt;
 mod fdt;
 
 pub use self::mm::*;
-pub use self::start::*;
+pub use self::entry::*;
 pub use self::context::*;
 pub use self::console::*;
 pub use self::io::*;

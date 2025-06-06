@@ -37,9 +37,9 @@ pub struct PTE64(pub u64);
 #[derive(Clone, Copy)]
 pub struct PageAttribute64(u64);
 
-pub struct RawPageTableSv48<'a>(NonNull<PTE64>, PhantomData<&'a ()>);
+pub struct RawPageTableSv39<'a>(NonNull<PTE64>, PhantomData<&'a ()>);
 
-pub struct PagingModeSv48;
+pub struct PagingModeSv39;
 
 impl PTE for PTE64 {
     type Attr = PageAttribute64;
@@ -55,11 +55,10 @@ impl PTE for PTE64 {
     }
 }
 
-impl PagingMode for PagingModeSv48 {
+impl PagingMode for PagingModeSv39 {
     type Entry = PTE64;
-    type RawTable<'a> = RawPageTableSv48<'a>;
+    type RawTable<'a> = RawPageTableSv39<'a>;
     const LEVELS: &'static [PageTableLevel] = &[
-        PageTableLevel::new(39, 9),
         PageTableLevel::new(30, 9),
         PageTableLevel::new(21, 9),
         PageTableLevel::new(12, 9),
@@ -67,7 +66,7 @@ impl PagingMode for PagingModeSv48 {
     const KERNEL_ROOT_TABLE_PFN: PFN = PAGE_TABLE_BASE;
 }
 
-impl<'a> RawPageTable<'a> for RawPageTableSv48<'a> {
+impl<'a> RawPageTable<'a> for RawPageTableSv39<'a> {
     type Entry = PTE64;
 
     fn index(&self, index: u16) -> &'a Self::Entry {
@@ -205,7 +204,7 @@ impl RawAttribute for PageAttribute64 {
     }
 }
 
-pub type DefaultPagingMode = PagingModeSv48;
+pub type DefaultPagingMode = PagingModeSv39;
 
 pub fn setup_kernel_satp() {
     unsafe {

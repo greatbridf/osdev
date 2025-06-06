@@ -1,23 +1,21 @@
-use super::{
-    config::{self, mm::*},
+use super::super::{
+    config::mm::*,
     mm::*,
-    fdt::get_num_harts,
 };
 
 use core::{
-    arch::global_asm, ptr::NonNull, sync::atomic::AtomicUsize
+    ptr::NonNull,
+    sync::atomic::AtomicUsize
 };
 use intrusive_list::{container_of, Link};
 use buddy_allocator::{BuddyAllocator, BuddyRawPage};
 use riscv::{asm::sfence_vma_all, register::satp};
 use eonix_mm::{
-    address::{Addr as _, PAddr, VAddr, VRange},
+    address::{Addr as _, AddrOps, PAddr, VAddr, VRange},
     page_table::{PageAttribute, PagingMode, RawAttribute, PTE as _},
     paging::{Page, PageAccess, PageAlloc, PageBlock, RawPage as RawPageTrait, PFN},
 };
 use spin::Mutex;
-
-global_asm!("start.S");
 
 static mut PAGES: [RawPage; 1024] = [const { RawPage::new() }; 1024];
 
@@ -149,9 +147,57 @@ impl PageAlloc for BuddyPageAlloc {
     }
 }
 
-type PageTable<'a> = eonix_mm::page_table::PageTable<'a, PagingModeSv48, BuddyPageAlloc, DirectPageAccess>;
+type PageTable<'a> = eonix_mm::page_table::PageTable<'a, PagingModeSv39, BuddyPageAlloc, DirectPageAccess>;
 
-fn setup_kernel_page_table() {
+extern "C" {
+    fn _ekernel();
+}
+
+/// TODO:
+/// _ekernel现在还没有，需要在linker里加上
+/// 对kernel image添加更细的控制，或者不加也行
+fn map_area(page_table: &PageTable, attr: PageAttribute, range: VRange, phy_offest: usize, page_size: PageSize) {
+    let (pfn_size, levels) = match page_size {
+        PageSize::_4KbPage => (0x1, &PagingModeSv39::LEVELS[..=0]),
+        PageSize::_2MbPage => (0x200, &PagingModeSv39::LEVELS[..=1]),
+        PageSize::_1GbPage => (0x40000, &PagingModeSv39::LEVELS[..=2]),
+    };
+    for (idx, pte) in page_table
+        .iter_kernel_levels(range, levels)
+        .enumerate()
+    {
+        pte.set(PFN::from(idx * pfn_size + phy_offest), PageAttribute64::from_page_attr(attr));
+    }
+}
+
+/// Map physical memory after ekernel, about 0x8040 0000-0x20_7fff_fff about 128GB
+/// to add a 0xffff ffc0 0000 0000 offest
+/// first use 4KB page, then 2MB page, last 1GB page
+fn map_free_physical_memory(attr: PageAttribute, page_table: &PageTable) {
+    let ekernel = _ekernel as usize - KIMAGE_OFFSET;
+
+    let start = PAddr::from(ekernel).ceil_to(PageSize::_4KbPage as usize);
+    let end = PAddr::from(ekernel).ceil_to(PageSize::_2MbPage as usize);
+    let size_4kb = end - start;
+    let range = VRange::from(VAddr::from(PHYS_MAP_VIRT + start.addr())).grow(size_4kb);
+    let pfn_start = start.addr() >> PAGE_SIZE_BITS;
+    map_area(page_table, attr, range, pfn_start, PageSize::_4KbPage);
+
+    let start = end;
+    let end = start.ceil_to(PageSize::_1GbPage as usize);
+    let size_2mb = end - start;
+    let range = VRange::from(VAddr::from(PHYS_MAP_VIRT + start.addr())).grow(size_2mb);
+    let pfn_start = start.addr() >> PAGE_SIZE_BITS;
+    map_area(page_table, attr, range, pfn_start, PageSize::_2MbPage);
+
+    let start = end;
+    let size_1gb = MEMORY_SIZE;
+    let range = VRange::from(VAddr::from(PHYS_MAP_VIRT + start.addr())).grow(size_1gb);
+    let pfn_start = start.addr() >> PAGE_SIZE_BITS;
+    map_area(page_table, attr, range, pfn_start, PageSize::_1GbPage);
+}
+
+pub fn setup_kernel_page_table() {
     let attr = PageAttribute::WRITE
         | PageAttribute::READ
         | PageAttribute::EXECUTE
@@ -163,22 +209,15 @@ fn setup_kernel_page_table() {
     let root_table_page = Page::alloc_in(BuddyPageAlloc);
     let page_table = PageTable::new_in(&root_table_page, BuddyPageAlloc);
 
-    // Map 0x80200000-0x81200000 16MB identically, use 2MB page
-    for (idx, pte) in page_table
-        .iter_kernel_levels(VRange::from(VAddr::from(KIMAGE_PHYS_BASE)).grow(0x1000000), &PagingModeSv48::LEVELS[..=2])
-        .enumerate()
-    {
-        pte.set(PFN::from(idx * 0x200 + 0x80200), PageAttribute64::from_page_attr(attr));
-    }
-
-    // Map 0x0000_0000_0000_0000-0x0000_007F_FFFF_FFFF 512GB
-    // to 0xFFFF_FF00_0000_0000 to 0xFFFF_FF7F_FFFF_FFFF, use 1 GB page
-    for (idx, pte) in page_table
-        .iter_kernel_levels(VRange::from(VAddr::from(PHYS_MAP_VIRT)).grow(0x80_0000_0000), &PagingModeSv48::LEVELS[..=1])
-        .enumerate()
-    {
-        pte.set(PFN::from(idx * 0x40000), PageAttribute64::from_page_attr(attr));
-    }
+    // Map 0x00000000-0x7fffffff 2GB MMIO,
+    // to 0xffff ffff 0000 0000 to 0xffff ffff 7ffff ffff, use 1GB page
+    map_area(&page_table,
+        attr,
+        VRange::from(VAddr::from(MMIO_VIRT_BASE)).grow(0x2000_0000),
+        0,
+        PageSize::_1GbPage);
+    
+    map_free_physical_memory(attr, &page_table);
 
     // Map 2 MB kernel image
     for (idx, pte) in page_table
@@ -188,26 +227,12 @@ fn setup_kernel_page_table() {
         pte.set(PFN::from(idx + 0x80200), PageAttribute64::from_page_attr(attr));
     }
 
-
     unsafe {
-        satp::set(satp::Mode::Sv48, 0, PFN::from(page_table.addr()).into());
+        satp::set(
+            satp::Mode::Sv39,
+            0,
+            usize::from(PFN::from(page_table.addr())),
+        );
     }
     sfence_vma_all();
-}
-
-extern "C" {
-    fn kernel_init();
-}
-
-/// TODO: 
-/// linker，现在VMA和LMA不对
-/// 现在的地址空间可能要改一改，改回Sv39的，Sv48有点大了
-#[no_mangle]
-pub unsafe extern "C" fn riscv64_start(hart_id: usize, dtb_addr: usize) -> ! {
-    let num_harts = get_num_harts(dtb_addr);
-    config::smp::set_num_harts(num_harts);
-    setup_kernel_page_table();
-    unsafe { kernel_init() };
-
-    unreachable!();
 }

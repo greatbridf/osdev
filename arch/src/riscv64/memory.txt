@@ -1,0 +1,13 @@
+physical memory:
+
+0x0000 0000 - 0x8000 0000  2GB MMIO
+0x8000 0000 - 0x8020 0000  2MB SBI
+0x8020 0000 - 0x8040 0000  2MB kernel image (maybe)
+free memory after kernel image
+
+
+kernel virtual address space:
+
+0xffff ffc0 0000 0000 - 0xffff ffdf ffff ffff  128GB physical memory
+0xffff ffff 0000 0000 - 0xffff ffff 7fff ffff    2GB MMIO
+0xffff ffff 8020 0000 - 0xffff ffff 803f ffff    2MB kernel image

@@ -1,18 +1,18 @@
-OUTPUT_FORMAT(elf64-littleriscv)
+OUTPUT_FORMAT(riscv)
 ENTRY(_start)
+
+RAM = 0x80200000;
 
 MEMORY
 {
-    PHYMEM        (w)  : org = 0xffffff0000000000, len = 512 * 1024M
-    PARRAY        (w)  : org = 0xffffff8000000000, len = 128 * 1024M
-    KBSS          (w)  : org = 0xffffffffc0200000, len = 2M
-    KIMAGE        (wx) : org = 0xffffffffffc00000, len = 2M
+    KBSS          (w)  : org = 0xffffffff00200000, len = 2M
+    KIMAGE        (wx) : org = 0xffffffff80200000, len = 2M
     KPERCPU       (w)  : org = 0x0000000000000000, len = 128K
 }
 
 SECTIONS
 {
-    .text : AT(0x80200000)
+    .text : AT(RAM)
     {
         TEXT_START = .;
         *(.text.entry)

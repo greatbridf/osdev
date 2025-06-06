@@ -12,34 +12,34 @@ pub trait RawPage: Clone + Copy + From<PFN> + Into<PFN> {
 }
 
 #[derive(Clone, Copy)]
-pub struct UnmanagedRawPage(PFN);
+pub struct UnmanagedRawPage(PFN, u32);
 
 /// Unmanaged raw pages should always have a non-zero refcount to
 /// avoid `free()` from being called.
 static UNMANAGED_RAW_PAGE_CLONE_COUNT: AtomicUsize = AtomicUsize::new(1);
 
 impl UnmanagedRawPage {
-    pub const fn new(pfn: PFN) -> Self {
-        Self(pfn)
+    pub const fn new(pfn: PFN, order: u32) -> Self {
+        Self(pfn, order)
     }
 }
 
 impl From<PFN> for UnmanagedRawPage {
     fn from(value: PFN) -> Self {
-        Self::new(value)
+        Self::new(value, 0)
     }
 }
 
 impl Into<PFN> for UnmanagedRawPage {
     fn into(self) -> PFN {
-        let Self(pfn) = self;
+        let Self(pfn, _) = self;
         pfn
     }
 }
 
 impl RawPage for UnmanagedRawPage {
     fn order(&self) -> u32 {
-        0
+        self.1
     }
 
     fn refcount(&self) -> &AtomicUsize {

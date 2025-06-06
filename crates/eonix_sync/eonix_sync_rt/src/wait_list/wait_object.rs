@@ -1,5 +1,5 @@
 use super::WaitList;
-use crate::{Spin, SpinIrq as _};
+use crate::SpinIrq as _;
 use core::{
     cell::UnsafeCell,
     marker::PhantomPinned,
@@ -8,6 +8,7 @@ use core::{
     sync::atomic::{AtomicBool, AtomicPtr, Ordering},
     task::Waker,
 };
+use eonix_spin::Spin;
 use intrusive_collections::{intrusive_adapter, LinkedListAtomicLink, UnsafeRef};
 
 intrusive_adapter!(

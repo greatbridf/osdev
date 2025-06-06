@@ -1,30 +1,26 @@
-use super::mm::{PA_G, PA_NXE, PA_P, PA_PS, PA_RW};
+pub(crate) mod init;
+
+use super::mm::{E820_MEM_MAP_DATA, PA_G, PA_NXE, PA_P, PA_PS, PA_RW};
 use core::arch::{global_asm, naked_asm};
 
-const KERNEL_IMAGE_PADDR: usize = 0x400000;
+const KERNEL_IMAGE_PADDR: usize = 0x200000;
 const KERNEL_PML4: usize = 0x1000;
 const KERNEL_PDPT_PHYS_MAPPING: usize = 0x2000;
 const KERNEL_PDPT_KERNEL_SPACE: usize = 0x3000;
 const KERNEL_PD_KIMAGE: usize = 0x4000;
 const KERNEL_PT_KIMAGE: usize = 0x5000;
-const KERNEL_PD_STRUCT_PAGE_ARR: usize = 0x6000;
 
 #[unsafe(link_section = ".low")]
-static EARLY_GDT: [u64; 7] = [0; 7];
+static mut EARLY_GDT: [u64; 7] = [0; 7];
 
 #[unsafe(no_mangle)]
 #[unsafe(link_section = ".low")]
-static EARLY_GDT_DESCRIPTOR: (u16, u32) = (0, 0);
+static mut EARLY_GDT_DESCRIPTOR: (u16, u32) = (0, 0);
 
 #[unsafe(link_section = ".low")]
-static BIOS_IDT_DESCRIPTOR: (u16, u32) = (0, 0);
-
-#[unsafe(link_section = ".low")]
-static E820_MEM_MAP_DATA: [u64; 128] = [0; 128];
+static mut BIOS_IDT_DESCRIPTOR: (u16, u32) = (0, 0);
 
 unsafe extern "C" {
-    fn _kernel_init() -> !;
-
     fn KIMAGE_32K_COUNT();
     fn KIMAGE_PAGES();
 
@@ -158,7 +154,7 @@ global_asm!(
     .align 16
     .Lread_data_packet:
         .long  0x00070010 # .stage1 takes up 3.5K, or 7 sectors
-        .long  0x00007000 # read to 0000:7000
+        .long  0x00006000 # read to 0000:6000
         .8byte 1          # read from LBA 1
     .popsection
     "#,
@@ -360,7 +356,7 @@ global_asm!(
 
         # clear paging structures
         mov $0x1000, %edi
-        mov $0x6000, %ecx
+        mov $0x5000, %ecx
         shr $2, %ecx # %ecx /= 4
         rep stosl
 
@@ -406,14 +402,9 @@ global_asm!(
         and $(~{PA_PS}), %ebx
         call fill_pxe
 
-        # PDPTE 0x008
-        mov ${KERNEL_PDPT_KERNEL_SPACE}, %edi
-        lea 0x8(%edi), %edi
-        mov ${KERNEL_PD_STRUCT_PAGE_ARR}, %esi
-        call fill_pxe
-
         # PDPTE 0xff8
-        lea 0xff0(%edi), %edi
+        mov ${KERNEL_PDPT_KERNEL_SPACE}, %edi
+        lea 0xff8(%edi), %edi
         mov ${KERNEL_PD_KIMAGE}, %esi
         call fill_pxe
 
@@ -490,7 +481,6 @@ global_asm!(
     PA_NXE = const PA_NXE,
     KERNEL_PDPT_PHYS_MAPPING = const KERNEL_PDPT_PHYS_MAPPING,
     KERNEL_PDPT_KERNEL_SPACE = const KERNEL_PDPT_KERNEL_SPACE,
-    KERNEL_PD_STRUCT_PAGE_ARR = const KERNEL_PD_STRUCT_PAGE_ARR,
     KERNEL_PD_KIMAGE = const KERNEL_PD_KIMAGE,
     KERNEL_PT_KIMAGE = const KERNEL_PT_KIMAGE,
     start_64bit = sym start_64bit,
@@ -520,7 +510,7 @@ pub unsafe extern "C" fn start_64bit() {
         kernel_identical_base = const 0xffffff0000000000u64,
         stack_paddr = const 0x80000,
         e820_data_addr = sym E820_MEM_MAP_DATA,
-        kernel_init = sym _kernel_init,
+        kernel_init = sym init::kernel_init,
         options(att_syntax)
     )
 }

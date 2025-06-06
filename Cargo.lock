@@ -74,7 +74,39 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "60b1af1c220855b6ceac025d3f6ecdd2b7c4894bfe9cd9bda4fbb4bc7c0d4cf0"
 
 [[package]]
-name = "eonix-kernel"
+name = "eonix_hal"
+version = "0.1.0"
+dependencies = [
+ "acpi",
+ "arch",
+ "cfg-if",
+ "eonix_hal_macros",
+ "eonix_hal_traits",
+ "eonix_mm",
+ "eonix_percpu",
+ "eonix_preempt",
+ "eonix_sync_base",
+]
+
+[[package]]
+name = "eonix_hal_macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "eonix_hal_traits"
+version = "0.1.0"
+dependencies = [
+ "bitflags",
+ "eonix_mm",
+]
+
+[[package]]
+name = "eonix_kernel"
 version = "0.1.0"
 dependencies = [
  "acpi",
@@ -96,35 +128,6 @@ dependencies = [
  "pointers",
  "posix_types",
  "slab_allocator",
-]
-
-[[package]]
-name = "eonix_hal"
-version = "0.1.0"
-dependencies = [
- "arch",
- "cfg-if",
- "eonix_hal_macros",
- "eonix_hal_traits",
- "eonix_mm",
- "eonix_percpu",
- "eonix_preempt",
-]
-
-[[package]]
-name = "eonix_hal_macros"
-version = "0.1.0"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
-]
-
-[[package]]
-name = "eonix_hal_traits"
-version = "0.1.0"
-dependencies = [
- "bitflags",
 ]
 
 [[package]]
@@ -190,11 +193,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "eonix_spin"
+version = "0.1.0"
+dependencies = [
+ "eonix_preempt",
+ "eonix_sync_base",
+]
+
+[[package]]
 name = "eonix_sync"
 version = "0.1.0"
 dependencies = [
+ "eonix_spin",
+ "eonix_sync_base",
+ "eonix_sync_rt",
+]
+
+[[package]]
+name = "eonix_sync_base"
+version = "0.1.0"
+
+[[package]]
+name = "eonix_sync_rt"
+version = "0.1.0"
+dependencies = [
  "arch",
+ "eonix_hal",
  "eonix_preempt",
+ "eonix_spin",
+ "eonix_sync_base",
  "intrusive-collections",
 ]
 

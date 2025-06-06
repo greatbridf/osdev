@@ -157,7 +157,7 @@ fn define_percpu_shared_impl(
 
             pub fn get_for_cpu(&self, cpuid: usize) -> Option<& #ty > {
                 let offset = & #inner_ident as *const _ as usize;
-                let base = ::arch::PercpuArea::get_for(cpuid);
+                let base = ::eonix_percpu::PercpuArea::get_for(cpuid);
                 base.map(|base| unsafe { base.byte_add(offset).cast().as_ref() })
             }
         }

@@ -1,16 +1,15 @@
+#![no_std]
+
 mod guard;
-mod relax;
-mod spin_irq;
 
 use core::{
     cell::UnsafeCell,
     marker::PhantomData,
     sync::atomic::{AtomicBool, Ordering},
 };
+use eonix_sync_base::{Relax, SpinRelax};
 
 pub use guard::{SpinGuard, UnlockedSpinGuard};
-pub use relax::{LoopRelax, Relax, SpinRelax};
-pub use spin_irq::SpinIrq;
 
 pub trait SpinContext {
     fn save() -> Self;
@@ -56,6 +55,14 @@ where
             value: UnsafeCell::new(value),
             _phantom: PhantomData,
         }
+    }
+
+    pub fn into_inner(mut self) -> T {
+        assert!(
+            !*self.locked.get_mut(),
+            "Spin::take(): Cannot take a locked Spin"
+        );
+        self.value.into_inner()
     }
 }
 

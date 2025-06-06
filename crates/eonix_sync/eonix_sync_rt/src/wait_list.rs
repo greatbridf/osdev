@@ -1,8 +1,10 @@
 mod wait_handle;
 mod wait_object;
 
-use crate::{LazyLock, Spin, SpinIrq as _};
+use crate::SpinIrq as _;
 use core::fmt;
+use eonix_spin::Spin;
+use eonix_sync_base::LazyLock;
 use intrusive_collections::{linked_list::CursorMut, LinkedList};
 use wait_object::{WaitObject, WaitObjectAdapter};
 

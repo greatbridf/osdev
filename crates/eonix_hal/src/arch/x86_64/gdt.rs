@@ -1,11 +1,11 @@
-use crate::TSS;
-use core::arch::asm;
+use super::cpu::TSS;
+use core::{arch::asm, marker::PhantomPinned};
 
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy)]
 pub struct GDTEntry(u64);
 
-pub struct GDT([GDTEntry; GDT::LEN]);
+pub struct GDT([GDTEntry; GDT::LEN], PhantomPinned);
 
 impl GDTEntry {
     const NULL: Self = Self(0);
@@ -50,18 +50,21 @@ impl GDT {
     const TSS_INDEX: usize = 8;
 
     pub fn new() -> Self {
-        Self([
-            GDTEntry::NULL,
-            GDTEntry::KERNEL_CODE64,
-            GDTEntry::KERNEL_DATA64,
-            GDTEntry::USER_CODE64,
-            GDTEntry::USER_DATA64,
-            GDTEntry::USER_CODE32,
-            GDTEntry::USER_DATA32,
-            GDTEntry::NULL, // User TLS 32bit
-            GDTEntry::NULL, // TSS Descriptor Low
-            GDTEntry::NULL, // TSS Descriptor High
-        ])
+        Self(
+            [
+                GDTEntry::NULL,
+                GDTEntry::KERNEL_CODE64,
+                GDTEntry::KERNEL_DATA64,
+                GDTEntry::USER_CODE64,
+                GDTEntry::USER_DATA64,
+                GDTEntry::USER_CODE32,
+                GDTEntry::USER_DATA32,
+                GDTEntry::NULL, // User TLS 32bit
+                GDTEntry::NULL, // TSS Descriptor Low
+                GDTEntry::NULL, // TSS Descriptor High
+            ],
+            PhantomPinned,
+        )
     }
 
     pub fn set_tss(&mut self, base: u64) {
@@ -74,18 +77,20 @@ impl GDT {
         self.0[Self::TLS32_INDEX] = desc;
     }
 
-    pub unsafe fn load(&self) {
+    pub fn load(&self) {
         let len = Self::LEN * 8 - 1;
         let descriptor: [u64; 2] = [(len as u64) << 48, self.0.as_ptr() as u64];
         assert!(len < 0x10000, "GDT too large");
 
         let descriptor_address = &descriptor as *const _ as usize + 6;
-        asm!(
-            "lgdt ({})",
-            "ltr %ax",
-            in(reg) descriptor_address,
-            in("ax") Self::TSS_INDEX as u16 * 8,
-            options(att_syntax)
-        );
+        unsafe {
+            asm!(
+                "lgdt ({})",
+                "ltr %ax",
+                in(reg) descriptor_address,
+                in("ax") Self::TSS_INDEX as u16 * 8,
+                options(att_syntax, readonly, preserves_flags),
+            );
+        }
     }
 }

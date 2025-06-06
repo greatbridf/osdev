@@ -1,19 +1,18 @@
 mod mapping;
 mod page_fault;
 
-use super::access::KernelPageAccess;
 use super::address::{VAddrExt as _, VRangeExt as _};
 use super::page_alloc::GlobalPageAlloc;
-use super::paging::{AllocZeroed as _, PageUnmanaged};
+use super::paging::AllocZeroed as _;
 use super::{AsMemoryBlock, MMArea, Page};
 use crate::kernel::constants::{EEXIST, EFAULT, EINVAL, ENOMEM};
 use crate::{prelude::*, sync::ArcSwap};
 use alloc::collections::btree_set::BTreeSet;
 use core::fmt;
 use core::sync::atomic::{AtomicUsize, Ordering};
-use eonix_hal::mm::DefaultPagingMode;
+use eonix_hal::mm::{ArchPagingMode, ArchPhysAccess, GLOBAL_PAGE_TABLE};
 use eonix_mm::address::{Addr as _, PAddr};
-use eonix_mm::page_table::{PageAttribute, PagingMode};
+use eonix_mm::page_table::PageAttribute;
 use eonix_mm::paging::PFN;
 use eonix_mm::{
     address::{AddrOps as _, VAddr, VRange},
@@ -27,10 +26,6 @@ pub use mapping::{FileMapping, Mapping};
 pub use page_fault::handle_kernel_page_fault;
 
 pub static EMPTY_PAGE: LazyLock<Page> = LazyLock::new(|| Page::zeroed());
-static KERNEL_ROOT_TABLE_PAGE: LazyLock<PageUnmanaged> = LazyLock::new(|| unsafe {
-    // SAFETY: The kernel page table is always valid.
-    PageUnmanaged::from_raw_unchecked(DefaultPagingMode::KERNEL_ROOT_TABLE_PFN)
-});
 
 #[derive(Debug, Clone, Copy)]
 pub struct Permission {
@@ -38,9 +33,11 @@ pub struct Permission {
     pub execute: bool,
 }
 
+pub type KernelPageTable<'a> = PageTable<'a, ArchPagingMode, GlobalPageAlloc, ArchPhysAccess>;
+
 struct MMListInner<'a> {
     areas: BTreeSet<MMArea>,
-    page_table: PageTable<'a, DefaultPagingMode, GlobalPageAlloc, KernelPageAccess>,
+    page_table: KernelPageTable<'a>,
     break_start: Option<VRange>,
     break_pos: Option<VAddr>,
 }
@@ -226,7 +223,7 @@ impl MMList {
     }
 
     pub fn new() -> Self {
-        let page_table = PageTable::new(&KERNEL_ROOT_TABLE_PAGE);
+        let page_table = GLOBAL_PAGE_TABLE.clone_global();
         Self {
             root_page_table: AtomicUsize::from(page_table.addr().addr()),
             user_count: AtomicUsize::new(0),
@@ -241,9 +238,9 @@ impl MMList {
 
     pub async fn new_cloned(&self) -> Self {
         let inner = self.inner.borrow();
-        let inner = inner.lock().await;
+        let mut inner = inner.lock().await;
 
-        let page_table = PageTable::new(&KERNEL_ROOT_TABLE_PAGE);
+        let page_table = GLOBAL_PAGE_TABLE.clone_global();
         let list = Self {
             root_page_table: AtomicUsize::from(page_table.addr().addr()),
             user_count: AtomicUsize::new(0),
@@ -262,7 +259,7 @@ impl MMList {
             for area in list_inner.areas.iter() {
                 list_inner
                     .page_table
-                    .set_copy_on_write(&inner.page_table, area.range());
+                    .set_copy_on_write(&mut inner.page_table, area.range());
             }
         }
 
@@ -281,7 +278,7 @@ impl MMList {
     }
 
     pub fn deactivate(&self) {
-        arch::set_root_page_table_pfn(DefaultPagingMode::KERNEL_ROOT_TABLE_PFN);
+        arch::set_root_page_table_pfn(PFN::from(GLOBAL_PAGE_TABLE.addr()));
 
         let old_user_count = self.user_count.fetch_sub(1, Ordering::Release);
         assert_ne!(old_user_count, 0);
@@ -333,7 +330,7 @@ impl MMList {
 
         let new_root_page_table = match &new {
             Some(new_mm) => new_mm.root_page_table.load(Ordering::Relaxed),
-            None => PAddr::from(DefaultPagingMode::KERNEL_ROOT_TABLE_PFN).addr(),
+            None => GLOBAL_PAGE_TABLE.addr().addr(),
         };
 
         arch::set_root_page_table_pfn(PFN::from(PAddr::from(new_root_page_table)));
@@ -551,7 +548,7 @@ trait PageTableExt {
     fn set_copy_on_write(&self, from: &Self, range: VRange);
 }
 
-impl PageTableExt for PageTable<'_, DefaultPagingMode, GlobalPageAlloc, KernelPageAccess> {
+impl PageTableExt for KernelPageTable<'_> {
     fn set_anonymous(&self, range: VRange, permission: Permission) {
         for pte in self.iter_user(range) {
             pte.set_anonymous(permission.execute);

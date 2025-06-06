@@ -1,5 +1,5 @@
 use super::{GlobalPageAlloc, PageAlloc, RawPage as _, PFN};
-use crate::address::{AddrRange, PAddr};
+use crate::address::{AddrRange, PAddr, PhysAccess};
 use core::{fmt, mem::ManuallyDrop, ptr::NonNull, sync::atomic::Ordering};
 
 pub const PAGE_SIZE: usize = 4096;
@@ -303,5 +303,18 @@ impl<A: PageAlloc> fmt::Debug for Page<A> {
             Into::<PFN>::into(self.raw_page),
             self.order()
         )
+    }
+}
+
+impl<T> PageAccess for T
+where
+    T: PhysAccess,
+{
+    unsafe fn get_ptr_for_pfn(pfn: PFN) -> NonNull<PageBlock> {
+        unsafe {
+            // SAFETY: The physical address of a existing page must be
+            //         aligned to the page size.
+            T::as_ptr(PAddr::from(pfn))
+        }
     }
 }

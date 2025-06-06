@@ -19,7 +19,7 @@ SECTIONS {
         BYTE(0xaa);
     } > LOWMEM = 0x00
 
-    .stage1 0x7000 :
+    .stage1 0x6000 :
     {
         KEEP(*(.stage1.smp));
 
@@ -72,7 +72,7 @@ SECTIONS {
 INSERT AFTER .rodata;
 
 SECTIONS {
-    .percpu : ALIGN(16)
+    .percpu 0 : ALIGN(16)
     {
         __spercpu = .;
 
@@ -85,12 +85,14 @@ SECTIONS {
 
         . = ALIGN(16);
         __epercpu = .;
-    } > KPERCPU AT> REGION_RODATA
+    } > LOWMEM AT> REGION_RODATA
 
     PERCPU_DATA_START = LOADADDR(.percpu);
     PERCPU_LENGTH = ABSOLUTE(__epercpu - __spercpu);
 
     KIMAGE_PAGES = (__edata - _stext + 0x1000 - 1) / 0x1000;
     KIMAGE_32K_COUNT = (KIMAGE_PAGES + 8 - 1) / 8;
+
+    BSS_LENGTH = ABSOLUTE(__ebss - __sbss);
 }
 INSERT AFTER .rodata;

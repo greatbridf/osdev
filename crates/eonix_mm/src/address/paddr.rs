@@ -3,7 +3,31 @@ use crate::paging::{PAGE_SIZE_BITS, PFN};
 use core::{
     fmt,
     ops::{Add, Sub},
+    ptr::NonNull,
 };
+
+pub trait PhysAccess {
+    /// Translate the data that this address is pointing to into kernel
+    /// accessible pointer. Use it with care.
+    ///
+    /// # Panic
+    /// If the address is not properly aligned.
+    ///
+    /// # Safety
+    /// The caller must ensure that the data is of type `T`.
+    /// Otherwise, it may lead to undefined behavior.
+    unsafe fn as_ptr<T>(paddr: PAddr) -> NonNull<T>;
+
+    /// Translate the kernel accessible pointer back into a physical address.
+    ///
+    /// # Panic
+    /// If the pointer is not properly aligned.
+    ///
+    /// # Safety
+    /// The caller must ensure that the pointer is valid and points to a
+    /// valid physical memory location.
+    unsafe fn from_ptr<T>(ptr: NonNull<T>) -> PAddr;
+}
 
 #[repr(transparent)]
 #[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq)]

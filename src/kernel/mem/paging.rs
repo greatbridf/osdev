@@ -1,8 +1,7 @@
 use super::{access::AsMemoryBlock, page_alloc::GlobalPageAlloc, MemoryBlock, PhysAccess};
 use crate::io::{Buffer, FillResult};
-use eonix_mm::paging::{NoAlloc, Page as GenericPage, PageAlloc};
+use eonix_mm::paging::{Page as GenericPage, PageAlloc};
 
-pub type PageUnmanaged = GenericPage<NoAlloc>;
 pub type Page = GenericPage<GlobalPageAlloc>;
 
 /// A buffer that wraps a page and provides a `Buffer` interface.

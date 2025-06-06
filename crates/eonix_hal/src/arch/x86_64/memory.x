@@ -1,8 +1,7 @@
 MEMORY {
-    LOWMEM             : org = 0x0000000000000000, len = 1M
-    KBSS         (wa)  : org = 0xffffffffc0200000, len = 2M
-    KIMAGE       (rwx) : org = 0xffffffffffc00000, len = 2M
-    KPERCPU            : org = 0x0000000000000000, len = 128K
+    LOWMEM : org = 0x0000000000000000, len = 1M
+    KBSS   : org = 0xffffffffc0200000, len = 2M
+    KIMAGE : org = 0xffffffffffc00000, len = 2M
 }
 
 REGION_ALIAS("REGION_TEXT", KIMAGE);

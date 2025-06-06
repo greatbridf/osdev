@@ -1,6 +1,16 @@
 #![no_std]
 
-use core::sync::atomic::{compiler_fence, Ordering};
+use core::{
+    ops::{Deref, DerefMut},
+    sync::atomic::{compiler_fence, Ordering},
+};
+
+pub struct PreemptGuard<T>
+where
+    T: ?Sized,
+{
+    value: T,
+}
 
 #[eonix_percpu::define_percpu]
 static PREEMPT_COUNT: usize = 0;
@@ -66,17 +76,38 @@ macro_rules! assert_preempt_count_eq {
     }};
 }
 
-#[unsafe(no_mangle)]
-pub extern "C" fn r_preempt_disable() {
-    disable();
+impl<T> PreemptGuard<T> {
+    pub fn new(value: T) -> Self {
+        disable();
+        Self { value }
+    }
 }
 
-#[unsafe(no_mangle)]
-pub extern "C" fn r_preempt_enable() {
-    enable();
+impl<T> Deref for PreemptGuard<T>
+where
+    T: ?Sized,
+{
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.value
+    }
 }
 
-#[unsafe(no_mangle)]
-pub extern "C" fn r_preempt_count() -> usize {
-    count()
+impl<T> DerefMut for PreemptGuard<T>
+where
+    T: ?Sized,
+{
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.value
+    }
+}
+
+impl<T> Drop for PreemptGuard<T>
+where
+    T: ?Sized,
+{
+    fn drop(&mut self) {
+        enable();
+    }
 }

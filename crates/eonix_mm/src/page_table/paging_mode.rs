@@ -1,15 +1,11 @@
 use super::{RawPageTable, PTE};
-use crate::{
-    address::{Addr as _, VAddr},
-    paging::PFN,
-};
+use crate::address::{Addr as _, VAddr};
 
 pub trait PagingMode {
     type Entry: PTE;
     type RawTable<'a>: RawPageTable<'a, Entry = Self::Entry>;
 
     const LEVELS: &'static [PageTableLevel];
-    const KERNEL_ROOT_TABLE_PFN: PFN;
 }
 
 #[derive(Clone, Copy, PartialOrd, PartialEq)]

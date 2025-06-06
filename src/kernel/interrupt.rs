@@ -1,20 +1,15 @@
-use super::cpu::local_cpu;
 use super::mem::handle_kernel_page_fault;
 use super::timer::timer_interrupt;
 use crate::kernel::constants::EINVAL;
 use crate::{driver::Port8, prelude::*};
 use alloc::sync::Arc;
+use eonix_hal::processor::CPU;
 use eonix_hal::traits::fault::Fault;
 use eonix_hal::traits::trap::{RawTrapContext, TrapType};
 use eonix_hal::trap::TrapContext;
 use eonix_mm::address::{Addr as _, VAddr};
 use eonix_runtime::scheduler::Scheduler;
 use eonix_sync::SpinIrq as _;
-
-const PIC1_COMMAND: Port8 = Port8::new(0x20);
-const PIC1_DATA: Port8 = Port8::new(0x21);
-const PIC2_COMMAND: Port8 = Port8::new(0xA0);
-const PIC2_DATA: Port8 = Port8::new(0xA1);
 
 static IRQ_HANDLERS: Spin<[Option<Arc<dyn Fn() + Send + Sync>>; 16]> =
     Spin::new([const { None }; 16]);
@@ -26,6 +21,9 @@ pub fn default_irq_handler(irqno: usize) {
     if let Some(handler) = handler {
         handler();
     }
+
+    const PIC1_COMMAND: Port8 = Port8::new(0x20);
+    const PIC2_COMMAND: Port8 = Port8::new(0xA0);
 
     PIC1_COMMAND.write(0x20); // EOI
     if irqno >= 8 {
@@ -82,26 +80,6 @@ where
     Ok(())
 }
 
-pub fn init() -> KResult<()> {
-    // Initialize PIC
-    PIC1_COMMAND.write(0x11); // edge trigger mode
-    PIC1_DATA.write(0x20); // IRQ 0-7 offset
-    PIC1_DATA.write(0x04); // cascade with slave PIC
-    PIC1_DATA.write(0x01); // no buffer mode
-
-    PIC2_COMMAND.write(0x11); // edge trigger mode
-    PIC2_DATA.write(0x28); // IRQ 8-15 offset
-    PIC2_DATA.write(0x02); // cascade with master PIC
-    PIC2_DATA.write(0x01); // no buffer mode
-
-    // Allow all IRQs
-    PIC1_DATA.write(0x0);
-    PIC2_DATA.write(0x0);
-
-    Ok(())
-}
-
 pub fn end_of_interrupt() {
-    // SAFETY: We only use this function in irq context, where preemption is disabled.
-    unsafe { local_cpu() }.interrupt.end_of_interrupt();
+    CPU::local().as_mut().end_of_interrupt();
 }

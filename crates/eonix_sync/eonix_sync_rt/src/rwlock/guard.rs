@@ -1,6 +1,6 @@
 use super::RwLock;
-use crate::{AsProof, AsProofMut, Proof, ProofMut, UnlockableGuard, UnlockedGuard};
 use core::ops::{Deref, DerefMut};
+use eonix_sync_base::{AsProof, AsProofMut, Proof, ProofMut, UnlockableGuard, UnlockedGuard};
 
 pub struct RwLockWriteGuard<'a, T>
 where

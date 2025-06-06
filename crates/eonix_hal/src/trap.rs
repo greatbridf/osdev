@@ -1,8 +1,5 @@
 use eonix_hal_traits::trap::IsRawTrapContext;
 
-pub use crate::arch::trap::TrapContext;
-
-// TODO: Remove this once the arch module is fully implemented.
-pub use crate::arch::trap::TRAP_STUBS_START;
+pub use crate::arch::trap::{disable_irqs, disable_irqs_save, enable_irqs, IrqState, TrapContext};
 
 struct _CheckTrapContext(IsRawTrapContext<TrapContext>);

@@ -1,0 +1,8 @@
+[package]
+name = "eonix_spin"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+eonix_preempt = { path = "../../eonix_preempt" }
+eonix_sync_base = { path = "../eonix_sync_base" }

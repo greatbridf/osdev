@@ -22,11 +22,16 @@ mod rcu;
 mod sync;
 
 use alloc::{ffi::CString, sync::Arc};
+use core::{
+    hint::spin_loop,
+    sync::atomic::{AtomicBool, Ordering},
+};
 use elf::ParsedElf32;
-use eonix_mm::paging::PFN;
+use eonix_hal::{processor::CPU, traits::trap::IrqState, trap::disable_irqs_save};
+use eonix_mm::address::PRange;
 use eonix_runtime::{run::FutureRun, scheduler::Scheduler, task::Task};
 use kernel::{
-    mem::Page,
+    mem::GlobalPageAlloc,
     pcie::init_pcie,
     task::{new_thread_runnable, KernelStack, ProcessBuilder, ProcessList, ThreadBuilder},
     vfs::{
@@ -36,6 +41,7 @@ use kernel::{
     },
     CharDevice,
 };
+use kernel_init::setup_memory;
 use path::Path;
 use prelude::*;
 
@@ -54,11 +60,17 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
     println_fatal!();
     println_fatal!("{}", info.message());
 
-    arch::freeze()
+    loop {}
 }
 
-#[no_mangle]
-pub extern "C" fn kernel_init(early_kstack_pfn: PFN) -> ! {
+static BSP_OK: AtomicBool = AtomicBool::new(false);
+
+#[eonix_hal::main]
+fn kernel_init(mut data: eonix_hal::bootstrap::BootStrapData) -> ! {
+    setup_memory(&mut data);
+
+    BSP_OK.store(true, Ordering::Release);
+
     init_pcie().expect("Unable to initialize PCIe bus");
 
     // To satisfy the `Scheduler` "preempt count == 0" assertion.
@@ -68,16 +80,43 @@ pub extern "C" fn kernel_init(early_kstack_pfn: PFN) -> ! {
     // So call `init_vfs` first, then `init_multitasking`.
     Scheduler::init_local_scheduler::<KernelStack>();
 
-    Scheduler::get().spawn::<KernelStack, _>(FutureRun::new(init_process(early_kstack_pfn)));
+    Scheduler::get().spawn::<KernelStack, _>(FutureRun::new(init_process(data.get_early_stack())));
 
+    drop(data);
     unsafe {
         // SAFETY: `preempt::count()` == 1.
         Scheduler::goto_scheduler_noreturn()
     }
 }
 
-async fn init_process(early_kstack_pfn: PFN) {
-    unsafe { Page::from_raw(early_kstack_pfn) };
+#[eonix_hal::ap_main]
+fn kernel_ap_main(_stack_range: PRange) -> ! {
+    while BSP_OK.load(Ordering::Acquire) == false {
+        // Wait for BSP to finish initializing.
+        spin_loop();
+    }
+
+    Scheduler::init_local_scheduler::<KernelStack>();
+    println_debug!("AP{} started", CPU::local().cpuid());
+
+    eonix_preempt::disable();
+
+    // TODO!!!!!: Free the stack after having switched to idle task.
+    unsafe {
+        // SAFETY: `preempt::count()` == 1.
+        Scheduler::goto_scheduler_noreturn()
+    }
+}
+
+async fn init_process(early_kstack: PRange) {
+    unsafe {
+        let irq_ctx = disable_irqs_save();
+
+        // SAFETY: IRQ is disabled.
+        GlobalPageAlloc::add_pages(early_kstack);
+
+        irq_ctx.restore();
+    }
 
     CharDevice::init().unwrap();
 
@@ -90,8 +129,6 @@ async fn init_process(early_kstack_pfn: PFN) {
     fs::tmpfs::init();
     fs::procfs::init();
     fs::fat32::init();
-
-    kernel::smp::bootstrap_smp();
 
     let (ip, sp, mm_list) = {
         // mount fat32 /mnt directory

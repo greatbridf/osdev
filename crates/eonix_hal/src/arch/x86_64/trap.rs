@@ -1,14 +1,17 @@
 mod trap_context;
 
 use super::context::TaskContext;
-use core::arch::{global_asm, naked_asm};
-use eonix_hal_traits::{context::RawTaskContext, trap::TrapReturn};
+use core::arch::{asm, global_asm, naked_asm};
+use eonix_hal_traits::{
+    context::RawTaskContext,
+    trap::{IrqState as IrqStateTrait, TrapReturn},
+};
 
 pub use trap_context::TrapContext;
 
 unsafe extern "C" {
     fn _default_trap_handler(trap_context: &mut TrapContext);
-    pub static TRAP_STUBS_START: usize;
+    pub fn trap_stubs_start();
     fn _raw_trap_return();
 }
 
@@ -20,6 +23,9 @@ static CAPTURER_CONTEXT: TaskContext = TaskContext::new();
 
 /// This value will never be used.
 static mut DIRTY_TRAP_CONTEXT: TaskContext = TaskContext::new();
+
+/// State of the interrupt flag.
+pub struct IrqState(u64);
 
 global_asm!(
     r"
@@ -64,11 +70,8 @@ global_asm!(
         .cfi_same_value %rbp
     .endm
 
-    .globl TRAP_STUBS_START
-    TRAP_STUBS_START:
-        .quad _trap_stubs_start
-
-    _trap_stubs_start:
+    .globl {trap_stubs_start}
+    {trap_stubs_start}:
         .altmacro
         .macro build_isr_no_err name
             .align 8
@@ -190,7 +193,7 @@ global_asm!(
         .cfi_rel_offset %rbp, RBP
         
         mov INT_NO(%rsp), %rcx
-        sub $_trap_stubs_start, %rcx
+        sub ${trap_stubs_start}, %rcx
         shr $3, %rcx
         mov %rcx, INT_NO(%rsp)
         
@@ -269,6 +272,7 @@ global_asm!(
         iretq
         .cfi_endproc
     ",
+    trap_stubs_start = sym trap_stubs_start,
     handler = sym _percpu_inner_TRAP_HANDLER,
     options(att_syntax),
 );
@@ -326,7 +330,7 @@ unsafe extern "C" fn captured_trap_return(trap_context: usize) -> ! {
 
 impl TrapReturn for TrapContext {
     unsafe fn trap_return(&mut self) {
-        let irq_states = arch::disable_irqs_save();
+        let irq_states = disable_irqs_save();
         let old_handler = TRAP_HANDLER.swap(captured_trap_handler);
 
         let mut to_ctx = TaskContext::new();
@@ -341,4 +345,46 @@ impl TrapReturn for TrapContext {
         TRAP_HANDLER.set(old_handler);
         irq_states.restore();
     }
+}
+
+impl IrqStateTrait for IrqState {
+    fn restore(self) {
+        let Self(state) = self;
+
+        unsafe {
+            asm!(
+                "push {state}",
+                "popf",
+                state = in(reg) state,
+                options(att_syntax, nomem)
+            );
+        }
+    }
+}
+
+pub fn enable_irqs() {
+    unsafe {
+        asm!("sti", options(att_syntax, nomem, nostack));
+    }
+}
+
+pub fn disable_irqs() {
+    unsafe {
+        asm!("cli", options(att_syntax, nomem, nostack));
+    }
+}
+
+pub fn disable_irqs_save() -> IrqState {
+    let state: u64;
+    unsafe {
+        asm!(
+            "pushf",
+            "pop {state}",
+            "cli",
+            state = out(reg) state,
+            options(att_syntax, nomem)
+        );
+    }
+
+    IrqState(state)
 }

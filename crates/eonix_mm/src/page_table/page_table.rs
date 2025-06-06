@@ -49,10 +49,20 @@ where
         }
     }
 
-    pub fn new_in<A1: PageAlloc>(kernel_root_table_page: &Page<A1>, alloc: A) -> Self {
+    pub fn clone_global<'b, B>(&self) -> PageTable<'b, M, B, X>
+    where
+        B: GlobalPageAlloc,
+    {
+        self.clone_in(B::global())
+    }
+
+    pub fn clone_in<'b, B>(&self, alloc: B) -> PageTable<'b, M, B, X>
+    where
+        B: PageAlloc,
+    {
         let new_root_table_page = Page::alloc_in(alloc);
         let new_table_data = X::get_ptr_for_page(&new_root_table_page);
-        let kernel_table_data = X::get_ptr_for_page(kernel_root_table_page);
+        let kernel_table_data = X::get_ptr_for_page(&self.root_table_page);
 
         unsafe {
             // SAFETY: `new_table_data` and `kernel_table_data` are both valid pointers
@@ -72,7 +82,7 @@ where
             root_page_table.index_mut(idx).take();
         }
 
-        Self::with_root_table(new_root_table_page)
+        PageTable::with_root_table(new_root_table_page)
     }
 
     pub fn addr(&self) -> PAddr {
@@ -119,17 +129,47 @@ where
         range: VRange,
         levels: &'static [PageTableLevel],
     ) -> impl Iterator<Item = &mut M::Entry> {
-        let alloc = self.root_table_page.allocator();
+        self.iter_kernel_in(range, levels, self.root_table_page.allocator())
+    }
+
+    /// Iterates over the kernel space entries in the page table for the specified levels
+    /// with a given page allocator.
+    ///
+    /// # Parameters
+    /// - `range`: The virtual address range to iterate over.
+    /// - `levels`: A slice of `PageTableLevel` that specifies which levels of the page table
+    ///   should be included in the iteration. Each level corresponds to a level in the page
+    ///   table hierarchy, and the iterator will traverse entries at these levels.
+    /// - `alloc`: A page allocator that provides memory for the page table entries.
+    ///
+    /// # Returns
+    /// An iterator over mutable references to the page table entries (`M::Entry`) within the
+    /// specified range and levels.
+    ///
+    /// # Example
+    /// ```no_run
+    /// let range = VRange::new(0x1234000, 0x1300000);
+    /// let levels = &M::LEVELS[..2];
+    /// for pte in page_table.iter_kernel_in(range, levels, NoAlloc) {
+    ///     // Process each entry
+    /// }
+    /// ```
+    pub fn iter_kernel_in<A1: PageAlloc>(
+        &self,
+        range: VRange,
+        levels: &'static [PageTableLevel],
+        alloc: A1,
+    ) -> impl Iterator<Item = &mut M::Entry> {
         let page_table_ptr = X::get_ptr_for_page(&self.root_table_page);
         let root_page_table = unsafe {
             // SAFETY: `page_table_ptr` is a valid pointer to a page table.
             M::RawTable::from_ptr(page_table_ptr)
         };
 
-        PageTableIterator::<M, A, X, KernelIterator>::with_levels(
+        PageTableIterator::<M, A1, X, KernelIterator>::with_levels(
             root_page_table,
             range,
-            alloc.clone(),
+            alloc,
             levels,
         )
     }
@@ -162,18 +202,6 @@ where
 
             Self::drop_page_table_recursive(&page_table, remaining_levels);
         }
-    }
-}
-
-impl<'a, M, A, X> PageTable<'a, M, A, X>
-where
-    M: PagingMode,
-    M::Entry: 'a,
-    A: GlobalPageAlloc,
-    X: PageAccess,
-{
-    pub fn new<A1: PageAlloc>(kernel_root_table_page: &Page<A1>) -> Self {
-        Self::new_in(kernel_root_table_page, A::global())
     }
 }
 

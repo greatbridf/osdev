@@ -92,6 +92,7 @@ impl Scheduler {
             let context: &mut ExecutionContext = LOCAL_SCHEDULER_CONTEXT.as_mut();
             context.set_ip(local_scheduler as _);
             context.set_sp(stack.get_bottom().addr().get() as usize);
+            context.set_interrupt(true);
             eonix_preempt::enable();
         }
 

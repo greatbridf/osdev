@@ -26,11 +26,6 @@ pub struct GlobalPageAlloc;
 #[derive(Clone)]
 pub struct BuddyPageAlloc();
 
-/// Allocator that allocates pages from the buddy allocator while we are still in
-/// the early stage of the kernel when the preemption is both disabled and not functioning.
-#[derive(Clone)]
-pub struct EarlyPageAlloc();
-
 struct PerCpuPageAlloc {
     batch: u32,
     // TODO: might be used in the future.
@@ -92,10 +87,6 @@ impl GlobalPageAlloc {
     #[allow(dead_code)]
     pub const fn buddy_alloc() -> BuddyPageAlloc {
         BuddyPageAlloc()
-    }
-
-    pub const fn early_alloc() -> EarlyPageAlloc {
-        EarlyPageAlloc()
     }
 
     pub fn mark_present(range: PRange) {
@@ -176,22 +167,6 @@ impl PageAlloc for BuddyPageAlloc {
     }
 
     fn has_management_over(&self, page_ptr: RawPagePtr) -> bool {
-        BuddyAllocator::has_management_over(page_ptr)
-    }
-}
-
-impl PageAlloc for EarlyPageAlloc {
-    type RawPage = RawPagePtr;
-
-    fn alloc_order(&self, order: u32) -> Option<Self::RawPage> {
-        BUDDY_ALLOC.lock_with_context(NoContext).alloc_order(order)
-    }
-
-    unsafe fn dealloc(&self, raw_page: Self::RawPage) {
-        BUDDY_ALLOC.lock_with_context(NoContext).dealloc(raw_page);
-    }
-
-    fn has_management_over(&self, page_ptr: Self::RawPage) -> bool {
         BuddyAllocator::has_management_over(page_ptr)
     }
 }

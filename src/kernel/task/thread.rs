@@ -4,7 +4,6 @@ use super::{
 };
 use crate::{
     kernel::{
-        cpu::local_cpu,
         interrupt::default_irq_handler,
         syscall::{syscall_handlers, SyscallHandler},
         timer::timer_interrupt,
@@ -14,7 +13,7 @@ use crate::{
     prelude::*,
 };
 use alloc::sync::Arc;
-use arch::{FpuState, UserTLS};
+use arch::FpuState;
 use atomic_unique_refcell::AtomicUniqueRefCell;
 use core::{
     future::Future,
@@ -23,13 +22,15 @@ use core::{
     sync::atomic::{AtomicBool, Ordering},
     task::{Context, Poll, Waker},
 };
+use eonix_hal::traits::trap::IrqState;
 use eonix_hal::{
+    processor::{UserTLS, CPU},
     traits::{
         fault::Fault,
         fpu::RawFpuState as _,
         trap::{RawTrapContext, TrapReturn, TrapType},
     },
-    trap::TrapContext,
+    trap::{disable_irqs_save, TrapContext},
 };
 use eonix_mm::address::{Addr as _, VAddr};
 use eonix_runtime::run::{Contexted, Run, RunState};
@@ -280,8 +281,7 @@ impl Thread {
     /// to be called in a preemption disabled context.
     pub unsafe fn load_thread_area32(&self) {
         if let Some(tls) = self.inner.lock().tls.as_ref() {
-            // SAFETY: Preemption is disabled.
-            tls.load(local_cpu());
+            CPU::local().as_mut().set_tls32(tls);
         }
     }
 
@@ -402,7 +402,7 @@ impl Thread {
             type Output = F::Output;
 
             fn poll(mut self: Pin<&mut Self>, ctx: &mut Context<'_>) -> Poll<Self::Output> {
-                let irq_state = arch::disable_irqs_save();
+                let irq_state = disable_irqs_save();
                 let (future, _) = unsafe {
                     // SAFETY: We construct a pinned future and `&Thread` is `Unpin`.
                     let me = self.as_mut().get_unchecked_mut();
@@ -466,7 +466,9 @@ impl<F: Future> Contexted for ThreadRunnable<F> {
         unsafe {
             let trap_ctx_ptr: *const TrapContext = &raw const *self.thread.trap_ctx.borrow();
             // SAFETY:
-            arch::load_interrupt_stack(local_cpu(), trap_ctx_ptr.add(1).addr() as u64);
+            CPU::local()
+                .as_mut()
+                .load_interrupt_stack(trap_ctx_ptr.add(1).addr() as u64);
         }
     }
 

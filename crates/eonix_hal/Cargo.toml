@@ -10,7 +10,9 @@ eonix_hal_macros = { path = "./eonix_hal_macros" }
 
 arch = { path = "../../arch" }
 eonix_mm = { path = "../eonix_mm" }
+eonix_sync_base = { path = "../eonix_sync/eonix_sync_base" }
 eonix_percpu = { path = "../eonix_percpu" }
 eonix_preempt = { path = "../eonix_preempt" }
 
+acpi = "5.2.0"
 cfg-if = "1.0"

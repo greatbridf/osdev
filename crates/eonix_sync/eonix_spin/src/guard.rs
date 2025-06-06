@@ -1,12 +1,12 @@
 use super::{
     ContextUnlock, DisablePreemption, Relax, Spin, SpinContext, SpinRelax, UnlockedContext,
 };
-use crate::{marker::NotSend, UnlockableGuard, UnlockedGuard};
 use core::{
     marker::PhantomData,
     mem::ManuallyDrop,
     ops::{Deref, DerefMut},
 };
+use eonix_sync_base::{NotSend, UnlockableGuard, UnlockedGuard};
 
 pub struct SpinGuard<'a, T, C = DisablePreemption, R = SpinRelax>
 where

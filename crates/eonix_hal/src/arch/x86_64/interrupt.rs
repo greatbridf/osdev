@@ -1,6 +1,5 @@
-use super::pause;
-use crate::rdmsr;
-use core::{arch::asm, pin::Pin, ptr::NonNull};
+use arch::{pause, rdmsr};
+use core::{arch::asm, marker::PhantomPinned, pin::Pin, ptr::NonNull};
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -25,10 +24,8 @@ pub struct APICRegs {
 pub struct InterruptControl {
     idt: [IDTEntry; 256],
     apic_base: APICRegs,
+    _pinned: PhantomPinned,
 }
-
-/// State of the interrupt flag.
-pub struct IrqState(u64);
 
 impl IDTEntry {
     const fn new(offset: usize, selector: u16, attributes: u8) -> Self {
@@ -111,10 +108,12 @@ impl APICRegs {
 impl InterruptControl {
     /// # Return
     /// Returns a tuple of InterruptControl and the cpu id of the current cpu.
-    pub(crate) fn new(base: usize) -> (Self, usize) {
+    pub fn new() -> (Self, usize) {
+        let trap_stubs_base = super::trap::trap_stubs_start as usize;
+
         let idt = core::array::from_fn(|idx| match idx {
-            0..0x80 => IDTEntry::new(base + 8 * idx, 0x08, 0x8e),
-            0x80 => IDTEntry::new(base + 8 * idx, 0x08, 0xee),
+            0..0x80 => IDTEntry::new(trap_stubs_base + 8 * idx, 0x08, 0x8e),
+            0x80 => IDTEntry::new(trap_stubs_base + 8 * idx, 0x08, 0xee),
             _ => IDTEntry::null(),
         });
 
@@ -134,7 +133,14 @@ impl InterruptControl {
 
         let cpuid = apic_base.local_apic_id().read() >> 24;
 
-        (Self { idt, apic_base }, cpuid as usize)
+        (
+            Self {
+                idt,
+                apic_base,
+                _pinned: PhantomPinned,
+            },
+            cpuid as usize,
+        )
     }
 
     pub fn setup_timer(&self) {
@@ -163,7 +169,7 @@ impl InterruptControl {
             pause();
         }
 
-        icr.write(0xc4607);
+        icr.write(0xc4606);
         while icr.read() & 0x1000 != 0 {
             pause();
         }
@@ -173,48 +179,6 @@ impl InterruptControl {
     pub fn end_of_interrupt(&self) {
         self.apic_base.end_of_interrupt()
     }
-}
-
-impl IrqState {
-    pub fn restore(self) {
-        let Self(state) = self;
-
-        unsafe {
-            asm!(
-                "push {state}",
-                "popf",
-                state = in(reg) state,
-                options(att_syntax, nomem)
-            );
-        }
-    }
-}
-
-pub fn enable_irqs() {
-    unsafe {
-        asm!("sti", options(att_syntax, nomem, nostack));
-    }
-}
-
-pub fn disable_irqs() {
-    unsafe {
-        asm!("cli", options(att_syntax, nomem, nostack));
-    }
-}
-
-pub fn disable_irqs_save() -> IrqState {
-    let state: u64;
-    unsafe {
-        asm!(
-            "pushf",
-            "pop {state}",
-            "cli",
-            state = out(reg) state,
-            options(att_syntax, nomem)
-        );
-    }
-
-    IrqState(state)
 }
 
 fn lidt(base: usize, limit: u16) {
@@ -227,6 +191,6 @@ fn lidt(base: usize, limit: u16) {
     idt_descriptor[4] = (base >> 48) as u16;
 
     unsafe {
-        asm!("lidt ({})", in(reg) &idt_descriptor, options(att_syntax));
+        asm!("lidt ({})", in(reg) &idt_descriptor, options(att_syntax, nostack, preserves_flags));
     }
 }

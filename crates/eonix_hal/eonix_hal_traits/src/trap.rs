@@ -38,6 +38,11 @@ pub trait TrapReturn {
     unsafe fn trap_return(&mut self);
 }
 
+pub trait IrqState {
+    /// Restore the IRQ state.
+    fn restore(self);
+}
+
 /// The reason that caused the trap.
 pub enum TrapType {
     Syscall { no: usize, args: [usize; 6] },

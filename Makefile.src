@@ -8,7 +8,7 @@ GDB ?= ##GDB##
 FDISK ?= ##FDISK##
 
 QEMU_ARGS ?= -machine q35 -drive id=disk,file=build/boot.img,format=raw,if=none \
-	-device ahci,id=ahci -device ide-hd,drive=disk,bus=ahci.0 -smp 4 \
+	-device ahci,id=ahci -device ide-hd,drive=disk,bus=ahci.0 \
 	-netdev user,id=mynet0,net=192.168.1.0/24,dhcpstart=192.168.1.16 -device e1000e,netdev=mynet0 \
 	-no-reboot -no-shutdown
 
@@ -31,6 +31,10 @@ endif
 ifeq ($(MODE),debug)
 MODE := dev
 endif
+
+COMMA := ,
+
+CARGO_FLAGS := --profile $(MODE) --features $(FEATURES)$(if $(SMP),$(COMMA)smp,)
 
 .PHONY: run
 run: build
@@ -73,19 +77,19 @@ tmux-debug:
 
 .PHONY: kernel
 kernel:
-	cargo build --profile $(MODE)
+	cargo build $(CARGO_FLAGS)
 
 build/kernel.sym: kernel
-	cargo objcopy --profile $(MODE) -- --only-keep-debug build/kernel.sym
+	cargo objcopy $(CARGO_FLAGS) -- --only-keep-debug build/kernel.sym
 
 build/mbr.bin: kernel
-	cargo objcopy --profile $(MODE) -- -O binary -j .mbr build/mbr.bin
+	cargo objcopy $(CARGO_FLAGS) -- -O binary -j .mbr build/mbr.bin
 
 build/stage1.bin: kernel
-	cargo objcopy --profile $(MODE) -- -O binary -j .stage1 build/stage1.bin
+	cargo objcopy $(CARGO_FLAGS) -- -O binary -j .stage1 build/stage1.bin
 
 build/kernel.bin: kernel
-	cargo objcopy --profile $(MODE) -- -O binary --strip-debug \
+	cargo objcopy $(CARGO_FLAGS) -- -O binary --strip-debug \
 		-R .mbr -R .stage1 build/kernel.bin
 
 build/fs.img: init_script.sh

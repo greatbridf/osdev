@@ -30,7 +30,18 @@ where
             if current_order > order {
                 self.expand(pages_ptr, current_order, order);
             }
-            assert!(pages_ptr.is_free() && pages_ptr.is_present());
+
+            assert!(
+                pages_ptr.is_present(),
+                "Page {:?} is not present",
+                pages_ptr.into(),
+            );
+
+            assert!(
+                pages_ptr.is_free(),
+                "Page {:?} is not free",
+                pages_ptr.into(),
+            );
 
             return Some(pages_ptr);
         }
@@ -56,6 +67,18 @@ where
 
         let mut pfn = Into::<PFN>::into(pages_ptr);
         let mut current_order = pages_ptr.order();
+
+        assert!(
+            pages_ptr.is_present(),
+            "Freeing a page that is not present: {:?}",
+            pages_ptr.into(),
+        );
+
+        assert!(
+            !pages_ptr.is_free(),
+            "Freeing a page that is free: {:?}",
+            pages_ptr.into(),
+        );
 
         while current_order < (AREAS - 1) as u32 {
             let buddy_pfn = pfn.buddy_pfn(current_order);
@@ -111,7 +134,7 @@ where
                 .trailing_zeros()
                 .min((AREAS - 1) as u32);
 
-            while start_pfn + order as usize > end_pfn {
+            while start_pfn + (1 << order) as usize > end_pfn {
                 order -= 1;
             }
             let page_ptr = Raw::from(start_pfn);

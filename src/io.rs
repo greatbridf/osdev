@@ -1,5 +1,5 @@
+use crate::kernel::constants::EFAULT;
 use crate::prelude::*;
-use bindings::EFAULT;
 use core::{cmp, mem::MaybeUninit};
 
 #[must_use]
@@ -191,7 +191,6 @@ impl Buffer for ByteBuffer<'_> {
 ///
 /// The iterator returns a tuple of (start, len) for each chunk.
 pub struct Chunks {
-    start: usize,
     end: usize,
     cur: usize,
     chunk_len: usize,
@@ -200,7 +199,6 @@ pub struct Chunks {
 impl Chunks {
     pub const fn new(start: usize, total_len: usize, chunk_len: usize) -> Self {
         Self {
-            start,
             end: start + total_len,
             cur: start,
             chunk_len,

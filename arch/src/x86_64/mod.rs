@@ -1,27 +1,14 @@
-mod context;
 mod fence;
-mod gdt;
-mod init;
-mod interrupt;
+mod fpu;
 mod io;
-mod mm;
-mod percpu;
-mod user;
 
 use core::arch::asm;
 use eonix_mm::address::{Addr as _, PAddr, VAddr};
 use eonix_mm::paging::PFN;
 
-pub use self::context::*;
-pub use self::gdt::*;
-pub use self::init::*;
-pub use self::interrupt::*;
 pub use self::io::*;
-pub use self::user::*;
 pub use fence::*;
-pub use mm::*;
-pub use percpu::*;
-pub use percpu_macros::{define_percpu, define_percpu_shared};
+pub use fpu::*;
 
 #[inline(always)]
 pub fn flush_tlb(vaddr: usize) {
@@ -94,14 +81,6 @@ pub fn halt() {
 pub fn pause() {
     unsafe {
         asm!("pause", options(att_syntax, nostack));
-    }
-}
-
-#[inline(always)]
-pub fn freeze() -> ! {
-    loop {
-        interrupt::disable_irqs();
-        halt();
     }
 }
 

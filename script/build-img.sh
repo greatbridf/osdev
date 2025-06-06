@@ -16,13 +16,10 @@ else
     $SUDO mount /dev/loop2 build/mnt
 fi
 
-$SUDO cp build/user-space-program/hello-world.out build/mnt/hello
-$SUDO cp build/user-space-program/interrupt-test.out build/mnt/int
-$SUDO cp build/user-space-program/stack-test.out build/mnt/stack
-$SUDO cp build/user-space-program/init.out build/mnt/init
-$SUDO cp build/user-space-program/priv-test.out build/mnt/priv
-$SUDO cp ./busybox build/mnt/busybox
-$SUDO cp ./busybox-minimal build/mnt/busybox_
+$SUDO cp ./user-programs/init.out build/mnt/init
+$SUDO cp ./user-programs/int.out build/mnt/int
+$SUDO cp ./user-programs/busybox build/mnt/busybox
+$SUDO cp ./user-programs/busybox-minimal build/mnt/busybox_
 $SUDO cp ./init_script.sh build/mnt/initsh
 
 # Add your custom files here

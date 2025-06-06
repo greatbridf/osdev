@@ -81,10 +81,7 @@ impl MMArea {
 
     /// # Return
     /// Whether the whole handling process is done.
-    pub fn handle_cow<E>(&self, pte: &mut E) -> bool
-    where
-        E: PTE,
-    {
+    pub fn handle_cow(&self, pte: &mut impl PTE) -> bool {
         let mut page_attr = pte.get_attr().as_page_attr().expect("Not a page attribute");
         let pfn = pte.get_pfn();
 
@@ -96,7 +93,7 @@ impl MMArea {
             // SAFETY: This is actually safe. If we read `1` here and we have `MMList` lock
             // held, there couldn't be neither other processes sharing the page, nor other
             // threads making the page COW at the same time.
-            pte.set_attr(E::Attr::from_page_attr(page_attr));
+            pte.set_attr(page_attr.into());
             core::mem::forget(page);
             return true;
         }
@@ -120,17 +117,14 @@ impl MMArea {
 
         page_attr.remove(PageAttribute::ACCESSED);
 
-        pte.set(new_page.into_raw(), E::Attr::from_page_attr(page_attr));
+        pte.set(new_page.into_raw(), page_attr.into());
 
         false
     }
 
     /// # Arguments
     /// * `offset`: The offset from the start of the mapping, aligned to 4KB boundary.
-    pub fn handle_mmap<E>(&self, pte: &mut E, offset: usize) -> KResult<()>
-    where
-        E: PTE,
-    {
+    pub fn handle_mmap(&self, pte: &mut impl PTE, offset: usize) -> KResult<()> {
         // TODO: Implement shared mapping
         let mut page_attr = pte.get_attr().as_page_attr().expect("Not a page attribute");
         let pfn = pte.get_pfn();
@@ -164,7 +158,7 @@ impl MMArea {
         page_attr.insert(PageAttribute::PRESENT);
         page_attr.remove(PageAttribute::MAPPED);
 
-        pte.set_attr(E::Attr::from_page_attr(page_attr));
+        pte.set_attr(page_attr.into());
         Ok(())
     }
 

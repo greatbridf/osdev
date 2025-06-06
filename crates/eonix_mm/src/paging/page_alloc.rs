@@ -1,4 +1,4 @@
-use super::RawPage;
+use super::{raw_page::UnmanagedRawPage, RawPage};
 
 /// A trait for allocating and deallocating pages of memory.
 ///
@@ -6,6 +6,7 @@ use super::RawPage;
 /// behavior, meaning that the allocators are to be passed around by value and stored in
 /// managed data structures. This is because the allocator may be used to deallocate the
 /// pages it allocates.
+#[doc(notable_trait)]
 pub trait PageAlloc: Clone {
     type RawPage: RawPage;
 
@@ -37,10 +38,14 @@ pub trait PageAlloc: Clone {
 /// A trait for global page allocators.
 ///
 /// Global means that we can get an instance of the allocator from anywhere in the kernel.
+#[doc(notable_trait)]
 pub trait GlobalPageAlloc: PageAlloc + 'static {
     /// Get the global page allocator.
     fn global() -> Self;
 }
+
+#[derive(Clone)]
+pub struct NoAlloc;
 
 impl<'a, A> PageAlloc for &'a A
 where
@@ -58,5 +63,27 @@ where
 
     fn has_management_over(&self, raw_page: Self::RawPage) -> bool {
         (*self).has_management_over(raw_page)
+    }
+}
+
+impl PageAlloc for NoAlloc {
+    type RawPage = UnmanagedRawPage;
+
+    fn alloc_order(&self, _: u32) -> Option<Self::RawPage> {
+        panic!("`NoAlloc` cannot allocate pages");
+    }
+
+    unsafe fn dealloc(&self, _: Self::RawPage) {
+        panic!("`NoAlloc` cannot free pages");
+    }
+
+    fn has_management_over(&self, _: Self::RawPage) -> bool {
+        true
+    }
+}
+
+impl GlobalPageAlloc for NoAlloc {
+    fn global() -> Self {
+        Self
     }
 }

@@ -10,7 +10,7 @@
             "isBackground": true,
             "problemMatcher": [
                 {
-                    "owner": "cpp",
+                    "owner": "rustc",
                     "fileLocation": [
                         "relative",
                         "${workspaceFolder}"
@@ -25,7 +25,7 @@
                     },
                     "background": {
                         "activeOnStart": true,
-                        "beginsPattern": "cmake --build",
+                        "beginsPattern": "cargo build",
                         "endsPattern": "qemu"
                     }
                 }

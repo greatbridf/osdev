@@ -1,11 +1,10 @@
 use super::{dentry::Dentry, s_isblk, s_ischr, vfs::Vfs, DevId, TimeSpec};
-use crate::{io::Buffer, prelude::*};
-use alloc::sync::{Arc, Weak};
-use bindings::{
-    statx, EINVAL, EISDIR, ENOTDIR, EPERM, STATX_ATIME, STATX_BLOCKS, STATX_CTIME, STATX_GID,
-    STATX_INO, STATX_MODE, STATX_MTIME, STATX_NLINK, STATX_SIZE, STATX_TYPE, STATX_UID, S_IFDIR,
-    S_IFMT,
+use crate::kernel::constants::{
+    EINVAL, EISDIR, ENOTDIR, EPERM, STATX_ATIME, STATX_BLOCKS, STATX_CTIME, STATX_GID, STATX_INO,
+    STATX_MODE, STATX_MTIME, STATX_NLINK, STATX_SIZE, STATX_TYPE, STATX_UID, S_IFDIR, S_IFMT,
 };
+use crate::{io::Buffer, kernel::syscall::file_rw::StatX, prelude::*};
+use alloc::sync::{Arc, Weak};
 use core::{
     mem::MaybeUninit,
     ops::ControlFlow,
@@ -143,7 +142,7 @@ pub trait Inode: Send + Sync + InodeInner {
         Err(EPERM)
     }
 
-    fn statx(&self, stat: &mut statx, mask: u32) -> KResult<()> {
+    fn statx(&self, stat: &mut StatX, mask: u32) -> KResult<()> {
         // Safety: ffi should have checked reference
         let vfs = self.vfs.upgrade().expect("Vfs is dropped");
 

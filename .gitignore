@@ -19,5 +19,3 @@ cross-compile.cmake
 .Trashes
 
 .gdbinit
-
-src/bindings.rs

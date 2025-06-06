@@ -1,5 +1,4 @@
 #![no_std]
-#![feature(naked_functions)]
 
 cfg_if::cfg_if! {
     if #[cfg(target_arch = "x86_64")] {

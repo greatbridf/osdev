@@ -1,6 +1,5 @@
+use crate::kernel::constants::{EFAULT, EINVAL};
 use core::{arch::asm, ffi::CStr};
-
-use bindings::{EFAULT, EINVAL};
 use eonix_preempt::assert_preempt_enabled;
 
 use crate::{
@@ -107,7 +106,7 @@ impl CheckedUserPointer {
                 "rep movsb",
                 "3:",
                 "nop",
-                ".pushsection .fix",
+                ".pushsection .fix, \"a\", @progbits",
                 ".align 32",
                 ".quad 2b",  // instruction address
                 ".quad 3b - 2b",  // instruction length
@@ -143,7 +142,7 @@ impl CheckedUserPointer {
                 "rep movsb",
                 "3:",
                 "nop",
-                ".pushsection .fix",
+                ".pushsection .fix, \"a\", @progbits",
                 ".align 32",
                 ".quad 2b",  // instruction address
                 ".quad 3b - 2b",  // instruction length
@@ -179,7 +178,7 @@ impl CheckedUserPointer {
                 "rep stosb",
                 "3:",
                 "nop",
-                ".pushsection .fix",
+                ".pushsection .fix, \"a\", @progbits",
                 ".align 32",
                 ".quad 2b",  // instruction address
                 ".quad 3b - 2b",  // instruction length
@@ -269,7 +268,7 @@ impl<'lt> UserString<'lt> {
                 "loop 2b",
                 "3:",
                 "nop",
-                ".pushsection .fix",
+                ".pushsection .fix, \"a\", @progbits",
                 ".align 32",
                 ".quad 2b",  // instruction address
                 ".quad 4b - 2b",  // instruction length

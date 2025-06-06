@@ -1,10 +1,10 @@
 use super::{Process, ProcessGroup, ProcessList, Signal, Thread};
+use crate::kernel::constants::EPERM;
 use crate::{kernel::Terminal, prelude::*};
 use alloc::{
     collections::btree_map::BTreeMap,
     sync::{Arc, Weak},
 };
-use bindings::EPERM;
 use eonix_sync::{AsProof as _, AsProofMut as _, Locked, Proof, ProofMut, RwLock};
 
 #[derive(Debug)]

@@ -1,30 +1,24 @@
 physical memory
 
-0x0000 - 0x1000 : GDT for kernel initialization use and some early kernel data
-0x1000 - 0x2000 : kernel stage1
-0x2000 - 0x3000 : kernel space PML4
-0x3000 - 0x4000 : kernel PDPT for physical memory mappings
-0x4000 - 0x5000 : kernel PDPT for kernel space
-0x5000 - 0x6000 : kernel PD for kernel image
-0x6000 - 0x7000 : kernel PT for kernel image
-0x7000 - 0x8000 : kernel PD for struct page array#1
+0x0000   - 0x1000   : Some early kernel data
+0x1000   - 0x2000   : kernel space PML4
+0x2000   - 0x3000   : kernel PDPT for physical memory mappings
+0x3000   - 0x4000   : kernel PDPT for kernel space
+0x4000   - 0x5000   : kernel PD for kernel image
+0x5000   - 0x6000   : kernel PT for kernel image
+0x6000   - 0x7000   : kernel stage1
+
+0x7000   - 0x80000  : unused
 
 0x100000 - 0x200000 : unused
-0x200000 - 0x400000 : first kernel bss page (2MB)
-0x400000 - ?        : kernel image
-?        - ?        : struct page array
-
+0x200000 - ?        : kernel image
 
 virtual address space
 
-0xffff ff0 000 000 000 - 0xffff ff3 fff fff fff  256GB physical memory (cached)
-0xffff ff4 000 000 000 - 0xffff ff7 fff fff fff  256GB physical memory (not cached)
+0xffff ff0 000 000 000 - 0xffff ff7 fff fff fff  512GB physical memory
 0xffff ff8 000 000 000 - 0xffff ff8 03f fff fff    1GB unused
 0xffff ff8 040 000 000 - 0xffff ff8 13f fff fff    4GB struct page array
-0xffff ff8 140 000 000 - 0xffff ff8 17f fff fff    1GB unused
-0xffff ff8 180 000 000 - 0xffff ffb fff fff fff  250GB kernel heap
-
-0xffff ffc 000 000 000 - 0xffff fff fbf fff fff  255GB unused
+0xffff ff8 140 000 000 - 0xffff fff fbf fff fff    506GB unused
 
 0xffff fff fc0 000 000 - 0xffff fff fc0 1ff fff    2MB unused
 0xffff fff fc0 200 000 - 0xffff fff fff 9ff fff 1016MB kernel bss

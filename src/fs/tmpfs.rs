@@ -1,3 +1,4 @@
+use crate::kernel::constants::{EINVAL, EIO, EISDIR};
 use crate::{
     io::Buffer,
     kernel::constants::{S_IFBLK, S_IFCHR, S_IFDIR, S_IFLNK, S_IFREG},
@@ -12,7 +13,6 @@ use crate::{
     prelude::*,
 };
 use alloc::sync::{Arc, Weak};
-use bindings::{EINVAL, EIO, EISDIR};
 use core::{ops::ControlFlow, sync::atomic::Ordering};
 use eonix_runtime::task::Task;
 use eonix_sync::{AsProof as _, AsProofMut as _, Locked, ProofMut};

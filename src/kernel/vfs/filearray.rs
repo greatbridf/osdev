@@ -3,11 +3,14 @@ use super::{
     inode::Mode,
     s_ischr, FsContext, Spin,
 };
+use crate::kernel::constants::{
+    EBADF, EISDIR, ENOTDIR, FD_CLOEXEC, F_DUPFD, F_DUPFD_CLOEXEC, F_GETFD, F_SETFD, O_APPEND,
+    O_CLOEXEC, O_DIRECTORY, O_RDWR, O_TRUNC, O_WRONLY,
+};
 use crate::{
     kernel::{
         console::get_console,
         constants::ENXIO,
-        task::Thread,
         vfs::{dentry::Dentry, file::Pipe, s_isdir, s_isreg},
         CharDevice,
     },
@@ -17,10 +20,6 @@ use crate::{
 use alloc::{
     collections::btree_map::{BTreeMap, Entry},
     sync::Arc,
-};
-use bindings::{
-    EBADF, EISDIR, ENOTDIR, FD_CLOEXEC, F_DUPFD, F_DUPFD_CLOEXEC, F_GETFD, F_SETFD, O_APPEND,
-    O_CLOEXEC, O_DIRECTORY, O_RDWR, O_TRUNC, O_WRONLY,
 };
 use core::sync::atomic::Ordering;
 use itertools::{
@@ -54,10 +53,6 @@ impl OpenFile {
 }
 
 impl FileArray {
-    pub fn get_current<'lt>() -> &'lt Arc<Self> {
-        &Thread::current().borrow().files
-    }
-
     pub fn new() -> Arc<Self> {
         Arc::new(FileArray {
             inner: Spin::new(FileArrayInner {

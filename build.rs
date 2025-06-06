@@ -1,28 +1,10 @@
-fn main() {
-    println!("cargo:rustc-link-search=native=./build/gblibstdc++");
-    println!("cargo:rustc-link-lib=static=gblibstdc++");
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    println!("cargo:rustc-link-arg=-T{}", "link.x");
+    if let Ok(extra_link_args) = std::env::var("DEP_EONIX_HAL_EXTRA_LINK_ARGS") {
+        for arg in extra_link_args.split_whitespace() {
+            println!("cargo:rustc-link-arg={}", arg);
+        }
+    }
 
-    let headers = [
-        "rust-headers.hpp",
-        "include/kernel/hw/pci.hpp",
-    ];
-
-    let bindings = bindgen::Builder::default()
-        .use_core()
-        .ctypes_prefix("core::ffi")
-        .headers(headers)
-        .clang_arg("-I./gblibstdc++/include")
-        .clang_arg("-I./gblibc/include")
-        .clang_arg("-I./include")
-        .clang_arg("-std=c++20")
-        .opaque_type("std::.*")
-        .enable_cxx_namespaces()
-        .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
-        .generate()
-        .expect("Unable to generate bindings");
-
-    let out_path = std::path::PathBuf::from(std::env::var("PWD").unwrap());
-    bindings
-        .write_to_file(out_path.join("src/bindings.rs"))
-        .expect("Couldn't write bindings!");
+    Ok(())
 }

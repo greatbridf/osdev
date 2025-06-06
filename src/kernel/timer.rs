@@ -1,6 +1,5 @@
 use super::interrupt::end_of_interrupt;
 use core::sync::atomic::{AtomicUsize, Ordering};
-use eonix_runtime::scheduler::Scheduler;
 
 static TICKS: AtomicUsize = AtomicUsize::new(0);
 
@@ -28,12 +27,6 @@ impl Ticks {
 pub fn timer_interrupt() {
     end_of_interrupt();
     TICKS.fetch_add(1, Ordering::Relaxed);
-
-    if eonix_preempt::count() == 0 {
-        // To make scheduler satisfied.
-        eonix_preempt::disable();
-        Scheduler::schedule();
-    }
 }
 
 pub fn ticks() -> Ticks {

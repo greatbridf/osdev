@@ -1,42 +1,51 @@
-# disable kvm to debug triple faults
-QEMU_BIN=##PLACEHOLDER_1##
-GDB_BIN=##PLACEHOLDER_2##
-QEMU_ACCELERATION_FLAG=##PLACEHOLDER_3##
-QEMU_DEBUG_FLAG=#-d cpu_reset,int -D build/qemu.log
-QEMU_ARGS=-machine q35 -drive id=disk,file=build/boot.img,format=raw,if=none \
+HOST ?= $(shell uname -s | tr '[:upper:]' '[:lower:]')
+ARCH ?= ##DEFAULT_ARCH##
+MODE ?= debug
+SMP ?= 4
+
+QEMU ?= ##QEMU##
+GDB ?= ##GDB##
+FDISK ?= ##FDISK##
+
+QEMU_ARGS ?= -machine q35 -drive id=disk,file=build/boot.img,format=raw,if=none \
 	-device ahci,id=ahci -device ide-hd,drive=disk,bus=ahci.0 -smp 4 \
-	-no-reboot -no-shutdown $(QEMU_ACCELERATION_FLAG) $(QEMU_DEBUG_FLAG)
+	-netdev user,id=mynet0,net=192.168.1.0/24,dhcpstart=192.168.1.16 -device e1000e,netdev=mynet0 \
+	-no-reboot -no-shutdown
 
-FDISK_BIN ?= ##PLACEHOLDER_5##
+ifeq ($(HOST),darwin)
+QEMU_ACCEL ?= -accel tcg
+else ifeq ($(HOST),linux)
+QEMU_ACCEL ?= -accel kvm
+endif
 
-CROSS_COMPILE=##PLACEHOLDER_4##
+QEMU_ARGS += $(QEMU_ACCEL)
+
+ifneq ($(DEBUG_TRAPS),)
+QEMU_ARGS += -d cpu_reset,int,guest_errors -D build/qemu.log
+endif
+
+ifneq ($(SMP),)
+QEMU_ARGS += -smp $(SMP)
+endif
+
+ifeq ($(MODE),debug)
+MODE := dev
+endif
+
 .PHONY: run
 run: build
-	$(QEMU_BIN) $(QEMU_ARGS) -display curses -S -s
+	$(QEMU) $(QEMU_ARGS) -display none -serial mon:stdio
+
 .PHONY: srun
 srun: build
-	$(QEMU_BIN) $(QEMU_ARGS) -display none -S -s -serial mon:stdio
-.PHONY: nativerun
-nativerun: build
-	$(QEMU_BIN) $(QEMU_ARGS) -display none -serial mon:stdio
-
-.PHONY: prepare
-prepare:
-	cmake -Bbuild -DCMAKE_BUILD_TYPE=Debug $(CROSS_COMPILE)
-	cp build/compile_commands.json .
-
-.PHONY: reprepare
-reprepare: clean prepare
-	true
-
-.PHONY: build
-build:
-	cmake --build build -j 6 --target boot.img
+	$(QEMU) $(QEMU_ARGS) -display none -S -s -serial mon:stdio
 
 .PHONY: clean
 clean:
+	-mv build/fs.img .
 	-rm -rf build
-	-rm compile_commands.json
+	-mkdir build
+	-mv fs.img build
 
 .PHONY: clean-all
 clean-all: clean
@@ -44,14 +53,14 @@ clean-all: clean
 
 .PHONY: debug
 debug:
-	-$(GDB_BIN) --symbols=build/kernel.out \
+	-RUST_GDB=$(GDB) rust-gdb --symbols=build/kernel.sym \
 		-iex 'source pretty-print.py' \
 		-iex 'set pagination off' \
 		-iex 'set output-radix 16' \
 		-iex 'set print asm-demangle on' \
 		-iex 'set print pretty on' \
 		-iex 'target remote:1234'
-	-killall $(QEMU_BIN)
+	-killall $(QEMU)
 
 .PHONY: tmux-debug
 tmux-debug:
@@ -62,17 +71,34 @@ tmux-debug:
 	-tmux attach -t gbos-debug
 	tmux kill-session -t gbos-debug
 
+.PHONY: kernel
+kernel:
+	cargo build --profile $(MODE)
+
+build/kernel.sym: kernel
+	cargo objcopy --profile $(MODE) -- --only-keep-debug build/kernel.sym
+
+build/mbr.bin: kernel
+	cargo objcopy --profile $(MODE) -- -O binary -j .mbr build/mbr.bin
+
+build/stage1.bin: kernel
+	cargo objcopy --profile $(MODE) -- -O binary -j .stage1 build/stage1.bin
+
+build/kernel.bin: kernel
+	cargo objcopy --profile $(MODE) -- -O binary --strip-debug \
+		-R .mbr -R .stage1 build/kernel.bin
+
 build/fs.img: init_script.sh
 	sh script/build-img.sh
 
-build/boot.img: build/fs.img build/mbr_hole.bin
-	dd if=build/mbr_hole.bin of=build/boot.img
-	dd if=build/fs.img of=build/boot.img bs=$(shell expr 4 \* 1024 \* 1024) seek=1 conv=notrunc
-	sh -c 'echo n; echo; echo; echo 8192; echo; echo a; echo w' | $(FDISK_BIN) build/boot.img
+build/boot.img: build/mbr.bin build/stage1.bin build/kernel.bin build/fs.img
+	dd if=build/mbr.bin of=build/boot.img bs=512 count=1 conv=notrunc 2> /dev/null
+	dd if=build/stage1.bin of=build/boot.img bs=512 seek=1 conv=notrunc 2> /dev/null
+	dd if=build/kernel.bin of=build/boot.img bs=4096 seek=1 conv=notrunc 2> /dev/null
+	dd if=build/fs.img of=build/boot.img bs=$(shell expr 4 \* 1024 \* 1024) \
+		seek=1 conv=notrunc 2> /dev/null
+	sh -c 'echo n; echo; echo; echo 8192; echo; echo a; echo w' \
+		| $(FDISK) build/boot.img 2> /dev/null > /dev/null
 
-build/boot.vdi: build/boot.img
-	-rm build/boot.vdi
-	VBoxManage convertfromraw $< $@ --format VDI
-
-.PHONY: image
-image: build/boot.img
+.PHONY: build
+build: build/boot.img build/kernel.sym

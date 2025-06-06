@@ -3,6 +3,7 @@ use super::{
     mem::{paging::Page, AsMemoryBlock as _},
     vfs::DevId,
 };
+use crate::kernel::constants::{EEXIST, EINVAL, EIO};
 use crate::{
     io::{Buffer, FillResult, UninitBuffer},
     prelude::*,
@@ -11,7 +12,6 @@ use alloc::{
     collections::btree_map::{BTreeMap, Entry},
     sync::Arc,
 };
-use bindings::{EEXIST, EINVAL, EIO};
 use core::cmp::Ordering;
 
 pub fn make_device(major: u32, minor: u32) -> DevId {

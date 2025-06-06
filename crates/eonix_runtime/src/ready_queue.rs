@@ -2,7 +2,7 @@ use crate::task::Task;
 use alloc::{collections::VecDeque, sync::Arc};
 use eonix_sync::Spin;
 
-#[arch::define_percpu_shared]
+#[eonix_percpu::define_percpu_shared]
 static READYQUEUE: Spin<FifoReadyQueue> = Spin::new(FifoReadyQueue::new());
 
 pub trait ReadyQueue {

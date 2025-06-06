@@ -18,10 +18,10 @@ use eonix_sync::{LazyLock, Spin, SpinIrq as _};
 use intrusive_collections::RBTree;
 use pointers::BorrowedArc;
 
-#[arch::define_percpu]
+#[eonix_percpu::define_percpu]
 static CURRENT_TASK: Option<NonNull<Task>> = None;
 
-#[arch::define_percpu]
+#[eonix_percpu::define_percpu]
 static LOCAL_SCHEDULER_CONTEXT: ExecutionContext = ExecutionContext::new();
 
 static TASKS: LazyLock<Spin<RBTree<TaskAdapter>>> =
@@ -92,6 +92,7 @@ impl Scheduler {
             let context: &mut ExecutionContext = LOCAL_SCHEDULER_CONTEXT.as_mut();
             context.set_ip(local_scheduler as _);
             context.set_sp(stack.get_bottom().addr().get() as usize);
+            context.set_interrupt(true);
             eonix_preempt::enable();
         }
 

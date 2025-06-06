@@ -1,0 +1,10 @@
+[package]
+name = "eonix_sync_base"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+
+[features]
+default = []
+no_check_locked = []

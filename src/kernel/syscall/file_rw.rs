@@ -1,16 +1,11 @@
-use core::mem::MaybeUninit;
-
-use bindings::{
-    statx, AT_FDCWD, AT_STATX_SYNC_AS_STAT, AT_STATX_SYNC_TYPE, AT_SYMLINK_NOFOLLOW, EBADF, EFAULT,
-    EINVAL, ENOENT, SEEK_CUR, SEEK_END, SEEK_SET, S_IFBLK, S_IFCHR,
+use crate::kernel::constants::{
+    AT_FDCWD, AT_STATX_SYNC_AS_STAT, AT_STATX_SYNC_TYPE, AT_SYMLINK_NOFOLLOW, EBADF, SEEK_CUR,
+    SEEK_END, SEEK_SET, S_IFBLK, S_IFCHR,
 };
-use eonix_runtime::task::Task;
-
 use crate::{
     io::{Buffer, BufferFill},
     kernel::{
-        constants::AT_EMPTY_PATH,
-        task::Thread,
+        constants::{AT_EMPTY_PATH, EFAULT, EINVAL, ENOENT},
         user::{
             dataflow::{CheckedUserPointer, UserBuffer, UserString},
             UserPointer, UserPointerMut,
@@ -18,94 +13,128 @@ use crate::{
         vfs::{
             dentry::Dentry,
             file::{PollEvent, SeekOption},
-            filearray::FileArray,
-            FsContext,
         },
     },
     path::Path,
     prelude::*,
 };
+use core::mem::MaybeUninit;
+use eonix_runtime::task::Task;
 
-use super::{define_syscall32, register_syscall};
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct StatXTimestamp {
+    pub tv_sec: i64,
+    pub tv_nsec: u32,
+    pub __reserved: i32,
+}
 
-fn do_read(fd: u32, buffer: *mut u8, bufsize: usize) -> KResult<usize> {
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct StatX {
+    pub stx_mask: u32,
+    pub stx_blksize: u32,
+    pub stx_attributes: u64,
+    pub stx_nlink: u32,
+    pub stx_uid: u32,
+    pub stx_gid: u32,
+    pub stx_mode: u16,
+    pub __spare0: [u16; 1usize],
+    pub stx_ino: u64,
+    pub stx_size: u64,
+    pub stx_blocks: u64,
+    pub stx_attributes_mask: u64,
+    pub stx_atime: StatXTimestamp,
+    pub stx_btime: StatXTimestamp,
+    pub stx_ctime: StatXTimestamp,
+    pub stx_mtime: StatXTimestamp,
+    pub stx_rdev_major: u32,
+    pub stx_rdev_minor: u32,
+    pub stx_dev_major: u32,
+    pub stx_dev_minor: u32,
+    pub stx_mnt_id: u64,
+    pub stx_dio_alignment: [u64; 13usize],
+}
+
+#[eonix_macros::define_syscall(0x03)]
+fn read(fd: u32, buffer: *mut u8, bufsize: usize) -> KResult<usize> {
     let mut buffer = UserBuffer::new(buffer, bufsize)?;
-    let files = FileArray::get_current();
 
-    Task::block_on(files.get(fd).ok_or(EBADF)?.read(&mut buffer))
+    Task::block_on(thread.files.get(fd).ok_or(EBADF)?.read(&mut buffer))
 }
 
-fn do_write(fd: u32, buffer: *const u8, count: usize) -> KResult<usize> {
+#[eonix_macros::define_syscall(0x04)]
+fn write(fd: u32, buffer: *const u8, count: usize) -> KResult<usize> {
     let data = unsafe { core::slice::from_raw_parts(buffer, count) };
-    let files = FileArray::get_current();
 
-    Task::block_on(files.get(fd).ok_or(EBADF)?.write(data))
+    Task::block_on(thread.files.get(fd).ok_or(EBADF)?.write(data))
 }
 
-fn do_open(path: *const u8, flags: u32, mode: u32) -> KResult<u32> {
+#[eonix_macros::define_syscall(0x05)]
+fn open(path: *const u8, flags: u32, mode: u32) -> KResult<u32> {
     let path = UserString::new(path)?;
     let path = Path::new(path.as_cstr().to_bytes())?;
 
-    let files = FileArray::get_current();
-    let context = FsContext::get_current();
-    let mode = mode & !*context.umask.lock();
+    let mode = mode & !*thread.fs_context.umask.lock();
 
-    files.open(&context, path, flags, mode)
+    thread.files.open(&thread.fs_context, path, flags, mode)
 }
 
-fn do_close(fd: u32) -> KResult<()> {
-    let files = FileArray::get_current();
-    files.close(fd)
+#[eonix_macros::define_syscall(0x06)]
+fn close(fd: u32) -> KResult<()> {
+    thread.files.close(fd)
 }
 
-fn do_dup(fd: u32) -> KResult<u32> {
-    let files = FileArray::get_current();
-    files.dup(fd)
+#[eonix_macros::define_syscall(0x29)]
+fn dup(fd: u32) -> KResult<u32> {
+    thread.files.dup(fd)
 }
 
-fn do_dup2(old_fd: u32, new_fd: u32) -> KResult<u32> {
-    let files = FileArray::get_current();
-    files.dup_to(old_fd, new_fd, 0)
+#[eonix_macros::define_syscall(0x3f)]
+fn dup2(old_fd: u32, new_fd: u32) -> KResult<u32> {
+    thread.files.dup_to(old_fd, new_fd, 0)
 }
 
-fn do_pipe2(pipe_fd: *mut [u32; 2], flags: u32) -> KResult<()> {
+#[eonix_macros::define_syscall(0x14b)]
+fn pipe2(pipe_fd: *mut [u32; 2], flags: u32) -> KResult<()> {
     let mut buffer = UserBuffer::new(pipe_fd as *mut u8, core::mem::size_of::<[u32; 2]>())?;
-    let files = FileArray::get_current();
-    let (read_fd, write_fd) = files.pipe(flags)?;
+    let (read_fd, write_fd) = thread.files.pipe(flags)?;
 
     buffer.copy(&[read_fd, write_fd])?.ok_or(EFAULT)
 }
 
-fn do_pipe(pipe_fd: *mut [u32; 2]) -> KResult<()> {
-    do_pipe2(pipe_fd, 0)
+#[eonix_macros::define_syscall(0x2a)]
+fn pipe(pipe_fd: *mut [u32; 2]) -> KResult<()> {
+    sys_pipe2(thread, pipe_fd, 0)
 }
 
-fn do_getdents(fd: u32, buffer: *mut u8, bufsize: usize) -> KResult<usize> {
+#[eonix_macros::define_syscall(0x8d)]
+fn getdents(fd: u32, buffer: *mut u8, bufsize: usize) -> KResult<usize> {
     let mut buffer = UserBuffer::new(buffer, bufsize)?;
-    let files = FileArray::get_current();
 
-    files.get(fd).ok_or(EBADF)?.getdents(&mut buffer)?;
+    thread.files.get(fd).ok_or(EBADF)?.getdents(&mut buffer)?;
     Ok(buffer.wrote())
 }
 
-fn do_getdents64(fd: u32, buffer: *mut u8, bufsize: usize) -> KResult<usize> {
+#[eonix_macros::define_syscall(0xdc)]
+fn getdents64(fd: u32, buffer: *mut u8, bufsize: usize) -> KResult<usize> {
     let mut buffer = UserBuffer::new(buffer, bufsize)?;
-    let files = FileArray::get_current();
 
-    files.get(fd).ok_or(EBADF)?.getdents64(&mut buffer)?;
+    thread.files.get(fd).ok_or(EBADF)?.getdents64(&mut buffer)?;
     Ok(buffer.wrote())
 }
 
-fn do_statx(dirfd: u32, path: *const u8, flags: u32, mask: u32, buffer: *mut u8) -> KResult<()> {
+#[eonix_macros::define_syscall(0x17f)]
+fn statx(dirfd: u32, path: *const u8, flags: u32, mask: u32, buffer: *mut u8) -> KResult<()> {
     if (flags & AT_STATX_SYNC_TYPE) != AT_STATX_SYNC_AS_STAT {
         unimplemented!("AT_STATX_SYNC_TYPE={:x}", flags & AT_STATX_SYNC_TYPE);
     }
 
-    let mut stat: statx = unsafe { MaybeUninit::zeroed().assume_init() };
-    let mut buffer = UserBuffer::new(buffer, core::mem::size_of::<statx>())?;
+    let mut stat: StatX = unsafe { MaybeUninit::zeroed().assume_init() };
+    let mut buffer = UserBuffer::new(buffer, core::mem::size_of::<StatX>())?;
 
     if (flags & AT_EMPTY_PATH) != 0 {
-        let file = FileArray::get_current().get(dirfd).ok_or(EBADF)?;
+        let file = thread.files.get(dirfd).ok_or(EBADF)?;
         file.statx(&mut stat, mask)?;
     } else {
         let path = UserString::new(path)?;
@@ -113,16 +142,16 @@ fn do_statx(dirfd: u32, path: *const u8, flags: u32, mask: u32, buffer: *mut u8)
 
         let file;
         if dirfd != AT_FDCWD as u32 && !path.is_absolute() {
-            let at = FileArray::get_current().get(dirfd).ok_or(EBADF)?;
+            let at = thread.files.get(dirfd).ok_or(EBADF)?;
             file = Dentry::open_at(
-                &FsContext::get_current(),
+                &thread.fs_context,
                 at.as_path().ok_or(EBADF)?,
                 path,
                 (flags & AT_SYMLINK_NOFOLLOW) != AT_SYMLINK_NOFOLLOW,
             )?;
         } else {
             file = Dentry::open(
-                &FsContext::get_current(),
+                &thread.fs_context,
                 path,
                 (flags & AT_SYMLINK_NOFOLLOW) != AT_SYMLINK_NOFOLLOW,
             )?;
@@ -134,69 +163,76 @@ fn do_statx(dirfd: u32, path: *const u8, flags: u32, mask: u32, buffer: *mut u8)
     buffer.copy(&stat)?.ok_or(EFAULT)
 }
 
-fn do_mkdir(pathname: *const u8, mode: u32) -> KResult<()> {
+#[eonix_macros::define_syscall(0x27)]
+fn mkdir(pathname: *const u8, mode: u32) -> KResult<()> {
     let path = UserString::new(pathname)?;
     let path = Path::new(path.as_cstr().to_bytes())?;
 
-    let context = FsContext::get_current();
-    let mode = mode & !*context.umask.lock() & 0o777;
+    let umask = *thread.fs_context.umask.lock();
+    let mode = mode & !umask & 0o777;
 
-    let dentry = Dentry::open(&context, path, true)?;
+    let dentry = Dentry::open(&thread.fs_context, path, true)?;
 
     dentry.mkdir(mode)
 }
 
-fn do_truncate(pathname: *const u8, length: usize) -> KResult<()> {
+#[eonix_macros::define_syscall(0x5c)]
+fn truncate(pathname: *const u8, length: usize) -> KResult<()> {
     let path = UserString::new(pathname)?;
     let path = Path::new(path.as_cstr().to_bytes())?;
 
-    let dentry = Dentry::open(&FsContext::get_current(), path, true)?;
+    let dentry = Dentry::open(&thread.fs_context, path, true)?;
 
     dentry.truncate(length)
 }
 
-fn do_unlink(pathname: *const u8) -> KResult<()> {
+#[eonix_macros::define_syscall(0x0a)]
+fn unlink(pathname: *const u8) -> KResult<()> {
     let path = UserString::new(pathname)?;
     let path = Path::new(path.as_cstr().to_bytes())?;
 
-    let dentry = Dentry::open(&FsContext::get_current(), path, false)?;
+    let dentry = Dentry::open(&thread.fs_context, path, false)?;
 
     dentry.unlink()
 }
 
-fn do_symlink(target: *const u8, linkpath: *const u8) -> KResult<()> {
+#[eonix_macros::define_syscall(0x53)]
+fn symlink(target: *const u8, linkpath: *const u8) -> KResult<()> {
     let target = UserString::new(target)?;
     let linkpath = UserString::new(linkpath)?;
     let linkpath = Path::new(linkpath.as_cstr().to_bytes())?;
 
-    let dentry = Dentry::open(&FsContext::get_current(), linkpath, false)?;
+    let dentry = Dentry::open(&thread.fs_context, linkpath, false)?;
 
     dentry.symlink(target.as_cstr().to_bytes())
 }
 
-fn do_mknod(pathname: *const u8, mode: u32, dev: u32) -> KResult<()> {
+#[eonix_macros::define_syscall(0x0e)]
+fn mknod(pathname: *const u8, mode: u32, dev: u32) -> KResult<()> {
     let path = UserString::new(pathname)?;
     let path = Path::new(path.as_cstr().to_bytes())?;
 
-    let context = FsContext::get_current();
-    let mode = mode & ((!*context.umask.lock() & 0o777) | (S_IFBLK | S_IFCHR));
+    let umask = *thread.fs_context.umask.lock();
+    let mode = mode & ((!umask & 0o777) | (S_IFBLK | S_IFCHR));
 
-    let dentry = Dentry::open(&context, path, true)?;
+    let dentry = Dentry::open(&thread.fs_context, path, true)?;
 
     dentry.mknod(mode, dev)
 }
 
-fn do_readlink(pathname: *const u8, buffer: *mut u8, bufsize: usize) -> KResult<usize> {
+#[eonix_macros::define_syscall(0x55)]
+fn readlink(pathname: *const u8, buffer: *mut u8, bufsize: usize) -> KResult<usize> {
     let path = UserString::new(pathname)?;
     let path = Path::new(path.as_cstr().to_bytes())?;
 
-    let dentry = Dentry::open(&FsContext::get_current(), path, false)?;
+    let dentry = Dentry::open(&thread.fs_context, path, false)?;
 
     let mut buffer = UserBuffer::new(buffer, bufsize)?;
     dentry.readlink(&mut buffer)
 }
 
-fn do_llseek(
+#[eonix_macros::define_syscall(0x8c)]
+fn llseek(
     fd: u32,
     offset_high: u32,
     offset_low: u32,
@@ -204,8 +240,7 @@ fn do_llseek(
     whence: u32,
 ) -> KResult<()> {
     let mut result = UserBuffer::new(result as *mut u8, core::mem::size_of::<u64>())?;
-    let files = FileArray::get_current();
-    let file = files.get(fd).ok_or(EBADF)?;
+    let file = thread.files.get(fd).ok_or(EBADF)?;
 
     let offset = ((offset_high as u64) << 32) | offset_low as u64;
 
@@ -226,9 +261,9 @@ struct IoVec32 {
     len: u32,
 }
 
-fn do_readv(fd: u32, iov_user: *const IoVec32, iovcnt: u32) -> KResult<usize> {
-    let files = FileArray::get_current();
-    let file = files.get(fd).ok_or(EBADF)?;
+#[eonix_macros::define_syscall(0x91)]
+fn readv(fd: u32, iov_user: *const IoVec32, iovcnt: u32) -> KResult<usize> {
+    let file = thread.files.get(fd).ok_or(EBADF)?;
 
     let mut iov_user = UserPointer::new(iov_user as *mut IoVec32)?;
     let iov_buffers = (0..iovcnt)
@@ -258,9 +293,9 @@ fn do_readv(fd: u32, iov_user: *const IoVec32, iovcnt: u32) -> KResult<usize> {
     Ok(tot)
 }
 
-fn do_writev(fd: u32, iov_user: *const u8, iovcnt: u32) -> KResult<usize> {
-    let files = FileArray::get_current();
-    let file = files.get(fd).ok_or(EBADF)?;
+#[eonix_macros::define_syscall(0x92)]
+fn writev(fd: u32, iov_user: *const u8, iovcnt: u32) -> KResult<usize> {
+    let file = thread.files.get(fd).ok_or(EBADF)?;
 
     // TODO: Rewrite this with `UserPointer`.
     let iov_user =
@@ -295,11 +330,12 @@ fn do_writev(fd: u32, iov_user: *const u8, iovcnt: u32) -> KResult<usize> {
     Ok(tot)
 }
 
-fn do_access(pathname: *const u8, _mode: u32) -> KResult<()> {
+#[eonix_macros::define_syscall(0x21)]
+fn access(pathname: *const u8, _mode: u32) -> KResult<()> {
     let path = UserString::new(pathname)?;
     let path = Path::new(path.as_cstr().to_bytes())?;
 
-    let dentry = Dentry::open(&FsContext::get_current(), path, true)?;
+    let dentry = Dentry::open(&thread.fs_context, path, true)?;
 
     if !dentry.is_valid() {
         return Err(ENOENT);
@@ -316,10 +352,10 @@ fn do_access(pathname: *const u8, _mode: u32) -> KResult<()> {
     Ok(())
 }
 
-fn do_sendfile64(out_fd: u32, in_fd: u32, offset: *mut u8, count: usize) -> KResult<usize> {
-    let files = FileArray::get_current();
-    let in_file = files.get(in_fd).ok_or(EBADF)?;
-    let out_file = files.get(out_fd).ok_or(EBADF)?;
+#[eonix_macros::define_syscall(0xef)]
+fn sendfile64(out_fd: u32, in_fd: u32, offset: *mut u8, count: usize) -> KResult<usize> {
+    let in_file = thread.files.get(in_fd).ok_or(EBADF)?;
+    let out_file = thread.files.get(out_fd).ok_or(EBADF)?;
 
     if !offset.is_null() {
         unimplemented!("sendfile64 with offset");
@@ -328,15 +364,16 @@ fn do_sendfile64(out_fd: u32, in_fd: u32, offset: *mut u8, count: usize) -> KRes
     Task::block_on(in_file.sendfile(&out_file, count))
 }
 
-fn do_ioctl(fd: u32, request: usize, arg3: usize) -> KResult<usize> {
-    let files = FileArray::get_current();
-    let file = files.get(fd).ok_or(EBADF)?;
+#[eonix_macros::define_syscall(0x36)]
+fn ioctl(fd: u32, request: usize, arg3: usize) -> KResult<usize> {
+    let file = thread.files.get(fd).ok_or(EBADF)?;
 
     file.ioctl(request, arg3)
 }
 
-fn do_fcntl64(fd: u32, cmd: u32, arg: usize) -> KResult<usize> {
-    FileArray::get_current().fcntl(fd, cmd, arg)
+#[eonix_macros::define_syscall(0xdd)]
+fn fcntl64(fd: u32, cmd: u32, arg: usize) -> KResult<usize> {
+    thread.files.fcntl(fd, cmd, arg)
 }
 
 #[repr(C)]
@@ -347,7 +384,8 @@ struct UserPollFd {
     revents: u16,
 }
 
-fn do_poll(fds: *mut UserPollFd, nfds: u32, _timeout: u32) -> KResult<u32> {
+#[eonix_macros::define_syscall(0xa8)]
+fn poll(fds: *mut UserPollFd, nfds: u32, _timeout: u32) -> KResult<u32> {
     match nfds {
         0 => Ok(0),
         2.. => unimplemented!("Poll with {} fds", nfds),
@@ -359,7 +397,7 @@ fn do_poll(fds: *mut UserPollFd, nfds: u32, _timeout: u32) -> KResult<u32> {
             let fds = UserPointerMut::new(fds)?;
             let mut fd = fds.read()?;
 
-            let file = Thread::current().files.get(fd.fd).ok_or(EBADF)?;
+            let file = thread.files.get(fd.fd).ok_or(EBADF)?;
             fd.revents = Task::block_on(file.poll(PollEvent::from_bits_retain(fd.events)))?.bits();
 
             fds.write(fd)?;
@@ -368,56 +406,4 @@ fn do_poll(fds: *mut UserPollFd, nfds: u32, _timeout: u32) -> KResult<u32> {
     }
 }
 
-define_syscall32!(sys_read, do_read, fd: u32, buffer: *mut u8, bufsize: usize);
-define_syscall32!(sys_write, do_write, fd: u32, buffer: *const u8, count: usize);
-define_syscall32!(sys_open, do_open, path: *const u8, flags: u32, mode: u32);
-define_syscall32!(sys_close, do_close, fd: u32);
-define_syscall32!(sys_dup, do_dup, fd: u32);
-define_syscall32!(sys_dup2, do_dup2, old_fd: u32, new_fd: u32);
-define_syscall32!(sys_pipe, do_pipe, pipe_fd: *mut [u32; 2]);
-define_syscall32!(sys_pipe2, do_pipe2, pipe_fd: *mut [u32; 2], flags: u32);
-define_syscall32!(sys_getdents, do_getdents, fd: u32, buffer: *mut u8, bufsize: usize);
-define_syscall32!(sys_getdents64, do_getdents64, fd: u32, buffer: *mut u8, bufsize: usize);
-define_syscall32!(sys_statx, do_statx, fd: u32, path: *const u8, flags: u32, mask: u32, buffer: *mut u8);
-define_syscall32!(sys_mkdir, do_mkdir, pathname: *const u8, mode: u32);
-define_syscall32!(sys_truncate, do_truncate, pathname: *const u8, length: usize);
-define_syscall32!(sys_unlink, do_unlink, pathname: *const u8);
-define_syscall32!(sys_symlink, do_symlink, target: *const u8, linkpath: *const u8);
-define_syscall32!(sys_readlink, do_readlink, pathname: *const u8, buffer: *mut u8, bufsize: usize);
-define_syscall32!(sys_llseek, do_llseek, fd: u32, offset_high: u32, offset_low: u32, result: *mut u64, whence: u32);
-define_syscall32!(sys_mknod, do_mknod, pathname: *const u8, mode: u32, dev: u32);
-define_syscall32!(sys_readv, do_readv, fd: u32, iov_user: *const IoVec32, iovcnt: u32);
-define_syscall32!(sys_writev, do_writev, fd: u32, iov_user: *const u8, iovcnt: u32);
-define_syscall32!(sys_access, do_access, pathname: *const u8, mode: u32);
-define_syscall32!(sys_sendfile64, do_sendfile64, out_fd: u32, in_fd: u32, offset: *mut u8, count: usize);
-define_syscall32!(sys_ioctl, do_ioctl, fd: u32, request: usize, arg3: usize);
-define_syscall32!(sys_fcntl64, do_fcntl64, fd: u32, cmd: u32, arg: usize);
-define_syscall32!(sys_poll, do_poll, fds: *mut UserPollFd, nfds: u32, timeout: u32);
-
-pub(super) fn register() {
-    register_syscall!(0x03, read);
-    register_syscall!(0x04, write);
-    register_syscall!(0x05, open);
-    register_syscall!(0x06, close);
-    register_syscall!(0x0a, unlink);
-    register_syscall!(0x0e, mknod);
-    register_syscall!(0x21, access);
-    register_syscall!(0x27, mkdir);
-    register_syscall!(0x29, dup);
-    register_syscall!(0x2a, pipe);
-    register_syscall!(0x36, ioctl);
-    register_syscall!(0x3f, dup2);
-    register_syscall!(0x53, symlink);
-    register_syscall!(0x55, readlink);
-    register_syscall!(0x5c, truncate);
-    register_syscall!(0x8c, llseek);
-    register_syscall!(0x8d, getdents);
-    register_syscall!(0x91, readv);
-    register_syscall!(0x92, writev);
-    register_syscall!(0xa8, poll);
-    register_syscall!(0xdc, getdents64);
-    register_syscall!(0xdd, fcntl64);
-    register_syscall!(0xef, sendfile64);
-    register_syscall!(0x14b, pipe2);
-    register_syscall!(0x17f, statx);
-}
+pub fn keep_alive() {}

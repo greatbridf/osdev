@@ -4,36 +4,46 @@ use super::{
 };
 use crate::{
     kernel::{
-        cpu::local_cpu,
+        interrupt::default_irq_handler,
+        syscall::{syscall_handlers, SyscallHandler},
+        timer::timer_interrupt,
         user::dataflow::CheckedUserPointer,
         vfs::{filearray::FileArray, FsContext},
     },
     prelude::*,
 };
 use alloc::sync::Arc;
-use arch::{InterruptContext, UserTLS, _arch_fork_return};
+use arch::FpuState;
+use atomic_unique_refcell::AtomicUniqueRefCell;
 use core::{
-    arch::asm,
+    future::Future,
     pin::Pin,
     ptr::NonNull,
-    sync::atomic::{AtomicUsize, Ordering},
-    task::Waker,
+    sync::atomic::{AtomicBool, Ordering},
+    task::{Context, Poll, Waker},
+};
+use eonix_hal::traits::trap::IrqState;
+use eonix_hal::{
+    processor::{UserTLS, CPU},
+    traits::{
+        fault::Fault,
+        fpu::RawFpuState as _,
+        trap::{RawTrapContext, TrapReturn, TrapType},
+    },
+    trap::{disable_irqs_save, TrapContext},
 };
 use eonix_mm::address::{Addr as _, VAddr};
-use eonix_runtime::{
-    context::ExecutionContext,
-    run::{Contexted, Run, RunState},
-};
+use eonix_runtime::run::{Contexted, Run, RunState};
 use eonix_sync::AsProofMut as _;
 use pointers::BorrowedArc;
 
-struct CurrentThread {
-    thread: NonNull<Thread>,
-    runnable: NonNull<ThreadRunnable>,
-}
+#[eonix_percpu::define_percpu]
+static CURRENT_THREAD: Option<NonNull<Thread>> = None;
 
-#[arch::define_percpu]
-static CURRENT_THREAD: Option<CurrentThread> = None;
+pub struct ThreadRunnable<F: Future> {
+    thread: Arc<Thread>,
+    future: F,
+}
 
 pub struct ThreadBuilder {
     tid: Option<u32>,
@@ -44,6 +54,9 @@ pub struct ThreadBuilder {
     signal_list: Option<SignalList>,
     tls: Option<UserTLS>,
     set_child_tid: Option<usize>,
+
+    trap_ctx: Option<TrapContext>,
+    fpu_state: Option<FpuState>,
 }
 
 #[derive(Debug)]
@@ -67,18 +80,13 @@ pub struct Thread {
     pub fs_context: Arc<FsContext>,
 
     pub signal_list: SignalList,
-    inner: Spin<ThreadInner>,
-}
 
-pub struct ThreadRunnable {
-    thread: Arc<Thread>,
-    /// Interrupt context for the thread initialization.
-    /// We store the kernel stack pointer in one of the fields for now.
-    ///
-    /// TODO: A better way to store the interrupt context.
-    interrupt_context: InterruptContext,
-    interrupt_stack_pointer: AtomicUsize,
-    return_context: ExecutionContext,
+    pub trap_ctx: AtomicUniqueRefCell<TrapContext>,
+    pub fpu_state: AtomicUniqueRefCell<FpuState>,
+
+    pub dead: AtomicBool,
+
+    inner: Spin<ThreadInner>,
 }
 
 #[repr(transparent)]
@@ -132,6 +140,8 @@ impl ThreadBuilder {
             signal_list: None,
             tls: None,
             set_child_tid: None,
+            trap_ctx: None,
+            fpu_state: None,
         }
     }
 
@@ -175,11 +185,35 @@ impl ThreadBuilder {
         self
     }
 
+    pub fn trap_ctx(mut self, trap_ctx: TrapContext) -> Self {
+        self.trap_ctx = Some(trap_ctx);
+        self
+    }
+
+    pub fn fpu_state(mut self, fpu_state: FpuState) -> Self {
+        self.fpu_state = Some(fpu_state);
+        self
+    }
+
+    pub fn entry(mut self, entry: VAddr, stack_pointer: VAddr) -> Self {
+        let mut trap_ctx = TrapContext::new();
+        trap_ctx.set_user_mode(true);
+        trap_ctx.set_program_counter(entry.addr());
+        trap_ctx.set_stack_pointer(stack_pointer.addr());
+        trap_ctx.set_interrupt_enabled(true);
+
+        self.trap_ctx = Some(trap_ctx);
+        self
+    }
+
     /// Fork the thread from another thread.
     ///
     /// Sets the thread's files, fs_context, signal_list, name, tls, and set_child_tid
     pub fn fork_from(self, thread: &Thread) -> Self {
         let inner = thread.inner.lock();
+
+        let mut trap_ctx = thread.trap_ctx.borrow().clone();
+        trap_ctx.set_user_return_value(0);
 
         self.files(FileArray::new_cloned(&thread.files))
             .fs_context(FsContext::new_cloned(&thread.fs_context))
@@ -187,6 +221,8 @@ impl ThreadBuilder {
             .name(inner.name.clone())
             .tls(inner.tls.clone())
             .set_child_tid(inner.set_child_tid)
+            .trap_ctx(trap_ctx)
+            .fpu_state(thread.fpu_state.borrow().clone())
     }
 
     pub fn build(self, process_list: &mut ProcessList) -> Arc<Thread> {
@@ -199,6 +235,8 @@ impl ThreadBuilder {
             .unwrap_or_else(|| FsContext::global().clone());
         let signal_list = self.signal_list.unwrap_or_else(|| SignalList::new());
         let set_child_tid = self.set_child_tid.unwrap_or(0);
+        let trap_ctx = self.trap_ctx.expect("TrapContext is not set");
+        let fpu_state = self.fpu_state.unwrap_or_else(FpuState::new);
 
         signal_list.clear_pending();
 
@@ -208,6 +246,9 @@ impl ThreadBuilder {
             files,
             fs_context,
             signal_list,
+            trap_ctx: AtomicUniqueRefCell::new(trap_ctx),
+            fpu_state: AtomicUniqueRefCell::new(fpu_state),
+            dead: AtomicBool::new(false),
             inner: Spin::new(ThreadInner {
                 name,
                 tls: self.tls,
@@ -225,14 +266,13 @@ impl Thread {
     pub fn current<'lt>() -> BorrowedArc<'lt, Self> {
         // SAFETY: We won't change the thread pointer in the current CPU when
         // we return here after some preemption.
-        let current: &Option<CurrentThread> = unsafe { CURRENT_THREAD.as_ref() };
-        let current = current.as_ref().expect("Current thread is not set");
+        let current = CURRENT_THREAD.get().expect("Current thread is not set");
 
         // SAFETY: We can only use the returned value when we are in the context of the thread.
-        unsafe { BorrowedArc::from_raw(current.thread) }
+        unsafe { BorrowedArc::from_raw(current) }
     }
 
-    pub fn raise(self: &Arc<Self>, signal: Signal) -> RaiseResult {
+    pub fn raise(&self, signal: Signal) -> RaiseResult {
         self.signal_list.raise(signal)
     }
 
@@ -241,8 +281,7 @@ impl Thread {
     /// to be called in a preemption disabled context.
     pub unsafe fn load_thread_area32(&self) {
         if let Some(tls) = self.inner.lock().tls.as_ref() {
-            // SAFETY: Preemption is disabled.
-            tls.load(local_cpu());
+            CPU::local().as_mut().set_tls32(tls);
         }
     }
 
@@ -279,123 +318,180 @@ impl Thread {
         self.inner.lock().name.clone()
     }
 
-    /// # Safety
-    /// This function needs to be called with preempt count == 1.
-    /// We won't return so clean all the resources before calling this.
-    pub unsafe fn exit() -> ! {
-        // SAFETY: We won't change the thread pointer in the current CPU when
-        // we return here after some preemption.
-        let current: &Option<CurrentThread> = unsafe { CURRENT_THREAD.as_ref() };
-        let current = current.as_ref().expect("Current thread is not set");
-
-        // SAFETY: We can only use the `run_context` when we are in the context of the thread.
-        let runnable = unsafe { current.runnable.as_ref() };
-
-        runnable.return_context.switch_noreturn()
-    }
-}
-
-impl ThreadRunnable {
-    pub fn new(thread: Arc<Thread>, entry: VAddr, stack_pointer: VAddr) -> Self {
-        let mut interrupt_context = InterruptContext::default();
-        interrupt_context.set_return_address(entry.addr() as _, true);
-        interrupt_context.set_stack_pointer(stack_pointer.addr() as _, true);
-        interrupt_context.set_interrupt_enabled(true);
-
-        Self {
-            thread,
-            interrupt_context,
-            interrupt_stack_pointer: AtomicUsize::new(0),
-            return_context: ExecutionContext::new(),
+    pub fn handle_syscall(&self, no: usize, args: [usize; 6]) -> Option<usize> {
+        match syscall_handlers().get(no) {
+            Some(Some(SyscallHandler {
+                handler,
+                name: _name,
+                ..
+            })) => {
+                println_trace!(
+                    "trace_syscall",
+                    "Syscall {_name}({no:#x}) on tid {:#x}",
+                    self.tid
+                );
+                handler(self, args)
+            }
+            _ => {
+                println_warn!("Syscall {no}({no:#x}) isn't implemented.");
+                self.raise(Signal::SIGSYS);
+                None
+            }
         }
     }
 
-    pub fn from_context(thread: Arc<Thread>, interrupt_context: InterruptContext) -> Self {
-        Self {
-            thread,
-            interrupt_context,
-            interrupt_stack_pointer: AtomicUsize::new(0),
-            return_context: ExecutionContext::new(),
+    pub fn is_dead(&self) -> bool {
+        self.dead.load(Ordering::SeqCst)
+    }
+
+    async fn real_run(&self) {
+        while !self.is_dead() {
+            if self.signal_list.has_pending_signal() {
+                self.signal_list
+                    .handle(&mut self.trap_ctx.borrow(), &mut self.fpu_state.borrow())
+                    .await;
+            }
+
+            if self.is_dead() {
+                return;
+            }
+
+            self.fpu_state.borrow().restore();
+
+            unsafe {
+                // SAFETY: We are returning to the context of the user thread.
+                self.trap_ctx.borrow().trap_return();
+            }
+
+            self.fpu_state.borrow().save();
+
+            let trap_type = self.trap_ctx.borrow().trap_type();
+            match trap_type {
+                TrapType::Fault(Fault::PageFault(err_code)) => {
+                    let addr = arch::get_page_fault_address();
+                    let mms = &self.process.mm_list;
+                    if let Err(signal) = mms.handle_user_page_fault(addr, err_code).await {
+                        self.signal_list.raise(signal);
+                    }
+                }
+                TrapType::Fault(Fault::BadAccess) => {
+                    self.signal_list.raise(Signal::SIGSEGV);
+                }
+                TrapType::Fault(Fault::InvalidOp) => {
+                    self.signal_list.raise(Signal::SIGILL);
+                }
+                TrapType::Fault(Fault::Unknown(_)) => unimplemented!("Unhandled fault"),
+                TrapType::Irq(irqno) => default_irq_handler(irqno),
+                TrapType::Timer => {
+                    timer_interrupt();
+                    yield_now().await;
+                }
+                TrapType::Syscall { no, args } => {
+                    if let Some(retval) = self.handle_syscall(no, args) {
+                        self.trap_ctx.borrow().set_user_return_value(retval);
+                    }
+                }
+            }
         }
+    }
+
+    pub async fn run(self: Arc<Thread>) {
+        struct ContextedRun<'a, F: Future>(F, &'a Thread);
+
+        impl<F: Future> Future for ContextedRun<'_, F> {
+            type Output = F::Output;
+
+            fn poll(mut self: Pin<&mut Self>, ctx: &mut Context<'_>) -> Poll<Self::Output> {
+                let irq_state = disable_irqs_save();
+                let (future, _) = unsafe {
+                    // SAFETY: We construct a pinned future and `&Thread` is `Unpin`.
+                    let me = self.as_mut().get_unchecked_mut();
+                    (Pin::new_unchecked(&mut me.0), me.1)
+                };
+
+                let retval = future.poll(ctx);
+
+                irq_state.restore();
+                retval
+            }
+        }
+
+        ContextedRun(self.real_run(), &self).await
     }
 }
 
-impl Contexted for ThreadRunnable {
+async fn yield_now() {
+    struct Yield {
+        yielded: bool,
+    }
+
+    impl Future for Yield {
+        type Output = ();
+
+        fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+            if self.as_mut().yielded {
+                Poll::Ready(())
+            } else {
+                self.as_mut().yielded = true;
+                cx.waker().wake_by_ref();
+                Poll::Pending
+            }
+        }
+    }
+
+    Yield { yielded: false }.await;
+}
+
+pub fn new_thread_runnable(
+    thread: Arc<Thread>,
+) -> ThreadRunnable<impl Future<Output = impl Send + 'static> + Send + 'static> {
+    ThreadRunnable {
+        thread: thread.clone(),
+        future: thread.run(),
+    }
+}
+
+impl<F: Future> Contexted for ThreadRunnable<F> {
     fn load_running_context(&self) {
-        let thread: &Thread = &self.thread;
+        self.thread.process.mm_list.activate();
 
-        match self.interrupt_stack_pointer.load(Ordering::Relaxed) {
-            0 => {}
-            sp => unsafe {
-                // SAFETY: Preemption is disabled.
-                arch::load_interrupt_stack(local_cpu(), sp as u64);
-            },
-        }
-
-        // SAFETY: Preemption is disabled.
-        unsafe {
-            // SAFETY: `self` and `thread` are valid and non-null.
-            let current_thread = CurrentThread {
-                thread: NonNull::new_unchecked(thread as *const _ as *mut _),
-                runnable: NonNull::new_unchecked(self as *const _ as *mut _),
-            };
-
-            // SAFETY: Preemption is disabled.
-            CURRENT_THREAD.swap(Some(current_thread));
-        }
-
-        thread.process.mm_list.activate();
+        let raw_ptr: *const Thread = &raw const *self.thread;
+        CURRENT_THREAD.set(NonNull::new(raw_ptr as *mut _));
 
         unsafe {
             // SAFETY: Preemption is disabled.
-            thread.load_thread_area32();
+            self.thread.load_thread_area32();
+        }
+
+        unsafe {
+            let trap_ctx_ptr: *const TrapContext = &raw const *self.thread.trap_ctx.borrow();
+            // SAFETY:
+            CPU::local()
+                .as_mut()
+                .load_interrupt_stack(trap_ctx_ptr.add(1).addr() as u64);
         }
     }
 
     fn restore_running_context(&self) {
         self.thread.process.mm_list.deactivate();
+
+        CURRENT_THREAD.set(None);
     }
 }
 
-impl Run for ThreadRunnable {
-    type Output = ();
+impl<F: Future> Run for ThreadRunnable<F> {
+    type Output = F::Output;
 
-    fn run(self: Pin<&mut Self>, _waker: &Waker) -> RunState<Self::Output> {
-        let mut task_context = ExecutionContext::new();
-        task_context.set_interrupt(false);
-        task_context.set_ip(_arch_fork_return as _);
-        task_context.set_sp(&self.interrupt_context as *const _ as _);
+    fn run(mut self: Pin<&mut Self>, waker: &Waker) -> RunState<Self::Output> {
+        let mut ctx = Context::from_waker(waker);
 
-        eonix_preempt::disable();
-
-        // TODO!!!!!: CHANGE THIS
-        let sp = unsafe {
-            let mut sp: usize;
-            asm!(
-                "mov %rsp, {0}",
-                out(reg) sp,
-                options(nomem, preserves_flags, att_syntax),
-            );
-            sp -= 512;
-            sp &= !0xf;
-
-            sp
-        };
-
-        self.interrupt_stack_pointer.store(sp, Ordering::Relaxed);
-
-        unsafe {
-            // SAFETY: Preemption is disabled.
-            arch::load_interrupt_stack(local_cpu(), sp as u64);
+        match unsafe {
+            self.as_mut()
+                .map_unchecked_mut(|me| &mut me.future)
+                .poll(&mut ctx)
+        } {
+            Poll::Ready(output) => RunState::Finished(output),
+            Poll::Pending => RunState::Running,
         }
-
-        eonix_preempt::enable();
-
-        self.return_context.switch_to(&task_context);
-
-        // We return here with preempt count == 1.
-        eonix_preempt::enable();
-
-        RunState::Finished(())
     }
 }

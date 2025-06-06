@@ -1,10 +1,10 @@
 [package]
-name = "gbos-rust-part"
+name = "eonix_kernel"
 version = "0.1.0"
 edition = "2021"
 
 [lib]
-crate-type = ["staticlib"]
+crate-type = ["bin"]
 
 [dependencies]
 arch = { path = "./arch" }
@@ -12,8 +12,10 @@ atomic_unique_refcell = { path = "./crates/atomic_unique_refcell", features = [
     "no_std",
 ] }
 buddy_allocator = { path = "./crates/buddy_allocator" }
-slab_allocator = { path = "./crates/slab_allocator" }
+eonix_hal = { path = "./crates/eonix_hal" }
+eonix_macros = { path = "./macros" }
 eonix_mm = { path = "./crates/eonix_mm" }
+eonix_percpu = { path = "./crates/eonix_percpu" }
 eonix_preempt = { path = "./crates/eonix_preempt" }
 eonix_runtime = { path = "./crates/eonix_runtime" }
 eonix_sync = { path = "./crates/eonix_sync" }
@@ -21,10 +23,12 @@ eonix_log = { path = "./crates/eonix_log" }
 intrusive_list = { path = "./crates/intrusive_list" }
 pointers = { path = "./crates/pointers" }
 posix_types = { path = "./crates/posix_types" }
+slab_allocator = { path = "./crates/slab_allocator" }
 
 bitflags = "2.6.0"
 intrusive-collections = "0.9.7"
 itertools = { version = "0.13.0", default-features = false }
+acpi = "5.2.0"
 
 [features]
 default = ["smp"]
@@ -33,9 +37,6 @@ trace_scheduler = []
 log_trace = ["trace_syscall", "trace_scheduler"]
 log_debug = []
 smp = []
-
-[build-dependencies]
-bindgen = "0.70.1"
 
 [profile.dev]
 panic = "abort"

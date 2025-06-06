@@ -6,11 +6,11 @@ use super::{
 };
 use crate::driver::ahci::command_table::CommandTable;
 use crate::kernel::block::{BlockDeviceRequest, BlockRequestQueue};
+use crate::kernel::constants::{EINVAL, EIO};
 use crate::kernel::mem::paging::Page;
 use crate::kernel::mem::AsMemoryBlock as _;
 use crate::prelude::*;
 use alloc::collections::vec_deque::VecDeque;
-use bindings::{EINVAL, EIO};
 use core::pin::pin;
 use eonix_mm::address::{Addr as _, PAddr};
 use eonix_runtime::task::Task;

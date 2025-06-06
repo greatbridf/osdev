@@ -1,5 +1,5 @@
 use super::{GlobalPageAlloc, PageAlloc, RawPage as _, PFN};
-use crate::address::{AddrRange, PAddr};
+use crate::address::{AddrRange, PAddr, PhysAccess};
 use core::{fmt, mem::ManuallyDrop, ptr::NonNull, sync::atomic::Ordering};
 
 pub const PAGE_SIZE: usize = 4096;
@@ -14,6 +14,7 @@ pub const PAGE_SIZE_BITS: u32 = PAGE_SIZE.trailing_zeros();
 pub struct PageBlock([u8; PAGE_SIZE]);
 
 /// A trait that provides the kernel access to the page.
+#[doc(notable_trait)]
 pub trait PageAccess {
     /// Returns a kernel-accessible pointer to the page referenced by the given
     /// physical frame number.
@@ -99,7 +100,7 @@ where
     where
         F: FnOnce(&Self) -> O,
     {
-        unsafe { Self::with_raw_in(pfn, func, A::global()) }
+        unsafe { Self::with_raw_in(pfn, A::global(), func) }
     }
 
     /// Do some work with the page without touching the reference count with the same
@@ -187,7 +188,7 @@ where
     ///
     /// # Safety
     /// Check `from_raw_in()` for the safety requirements.
-    pub unsafe fn with_raw_in<F, O>(pfn: PFN, func: F, alloc: A) -> O
+    pub unsafe fn with_raw_in<F, O>(pfn: PFN, alloc: A, func: F) -> O
     where
         F: FnOnce(&Self) -> O,
     {
@@ -302,5 +303,18 @@ impl<A: PageAlloc> fmt::Debug for Page<A> {
             Into::<PFN>::into(self.raw_page),
             self.order()
         )
+    }
+}
+
+impl<T> PageAccess for T
+where
+    T: PhysAccess,
+{
+    unsafe fn get_ptr_for_pfn(pfn: PFN) -> NonNull<PageBlock> {
+        unsafe {
+            // SAFETY: The physical address of a existing page must be
+            //         aligned to the page size.
+            T::as_ptr(PAddr::from(pfn))
+        }
     }
 }

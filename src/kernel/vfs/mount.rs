@@ -3,9 +3,9 @@ use super::{
     inode::Inode,
     vfs::Vfs,
 };
+use crate::kernel::constants::{EEXIST, ENODEV, ENOTDIR};
 use crate::prelude::*;
 use alloc::{collections::btree_map::BTreeMap, string::ToString as _, sync::Arc};
-use bindings::{EEXIST, ENODEV, ENOTDIR};
 use eonix_sync::LazyLock;
 
 pub const MS_RDONLY: u64 = 1 << 0;

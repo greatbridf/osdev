@@ -1,15 +1,11 @@
-use bindings::EINVAL;
-
 use crate::{
     kernel::{
-        constants::{CLOCK_MONOTONIC, CLOCK_REALTIME},
+        constants::{CLOCK_MONOTONIC, CLOCK_REALTIME, EINVAL},
         timer::ticks,
         user::UserPointerMut,
     },
     prelude::*,
 };
-
-use super::{define_syscall32, register_syscall};
 
 #[derive(Clone, Copy)]
 struct NewUTSName {
@@ -27,7 +23,8 @@ fn copy_cstr_to_array(cstr: &[u8], array: &mut [u8]) {
     array[len] = 0;
 }
 
-fn do_newuname(buffer: *mut NewUTSName) -> KResult<()> {
+#[eonix_macros::define_syscall(0x7a)]
+fn newuname(buffer: *mut NewUTSName) -> KResult<()> {
     let buffer = UserPointerMut::new(buffer)?;
     let mut uname = NewUTSName {
         sysname: [0; 65],
@@ -63,7 +60,8 @@ pub struct TimeSpec {
     nsec: u64,
 }
 
-fn do_gettimeofday(timeval: *mut TimeVal, timezone: *mut ()) -> KResult<()> {
+#[eonix_macros::define_syscall(0x4e)]
+fn gettimeofday(timeval: *mut TimeVal, timezone: *mut ()) -> KResult<()> {
     if !timezone.is_null() {
         return Err(EINVAL);
     }
@@ -80,7 +78,8 @@ fn do_gettimeofday(timeval: *mut TimeVal, timezone: *mut ()) -> KResult<()> {
     Ok(())
 }
 
-fn do_clock_gettime64(clock_id: u32, timespec: *mut TimeSpec) -> KResult<()> {
+#[eonix_macros::define_syscall(0x193)]
+fn clock_gettime64(clock_id: u32, timespec: *mut TimeSpec) -> KResult<()> {
     if clock_id != CLOCK_REALTIME && clock_id != CLOCK_MONOTONIC {
         unimplemented!("Unsupported clock_id: {}", clock_id);
     }
@@ -111,7 +110,8 @@ struct Sysinfo {
     _padding: [u8; 8],
 }
 
-fn do_sysinfo(info: *mut Sysinfo) -> KResult<()> {
+#[eonix_macros::define_syscall(0x74)]
+fn sysinfo(info: *mut Sysinfo) -> KResult<()> {
     let info = UserPointerMut::new(info)?;
     info.write(Sysinfo {
         uptime: ticks().in_secs() as u32,
@@ -139,7 +139,8 @@ struct TMS {
     tms_cstime: u32,
 }
 
-fn do_times(tms: *mut TMS) -> KResult<()> {
+#[eonix_macros::define_syscall(0x2b)]
+fn times(tms: *mut TMS) -> KResult<()> {
     let tms = UserPointerMut::new(tms)?;
     tms.write(TMS {
         tms_utime: 0,
@@ -149,16 +150,4 @@ fn do_times(tms: *mut TMS) -> KResult<()> {
     })
 }
 
-define_syscall32!(sys_newuname, do_newuname, buffer: *mut NewUTSName);
-define_syscall32!(sys_gettimeofday, do_gettimeofday, timeval: *mut TimeVal, timezone: *mut ());
-define_syscall32!(sys_clock_gettime64, do_clock_gettime64, clock_id: u32, timespec: *mut TimeSpec);
-define_syscall32!(sys_sysinfo, do_sysinfo, info: *mut Sysinfo);
-define_syscall32!(sys_times, do_times, tms: *mut TMS);
-
-pub(super) fn register() {
-    register_syscall!(0x2b, times);
-    register_syscall!(0x4e, gettimeofday);
-    register_syscall!(0x74, sysinfo);
-    register_syscall!(0x7a, newuname);
-    register_syscall!(0x193, clock_gettime64);
-}
+pub fn keep_alive() {}

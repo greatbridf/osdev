@@ -2,12 +2,12 @@ use super::{
     task::{ProcessList, Session, Signal, Thread},
     user::{UserPointer, UserPointerMut},
 };
+use crate::kernel::constants::{EINTR, ENOTTY, EPERM};
 use crate::{io::Buffer, prelude::*, sync::CondVar};
 use alloc::{
     collections::vec_deque::VecDeque,
     sync::{Arc, Weak},
 };
-use bindings::{EINTR, ENOTTY, EPERM};
 use bitflags::bitflags;
 use eonix_log::ConsoleWrite;
 use eonix_runtime::task::Task;

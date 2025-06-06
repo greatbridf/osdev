@@ -15,7 +15,7 @@
 - [x] 静态 ELF 加载器
 - [x] TTY 及任务控制接口（正在进一步实现）
 - [x] FAT32 文件系统的读取实现
-- [ ] 全部 Rust 化（只剩一点点）
+- [x] 全部 Rust 化（只剩一点点）
 - [ ] 网卡驱动(WIP)
 - [ ] POSIX 线程接口(WIP)
 - [ ] 动态加载器(WIP)
@@ -180,11 +180,11 @@
 
 ```bash
 # 配置构建环境
-./configure && make prepare && make build
+./configure && make build
 
 # 直接运行
 
-make nativerun
+make run
 
 # 如果需要调试
 
@@ -201,14 +201,19 @@ make tmux-debug
 
 可能需要在运行 `./configure` 时在环境变量中指定正确版本的构建工具。
 
-- `QEMU`: 用于调试运行的 QEMU。默认使用 `qemu-system-x86_64`。
-- `GDB`: 用于 `make debug` 的 GDB。我们将默认查找 `gdb` 或者是 `x86_64-elf-gdb` 并检查支持的架构。
-- `FDISK_BIN`: 用于创建磁盘镜像分区表的 fdisk 可执行文件。默认使用 `fdisk`。
+- `DEFAULT_ARCH`: 在调用 Makefile 时如果不进行额外指定，默认使用的架构。默认为 `x86_64`。
+- `QEMU`: 用于调试运行的 QEMU。默认使用 `qemu-system-$(ARCH)`。
+- `GDB`: 用于 `make debug` 的 GDB。我们将默认查找 `$(ARCH)-elf-gdb` 并检查支持的架构。
+- `FDISK`: 用于创建磁盘镜像分区表的 fdisk 可执行文件，要求使用来自 util-linux 版本的 fdisk。默认使用 `fdisk`。
 
-如果正在进行交叉编译，请在运行 `./configure` 时将 `CROSS_COMPILE` 设置为你的交叉编译器的相应目标三元组。
+在运行 make 时可以指定的额外选项：
 
-## 运行自己编译的程序
-
-项目目录下的 `user` 目录主要是出于一些*历史*原因存在，几乎没有任何用处。所以不要尝试查看里面的内容。
-
-要将你的程序（可以使用任何编译器为i386架构编译，静态链接）复制到构建的磁盘镜像中，你可以编辑 `CMakeLists.txt` 并在 `boot.img` 部分添加一行。你也可以尝试编辑 `init_script.sh` 以自定义启动过程。
+- `HOST`: 当前平台架构，用于决定 qemu 的默认加速模式，默认使用 `uname -s` 的输出。
+- `ARCH`: 编译运行的目标架构，默认使用 configure 时指定的值。
+- `MODE`: 编译运行的模式，可以使用 `debug` 或者是 `release`。
+- `SMP`: 是否运行多处理器处理，默认使用 4 CPU。
+- `QEMU`: 手动指定 qemu 路径。
+- `GDB`: 手动指定 gdb 路径。
+- `FDISK`: 手动指定 fdisk 路径。
+- `QEMU_ACCEL`: 手动指定要使用的 qemu 加速方法。
+- `DEBUG_TRAPS`: 是否要进行 trap 的调试，使 qemu 输出详细的 trap 日志。

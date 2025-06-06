@@ -4,18 +4,18 @@ use super::{
     inode::{Ino, Inode, Mode, WriteOffset},
     s_isblk, s_ischr, s_isdir, s_isreg, DevId, FsContext,
 };
+use crate::kernel::constants::{
+    EEXIST, EINVAL, EISDIR, ELOOP, ENOENT, ENOTDIR, EPERM, ERANGE, O_CREAT, O_EXCL,
+};
 use crate::{
     hash::KernelHasher,
     io::{Buffer, ByteBuffer},
-    kernel::{block::BlockDevice, CharDevice},
+    kernel::{block::BlockDevice, syscall::file_rw::StatX, CharDevice},
     path::{Path, PathComponent},
     prelude::*,
     rcu::{RCUNode, RCUPointer},
 };
 use alloc::sync::Arc;
-use bindings::{
-    statx, EEXIST, EINVAL, EISDIR, ELOOP, ENOENT, ENOTDIR, EPERM, ERANGE, O_CREAT, O_EXCL,
-};
 use core::{
     fmt,
     hash::{BuildHasher, BuildHasherDefault, Hasher},
@@ -413,7 +413,7 @@ impl Dentry {
         }
     }
 
-    pub fn statx(&self, stat: &mut statx, mask: u32) -> KResult<()> {
+    pub fn statx(&self, stat: &mut StatX, mask: u32) -> KResult<()> {
         self.get_inode()?.statx(stat, mask)
     }
 

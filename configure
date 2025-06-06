@@ -1,4 +1,6 @@
 #!/bin/sh
+DEFAULT_ARCH="x86_64"
+
 event() {
     printf "$1... "
 }
@@ -30,36 +32,23 @@ case "$ARCH" in
         ;;
 esac
 
-# $1: OS NAME
-# $2: CROSS COMPILE FLAG
-# $3: FDISK_BIN
-generate_cross_compile_script() {
-cat > cross-compile.cmake <<EOF
-set(CMAKE_SYSTEM_NAME $1)
-
-set(TOOLCHAIN_PATH_AND_PREFIX "$2")
-
-set(CMAKE_C_COMPILER \${TOOLCHAIN_PATH_AND_PREFIX}gcc)
-set(CMAKE_CXX_COMPILER \${TOOLCHAIN_PATH_AND_PREFIX}c++)
-set(CMAKE_AR \${TOOLCHAIN_PATH_AND_PREFIX}ar)
-set(CMAKE_LINKER \${TOOLCHAIN_PATH_AND_PREFIX}ld)
-set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
-
-SET(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
-# for libraries and headers in the target directories
-SET(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
-SET(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
-SET(FDISK_BIN $3)
-EOF
-}
-
-event "finding qemu"
-for item in $QEMU_EXECUTABLES; do
-    if $item --version > /dev/null 2>&1; then
-        QEMU="$item"
+if [ "$QEMU" = "" ]; then
+    event "checking default qemu"
+    QEMU="qemu-system-$DEFAULT_ARCH"
+    if $QEMU --version > /dev/null 2>&1; then
+        QEMU="qemu-system-\$(ARCH)"
         break
     fi
-done
+else
+    event "checking given qemu"
+    for item in $QEMU; do
+        if $item --version > /dev/null 2>&1; then
+            QEMU="$item"
+            break
+        fi
+    done
+    QEMU=""
+fi
 if [ "$QEMU" = "" ]; then
     echo "failed"
     exit 1
@@ -70,7 +59,7 @@ check_gdb_arch() {
     local item="$1"
     if $item --init-eval-command 'set arch' \
              --init-eval-command 'q' 2>&1 \
-             | grep "$ARCH" >/dev/null 2>&1; then
+             | grep "$DEFAULT_ARCH" >/dev/null 2>&1; then
         return 0
     else
         return 1
@@ -78,77 +67,41 @@ check_gdb_arch() {
 }
 
 if [ "$GDB" = "" ]; then
-    event "finding gdb"
-    for item in $GDB_EXECUTABLES; do
-        if check_gdb_arch "$item"; then
+    event "checking default gdb"
+    if check_gdb_arch "$DEFAULT_ARCH-elf-gdb"; then
+        GDB="\$(ARCH)-elf-gdb"
+        break
+    fi
+else
+    event 'checking given gdb'
+    for item in $GDB; do
+        if check_gdb_arch "$GDB"; then
             GDB="$item"
             break
         fi
     done
-    if [ "$GDB" = "" ]; then
-        echo "failed"
-        exit 1
-    fi
-else
-    event 'checking given gdb'
-    if ! check_gdb_arch "$GDB"; then
-        echo "failed"
-        exit 1
-    fi
+    GDB=""
+fi
+if [ "$GDB" = "" ]; then
+    echo "failed"
+    exit 1
 fi
 echo "$GDB"
 
-event "checking os type"
-OS=`uname`
-case "$OS" in
-    "Linux")
-        echo "Linux"
-        ;;
-    "Darwin")
-        echo "macOS"
-        ;;
-    *)
-        echo "unknown"
-        exit 1
-        ;;
-esac
-
-event "setting hardware acceleration type"
-case "$OS" in
-    "Linux")
-        echo "kvm"
-        # QEMU_ACCEL='-enable-kvm'
-        ;;
-    "Darwin")
-        echo "tcg"
-        QEMU_ACCEL='-accel tcg'
-        ;;
-esac
-
 event "checking util-linux fdisk"
-if [ -z "$FDISK_BIN" ]; then
+if [ "$FDISK" = "" ]; then
     if ! which fdisk > /dev/null 2>&1; then
         echo "no"
         exit 1
     fi
-    FDISK_BIN=$(which fdisk)
+    FDISK=`which fdisk`
 fi
 
-if ! $FDISK_BIN -v 2>&1 | grep util-linux > /dev/null 2>&1 ; then
+if ! $FDISK -v 2>&1 | grep util-linux > /dev/null 2>&1 ; then
     echo "no, fdisk is not from util-linux"
     exit 1
 else
-    echo "$FDISK_BIN"
-fi
-
-event "checking cross compiling"
-if [ "$CROSS_COMPILE" != "" ]; then
-    echo "yes"
-    CROSS_COMPILE_FLAG='--toolchain cross-compile.cmake'
-    generate_cross_compile_script "$OS" "$CROSS_COMPILE" "$FDISK_BIN"
-else
-    echo "no"
-    CROSS_COMPILE_FLAG=
+    echo "$FDISK"
 fi
 
 event "checking mkfs tool"
@@ -160,12 +113,8 @@ else
 fi
 
 cp Makefile.src Makefile
-sed -i '' -e "s|##PLACEHOLDER_1##|$QEMU|" Makefile > /dev/null 2>&1
-sed -i '' -e "s|##PLACEHOLDER_2##|$GDB|" Makefile > /dev/null 2>&1
-sed -i '' -e "s|##PLACEHOLDER_3##|$QEMU_ACCEL|" Makefile > /dev/null 2>&1
-sed -i '' -e "s|##PLACEHOLDER_4##|$CROSS_COMPILE_FLAG|" Makefile > /dev/null 2>&1
-sed -i '' -e "s|##PLACEHOLDER_5##|$FDISK_BIN|" Makefile > /dev/null 2>&1
-sed -i '' -e "s|##PLACEHOLDER_6##|$ARCH|" Makefile > /dev/null 2>&1
-
-echo "Configuration successful for architecture: $ARCH"
+sed -i '' -e "s|##DEFAULT_ARCH##|$DEFAULT_ARCH|" Makefile > /dev/null 2>&1
+sed -i '' -e "s|##GDB##|$GDB|" Makefile > /dev/null 2>&1
+sed -i '' -e "s|##QEMU##|$QEMU|" Makefile > /dev/null 2>&1
+sed -i '' -e "s|##FDISK##|$FDISK|" Makefile > /dev/null 2>&1
 exit 0

@@ -23,10 +23,12 @@ bitflags! {
         const COPY_ON_WRITE = 256;
         const MAPPED = 512;
         const ANONYMOUS = 1024;
+        const HUGE = 2048;
     }
 }
 
-pub trait RawAttribute: Copy {
+#[doc(notable_trait)]
+pub trait RawAttribute: Copy + From<PageAttribute> + From<TableAttribute> {
     /// Create a new attribute representing a non-present page.
     fn null() -> Self;
 
@@ -43,20 +45,9 @@ pub trait RawAttribute: Copy {
     /// # Panic
     /// The implementor should panic if invalid combinations of flags are present.
     fn as_page_attr(self) -> Option<PageAttribute>;
-
-    /// Convert the attribute to a raw value.
-    ///
-    /// # Panic
-    /// The implementor should panic if invalid combinations of flags are present.
-    fn from_table_attr(table_attr: TableAttribute) -> Self;
-
-    /// Convert the attribute to a raw value.
-    ///
-    /// # Panic
-    /// The implementor should panic if invalid combinations of flags are present.
-    fn from_page_attr(page_attr: PageAttribute) -> Self;
 }
 
+#[doc(notable_trait)]
 pub trait PTE: Sized {
     type Attr: RawAttribute;
 

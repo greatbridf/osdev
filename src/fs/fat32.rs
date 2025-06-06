@@ -1,6 +1,7 @@
 mod dir;
 mod file;
 
+use crate::kernel::constants::EIO;
 use crate::{
     io::{Buffer, ByteBuffer, UninitBuffer},
     kernel::{
@@ -23,7 +24,6 @@ use alloc::{
     sync::{Arc, Weak},
     vec::Vec,
 };
-use bindings::EIO;
 use core::{ops::ControlFlow, sync::atomic::Ordering};
 use dir::Dirs as _;
 use eonix_runtime::task::Task;

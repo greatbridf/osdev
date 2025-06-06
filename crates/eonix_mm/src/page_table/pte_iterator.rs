@@ -41,7 +41,7 @@ pub trait IteratorType<M: PagingMode> {
 
             pte.set(
                 page.into_raw(),
-                <M::Entry as PTE>::Attr::from_table_attr(Self::page_table_attributes()),
+                <M::Entry as PTE>::Attr::from(Self::page_table_attributes()),
             );
 
             unsafe {

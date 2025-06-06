@@ -3,11 +3,13 @@ mod signal_action;
 mod signal_mask;
 
 use super::{ProcessList, Thread, WaitObject, WaitType};
+use crate::kernel::constants::{EFAULT, EINVAL};
 use crate::{kernel::user::UserPointer, prelude::*};
 use alloc::collections::binary_heap::BinaryHeap;
-use arch::{ExtendedContext, InterruptContext};
-use bindings::{EFAULT, EINVAL};
+use arch::FpuState;
 use core::{cmp::Reverse, task::Waker};
+use eonix_hal::traits::trap::RawTrapContext;
+use eonix_hal::trap::TrapContext;
 use eonix_runtime::task::Task;
 use eonix_sync::AsProof as _;
 use intrusive_collections::UnsafeRef;
@@ -16,6 +18,9 @@ use signal_action::SignalActionList;
 pub use signal::{Signal, SIGNAL_IGNORE, SIGNAL_NOW, SIGNAL_STOP};
 pub use signal_action::SignalAction;
 pub use signal_mask::SignalMask;
+
+pub(self) const SAVED_DATA_SIZE: usize =
+    size_of::<TrapContext>() + size_of::<FpuState>() + size_of::<SignalMask>();
 
 struct SignalListInner {
     mask: SignalMask,
@@ -161,11 +166,7 @@ impl SignalList {
     }
 
     /// Handle signals in the context of `Thread::current()`.
-    ///
-    /// # Safety
-    /// This function might never return. Caller must make sure that local variables
-    /// that own resources are dropped before calling this function.
-    pub async fn handle(&self, int_stack: &mut InterruptContext, ext_ctx: &mut ExtendedContext) {
+    pub async fn handle(&self, trap_ctx: &mut TrapContext, fpu_state: &mut FpuState) {
         loop {
             let signal = {
                 let signal = match self.inner.lock().pop() {
@@ -182,7 +183,7 @@ impl SignalList {
                         old_mask
                     };
 
-                    let result = handler.handle(signal, old_mask, int_stack, ext_ctx);
+                    let result = handler.handle(signal, old_mask, trap_ctx, fpu_state);
                     if result.is_err() {
                         self.inner.lock().mask = old_mask;
                     }
@@ -245,29 +246,30 @@ impl SignalList {
                         );
                     }
                 }
-                // Default to terminate the process.
-                signal => ProcessList::kill_current(signal),
+                signal => {
+                    // Default to terminate the process.
+                    Thread::current().process.force_kill(signal).await;
+                    return;
+                }
             }
         }
     }
 
-    /// Load the signal mask, MMX registers and interrupt stack from the user stack.
-    /// We must be here because `sigreturn` is called. Se we return the value of the register
-    /// used to store the syscall return value to prevent the original value being clobbered.
-    pub fn restore(
-        &self,
-        int_stack: &mut InterruptContext,
-        ext_ctx: &mut ExtendedContext,
-    ) -> KResult<usize> {
-        let old_mask_vaddr = int_stack.rsp as usize;
-        let old_mmxregs_vaddr = old_mask_vaddr + size_of::<usize>();
-        let old_int_stack_vaddr = old_mmxregs_vaddr + size_of::<ExtendedContext>();
+    /// Load the signal mask, fpu state and trap context from the user stack.
+    pub fn restore(&self, trap_ctx: &mut TrapContext, fpu_state: &mut FpuState) -> KResult<()> {
+        let old_trap_ctx_vaddr = trap_ctx.get_stack_pointer() + 16 - 4;
+        let old_fpu_state_vaddr = old_trap_ctx_vaddr + size_of::<TrapContext>();
+        let old_mask_vaddr = old_fpu_state_vaddr + size_of::<FpuState>();
 
-        let old_mask = UserPointer::<u64>::new_vaddr(old_mask_vaddr)?.read()?;
-        *ext_ctx = UserPointer::<ExtendedContext>::new_vaddr(old_mmxregs_vaddr)?.read()?;
-        *int_stack = UserPointer::<InterruptContext>::new_vaddr(old_int_stack_vaddr)?.read()?;
+        *trap_ctx = UserPointer::<TrapContext>::new_vaddr(old_trap_ctx_vaddr)?.read()?;
 
-        self.inner.lock().mask = SignalMask::from(old_mask);
-        Ok(int_stack.rax as usize)
+        if !trap_ctx.is_user_mode() || !trap_ctx.is_interrupt_enabled() {
+            return Err(EFAULT)?;
+        }
+
+        *fpu_state = UserPointer::<FpuState>::new_vaddr(old_fpu_state_vaddr)?.read()?;
+        self.inner.lock().mask = UserPointer::<SignalMask>::new_vaddr(old_mask_vaddr)?.read()?;
+
+        Ok(())
     }
 }

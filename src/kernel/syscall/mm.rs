@@ -1,15 +1,26 @@
-use super::{define_syscall32, register_syscall, MapArgument, MapArgumentImpl};
+use super::FromSyscallArg;
+use crate::kernel::constants::{EINVAL, ENOMEM};
 use crate::{
     kernel::{
         constants::{UserMmapFlags, UserMmapProtocol},
         mem::{Mapping, Permission},
-        task::Thread,
     },
     prelude::*,
 };
-use bindings::{EINVAL, ENOMEM};
 use eonix_mm::address::{Addr as _, AddrOps as _, VAddr};
 use eonix_runtime::task::Task;
+
+impl FromSyscallArg for UserMmapProtocol {
+    fn from_arg(value: usize) -> UserMmapProtocol {
+        UserMmapProtocol::from_bits_truncate(value as u32)
+    }
+}
+
+impl FromSyscallArg for UserMmapFlags {
+    fn from_arg(value: usize) -> UserMmapFlags {
+        UserMmapFlags::from_bits_truncate(value as u32)
+    }
+}
 
 /// Check whether we are doing an implemented function.
 /// If `condition` is false, return `Err(err)`.
@@ -21,7 +32,8 @@ fn check_impl(condition: bool, err: u32) -> KResult<()> {
     }
 }
 
-fn do_mmap_pgoff(
+#[eonix_macros::define_syscall(0xc0)]
+fn mmap_pgoff(
     addr: usize,
     len: usize,
     prot: UserMmapProtocol,
@@ -41,7 +53,7 @@ fn do_mmap_pgoff(
         return Err(EINVAL);
     }
 
-    let mm_list = &Thread::current().process.mm_list;
+    let mm_list = &thread.process.mm_list;
 
     // PROT_NONE, we do unmapping.
     if prot.is_empty() {
@@ -77,50 +89,26 @@ fn do_mmap_pgoff(
     addr.map(|addr| addr.addr())
 }
 
-fn do_munmap(addr: usize, len: usize) -> KResult<usize> {
+#[eonix_macros::define_syscall(0x5b)]
+fn munmap(addr: usize, len: usize) -> KResult<usize> {
     let addr = VAddr::from(addr);
     if !addr.is_page_aligned() || len == 0 {
         return Err(EINVAL);
     }
 
     let len = (len + 0xfff) & !0xfff;
-    Task::block_on(Thread::current().process.mm_list.unmap(addr, len)).map(|_| 0)
+    Task::block_on(thread.process.mm_list.unmap(addr, len)).map(|_| 0)
 }
 
-fn do_brk(addr: usize) -> KResult<usize> {
+#[eonix_macros::define_syscall(0x2d)]
+fn brk(addr: usize) -> KResult<usize> {
     let vaddr = if addr == 0 { None } else { Some(VAddr::from(addr)) };
-    Ok(Thread::current().process.mm_list.set_break(vaddr).addr())
+    Ok(thread.process.mm_list.set_break(vaddr).addr())
 }
 
-impl MapArgument<'_, UserMmapProtocol> for MapArgumentImpl {
-    fn map_arg(value: u64) -> UserMmapProtocol {
-        UserMmapProtocol::from_bits_truncate(value as u32)
-    }
-}
-
-impl MapArgument<'_, UserMmapFlags> for MapArgumentImpl {
-    fn map_arg(value: u64) -> UserMmapFlags {
-        UserMmapFlags::from_bits_truncate(value as u32)
-    }
-}
-
-#[allow(unused_variables)]
-fn do_madvise(addr: usize, len: usize, advice: u32) -> KResult<()> {
+#[eonix_macros::define_syscall(0xdb)]
+fn madvise(_addr: usize, _len: usize, _advice: u32) -> KResult<()> {
     Ok(())
 }
 
-define_syscall32!(sys_brk, do_brk, addr: usize);
-define_syscall32!(sys_munmap, do_munmap, addr: usize, len: usize);
-define_syscall32!(sys_madvise, do_madvise, addr: usize, len: usize, advice: u32);
-define_syscall32!(sys_mmap_pgoff, do_mmap_pgoff,
-    addr: usize, len: usize,
-    prot: UserMmapProtocol,
-    flags: UserMmapFlags,
-    fd: u32, pgoffset: usize);
-
-pub(super) fn register() {
-    register_syscall!(0x2d, brk);
-    register_syscall!(0x5b, munmap);
-    register_syscall!(0xc0, mmap_pgoff);
-    register_syscall!(0xdb, madvise);
-}
+pub fn keep_alive() {}

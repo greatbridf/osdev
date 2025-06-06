@@ -3,6 +3,10 @@ use super::{
     inode::{Mode, WriteOffset},
     s_isblk, s_isdir, s_isreg,
 };
+use crate::kernel::{
+    constants::{EBADF, EFAULT, EINTR, EINVAL, ENOTDIR, ENOTTY, EOVERFLOW, EPIPE, ESPIPE, S_IFMT},
+    syscall::file_rw::StatX,
+};
 use crate::{
     io::{Buffer, BufferFill, ByteBuffer, Chunks},
     kernel::{
@@ -17,9 +21,6 @@ use crate::{
     sync::CondVar,
 };
 use alloc::{collections::vec_deque::VecDeque, sync::Arc};
-use bindings::{
-    statx, EBADF, EFAULT, EINTR, EINVAL, ENOTDIR, ENOTTY, EOVERFLOW, EPIPE, ESPIPE, S_IFMT,
-};
 use bitflags::bitflags;
 use core::{ops::ControlFlow, sync::atomic::Ordering};
 use eonix_runtime::task::Task;
@@ -507,6 +508,7 @@ impl File {
             _ => return Err(EINVAL),
         }
 
+        let mut nsent = 0;
         for (cur, len) in Chunks::new(0, count, buffer.len()) {
             if Thread::current().signal_list.has_pending_signal() {
                 return if cur == 0 { Err(EINTR) } else { Ok(cur) };
@@ -517,12 +519,14 @@ impl File {
             }
 
             let nwrote = dest_file.write(&buffer[..nread]).await?;
-            if nwrote != nread {
-                return Ok(cur + nwrote);
+            nsent += nwrote;
+
+            if nwrote != len {
+                break;
             }
         }
 
-        Ok(count)
+        Ok(nsent)
     }
 
     pub fn ioctl(&self, request: usize, arg3: usize) -> KResult<usize> {
@@ -540,7 +544,7 @@ impl File {
         }
     }
 
-    pub fn statx(&self, buffer: &mut statx, mask: u32) -> KResult<()> {
+    pub fn statx(&self, buffer: &mut StatX, mask: u32) -> KResult<()> {
         match self {
             File::Inode(inode) => inode.dentry.statx(buffer, mask),
             _ => Err(EBADF),

@@ -2,6 +2,7 @@ use super::{
     process_group::ProcessGroupBuilder, signal::RaiseResult, thread::ThreadBuilder, ProcessGroup,
     ProcessList, Session, Signal, Thread,
 };
+use crate::kernel::constants::{ECHILD, EINTR, EPERM, ESRCH};
 use crate::{
     kernel::mem::MMList,
     prelude::*,
@@ -13,7 +14,6 @@ use alloc::{
     collections::{btree_map::BTreeMap, vec_deque::VecDeque},
     sync::{Arc, Weak},
 };
-use bindings::{ECHILD, EINTR, EPERM, ESRCH};
 use core::sync::atomic::{AtomicU32, Ordering};
 use eonix_runtime::task::Task;
 use eonix_sync::{
@@ -459,6 +459,14 @@ impl Process {
             process: self,
             cv: &self.wait_list.cv_wait_procs,
             needs_notify: false,
+        }
+    }
+
+    pub async fn force_kill(self: &Arc<Self>, signal: Signal) {
+        let mut proc_list = ProcessList::get().write().await;
+        unsafe {
+            // SAFETY: Preemption is disabled.
+            proc_list.do_kill_process(self, WaitType::Signaled(signal));
         }
     }
 }

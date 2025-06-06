@@ -1,6 +1,7 @@
 use core::{num::NonZero, ptr::NonNull};
-use eonix_mm::address::{Addr as _, PAddr, VAddr};
-use eonix_mm::paging::{PageAccess, PageBlock, PFN};
+use eonix_hal::mm::ArchPhysAccess;
+use eonix_mm::address::{Addr as _, PAddr, PhysAccess as _PhysAccess, VAddr};
+use eonix_mm::paging::PFN;
 
 use super::page_alloc::RawPagePtr;
 
@@ -14,8 +15,6 @@ pub struct MemoryBlock {
     addr: NonZero<usize>,
     len: usize,
 }
-
-pub struct KernelPageAccess;
 
 pub trait AsMemoryBlock {
     /// Translate the physical page the page object pointing to into kernel
@@ -139,23 +138,7 @@ impl MemoryBlock {
 
 impl PhysAccess for PAddr {
     unsafe fn as_ptr<T>(&self) -> NonNull<T> {
-        let alignment: usize = align_of::<T>();
-        assert!(self.addr() % alignment == 0, "Alignment error");
-
-        unsafe {
-            // SAFETY: We can assume that we'll never have `self.addr()` equals
-            //         to `-PHYS_OFFSET`. Otherwise, the kernel might be broken.
-            NonNull::new_unchecked((PHYS_OFFSET + self.addr()) as *mut T)
-        }
-    }
-}
-
-impl PageAccess for KernelPageAccess {
-    unsafe fn get_ptr_for_pfn(pfn: PFN) -> NonNull<PageBlock> {
-        unsafe {
-            // SAFETY: The physical address of a page must be aligned to the page size.
-            PAddr::from(pfn).as_ptr()
-        }
+        ArchPhysAccess::as_ptr(*self)
     }
 }
 

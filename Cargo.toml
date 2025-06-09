@@ -29,6 +29,8 @@ bitflags = "2.6.0"
 intrusive-collections = "0.9.7"
 itertools = { version = "0.13.0", default-features = false }
 acpi = "5.2.0"
+align_ext = "0.1.0"
+xmas-elf = "0.10.0"
 
 [features]
 default = []

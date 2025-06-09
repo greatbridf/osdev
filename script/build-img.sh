@@ -18,13 +18,15 @@ fi
 
 $SUDO cp ./user-programs/init.out build/mnt/init
 $SUDO cp ./user-programs/int.out build/mnt/int
+$SUDO cp ./user-programs/dynamic_test build/mnt/dynamic_test
 $SUDO cp ./user-programs/busybox build/mnt/busybox
 $SUDO cp ./user-programs/busybox-minimal build/mnt/busybox_
+$SUDO cp ./user-programs/ld-musl-i386.so.1 build/mnt/ld-musl-i386.so.1
 $SUDO cp ./init_script.sh build/mnt/initsh
 
 # Add your custom files here
 
-$SUDO cp -r $HOME/.local/i486-linux-musl-cross build/mnt/
+# $SUDO cp -r $HOME/.local/i486-linux-musl-cross build/mnt/
 
 # End of custom files
 

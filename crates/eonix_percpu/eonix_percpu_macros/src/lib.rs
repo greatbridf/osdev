@@ -208,3 +208,29 @@ pub fn define_percpu_shared_x86_64(
     )
     .into()
 }
+
+#[proc_macro_attribute]
+pub fn define_percpu_riscv64(
+    attrs: proc_macro::TokenStream,
+    item: proc_macro::TokenStream,
+) -> proc_macro::TokenStream {
+    define_percpu_impl(
+        attrs.into(),
+        item.into(),
+        arch_macros::riscv64::percpu::get_percpu_pointer,
+    )
+    .into()
+}
+
+#[proc_macro_attribute]
+pub fn define_percpu_shared_riscv64(
+    attrs: proc_macro::TokenStream,
+    item: proc_macro::TokenStream,
+) -> proc_macro::TokenStream {
+    define_percpu_shared_impl(
+        attrs.into(),
+        item.into(),
+        arch_macros::riscv64::percpu::get_percpu_pointer,
+    )
+    .into()
+}

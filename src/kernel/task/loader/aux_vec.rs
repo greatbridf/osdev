@@ -66,54 +66,20 @@ impl<T> AuxVec<T> {
     }
 }
 
-impl AuxVec<u32> {
-    pub fn set(&mut self, key: AuxKey, val: u32) -> KResult<()> {
+impl<T: Clone + Copy> AuxVec<T> {
+    pub fn set(&mut self, key: AuxKey, val: T) -> KResult<()> {
         if key == AuxKey::AT_NULL || key == AuxKey::AT_IGNORE {
             panic!("Set illegal key!");
         }
 
         self.table
             .entry(key)
-            .and_modify(|val_mut: &mut u32| *val_mut = val)
+            .and_modify(|val_mut: &mut T| *val_mut = val)
             .or_insert(val);
         Ok(())
     }
 
-    pub fn get(&self, key: AuxKey) -> Option<u32> {
-        self.table.get(&key).copied()
-    }
-
-    pub fn del(&mut self, key: AuxKey) -> Option<u32> {
-        self.table.remove(&key)
-    }
-
-    pub fn table(&self) -> &BTreeMap<AuxKey, u32> {
-        &self.table
-    }
-}
-
-impl AuxVec<u64> {
-    pub fn set(&mut self, key: AuxKey, val: u64) -> KResult<()> {
-        if key == AuxKey::AT_NULL || key == AuxKey::AT_IGNORE {
-            panic!("Set illegal key!");
-        }
-
-        self.table
-            .entry(key)
-            .and_modify(|val_mut: &mut u64| *val_mut = val)
-            .or_insert(val);
-        Ok(())
-    }
-
-    pub fn get(&self, key: AuxKey) -> Option<u64> {
-        self.table.get(&key).copied()
-    }
-
-    pub fn del(&mut self, key: AuxKey) -> Option<u64> {
-        self.table.remove(&key)
-    }
-
-    pub fn table(&self) -> &BTreeMap<AuxKey, u64> {
+    pub fn table(&self) -> &BTreeMap<AuxKey, T> {
         &self.table
     }
 }

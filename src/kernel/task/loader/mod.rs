@@ -1,6 +1,6 @@
 use crate::io::ByteBuffer;
 use crate::kernel::constants::ENOEXEC;
-use crate::kernel::task::loader::elf::Elf;
+use crate::kernel::task::loader::elf::ELF;
 use crate::{
     kernel::{mem::MMList, vfs::dentry::Dentry},
     prelude::*,
@@ -22,7 +22,7 @@ pub struct LoadInfo {
 }
 
 enum Object {
-    ELF(Elf),
+    ELF(ELF),
 }
 
 pub struct ProgramLoader {
@@ -32,11 +32,10 @@ pub struct ProgramLoader {
 impl ProgramLoader {
     pub fn parse(file: Arc<Dentry>) -> KResult<Self> {
         let mut magic = [0u8; 4];
-        let mut buffer = ByteBuffer::new(magic.as_mut_slice());
-        file.read(&mut buffer, 0)?;
+        file.read(&mut ByteBuffer::new(magic.as_mut_slice()), 0)?;
 
         let object = match magic {
-            ELF_MAGIC => Elf::parse(file),
+            ELF_MAGIC => ELF::parse(file),
             _ => Err(ENOEXEC),
         }?;
 

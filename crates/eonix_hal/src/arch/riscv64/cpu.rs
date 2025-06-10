@@ -94,11 +94,12 @@ impl CPU {
         }
     }
 
-    // TODO: 
-    pub unsafe fn load_interrupt_stack(self: Pin<&mut Self>, rsp: u64) {
-        /*unsafe {
-            self.map_unchecked_mut(|me| &mut me.tss).set_rsp0(rsp);
-        }*/
+    pub unsafe fn load_interrupt_stack(self: Pin<&mut Self>, sp: u64) {
+        sscratch::write(sp as usize);
+    }
+
+    pub fn set_tls32(self: Pin<&mut Self>, user_tls: &UserTLS) {
+        // nothing
     }
 
     pub fn end_of_interrupt(self: Pin<&mut Self>) {

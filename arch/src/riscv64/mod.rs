@@ -1,21 +1,58 @@
-mod mm;
-mod entry;
-mod context;
-mod console;
-mod io;
-mod fence;
-mod config;
-mod init;
-mod interrupt;
-mod fdt;
+use core::arch::asm;
 
-pub use self::mm::*;
-pub use self::entry::*;
-pub use self::context::*;
-pub use self::console::*;
-pub use self::io::*;
-pub use self::fence::*;
-pub use self::config::*;
-pub use self::init::*;
-pub use self::interrupt::*;
-pub use self::fdt::*;
+use eonix_mm::{address::{Addr, PAddr, VAddr}, paging::PFN};
+use riscv::{asm::{sfence_vma, sfence_vma_all}, register::{satp, stval}};
+
+pub mod io;
+pub mod fence;
+pub mod fpu;
+
+#[inline(always)]
+pub fn flush_tlb(vaddr: usize) {
+    sfence_vma(vaddr, 0);
+}
+
+#[inline(always)]
+pub fn flush_tlb_all() {
+    sfence_vma_all();
+}
+
+#[inline(always)]
+pub fn get_root_page_table_pfn() -> PFN {
+    let satp_val = satp::read();
+    let ppn = satp_val.ppn();
+    PFN::from(ppn)
+}
+
+#[inline(always)]
+pub fn set_root_page_table_pfn(pfn: PFN) {
+    let ppn = PAddr::from(pfn).addr();
+
+    unsafe { satp::set(satp::Mode::Sv39, 0, ppn) };
+    sfence_vma_all();
+}
+
+#[inline(always)]
+pub fn get_page_fault_address() -> VAddr {
+    VAddr::from(stval::read())
+}
+
+#[inline(always)]
+pub fn halt() {
+    unsafe {
+        asm!(
+            "wfi",
+            options(nomem, nostack)
+        );
+    }
+}
+
+#[inline(always)]
+pub fn pause() {
+    unsafe {
+        asm!(
+            "nop",
+            options(nomem, nostack)
+        );
+    }
+}

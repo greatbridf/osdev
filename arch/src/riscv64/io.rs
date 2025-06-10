@@ -1,14 +1,4 @@
 use core::ptr::{read_volatile, write_volatile};
-use riscv::register::sstatus::{self, FS};
-
-pub fn enable_sse() {
-    unsafe {
-        // FS (Floating-point Status) Initial (0b01)
-        sstatus::set_fs(FS::Initial);
-    }
-}
-
-// MMIO
 
 pub fn inb(addr: usize) -> u8 {
     unsafe {

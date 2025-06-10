@@ -1,0 +1,59 @@
+use core::ptr::{read_volatile, write_volatile};
+use riscv::register::sstatus::{self, FS};
+
+pub fn enable_sse() {
+    unsafe {
+        // FS (Floating-point Status) Initial (0b01)
+        sstatus::set_fs(FS::Initial);
+    }
+}
+
+// MMIO
+
+pub fn inb(addr: usize) -> u8 {
+    unsafe {
+        read_volatile(addr as *const u8)
+    }
+}
+
+pub fn inw(addr: usize) -> u16 {
+    unsafe {
+        read_volatile(addr as *const u16)
+    }
+}
+
+pub fn inl(addr: usize) -> u32 {
+    unsafe {
+        read_volatile(addr as *const u32)
+    }
+}
+
+pub fn inu64(addr: usize) -> u64 {
+    unsafe {
+        read_volatile(addr as *const u64)
+    }
+}
+
+pub fn outb(addr: usize, data: u8) {
+    unsafe {
+        write_volatile(addr as *mut u8, data)
+    }
+}
+
+pub fn outw(addr: usize, data: u16) {
+    unsafe {
+        write_volatile(addr as *mut u16, data)
+    }
+}
+
+pub fn outl(addr: usize, data: u32) {
+    unsafe {
+        write_volatile(addr as *mut u32, data)
+    }
+}
+
+pub fn outu64(addr: usize, data: u64) {
+    unsafe {
+        write_volatile(addr as *mut u64, data)
+    }
+}

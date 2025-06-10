@@ -9,7 +9,6 @@
 extern crate alloc;
 
 mod driver;
-mod elf;
 mod fs;
 mod hash;
 mod io;
@@ -26,14 +25,15 @@ use core::{
     hint::spin_loop,
     sync::atomic::{AtomicBool, Ordering},
 };
-use elf::ParsedElf32;
 use eonix_hal::{processor::CPU, traits::trap::IrqState, trap::disable_irqs_save};
 use eonix_mm::address::PRange;
 use eonix_runtime::{run::FutureRun, scheduler::Scheduler, task::Task};
 use kernel::{
     mem::GlobalPageAlloc,
     pcie::init_pcie,
-    task::{new_thread_runnable, KernelStack, ProcessBuilder, ProcessList, ThreadBuilder},
+    task::{
+        new_thread_runnable, KernelStack, ProcessBuilder, ProcessList, ProgramLoader, ThreadBuilder,
+    },
     vfs::{
         dentry::Dentry,
         mount::{do_mount, MS_NOATIME, MS_NODEV, MS_NOSUID, MS_RDONLY},
@@ -130,7 +130,7 @@ async fn init_process(early_kstack: PRange) {
     fs::procfs::init();
     fs::fat32::init();
 
-    let (ip, sp, mm_list) = {
+    let load_info = {
         // mount fat32 /mnt directory
         let fs_context = FsContext::global();
         let mnt_dir = Dentry::open(fs_context, Path::new(b"/mnt/").unwrap(), true).unwrap();
@@ -162,17 +162,19 @@ async fn init_process(early_kstack: PRange) {
             CString::new("PWD=/").unwrap(),
         ];
 
-        let elf = ParsedElf32::parse(init.clone()).unwrap();
-        elf.load(argv, envp).unwrap()
+        ProgramLoader::parse(init.clone())
+            .unwrap()
+            .load(argv, envp)
+            .unwrap()
     };
 
     let thread_builder = ThreadBuilder::new()
         .name(Arc::from(&b"busybox"[..]))
-        .entry(ip, sp);
+        .entry(load_info.entry_ip, load_info.sp);
 
     let mut process_list = Task::block_on(ProcessList::get().write());
     let (thread, process) = ProcessBuilder::new()
-        .mm_list(mm_list)
+        .mm_list(load_info.mm_list)
         .thread_builder(thread_builder)
         .build(&mut process_list);
 

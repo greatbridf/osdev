@@ -37,7 +37,7 @@ impl TrapContext {
             13 => Fault::BadAccess,
             14 => {
                 let mut error_code = PageFaultErrorCode::empty();
-                if self.errcode & 1 != 0 {
+                if self.errcode & 1 == 0 {
                     error_code |= PageFaultErrorCode::NonPresent;
                 }
 

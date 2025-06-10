@@ -1,5 +1,6 @@
 use crate::kernel::vfs::dentry::Dentry;
 use alloc::sync::Arc;
+use eonix_mm::paging::PAGE_SIZE;
 
 #[derive(Debug, Clone)]
 pub struct FileMapping {
@@ -17,7 +18,7 @@ pub enum Mapping {
 
 impl FileMapping {
     pub fn new(file: Arc<Dentry>, offset: usize, length: usize) -> Self {
-        assert_eq!(offset & 0xfff, 0);
+        assert_eq!(offset & (PAGE_SIZE - 1), 0);
         Self {
             file,
             offset,

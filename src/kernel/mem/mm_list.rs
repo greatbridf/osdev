@@ -29,6 +29,7 @@ pub static EMPTY_PAGE: LazyLock<Page> = LazyLock::new(|| Page::zeroed());
 
 #[derive(Debug, Clone, Copy)]
 pub struct Permission {
+    pub read: bool,
     pub write: bool,
     pub execute: bool,
 }
@@ -170,6 +171,91 @@ impl MMListInner<'_> {
         Ok(pages_to_free)
     }
 
+    fn protect(&mut self, start: VAddr, len: usize, permission: Permission) -> KResult<()> {
+        assert_eq!(start.floor(), start);
+        assert!(len != 0);
+
+        let end = (start + len).ceil();
+        let range_to_protect = VRange::new(start, end);
+        if !range_to_protect.is_user() {
+            return Err(EINVAL);
+        }
+
+        let mut left_area = None;
+        let mut right_area = None;
+        let mut mid_area = None;
+
+        self.areas.retain(|area| {
+            let Some((left, mid, right)) = area.range().mask_with_checked(&range_to_protect) else {
+                return true;
+            };
+
+            for pte in self.page_table.iter_user(mid) {
+                let mut page_attr = pte.get_attr().as_page_attr().expect("Not a page attribute");
+
+                page_attr.set(PageAttribute::READ, permission.read);
+                page_attr.set(PageAttribute::WRITE, permission.write);
+                page_attr.set(PageAttribute::EXECUTE, permission.execute);
+
+                pte.set_attr(page_attr.into());
+            }
+
+            match (left, right) {
+                (None, None) => {}
+                (Some(left), None) => {
+                    assert!(left_area.is_none());
+                    let (Some(left), Some(right)) = area.clone().split(left.end()) else {
+                        unreachable!("`left.end()` is within the area");
+                    };
+
+                    left_area = Some(left);
+                    mid_area = Some(right);
+                }
+                (None, Some(right)) => {
+                    assert!(right_area.is_none());
+                    let (Some(left), Some(right)) = area.clone().split(right.start()) else {
+                        unreachable!("`right.start()` is within the area");
+                    };
+
+                    mid_area = Some(left);
+                    right_area = Some(right);
+                }
+                (Some(left), Some(right)) => {
+                    assert!(left_area.is_none());
+                    assert!(right_area.is_none());
+                    let (Some(left), Some(mid)) = area.clone().split(left.end()) else {
+                        unreachable!("`left.end()` is within the area");
+                    };
+
+                    let (Some(mid), Some(right)) = mid.split(right.start()) else {
+                        unreachable!("`right.start()` is within the area");
+                    };
+
+                    left_area = Some(left);
+                    right_area = Some(right);
+                    mid_area = Some(mid);
+                }
+            }
+
+            false
+        });
+
+        assert!(mid_area.is_some());
+
+        if let Some(mut mid) = mid_area {
+            mid.permission = permission;
+            self.areas.insert(mid);
+        }
+        if let Some(front) = left_area {
+            self.areas.insert(front);
+        }
+        if let Some(back) = right_area {
+            self.areas.insert(back);
+        }
+
+        Ok(())
+    }
+
     fn mmap(
         &mut self,
         at: VAddr,
@@ -178,7 +264,7 @@ impl MMListInner<'_> {
         permission: Permission,
     ) -> KResult<()> {
         assert_eq!(at.floor(), at);
-        assert_eq!(len & 0xfff, 0);
+        assert_eq!(len & (PAGE_SIZE - 1), 0);
         let range = VRange::new(at, at + len);
 
         // We are doing a area marker insertion.
@@ -361,6 +447,15 @@ impl MMList {
         Ok(())
     }
 
+    pub async fn protect(&self, start: VAddr, len: usize, prot: Permission) -> KResult<()> {
+        self.inner.borrow().lock().await.protect(start, len, prot)?;
+
+        // flush the tlb due to the pte attribute changes
+        self.flush_user_tlbs().await;
+
+        Ok(())
+    }
+
     pub fn mmap_hint(
         &self,
         hint: VAddr,
@@ -423,6 +518,7 @@ impl MMList {
                 break_start,
                 Mapping::Anonymous,
                 Permission {
+                    read: true,
                     write: true,
                     execute: false,
                 },
@@ -442,6 +538,7 @@ impl MMList {
         inner.page_table.set_anonymous(
             range_to_grow,
             Permission {
+                read: true,
                 write: true,
                 execute: false,
             },

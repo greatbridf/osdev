@@ -1,5 +1,8 @@
 use core::arch::naked_asm;
 
+use eonix_hal_traits::context::RawTaskContext;
+use riscv::register::sstatus::Sstatus;
+
 #[repr(C)]
 #[derive(Debug, Default)]
 pub struct TaskContext {
@@ -7,7 +10,53 @@ pub struct TaskContext {
     s: [u64; 12],
     sp: u64,
     ra: u64,
+    sepc: u64,
     sstatus: u64,
+}
+
+impl RawTaskContext for TaskContext {
+    fn new() -> Self {
+        Self::new()
+    }
+
+    fn set_program_counter(&mut self, pc: usize) {
+        self.sepc = pc as u64;
+    }
+
+    fn set_stack_pointer(&mut self, sp: usize) {
+        self.sp = sp as u64;
+    }
+
+    fn is_interrupt_enabled(&self) -> bool {
+        let sstatus_val = Sstatus::from_bits(self.sstatus as usize);
+        sstatus_val.sie()
+    }
+
+    fn set_interrupt_enabled(&mut self, is_enabled: bool) {
+        // sstatus: SIE bit is bit 1
+        const SSTATUS_SIE_BIT: u64 = 1 << 1; // 0x2
+
+        if is_enabled {
+            self.sstatus |= SSTATUS_SIE_BIT;
+        } else {
+            self.sstatus &= !SSTATUS_SIE_BIT;
+        }
+    }
+
+    fn call(&mut self, func: unsafe extern "C" fn(usize) -> !, arg: usize) {
+        self.set_program_counter(Self::do_call as usize);
+
+        self.s[0] = func as u64;
+        self.s[1] = arg as u64;
+
+        self.ra = 0;
+    }
+
+    unsafe extern "C" fn switch(from: &mut Self, to: &mut Self) {
+        unsafe {
+            Self::__task_context_switch(from, to)
+        }
+    }
 }
 
 impl TaskContext {
@@ -16,6 +65,7 @@ impl TaskContext {
             s: [0; 12],
             sp: 0,
             ra: 0,
+            sepc: 0,
             sstatus: 0,
         }
     }
@@ -28,59 +78,8 @@ impl TaskContext {
         self.ra = entry as u64;
     }
 
-    pub fn sp(&mut self, sp: usize) {
-        self.sp = sp as u64;
-    }
-
     pub fn sstatus(&mut self, status: usize) {
         self.sstatus = status as u64;
-    }
-
-    pub fn call1(&mut self, func: unsafe extern "C" fn(usize) -> !, arg: [usize; 1]) {
-        self.entry_point(Self::do_call as usize);
-        self.s[0] = func as u64;
-        self.s[1] = arg[0] as u64;
-    }
-
-    pub fn call2(&mut self, func: unsafe extern "C" fn(usize, usize) -> !, arg: [usize; 2]) {
-        self.entry_point(Self::do_call as usize);
-        self.s[0] = func as u64;
-        self.s[1] = arg[0] as u64;
-        self.s[2] = arg[1] as u64;
-    }
-
-    pub fn call3(&mut self, func: unsafe extern "C" fn(usize, usize, usize) -> !, arg: [usize; 3]) {
-        self.entry_point(Self::do_call as usize);
-        self.s[0] = func as u64;
-        self.s[1] = arg[0] as u64;
-        self.s[2] = arg[1] as u64;
-        self.s[3] = arg[2] as u64;
-    }
-
-    pub fn call4(
-        &mut self,
-        func: unsafe extern "C" fn(usize, usize, usize, usize) -> !,
-        arg: [usize; 4],
-    ) {
-        self.entry_point(Self::do_call as usize);
-        self.s[0] = func as u64;
-        self.s[1] = arg[0] as u64;
-        self.s[2] = arg[1] as u64;
-        self.s[3] = arg[2] as u64;
-        self.s[4] = arg[3] as u64;
-    }
-
-    pub fn call5(
-        &mut self,
-        func: unsafe extern "C" fn(usize, usize, usize, usize, usize) -> !,
-        arg: [usize; 5],
-    ) {
-        self.entry_point(Self::do_call as usize);
-        self.s[0] = func as u64;
-        self.s[1] = arg[0] as u64;
-        self.s[2] = arg[1] as u64;
-        self.s[3] = arg[2] as u64;
-        self.s[4] = arg[3] as u64;
     }
 
     pub fn interrupt(&mut self, is_enabled: bool) {
@@ -126,6 +125,8 @@ impl TaskContext {
             "sd   ra, 104(a0)",
             "csrr s0, sstatus",
             "sd   s0, 112(a0)", // Store sstatus at offset 112
+            "csrr s0, sepc",
+            "sd   s0, 120(a0)", // Store sepc at offset 120
 
             // Load next task's callee-saved registers from `to` context
             "ld   s0, 0(a1)",
@@ -144,8 +145,10 @@ impl TaskContext {
             "ld   ra, 104(a1)",
             "ld   t0, 112(a1)",
             "csrw sstatus, t0",
+            "ld   t0, 120(a1)",
+            "csrw sepc, t0",
 
-            "ret",
+            "sret",
         );
     }
 

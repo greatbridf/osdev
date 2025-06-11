@@ -31,7 +31,7 @@ itertools = { version = "0.13.0", default-features = false }
 acpi = "5.2.0"
 
 [features]
-default = ["smp"]
+default = []
 trace_syscall = []
 trace_scheduler = []
 log_trace = ["trace_syscall", "trace_scheduler"]

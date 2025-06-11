@@ -18,7 +18,7 @@ static LOCAL_CPU: LazyLock<CPU> = LazyLock::new(CPU::new);
 use super::{
     config::smp::get_num_harts,
     mm::setup_kernel_satp,
-    trap::setup_kernel_trap,
+    trap::setup_trap,
     interrupt::InterruptControl
 };
 
@@ -42,7 +42,7 @@ impl UserTLS {
 
 impl CPU {
     pub fn new() -> Self {
-        let hart_id = read_hart_id();
+        let hart_id = 0;
         Self {
             hart_id: hart_id,
             interrupt: InterruptControl::new(hart_id),
@@ -54,12 +54,13 @@ impl CPU {
     /// # Safety
     /// This function performs low-level hardware initialization and should
     /// only be called once per Hart during its boot sequence.
-    pub unsafe fn init(self: Pin<&mut Self>) {
+    pub unsafe fn init(self: Pin<&mut Self>, hart_id: usize) {
         let self_mut = self.get_unchecked_mut();
+        self_mut.hart_id = hart_id;
 
         sscratch::write(self_mut.hart_id as usize);
 
-        setup_kernel_trap();
+        setup_trap();
 
         // CLINT, 10_000 ms
         self_mut.interrupt.setup_timer(10_000);
@@ -88,7 +89,10 @@ impl CPU {
 
         let ap_entry_point = PhysicalAddress::new(ap_boot_entry as usize);
 
-        for i in 1..total_harts {
+        for i in 0..total_harts {
+            if i == self.hart_id {
+                continue;
+            }
             sbi::hsm::hart_start(i, ap_entry_point, 0)
                 .expect("Failed to start secondary hart via SBI");
         }
@@ -98,7 +102,7 @@ impl CPU {
         sscratch::write(sp as usize);
     }
 
-    pub fn set_tls32(self: Pin<&mut Self>, user_tls: &UserTLS) {
+    pub fn set_tls32(self: Pin<&mut Self>, _user_tls: &UserTLS) {
         // nothing
     }
 
@@ -118,14 +122,9 @@ impl CPU {
         }
     }
 
-
     pub fn cpuid(&self) -> usize {
         self.hart_id
     }
-}
-
-fn read_hart_id() -> usize {
-    mhartid::read()
 }
 
 #[macro_export]

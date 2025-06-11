@@ -8,8 +8,8 @@ pub mod mm {
     pub const KIMAGE_VIRT_BASE: usize = KIMAGE_OFFSET + KIMAGE_PHYS_BASE;
     pub const PAGE_SIZE: usize = 1 << PAGE_SIZE_BITS;
     pub const PAGE_SIZE_BITS: usize = 12;
-    // 127GB
-    pub const MEMORY_SIZE: usize = 0x1F_C000_0000;
+    // 128GB
+    pub const MEMORY_SIZE: usize = 0x20_0000_0000;
 
     pub const PTE_SIZE: usize = 8;
     pub const PTES_PER_PAGE: usize = PAGE_SIZE / PTE_SIZE;

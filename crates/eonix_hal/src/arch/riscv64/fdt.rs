@@ -5,10 +5,12 @@ use alloc::string::String;
 use fdt::Fdt;
 use spin::Once;
 
+use crate::arch::riscv64::config::mm::KIMAGE_OFFSET;
+
 static GLOBAL_FDT: Once<Fdt<'static>> = Once::new();
 
 pub unsafe fn init_dtb_and_fdt(dtb_pa: usize) {
-    let dtb_virt_ptr = dtb_pa as *const u8;
+    let dtb_virt_ptr = (dtb_pa + KIMAGE_OFFSET) as *const u8;
 
     GLOBAL_FDT.call_once(|| {
         unsafe { Fdt::from_ptr(dtb_virt_ptr)

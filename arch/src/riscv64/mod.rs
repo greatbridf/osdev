@@ -3,9 +3,13 @@ use core::arch::asm;
 use eonix_mm::{address::{Addr, PAddr, VAddr}, paging::PFN};
 use riscv::{asm::{sfence_vma, sfence_vma_all}, register::{satp, stval}};
 
-pub mod io;
-pub mod fence;
-pub mod fpu;
+mod io;
+mod fence;
+mod fpu;
+
+pub use io::*;
+pub use fence::*;
+pub use fpu::*;
 
 #[inline(always)]
 pub fn flush_tlb(vaddr: usize) {

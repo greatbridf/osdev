@@ -1,9 +1,10 @@
 use core::ptr::{read_volatile, write_volatile};
 
-pub fn inb(addr: usize) -> u8 {
-    unsafe {
+pub fn inb(_addr: u16) -> u8 {
+    /*unsafe {
         read_volatile(addr as *const u8)
-    }
+    }*/
+    0
 }
 
 pub fn inw(addr: usize) -> u16 {
@@ -24,7 +25,7 @@ pub fn inu64(addr: usize) -> u64 {
     }
 }
 
-pub fn outb(addr: usize, data: u8) {
+pub fn outb(addr: u16, data: u8) {
     unsafe {
         write_volatile(addr as *mut u8, data)
     }

@@ -8,7 +8,7 @@ pub fn get_percpu_pointer(percpu: &Ident, ty: &Type) -> TokenStream {
         {
             let base: *mut #ty;
             ::core::arch::asm!(
-                "addi {base}, tp, {offset}",
+                "la {base}, {offset}",
                 base = out(reg) base,
                 offset = sym #percpu,
                 options(nostack, preserves_flags)

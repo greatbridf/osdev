@@ -72,7 +72,7 @@ global_asm!(
         csrr t0, sscratch
         sd t0, 2*8(sp)      # save user stack pointer into the TrapContext
 
-        addi t0, tp, {handler}
+        la t0, {handler}
         ld t1, 0(t0)
         jr t1
 

@@ -5,7 +5,7 @@ RAM = 0x80200000;
 
 MEMORY {
     LOWMEM : org = 0x0000000000000000, len = 1M
-    KBSS   : org = 0xffffffff00000000, len = 2M
+    KBSS   : org = 0xffffffff40000000, len = 2M
     KIMAGE : org = 0xffffffff80200000, len = 2M
 }
 

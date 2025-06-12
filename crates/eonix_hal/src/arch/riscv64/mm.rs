@@ -283,9 +283,14 @@ impl Memory for ArchMemory {
         }
 
         let kernel_end = PAddr::from(__kernel_end as usize - KIMAGE_OFFSET);
-        let paddr_after_kimage_aligned = kernel_end.ceil_to(0x200000);
+        let paddr_after_kimage_aligned = kernel_end.ceil_to(0x2000000);
 
         core::iter::once(PRange::new(
+            kernel_end,
+            paddr_after_kimage_aligned,
+        ))
+
+        /*core::iter::once(PRange::new(
             kernel_end,
             paddr_after_kimage_aligned,
         ))
@@ -300,7 +305,7 @@ impl Memory for ArchMemory {
                         range
                     }
                 }),
-        )
+        )*/
     }
 }
 

@@ -1,18 +1,4 @@
 SECTIONS {
-    .text _stext : AT(RAM) {
-        __kernel_start = .;
-        __stext = .;
-
-        *(.text.entry);
-        *(.text .text.*);
-
-        . = ALIGN(0x1000);
-    } > REGION_TEXT
-
-    __etext = .;
-}
-
-SECTIONS {
     .text.syscall_fns :
     {
 

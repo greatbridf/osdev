@@ -5,18 +5,16 @@ use crate::{
     bootstrap::BootStrapData,
     mm::{ArchMemory, ArchPagingMode, BasicPageAlloc, BasicPageAllocRef, ScopedAllocator},
 };
-use acpi::{platform::ProcessorState, AcpiHandler, AcpiTables, PhysicalMapping, PlatformInfo};
 use riscv::{asm::sfence_vma_all, register::{satp, sstatus::{self, FS}}};
 use core::{
     alloc::Allocator,
-    arch::{asm, global_asm},
+    arch::asm,
     cell::RefCell,
-    hint::spin_loop,
-    sync::atomic::{AtomicBool, AtomicPtr, AtomicUsize, Ordering},
+    sync::atomic::{AtomicBool, AtomicUsize},
 };
 use eonix_hal_traits::mm::Memory;
 use eonix_mm::{
-    address::{Addr as _, PAddr, PRange, PhysAccess, VAddr, VRange},
+    address::{Addr as _, PAddr, PRange, VAddr, VRange},
     page_table::{PageAttribute, PagingMode, PTE as _},
     paging::{Page, PageAccess, PageAlloc, PAGE_SIZE, PFN},
 };
@@ -25,6 +23,7 @@ use eonix_percpu::PercpuArea;
 use super::{
     config::{self, mm::*},
     fdt::get_num_harts,
+    console::write_str,
 };
 
 use core::arch::naked_asm;
@@ -84,6 +83,8 @@ unsafe extern "C" fn _start(hart_id: usize, dtb_addr: usize) -> ! {
 /// 启动所有的cpu
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn riscv64_start(hart_id: usize, dtb_addr: usize) -> ! {
+    write_str("hello\n");
+
     let real_allocator = RefCell::new(BasicPageAlloc::new());
     let alloc = BasicPageAllocRef::new(&real_allocator);
 

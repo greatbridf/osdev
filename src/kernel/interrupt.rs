@@ -1,5 +1,5 @@
 use super::mem::handle_kernel_page_fault;
-use super::timer::timer_interrupt;
+use super::timer::{should_reschedule, timer_interrupt};
 use crate::kernel::constants::EINVAL;
 use crate::{driver::Port8, prelude::*};
 use alloc::sync::Arc;
@@ -61,7 +61,7 @@ pub fn interrupt_handler(trap_ctx: &mut TrapContext) {
         TrapType::Timer => {
             timer_interrupt();
 
-            if eonix_preempt::count() == 0 {
+            if eonix_preempt::count() == 0 && should_reschedule() {
                 // To make scheduler satisfied.
                 eonix_preempt::disable();
                 Scheduler::schedule();

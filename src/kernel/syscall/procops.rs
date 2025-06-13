@@ -1,3 +1,5 @@
+use core::time::Duration;
+
 use super::sysinfo::TimeVal;
 use super::SyscallNoReturn;
 use crate::elf::ParsedElf32;
@@ -11,6 +13,7 @@ use crate::kernel::task::{
     new_thread_runnable, KernelStack, ProcessBuilder, ProcessList, Signal, SignalAction,
     SignalMask, ThreadBuilder, UserDescriptor, WaitObject, WaitType,
 };
+use crate::kernel::timer::sleep;
 use crate::kernel::user::dataflow::UserString;
 use crate::kernel::user::{UserPointer, UserPointerMut};
 use crate::kernel::vfs::{self, dentry::Dentry};
@@ -40,6 +43,25 @@ bitflags! {
         const WUNTRACED = 2;
         const WCONTINUED = 8;
     }
+}
+
+#[eonix_macros::define_syscall(0xa2)]
+fn nanosleep(req: *const (u32, u32), rem: *mut (u32, u32)) -> KResult<usize> {
+    let req = UserPointer::new(req)?.read()?;
+    let rem = if rem.is_null() {
+        None
+    } else {
+        Some(UserPointerMut::new(rem)?)
+    };
+
+    let duration = Duration::from_secs(req.0 as u64) + Duration::from_nanos(req.1 as u64);
+    Task::block_on(sleep(duration));
+
+    if let Some(rem) = rem {
+        rem.write((0, 0))?;
+    }
+
+    Ok(0)
 }
 
 #[eonix_macros::define_syscall(0x3c)]

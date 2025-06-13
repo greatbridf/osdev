@@ -6,7 +6,7 @@ use crate::{
     kernel::{
         interrupt::default_irq_handler,
         syscall::{syscall_handlers, SyscallHandler},
-        timer::timer_interrupt,
+        timer::{should_reschedule, timer_interrupt},
         user::dataflow::CheckedUserPointer,
         vfs::{filearray::FileArray, FsContext},
     },
@@ -384,7 +384,10 @@ impl Thread {
                 TrapType::Irq(irqno) => default_irq_handler(irqno),
                 TrapType::Timer => {
                     timer_interrupt();
-                    yield_now().await;
+
+                    if should_reschedule() {
+                        yield_now().await;
+                    }
                 }
                 TrapType::Syscall { no, args } => {
                     if let Some(retval) = self.handle_syscall(no, args) {

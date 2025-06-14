@@ -6,7 +6,7 @@ use crate::{
     address::{AddrOps as _, VRange},
     paging::{Page, PageAccess, PageAlloc},
 };
-use core::marker::PhantomData;
+use core::{marker::PhantomData};
 
 pub struct KernelIterator;
 pub struct UserIterator;
@@ -81,6 +81,7 @@ where
     X: PageAccess,
     K: IteratorType<M>,
 {
+
     fn parse_tables_starting_from(&mut self, idx_level: usize) {
         for (idx, &pt_idx) in self
             .indicies

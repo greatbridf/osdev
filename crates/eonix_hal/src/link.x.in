@@ -1,25 +1,15 @@
 PROVIDE(_stext = ORIGIN(REGION_TEXT));
 
 SECTIONS {
-    .text.dummy (NOLOAD) :
+    .text _stext :
     {
-        /*
-         * If we use _stext somewhere before its first appearance below, we
-         * need to define it as absolute here to avoid linker errors.
-         */
-        . = ABSOLUTE(_stext);
-
-    } > REGION_TEXT
-
-    .text _stext : AT(RAM) {
         __kernel_start = .;
         __stext = .;
 
         *(.text.entry);
         *(.text .text.*);
 
-        . = ALIGN(0x1000);
-    } > REGION_TEXT
+    } > REGION_TEXT AT> RAM
 
     __etext = .;
 
@@ -29,7 +19,7 @@ SECTIONS {
 
         *(.rodata .rodata.*);
 
-    } > REGION_RODATA
+    } > REGION_RODATA AT> RAM
 
     __erodata = .;
 
@@ -40,7 +30,7 @@ SECTIONS {
         *(.data .data.*);
         *(.got .got.plt);
 
-    } > REGION_DATA
+    } > REGION_DATA AT> RAM
 
     __edata = .;
 
@@ -51,7 +41,7 @@ SECTIONS {
         *(.bss .bss.*);
 
         . = ALIGN(0x1000);
-    } > REGION_BSS
+    } > REGION_BSS AT> RAM
 
     __ebss = .;
 
@@ -61,7 +51,7 @@ SECTIONS {
 
         KEEP(*(.eh_frame .eh_frame*));
 
-    } > REGION_EHFRAME
+    } > REGION_EHFRAME AT> RAM
 
     . = ALIGN(0x1000);
     __eeh_frame = .;

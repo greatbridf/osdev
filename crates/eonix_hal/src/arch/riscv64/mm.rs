@@ -1,24 +1,20 @@
-extern crate alloc;
-
-
-use crate::{arch::{fdt::get_global_fdt, riscv64::config::mm::KIMAGE_OFFSET}, traits::mm::Memory};
+use super::{
+    config::mm::{PHYS_MAP_VIRT, ROOT_PAGE_TABLE_PFN},
+    fdt::{FdtExt, FDT},
+};
+use crate::{arch::riscv64::config::mm::KIMAGE_OFFSET, traits::mm::Memory};
 use core::{marker::PhantomData, ptr::NonNull};
 use eonix_mm::{
-    address::{Addr as _, AddrOps, PAddr, PRange, PhysAccess, VAddr}, page_table::{
-        PageAttribute, PageTable, PageTableLevel, PagingMode, RawAttribute, RawPageTable, TableAttribute, PTE
-    }, paging::{NoAlloc, Page, PageBlock, PFN}
+    address::{Addr as _, AddrOps, PAddr, PRange, PhysAccess, VAddr},
+    page_table::{
+        PageAttribute, PageTable, PageTableLevel, PagingMode, RawAttribute, RawPageTable,
+        TableAttribute, PTE,
+    },
+    paging::{NoAlloc, Page, PageBlock, PFN},
 };
 use eonix_sync_base::LazyLock;
 use fdt::Fdt;
 use riscv::{asm::sfence_vma_all, register::satp};
-
-use super::config::mm::{
-    ROOT_PAGE_TABLE_PFN,
-    PHYS_MAP_VIRT
-};
-
-pub const P_KIMAGE_START: PAddr = PAddr::from_val(0x80200000);
-pub const V_KERNEL_BSS_START: VAddr = VAddr::from(0xffffffff00000000);
 
 pub const PAGE_TABLE_BASE: PFN = PFN::from_val(ROOT_PAGE_TABLE_PFN);
 pub static GLOBAL_PAGE_TABLE: LazyLock<PageTable<ArchPagingMode, NoAlloc, ArchPhysAccess>> =
@@ -54,9 +50,9 @@ pub struct PTE64(pub u64);
 #[derive(Clone, Copy)]
 pub struct PageAttribute64(u64);
 
-pub struct RawPageTableSv39<'a>(NonNull<PTE64>, PhantomData<&'a ()>);
+pub struct RawPageTableSv48<'a>(NonNull<PTE64>, PhantomData<&'a ()>);
 
-pub struct PagingModeSv39;
+pub struct PagingModeSv48;
 
 pub struct ArchPhysAccess;
 
@@ -76,19 +72,20 @@ impl PTE for PTE64 {
     }
 }
 
-impl PagingMode for PagingModeSv39 {
+impl PagingMode for PagingModeSv48 {
     type Entry = PTE64;
-    type RawTable<'a> = RawPageTableSv39<'a>;
+    type RawTable<'a> = RawPageTableSv48<'a>;
     const LEVELS: &'static [PageTableLevel] = &[
+        PageTableLevel::new(39, 9),
         PageTableLevel::new(30, 9),
         PageTableLevel::new(21, 9),
         PageTableLevel::new(12, 9),
     ];
 }
 
-pub type ArchPagingMode = PagingModeSv39;
+pub type ArchPagingMode = PagingModeSv48;
 
-impl<'a> RawPageTable<'a> for RawPageTableSv39<'a> {
+impl<'a> RawPageTable<'a> for RawPageTableSv48<'a> {
     type Entry = PTE64;
 
     fn index(&self, index: u16) -> &'a Self::Entry {
@@ -203,7 +200,7 @@ impl From<PageAttribute> for PageAttribute64 {
                 PageAttribute::GLOBAL => raw_attr |= PA_G,
                 PageAttribute::COPY_ON_WRITE => raw_attr |= PA_COW,
                 PageAttribute::MAPPED => raw_attr |= PA_MMAP,
-                PageAttribute::ANONYMOUS => {},
+                PageAttribute::ANONYMOUS => {}
                 _ => unreachable!("Invalid page attribute"),
             }
         }
@@ -260,41 +257,20 @@ impl PhysAccess for ArchPhysAccess {
 }
 
 impl Memory for ArchMemory {
-    /// TODO: fuck, I don't know how to fix
-    fn present_ram() -> impl Iterator<Item = eonix_mm::address::PRange> {
-        let fdt: &'static Fdt<'static> = get_global_fdt();
-
-        let memory_node = fdt.memory().clone();
-
-        let owned_ranges: alloc::vec::Vec<PRange> = memory_node.regions() 
-            .map(|mem_region| {
-                let base = mem_region.starting_address as usize;
-                let size = mem_region.size.expect("this region has no memory") as usize;
-                PRange::from(PAddr::from(base as usize)).grow(size as usize)
-            }).collect();
-        
-        owned_ranges.into_iter()
+    fn present_ram() -> impl Iterator<Item = PRange> {
+        FDT.present_ram()
     }
 
-    fn free_ram() -> impl Iterator<Item = eonix_mm::address::PRange> {
+    fn free_ram() -> impl Iterator<Item = PRange> {
         unsafe extern "C" {
             fn __kernel_start();
             fn __kernel_end();
         }
 
         let kernel_end = PAddr::from(__kernel_end as usize - KIMAGE_OFFSET);
-        let paddr_after_kimage_aligned = kernel_end.ceil_to(0x2000000);
+        let paddr_after_kimage_aligned = kernel_end.ceil_to(0x200000);
 
-        core::iter::once(PRange::new(
-            kernel_end,
-            paddr_after_kimage_aligned,
-        ))
-
-        /*core::iter::once(PRange::new(
-            kernel_end,
-            paddr_after_kimage_aligned,
-        ))
-        .chain(
+        core::iter::once(PRange::new(kernel_end, paddr_after_kimage_aligned)).chain(
             Self::present_ram()
                 .filter(move |range| range.end() > paddr_after_kimage_aligned)
                 .map(move |range| {
@@ -305,15 +281,41 @@ impl Memory for ArchMemory {
                         range
                     }
                 }),
-        )*/
+        )
     }
 }
 
-pub type DefaultPagingMode = PagingModeSv39;
+pub type DefaultPagingMode = PagingModeSv48;
 
-pub fn setup_kernel_satp() {
-    unsafe {
-        satp::set(satp::Mode::Sv39, 0, PFN::from(ROOT_PAGE_TABLE_PFN).into());
+pub trait PresentRam: Iterator<Item = PRange> {}
+
+pub trait FreeRam: PresentRam {
+    fn free_ram(self) -> impl Iterator<Item = PRange>;
+}
+
+impl<T> FreeRam for T
+where
+    T: PresentRam,
+{
+    fn free_ram(self) -> impl Iterator<Item = PRange> {
+        unsafe extern "C" {
+            fn __kernel_start();
+            fn __kernel_end();
+        }
+
+        let kernel_end = PAddr::from(__kernel_end as usize - KIMAGE_OFFSET);
+        let paddr_after_kimage_aligned = kernel_end.ceil_to(0x200000);
+
+        core::iter::once(PRange::new(kernel_end, paddr_after_kimage_aligned)).chain(
+            self.filter(move |range| range.end() > paddr_after_kimage_aligned)
+                .map(move |range| {
+                    if range.start() < paddr_after_kimage_aligned {
+                        let (_, right) = range.split_at(paddr_after_kimage_aligned);
+                        right
+                    } else {
+                        range
+                    }
+                }),
+        )
     }
-    sfence_vma_all();
 }

@@ -1,26 +1,14 @@
+use super::{interrupt::InterruptControl, trap::setup_trap};
+use crate::arch::fdt::{FdtExt, FDT};
 use core::pin::Pin;
-use riscv::register::{
-    mhartid,
-    sscratch,
-    sstatus
-};
-use sbi::PhysicalAddress;
 use eonix_preempt::PreemptGuard;
 use eonix_sync_base::LazyLock;
-
-/// TODO:
-/// CPU 的一些函数
-/// 
+use riscv::register::{mhartid, sscratch, sstatus};
+use riscv_peripheral::plic::PLIC;
+use sbi::PhysicalAddress;
 
 #[eonix_percpu::define_percpu]
 static LOCAL_CPU: LazyLock<CPU> = LazyLock::new(CPU::new);
-
-use super::{
-    config::smp::get_num_harts,
-    mm::setup_kernel_satp,
-    trap::setup_trap,
-    interrupt::InterruptControl
-};
 
 #[derive(Debug, Clone)]
 pub enum UserTLS {
@@ -42,10 +30,9 @@ impl UserTLS {
 
 impl CPU {
     pub fn new() -> Self {
-        let hart_id = 0;
         Self {
-            hart_id: hart_id,
-            interrupt: InterruptControl::new(hart_id),
+            hart_id: 0,
+            interrupt: InterruptControl::new(),
         }
     }
 
@@ -54,46 +41,27 @@ impl CPU {
     /// # Safety
     /// This function performs low-level hardware initialization and should
     /// only be called once per Hart during its boot sequence.
-    pub unsafe fn init(self: Pin<&mut Self>, hart_id: usize) {
-        let self_mut = self.get_unchecked_mut();
-        self_mut.hart_id = hart_id;
-
-        sscratch::write(self_mut.hart_id as usize);
+    pub unsafe fn init(mut self: Pin<&mut Self>, hart_id: usize) {
+        let me = self.as_mut().get_unchecked_mut();
+        me.hart_id = hart_id;
 
         setup_trap();
 
-        // CLINT, 10_000 ms
-        self_mut.interrupt.setup_timer(10_000);
+        let interrupt = self.map_unchecked_mut(|me| &mut me.interrupt);
+        interrupt.init();
 
-        // Supervisor Mode Status Register (sstatus)
-        // SUM (Supervisor User Memory access): support S-mode access user memory
-        // MXR (Make Executable Readable)
-        // SIE (Supervisor Interrupt Enable): enable S-mode interrupt
         let mut current_sstatus = sstatus::read();
         current_sstatus.set_spp(sstatus::SPP::Supervisor);
         current_sstatus.set_sum(true);
         current_sstatus.set_mxr(true);
-        current_sstatus.set_sie(true);
         sstatus::write(current_sstatus);
-
-        // setup kernel page table and flush tlb
-        setup_kernel_satp();
     }
 
     /// Boot all other hart.
     pub unsafe fn bootstrap_cpus(&self) {
-        unsafe extern "C" {
-        fn ap_boot_entry();
-        }
-        let total_harts = get_num_harts();
-
-        let ap_entry_point = PhysicalAddress::new(ap_boot_entry as usize);
-
-        for i in 0..total_harts {
-            if i == self.hart_id {
-                continue;
-            }
-            sbi::hsm::hart_start(i, ap_entry_point, 0)
+        let total_harts = FDT.hart_count();
+        for i in (0..total_harts).filter(|&i| i != self.hart_id) {
+            sbi::hsm::hart_start(i, todo!("AP entry"), 0)
                 .expect("Failed to start secondary hart via SBI");
         }
     }
@@ -107,11 +75,7 @@ impl CPU {
     }
 
     pub fn end_of_interrupt(self: Pin<&mut Self>) {
-        unsafe {
-            // TODO: 不知道写的对不对。。。
-            self.map_unchecked_mut(|me| &mut me.interrupt)
-                .clear_soft_interrupt_pending();
-        }
+        todo!()
     }
 
     pub fn local() -> PreemptGuard<Pin<&'static mut Self>> {
@@ -126,65 +90,3 @@ impl CPU {
         self.hart_id
     }
 }
-
-#[macro_export]
-macro_rules! define_smp_bootstrap {
-    ($cpu_count:literal, $ap_entry:ident, $alloc_kstack:tt) => {
-        #[no_mangle]
-        static BOOT_SEMAPHORE: core::sync::atomic::AtomicU64 =
-            core::sync::atomic::AtomicU64::new(0);
-        #[no_mangle]
-        static BOOT_STACK: core::sync::atomic::AtomicU64 =
-            core::sync::atomic::AtomicU64::new(0);
-
-        #[no_mangle]
-        static CPU_COUNT: core::sync::atomic::AtomicU64 =
-            core::sync::atomic::AtomicU64::new(0);
-
-        core::arch::global_asm!(
-            r#"
-        .section .text.ap_boot
-        .globl ap_boot_entry
-
-        ap_boot_entry:
-            csrr a0, mhartid
-
-        1:
-            lw t0, AP_BOOT_STACK.addr
-            beqz t0, 1b
-            li t1, 0
-            sw t1, AP_BOOT_STACK.addr
-            mv sp, t0
-
-        2:
-            lw t0, AP_BOOT_SEMAPHORE.addr
-            beqz t0, 2b
-
-            li t1, 0
-            sw t1, AP_BOOT_SEMAPHORE.addr
-
-            li t0, 1
-            amoswap.w.aq rl t0, a0, ONLINE_HART_COUNT.addr
-
-            call $ap_entry
-            j .
-            "#,
-            BOOT_SEMAPHORE = sym BOOT_SEMAPHORE,
-            BOOT_STACK = sym BOOT_STACK,
-            CPU_COUNT = sym CPU_COUNT,
-            AP_ENTRY = sym $ap_entry,
-        );
-
-        pub unsafe fn wait_cpus_online() {
-            use core::sync::atomic::Ordering;
-            while CPU_COUNT.load(Ordering::Acquire) != $cpu_count - 1 {
-                if BOOT_STACK.load(Ordering::Acquire) == 0 {
-                    let stack_bottom = $alloc_kstack as u64;
-                    BOOT_STACK.store(stack_bottom, Ordering::Release);
-                }
-                $crate::pause();
-            }
-        }
-    };
-}
-

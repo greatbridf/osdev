@@ -30,3 +30,11 @@ pub fn get_percpu_pointer(percpu: &Ident, ty: &Type) -> TokenStream {
         }
     }
 }
+
+pub fn get_percpu_offset(percpu: &Ident) -> TokenStream {
+    quote! {
+        {
+            & #percpu as *const _ as usize
+        }
+    }
+}

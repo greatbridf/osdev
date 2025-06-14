@@ -1,10 +1,25 @@
 SECTIONS {
+    .bootstrap ORIGIN(RAM) :
+    {
+        KEEP(*(.bootstrap.entry .bootstrap.data));
+
+        . = ORIGIN(RAM) + 0x1000;
+        KEEP(*(.bootstrap.page_table.1));
+        KEEP(*(.bootstrap.page_table.2));
+
+        . = ALIGN(16);
+        KEEP(*(.bootstrap.stack));
+    } > RAM
+}
+INSERT BEFORE .text;
+
+SECTIONS {
     .text.syscall_fns :
     {
 
         KEEP(*(.syscall_fns*));
 
-    } > REGION_TEXT
+    } > REGION_TEXT AT> RAM
 }
 INSERT AFTER .text;
 
@@ -17,7 +32,7 @@ SECTIONS {
         KEEP(*(.fix));
 
         FIX_END = .;
-    } > REGION_RODATA
+    } > REGION_RODATA AT> RAM
 
     .rodata.syscalls :
     {
@@ -31,16 +46,16 @@ SECTIONS {
 
         RAW_SYSCALL_HANDLERS_SIZE =
             ABSOLUTE(__raw_syscall_handlers_end - __raw_syscall_handlers_start);
-    } > REGION_RODATA
+    } > REGION_RODATA AT> RAM
 }
 INSERT AFTER .rodata;
 
 SECTIONS {
-    .percpu 0 : ALIGN(16)
+    .percpu : ALIGN(16)
     {
         __spercpu = .;
 
-        PERCPU_START = .;
+        PERCPU_DATA_START = .;
 
         . = ALIGN(16);
 
@@ -48,9 +63,8 @@ SECTIONS {
 
         . = ALIGN(16);
         __epercpu = .;
-    } > LOWMEM AT> REGION_RODATA
+    } > REGION_RODATA AT> RAM
 
-    PERCPU_DATA_START = LOADADDR(.percpu);
     PERCPU_LENGTH = ABSOLUTE(__epercpu - __spercpu);
 
     KIMAGE_PAGES = (__edata - _stext + 0x1000 - 1) / 0x1000;
@@ -58,14 +72,5 @@ SECTIONS {
     __kernel_end = .;
 
     BSS_LENGTH = ABSOLUTE(__ebss - __sbss);
-}
-INSERT AFTER .rodata;
-
-SECTIONS {
-    .bootregion : {
-        . = ALIGN(4096);
-        *(.bootstack);
-        *(.bootdata);
-    } > REGION_BOOT
 }
 INSERT AFTER .rodata;

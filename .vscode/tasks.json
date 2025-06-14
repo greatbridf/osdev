@@ -46,7 +46,7 @@
         {
             "label": "kill qemu",
             "type": "shell",
-            "command": "killall qemu-system-x86_64",
+            "command": "killall qemu-system-riscv64",
             "presentation": {
                 "echo": false,
                 "reveal": "never",

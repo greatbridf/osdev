@@ -11,7 +11,7 @@
             "environment": [],
             "externalConsole": false,
             "MIMode": "gdb",
-            "miDebuggerPath": "x86_64-elf-gdb",
+            "miDebuggerPath": "/Users/david/.local/riscv64-unknown-elf-gcc-8.3.0-2020.04.1-x86_64-apple-darwin/bin/riscv64-unknown-elf-gdb",
             "miDebuggerServerAddress": "127.0.0.1:1234",
             "setupCommands": [
                 // {
@@ -24,11 +24,11 @@
                     "description": "Enable GDB pretty printing",
                     "ignoreFailures": true
                 },
-                {
-                    "text": "source ${workspaceFolder}/pretty-print.py",
-                    "description": "Load GDB pretty printers",
-                    "ignoreFailures": false
-                },
+                // {
+                //     "text": "source ${workspaceFolder}/pretty-print.py",
+                //     "description": "Load GDB pretty printers",
+                //     "ignoreFailures": false
+                // },
             ],
             "preLaunchTask": "debug run",
             "postDebugTask": "kill qemu"

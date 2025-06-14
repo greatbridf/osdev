@@ -1,13 +1,17 @@
 use core::arch::asm;
 
-use eonix_mm::{address::{Addr, PAddr, VAddr}, paging::PFN};
-use riscv::{asm::{sfence_vma, sfence_vma_all}, register::{satp, stval}};
+use eonix_mm::{
+    address::{Addr, PAddr, VAddr},
+    paging::PFN,
+};
+use riscv::{
+    asm::{sfence_vma, sfence_vma_all},
+    register::{satp, stval},
+};
 
-mod io;
 mod fence;
 mod fpu;
 
-pub use io::*;
 pub use fence::*;
 pub use fpu::*;
 
@@ -44,19 +48,13 @@ pub fn get_page_fault_address() -> VAddr {
 #[inline(always)]
 pub fn halt() {
     unsafe {
-        asm!(
-            "wfi",
-            options(nomem, nostack)
-        );
+        asm!("wfi", options(nomem, nostack));
     }
 }
 
 #[inline(always)]
 pub fn pause() {
     unsafe {
-        asm!(
-            "nop",
-            options(nomem, nostack)
-        );
+        asm!("nop", options(nomem, nostack));
     }
 }

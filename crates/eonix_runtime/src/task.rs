@@ -14,6 +14,7 @@ use core::{
     sync::atomic::{AtomicBool, AtomicU32, Ordering},
     task::{Context, Poll, Waker},
 };
+use eonix_hal::processor::CPU;
 use eonix_preempt::assert_preempt_enabled;
 use eonix_sync::Spin;
 use intrusive_collections::RBTreeAtomicLink;
@@ -89,7 +90,7 @@ impl Task {
             id: TaskId(ID.fetch_add(1, Ordering::Relaxed)),
             on_rq: AtomicBool::new(false),
             unparked: AtomicBool::new(false),
-            cpu: AtomicU32::new(0),
+            cpu: AtomicU32::new(CPU::local().cpuid() as u32),
             state: TaskState::new(TaskState::RUNNING),
             executor: AtomicUniqueRefCell::new(Some(executor)),
             execution_context,

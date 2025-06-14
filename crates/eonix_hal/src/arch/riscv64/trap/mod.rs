@@ -1,28 +1,22 @@
 mod trap_context;
 
+use super::config::platform::virt::*;
+use super::context::TaskContext;
+use core::arch::{global_asm, naked_asm};
 use eonix_hal_traits::{context::RawTaskContext, trap::TrapReturn};
-pub use trap_context::*;
-
+use riscv::register::sie::Sie;
+use riscv::register::stvec::TrapMode;
+use riscv::register::{scause, sepc, stval};
 use riscv::{
     asm::sfence_vma_all,
     register::{
-        sstatus::{self, Sstatus},
-        stvec::{self, Stvec}
-    }
+        sie,
+        stvec::{self, Stvec},
+    },
 };
 use sbi::SbiError;
-use core::arch::{global_asm, naked_asm};
 
-use super::context::TaskContext;
-
-use super::config::platform::virt::*;
-
-//global_asm!(include_str!("trap.S"));
-
-use riscv::register::{scause, sepc, stval};
-
-//#[eonix_percpu::define_percpu]
-//static TRAP_HANDLER: unsafe extern "C" fn() = default_trap_handler;
+pub use trap_context::*;
 
 #[eonix_percpu::define_percpu]
 static TRAP_HANDLER: unsafe extern "C" fn() = default_trap_handler;
@@ -32,6 +26,14 @@ static CAPTURER_CONTEXT: TaskContext = TaskContext::new();
 
 /// This value will never be used.
 static mut DIRTY_TRAP_CONTEXT: TaskContext = TaskContext::new();
+
+#[unsafe(naked)]
+unsafe extern "C" fn _raw_trap_entry() -> ! {
+    naked_asm!(
+        "j {entry}",
+        entry = sym _raw_trap_entry,
+    );
+}
 
 // TODO: is need to save kernel's callee saved registers?
 global_asm!(
@@ -45,11 +47,11 @@ global_asm!(
     .endm
 
     .section .text
-        .globl _raw_trap_entry
+        .globl __raw_trap_entry
         .globl return_to_user
         .align 2
 
-    _raw_trap_entry:
+    __raw_trap_entry:
         # swap sp and sscratch(previously stored user TrapContext's address in return_to_user)
         csrrw sp, sscratch, sp
 
@@ -110,7 +112,6 @@ global_asm!(
 
 unsafe extern "C" {
     fn _default_trap_handler(trap_context: &mut TrapContext);
-    fn _raw_trap_entry();
     fn _raw_trap_return();
 }
 
@@ -189,10 +190,13 @@ impl TrapReturn for TrapContext {
 }
 
 fn setup_trap_handler(trap_entry_addr: usize) {
+    let mut stvec_val = Stvec::from_bits(0);
+    stvec_val.set_address(trap_entry_addr);
+    stvec_val.set_trap_mode(TrapMode::Direct);
+
     unsafe {
-        stvec::write(Stvec::from_bits(trap_entry_addr));
+        stvec::write(stvec_val);
     }
-    sfence_vma_all();
 }
 
 pub fn setup_trap() {
@@ -200,54 +204,45 @@ pub fn setup_trap() {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct IrqState(usize);
+pub struct IrqState(Sie);
 
 impl IrqState {
     #[inline]
     pub fn save() -> Self {
-        let sstatus_val = sstatus::read().bits();
-
-        unsafe {
-            sstatus::clear_sie();
-        }
-
-        IrqState(sstatus_val)
+        IrqState(sie::read())
     }
 
     #[inline]
     pub fn restore(self) {
         let Self(state) = self;
         unsafe {
-            sstatus::write(Sstatus::from_bits(state));
+            sie::write(state);
         }
-    }
-
-    #[inline]
-    pub fn was_enabled(&self) -> bool {
-        (self.0 & (1 << 1)) != 0
     }
 }
 
 #[inline]
 pub fn disable_irqs() {
     unsafe {
-        sstatus::clear_sie();
+        sie::clear_sext();
+        sie::clear_stimer();
+        sie::clear_ssoft();
     }
 }
 
 #[inline]
 pub fn enable_irqs() {
     unsafe {
-        sstatus::set_sie();
+        sie::set_sext();
+        sie::set_stimer();
+        sie::set_ssoft();
     }
 }
 
 #[inline]
 pub fn disable_irqs_save() -> IrqState {
-    unsafe {
-        let original_sstatus_bits = sstatus::read().bits();
-        sstatus::clear_sie();
+    let state = IrqState::save();
+    disable_irqs();
 
-        IrqState(original_sstatus_bits)
-    }
+    state
 }

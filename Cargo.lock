@@ -22,7 +22,7 @@ dependencies = [
  "eonix_hal_traits",
  "eonix_mm",
  "fdt",
- "riscv",
+ "riscv 0.13.0",
  "sbi",
  "spin",
 ]
@@ -107,9 +107,9 @@ dependencies = [
  "eonix_sync_base",
  "fdt",
  "intrusive_list",
- "riscv",
+ "riscv 0.13.0",
+ "riscv-peripheral",
  "sbi",
- "spin",
 ]
 
 [[package]]
@@ -348,6 +348,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "riscv"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0f1671c79a01a149fe000af2429ce9ccc8e58cdecda72672355d50e5536b363c"
+dependencies = [
+ "critical-section",
+ "embedded-hal",
+ "paste",
+ "riscv-macros",
+ "riscv-pac",
+]
+
+[[package]]
 name = "riscv-macros"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -363,6 +376,18 @@ name = "riscv-pac"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8188909339ccc0c68cfb5a04648313f09621e8b87dc03095454f1a11f6c5d436"
+
+[[package]]
+name = "riscv-peripheral"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d50c11ddf3e2a21206642bfe6d5e06f76d5225c1fbece09952dcd40f8c49409a"
+dependencies = [
+ "embedded-hal",
+ "paste",
+ "riscv 0.14.0",
+ "riscv-pac",
+]
 
 [[package]]
 name = "sbi"

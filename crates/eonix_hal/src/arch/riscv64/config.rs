@@ -1,7 +1,7 @@
 /// mm
 pub mod mm {
-    pub const ROOT_PAGE_TABLE_PHYS_ADDR: usize = 0x8040_0000;
-    pub const PHYS_MAP_VIRT: usize = 0xffff_ffc0_0000_0000;
+    pub const ROOT_PAGE_TABLE_PHYS_ADDR: usize = 0x8020_1000;
+    pub const PHYS_MAP_VIRT: usize = 0xffff_ff00_0000_0000;
     pub const KIMAGE_PHYS_BASE: usize = 0x8020_0000;
     pub const KIMAGE_OFFSET: usize = 0xffff_ffff_0000_0000;
     pub const MMIO_VIRT_BASE: usize = KIMAGE_OFFSET;
@@ -15,28 +15,6 @@ pub mod mm {
     pub const PTES_PER_PAGE: usize = PAGE_SIZE / PTE_SIZE;
     pub const ROOT_PAGE_TABLE_PFN: usize = ROOT_PAGE_TABLE_PHYS_ADDR >> 12;
     pub const PAGE_TABLE_PHYS_END: usize = 0x8080_0000;
-
-    #[derive(Clone, Copy)]
-    pub enum PageSize {
-        _4KbPage = 4096,
-        _2MbPage = 2 * 1024 * 1024,
-        _1GbPage = 1 * 1024 * 1024 * 1024,
-    }
-}
-
-/// smp
-pub mod smp {
-    use spin::Once;
-
-    pub static NUM_HARTS: Once<usize> = Once::new();
-
-    pub fn set_num_harts(num: usize) {
-        NUM_HARTS.call_once(|| num);
-    }
-
-    pub fn get_num_harts() -> usize {
-        *NUM_HARTS.get().expect("NUM_HARTS should be initialized by now")
-    }
 }
 
 pub mod platform {
@@ -60,10 +38,9 @@ pub mod platform {
         // CLINT (Core Local Interruptor) memory-mapped registers
         // Base address for CLINT on QEMU virt platform
         pub const CLINT_BASE: usize = 0x200_0000;
-        pub const CLINT_MSIP_OFFSET: usize = 0x0000;      // Machine-mode Software Interrupt Pending (MSIP)
-        pub const CLINT_MTIMECMP_OFFSET: usize = 0x4000;  // Machine-mode Timer Compare (MTIMECMP)
+        pub const CLINT_MSIP_OFFSET: usize = 0x0000; // Machine-mode Software Interrupt Pending (MSIP)
+        pub const CLINT_MTIMECMP_OFFSET: usize = 0x4000; // Machine-mode Timer Compare (MTIMECMP)
         pub const CLINT_MTIME_OFFSET: usize = 0xBFF8;
         pub const CPU_FREQ_HZ: u64 = 10_000_000;
     }
 }
-

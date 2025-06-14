@@ -1,12 +1,9 @@
 pub mod bootstrap;
+mod config;
+pub mod console;
+pub mod context;
 pub mod cpu;
 pub mod fdt;
-pub mod mm;
-pub mod context;
-pub mod trap;
 pub mod interrupt;
-pub mod console;
-mod config;
-
-// TODO:
-// linker
+pub mod mm;
+pub mod trap;

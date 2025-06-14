@@ -10,7 +10,6 @@ pub struct TaskContext {
     s: [u64; 12],
     sp: u64,
     ra: u64,
-    sepc: u64,
     sstatus: u64,
 }
 
@@ -20,7 +19,7 @@ impl RawTaskContext for TaskContext {
     }
 
     fn set_program_counter(&mut self, pc: usize) {
-        self.sepc = pc as u64;
+        self.ra = pc as u64;
     }
 
     fn set_stack_pointer(&mut self, sp: usize) {
@@ -44,18 +43,14 @@ impl RawTaskContext for TaskContext {
     }
 
     fn call(&mut self, func: unsafe extern "C" fn(usize) -> !, arg: usize) {
-        self.set_program_counter(Self::do_call as usize);
-
         self.s[0] = func as u64;
         self.s[1] = arg as u64;
 
-        self.ra = 0;
+        self.set_program_counter(Self::do_call as usize);
     }
 
     unsafe extern "C" fn switch(from: &mut Self, to: &mut Self) {
-        unsafe {
-            Self::__task_context_switch(from, to)
-        }
+        unsafe { Self::__task_context_switch(from, to) }
     }
 }
 
@@ -65,7 +60,6 @@ impl TaskContext {
             s: [0; 12],
             sp: 0,
             ra: 0,
-            sepc: 0,
             sstatus: 0,
         }
     }
@@ -123,12 +117,9 @@ impl TaskContext {
             "sd  s11, 88(a0)",
             "sd   sp, 96(a0)",
             "sd   ra, 104(a0)",
-            "csrr s0, sstatus",
-            "sd   s0, 112(a0)", // Store sstatus at offset 112
-            "csrr s0, sepc",
-            "sd   s0, 120(a0)", // Store sepc at offset 120
-
-            // Load next task's callee-saved registers from `to` context
+            "csrr t0, sstatus",
+            "sd   t0, 112(a0)",
+            "",
             "ld   s0, 0(a1)",
             "ld   s1, 8(a1)",
             "ld   s2, 16(a1)",
@@ -145,10 +136,7 @@ impl TaskContext {
             "ld   ra, 104(a1)",
             "ld   t0, 112(a1)",
             "csrw sstatus, t0",
-            "ld   t0, 120(a1)",
-            "csrw sepc, t0",
-
-            "sret",
+            "ret",
         );
     }
 
@@ -159,23 +147,18 @@ impl TaskContext {
     }
 
     #[unsafe(naked)]
-    #[unsafe(no_mangle)]
     /// Maximum of 5 arguments supported.
     unsafe extern "C" fn do_call() -> ! {
         naked_asm!(
-            // Move function pointer.
-            "mv   t0, s0",
-
-            // Move arguments.
-            "mv   a0, s1",
+            "mv   t0, s0", // Function pointer in s0.
+            "mv   a0, s1", // Args
             "mv   a1, s2",
             "mv   a2, s3",
             "mv   a3, s4",
             "mv   a4, s5",
-
-            "mv   s0, zero", // Set s0 (fp) to 0.
-
-            "jr   t0", // Jump to t0.
+            "mv   fp, zero", // Set frame pointer to 0.
+            "mv   ra, zero",
+            "jr   t0",
         );
     }
 }

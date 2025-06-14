@@ -93,7 +93,7 @@ impl CheckedUserPointer {
 
     /// # Might Sleep
     pub fn read(&self, buffer: *mut (), total: usize) -> KResult<()> {
-        /*assert_preempt_enabled!("UserPointer::read");
+        assert_preempt_enabled!("UserPointer::read");
 
         if total > self.len {
             return Err(EINVAL);
@@ -113,9 +113,9 @@ impl CheckedUserPointer {
                 ".quad 3b",  // fix jump address
                 ".quad 0x3", // type: load
                 ".popsection",
-                //inout("rcx") total => error_bytes,
-                //inout("rsi") self.ptr => _,
-                //inout("rdi") buffer => _,
+                inout("rcx") total => error_bytes,
+                inout("rsi") self.ptr => _,
+                inout("rdi") buffer => _,
             )
         }
 
@@ -123,13 +123,12 @@ impl CheckedUserPointer {
             Err(EFAULT)
         } else {
             Ok(())
-        }*/
-        Ok(())
+        }
     }
 
     /// # Might Sleep
     pub fn write(&self, data: *mut (), total: usize) -> KResult<()> {
-        /*assert_preempt_enabled!("UserPointer::write");
+        assert_preempt_enabled!("UserPointer::write");
 
         if total > self.len {
             return Err(EINVAL);
@@ -158,14 +157,14 @@ impl CheckedUserPointer {
 
         if error_bytes != 0 {
             return Err(EFAULT);
-        }*/
+        }
 
         Ok(())
     }
 
     /// # Might Sleep
     pub fn zero(&self) -> KResult<()> {
-        /*assert_preempt_enabled!("CheckedUserPointer::zero");
+        assert_preempt_enabled!("CheckedUserPointer::zero");
 
         if self.len == 0 {
             return Ok(());
@@ -197,8 +196,7 @@ impl CheckedUserPointer {
             Err(EFAULT)
         } else {
             Ok(())
-        }*/
-        Ok(())
+        }
     }
 }
 
@@ -252,7 +250,7 @@ impl<'lt> Buffer for UserBuffer<'lt> {
 impl<'lt> UserString<'lt> {
     /// # Might Sleep
     pub fn new(ptr: *const u8) -> KResult<Self> {
-        /*assert_preempt_enabled!("UserString::new");
+        assert_preempt_enabled!("UserString::new");
 
         const MAX_LEN: usize = 4096;
         // TODO
@@ -292,8 +290,7 @@ impl<'lt> UserString<'lt> {
                 len: MAX_LEN - result,
                 _phantom: core::marker::PhantomData,
             })
-        }*/
-        Err(EFAULT)
+        }
     }
 
     pub fn as_cstr(&self) -> &'lt CStr {

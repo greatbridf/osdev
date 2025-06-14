@@ -34,9 +34,7 @@ pub fn get_root_page_table_pfn() -> PFN {
 
 #[inline(always)]
 pub fn set_root_page_table_pfn(pfn: PFN) {
-    let ppn = PAddr::from(pfn).addr();
-
-    unsafe { satp::set(satp::Mode::Sv39, 0, ppn) };
+    unsafe { satp::set(satp::Mode::Sv48, 0, usize::from(pfn)) };
     sfence_vma_all();
 }
 

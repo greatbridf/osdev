@@ -584,7 +584,10 @@ where
     fn set_anonymous(&mut self, execute: bool) {
         // Writable flag is set during page fault handling while executable flag is
         // preserved across page faults, so we set executable flag now.
-        let mut attr = PageAttribute::PRESENT | PageAttribute::USER | PageAttribute::COPY_ON_WRITE;
+        let mut attr = PageAttribute::PRESENT
+            | PageAttribute::READ
+            | PageAttribute::USER
+            | PageAttribute::COPY_ON_WRITE;
         attr.set(PageAttribute::EXECUTE, execute);
 
         self.set(EMPTY_PAGE.clone().into_raw(), T::Attr::from(attr));
@@ -593,7 +596,10 @@ where
     fn set_mapped(&mut self, execute: bool) {
         // Writable flag is set during page fault handling while executable flag is
         // preserved across page faults, so we set executable flag now.
-        let mut attr = PageAttribute::MAPPED | PageAttribute::USER | PageAttribute::COPY_ON_WRITE;
+        let mut attr = PageAttribute::READ
+            | PageAttribute::USER
+            | PageAttribute::MAPPED
+            | PageAttribute::COPY_ON_WRITE;
         attr.set(PageAttribute::EXECUTE, execute);
 
         self.set(EMPTY_PAGE.clone().into_raw(), T::Attr::from(attr));

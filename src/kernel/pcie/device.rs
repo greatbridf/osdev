@@ -1,6 +1,5 @@
 use super::{CommonHeader, Header};
 use crate::{kernel::mem::PhysAccess as _, sync::fence::memory_barrier};
-use acpi::mcfg::PciConfigEntry;
 use alloc::sync::Arc;
 use core::{ops::RangeInclusive, sync::atomic::Ordering};
 use eonix_mm::address::PAddr;
@@ -27,7 +26,7 @@ pub struct PCIDevice<'a> {
 #[allow(dead_code)]
 #[derive(Clone)]
 pub struct SegmentGroup {
-    id: u16,
+    id: usize,
     bus_range: RangeInclusive<u8>,
     base_address: PAddr,
 }
@@ -43,9 +42,18 @@ pub struct ConfigSpace {
 }
 
 impl SegmentGroup {
-    pub fn from_entry(entry: &PciConfigEntry) -> Self {
+    pub fn new(id: usize, bus_start: u8, bus_end: u8, base_address: PAddr) -> Self {
         Self {
-            id: entry.segment_group,
+            id,
+            bus_range: bus_start..=bus_end,
+            base_address,
+        }
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    pub fn from_entry(entry: &acpi::mcfg::PciConfigEntry) -> Self {
+        Self {
+            id: entry.segment_group as usize,
             bus_range: entry.bus_range.clone(),
             base_address: PAddr::from(entry.physical_address),
         }

@@ -28,7 +28,6 @@ use core::{
 };
 use elf::ParsedElf32;
 use eonix_hal::{processor::CPU, trap::disable_irqs_save};
-use eonix_log::ConsoleWrite;
 use eonix_mm::address::PRange;
 use eonix_runtime::{run::FutureRun, scheduler::Scheduler, task::Task};
 use kernel::{
@@ -73,21 +72,10 @@ fn kernel_init(mut data: eonix_hal::bootstrap::BootStrapData) -> ! {
 
     #[cfg(target_arch = "riscv64")]
     {
-        struct Console;
-
-        impl ConsoleWrite for Console {
-            fn write(&self, s: &str) {
-                eonix_hal::bootstrap::early_console_write(s);
-            }
-        }
-
-        eonix_log::set_console(Arc::new(Console));
+        driver::sbi_console::init_console();
     }
 
-    #[cfg(target_arch = "x86_64")]
-    {
-        kernel::pcie::init_pcie().expect("Unable to initialize PCIe bus");
-    }
+    kernel::pcie::init_pcie().expect("Unable to initialize PCIe bus");
 
     // To satisfy the `Scheduler` "preempt count == 0" assertion.
     eonix_preempt::disable();
@@ -140,7 +128,13 @@ async fn init_process(early_kstack: PRange) {
     {
         // We might want the serial initialized as soon as possible.
         driver::serial::init().unwrap();
+        driver::e1000e::register_e1000e_driver();
+        driver::ahci::register_ahci_driver();
+    }
 
+    #[cfg(target_arch = "riscv64")]
+    {
+        driver::virtio::init_virtio_devices();
         driver::e1000e::register_e1000e_driver();
         driver::ahci::register_ahci_driver();
     }

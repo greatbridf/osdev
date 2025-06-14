@@ -33,6 +33,7 @@ use riscv::{
         sstatus::{self, FS},
     },
 };
+use sbi::legacy::console_putchar;
 
 #[unsafe(link_section = ".bootstrap.stack")]
 static BOOT_STACK: [u8; 4096 * 16] = [0; 4096 * 16];
@@ -233,4 +234,8 @@ fn bootstrap_smp(alloc: impl Allocator, page_alloc: &RefCell<BasicPageAlloc>) {}
 
 pub fn early_console_write(s: &str) {
     write_str(s);
+}
+
+pub fn early_console_putchar(ch: u8) {
+    console_putchar(ch);
 }

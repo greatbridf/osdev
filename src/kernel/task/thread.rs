@@ -22,7 +22,6 @@ use core::{
     sync::atomic::{AtomicBool, Ordering},
     task::{Context, Poll, Waker},
 };
-use eonix_hal::traits::trap::IrqState;
 use eonix_hal::{
     processor::{UserTLS, CPU},
     traits::{

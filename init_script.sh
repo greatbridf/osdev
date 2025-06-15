@@ -32,6 +32,7 @@ echo -n -e "deploying busybox... " >&2
 
 do_or_freeze $BUSYBOX mkdir -p /bin
 do_or_freeze $BUSYBOX --install -s /bin
+do_or_freeze $BUSYBOX mkdir -p /lib
 
 export PATH="/bin"
 
@@ -39,6 +40,9 @@ echo ok >&2
 
 do_or_freeze mkdir -p /etc /root /proc
 do_or_freeze mount -t procfs proc proc
+
+cp /mnt/ld-musl-i386.so.1 /lib/ld-musl-i386.so.1
+ln -s /lib/ld-musl-i386.so.1 /lib/libc.so
 
 cat > /etc/passwd <<EOF
 root:x:0:0:root:/root:/mnt/busybox sh

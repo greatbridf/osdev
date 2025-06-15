@@ -79,27 +79,23 @@ impl MMArea {
         }
     }
 
-    /// # Return
-    /// Whether the whole handling process is done.
-    pub fn handle_cow(&self, pte: &mut impl PTE) -> bool {
-        let mut page_attr = pte.get_attr().as_page_attr().expect("Not a page attribute");
-        let pfn = pte.get_pfn();
+    pub fn handle_cow(&self, pfn: &mut PFN, attr: &mut PageAttribute) {
+        assert!(attr.contains(PageAttribute::COPY_ON_WRITE));
 
-        page_attr.remove(PageAttribute::COPY_ON_WRITE);
-        page_attr.set(PageAttribute::WRITE, self.permission.write);
+        attr.remove(PageAttribute::COPY_ON_WRITE);
+        attr.set(PageAttribute::WRITE, self.permission.write);
 
-        let page = unsafe { Page::from_raw(pfn) };
+        let page = unsafe { Page::from_raw(*pfn) };
         if page.is_exclusive() {
             // SAFETY: This is actually safe. If we read `1` here and we have `MMList` lock
             // held, there couldn't be neither other processes sharing the page, nor other
             // threads making the page COW at the same time.
-            pte.set_attr(page_attr.into());
             core::mem::forget(page);
-            return true;
+            return;
         }
 
         let new_page;
-        if is_empty_page(pfn) {
+        if *pfn == EMPTY_PAGE.pfn() {
             new_page = Page::zeroed();
         } else {
             new_page = Page::alloc();
@@ -115,33 +111,30 @@ impl MMArea {
             };
         }
 
-        page_attr.remove(PageAttribute::ACCESSED);
-
-        pte.set(new_page.into_raw(), page_attr.into());
-
-        false
+        attr.remove(PageAttribute::ACCESSED);
+        *pfn = new_page.into_raw();
     }
 
     /// # Arguments
     /// * `offset`: The offset from the start of the mapping, aligned to 4KB boundary.
-    pub fn handle_mmap(&self, pte: &mut impl PTE, offset: usize) -> KResult<()> {
+    pub fn handle_mmap(
+        &self,
+        pfn: &mut PFN,
+        attr: &mut PageAttribute,
+        offset: usize,
+    ) -> KResult<()> {
         // TODO: Implement shared mapping
-        let mut page_attr = pte.get_attr().as_page_attr().expect("Not a page attribute");
-        let pfn = pte.get_pfn();
+        let Mapping::File(mapping) = &self.mapping else {
+            panic!("Anonymous mapping should not be PA_MMAP");
+        };
 
-        match &self.mapping {
-            Mapping::File(mapping) if offset < mapping.length => {
-                let page = unsafe {
-                    // SAFETY: Since we are here, the `pfn` must refer to a valid buddy page.
-                    Page::with_raw(pfn, |page| page.clone())
-                };
-
-                let page_data = unsafe {
-                    // SAFETY: `page` is marked as mapped, so others trying to read or write to
-                    //         it will be blocked and enter the page fault handler, where they will
-                    //         be blocked by the mutex held by us.
-                    page.as_memblk().as_bytes_mut()
-                };
+        assert!(offset < mapping.length, "Offset out of range");
+        unsafe {
+            Page::with_raw(*pfn, |page| {
+                // SAFETY: `page` is marked as mapped, so others trying to read or write to
+                //         it will be blocked and enter the page fault handler, where they will
+                //         be blocked by the mutex held by us.
+                let page_data = page.as_memblk().as_bytes_mut();
 
                 let cnt_to_read = (mapping.length - offset).min(0x1000);
                 let cnt_read = mapping.file.read(
@@ -150,37 +143,33 @@ impl MMArea {
                 )?;
 
                 page_data[cnt_read..].fill(0);
-            }
-            Mapping::File(_) => panic!("Offset out of range"),
-            _ => panic!("Anonymous mapping should not be PA_MMAP"),
+
+                KResult::Ok(())
+            })?;
         }
 
-        page_attr.insert(PageAttribute::PRESENT);
-        page_attr.remove(PageAttribute::MAPPED);
-
-        pte.set_attr(page_attr.into());
+        attr.insert(PageAttribute::PRESENT);
+        attr.remove(PageAttribute::MAPPED);
         Ok(())
     }
 
     pub fn handle(&self, pte: &mut impl PTE, offset: usize) -> KResult<()> {
-        let page_attr = pte.get_attr().as_page_attr().expect("Not a page attribute");
+        let mut attr = pte.get_attr().as_page_attr().expect("Not a page attribute");
+        let mut pfn = pte.get_pfn();
 
-        if page_attr.contains(PageAttribute::COPY_ON_WRITE) {
-            self.handle_cow(pte);
+        if attr.contains(PageAttribute::COPY_ON_WRITE) {
+            self.handle_cow(&mut pfn, &mut attr);
         }
 
-        if page_attr.contains(PageAttribute::MAPPED) {
-            self.handle_mmap(pte, offset)?;
+        if attr.contains(PageAttribute::MAPPED) {
+            self.handle_mmap(&mut pfn, &mut attr, offset)?;
         }
+
+        attr.set(PageAttribute::ACCESSED, true);
+        pte.set(pfn, attr.into());
 
         Ok(())
     }
-}
-
-/// check pfn with EMPTY_PAGE's pfn
-fn is_empty_page(pfn: PFN) -> bool {
-    let empty_pfn = EMPTY_PAGE.pfn();
-    pfn == empty_pfn
 }
 
 impl Eq for MMArea {}

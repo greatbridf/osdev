@@ -13,7 +13,7 @@ pub use fpu::*;
 
 #[inline(always)]
 pub fn flush_tlb(vaddr: usize) {
-    sfence_vma(vaddr, 0);
+    sfence_vma(0, vaddr);
 }
 
 #[inline(always)]

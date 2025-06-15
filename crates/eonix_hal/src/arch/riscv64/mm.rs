@@ -217,8 +217,7 @@ impl From<TableAttribute> for PageAttribute64 {
             match attr {
                 TableAttribute::PRESENT => raw_attr |= PA_V,
                 TableAttribute::GLOBAL => raw_attr |= PA_G,
-                TableAttribute::USER => raw_attr |= PA_U,
-                TableAttribute::ACCESSED => raw_attr |= PA_A,
+                TableAttribute::USER | TableAttribute::ACCESSED => {}
                 _ => unreachable!("Invalid table attribute"),
             }
         }

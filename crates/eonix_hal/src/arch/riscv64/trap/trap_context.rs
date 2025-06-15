@@ -138,11 +138,10 @@ impl RawTrapContext for TrapContext {
                         no: self.syscall_no(),
                         args: self.syscall_args(),
                     },
-                    Exception::InstructionPageFault
+                    exception @ (Exception::InstructionPageFault
                     | Exception::LoadPageFault
-                    | Exception::StorePageFault => {
-                        let e = Exception::from_number(e).unwrap();
-                        TrapType::Fault(Fault::PageFault(self.get_page_fault_error_code(e)))
+                    | Exception::StorePageFault) => {
+                        TrapType::Fault(Fault::PageFault(self.get_page_fault_error_code(exception)))
                     }
                     // breakpoint and supervisor env call
                     _ => TrapType::Fault(Fault::Unknown(e)),
@@ -193,14 +192,12 @@ impl RawTrapContext for TrapContext {
 
 impl TrapContext {
     /// TODO: get PageFaultErrorCode also need check pagetable
-    fn get_page_fault_error_code(&self, exception_type: Exception) -> PageFaultErrorCode {
-        let scause_val = self.scause;
+    fn get_page_fault_error_code(&self, exception: Exception) -> PageFaultErrorCode {
         let mut error_code = PageFaultErrorCode::empty();
 
-        match exception_type {
+        match exception {
             Exception::InstructionPageFault => {
                 error_code |= PageFaultErrorCode::InstructionFetch;
-                error_code |= PageFaultErrorCode::Read;
             }
             Exception::LoadPageFault => {
                 error_code |= PageFaultErrorCode::Read;
@@ -212,7 +209,11 @@ impl TrapContext {
                 unreachable!();
             }
         }
-        // TODO: here need check pagetable to confirm NonPresent and UserAccess
+
+        if self.sstatus.spp() == SPP::User {
+            error_code |= PageFaultErrorCode::UserAccess;
+        }
+
         error_code
     }
 }

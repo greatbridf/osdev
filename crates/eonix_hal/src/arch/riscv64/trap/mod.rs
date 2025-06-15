@@ -3,6 +3,9 @@ mod trap_context;
 use super::config::platform::virt::*;
 use super::context::TaskContext;
 use core::arch::{global_asm, naked_asm};
+use core::mem::{offset_of, size_of};
+use core::num::NonZero;
+use core::ptr::NonNull;
 use eonix_hal_traits::{context::RawTaskContext, trap::TrapReturn};
 use riscv::register::sie::Sie;
 use riscv::register::stvec::TrapMode;
@@ -18,11 +21,25 @@ use sbi::SbiError;
 
 pub use trap_context::*;
 
-#[eonix_percpu::define_percpu]
-static TRAP_HANDLER: unsafe extern "C" fn() = default_trap_handler;
+#[repr(C)]
+pub struct TrapScratch {
+    t1: u64,
+    t2: u64,
+    kernel_tp: Option<NonZero<u64>>,
+    trap_context: Option<NonNull<TrapContext>>,
+    handler: unsafe extern "C" fn(),
+    capturer_context: TaskContext,
+}
 
 #[eonix_percpu::define_percpu]
-static CAPTURER_CONTEXT: TaskContext = TaskContext::new();
+pub(crate) static TRAP_SCRATCH: TrapScratch = TrapScratch {
+    t1: 0,
+    t2: 0,
+    kernel_tp: None,
+    trap_context: None,
+    handler: default_trap_handler,
+    capturer_context: TaskContext::new(),
+};
 
 /// This value will never be used.
 static mut DIRTY_TRAP_CONTEXT: TaskContext = TaskContext::new();
@@ -30,109 +47,147 @@ static mut DIRTY_TRAP_CONTEXT: TaskContext = TaskContext::new();
 #[unsafe(naked)]
 unsafe extern "C" fn _raw_trap_entry() -> ! {
     naked_asm!(
-        "j {entry}",
-        entry = sym _raw_trap_entry,
+        "csrrw t0, sscratch, t0", // Swap t0 and sscratch
+        "sd    t1, 0(t0)",
+        "sd    t2, 8(t0)",
+        "csrr  t1, sstatus",
+        "andi  t1, t1, 0x10",
+        "beqz  t1, 2f",
+        // else SPP = 1, supervisor mode
+        "addi  t1, sp, -{trap_context_size}",
+        "mv    t2, tp",
+        "j     3f",
+        // SPP = 0, user mode
+        "2:",
+        "ld    t1, 24(t0)", // Load captured TrapContext address
+        "mv    t2, tp",
+        "ld    tp, 16(t0)", // Restore kernel tp
+        // t0: &mut TrapScratch, t1: &mut TrapContext, t2: tp before trap
+        "3:",
+        "sd    ra, {ra}(t1)",
+        "sd    sp, {sp}(t1)",
+        "sd    gp, {gp}(t1)",
+        "sd    t2, {tp}(t1)",
+        "ld    ra, 0(t0)",
+        "ld    t2, 8(t0)",
+        "sd    ra, {t1}(t1)",     // Save t1
+        "sd    t2, {t2}(t1)",     // Save t2
+        "ld    ra, 32(t0)",       // Load handler address
+        "csrrw t2, sscratch, t0", // Swap to and sscratch
+        "sd    t2, {t0}(t1)",
+        "sd    a0, {a0}(t1)",
+        "sd    a1, {a1}(t1)",
+        "sd    a2, {a2}(t1)",
+        "sd    a3, {a3}(t1)",
+        "sd    a4, {a4}(t1)",
+        "sd    a5, {a5}(t1)",
+        "sd    a6, {a6}(t1)",
+        "sd    a7, {a7}(t1)",
+        "sd    t3, {t3}(t1)",
+        "sd    t4, {t4}(t1)",
+        "sd    t5, {t5}(t1)",
+        "sd    t6, {t6}(t1)",
+        "csrr  t2, sstatus",
+        "csrr  t3, sepc",
+        "csrr  t4, scause",
+        "sd    t2, {sstatus}(t1)",
+        "sd    t3, {sepc}(t1)",
+        "sd    t4, {scause}(t1)",
+        "ret",
+        trap_context_size = const size_of::<TrapContext>(),
+        ra = const Registers::OFFSET_RA,
+        sp = const Registers::OFFSET_SP,
+        gp = const Registers::OFFSET_GP,
+        tp = const Registers::OFFSET_TP,
+        t1 = const Registers::OFFSET_T1,
+        t2 = const Registers::OFFSET_T2,
+        t0 = const Registers::OFFSET_T0,
+        a0 = const Registers::OFFSET_A0,
+        a1 = const Registers::OFFSET_A1,
+        a2 = const Registers::OFFSET_A2,
+        a3 = const Registers::OFFSET_A3,
+        a4 = const Registers::OFFSET_A4,
+        a5 = const Registers::OFFSET_A5,
+        a6 = const Registers::OFFSET_A6,
+        a7 = const Registers::OFFSET_A7,
+        t3 = const Registers::OFFSET_T3,
+        t4 = const Registers::OFFSET_T4,
+        t5 = const Registers::OFFSET_T5,
+        t6 = const Registers::OFFSET_T6,
+        sstatus = const TrapContext::OFFSET_SSTATUS,
+        sepc = const TrapContext::OFFSET_SEPC,
+        scause = const TrapContext::OFFSET_SCAUSE,
     );
 }
 
-// TODO: is need to save kernel's callee saved registers?
-global_asm!(
-    r"
-    .altmacro
-    .macro SAVE_GP n
-        sd x\n, \n*8(sp)
-    .endm
-    .macro LOAD_GP n
-        ld x\n, \n*8(sp)
-    .endm
-
-    .section .text
-        .globl __raw_trap_entry
-        .globl return_to_user
-        .align 2
-
-    __raw_trap_entry:
-        # swap sp and sscratch(previously stored user TrapContext's address in return_to_user)
-        csrrw sp, sscratch, sp
-
-        sd x1, 1*8(sp)
-        .set n, 3
-        .rept 29
-            SAVE_GP %n
-            .set n, n+1
-        .endr
-
-        csrr t0, sstatus
-        csrr t1, sepc
-        csrr t2, scause
-        csrr t3, stval
-        sd t0, 32*8(sp)     # save sstatus into the TrapContext
-        sd t1, 33*8(sp)     # save sepc into the TrapContext
-        sd t2, 34*8(sp)     # save scause into the TrapContext
-        sd t3, 35*8(sp)     # save stval into the TrapContext
-
-        csrr t0, sscratch
-        sd t0, 2*8(sp)      # save user stack pointer into the TrapContext
-
-        la t0, {handler}
-        ld t1, 0(t0)
-        jr t1
-
-    _raw_trap_return:
-        # sscratch store the TrapContext's address
-        csrw sscratch, a0
-
-        mv sp, a0
-        # now sp points to TrapContext in kernel space
-
-        # restore sstatus and sepc
-        ld t0, 32*8(sp)
-        ld t1, 33*8(sp)
-        ld t2, 34*8(sp)
-        ld t3, 35*8(sp)
-        csrw sstatus, t0
-        csrw sepc, t1
-        csrw scause, t2
-        csrw stval, t3
-
-        # save x* expect x0 and sp
-        ld x1, 1*8(sp)
-        .set n, 3
-        .rept 29
-            LOAD_GP %n
-            .set n, n+1
-        .endr
-        ld sp, 2*8(sp)
-
-        sret
-    ",
-    handler = sym _percpu_inner_TRAP_HANDLER,
-
-);
-
-unsafe extern "C" {
-    fn _default_trap_handler(trap_context: &mut TrapContext);
-    fn _raw_trap_return();
+#[unsafe(naked)]
+unsafe extern "C" fn _raw_trap_return(ctx: &mut TrapContext) -> ! {
+    naked_asm!(
+        "ld ra, {ra}(a0)",
+        "ld sp, {sp}(a0)",
+        "ld gp, {gp}(a0)",
+        "ld tp, {tp}(a0)",
+        "ld t1, {t1}(a0)",
+        "ld t2, {t2}(a0)",
+        "ld t0, {t0}(a0)",
+        "ld a1, {a1}(a0)",
+        "ld a2, {a2}(a0)",
+        "ld a3, {a3}(a0)",
+        "ld a4, {a4}(a0)",
+        "ld a5, {a5}(a0)",
+        "ld a6, {a6}(a0)",
+        "ld a7, {a7}(a0)",
+        "ld t3, {t3}(a0)",
+        "ld t4, {sepc}(a0)",    // Load sepc from TrapContext
+        "ld t5, {sstatus}(a0)", // Load sstatus from TrapContext
+        "csrw sepc, t4",        // Restore sepc
+        "csrw sstatus, t5",     // Restore sstatus
+        "ld t4, {t4}(a0)",
+        "ld t5, {t5}(a0)",
+        "ld t6, {t6}(a0)",
+        "ld a0, {a0}(a0)",
+        "sret",
+        ra = const Registers::OFFSET_RA,
+        sp = const Registers::OFFSET_SP,
+        gp = const Registers::OFFSET_GP,
+        tp = const Registers::OFFSET_TP,
+        t1 = const Registers::OFFSET_T1,
+        t2 = const Registers::OFFSET_T2,
+        t0 = const Registers::OFFSET_T0,
+        a0 = const Registers::OFFSET_A0,
+        a1 = const Registers::OFFSET_A1,
+        a2 = const Registers::OFFSET_A2,
+        a3 = const Registers::OFFSET_A3,
+        a4 = const Registers::OFFSET_A4,
+        a5 = const Registers::OFFSET_A5,
+        a6 = const Registers::OFFSET_A6,
+        a7 = const Registers::OFFSET_A7,
+        t3 = const Registers::OFFSET_T3,
+        t4 = const Registers::OFFSET_T4,
+        t5 = const Registers::OFFSET_T5,
+        t6 = const Registers::OFFSET_T6,
+        sstatus = const TrapContext::OFFSET_SSTATUS,
+        sepc = const TrapContext::OFFSET_SEPC,
+    );
 }
 
-/// TODO:
-/// default_trap_handler
-/// captured_trap_handler
-/// _raw_trap_entry应该是做好了
-/// _raw_trap_return应该是做好了
 #[unsafe(naked)]
 unsafe extern "C" fn default_trap_handler() {
+    unsafe extern "C" {
+        fn _default_trap_handler(trap_context: &mut TrapContext);
+    }
+
     naked_asm!(
-        "mv t0, sp",
-        "andi sp, sp, -16",
-        "mv a0, t0",
-        "call {handle_trap}",
-
-        "mv sp, t0",
-
+        "andi sp, sp, -16", // Align stack pointer to 16 bytes
+        "addi sp, sp, -16",
+        "mv   a0, t1",      // TrapContext pointer in t1
+        "sd   a0, 0(sp)",   // Save TrapContext pointer
+        "",
+        "call {default_handler}",
+        "",
+        "ld   a0, 0(sp)",   // Restore TrapContext pointer
         "j {trap_return}",
-
-        handle_trap = sym _default_trap_handler,
+        default_handler = sym _default_trap_handler,
         trap_return = sym _raw_trap_return,
     );
 }
@@ -140,23 +195,11 @@ unsafe extern "C" fn default_trap_handler() {
 #[unsafe(naked)]
 unsafe extern "C" fn captured_trap_handler() {
     naked_asm!(
-        "addi sp, sp, -16",
-        "sd ra, 8(sp)",
-
         "la a0, {from_context}",
-
-        "mv t0, tp",
-        "la t1, {to_context}",
-        "add a1, t0, t1",
-
-        "call {switch}",
-
-        "ld ra, 8(sp)",
-        "addi sp, sp, 16",
-        "ret",
-
+        "addi a1, t0, {capturer_context_offset}",
+        "j {switch}",
         from_context = sym DIRTY_TRAP_CONTEXT,
-        to_context = sym _percpu_inner_CAPTURER_CONTEXT,
+        capturer_context_offset = const offset_of!(TrapScratch, capturer_context),
         switch = sym TaskContext::switch,
     );
 }
@@ -164,16 +207,33 @@ unsafe extern "C" fn captured_trap_handler() {
 #[unsafe(naked)]
 unsafe extern "C" fn captured_trap_return(trap_context: usize) -> ! {
     naked_asm!(
-        "la t0, {trap_return}",
-        "jalr zero, t0, 0",
-        trap_return = sym _raw_trap_return,
+        "mv a0, sp",
+        "j {raw_trap_return}",
+        raw_trap_return = sym _raw_trap_return,
     );
+}
+
+impl TrapScratch {
+    pub fn set_trap_context(&mut self, ctx: NonNull<TrapContext>) {
+        self.trap_context = Some(ctx);
+    }
+
+    pub fn clear_trap_context(&mut self) {
+        self.trap_context = None;
+    }
+
+    pub fn set_kernel_tp(&mut self, tp: NonNull<u8>) {
+        self.kernel_tp = Some(NonZero::new(tp.addr().get() as u64).unwrap());
+    }
 }
 
 impl TrapReturn for TrapContext {
     unsafe fn trap_return(&mut self) {
         let irq_states = disable_irqs_save();
-        let old_handler = TRAP_HANDLER.swap(captured_trap_handler);
+        let old_handler = {
+            let trap_scratch = TRAP_SCRATCH.as_mut();
+            core::mem::replace(&mut trap_scratch.handler, captured_trap_handler)
+        };
 
         let mut to_ctx = TaskContext::new();
         to_ctx.set_program_counter(captured_trap_return as _);
@@ -181,10 +241,10 @@ impl TrapReturn for TrapContext {
         to_ctx.set_interrupt_enabled(false);
 
         unsafe {
-            TaskContext::switch(CAPTURER_CONTEXT.as_mut(), &mut to_ctx);
+            TaskContext::switch(&mut TRAP_SCRATCH.as_mut().capturer_context, &mut to_ctx);
         }
 
-        TRAP_HANDLER.set(old_handler);
+        TRAP_SCRATCH.as_mut().handler = old_handler;
         irq_states.restore();
     }
 }

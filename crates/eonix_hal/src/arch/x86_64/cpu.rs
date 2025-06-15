@@ -1,6 +1,8 @@
 use super::gdt::{GDTEntry, GDT};
 use super::interrupt::InterruptControl;
+use super::trap::TrapContext;
 use core::marker::PhantomPinned;
+use core::mem::size_of;
 use core::pin::Pin;
 use eonix_preempt::PreemptGuard;
 use eonix_sync_base::LazyLock;
@@ -114,7 +116,8 @@ impl CPU {
 
     pub unsafe fn load_interrupt_stack(self: Pin<&mut Self>, rsp: u64) {
         unsafe {
-            self.map_unchecked_mut(|me| &mut me.tss).set_rsp0(rsp);
+            self.map_unchecked_mut(|me| &mut me.tss)
+                .set_rsp0(rsp + size_of::<TrapContext>() as u64);
         }
     }
 

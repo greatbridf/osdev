@@ -3,12 +3,12 @@ use eonix_hal_traits::{
     fault::{Fault, PageFaultErrorCode},
     trap::{RawTrapContext, TrapType},
 };
+use eonix_mm::address::VAddr;
 use riscv::{
     interrupt::{Exception, Interrupt, Trap},
     register::{
         scause::{self, Scause},
-        sie,
-        sstatus::{self, Sstatus, SPP},
+        sstatus::{self, Sstatus, FS, SPP},
         stval,
     },
     ExceptionNumber, InterruptNumber,
@@ -22,36 +22,92 @@ pub struct FpuRegisters {
     pub fcsr: u32,
 }
 
+#[repr(C)]
+#[derive(Default, Clone, Copy)]
+pub struct Registers {
+    ra: u64,
+    sp: u64,
+    gp: u64,
+    tp: u64,
+    t1: u64,
+    t2: u64,
+    t0: u64,
+    a0: u64,
+    a1: u64,
+    a2: u64,
+    a3: u64,
+    a4: u64,
+    a5: u64,
+    a6: u64,
+    a7: u64,
+    t3: u64,
+    t4: u64,
+    t5: u64,
+    t6: u64,
+}
+
 /// Saved CPU context when a trap (interrupt or exception) occurs on RISC-V 64.
 #[repr(C)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone, Copy)]
 pub struct TrapContext {
-    pub x: [usize; 32],
+    regs: Registers,
 
-    // CSRs
-    pub sstatus: Sstatus, // sstatus CSR value. Contains privilege mode, interrupt enable, FPU state.
-    pub sepc: usize,      // sepc (Supervisor Exception Program Counter). Program counter at trap.
-    pub scause: Scause,   // S-mode Trap Cause Register
+    sstatus: Sstatus,
+    sepc: usize,
+    scause: Scause,
+}
+
+impl Registers {
+    pub const OFFSET_RA: usize = 0 * 8;
+    pub const OFFSET_SP: usize = 1 * 8;
+    pub const OFFSET_GP: usize = 2 * 8;
+    pub const OFFSET_TP: usize = 3 * 8;
+    pub const OFFSET_T1: usize = 4 * 8;
+    pub const OFFSET_T2: usize = 5 * 8;
+    pub const OFFSET_T0: usize = 6 * 8;
+    pub const OFFSET_A0: usize = 7 * 8;
+    pub const OFFSET_A1: usize = 8 * 8;
+    pub const OFFSET_A2: usize = 9 * 8;
+    pub const OFFSET_A3: usize = 10 * 8;
+    pub const OFFSET_A4: usize = 11 * 8;
+    pub const OFFSET_A5: usize = 12 * 8;
+    pub const OFFSET_A6: usize = 13 * 8;
+    pub const OFFSET_A7: usize = 14 * 8;
+    pub const OFFSET_T3: usize = 15 * 8;
+    pub const OFFSET_T4: usize = 16 * 8;
+    pub const OFFSET_T5: usize = 17 * 8;
+    pub const OFFSET_T6: usize = 18 * 8;
 }
 
 impl TrapContext {
+    pub const OFFSET_SSTATUS: usize = 19 * 8;
+    pub const OFFSET_SEPC: usize = 20 * 8;
+    pub const OFFSET_SCAUSE: usize = 21 * 8;
+
     fn syscall_no(&self) -> usize {
-        self.x[17]
+        self.regs.a7 as usize
     }
 
     fn syscall_args(&self) -> [usize; 6] {
         [
-            self.x[10], self.x[11], self.x[12], self.x[13], self.x[14], self.x[15],
+            self.regs.a0 as usize,
+            self.regs.a1 as usize,
+            self.regs.a2 as usize,
+            self.regs.a3 as usize,
+            self.regs.a4 as usize,
+            self.regs.a5 as usize,
         ]
     }
 }
 
 impl RawTrapContext for TrapContext {
-    /// TODO: temporarily all zero, may change in future
     fn new() -> Self {
+        let mut sstatus = Sstatus::from_bits(0);
+        sstatus.set_fs(FS::Initial);
+
         Self {
-            x: [0; 32],
-            sstatus: sstatus::read(),
+            regs: Registers::default(),
+            sstatus,
             sepc: 0,
             scause: Scause::from_bits(0),
         }
@@ -100,7 +156,7 @@ impl RawTrapContext for TrapContext {
     }
 
     fn get_stack_pointer(&self) -> usize {
-        self.x[2]
+        self.regs.sp as usize
     }
 
     fn set_program_counter(&mut self, pc: usize) {
@@ -108,30 +164,15 @@ impl RawTrapContext for TrapContext {
     }
 
     fn set_stack_pointer(&mut self, sp: usize) {
-        self.x[2] = sp;
+        self.regs.sp = sp as u64;
     }
 
     fn is_interrupt_enabled(&self) -> bool {
-        self.sstatus.sie()
+        self.sstatus.spie()
     }
 
-    /// TODO: may need more precise control
     fn set_interrupt_enabled(&mut self, enabled: bool) {
-        if enabled {
-            self.sstatus.set_sie(enabled);
-            unsafe {
-                sie::set_sext();
-                sie::set_ssoft();
-                sie::set_stimer();
-            };
-        } else {
-            self.sstatus.set_sie(enabled);
-            unsafe {
-                sie::clear_sext();
-                sie::clear_ssoft();
-                sie::clear_stimer();
-            };
-        }
+        self.sstatus.set_spie(enabled);
     }
 
     fn is_user_mode(&self) -> bool {
@@ -146,7 +187,7 @@ impl RawTrapContext for TrapContext {
     }
 
     fn set_user_return_value(&mut self, retval: usize) {
-        self.sepc = retval;
+        self.regs.a0 = retval as u64;
     }
 }
 

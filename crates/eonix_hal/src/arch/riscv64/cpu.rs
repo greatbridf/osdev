@@ -1,9 +1,15 @@
-use super::{interrupt::InterruptControl, trap::setup_trap};
+use super::{
+    interrupt::InterruptControl,
+    trap::{setup_trap, TRAP_SCRATCH},
+};
 use crate::arch::fdt::{FdtExt, FDT};
-use core::pin::Pin;
+use core::{pin::Pin, ptr::NonNull};
 use eonix_preempt::PreemptGuard;
 use eonix_sync_base::LazyLock;
-use riscv::register::{mhartid, sscratch, sstatus};
+use riscv::register::{
+    medeleg::{self, Medeleg},
+    mhartid, sscratch, sstatus,
+};
 use riscv_peripheral::plic::PLIC;
 use sbi::PhysicalAddress;
 
@@ -50,11 +56,8 @@ impl CPU {
         let interrupt = self.map_unchecked_mut(|me| &mut me.interrupt);
         interrupt.init();
 
-        let mut current_sstatus = sstatus::read();
-        current_sstatus.set_spp(sstatus::SPP::Supervisor);
-        current_sstatus.set_sum(true);
-        current_sstatus.set_mxr(true);
-        sstatus::write(current_sstatus);
+        sstatus::set_sum();
+        sscratch::write(TRAP_SCRATCH.as_ptr() as usize);
     }
 
     /// Boot all other hart.
@@ -67,7 +70,9 @@ impl CPU {
     }
 
     pub unsafe fn load_interrupt_stack(self: Pin<&mut Self>, sp: u64) {
-        sscratch::write(sp as usize);
+        TRAP_SCRATCH
+            .as_mut()
+            .set_trap_context(NonNull::new(sp as *mut _).unwrap());
     }
 
     pub fn set_tls32(self: Pin<&mut Self>, _user_tls: &UserTLS) {

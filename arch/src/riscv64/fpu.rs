@@ -1,7 +1,5 @@
 use core::arch::asm;
-
 use eonix_hal_traits::fpu::RawFpuState;
-
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default)]
@@ -107,7 +105,7 @@ impl RawFpuState for FpuState {
             base = in(reg) base_ptr,
             fcsr_val = out(reg) _fcsr_val,
             fcsr_ptr = in(reg) fcsr_ptr,
-            options(nostack, nomem, preserves_flags));
+            options(nostack, preserves_flags));
         }
     }
 }

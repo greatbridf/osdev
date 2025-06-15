@@ -467,7 +467,7 @@ impl<F: Future> Contexted for ThreadRunnable<F> {
             // SAFETY:
             CPU::local()
                 .as_mut()
-                .load_interrupt_stack(trap_ctx_ptr.add(1).addr() as u64);
+                .load_interrupt_stack(trap_ctx_ptr as u64);
         }
     }
 

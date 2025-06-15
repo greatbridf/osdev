@@ -1,6 +1,7 @@
 use super::{
     config::{self, mm::*},
     console::write_str,
+    trap::TRAP_SCRATCH,
 };
 use crate::{
     arch::{
@@ -26,13 +27,7 @@ use eonix_mm::{
 };
 use eonix_percpu::PercpuArea;
 use fdt::Fdt;
-use riscv::{
-    asm::sfence_vma_all,
-    register::{
-        satp,
-        sstatus::{self, FS},
-    },
-};
+use riscv::{asm::sfence_vma_all, register::satp};
 use sbi::legacy::console_putchar;
 
 #[unsafe(link_section = ".bootstrap.stack")]
@@ -100,7 +95,6 @@ unsafe extern "C" fn _start(hart_id: usize, dtb_addr: usize) -> ! {
 /// TODO:
 /// 启动所有的cpu
 pub unsafe extern "C" fn riscv64_start(hart_id: usize, dtb_addr: PAddr) -> ! {
-    enable_fpu();
     let fdt = Fdt::from_ptr(ArchPhysAccess::as_ptr(dtb_addr).as_ptr())
         .expect("Failed to parse DTB from static memory.");
 
@@ -190,13 +184,6 @@ fn setup_kernel_page_table(alloc: impl PageAlloc) {
     sfence_vma_all();
 }
 
-fn enable_fpu() {
-    unsafe {
-        // FS (Floating-point Status) Initial (0b01)
-        sstatus::set_fs(FS::Initial);
-    }
-}
-
 /// set up tp register to percpu
 fn setup_cpu(alloc: impl PageAlloc, hart_id: usize) {
     let mut percpu_area = PercpuArea::new(|layout| {
@@ -227,6 +214,13 @@ fn setup_cpu(alloc: impl PageAlloc, hart_id: usize) {
     }
 
     percpu_area.register(cpu.cpuid());
+
+    unsafe {
+        // SAFETY: Interrupts are disabled.
+        TRAP_SCRATCH
+            .as_mut()
+            .set_kernel_tp(PercpuArea::get_for(cpu.cpuid()).unwrap().cast());
+    }
 }
 
 /// TODO

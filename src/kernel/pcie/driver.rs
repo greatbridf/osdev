@@ -2,10 +2,7 @@ use super::{
     device::{PCIDevice, PCIE_DEVICES},
     error::PciError,
 };
-use crate::{
-    kernel::constants::{EEXIST, ENOENT},
-    KResult,
-};
+use crate::{kernel::constants::EEXIST, KResult};
 use alloc::{
     collections::btree_map::{self, BTreeMap},
     sync::Arc,

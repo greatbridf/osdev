@@ -1,9 +1,5 @@
 use core::arch::asm;
-
-use eonix_mm::{
-    address::{Addr, PAddr, VAddr},
-    paging::PFN,
-};
+use eonix_mm::{address::VAddr, paging::PFN};
 use riscv::{
     asm::{sfence_vma, sfence_vma_all},
     register::{satp, stval},

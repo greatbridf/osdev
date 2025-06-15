@@ -1,6 +1,5 @@
 use super::sysinfo::TimeVal;
 use super::SyscallNoReturn;
-use crate::elf::ParsedElf32;
 use crate::io::Buffer;
 use crate::kernel::constants::{EINVAL, ENOENT, ENOTDIR, ERANGE, ESRCH};
 use crate::kernel::constants::{
@@ -8,8 +7,8 @@ use crate::kernel::constants::{
 };
 use crate::kernel::mem::PageBuffer;
 use crate::kernel::task::{
-    new_thread_runnable, KernelStack, ProcessBuilder, ProcessList, Signal, SignalAction,
-    SignalMask, ThreadBuilder, UserDescriptor, WaitObject, WaitType,
+    new_thread_runnable, KernelStack, ProcessBuilder, ProcessList, ProgramLoader, Signal,
+    SignalAction, SignalMask, ThreadBuilder, UserDescriptor, WaitObject, WaitType,
 };
 use crate::kernel::user::dataflow::UserString;
 use crate::kernel::user::{UserPointer, UserPointerMut};
@@ -145,19 +144,18 @@ fn execve(exec: *const u8, argv: *const u32, envp: *const u32) -> KResult<()> {
 
     // TODO: When `execve` is called by one of the threads in a process, the other threads
     //       should be terminated and `execve` is performed in the thread group leader.
-    let elf = ParsedElf32::parse(dentry.clone())?;
-    if let Ok((ip, sp, mm_list)) = elf.load(argv, envp) {
+    if let Ok(load_info) = ProgramLoader::parse(dentry.clone())?.load(argv, envp) {
         unsafe {
             // SAFETY: We are doing execve, all other threads are terminated.
-            thread.process.mm_list.replace(Some(mm_list));
+            thread.process.mm_list.replace(Some(load_info.mm_list));
         }
         thread.files.on_exec();
         thread.signal_list.clear_non_ignore();
         thread.set_name(dentry.name().clone());
 
         let mut trap_ctx = thread.trap_ctx.borrow();
-        trap_ctx.set_program_counter(ip.addr());
-        trap_ctx.set_stack_pointer(sp.addr());
+        trap_ctx.set_program_counter(load_info.entry_ip.addr());
+        trap_ctx.set_stack_pointer(load_info.sp.addr());
         Ok(())
     } else {
         // We can't hold any ownership when we call `kill_current`.

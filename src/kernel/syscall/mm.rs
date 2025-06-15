@@ -7,7 +7,9 @@ use crate::{
     },
     prelude::*,
 };
+use align_ext::AlignExt;
 use eonix_mm::address::{Addr as _, AddrOps as _, VAddr};
+use eonix_mm::paging::PAGE_SIZE;
 use eonix_runtime::task::Task;
 
 impl FromSyscallArg for UserMmapProtocol {
@@ -46,7 +48,7 @@ fn mmap_pgoff(
         return Err(EINVAL);
     }
 
-    let len = (len + 0xfff) & !0xfff;
+    let len = len.align_up(PAGE_SIZE);
     check_impl(flags.contains(UserMmapFlags::MAP_ANONYMOUS), ENOMEM)?;
     check_impl(flags.contains(UserMmapFlags::MAP_PRIVATE), EINVAL)?;
     if fd != u32::MAX || pgoffset != 0 {
@@ -70,6 +72,7 @@ fn mmap_pgoff(
             len,
             Mapping::Anonymous,
             Permission {
+                read: prot.contains(UserMmapProtocol::PROT_READ),
                 write: prot.contains(UserMmapProtocol::PROT_WRITE),
                 execute: prot.contains(UserMmapProtocol::PROT_EXEC),
             },
@@ -80,6 +83,7 @@ fn mmap_pgoff(
             len,
             Mapping::Anonymous,
             Permission {
+                read: prot.contains(UserMmapProtocol::PROT_READ),
                 write: prot.contains(UserMmapProtocol::PROT_WRITE),
                 execute: prot.contains(UserMmapProtocol::PROT_EXEC),
             },
@@ -96,7 +100,7 @@ fn munmap(addr: usize, len: usize) -> KResult<usize> {
         return Err(EINVAL);
     }
 
-    let len = (len + 0xfff) & !0xfff;
+    let len = len.align_up(PAGE_SIZE);
     Task::block_on(thread.process.mm_list.unmap(addr, len)).map(|_| 0)
 }
 
@@ -109,6 +113,26 @@ fn brk(addr: usize) -> KResult<usize> {
 #[eonix_macros::define_syscall(0xdb)]
 fn madvise(_addr: usize, _len: usize, _advice: u32) -> KResult<()> {
     Ok(())
+}
+
+#[eonix_macros::define_syscall(0x7d)]
+fn mprotect(addr: usize, len: usize, prot: UserMmapProtocol) -> KResult<()> {
+    let addr = VAddr::from(addr);
+    if !addr.is_page_aligned() || len == 0 {
+        return Err(EINVAL);
+    }
+
+    let len = len.align_up(PAGE_SIZE);
+
+    Task::block_on(thread.process.mm_list.protect(
+        addr,
+        len,
+        Permission {
+            read: prot.contains(UserMmapProtocol::PROT_READ),
+            write: prot.contains(UserMmapProtocol::PROT_WRITE),
+            execute: prot.contains(UserMmapProtocol::PROT_EXEC),
+        },
+    ))
 }
 
 pub fn keep_alive() {}

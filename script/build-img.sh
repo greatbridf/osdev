@@ -26,7 +26,6 @@ $SUDO cp ./init_script.sh build/mnt/initsh
 
 # Add your custom files here
 
-# $SUDO cp -r $HOME/.local/i486-linux-musl-cross build/mnt/
 
 # End of custom files
 

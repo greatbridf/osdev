@@ -6,6 +6,7 @@ pub(crate) mod arch;
 
 pub mod bootstrap;
 pub mod context;
+pub mod device;
 pub mod mm;
 pub mod processor;
 pub mod trap;

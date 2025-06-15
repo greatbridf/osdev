@@ -25,12 +25,11 @@ use core::{
     hint::spin_loop,
     sync::atomic::{AtomicBool, Ordering},
 };
-use eonix_hal::{processor::CPU, traits::trap::IrqState, trap::disable_irqs_save};
+use eonix_hal::{processor::CPU, trap::disable_irqs_save};
 use eonix_mm::address::PRange;
 use eonix_runtime::{run::FutureRun, scheduler::Scheduler, task::Task};
 use kernel::{
     mem::GlobalPageAlloc,
-    pcie::init_pcie,
     task::{
         new_thread_runnable, KernelStack, ProcessBuilder, ProcessList, ProgramLoader, ThreadBuilder,
     },
@@ -71,7 +70,12 @@ fn kernel_init(mut data: eonix_hal::bootstrap::BootStrapData) -> ! {
 
     BSP_OK.store(true, Ordering::Release);
 
-    init_pcie().expect("Unable to initialize PCIe bus");
+    #[cfg(target_arch = "riscv64")]
+    {
+        driver::sbi_console::init_console();
+    }
+
+    kernel::pcie::init_pcie().expect("Unable to initialize PCIe bus");
 
     // To satisfy the `Scheduler` "preempt count == 0" assertion.
     eonix_preempt::disable();
@@ -120,11 +124,20 @@ async fn init_process(early_kstack: PRange) {
 
     CharDevice::init().unwrap();
 
-    // We might want the serial initialized as soon as possible.
-    driver::serial::init().unwrap();
+    #[cfg(target_arch = "x86_64")]
+    {
+        // We might want the serial initialized as soon as possible.
+        driver::serial::init().unwrap();
+        driver::e1000e::register_e1000e_driver();
+        driver::ahci::register_ahci_driver();
+    }
 
-    driver::e1000e::register_e1000e_driver();
-    driver::ahci::register_ahci_driver();
+    #[cfg(target_arch = "riscv64")]
+    {
+        driver::virtio::init_virtio_devices();
+        driver::e1000e::register_e1000e_driver();
+        driver::ahci::register_ahci_driver();
+    }
 
     fs::tmpfs::init();
     fs::procfs::init();

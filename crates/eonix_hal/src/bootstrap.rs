@@ -20,3 +20,13 @@ impl BootStrapData {
         self.early_stack
     }
 }
+
+#[cfg(target_arch = "riscv64")]
+pub fn early_console_write(s: &str) {
+    crate::arch::bootstrap::early_console_write(s);
+}
+
+#[cfg(target_arch = "riscv64")]
+pub fn early_console_putchar(ch: u8) {
+    crate::arch::bootstrap::early_console_putchar(ch);
+}

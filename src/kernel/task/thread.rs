@@ -22,7 +22,6 @@ use core::{
     sync::atomic::{AtomicBool, Ordering},
     task::{Context, Poll, Waker},
 };
-use eonix_hal::traits::trap::IrqState;
 use eonix_hal::{
     processor::{UserTLS, CPU},
     traits::{
@@ -468,7 +467,7 @@ impl<F: Future> Contexted for ThreadRunnable<F> {
             // SAFETY:
             CPU::local()
                 .as_mut()
-                .load_interrupt_stack(trap_ctx_ptr.add(1).addr() as u64);
+                .load_interrupt_stack(trap_ctx_ptr as u64);
         }
     }
 

@@ -1,7 +1,7 @@
 use super::mem::handle_kernel_page_fault;
 use super::timer::timer_interrupt;
 use crate::kernel::constants::EINVAL;
-use crate::{driver::Port8, prelude::*};
+use crate::prelude::*;
 use alloc::sync::Arc;
 use eonix_hal::processor::CPU;
 use eonix_hal::traits::fault::Fault;
@@ -22,13 +22,13 @@ pub fn default_irq_handler(irqno: usize) {
         handler();
     }
 
-    const PIC1_COMMAND: Port8 = Port8::new(0x20);
-    const PIC2_COMMAND: Port8 = Port8::new(0xA0);
+    // const PIC1_COMMAND: Port8 = Port8::new(0x20);
+    // const PIC2_COMMAND: Port8 = Port8::new(0xA0);
 
-    PIC1_COMMAND.write(0x20); // EOI
-    if irqno >= 8 {
-        PIC2_COMMAND.write(0x20); // EOI
-    }
+    // PIC1_COMMAND.write(0x20); // EOI
+    // if irqno >= 8 {
+    //     PIC2_COMMAND.write(0x20); // EOI
+    // }
 }
 
 pub fn default_fault_handler(fault_type: Fault, trap_ctx: &mut TrapContext) {

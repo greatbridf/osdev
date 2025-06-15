@@ -12,6 +12,12 @@ pub use eonix_percpu_macros::define_percpu_x86_64 as define_percpu;
 #[cfg(target_arch = "x86_64")]
 pub use eonix_percpu_macros::define_percpu_shared_x86_64 as define_percpu_shared;
 
+#[cfg(target_arch = "riscv64")]
+pub use eonix_percpu_macros::define_percpu_riscv64 as define_percpu;
+
+#[cfg(target_arch = "riscv64")]
+pub use eonix_percpu_macros::define_percpu_shared_riscv64 as define_percpu_shared;
+
 const MAX_CPUS: usize = 256;
 
 #[repr(align(16))]

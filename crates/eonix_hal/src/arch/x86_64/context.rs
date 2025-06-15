@@ -36,39 +36,6 @@ impl TaskContext {
     }
 
     #[unsafe(naked)]
-    unsafe extern "C" fn _switch(from: &mut Self, to: &mut Self) {
-        naked_asm!(
-            "pop %rax",
-            "pushf",
-            "pop %rcx",
-            "mov %r12, (%rdi)",
-            "mov %r13, 8(%rdi)",
-            "mov %r14, 16(%rdi)",
-            "mov %r15, 24(%rdi)",
-            "mov %rbx, 32(%rdi)",
-            "mov %rbp, 40(%rdi)",
-            "mov %rsp, 48(%rdi)",
-            "mov %rax, 56(%rdi)",
-            "mov %rcx, 64(%rdi)",
-            "",
-            "mov (%rsi), %r12",
-            "mov 8(%rsi), %r13",
-            "mov 16(%rsi), %r14",
-            "mov 24(%rsi), %r15",
-            "mov 32(%rsi), %rbx",
-            "mov 40(%rsi), %rbp",
-            "mov 48(%rsi), %rdi", // store next stack pointer
-            "mov 56(%rsi), %rax",
-            "mov 64(%rsi), %rcx",
-            "push %rcx",
-            "popf",
-            "xchg %rdi, %rsp", // switch to new stack
-            "jmp *%rax",
-            options(att_syntax),
-        );
-    }
-
-    #[unsafe(naked)]
     unsafe extern "C" fn do_call() -> ! {
         naked_asm!(
             "mov %r12, %rdi",
@@ -111,9 +78,36 @@ impl RawTaskContext for TaskContext {
         self.rbp = 0; // NULL previous stack frame
     }
 
+    #[unsafe(naked)]
     unsafe extern "C" fn switch(from: &mut Self, to: &mut Self) {
-        unsafe {
-            Self::_switch(from, to);
-        }
+        naked_asm!(
+            "pop %rax",
+            "pushf",
+            "pop %rcx",
+            "mov %r12, (%rdi)",
+            "mov %r13, 8(%rdi)",
+            "mov %r14, 16(%rdi)",
+            "mov %r15, 24(%rdi)",
+            "mov %rbx, 32(%rdi)",
+            "mov %rbp, 40(%rdi)",
+            "mov %rsp, 48(%rdi)",
+            "mov %rax, 56(%rdi)",
+            "mov %rcx, 64(%rdi)",
+            "",
+            "mov (%rsi), %r12",
+            "mov 8(%rsi), %r13",
+            "mov 16(%rsi), %r14",
+            "mov 24(%rsi), %r15",
+            "mov 32(%rsi), %rbx",
+            "mov 40(%rsi), %rbp",
+            "mov 48(%rsi), %rdi", // store next stack pointer
+            "mov 56(%rsi), %rax",
+            "mov 64(%rsi), %rcx",
+            "push %rcx",
+            "popf",
+            "xchg %rdi, %rsp", // switch to new stack
+            "jmp *%rax",
+            options(att_syntax),
+        );
     }
 }

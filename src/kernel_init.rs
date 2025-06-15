@@ -33,7 +33,6 @@ pub fn setup_memory(data: &mut BootStrapData) {
         let attr = PageAttribute::PRESENT
             | PageAttribute::WRITE
             | PageAttribute::READ
-            | PageAttribute::HUGE
             | PageAttribute::GLOBAL;
 
         let page = GenericPage::alloc_in(&alloc);

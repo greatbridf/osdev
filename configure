@@ -5,6 +5,33 @@ event() {
     printf "$1... "
 }
 
+ARCH=${ARCH:-x86_64}
+
+# Define toolchain and QEMU/GDB settings for per architecture
+event "target architecture"
+echo "$ARCH"
+case "$ARCH" in
+    x86_64)
+        QEMU_EXECUTABLES="qemu-system-x86_64"
+        GDB_EXECUTABLES="gdb x86_64-elf-gdb"
+        : "${CROSS_COMPILE:=}"
+        ;;
+    riscv64)
+        QEMU_EXECUTABLES="qemu-system-riscv64"
+        GDB_EXECUTABLES="gdb riscv64-unknown-elf-gdb"
+        : "${CROSS_COMPILE:=riscv64-unknown-elf-}"
+        ;;
+    aarch64)
+        QEMU_EXECUTABLES="qemu-system-aarch64"
+        GDB_EXECUTABLES="gdb aarch64-none-elf-gdb"
+        : "${CROSS_COMPILE:=aarch64-none-elf-}"
+        ;;
+    *)
+        echo "Unsupported ARCH: $ARCH"
+        exit 1
+        ;;
+esac
+
 if [ "$QEMU" = "" ]; then
     event "checking default qemu"
     QEMU="qemu-system-$DEFAULT_ARCH"

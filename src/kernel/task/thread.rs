@@ -23,6 +23,7 @@ use core::{
     task::{Context, Poll, Waker},
 };
 use eonix_hal::{
+    context::TaskContext,
     processor::{UserTLS, CPU},
     traits::{
         fault::Fault,
@@ -344,6 +345,8 @@ impl Thread {
     }
 
     async fn real_run(&self) {
+        let mut task_context = TaskContext::new();
+
         while !self.is_dead() {
             if self.signal_list.has_pending_signal() {
                 self.signal_list
@@ -359,7 +362,7 @@ impl Thread {
 
             unsafe {
                 // SAFETY: We are returning to the context of the user thread.
-                self.trap_ctx.borrow().trap_return();
+                self.trap_ctx.borrow().trap_return(&mut task_context);
             }
 
             self.fpu_state.borrow().save();

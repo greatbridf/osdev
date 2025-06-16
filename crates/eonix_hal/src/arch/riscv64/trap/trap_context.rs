@@ -104,6 +104,7 @@ impl RawTrapContext for TrapContext {
     fn new() -> Self {
         let mut sstatus = Sstatus::from_bits(0);
         sstatus.set_fs(FS::Initial);
+        sstatus.set_sum(true);
 
         Self {
             regs: Registers::default(),

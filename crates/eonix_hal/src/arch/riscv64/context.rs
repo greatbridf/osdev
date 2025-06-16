@@ -89,7 +89,7 @@ impl TaskContext {
             s: [0; 12],
             sp: 0,
             ra: 0,
-            sstatus: Sstatus::from_bits(1 << 13), // Set FS = Initial
+            sstatus: Sstatus::from_bits((1 << 13) | (1 << 18)), // FS = Initial, SUM = 1.
         }
     }
 

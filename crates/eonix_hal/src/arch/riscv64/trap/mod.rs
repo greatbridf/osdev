@@ -28,6 +28,7 @@ pub struct TrapScratch {
     kernel_tp: Option<NonZero<u64>>,
     trap_context: Option<NonNull<TrapContext>>,
     handler: unsafe extern "C" fn(),
+    captured_context: Option<NonNull<TaskContext>>,
     capturer_context: TaskContext,
 }
 
@@ -38,11 +39,9 @@ pub(crate) static TRAP_SCRATCH: TrapScratch = TrapScratch {
     kernel_tp: None,
     trap_context: None,
     handler: default_trap_handler,
+    captured_context: None,
     capturer_context: TaskContext::new(),
 };
-
-/// This value will never be used.
-static mut DIRTY_TRAP_CONTEXT: TaskContext = TaskContext::new();
 
 #[unsafe(naked)]
 unsafe extern "C" fn _raw_trap_entry() -> ! {
@@ -195,10 +194,10 @@ unsafe extern "C" fn default_trap_handler() {
 #[unsafe(naked)]
 unsafe extern "C" fn captured_trap_handler() {
     naked_asm!(
-        "la a0, {from_context}",
+        "ld   a0, {captured_context_offset}(t0)",
         "addi a1, t0, {capturer_context_offset}",
         "j {switch}",
-        from_context = sym DIRTY_TRAP_CONTEXT,
+        captured_context_offset = const offset_of!(TrapScratch, captured_context),
         capturer_context_offset = const offset_of!(TrapScratch, capturer_context),
         switch = sym TaskContext::switch,
     );
@@ -228,23 +227,30 @@ impl TrapScratch {
 }
 
 impl TrapReturn for TrapContext {
-    unsafe fn trap_return(&mut self) {
+    type TaskContext = TaskContext;
+
+    unsafe fn trap_return(&mut self, to_ctx: &mut Self::TaskContext) {
         let irq_states = disable_irqs_save();
         let old_handler = {
             let trap_scratch = TRAP_SCRATCH.as_mut();
+            trap_scratch.captured_context = Some(NonNull::from(&mut *to_ctx));
             core::mem::replace(&mut trap_scratch.handler, captured_trap_handler)
         };
 
-        let mut to_ctx = TaskContext::new();
-        to_ctx.set_program_counter(captured_trap_return as _);
+        to_ctx.set_program_counter(captured_trap_return as usize);
         to_ctx.set_stack_pointer(&raw mut *self as usize);
         to_ctx.set_interrupt_enabled(false);
 
         unsafe {
-            TaskContext::switch(&mut TRAP_SCRATCH.as_mut().capturer_context, &mut to_ctx);
+            TaskContext::switch(&mut TRAP_SCRATCH.as_mut().capturer_context, to_ctx);
         }
 
-        TRAP_SCRATCH.as_mut().handler = old_handler;
+        {
+            let trap_scratch = TRAP_SCRATCH.as_mut();
+            trap_scratch.handler = old_handler;
+            trap_scratch.captured_context = None;
+        }
+
         irq_states.restore();
     }
 }

@@ -1,4 +1,4 @@
-use crate::fault::Fault;
+use crate::{context::RawTaskContext, fault::Fault};
 use core::marker::PhantomData;
 
 /// A raw trap context.
@@ -28,6 +28,8 @@ pub trait RawTrapContext: Copy {
 
 #[doc(notable_trait)]
 pub trait TrapReturn {
+    type TaskContext: RawTaskContext;
+
     /// Return to the context before the trap occurred.
     ///
     /// # Safety
@@ -35,7 +37,7 @@ pub trait TrapReturn {
     /// context before the trap is valid, that is, that the stack pointer
     /// points to a valid stack frame and the program counter points to some
     /// valid instruction.
-    unsafe fn trap_return(&mut self);
+    unsafe fn trap_return(&mut self, task_ctx: &mut Self::TaskContext);
 }
 
 pub trait IrqState {

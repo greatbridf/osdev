@@ -157,9 +157,9 @@ impl ElfArch for ElfArch64 {
     type Ea = u64;
     type Ph = ProgramHeader64;
 
-    const DYN_BASE_ADDR: usize = 0xaaaa_0000_0000;
-    const LDSO_BASE_ADDR: usize = 0xf000_0000_0000;
-    const STACK_BASE_ADDR: usize = 0xffff_ffff_0000;
+    const DYN_BASE_ADDR: usize = 0x2aaa_0000_0000;
+    const LDSO_BASE_ADDR: usize = 0x7000_0000_0000;
+    const STACK_BASE_ADDR: usize = 0x7fff_ffff_0000;
 }
 
 impl<E: ElfArch> Elf<E> {

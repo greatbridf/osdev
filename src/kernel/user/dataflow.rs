@@ -93,7 +93,7 @@ impl CheckedUserPointer {
 
     /// # Might Sleep
     pub fn read(&self, buffer: *mut (), total: usize) -> KResult<()> {
-        /*assert_preempt_enabled!("UserPointer::read");
+        assert_preempt_enabled!("UserPointer::read");
 
         if total > self.len {
             return Err(EINVAL);
@@ -101,6 +101,7 @@ impl CheckedUserPointer {
 
         let error_bytes: usize;
         unsafe {
+            #[cfg(target_arch = "x86_64")]
             asm!(
                 "2:",
                 "rep movsb",
@@ -108,28 +109,51 @@ impl CheckedUserPointer {
                 "nop",
                 ".pushsection .fix, \"a\", @progbits",
                 ".align 32",
-                ".quad 2b",  // instruction address
-                ".quad 3b - 2b",  // instruction length
-                ".quad 3b",  // fix jump address
-                ".quad 0x3", // type: load
+                ".quad 2b",      // instruction address
+                ".quad 3b - 2b", // instruction length
+                ".quad 3b",      // fix jump address
+                ".quad 0x3",     // type: load
                 ".popsection",
-                //inout("rcx") total => error_bytes,
-                //inout("rsi") self.ptr => _,
-                //inout("rdi") buffer => _,
-            )
+                inout("rcx") total => error_bytes,
+                inout("rsi") self.ptr => _,
+                inout("rdi") buffer => _,
+            );
+
+            #[cfg(target_arch = "riscv64")]
+            asm!(
+                "2:",
+                "lb t0, 0(a1)",
+                "sb t0, 0(a2)",
+                "addi a1, a1, 1",
+                "addi a2, a2, 1",
+                "addi a0, a0, -1",
+                "bnez a0, 2b",
+                "3:",
+                "nop",
+                ".pushsection .fix, \"a\", @progbits",
+                ".align 16",
+                ".quad 2b",      // instruction address
+                ".quad 3b - 2b", // instruction length
+                ".quad 3b",      // fix jump address
+                ".quad 0x3",     // type: load
+                ".popsection",
+                inout("a0") total => error_bytes,
+                inout("a1") self.ptr => _,
+                inout("a2") buffer => _,
+                out("t0") _,
+            );
         }
 
         if error_bytes != 0 {
             Err(EFAULT)
         } else {
             Ok(())
-        }*/
-        Ok(())
+        }
     }
 
     /// # Might Sleep
     pub fn write(&self, data: *mut (), total: usize) -> KResult<()> {
-        /*assert_preempt_enabled!("UserPointer::write");
+        assert_preempt_enabled!("UserPointer::write");
 
         if total > self.len {
             return Err(EINVAL);
@@ -138,6 +162,7 @@ impl CheckedUserPointer {
         // TODO: align to 8 bytes when doing copy for performance
         let error_bytes: usize;
         unsafe {
+            #[cfg(target_arch = "x86_64")]
             asm!(
                 "2:",
                 "rep movsb",
@@ -153,19 +178,43 @@ impl CheckedUserPointer {
                 inout("rcx") total => error_bytes,
                 inout("rsi") data => _,
                 inout("rdi") self.ptr => _,
-            )
+            );
+
+            #[cfg(target_arch = "riscv64")]
+            asm!(
+                "2:",
+                "lb t0, 0(a1)",
+                "sb t0, 0(a2)",
+                "addi a1, a1, 1",
+                "addi a2, a2, 1",
+                "addi a0, a0, -1",
+                "bnez a0, 2b",
+                "3:",
+                "nop",
+                ".pushsection .fix, \"a\", @progbits",
+                ".align 16",
+                ".quad 2b",  // instruction address
+                ".quad 3b - 2b",  // instruction length
+                ".quad 3b",  // fix jump address
+                ".quad 0x1", // type: store
+                ".popsection",
+                inout("a0") total => error_bytes,
+                inout("a1") data => _,
+                inout("a2") self.ptr => _,
+                out("t0") _,
+            );
         };
 
         if error_bytes != 0 {
             return Err(EFAULT);
-        }*/
+        }
 
         Ok(())
     }
 
     /// # Might Sleep
     pub fn zero(&self) -> KResult<()> {
-        /*assert_preempt_enabled!("CheckedUserPointer::zero");
+        assert_preempt_enabled!("CheckedUserPointer::zero");
 
         if self.len == 0 {
             return Ok(());
@@ -174,6 +223,7 @@ impl CheckedUserPointer {
         // TODO: align to 8 bytes when doing copy for performance
         let error_bytes: usize;
         unsafe {
+            #[cfg(target_arch = "x86_64")]
             asm!(
                 "2:",
                 "rep stosb",
@@ -190,15 +240,34 @@ impl CheckedUserPointer {
                 inout("rcx") self.len => error_bytes,
                 inout("rdi") self.ptr => _,
                 options(att_syntax)
-            )
+            );
+
+            #[cfg(target_arch = "riscv64")]
+            asm!(
+                "2:",
+                "sb zero, 0(a1)",
+                "addi a1, a1, 1",
+                "addi a0, a0, -1",
+                "bnez a0, 2b",
+                "3:",
+                "nop",
+                ".pushsection .fix, \"a\", @progbits",
+                ".align 16",
+                ".quad 2b",  // instruction address
+                ".quad 3b - 2b",  // instruction length
+                ".quad 3b",  // fix jump address
+                ".quad 0x1", // type: store
+                ".popsection",
+                inout("a0") self.len => error_bytes,
+                inout("a1") self.ptr => _,
+            );
         };
 
         if error_bytes != 0 {
             Err(EFAULT)
         } else {
             Ok(())
-        }*/
-        Ok(())
+        }
     }
 }
 
@@ -252,14 +321,14 @@ impl<'lt> Buffer for UserBuffer<'lt> {
 impl<'lt> UserString<'lt> {
     /// # Might Sleep
     pub fn new(ptr: *const u8) -> KResult<Self> {
-        /*assert_preempt_enabled!("UserString::new");
+        assert_preempt_enabled!("UserString::new");
 
         const MAX_LEN: usize = 4096;
-        // TODO
         let ptr = CheckedUserPointer::new(ptr, MAX_LEN)?;
 
         let result: usize;
         unsafe {
+            #[cfg(target_arch = "x86_64")]
             asm!(
                 "2:",
                 "movb ({ptr}), %al",
@@ -281,7 +350,30 @@ impl<'lt> UserString<'lt> {
                 inout("rcx") MAX_LEN => result,
                 ptr = inout(reg) ptr.ptr => _,
                 options(att_syntax),
-            )
+            );
+
+            #[cfg(target_arch = "riscv64")]
+            asm!(
+                "2:",
+                "lb t0, 0(a1)",
+                "4:",
+                "beqz t0, 3f",
+                "addi a1, a1, 1",
+                "addi a0, a0, -1",
+                "bnez a0, 2b",
+                "3:",
+                "nop",
+                ".pushsection .fix, \"a\", @progbits",
+                ".align 16",
+                ".quad 2b",  // instruction address
+                ".quad 4b - 2b",  // instruction length
+                ".quad 3b",  // fix jump address
+                ".quad 0x2", // type: string
+                ".popsection",
+                out("t0") _,
+                inout("a0") MAX_LEN => result,
+                inout("a1") ptr.ptr => _,
+            );
         };
 
         if result == 0 {
@@ -292,8 +384,7 @@ impl<'lt> UserString<'lt> {
                 len: MAX_LEN - result,
                 _phantom: core::marker::PhantomData,
             })
-        }*/
-        Err(EFAULT)
+        }
     }
 
     pub fn as_cstr(&self) -> &'lt CStr {

@@ -2,20 +2,14 @@ extern crate proc_macro;
 
 use proc_macro2::{Span, TokenStream};
 use quote::quote;
-use syn::{parse2, FnArg, Ident, ItemFn, LitInt, LitStr};
+use syn::{parse2, FnArg, Ident, ItemFn, LitStr};
 
 fn define_syscall_impl(attrs: TokenStream, item: TokenStream) -> TokenStream {
     if attrs.is_empty() {
         panic!("`define_syscall` attribute should take one argument: `syscall_no`");
     }
 
-    let syscall_no = parse2::<LitInt>(attrs).expect("Invalid syscall number");
-    let syscall_no = syscall_no
-        .base10_parse::<usize>()
-        .expect("Invalid syscall number");
-
-    assert!(syscall_no < 512, "Syscall number must be less than 512");
-
+    let syscall_no = parse2::<Ident>(attrs).expect("Invalid syscall number");
     let item = parse2::<ItemFn>(item).unwrap();
 
     let attrs = item.attrs;
@@ -57,7 +51,7 @@ fn define_syscall_impl(attrs: TokenStream, item: TokenStream) -> TokenStream {
 
     let helper_fn = Ident::new(&format!("_do_syscall_{}", syscall_name), Span::call_site());
     let helper_fn_pointer = Ident::new(
-        &format!("_SYSCALL_ENTRY_{:03}", syscall_no),
+        &format!("_SYSCALL_ENTRY_{}", syscall_name.to_string().to_uppercase()),
         Span::call_site(),
     );
 

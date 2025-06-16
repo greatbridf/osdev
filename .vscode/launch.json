@@ -3,7 +3,7 @@
         {
             "type": "cppdbg",
             "request": "launch",
-            "name": "Launch Kernel",
+            "name": "Launch Kernel (riscv64)",
             "program": "${workspaceFolder}/build/kernel.sym",
             "args": [],
             "stopAtEntry": false,
@@ -14,11 +14,6 @@
             "miDebuggerPath": "/Users/david/.local/riscv64-unknown-elf-gcc-8.3.0-2020.04.1-x86_64-apple-darwin/bin/riscv64-unknown-elf-gdb",
             "miDebuggerServerAddress": "127.0.0.1:1234",
             "setupCommands": [
-                // {
-                //     "text": "source ${env:HOME}/.rustup/toolchains/nightly-aarch64-apple-darwin/lib/rustlib/etc/gdb_load_rust_pretty_printers.py",
-                //     "description": "Load Rust pretty printers",
-                //     "ignoreFailures": false
-                // },
                 {
                     "text": "-enable-pretty-printing",
                     "description": "Enable GDB pretty printing",
@@ -30,13 +25,13 @@
                 //     "ignoreFailures": false
                 // },
             ],
-            "preLaunchTask": "debug run",
-            "postDebugTask": "kill qemu"
+            "preLaunchTask": "debug run riscv64",
+            "postDebugTask": "kill qemu riscv64"
         },
         {
             "type": "cppdbg",
             "request": "launch",
-            "name": "Attach Kernel",
+            "name": "Attach Kernel (x86_64)",
             "program": "${workspaceFolder}/build/kernel.sym",
             "args": [],
             "stopAtEntry": false,

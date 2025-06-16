@@ -6,6 +6,7 @@ use crate::{
     },
     prelude::*,
 };
+use posix_types::syscall_no::*;
 
 #[derive(Clone, Copy)]
 struct NewUTSName {
@@ -23,7 +24,7 @@ fn copy_cstr_to_array(cstr: &[u8], array: &mut [u8]) {
     array[len] = 0;
 }
 
-#[eonix_macros::define_syscall(0x7a)]
+#[eonix_macros::define_syscall(SYS_NEWUNAME)]
 fn newuname(buffer: *mut NewUTSName) -> KResult<()> {
     let buffer = UserPointerMut::new(buffer)?;
     let mut uname = NewUTSName {
@@ -60,7 +61,7 @@ pub struct TimeSpec {
     nsec: u64,
 }
 
-#[eonix_macros::define_syscall(0x4e)]
+#[eonix_macros::define_syscall(SYS_GETTIMEOFDAY)]
 fn gettimeofday(timeval: *mut TimeVal, timezone: *mut ()) -> KResult<()> {
     if !timezone.is_null() {
         return Err(EINVAL);
@@ -78,7 +79,7 @@ fn gettimeofday(timeval: *mut TimeVal, timezone: *mut ()) -> KResult<()> {
     Ok(())
 }
 
-#[eonix_macros::define_syscall(0x193)]
+#[eonix_macros::define_syscall(SYS_CLOCK_GETTIME64)]
 fn clock_gettime64(clock_id: u32, timespec: *mut TimeSpec) -> KResult<()> {
     if clock_id != CLOCK_REALTIME && clock_id != CLOCK_MONOTONIC {
         unimplemented!("Unsupported clock_id: {}", clock_id);
@@ -110,7 +111,7 @@ struct Sysinfo {
     _padding: [u8; 8],
 }
 
-#[eonix_macros::define_syscall(0x74)]
+#[eonix_macros::define_syscall(SYS_SYSINFO)]
 fn sysinfo(info: *mut Sysinfo) -> KResult<()> {
     let info = UserPointerMut::new(info)?;
     info.write(Sysinfo {
@@ -139,7 +140,7 @@ struct TMS {
     tms_cstime: u32,
 }
 
-#[eonix_macros::define_syscall(0x2b)]
+#[eonix_macros::define_syscall(SYS_TIMES)]
 fn times(tms: *mut TMS) -> KResult<()> {
     let tms = UserPointerMut::new(tms)?;
     tms.write(TMS {

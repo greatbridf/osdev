@@ -341,6 +341,9 @@ version = "0.1.0"
 [[package]]
 name = "posix_types"
 version = "0.1.0"
+dependencies = [
+ "cfg-if",
+]
 
 [[package]]
 name = "proc-macro2"

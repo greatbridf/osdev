@@ -21,6 +21,7 @@ use eonix_sync::{
     UnlockableGuard as _, UnlockedGuard as _,
 };
 use pointers::BorrowedArc;
+use posix_types::constants::{CLD_CONTINUED, CLD_DUMPED, CLD_EXITED, CLD_KILLED, CLD_STOPPED};
 
 pub struct ProcessBuilder {
     mm_list: Option<MMList>,
@@ -116,6 +117,17 @@ impl WaitType {
             WaitType::Signaled(signal) => u32::from(signal),
             WaitType::Stopped(signal) => 0x7f | (u32::from(signal) << 8),
             WaitType::Continued => 0xffff,
+        }
+    }
+
+    pub fn to_status_code(self) -> (u32, u32) {
+        // TODO: CLD_TRAPPED
+        match self {
+            WaitType::Exited(status) => (status, CLD_EXITED),
+            WaitType::Signaled(signal @ SIGNAL_COREDUMP!()) => (u32::from(signal), CLD_DUMPED),
+            WaitType::Signaled(signal) => (u32::from(signal), CLD_KILLED),
+            WaitType::Stopped(signal) => (u32::from(signal), CLD_STOPPED),
+            WaitType::Continued => (u32::from(Signal::SIGCONT), CLD_CONTINUED),
         }
     }
 }

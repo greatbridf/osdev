@@ -3,9 +3,8 @@ use super::{
     inode::{Mode, WriteOffset},
     s_isblk, s_isdir, s_isreg,
 };
-use crate::kernel::{
-    constants::{EBADF, EFAULT, EINTR, EINVAL, ENOTDIR, ENOTTY, EOVERFLOW, EPIPE, ESPIPE, S_IFMT},
-    syscall::file_rw::StatX,
+use crate::kernel::constants::{
+    EBADF, EFAULT, EINTR, EINVAL, ENOTDIR, ENOTTY, EOVERFLOW, EPIPE, ESPIPE, S_IFMT,
 };
 use crate::{
     io::{Buffer, BufferFill, ByteBuffer, Chunks},
@@ -25,6 +24,7 @@ use bitflags::bitflags;
 use core::{ops::ControlFlow, sync::atomic::Ordering};
 use eonix_runtime::task::Task;
 use eonix_sync::Mutex;
+use posix_types::stat::StatX;
 
 pub struct InodeFile {
     read: bool,

@@ -3,7 +3,7 @@ use crate::kernel::constants::{
     EINVAL, EISDIR, ENOTDIR, EPERM, STATX_ATIME, STATX_BLOCKS, STATX_CTIME, STATX_GID, STATX_INO,
     STATX_MODE, STATX_MTIME, STATX_NLINK, STATX_SIZE, STATX_TYPE, STATX_UID, S_IFDIR, S_IFMT,
 };
-use crate::{io::Buffer, kernel::syscall::file_rw::StatX, prelude::*};
+use crate::{io::Buffer, prelude::*};
 use alloc::sync::{Arc, Weak};
 use core::{
     mem::MaybeUninit,
@@ -13,6 +13,7 @@ use core::{
 };
 use eonix_runtime::task::Task;
 use eonix_sync::RwLock;
+use posix_types::stat::StatX;
 
 pub type Ino = u64;
 pub type AtomicIno = AtomicU64;

@@ -10,7 +10,7 @@ use crate::kernel::constants::{
 use crate::{
     hash::KernelHasher,
     io::{Buffer, ByteBuffer},
-    kernel::{block::BlockDevice, syscall::file_rw::StatX, CharDevice},
+    kernel::{block::BlockDevice, CharDevice},
     path::{Path, PathComponent},
     prelude::*,
     rcu::{RCUNode, RCUPointer},
@@ -23,6 +23,7 @@ use core::{
     sync::atomic::{AtomicPtr, Ordering},
 };
 use eonix_sync::LazyLock;
+use posix_types::stat::StatX;
 
 struct DentryData {
     inode: Arc<dyn Inode>,

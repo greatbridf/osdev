@@ -22,6 +22,7 @@ use crate::{
 use alloc::sync::Arc;
 use core::mem::MaybeUninit;
 use eonix_runtime::task::Task;
+use posix_types::stat::{Stat, StatX};
 use posix_types::syscall_no::*;
 
 fn dentry_from(
@@ -50,41 +51,6 @@ fn dentry_from(
             Dentry::open_at(&thread.fs_context, dir_dentry, path, follow_symlink)
         }
     }
-}
-
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct StatXTimestamp {
-    pub tv_sec: i64,
-    pub tv_nsec: u32,
-    pub __reserved: i32,
-}
-
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct StatX {
-    pub stx_mask: u32,
-    pub stx_blksize: u32,
-    pub stx_attributes: u64,
-    pub stx_nlink: u32,
-    pub stx_uid: u32,
-    pub stx_gid: u32,
-    pub stx_mode: u16,
-    pub __spare0: [u16; 1usize],
-    pub stx_ino: u64,
-    pub stx_size: u64,
-    pub stx_blocks: u64,
-    pub stx_attributes_mask: u64,
-    pub stx_atime: StatXTimestamp,
-    pub stx_btime: StatXTimestamp,
-    pub stx_ctime: StatXTimestamp,
-    pub stx_mtime: StatXTimestamp,
-    pub stx_rdev_major: u32,
-    pub stx_rdev_minor: u32,
-    pub stx_dev_major: u32,
-    pub stx_dev_minor: u32,
-    pub stx_mnt_id: u64,
-    pub stx_dio_alignment: [u64; 13usize],
 }
 
 #[eonix_macros::define_syscall(SYS_READ)]
@@ -157,6 +123,26 @@ fn getdents64(fd: u32, buffer: *mut u8, bufsize: usize) -> KResult<usize> {
 
     thread.files.get(fd).ok_or(EBADF)?.getdents64(&mut buffer)?;
     Ok(buffer.wrote())
+}
+
+#[eonix_macros::define_syscall(SYS_NEWFSTATAT)]
+fn newfstatat(dirfd: u32, pathname: *const u8, statbuf: *mut Stat, flags: u32) -> KResult<()> {
+    let dentry = if (flags & AT_EMPTY_PATH) != 0 {
+        let file = thread.files.get(dirfd).ok_or(EBADF)?;
+        file.as_path().ok_or(EBADF)?.clone()
+    } else {
+        let follow_symlink = (flags & AT_SYMLINK_NOFOLLOW) != AT_SYMLINK_NOFOLLOW;
+        dentry_from(thread, dirfd, pathname, follow_symlink)?
+    };
+
+    let statbuf = UserPointerMut::new(statbuf)?;
+
+    let mut statx = StatX::default();
+    dentry.statx(&mut statx, u32::MAX)?;
+
+    statbuf.write(statx.into())?;
+
+    Ok(())
 }
 
 #[eonix_macros::define_syscall(SYS_STATX)]

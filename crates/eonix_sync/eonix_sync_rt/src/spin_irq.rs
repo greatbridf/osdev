@@ -1,3 +1,4 @@
+use eonix_hal::traits::trap::IrqState as _;
 use eonix_hal::trap::{disable_irqs_save, IrqState};
 use eonix_spin::{ContextUnlock, Spin, SpinContext, SpinGuard, UnlockedContext};
 use eonix_sync_base::Relax;

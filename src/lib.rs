@@ -25,7 +25,7 @@ use core::{
     hint::spin_loop,
     sync::atomic::{AtomicBool, Ordering},
 };
-use eonix_hal::{processor::CPU, trap::disable_irqs_save};
+use eonix_hal::{processor::CPU, traits::trap::IrqState, trap::disable_irqs_save};
 use eonix_mm::address::PRange;
 use eonix_runtime::{run::FutureRun, scheduler::Scheduler, task::Task};
 use kernel::{
@@ -159,11 +159,30 @@ async fn init_process(early_kstack: PRange) {
         )
         .unwrap();
 
-        let init = Dentry::open(fs_context, Path::new(b"/mnt/busybox").unwrap(), true)
-            .expect("busybox should be present in /mnt");
+        let init_names = [
+            &b"/sbin/init"[..],
+            &b"/init"[..],
+            &b"/bin/busybox"[..],
+            &b"/mnt/busybox"[..],
+        ];
+
+        let mut init_name = None;
+        let mut init = None;
+        for name in &init_names {
+            if let Ok(dentry) = Dentry::open(fs_context, Path::new(name).unwrap(), true) {
+                if dentry.is_valid() {
+                    init_name = Some(*name);
+                    init = Some(dentry);
+                    break;
+                }
+            }
+        }
+
+        let init = init.expect("No init binary found in the system.");
+        let init_name = init_name.unwrap();
 
         let argv = vec![
-            CString::new("/mnt/busybox").unwrap(),
+            CString::new(init_name).unwrap(),
             CString::new("sh").unwrap(),
             CString::new("/mnt/initsh").unwrap(),
         ];

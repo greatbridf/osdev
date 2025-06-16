@@ -125,6 +125,7 @@ fn getdents64(fd: u32, buffer: *mut u8, bufsize: usize) -> KResult<usize> {
     Ok(buffer.wrote())
 }
 
+#[cfg(not(target_arch = "x86_64"))]
 #[eonix_macros::define_syscall(SYS_NEWFSTATAT)]
 fn newfstatat(dirfd: u32, pathname: *const u8, statbuf: *mut Stat, flags: u32) -> KResult<()> {
     let dentry = if (flags & AT_EMPTY_PATH) != 0 {

@@ -76,7 +76,6 @@ SECTIONS {
     {
         __spercpu = .;
 
-        PERCPU_START = .;
         QUAD(0); /* Reserved for x86 percpu pointer */
 
         . = ALIGN(16);

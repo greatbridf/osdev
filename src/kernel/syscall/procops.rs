@@ -279,7 +279,12 @@ fn wait4(waitpid: u32, arg1: *mut u32, options: u32, rusage: *mut RUsage) -> KRe
         WaitInfo::None
     };
 
-    do_waitid(thread, P_PID, waitpid, waitinfo, options, rusage)
+    let idtype = match waitpid {
+        u32::MAX => P_ALL,
+        _ => P_PID,
+    };
+
+    do_waitid(thread, idtype, waitpid, waitinfo, options, rusage)
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -342,10 +347,31 @@ fn getppid() -> KResult<u32> {
     Ok(thread.process.parent_rcu().map_or(0, |x| x.pid))
 }
 
-#[eonix_macros::define_syscall(SYS_GETUID)]
-fn getuid() -> KResult<u32> {
+fn do_geteuid(_thread: &Thread) -> KResult<u32> {
     // All users are root for now.
     Ok(0)
+}
+
+fn do_getuid(_thread: &Thread) -> KResult<u32> {
+    // All users are root for now.
+    Ok(0)
+}
+
+#[cfg(target_arch = "x86_64")]
+#[eonix_macros::define_syscall(SYS_GETUID32)]
+fn getuid32() -> KResult<u32> {
+    do_getuid(thread)
+}
+
+#[eonix_macros::define_syscall(SYS_GETUID)]
+fn getuid() -> KResult<u32> {
+    do_getuid(thread)
+}
+
+#[cfg(target_arch = "x86_64")]
+#[eonix_macros::define_syscall(SYS_GETEUID32)]
+fn geteuid32() -> KResult<u32> {
+    do_geteuid(thread)
 }
 
 #[eonix_macros::define_syscall(SYS_GETEUID)]

@@ -6,7 +6,10 @@ use core::arch::{global_asm, naked_asm};
 use core::mem::{offset_of, size_of};
 use core::num::NonZero;
 use core::ptr::NonNull;
-use eonix_hal_traits::{context::RawTaskContext, trap::TrapReturn};
+use eonix_hal_traits::{
+    context::RawTaskContext,
+    trap::{IrqState as IrqStateTrait, TrapReturn},
+};
 use riscv::register::sie::Sie;
 use riscv::register::stvec::TrapMode;
 use riscv::register::{scause, sepc, stval};
@@ -281,9 +284,10 @@ impl IrqState {
     pub fn save() -> Self {
         IrqState(sie::read())
     }
+}
 
-    #[inline]
-    pub fn restore(self) {
+impl IrqStateTrait for IrqState {
+    fn restore(self) {
         let Self(state) = self;
         unsafe {
             sie::write(state);

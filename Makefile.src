@@ -7,10 +7,14 @@ QEMU ?= ##QEMU##
 GDB ?= ##GDB##
 FDISK ?= ##FDISK##
 
-QEMU_ARGS ?= -machine q35 -drive id=disk,file=build/boot.img,format=raw,if=none \
-	-device ahci,id=ahci -device ide-hd,drive=disk,bus=ahci.0 \
-	-netdev user,id=mynet0,net=192.168.1.0/24,dhcpstart=192.168.1.16 -device e1000e,netdev=mynet0 \
-	-no-reboot -no-shutdown
+COMMA := ,
+
+ifeq ($(MODE),debug)
+MODE := dev
+endif
+
+QEMU_ARGS ?= -no-reboot -no-shutdown
+CARGO_FLAGS := --profile $(MODE) --features $(FEATURES)$(if $(SMP),$(COMMA)smp,)
 
 ifeq ($(HOST),darwin)
 QEMU_ACCEL ?= -accel tcg
@@ -28,13 +32,38 @@ ifneq ($(SMP),)
 QEMU_ARGS += -smp $(SMP)
 endif
 
-ifeq ($(MODE),debug)
-MODE := dev
-endif
+ifeq ($(ARCH),riscv64)
 
-COMMA := ,
+QEMU_ARGS += \
+	-machine virt -kernel build/riscv64gc-unknown-none-elf/debug/eonix_kernel \
+	-device virtio-blk-device,drive=disk0,bus=virtio-mmio-bus.0 \
+	-device virtio-blk-device,drive=disk1,bus=virtio-mmio-bus.1 \
+	-device virtio-net-device,netdev=mynet0 \
+	-drive id=disk0,file=build/boot.img,format=raw,if=none \
+	-drive id=disk1,file=build/fs.img,format=raw,if=none \
+	-netdev user,id=mynet0 \
+	-rtc base=utc
 
-CARGO_FLAGS := --profile $(MODE) --features $(FEATURES)$(if $(SMP),$(COMMA)smp,)
+CARGO_FLAGS += --target riscv64gc-unknown-none-elf
+
+.PHONY: run
+run: kernel build/kernel.sym build/boot.img
+	$(QEMU) $(QEMU_ARGS) -display none -serial mon:stdio
+
+.PHONY: srun
+srun: kernel build/kernel.sym build/boot.img
+	$(QEMU) $(QEMU_ARGS) -display none -S -s -serial mon:stdio
+
+else ifeq ($(ARCH),x86_64)
+
+QEMU_ARGS += \
+	-machine q35 \
+	-device ahci,id=ahci -device ide-hd,drive=disk,bus=ahci.0 \
+	-device e1000e,netdev=mynet0 \
+	-drive id=disk,file=build/boot.img,format=raw,if=none \
+	-netdev user,id=mynet0
+
+CARGO_FLAGS += --target x86_64-unknown-none.json
 
 .PHONY: run
 run: build
@@ -44,12 +73,12 @@ run: build
 srun: build
 	$(QEMU) $(QEMU_ARGS) -display none -S -s -serial mon:stdio
 
+endif
+
 .PHONY: clean
 clean:
-	-mv build/fs.img .
 	-rm -rf build
 	-mkdir build
-	-mv fs.img build
 
 .PHONY: clean-all
 clean-all: clean
@@ -92,7 +121,7 @@ build/kernel.bin: kernel
 	cargo objcopy $(CARGO_FLAGS) -- -O binary --strip-debug \
 		-R .mbr -R .stage1 build/kernel.bin
 
-build/fs.img: init_script.sh
+build/fs.img: init_script.sh script/build-img.sh
 	sh script/build-img.sh
 
 build/boot.img: build/mbr.bin build/stage1.bin build/kernel.bin build/fs.img

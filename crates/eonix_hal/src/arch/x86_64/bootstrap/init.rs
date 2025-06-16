@@ -241,7 +241,7 @@ fn bootstrap_smp(alloc: impl Allocator, page_alloc: &RefCell<BasicPageAlloc>) {
         let stack_range = {
             let page_alloc = BasicPageAllocRef::new(&page_alloc);
 
-            let ap_stack = Page::alloc_order_in(3, page_alloc);
+            let ap_stack = Page::alloc_order_in(4, page_alloc);
             let stack_range = ap_stack.range();
             ap_stack.into_raw();
 

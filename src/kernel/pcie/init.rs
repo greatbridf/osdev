@@ -2,13 +2,9 @@ use super::{
     device::{PCIDevice, SegmentGroup, PCIE_DEVICES},
     error::PciError,
 };
-use crate::kernel::{
-    constants::{EINVAL, ENOENT},
-    mem::PhysAccess as _,
-};
+use crate::kernel::mem::PhysAccess as _;
 use acpi::{AcpiHandler, PhysicalMapping};
-use eonix_hal::device::FDT;
-use eonix_mm::address::{PAddr, PRange};
+use eonix_mm::address::PAddr;
 
 #[derive(Clone)]
 struct AcpiHandlerImpl;
@@ -56,6 +52,10 @@ pub fn init_pcie() -> Result<(), PciError> {
 
     #[cfg(target_arch = "riscv64")]
     {
+        use crate::kernel::constants::{EINVAL, ENOENT};
+        use eonix_hal::device::FDT;
+        use eonix_mm::address::PRange;
+
         let pcie_node = FDT.find_node("/soc/pci").ok_or(ENOENT)?;
         let bus_range = pcie_node.property("bus-range").ok_or(ENOENT)?;
         let reg = pcie_node.reg().ok_or(EINVAL)?.next().ok_or(EINVAL)?;

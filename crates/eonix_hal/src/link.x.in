@@ -9,7 +9,7 @@ SECTIONS {
         *(.text.entry);
         *(.text .text.*);
 
-    } > REGION_TEXT AT> RAM
+    } > REGION_TEXT AT> LINK_REGION_TEXT
 
     __etext = .;
 
@@ -19,7 +19,7 @@ SECTIONS {
 
         *(.rodata .rodata.*);
 
-    } > REGION_RODATA AT> RAM
+    } > REGION_RODATA AT> LINK_REGION_RODATA
 
     __erodata = .;
 
@@ -30,7 +30,7 @@ SECTIONS {
         *(.data .data.*);
         *(.got .got.plt);
 
-    } > REGION_DATA AT> RAM
+    } > REGION_DATA AT> LINK_REGION_DATA
 
     __edata = .;
 
@@ -41,7 +41,7 @@ SECTIONS {
         *(.bss .bss.*);
 
         . = ALIGN(0x1000);
-    } > REGION_BSS AT> RAM
+    } > REGION_BSS AT> LINK_REGION_BSS
 
     __ebss = .;
 
@@ -51,7 +51,7 @@ SECTIONS {
 
         KEEP(*(.eh_frame .eh_frame*));
 
-    } > REGION_EHFRAME AT> RAM
+    } > REGION_EHFRAME AT> LINK_REGION_EHFRAME
 
     . = ALIGN(0x1000);
     __eeh_frame = .;

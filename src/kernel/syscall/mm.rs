@@ -118,7 +118,7 @@ fn mmap2(
     fd: u32,
     pgoffset: usize,
 ) -> KResult<usize> {
-    do_mmap2(addr, len, prot, flags, fd, pgoffset)
+    do_mmap2(thread, addr, len, prot, flags, fd, pgoffset)
 }
 
 #[eonix_macros::define_syscall(SYS_MUNMAP)]

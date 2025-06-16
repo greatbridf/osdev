@@ -28,7 +28,7 @@ use eonix_hal::{
     traits::{
         fault::Fault,
         fpu::RawFpuState as _,
-        trap::{RawTrapContext, TrapReturn, TrapType},
+        trap::{IrqState as _, RawTrapContext, TrapReturn, TrapType},
     },
     trap::{disable_irqs_save, TrapContext},
 };

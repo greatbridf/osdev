@@ -1,7 +1,9 @@
+use core::arch::asm;
 use eonix_hal_traits::{
     fault::{Fault, PageFaultErrorCode},
     trap::{RawTrapContext, TrapType},
 };
+use eonix_mm::address::VAddr;
 
 #[derive(Clone, Copy, Default)]
 #[repr(C, align(16))]
@@ -50,7 +52,23 @@ impl TrapContext {
                     error_code |= PageFaultErrorCode::UserAccess;
                 }
 
-                Fault::PageFault(error_code)
+                #[inline(always)]
+                fn get_page_fault_address() -> VAddr {
+                    let cr2: usize;
+                    unsafe {
+                        asm!(
+                            "mov %cr2, {}",
+                            out(reg) cr2,
+                            options(att_syntax)
+                        );
+                    }
+                    VAddr::from(cr2)
+                }
+
+                Fault::PageFault {
+                    error_code,
+                    address: get_page_fault_address(),
+                }
             }
             code @ 0..0x20 => Fault::Unknown(code as usize),
             _ => unreachable!(),

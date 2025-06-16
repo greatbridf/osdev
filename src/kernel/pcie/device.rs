@@ -1,7 +1,8 @@
 use super::{CommonHeader, Header};
-use crate::{kernel::mem::PhysAccess as _, sync::fence::memory_barrier};
+use crate::kernel::mem::PhysAccess as _;
 use alloc::sync::Arc;
 use core::{ops::RangeInclusive, sync::atomic::Ordering};
+use eonix_hal::fence::memory_barrier;
 use eonix_mm::address::PAddr;
 use eonix_sync::{LazyLock, Spin};
 use intrusive_collections::{intrusive_adapter, KeyAdapter, RBTree, RBTreeAtomicLink};

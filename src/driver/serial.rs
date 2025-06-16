@@ -1,4 +1,3 @@
-use super::Port8;
 use crate::{
     kernel::{
         block::make_device, console::set_console, constants::EIO, interrupt::register_irq_handler,
@@ -9,8 +8,12 @@ use crate::{
 use alloc::{collections::vec_deque::VecDeque, format, sync::Arc};
 use bitflags::bitflags;
 use core::pin::pin;
+use eonix_hal::arch_exported::io::Port8;
 use eonix_runtime::{run::FutureRun, scheduler::Scheduler};
 use eonix_sync::{SpinIrq as _, WaitList};
+
+#[cfg(not(target_arch = "x86_64"))]
+compile_error!("Serial driver is only supported on x86_64 architecture");
 
 bitflags! {
     struct LineStatus: u8 {

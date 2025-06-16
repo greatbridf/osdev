@@ -13,7 +13,6 @@ use crate::{
     prelude::*,
 };
 use alloc::sync::Arc;
-use arch::FpuState;
 use atomic_unique_refcell::AtomicUniqueRefCell;
 use core::{
     future::Future,
@@ -24,6 +23,7 @@ use core::{
 };
 use eonix_hal::{
     context::TaskContext,
+    fpu::FpuState,
     processor::{UserTLS, CPU},
     traits::{
         fault::Fault,
@@ -369,10 +369,12 @@ impl Thread {
 
             let trap_type = self.trap_ctx.borrow().trap_type();
             match trap_type {
-                TrapType::Fault(Fault::PageFault(err_code)) => {
-                    let addr = arch::get_page_fault_address();
+                TrapType::Fault(Fault::PageFault {
+                    error_code,
+                    address: addr,
+                }) => {
                     let mms = &self.process.mm_list;
-                    if let Err(signal) = mms.handle_user_page_fault(addr, err_code).await {
+                    if let Err(signal) = mms.handle_user_page_fault(addr, error_code).await {
                         self.signal_list.raise(signal);
                     }
                 }

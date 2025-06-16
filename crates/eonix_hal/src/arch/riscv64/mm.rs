@@ -14,7 +14,10 @@ use eonix_mm::{
 };
 use eonix_sync_base::LazyLock;
 use fdt::Fdt;
-use riscv::{asm::sfence_vma_all, register::satp};
+use riscv::{
+    asm::{sfence_vma, sfence_vma_all},
+    register::satp,
+};
 
 pub const PAGE_TABLE_BASE: PFN = PFN::from_val(ROOT_PAGE_TABLE_PFN);
 pub static GLOBAL_PAGE_TABLE: LazyLock<PageTable<ArchPagingMode, NoAlloc, ArchPhysAccess>> =
@@ -317,4 +320,27 @@ where
                 }),
         )
     }
+}
+
+#[inline(always)]
+pub fn flush_tlb(vaddr: usize) {
+    sfence_vma(0, vaddr);
+}
+
+#[inline(always)]
+pub fn flush_tlb_all() {
+    sfence_vma_all();
+}
+
+#[inline(always)]
+pub fn get_root_page_table_pfn() -> PFN {
+    let satp_val = satp::read();
+    let ppn = satp_val.ppn();
+    PFN::from(ppn)
+}
+
+#[inline(always)]
+pub fn set_root_page_table_pfn(pfn: PFN) {
+    unsafe { satp::set(satp::Mode::Sv48, 0, usize::from(pfn)) };
+    sfence_vma_all();
 }

@@ -1,14 +1,14 @@
 use crate::{
     arch::{
         bootstrap::{EARLY_GDT_DESCRIPTOR, KERNEL_PML4},
-        cpu::CPU,
+        cpu::{wrmsr, CPU},
+        io::Port8,
         mm::{ArchPhysAccess, GLOBAL_PAGE_TABLE, V_KERNEL_BSS_START},
     },
     bootstrap::BootStrapData,
     mm::{ArchMemory, ArchPagingMode, BasicPageAlloc, BasicPageAllocRef, ScopedAllocator},
 };
 use acpi::{platform::ProcessorState, AcpiHandler, AcpiTables, PhysicalMapping, PlatformInfo};
-use arch::wrmsr;
 use core::{
     alloc::Allocator,
     arch::{asm, global_asm},
@@ -160,19 +160,6 @@ fn setup_cpu(alloc: impl PageAlloc) {
 
 fn setup_pic() {
     // TODO: Remove this when we have completely switched to APIC.
-    pub struct Port8 {
-        no: u16,
-    }
-
-    impl Port8 {
-        pub const fn new(no: u16) -> Self {
-            Self { no }
-        }
-
-        pub fn write(&self, data: u8) {
-            arch::outb(self.no, data)
-        }
-    }
 
     const PIC1_COMMAND: Port8 = Port8::new(0x20);
     const PIC1_DATA: Port8 = Port8::new(0x21);

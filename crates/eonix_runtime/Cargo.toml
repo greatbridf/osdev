@@ -4,7 +4,6 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-arch = { path = "../../arch" }
 atomic_unique_refcell = { path = "../atomic_unique_refcell" }
 eonix_hal = { path = "../eonix_hal" }
 eonix_log = { path = "../eonix_log" }

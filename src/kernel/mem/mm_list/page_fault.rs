@@ -1,7 +1,8 @@
 use super::{MMList, VAddr};
 use crate::kernel::task::{Signal, Thread};
+use eonix_hal::mm::flush_tlb;
 use eonix_hal::traits::fault::PageFaultErrorCode;
-use eonix_mm::address::{AddrOps as _, VRange};
+use eonix_mm::address::{Addr as _, AddrOps as _, VRange};
 use eonix_mm::paging::PAGE_SIZE;
 use eonix_runtime::task::Task;
 
@@ -83,14 +84,7 @@ impl MMList {
         area.handle(pte, addr.floor() - area.range().start())
             .map_err(|_| Signal::SIGBUS)?;
 
-        #[cfg(not(target_arch = "x86_64"))]
-        {
-            use eonix_mm::address::Addr as _;
-            // Flush the TLB for the affected address range.
-            // x86 CPUs will try to retrieve the PTE again for non-present entries.
-            // So we don't need to flush TLB.
-            arch::flush_tlb(addr.floor().addr());
-        }
+        flush_tlb(addr.floor().addr());
 
         Ok(())
     }

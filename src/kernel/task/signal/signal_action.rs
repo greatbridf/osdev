@@ -8,9 +8,8 @@ use crate::{
     SIGNAL_NOW,
 };
 use alloc::collections::btree_map::BTreeMap;
-use arch::FpuState;
 use core::num::NonZero;
-use eonix_hal::{traits::trap::RawTrapContext, trap::TrapContext};
+use eonix_hal::{fpu::FpuState, traits::trap::RawTrapContext, trap::TrapContext};
 use eonix_mm::address::{Addr as _, AddrOps as _, VAddr};
 use posix_types::signal::{SigAction, TryFromSigAction};
 

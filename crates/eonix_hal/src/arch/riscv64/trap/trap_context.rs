@@ -14,14 +14,6 @@ use riscv::{
     ExceptionNumber, InterruptNumber,
 };
 
-/// Floating-point registers context.
-#[repr(C)]
-#[derive(Debug, Clone, Copy, Default)]
-pub struct FpuRegisters {
-    pub f: [u64; 32],
-    pub fcsr: u32,
-}
-
 #[repr(C)]
 #[derive(Default, Clone, Copy)]
 pub struct Registers {
@@ -142,7 +134,14 @@ impl RawTrapContext for TrapContext {
                     exception @ (Exception::InstructionPageFault
                     | Exception::LoadPageFault
                     | Exception::StorePageFault) => {
-                        TrapType::Fault(Fault::PageFault(self.get_page_fault_error_code(exception)))
+                        #[inline(always)]
+                        fn get_page_fault_address() -> VAddr {
+                            VAddr::from(stval::read())
+                        }
+                        TrapType::Fault(Fault::PageFault {
+                            error_code: self.get_page_fault_error_code(exception),
+                            address: get_page_fault_address(),
+                        })
                     }
                     // breakpoint and supervisor env call
                     _ => TrapType::Fault(Fault::Unknown(e)),

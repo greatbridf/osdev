@@ -3,7 +3,7 @@ use super::{
     trap::{setup_trap, TRAP_SCRATCH},
 };
 use crate::arch::fdt::{FdtExt, FDT};
-use core::{pin::Pin, ptr::NonNull};
+use core::{arch::asm, pin::Pin, ptr::NonNull};
 use eonix_preempt::PreemptGuard;
 use eonix_sync_base::LazyLock;
 use riscv::register::{
@@ -93,5 +93,12 @@ impl CPU {
 
     pub fn cpuid(&self) -> usize {
         self.hart_id
+    }
+}
+
+#[inline(always)]
+pub fn halt() {
+    unsafe {
+        asm!("wfi", options(nomem, nostack, preserves_flags));
     }
 }

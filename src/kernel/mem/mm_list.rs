@@ -10,7 +10,10 @@ use crate::{prelude::*, sync::ArcSwap};
 use alloc::collections::btree_set::BTreeSet;
 use core::fmt;
 use core::sync::atomic::{AtomicUsize, Ordering};
-use eonix_hal::mm::{ArchPagingMode, ArchPhysAccess, GLOBAL_PAGE_TABLE};
+use eonix_hal::mm::{
+    flush_tlb_all, get_root_page_table_pfn, set_root_page_table_pfn, ArchPagingMode,
+    ArchPhysAccess, GLOBAL_PAGE_TABLE,
+};
 use eonix_mm::address::{Addr as _, PAddr};
 use eonix_mm::page_table::PageAttribute;
 use eonix_mm::paging::PFN;
@@ -289,12 +292,12 @@ impl MMList {
                 // If there are currently no users, we don't need to do anything.
             }
             1 => {
-                if PAddr::from(arch::get_root_page_table_pfn()).addr()
+                if PAddr::from(get_root_page_table_pfn()).addr()
                     == self.root_page_table.load(Ordering::Relaxed)
                 {
                     // If there is only one user and we are using the page table,
                     // flushing the TLB for the local cpu only is enough.
-                    arch::flush_tlb_all();
+                    flush_tlb_all();
                 } else {
                     // Send the TLB flush request to the core.
                     todo!();
@@ -360,11 +363,11 @@ impl MMList {
 
         let root_page_table = self.root_page_table.load(Ordering::Relaxed);
         assert_ne!(root_page_table, 0);
-        arch::set_root_page_table_pfn(PFN::from(PAddr::from(root_page_table)));
+        set_root_page_table_pfn(PFN::from(PAddr::from(root_page_table)));
     }
 
     pub fn deactivate(&self) {
-        arch::set_root_page_table_pfn(PFN::from(GLOBAL_PAGE_TABLE.addr()));
+        set_root_page_table_pfn(PFN::from(GLOBAL_PAGE_TABLE.addr()));
 
         let old_user_count = self.user_count.fetch_sub(1, Ordering::Release);
         assert_ne!(old_user_count, 0);
@@ -378,7 +381,7 @@ impl MMList {
 
         let root_page_table = self.root_page_table.load(Ordering::Relaxed);
         assert_ne!(root_page_table, 0);
-        arch::set_root_page_table_pfn(PFN::from(PAddr::from(root_page_table)));
+        set_root_page_table_pfn(PFN::from(PAddr::from(root_page_table)));
 
         let old_user_count = to.user_count.fetch_sub(1, Ordering::Release);
         assert_ne!(old_user_count, 0);
@@ -407,7 +410,7 @@ impl MMList {
         );
 
         let old_root_page_table = self.root_page_table.load(Ordering::Relaxed);
-        let current_root_page_table = arch::get_root_page_table_pfn();
+        let current_root_page_table = get_root_page_table_pfn();
         assert_eq!(
             PAddr::from(current_root_page_table).addr(),
             old_root_page_table,
@@ -419,7 +422,7 @@ impl MMList {
             None => GLOBAL_PAGE_TABLE.addr().addr(),
         };
 
-        arch::set_root_page_table_pfn(PFN::from(PAddr::from(new_root_page_table)));
+        set_root_page_table_pfn(PFN::from(PAddr::from(new_root_page_table)));
 
         self.root_page_table
             .store(new_root_page_table, Ordering::Relaxed);

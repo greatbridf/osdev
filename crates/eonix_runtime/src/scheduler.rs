@@ -12,6 +12,7 @@ use core::{
     sync::atomic::{compiler_fence, Ordering},
     task::Waker,
 };
+use eonix_hal::processor::halt;
 use eonix_log::println_trace;
 use eonix_preempt::assert_preempt_count_eq;
 use eonix_sync::{LazyLock, Spin, SpinIrq as _};
@@ -219,7 +220,7 @@ extern "C" fn local_scheduler() -> ! {
             (None, None) => {
                 // Nothing to do, halt the cpu and rerun the loop.
                 drop(rq);
-                arch::halt();
+                halt();
                 continue;
             }
             (None, Some(next)) => {
@@ -238,7 +239,7 @@ extern "C" fn local_scheduler() -> ! {
                     // Nothing to do, halt the cpu and rerun the loop.
                     CURRENT_TASK.set(NonNull::new(Arc::into_raw(previous) as *mut _));
                     drop(rq);
-                    arch::halt();
+                    halt();
                     continue;
                 }
             }

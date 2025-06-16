@@ -1,4 +1,5 @@
 use bitflags::bitflags;
+use eonix_mm::address::VAddr;
 
 bitflags! {
     #[derive(Debug)]
@@ -14,6 +15,9 @@ bitflags! {
 pub enum Fault {
     InvalidOp,
     BadAccess,
-    PageFault(PageFaultErrorCode),
+    PageFault {
+        error_code: PageFaultErrorCode,
+        address: VAddr,
+    },
     Unknown(usize),
 }

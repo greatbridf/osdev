@@ -24,7 +24,7 @@ pub fn default_irq_handler(irqno: usize) {
 
     #[cfg(target_arch = "x86_64")]
     {
-        use crate::driver::Port8;
+        use eonix_hal::arch_exported::io::Port8;
 
         const PIC1_COMMAND: Port8 = Port8::new(0x20);
         const PIC2_COMMAND: Port8 = Port8::new(0xA0);
@@ -42,9 +42,11 @@ pub fn default_fault_handler(fault_type: Fault, trap_ctx: &mut TrapContext) {
     }
 
     match fault_type {
-        Fault::PageFault(error_code) => {
+        Fault::PageFault {
+            error_code,
+            address: vaddr,
+        } => {
             let fault_pc = VAddr::from(trap_ctx.get_program_counter());
-            let vaddr = arch::get_page_fault_address();
 
             if let Some(new_pc) = handle_kernel_page_fault(fault_pc, vaddr, error_code) {
                 trap_ctx.set_program_counter(new_pc.addr());

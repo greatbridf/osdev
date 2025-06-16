@@ -1,12 +1,15 @@
 mod virtio_blk;
 
+#[cfg(not(target_arch = "riscv64"))]
+compile_error!("VirtIO drivers are only supported on RISC-V architecture");
+
 use crate::kernel::{
     block::{make_device, BlockDevice},
     mem::{AsMemoryBlock, MemoryBlock, Page},
 };
 use alloc::sync::Arc;
 use core::num::NonZero;
-use eonix_hal::{device::FDT, mm::ArchPhysAccess};
+use eonix_hal::{arch_exported::fdt::FDT, mm::ArchPhysAccess};
 use eonix_log::{println_info, println_warn};
 use eonix_mm::{
     address::{Addr, PAddr, PhysAccess},

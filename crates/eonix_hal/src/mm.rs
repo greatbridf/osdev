@@ -8,7 +8,10 @@ use eonix_mm::{
     paging::{PageAlloc, UnmanagedRawPage, PAGE_SIZE, PFN},
 };
 
-pub use crate::arch::mm::{ArchMemory, ArchPagingMode, ArchPhysAccess, GLOBAL_PAGE_TABLE};
+pub use crate::arch::mm::{
+    flush_tlb, flush_tlb_all, get_root_page_table_pfn, set_root_page_table_pfn, ArchMemory,
+    ArchPagingMode, ArchPhysAccess, GLOBAL_PAGE_TABLE,
+};
 
 pub struct BasicPageAlloc {
     ranges: [Option<PRange>; Self::MAX],

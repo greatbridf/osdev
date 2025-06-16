@@ -8,7 +8,6 @@ links = "eonix_hal"
 eonix_hal_traits = { path = "./eonix_hal_traits" }
 eonix_hal_macros = { path = "./eonix_hal_macros" }
 
-arch = { path = "../../arch" }
 eonix_mm = { path = "../eonix_mm" }
 eonix_sync_base = { path = "../eonix_sync/eonix_sync_base" }
 eonix_percpu = { path = "../eonix_percpu" }

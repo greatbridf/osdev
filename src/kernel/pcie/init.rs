@@ -53,7 +53,7 @@ pub fn init_pcie() -> Result<(), PciError> {
     #[cfg(target_arch = "riscv64")]
     {
         use crate::kernel::constants::{EINVAL, ENOENT};
-        use eonix_hal::device::FDT;
+        use eonix_hal::arch_exported::fdt::FDT;
         use eonix_mm::address::PRange;
 
         let pcie_node = FDT.find_node("/soc/pci").ok_or(ENOENT)?;

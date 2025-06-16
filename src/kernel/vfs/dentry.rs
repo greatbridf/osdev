@@ -4,9 +4,7 @@ use super::{
     inode::{Ino, Inode, Mode, WriteOffset},
     s_isblk, s_ischr, s_isdir, s_isreg, DevId, FsContext,
 };
-use crate::kernel::constants::{
-    EEXIST, EINVAL, EISDIR, ELOOP, ENOENT, ENOTDIR, EPERM, ERANGE, O_CREAT, O_EXCL,
-};
+use crate::kernel::constants::{EEXIST, EINVAL, EISDIR, ELOOP, ENOENT, ENOTDIR, EPERM, ERANGE};
 use crate::{
     hash::KernelHasher,
     io::{Buffer, ByteBuffer},
@@ -23,7 +21,7 @@ use core::{
     sync::atomic::{AtomicPtr, Ordering},
 };
 use eonix_sync::LazyLock;
-use posix_types::stat::StatX;
+use posix_types::{open::OpenFlags, stat::StatX};
 
 struct DentryData {
     inode: Arc<dyn Inode>,
@@ -207,18 +205,17 @@ impl Dentry {
         self.data.load().is_some()
     }
 
-    pub fn open_check(self: &Arc<Self>, flags: u32, mode: Mode) -> KResult<()> {
+    pub fn open_check(self: &Arc<Self>, flags: OpenFlags, mode: Mode) -> KResult<()> {
         let data = self.data.load();
-        let create = flags & O_CREAT != 0;
-        let excl = flags & O_EXCL != 0;
 
         if data.is_some() {
-            if create && excl {
-                return Err(EEXIST);
+            if flags.contains(OpenFlags::O_CREAT | OpenFlags::O_EXCL) {
+                Err(EEXIST)
+            } else {
+                Ok(())
             }
-            return Ok(());
         } else {
-            if !create {
+            if !flags.contains(OpenFlags::O_CREAT) {
                 return Err(ENOENT);
             }
 

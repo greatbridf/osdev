@@ -304,6 +304,7 @@ version = "0.1.0"
 name = "posix_types"
 version = "0.1.0"
 dependencies = [
+ "bitflags",
  "cfg-if",
 ]
 

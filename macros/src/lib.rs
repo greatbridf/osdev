@@ -64,6 +64,29 @@ fn define_syscall_impl(attrs: TokenStream, item: TokenStream) -> TokenStream {
     let syscall_fn_section =
         LitStr::new(&format!(".syscall_fns.{}", syscall_name), Span::call_site());
 
+    let trace_format_string = {
+        let arg_count = item.sig.inputs.len();
+        let brackets = (0..arg_count)
+            .map(|_| String::from("{:x?}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        LitStr::new(&brackets, Span::call_site())
+    };
+
+    let trace_format_args = {
+        let args = item.sig.inputs.iter();
+        let args = args.enumerate().map(|(idx, arg)| match arg {
+            FnArg::Receiver(_) => panic!("&self is not permitted."),
+            FnArg::Typed(_) => {
+                let arg_ident = Ident::new(&format!("arg_{}", idx), Span::call_site());
+                quote! { #arg_ident }
+            }
+        });
+
+        quote! { #(#args,)* }
+    };
+
     quote! {
         #[used]
         #[doc(hidden)]
@@ -85,23 +108,21 @@ fn define_syscall_impl(attrs: TokenStream, item: TokenStream) -> TokenStream {
 
             #(#args_mapped)*
 
-            // eonix_log::println_trace!(
-            //     "trace_syscall",
-            //     "tid{}: {}({}) => {{",
-            //     crate::kernel::task::Thread::current().tid,
-            //     #syscall_name_str,
-            //     crate::kernel::syscall::format_expand!($($arg, $arg),*),
-            // );
+            eonix_log::println_trace!(
+                "trace_syscall",
+                "tid{}: {}({}) => {{",
+                thd.tid,
+                #syscall_name_str,
+                format_args!(#trace_format_string, #trace_format_args),
+            );
 
             let retval = #real_fn(thd, #(#args_call),*).into_retval();
 
-            // eonix_log::println_trace!(
-            //     "trace_syscall",
-            //     "tid{}: {}({}) => {{",
-            //     crate::kernel::task::Thread::current().tid,
-            //     #syscall_name_str,
-            //     crate::kernel::syscall::format_expand!($($arg, $arg),*),
-            // );
+            eonix_log::println_trace!(
+                "trace_syscall",
+                "}} => {:x?}",
+                retval,
+            );
 
             retval
         }

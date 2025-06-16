@@ -324,14 +324,7 @@ impl Thread {
                 handler,
                 name: _name,
                 ..
-            })) => {
-                println_trace!(
-                    "trace_syscall",
-                    "Syscall {_name}({no:#x}) on tid {:#x}",
-                    self.tid
-                );
-                handler(self, args)
-            }
+            })) => handler(self, args),
             _ => {
                 println_warn!("Syscall {no}({no:#x}) isn't implemented.");
                 self.raise(Signal::SIGSYS);

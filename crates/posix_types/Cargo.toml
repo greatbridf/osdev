@@ -5,3 +5,4 @@ edition = "2024"
 
 [dependencies]
 cfg-if = "1.0"
+bitflags = "2.6.0"

@@ -9,6 +9,7 @@ pub mod sysinfo;
 
 const MAX_SYSCALL_NO: usize = 512;
 
+#[derive(Debug, Clone, Copy)]
 pub struct SyscallNoReturn;
 
 #[repr(C)]
@@ -23,11 +24,11 @@ pub struct SyscallHandler {
     pub name: &'static str,
 }
 
-pub trait FromSyscallArg {
+pub trait FromSyscallArg: core::fmt::Debug {
     fn from_arg(value: usize) -> Self;
 }
 
-pub trait SyscallRetVal {
+pub trait SyscallRetVal: core::fmt::Debug {
     fn into_retval(self) -> Option<usize>;
 }
 

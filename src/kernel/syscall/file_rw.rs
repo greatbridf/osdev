@@ -20,7 +20,6 @@ use crate::{
     prelude::*,
 };
 use alloc::sync::Arc;
-use core::mem::MaybeUninit;
 use eonix_runtime::task::Task;
 use posix_types::open::{AtFlags, OpenFlags};
 use posix_types::stat::{Stat, StatX};

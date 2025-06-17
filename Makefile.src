@@ -9,12 +9,18 @@ FDISK ?= ##FDISK##
 
 COMMA := ,
 
+PROFILE = $(MODE)
 ifeq ($(MODE),debug)
-MODE := dev
+PROFILE := dev
 endif
 
+USER_PROGRAMS = $(shell find user-programs -type f)
+KERNEL_SOURCES := $(shell find src macros crates -name '*.rs' -type f)
+KERNEL_CARGO_MANIFESTS += $(shell find src macros crates -name Cargo.toml -type f)
+KERNEL_DEPS := $(KERNEL_SOURCES) $(KERNEL_CARGO_MANIFESTS)
+
 QEMU_ARGS ?= -no-reboot -no-shutdown
-CARGO_FLAGS := --profile $(MODE) --features $(FEATURES)$(if $(SMP),$(COMMA)smp,)
+CARGO_FLAGS := --profile $(PROFILE) --features $(FEATURES)$(if $(SMP),$(COMMA)smp,)
 
 ifeq ($(HOST),darwin)
 QEMU_ACCEL ?= -accel tcg
@@ -34,46 +40,50 @@ endif
 
 ifeq ($(ARCH),riscv64)
 
+BINARY_DIR_BASE := build/riscv64gc-unknown-none-elf
+BINARY_DIR := $(BINARY_DIR_BASE)/$(MODE)
+
 QEMU_ARGS += \
-	-machine virt -kernel build/riscv64gc-unknown-none-elf/debug/eonix_kernel \
+	-machine virt -kernel $(BINARY_DIR)/eonix_kernel \
 	-device virtio-blk-device,drive=disk0,bus=virtio-mmio-bus.0 \
 	-device virtio-blk-device,drive=disk1,bus=virtio-mmio-bus.1 \
 	-device virtio-net-device,netdev=mynet0 \
-	-drive id=disk0,file=build/boot.img,format=raw,if=none \
-	-drive id=disk1,file=build/fs.img,format=raw,if=none \
+	-drive id=disk0,file=build/boot-riscv64.img,format=raw,if=none \
+	-drive id=disk1,file=build/fs-riscv64.img,format=raw,if=none \
 	-netdev user,id=mynet0 \
 	-rtc base=utc
 
 CARGO_FLAGS += --target riscv64gc-unknown-none-elf
 
-.PHONY: run
-run: kernel build/kernel.sym build/boot.img
-	$(QEMU) $(QEMU_ARGS) -display none -serial mon:stdio
-
-.PHONY: srun
-srun: kernel build/kernel.sym build/boot.img
-	$(QEMU) $(QEMU_ARGS) -display none -S -s -serial mon:stdio
+.PHONY: build
+build: $(BINARY_DIR)/eonix_kernel build/boot-riscv64.img build/fs-riscv64.img
 
 else ifeq ($(ARCH),x86_64)
+
+BINARY_DIR_BASE := build/x86_64-unknown-none
+BINARY_DIR := $(BINARY_DIR_BASE)/$(MODE)
 
 QEMU_ARGS += \
 	-machine q35 \
 	-device ahci,id=ahci -device ide-hd,drive=disk,bus=ahci.0 \
 	-device e1000e,netdev=mynet0 \
-	-drive id=disk,file=build/boot.img,format=raw,if=none \
+	-drive id=disk,file=build/boot-x86_64.img,format=raw,if=none \
 	-netdev user,id=mynet0
 
 CARGO_FLAGS += --target x86_64-unknown-none.json
 
+.PHONY: build
+build: $(BINARY_DIR)/eonix_kernel build/boot-x86_64.img
+
+endif
+
 .PHONY: run
-run: build
+run: build build/kernel.sym
 	$(QEMU) $(QEMU_ARGS) -display none -serial mon:stdio
 
 .PHONY: srun
-srun: build
+srun: build build/kernel.sym
 	$(QEMU) $(QEMU_ARGS) -display none -S -s -serial mon:stdio
-
-endif
 
 .PHONY: clean
 clean:
@@ -85,7 +95,7 @@ clean-all: clean
 	-rm Makefile
 
 .PHONY: debug
-debug:
+debug: build/kernel.sym
 	-RUST_GDB=$(GDB) rust-gdb --symbols=build/kernel.sym \
 		-iex 'source pretty-print.py' \
 		-iex 'set pagination off' \
@@ -104,34 +114,38 @@ tmux-debug:
 	-tmux attach -t gbos-debug
 	tmux kill-session -t gbos-debug
 
-.PHONY: kernel
-kernel:
+$(BINARY_DIR)/eonix_kernel: $(KERNEL_DEPS)
 	cargo build $(CARGO_FLAGS)
 
-build/kernel.sym: kernel
-	cargo objcopy $(CARGO_FLAGS) -- --only-keep-debug build/kernel.sym
+build/kernel.sym: $(BINARY_DIR)/eonix_kernel
+	cargo objcopy -q $(CARGO_FLAGS) -- --only-keep-debug build/kernel.sym
 
-build/mbr.bin: kernel
-	cargo objcopy $(CARGO_FLAGS) -- -O binary -j .mbr build/mbr.bin
+build/fs-%.img: init_script.sh script/build-img.sh $(USER_PROGRAMS)
+	ARCH=$* OUTPUT=$@ sh script/build-img.sh
 
-build/stage1.bin: kernel
-	cargo objcopy $(CARGO_FLAGS) -- -O binary -j .stage1 build/stage1.bin
+build/mbr.bin: $(BINARY_DIR)/eonix_kernel
+	cargo objcopy -q $(CARGO_FLAGS) -- -O binary -j .mbr build/mbr.bin
 
-build/kernel.bin: kernel
-	cargo objcopy $(CARGO_FLAGS) -- -O binary --strip-debug \
+build/stage1.bin: $(BINARY_DIR)/eonix_kernel
+	cargo objcopy -q $(CARGO_FLAGS) -- -O binary -j .stage1 build/stage1.bin
+
+build/kernel.bin: $(BINARY_DIR)/eonix_kernel
+	cargo objcopy -q $(CARGO_FLAGS) -- -O binary --strip-debug \
 		-R .mbr -R .stage1 build/kernel.bin
 
-build/fs.img: init_script.sh script/build-img.sh
-	sh script/build-img.sh
-
-build/boot.img: build/mbr.bin build/stage1.bin build/kernel.bin build/fs.img
-	dd if=build/mbr.bin of=build/boot.img bs=512 count=1 conv=notrunc 2> /dev/null
-	dd if=build/stage1.bin of=build/boot.img bs=512 seek=1 conv=notrunc 2> /dev/null
-	dd if=build/kernel.bin of=build/boot.img bs=4096 seek=1 conv=notrunc 2> /dev/null
-	dd if=build/fs.img of=build/boot.img bs=$(shell expr 4 \* 1024 \* 1024) \
+build/boot-x86_64.img: build/fs-x86_64.img build/mbr.bin build/stage1.bin build/kernel.bin
+	dd if=build/mbr.bin of=$@ bs=512 count=1 conv=notrunc 2> /dev/null
+	dd if=build/stage1.bin of=$@ bs=512 seek=1 conv=notrunc 2> /dev/null
+	dd if=build/kernel.bin of=$@ bs=4096 seek=1 conv=notrunc 2> /dev/null
+	dd if=$< of=$@ bs=$(shell expr 4 \* 1024 \* 1024) \
 		seek=1 conv=notrunc 2> /dev/null
 	sh -c 'echo n; echo; echo; echo 8192; echo; echo a; echo w' \
-		| $(FDISK) build/boot.img 2> /dev/null > /dev/null
+		| $(FDISK) $@ 2> /dev/null > /dev/null
 
-.PHONY: build
-build: build/boot.img build/kernel.sym
+build/boot-riscv64.img: build/fs-riscv64.img
+	dd if=$< of=$@ bs=$(shell expr 4 \* 1024 \* 1024) \
+		seek=1 conv=notrunc 2> /dev/null
+	sh -c 'echo n; echo; echo; echo 8192; echo; echo a; echo w' \
+		| $(FDISK) $@ 2> /dev/null > /dev/null
+
+.DEFAULT_GOAL := build

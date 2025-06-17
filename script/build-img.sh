@@ -3,25 +3,39 @@
 OS=`uname -s`
 SUDO=sudo
 
-dd if=/dev/zero of=build/fs.img bs=`expr 1024 \* 1024` count=512
-mkfs.fat -n SYSTEM build/fs.img
+if [ "$OUTPUT" = "" ]; then
+    OUTPUT="build/fs-$ARCH.img"
+fi
+
+if [ "$ARCH" = "" ]; then
+    echo "ARCH is not set, exiting..." >&2
+    exit 1
+fi
+
+dd if=/dev/zero of="$OUTPUT" bs=`expr 1024 \* 1024` count=1020
+mkfs.fat -n SYSTEM "$OUTPUT"
 
 if [ "$OS" = "Darwin" ]; then
     SUDO=''
     hdiutil detach build/mnt > /dev/null 2>&1 || true
-    hdiutil attach build/fs.img -mountpoint build/mnt
+    hdiutil attach "$OUTPUT" -mountpoint build/mnt
 else
     mkdir -p build/mnt
-    $SUDO losetup -P /dev/loop2 build/fs.img
+    $SUDO losetup -P /dev/loop2 "$OUTPUT"
     $SUDO mount /dev/loop2 build/mnt
 fi
 
-$SUDO cp ./user-programs/init.out build/mnt/init
-$SUDO cp ./user-programs/int.out build/mnt/int
-$SUDO cp ./user-programs/dynamic_test build/mnt/dynamic_test
-$SUDO cp ./user-programs/busybox build/mnt/busybox
-$SUDO cp ./user-programs/busybox-minimal build/mnt/busybox_
-$SUDO cp ./user-programs/ld-musl-i386.so.1 build/mnt/ld-musl-i386.so.1
+if [ "$ARCH" = "x86_64" ]; then
+    $SUDO cp ./user-programs/init.out build/mnt/init
+    $SUDO cp ./user-programs/int.out build/mnt/int
+    $SUDO cp ./user-programs/dynamic_test build/mnt/dynamic_test
+    $SUDO cp ./user-programs/busybox build/mnt/busybox
+    $SUDO cp ./user-programs/busybox-minimal build/mnt/busybox_
+    $SUDO cp ./user-programs/ld-musl-i386.so.1 build/mnt/ld-musl-i386.so.1
+elif [ "$ARCH" = "riscv64" ]; then
+    $SUDO cp ./user-programs/busybox.static build/mnt/busybox
+fi
+
 $SUDO cp ./init_script.sh build/mnt/initsh
 
 # Add your custom files here

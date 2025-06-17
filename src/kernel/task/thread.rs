@@ -1,6 +1,6 @@
 use super::{
     signal::{RaiseResult, Signal, SignalList},
-    Process, ProcessList,
+    Process, ProcessList, WaitType,
 };
 use crate::{
     kernel::{
@@ -8,7 +8,7 @@ use crate::{
         syscall::{syscall_handlers, SyscallHandler},
         task::{clone::CloneArgs, CloneFlags},
         timer::timer_interrupt,
-        user::{dataflow::CheckedUserPointer, UserPointerMut},
+        user::UserPointerMut,
         vfs::{filearray::FileArray, FsContext},
     },
     prelude::*,
@@ -37,7 +37,6 @@ use eonix_mm::address::{Addr as _, VAddr};
 use eonix_runtime::run::{Contexted, Run, RunState};
 use eonix_sync::AsProofMut as _;
 use pointers::BorrowedArc;
-use posix_types::x86_64::UserDescriptor;
 
 #[eonix_percpu::define_percpu]
 static CURRENT_THREAD: Option<NonNull<Thread>> = None;
@@ -54,7 +53,7 @@ pub struct ThreadBuilder {
     files: Option<Arc<FileArray>>,
     fs_context: Option<Arc<FsContext>>,
     signal_list: Option<SignalList>,
-    tls: Option<usize>,
+    tls: Option<UserTLS>,
     set_child_tid: Option<usize>,
     clear_child_tid: Option<usize>,
 
@@ -141,7 +140,7 @@ impl ThreadBuilder {
         self
     }
 
-    pub fn tls(mut self, tls: Option<usize>) -> Self {
+    pub fn tls(mut self, tls: Option<UserTLS>) -> Self {
         self.tls = tls;
         self
     }
@@ -188,12 +187,6 @@ impl ThreadBuilder {
             trap_ctx.set_stack_pointer(sp);
         }
 
-        let tls = if clone_args.flags.contains(CloneFlags::CLONE_SETTLS) {
-            Some(clone_args.tls)
-        } else {
-            None
-        };
-
         let fs_context = if clone_args.flags.contains(CloneFlags::CLONE_FS) {
             FsContext::new_shared(&thread.fs_context)
         } else {
@@ -212,26 +205,14 @@ impl ThreadBuilder {
             SignalList::new_cloned(&thread.signal_list)
         };
 
-        let set_child_tid = if clone_args.flags.contains(CloneFlags::CLONE_CHILD_SETTID) {
-            Some(clone_args.child_tid_ptr)
-        } else {
-            None
-        };
-
-        let clear_child_tid = if clone_args.flags.contains(CloneFlags::CLONE_CHILD_CLEARTID) {
-            Some(clone_args.child_tid_ptr)
-        } else {
-            None
-        };
-
         Ok(self
             .files(files)
             .fs_context(fs_context)
             .signal_list(signal_list)
             .name(inner.name.clone())
-            .tls(tls)
-            .set_child_tid(set_child_tid)
-            .clear_child_tid(clear_child_tid)
+            .tls(clone_args.tls.clone())
+            .set_child_tid(clone_args.set_tid_ptr)
+            .clear_child_tid(clone_args.clear_tid_ptr)
             .trap_ctx(trap_ctx)
             .fpu_state(thread.fpu_state.borrow().clone()))
     }
@@ -261,7 +242,7 @@ impl ThreadBuilder {
             dead: AtomicBool::new(false),
             inner: Spin::new(ThreadInner {
                 name,
-                tls: None,
+                tls: self.tls,
                 set_child_tid: self.set_child_tid,
                 clear_child_tid: self.clear_child_tid,
             }),
@@ -296,38 +277,8 @@ impl Thread {
         }
     }
 
-    pub fn set_user_tls(&self, arch_tls: usize) -> KResult<()> {
-        #[cfg(target_arch = "x86_64")]
-        {
-            let desc = arch_tls as *mut UserDescriptor;
-
-            let desc_pointer = UserPointerMut::new(desc)?;
-            let mut desc = desc_pointer.read()?;
-
-            // Clear the TLS area if it is not present.
-            if desc.flags.is_read_exec_only() && !desc.flags.is_present() {
-                if desc.limit == 0 || desc.base == 0 {
-                    return Ok(());
-                }
-
-                let len = if desc.flags.is_limit_in_pages() {
-                    (desc.limit as usize) << 12
-                } else {
-                    desc.limit as usize
-                };
-
-                CheckedUserPointer::new(desc.base as _, len)?.zero()?;
-                return Ok(());
-            }
-
-            let (tls, entry) =
-                UserTLS::new32(desc.base, desc.limit, desc.flags.is_limit_in_pages());
-            desc.entry = entry;
-
-            self.inner.lock().tls = Some(tls);
-            desc_pointer.write(desc)?;
-        }
-
+    pub fn set_user_tls(&self, tls: UserTLS) -> KResult<()> {
+        self.inner.lock().tls = Some(tls);
         Ok(())
     }
 
@@ -337,10 +288,6 @@ impl Thread {
 
     pub fn get_name(&self) -> Arc<[u8]> {
         self.inner.lock().name.clone()
-    }
-
-    pub fn set_child_tid(&self, set_child_tid: Option<usize>) {
-        self.inner.lock().set_child_tid = set_child_tid;
     }
 
     pub fn clear_child_tid(&self, clear_child_tid: Option<usize>) {

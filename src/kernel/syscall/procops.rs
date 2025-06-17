@@ -11,7 +11,7 @@ use crate::kernel::task::{
     SignalAction, SignalMask, WaitObject, WaitType,
 };
 use crate::kernel::task::{parse_futexop, CloneArgs};
-use crate::kernel::user::dataflow::UserString;
+use crate::kernel::user::dataflow::{CheckedUserPointer, UserString};
 use crate::kernel::user::{UserPointer, UserPointerMut};
 use crate::kernel::vfs::{self, dentry::Dentry};
 use crate::path::Path;
@@ -20,6 +20,7 @@ use crate::{kernel::user::dataflow::UserBuffer, prelude::*};
 use alloc::borrow::ToOwned;
 use alloc::ffi::CString;
 use bitflags::bitflags;
+use eonix_hal::processor::UserTLS;
 use eonix_hal::traits::trap::RawTrapContext;
 use eonix_mm::address::Addr as _;
 use eonix_runtime::task::Task;
@@ -302,9 +303,43 @@ fn gettid() -> KResult<u32> {
     Ok(thread.tid)
 }
 
+pub fn parse_user_tls(arch_tls: usize) -> KResult<UserTLS> {
+    #[cfg(target_arch = "x86_64")]
+    {
+        let desc = arch_tls as *mut posix_types::x86_64::UserDescriptor;
+        let desc_pointer = UserPointerMut::new(desc)?;
+        let mut desc = desc_pointer.read()?;
+
+        // Clear the TLS area if it is not present.
+        if desc.flags.is_read_exec_only() && !desc.flags.is_present() {
+            if desc.limit != 0 && desc.base != 0 {
+                let len = if desc.flags.is_limit_in_pages() {
+                    (desc.limit as usize) << 12
+                } else {
+                    desc.limit as usize
+                };
+
+                CheckedUserPointer::new(desc.base as _, len)?.zero()?;
+            }
+        }
+
+        let (new_tls, entry) =
+            UserTLS::new32(desc.base, desc.limit, desc.flags.is_limit_in_pages());
+        desc.entry = entry;
+        desc_pointer.write(desc)?;
+
+        Ok(new_tls)
+    }
+
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        todo!()
+    }
+}
+
 #[eonix_macros::define_syscall(0xf3)]
 fn set_thread_area(arch_tls: usize) -> KResult<()> {
-    thread.set_user_tls(arch_tls)?;
+    thread.set_user_tls(parse_user_tls(arch_tls)?)?;
 
     // SAFETY: Preemption is disabled on calling `load_thread_area32()`.
     unsafe {
@@ -318,6 +353,7 @@ fn set_thread_area(arch_tls: usize) -> KResult<()> {
 
 #[eonix_macros::define_syscall(0x102)]
 fn set_tid_address(tidptr: usize) -> KResult<u32> {
+    thread.clear_child_tid(Some(tidptr));
     Ok(thread.tid)
 }
 

@@ -1,14 +1,16 @@
 use crate::{
     kernel::{
+        syscall::procops::parse_user_tls,
         task::{
             alloc_pid, new_thread_runnable, KernelStack, ProcessBuilder, ProcessList, Thread,
             ThreadBuilder,
         },
-        user::UserPointerMut,
+        user::{dataflow::CheckedUserPointer, UserPointerMut},
     },
     KResult,
 };
 use bitflags::bitflags;
+use eonix_hal::processor::UserTLS;
 use eonix_runtime::{scheduler::Scheduler, task::Task};
 use eonix_sync::AsProof;
 
@@ -47,11 +49,12 @@ bitflags! {
 #[derive(Debug)]
 pub struct CloneArgs {
     pub flags: CloneFlags,
-    pub sp: Option<usize>,           // Stack pointer for the new thread.
-    pub exit_signal: Option<Signal>, // Signal to send to the parent on exit.
-    pub child_tid_ptr: usize,        // Pointer to child TID in user space.
-    pub parent_tid_ptr: usize,       // Pointer to parent TID in user space.
-    pub tls: usize,                  // Pointer to TLS information.
+    pub sp: Option<usize>,             // Stack pointer for the new thread.
+    pub exit_signal: Option<Signal>,   // Signal to send to the parent on exit.
+    pub set_tid_ptr: Option<usize>,    // Pointer to set child TID in user space.
+    pub clear_tid_ptr: Option<usize>,  // Pointer to clear child TID in user space.
+    pub parent_tid_ptr: Option<usize>, // Pointer to parent TID in user space.
+    pub tls: Option<UserTLS>,          // Pointer to TLS information.
 }
 
 impl CloneArgs {
@@ -72,12 +75,34 @@ impl CloneArgs {
             None
         };
 
+        let mut set_tid_ptr = None;
+        if clone_flags.contains(CloneFlags::CLONE_CHILD_SETTID) {
+            set_tid_ptr = Some(child_tid_ptr);
+        }
+
+        let mut clear_tid_ptr = None;
+        if clone_flags.contains(CloneFlags::CLONE_CHILD_CLEARTID) {
+            clear_tid_ptr = Some(child_tid_ptr);
+        }
+
+        let parent_tid_ptr = clone_flags
+            .contains(CloneFlags::CLONE_PARENT_SETTID)
+            .then_some(parent_tid_ptr);
+
+        #[cfg(target_arch = "x86_64")]
+        let tls = if clone_flags.contains(CloneFlags::CLONE_SETTLS) {
+            Some(parse_user_tls(tls)?)
+        } else {
+            None
+        };
+
         assert!(sp != 0);
 
         let clone_args = CloneArgs {
             flags: clone_flags,
             sp: Some(sp),
-            child_tid_ptr,
+            set_tid_ptr,
+            clear_tid_ptr,
             parent_tid_ptr,
             exit_signal,
             tls,
@@ -90,10 +115,11 @@ impl CloneArgs {
         CloneArgs {
             flags: CloneFlags::empty(),
             sp: None,
-            child_tid_ptr: 0,
-            parent_tid_ptr: 0,
+            set_tid_ptr: None,
+            clear_tid_ptr: None,
+            parent_tid_ptr: None,
             exit_signal: Some(Signal::SIGCHLD),
-            tls: 0,
+            tls: None,
         }
     }
 
@@ -101,10 +127,11 @@ impl CloneArgs {
         CloneArgs {
             flags: CloneFlags::CLONE_VFORK | CloneFlags::CLONE_VM,
             sp: None,
-            child_tid_ptr: 0,
-            parent_tid_ptr: 0,
+            set_tid_ptr: None,
+            clear_tid_ptr: None,
+            parent_tid_ptr: None,
             exit_signal: Some(Signal::SIGCHLD),
-            tls: 0,
+            tls: None,
         }
     }
 }
@@ -121,6 +148,7 @@ pub fn do_clone(thread: &Thread, clone_args: CloneArgs) -> KResult<u32> {
         let new_thread = thread_builder
             .process(current_process)
             .tid(new_pid)
+            .tls(clone_args.tls)
             .build(&mut procs);
         new_thread
     } else {
@@ -137,12 +165,8 @@ pub fn do_clone(thread: &Thread, clone_args: CloneArgs) -> KResult<u32> {
         new_thread
     };
 
-    if clone_args.flags.contains(CloneFlags::CLONE_PARENT_SETTID) {
-        UserPointerMut::new(clone_args.parent_tid_ptr as *mut u32)?.write(new_pid)?
-    }
-
-    if clone_args.flags.contains(CloneFlags::CLONE_SETTLS) {
-        new_thread.set_user_tls(clone_args.tls)?;
+    if let Some(parent_tid_ptr) = clone_args.parent_tid_ptr {
+        UserPointerMut::new(parent_tid_ptr as *mut u32)?.write(new_pid)?
     }
 
     Scheduler::get().spawn::<KernelStack, _>(new_thread_runnable(new_thread));

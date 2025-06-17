@@ -20,6 +20,7 @@ mod prelude;
 mod rcu;
 mod sync;
 
+use crate::kernel::task::alloc_pid;
 use alloc::{ffi::CString, sync::Arc};
 use core::{
     hint::spin_loop,
@@ -44,8 +45,6 @@ use kernel::{
 use kernel_init::setup_memory;
 use path::Path;
 use prelude::*;
-
-use crate::kernel::task::alloc_pid;
 
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {

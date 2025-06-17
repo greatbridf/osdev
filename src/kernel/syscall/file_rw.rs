@@ -1,4 +1,5 @@
 use super::FromSyscallArg;
+use crate::io::IntoStream;
 use crate::kernel::constants::{
     EBADF, EFAULT, EINVAL, ENOENT, ENOTDIR, SEEK_CUR, SEEK_END, SEEK_SET, S_IFBLK, S_IFCHR,
 };
@@ -73,9 +74,10 @@ fn read(fd: FD, buffer: *mut u8, bufsize: usize) -> KResult<usize> {
 
 #[eonix_macros::define_syscall(SYS_WRITE)]
 fn write(fd: FD, buffer: *const u8, count: usize) -> KResult<usize> {
-    let data = unsafe { core::slice::from_raw_parts(buffer, count) };
+    let buffer = CheckedUserPointer::new(buffer, count)?;
+    let mut stream = buffer.into_stream();
 
-    Task::block_on(thread.files.get(fd).ok_or(EBADF)?.write(data))
+    Task::block_on(thread.files.get(fd).ok_or(EBADF)?.write(&mut stream))
 }
 
 #[eonix_macros::define_syscall(SYS_OPENAT)]
@@ -295,7 +297,7 @@ struct IoVec32 {
 fn readv(fd: FD, iov_user: *const IoVec32, iovcnt: u32) -> KResult<usize> {
     let file = thread.files.get(fd).ok_or(EBADF)?;
 
-    let mut iov_user = UserPointer::new(iov_user as *mut IoVec32)?;
+    let mut iov_user = UserPointer::new(iov_user)?;
     let iov_buffers = (0..iovcnt)
         .map(|_| {
             let iov_result = iov_user.read()?;
@@ -324,35 +326,31 @@ fn readv(fd: FD, iov_user: *const IoVec32, iovcnt: u32) -> KResult<usize> {
 }
 
 #[eonix_macros::define_syscall(SYS_WRITEV)]
-fn writev(fd: FD, iov_user: *const u8, iovcnt: u32) -> KResult<usize> {
+fn writev(fd: FD, iov_user: *const IoVec32, iovcnt: u32) -> KResult<usize> {
     let file = thread.files.get(fd).ok_or(EBADF)?;
 
-    // TODO: Rewrite this with `UserPointer`.
-    let iov_user =
-        CheckedUserPointer::new(iov_user, iovcnt as usize * core::mem::size_of::<IoVec32>())?;
-    let mut iov_user_copied: Vec<IoVec32> = vec![];
-    iov_user_copied.resize(iovcnt as usize, IoVec32::default());
-
-    iov_user.read(
-        iov_user_copied.as_mut_ptr() as *mut (),
-        iov_user_copied.len() * core::mem::size_of::<IoVec32>(),
-    )?;
-
-    let iov_blocks = iov_user_copied
-        .into_iter()
-        .filter(|iov| iov.len != 0)
-        .map(|iov| CheckedUserPointer::new(iov.base as *mut u8, iov.len as usize))
+    let mut iov_user = UserPointer::new(iov_user)?;
+    let iov_streams = (0..iovcnt)
+        .map(|_| {
+            let iov_result = iov_user.read()?;
+            iov_user = iov_user.offset(1)?;
+            Ok(iov_result)
+        })
+        .filter_map(|iov_result| match iov_result {
+            Err(err) => Some(Err(err)),
+            Ok(IoVec32 { len: 0, .. }) => None,
+            Ok(IoVec32 { base, len }) => Some(
+                CheckedUserPointer::new(base as *mut u8, len as usize).map(|ptr| ptr.into_stream()),
+            ),
+        })
         .collect::<KResult<Vec<_>>>()?;
 
     let mut tot = 0usize;
-    for block in iov_blocks.into_iter() {
-        // TODO!!!: atomic `writev`
-        // TODO!!!!!: copy from user
-        let slice = block.as_slice();
-        let nread = Task::block_on(file.write(slice))?;
+    for mut stream in iov_streams.into_iter() {
+        let nread = Task::block_on(file.write(&mut stream))?;
         tot += nread;
 
-        if nread == 0 || nread != slice.len() {
+        if nread == 0 || !stream.is_drained() {
             break;
         }
     }

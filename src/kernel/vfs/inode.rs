@@ -1,4 +1,5 @@
 use super::{dentry::Dentry, s_isblk, s_ischr, vfs::Vfs, DevId, TimeSpec};
+use crate::io::Stream;
 use crate::kernel::constants::{
     EINVAL, EISDIR, ENOTDIR, EPERM, STATX_ATIME, STATX_BLOCKS, STATX_CTIME, STATX_GID, STATX_INO,
     STATX_MODE, STATX_MTIME, STATX_NLINK, STATX_SIZE, STATX_TYPE, STATX_UID, S_IFDIR, S_IFMT,
@@ -115,7 +116,7 @@ pub trait Inode: Send + Sync + InodeInner {
         Err(if self.is_dir() { EISDIR } else { EINVAL })
     }
 
-    fn write(&self, buffer: &[u8], offset: WriteOffset) -> KResult<usize> {
+    fn write(&self, stream: &mut dyn Stream, offset: WriteOffset) -> KResult<usize> {
         Err(if self.is_dir() { EISDIR } else { EINVAL })
     }
 

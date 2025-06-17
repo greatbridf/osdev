@@ -1,5 +1,8 @@
-use crate::kernel::constants::{EFAULT, EINVAL};
-use core::{arch::asm, ffi::CStr};
+use crate::{
+    io::{IntoStream, Stream},
+    kernel::constants::{EFAULT, EINVAL},
+};
+use core::{arch::asm, ffi::CStr, marker::PhantomData};
 use eonix_preempt::assert_preempt_enabled;
 
 use crate::{
@@ -7,36 +10,40 @@ use crate::{
     prelude::*,
 };
 
-pub struct CheckedUserPointer {
+pub struct CheckedUserPointer<'a> {
     ptr: *const u8,
     len: usize,
+    _phantom: PhantomData<&'a ()>,
 }
 
-pub struct UserBuffer<'lt> {
-    ptr: CheckedUserPointer,
+pub struct UserBuffer<'a> {
+    ptr: CheckedUserPointer<'a>,
     size: usize,
     cur: usize,
-    _phantom: core::marker::PhantomData<&'lt ()>,
 }
 
-pub struct UserString<'lt> {
-    ptr: CheckedUserPointer,
+pub struct UserString<'a> {
+    ptr: CheckedUserPointer<'a>,
     len: usize,
-    _phantom: core::marker::PhantomData<&'lt ()>,
 }
 
 pub struct UserPointer<'a, T: Copy, const CONST: bool> {
-    pointer: CheckedUserPointer,
-    _phantom: core::marker::PhantomData<&'a T>,
+    pointer: CheckedUserPointer<'a>,
+    _phantom: PhantomData<T>,
 }
 
-impl<'a, T: Copy, const CONST: bool> UserPointer<'a, T, CONST> {
+pub struct UserStream<'a> {
+    pointer: CheckedUserPointer<'a>,
+    cur: usize,
+}
+
+impl<T: Copy, const CONST: bool> UserPointer<'_, T, CONST> {
     pub fn new(ptr: *const T) -> KResult<Self> {
         let pointer = CheckedUserPointer::new(ptr as *const u8, core::mem::size_of::<T>())?;
 
         Ok(Self {
             pointer,
-            _phantom: core::marker::PhantomData,
+            _phantom: PhantomData,
         })
     }
 
@@ -65,14 +72,18 @@ impl<'a, T: Copy> UserPointer<'a, T, false> {
     }
 }
 
-impl CheckedUserPointer {
+impl CheckedUserPointer<'_> {
     pub fn new(ptr: *const u8, len: usize) -> KResult<Self> {
         const USER_MAX_ADDR: usize = 0x7ff_fff_fff_fff;
         let end = (ptr as usize).checked_add(len);
         if ptr.is_null() || end.ok_or(EFAULT)? > USER_MAX_ADDR {
             Err(EFAULT)
         } else {
-            Ok(Self { ptr, len })
+            Ok(Self {
+                ptr,
+                len,
+                _phantom: PhantomData,
+            })
         }
     }
 
@@ -275,12 +286,7 @@ impl UserBuffer<'_> {
     pub fn new(ptr: *mut u8, size: usize) -> KResult<Self> {
         let ptr = CheckedUserPointer::new(ptr, size)?;
 
-        Ok(Self {
-            ptr,
-            size,
-            cur: 0,
-            _phantom: core::marker::PhantomData,
-        })
+        Ok(Self { ptr, size, cur: 0 })
     }
 
     fn remaining(&self) -> usize {
@@ -382,7 +388,6 @@ impl<'lt> UserString<'lt> {
             Ok(Self {
                 ptr,
                 len: MAX_LEN - result,
-                _phantom: core::marker::PhantomData,
             })
         }
     }
@@ -393,6 +398,60 @@ impl<'lt> UserString<'lt> {
                 self.ptr.get_const(),
                 self.len + 1,
             ))
+        }
+    }
+}
+
+impl UserStream<'_> {
+    pub fn len(&self) -> usize {
+        self.pointer.len
+    }
+
+    pub fn remaining(&self) -> usize {
+        self.pointer.len - self.cur
+    }
+
+    pub fn is_drained(&self) -> bool {
+        self.cur >= self.pointer.len
+    }
+}
+
+impl Stream for UserStream<'_> {
+    fn poll_data<'a>(&mut self, buf: &'a mut [u8]) -> KResult<Option<&'a mut [u8]>> {
+        assert_preempt_enabled!("UserStream::poll_data");
+
+        if self.cur >= self.pointer.len {
+            return Ok(None);
+        }
+
+        let to_read = buf.len().min(self.pointer.len - self.cur);
+
+        self.pointer.read(buf.as_mut_ptr() as *mut (), to_read)?;
+
+        self.pointer.forward(to_read);
+        self.cur += to_read;
+        Ok(Some(&mut buf[..to_read]))
+    }
+
+    fn ignore(&mut self, len: usize) -> KResult<Option<usize>> {
+        if self.cur >= self.pointer.len {
+            return Ok(None);
+        }
+        let to_ignore = len.min(self.pointer.len - self.cur);
+
+        self.pointer.forward(to_ignore);
+        self.cur += to_ignore;
+        Ok(Some(to_ignore))
+    }
+}
+
+impl<'a> IntoStream for CheckedUserPointer<'a> {
+    type Stream = UserStream<'a>;
+
+    fn into_stream(self) -> Self::Stream {
+        UserStream {
+            pointer: self,
+            cur: 0,
         }
     }
 }

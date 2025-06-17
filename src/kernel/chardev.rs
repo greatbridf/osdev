@@ -9,7 +9,10 @@ use super::{
         DevId,
     },
 };
-use crate::{io::Buffer, prelude::*};
+use crate::{
+    io::{Buffer, Stream, StreamRead},
+    prelude::*,
+};
 use alloc::{
     boxed::Box,
     collections::btree_map::{BTreeMap, Entry},
@@ -20,7 +23,7 @@ use eonix_sync::AsProof as _;
 
 pub trait VirtualCharDevice: Send + Sync {
     fn read(&self, buffer: &mut dyn Buffer) -> KResult<usize>;
-    fn write(&self, data: &[u8]) -> KResult<usize>;
+    fn write(&self, stream: &mut dyn Stream) -> KResult<usize>;
 }
 
 pub enum CharDeviceType {
@@ -44,15 +47,13 @@ impl CharDevice {
         }
     }
 
-    pub fn write(&self, data: &[u8]) -> KResult<usize> {
+    pub fn write(&self, stream: &mut dyn Stream) -> KResult<usize> {
         match &self.device {
-            CharDeviceType::Virtual(device) => device.write(data),
-            CharDeviceType::Terminal(terminal) => {
-                for &ch in data.iter() {
-                    terminal.show_char(ch);
-                }
-                Ok(data.len())
-            }
+            CharDeviceType::Virtual(device) => device.write(stream),
+            CharDeviceType::Terminal(terminal) => stream.read_till_end(&mut [0; 128], |data| {
+                terminal.write(data);
+                Ok(())
+            }),
         }
     }
 
@@ -99,8 +100,8 @@ impl VirtualCharDevice for NullDevice {
         Ok(0)
     }
 
-    fn write(&self, _data: &[u8]) -> KResult<usize> {
-        Ok(_data.len())
+    fn write(&self, stream: &mut dyn Stream) -> KResult<usize> {
+        stream.ignore_all()
     }
 }
 
@@ -112,8 +113,8 @@ impl VirtualCharDevice for ZeroDevice {
         Ok(buffer.wrote())
     }
 
-    fn write(&self, _data: &[u8]) -> KResult<usize> {
-        Ok(_data.len())
+    fn write(&self, stream: &mut dyn Stream) -> KResult<usize> {
+        stream.ignore_all()
     }
 }
 
@@ -124,12 +125,12 @@ impl VirtualCharDevice for ConsoleDevice {
         Task::block_on(console_terminal.read(buffer))
     }
 
-    fn write(&self, data: &[u8]) -> KResult<usize> {
+    fn write(&self, stream: &mut dyn Stream) -> KResult<usize> {
         let console_terminal = get_console().ok_or(EIO)?;
-        for &ch in data.iter() {
-            console_terminal.show_char(ch);
-        }
-        Ok(data.len())
+        stream.read_till_end(&mut [0; 128], |data| {
+            console_terminal.write(data);
+            Ok(())
+        })
     }
 }
 

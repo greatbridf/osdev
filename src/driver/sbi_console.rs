@@ -11,12 +11,16 @@ impl ConsoleWrite for SbiConsole {
 }
 
 impl TerminalDevice for SbiConsole {
-    fn putchar(&self, ch: u8) {
-        eonix_hal::bootstrap::early_console_putchar(ch);
+    fn write(&self, data: &[u8]) {
+        for &ch in data {
+            eonix_hal::bootstrap::early_console_putchar(ch);
+        }
     }
 
-    fn putchar_direct(&self, ch: u8) {
-        eonix_hal::bootstrap::early_console_putchar(ch);
+    fn write_direct(&self, data: &[u8]) {
+        for &ch in data {
+            eonix_hal::bootstrap::early_console_putchar(ch);
+        }
     }
 }
 

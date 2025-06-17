@@ -200,14 +200,16 @@ impl Serial {
 }
 
 impl TerminalDevice for Serial {
-    fn putchar(&self, ch: u8) {
+    fn write(&self, data: &[u8]) {
         let mut tx_buffer = self.tx_buffer.lock();
-        tx_buffer.push_back(ch);
+        tx_buffer.extend(data.iter().copied());
         self.wakeup_worker();
     }
 
-    fn putchar_direct(&self, ch: u8) {
-        self.tx_rx.write(ch);
+    fn write_direct(&self, data: &[u8]) {
+        for &ch in data {
+            self.tx_rx.write(ch);
+        }
     }
 }
 

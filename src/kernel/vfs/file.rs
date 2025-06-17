@@ -3,11 +3,8 @@ use super::{
     inode::{Mode, WriteOffset},
     s_isblk, s_isdir, s_isreg,
 };
-use crate::kernel::constants::{
-    EBADF, EFAULT, EINTR, EINVAL, ENOTDIR, ENOTTY, EOVERFLOW, EPIPE, ESPIPE, S_IFMT,
-};
 use crate::{
-    io::{Buffer, BufferFill, ByteBuffer, Chunks},
+    io::{Buffer, BufferFill, ByteBuffer, Chunks, IntoStream},
     kernel::{
         constants::{TCGETS, TCSETS, TIOCGPGRP, TIOCGWINSZ, TIOCSPGRP},
         mem::{paging::Page, AsMemoryBlock as _},
@@ -18,6 +15,12 @@ use crate::{
     },
     prelude::*,
     sync::CondVar,
+};
+use crate::{
+    io::{Stream, StreamRead},
+    kernel::constants::{
+        EBADF, EFAULT, EINTR, EINVAL, ENOTDIR, ENOTTY, EOVERFLOW, EPIPE, ESPIPE, S_IFMT,
+    },
 };
 use alloc::{collections::vec_deque::VecDeque, sync::Arc};
 use bitflags::bitflags;
@@ -193,54 +196,17 @@ impl Pipe {
         return Ok(data.len());
     }
 
-    async fn write_non_atomic(&self, data: &[u8]) -> KResult<usize> {
-        let mut inner = self.inner.lock().await;
-
-        if inner.read_closed {
-            send_sigpipe_to_current();
-            return Err(EPIPE);
-        }
-
-        let mut remaining = data;
-        while !remaining.is_empty() {
-            let space = inner.buffer.capacity() - inner.buffer.len();
-
-            if space != 0 {
-                let to_write = remaining.len().min(space);
-                inner.buffer.extend(&remaining[..to_write]);
-                remaining = &remaining[to_write..];
-
-                self.cv_read.notify_all();
-            }
-
-            if remaining.is_empty() {
+    async fn write(&self, stream: &mut dyn Stream) -> KResult<usize> {
+        let mut buffer = [0; Self::PIPE_SIZE];
+        let mut total = 0;
+        while let Some(data) = stream.poll_data(&mut buffer)? {
+            let nwrote = self.write_atomic(data).await?;
+            total += nwrote;
+            if nwrote != data.len() {
                 break;
             }
-
-            inner = self.cv_write.wait(inner).await;
-            if Thread::current().signal_list.has_pending_signal() {
-                if data.len() != remaining.len() {
-                    break;
-                }
-                return Err(EINTR);
-            }
-
-            if inner.read_closed {
-                send_sigpipe_to_current();
-                return Err(EPIPE);
-            }
         }
-
-        Ok(data.len() - remaining.len())
-    }
-
-    async fn write(&self, data: &[u8]) -> KResult<usize> {
-        // Writes those are smaller than the pipe size are atomic.
-        if data.len() <= Self::PIPE_SIZE {
-            self.write_atomic(data).await
-        } else {
-            self.write_non_atomic(data).await
-        }
+        Ok(total)
     }
 }
 
@@ -311,7 +277,7 @@ impl InodeFile {
         Ok(new_cursor)
     }
 
-    fn write(&self, buffer: &[u8]) -> KResult<usize> {
+    fn write(&self, stream: &mut dyn Stream) -> KResult<usize> {
         if !self.write {
             return Err(EBADF);
         }
@@ -320,11 +286,11 @@ impl InodeFile {
 
         // TODO!!!: use `UserBuffer`
         if self.append {
-            let nwrote = self.dentry.write(buffer, WriteOffset::End(&mut cursor))?;
+            let nwrote = self.dentry.write(stream, WriteOffset::End(&mut cursor))?;
 
             Ok(nwrote)
         } else {
-            let nwrote = self.dentry.write(buffer, WriteOffset::Position(*cursor))?;
+            let nwrote = self.dentry.write(stream, WriteOffset::Position(*cursor))?;
 
             *cursor += nwrote;
             Ok(nwrote)
@@ -413,12 +379,11 @@ impl TerminalFile {
         self.terminal.read(buffer).await
     }
 
-    fn write(&self, buffer: &[u8]) -> KResult<usize> {
-        for &ch in buffer.iter() {
-            self.terminal.show_char(ch);
-        }
-
-        Ok(buffer.len())
+    fn write(&self, stream: &mut dyn Stream) -> KResult<usize> {
+        stream.read_till_end(&mut [0; 128], |data| {
+            self.terminal.write(data);
+            Ok(())
+        })
     }
 
     async fn poll(&self, event: PollEvent) -> KResult<PollEvent> {
@@ -467,12 +432,12 @@ impl File {
     //     }
     // }
 
-    pub async fn write(&self, buffer: &[u8]) -> KResult<usize> {
+    pub async fn write(&self, stream: &mut dyn Stream) -> KResult<usize> {
         match self {
-            File::Inode(inode) => inode.write(buffer),
-            File::PipeWrite(pipe) => pipe.pipe.write(buffer).await,
-            File::TTY(tty) => tty.write(buffer),
-            File::CharDev(device) => device.write(buffer),
+            File::Inode(inode) => inode.write(stream),
+            File::PipeWrite(pipe) => pipe.pipe.write(stream).await,
+            File::TTY(tty) => tty.write(stream),
+            File::CharDev(device) => device.write(stream),
             _ => Err(EBADF),
         }
     }
@@ -518,7 +483,7 @@ impl File {
                 break;
             }
 
-            let nwrote = dest_file.write(&buffer[..nread]).await?;
+            let nwrote = dest_file.write(&mut buffer[..nread].into_stream()).await?;
             nsent += nwrote;
 
             if nwrote != len {

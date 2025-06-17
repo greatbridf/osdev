@@ -22,6 +22,7 @@ $SUDO cp ./user-programs/dynamic_test build/mnt/dynamic_test
 $SUDO cp ./user-programs/busybox build/mnt/busybox
 $SUDO cp ./user-programs/busybox-minimal build/mnt/busybox_
 $SUDO cp ./user-programs/ld-musl-i386.so.1 build/mnt/ld-musl-i386.so.1
+$SUDO cp ./user-programs/pthread_test build/mnt/pthread_test
 $SUDO cp ./init_script.sh build/mnt/initsh
 
 # Add your custom files here

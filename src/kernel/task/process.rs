@@ -486,14 +486,6 @@ impl Process {
             needs_notify: false,
         }
     }
-
-    pub async fn force_kill(self: &Arc<Self>, signal: Signal) {
-        let mut proc_list = ProcessList::get().write().await;
-        unsafe {
-            // SAFETY: Preemption is disabled.
-            proc_list.do_kill_process(self, WaitType::Signaled(signal));
-        }
-    }
 }
 
 impl WaitList {

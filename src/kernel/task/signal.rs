@@ -250,8 +250,8 @@ impl SignalList {
                     }
                 }
                 signal => {
-                    // Default to terminate the process.
-                    Thread::current().process.force_kill(signal).await;
+                    // Default to terminate the thread.
+                    Thread::current().force_kill(signal).await;
                     return;
                 }
             }

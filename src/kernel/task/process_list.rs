@@ -104,71 +104,10 @@ impl ProcessList {
     }
 
     /// Make the process a zombie and notify the parent.
-    /// # Safet
+    /// # Safety
     /// This function will destroy the process and all its threads.
     /// It is the caller's responsibility to ensure that the process is not
     /// running or will not run after this function is called.
-    pub unsafe fn do_kill_process(&mut self, process: &Arc<Process>, status: WaitType) {
-        if process.pid == 1 {
-            panic!("init exited");
-        }
-
-        let inner = process.inner.access_mut(self.prove_mut());
-        // TODO!!!!!!: When we are killing multiple threads, we need to wait until all
-        // the threads are stopped then proceed.
-        for thread in inner.threads.values().map(|t| t.upgrade().unwrap()) {
-            assert!(thread.tid == Thread::current().tid);
-            // TODO: Send SIGKILL to all threads.
-            thread.files.close_all();
-            thread.dead.store(true, Ordering::SeqCst);
-        }
-
-        // If we are the session leader, we should drop the control terminal.
-        if process.session(self.prove()).sid == process.pid {
-            if let Some(terminal) =
-                Task::block_on(process.session(self.prove()).drop_control_terminal())
-            {
-                terminal.drop_session();
-            }
-        }
-
-        // Release the MMList as well as the page table.
-        unsafe {
-            // SAFETY: We are exiting the process, so no one might be using it.
-            process.mm_list.replace(None);
-        }
-
-        // Make children orphans (adopted by init)
-        {
-            let init = self.init_process();
-            inner.children.retain(|_, child| {
-                let child = child.upgrade().unwrap();
-                // SAFETY: `child.parent` must be ourself. So we don't need to free it.
-                unsafe { child.parent.swap(Some(init.clone())) };
-                init.add_child(&child, self.prove_mut());
-
-                false
-            });
-        }
-
-        let mut init_notify = self.init_process().notify_batch();
-        process
-            .wait_list
-            .drain_exited()
-            .into_iter()
-            .for_each(|item| init_notify.notify(item));
-        init_notify.finish(self.prove());
-
-        process.parent(self.prove()).notify(
-            process.exit_signal.expect("Process must set exit signal"),
-            WaitObject {
-                pid: process.pid,
-                code: status,
-            },
-            self.prove(),
-        );
-    }
-
     pub async unsafe fn do_exit(
         &mut self,
         thread: &Thread,

@@ -377,6 +377,16 @@ impl Thread {
         }
     }
 
+    pub async fn force_kill(&self, signal: Signal) {
+        let mut proc_list = ProcessList::get().write().await;
+        unsafe {
+            // SAFETY: Preemption is disabled.
+            proc_list
+                .do_exit(self, WaitType::Signaled(signal), false)
+                .await;
+        }
+    }
+
     pub fn is_dead(&self) -> bool {
         self.dead.load(Ordering::SeqCst)
     }

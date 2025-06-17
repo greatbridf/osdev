@@ -610,7 +610,7 @@ fn sigreturn() -> KResult<SyscallNoReturn> {
                 "`sigreturn` failed in thread {} with error {err}!",
                 thread.tid
             );
-            Task::block_on(thread.process.force_kill(Signal::SIGSEGV));
+            Task::block_on(thread.force_kill(Signal::SIGSEGV));
         })?;
 
     Ok(SyscallNoReturn)

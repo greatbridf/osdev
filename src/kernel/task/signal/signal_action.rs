@@ -7,11 +7,12 @@ use crate::{
     },
     SIGNAL_NOW,
 };
-use alloc::collections::btree_map::BTreeMap;
+use alloc::{collections::btree_map::BTreeMap, sync::Arc};
 use arch::FpuState;
 use core::num::NonZero;
 use eonix_hal::{traits::trap::RawTrapContext, trap::TrapContext};
 use eonix_mm::address::{Addr as _, AddrOps as _, VAddr};
+use eonix_sync::Spin;
 use posix_types::signal::{SigAction, TryFromSigAction};
 
 #[derive(Debug, Clone, Copy)]
@@ -27,38 +28,51 @@ pub enum SignalAction {
 
 #[derive(Debug)]
 pub struct SignalActionList {
-    actions: BTreeMap<Signal, SignalAction>,
+    actions: Spin<BTreeMap<Signal, SignalAction>>,
+}
+
+impl SignalActionList {
+    pub fn new_shared(other: &Arc<Self>) -> Arc<Self> {
+        other.clone()
+    }
+
+    pub fn new_cloned(other: &Self) -> Arc<Self> {
+        Arc::new(Self {
+            actions: Spin::new(other.actions.lock().clone()),
+        })
+    }
 }
 
 impl SignalActionList {
     pub const fn new() -> Self {
         Self {
-            actions: BTreeMap::new(),
+            actions: Spin::new(BTreeMap::new()),
         }
     }
 
-    pub fn set(&mut self, signal: Signal, action: SignalAction) {
+    pub fn set(&self, signal: Signal, action: SignalAction) {
         debug_assert!(
             !matches!(signal, SIGNAL_NOW!()),
             "SIGSTOP and SIGKILL should not be set for a handler."
         );
         match action {
-            SignalAction::Default => self.actions.remove(&signal),
-            _ => self.actions.insert(signal, action),
+            SignalAction::Default => self.actions.lock().remove(&signal),
+            _ => self.actions.lock().insert(signal, action),
         };
     }
 
     pub fn get(&self, signal: Signal) -> SignalAction {
-        match self.actions.get(&signal) {
+        match self.actions.lock().get(&signal) {
             None => SignalAction::Default,
             Some(action) => action.clone(),
         }
     }
 
-    pub fn remove_non_ignore(&mut self) {
+    pub fn remove_non_ignore(&self) {
         // Remove all custom handlers except for the ignore action.
         // Default handlers should never appear in the list so we don't consider that.
         self.actions
+            .lock()
             .retain(|_, action| matches!(action, SignalAction::Ignore));
     }
 }
@@ -114,7 +128,7 @@ impl SignalAction {
 impl Clone for SignalActionList {
     fn clone(&self) -> Self {
         Self {
-            actions: self.actions.clone(),
+            actions: Spin::new(self.actions.lock().clone()),
         }
     }
 }

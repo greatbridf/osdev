@@ -181,76 +181,54 @@ impl MMListInner<'_> {
             return Err(EINVAL);
         }
 
-        let mut left_area = None;
-        let mut right_area = None;
-        let mut mid_area = None;
-
-        self.areas.retain(|area| {
+        let mut found = false;
+        let old_areas = core::mem::take(&mut self.areas);
+        for mut area in old_areas {
             let Some((left, mid, right)) = area.range().mask_with_checked(&range_to_protect) else {
-                return true;
+                self.areas.insert(area);
+                continue;
             };
+
+            found = true;
+
+            if let Some(left) = left {
+                let (Some(left), Some(right)) = area.split(left.end()) else {
+                    unreachable!("`left.end()` is within the area");
+                };
+
+                self.areas.insert(left);
+                area = right;
+            }
+
+            if let Some(right) = right {
+                let (Some(left), Some(right)) = area.split(right.start()) else {
+                    unreachable!("`right.start()` is within the area");
+                };
+
+                self.areas.insert(right);
+                area = left;
+            }
 
             for pte in self.page_table.iter_user(mid) {
                 let mut page_attr = pte.get_attr().as_page_attr().expect("Not a page attribute");
 
                 page_attr.set(PageAttribute::READ, permission.read);
-                page_attr.set(PageAttribute::WRITE, permission.write);
+
+                if !page_attr.contains(PageAttribute::COPY_ON_WRITE) {
+                    page_attr.set(PageAttribute::WRITE, permission.write);
+                }
+
                 page_attr.set(PageAttribute::EXECUTE, permission.execute);
 
                 pte.set_attr(page_attr.into());
             }
 
-            match (left, right) {
-                (None, None) => {}
-                (Some(left), None) => {
-                    assert!(left_area.is_none());
-                    let (Some(left), Some(right)) = area.clone().split(left.end()) else {
-                        unreachable!("`left.end()` is within the area");
-                    };
-
-                    left_area = Some(left);
-                    mid_area = Some(right);
-                }
-                (None, Some(right)) => {
-                    assert!(right_area.is_none());
-                    let (Some(left), Some(right)) = area.clone().split(right.start()) else {
-                        unreachable!("`right.start()` is within the area");
-                    };
-
-                    mid_area = Some(left);
-                    right_area = Some(right);
-                }
-                (Some(left), Some(right)) => {
-                    assert!(left_area.is_none());
-                    assert!(right_area.is_none());
-                    let (Some(left), Some(mid)) = area.clone().split(left.end()) else {
-                        unreachable!("`left.end()` is within the area");
-                    };
-
-                    let (Some(mid), Some(right)) = mid.split(right.start()) else {
-                        unreachable!("`right.start()` is within the area");
-                    };
-
-                    left_area = Some(left);
-                    right_area = Some(right);
-                    mid_area = Some(mid);
-                }
-            }
-
-            false
-        });
-
-        assert!(mid_area.is_some());
-
-        if let Some(mut mid) = mid_area {
-            mid.permission = permission;
-            self.areas.insert(mid);
+            area.permission = permission;
+            self.areas.insert(area);
         }
-        if let Some(front) = left_area {
-            self.areas.insert(front);
-        }
-        if let Some(back) = right_area {
-            self.areas.insert(back);
+
+        if !found {
+            return Err(ENOMEM);
         }
 
         Ok(())
@@ -353,6 +331,10 @@ impl MMList {
         self.flush_user_tlbs().await;
 
         list
+    }
+
+    pub async fn new_shared(&self) -> Self {
+        todo!()
     }
 
     pub fn activate(&self) {

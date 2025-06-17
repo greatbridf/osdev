@@ -73,7 +73,9 @@ impl MMArea {
                     },
                 };
 
-                self.range.get_mut().shrink(diff);
+                let new_range = self.range_borrow().shrink(self.range_borrow().end() - at);
+
+                *self.range.get_mut() = new_range;
                 (Some(self), Some(right))
             }
         }

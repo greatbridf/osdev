@@ -1,7 +1,10 @@
 use core::sync::atomic::Ordering;
 
 use super::{Process, ProcessGroup, Session, Thread, WaitObject, WaitType};
-use crate::rcu::rcu_sync;
+use crate::{
+    kernel::{task::futex_wake, user::UserPointerMut},
+    rcu::rcu_sync,
+};
 use alloc::{
     collections::btree_map::BTreeMap,
     sync::{Arc, Weak},
@@ -105,63 +108,93 @@ impl ProcessList {
     /// This function will destroy the process and all its threads.
     /// It is the caller's responsibility to ensure that the process is not
     /// running or will not run after this function is called.
-    pub unsafe fn do_kill_process(&mut self, process: &Arc<Process>, status: WaitType) {
+    pub async unsafe fn do_exit(
+        &mut self,
+        thread: &Thread,
+        exit_status: WaitType,
+        is_exiting_group: bool,
+    ) {
+        let process = thread.process.clone();
+
         if process.pid == 1 {
             panic!("init exited");
         }
 
         let inner = process.inner.access_mut(self.prove_mut());
-        // TODO!!!!!!: When we are killing multiple threads, we need to wait until all
-        // the threads are stopped then proceed.
-        for thread in inner.threads.values().map(|t| t.upgrade().unwrap()) {
-            assert!(thread.tid == Thread::current().tid);
+
+        thread.dead.store(true, Ordering::SeqCst);
+
+        if is_exiting_group {
             // TODO: Send SIGKILL to all threads.
+            // todo!()
+        }
+
+        if thread.tid != process.pid {
+            self.threads.remove(&thread.tid);
+            inner.threads.remove(&thread.tid).unwrap();
+        }
+
+        if let Some(clear_ctid) = thread.get_clear_ctid() {
+            UserPointerMut::new(clear_ctid as *mut u32)
+                .unwrap()
+                .write(0u32)
+                .expect("should clear child tid successfully");
+
+            futex_wake(clear_ctid, None, 1)
+                .await
+                .expect("should wake up child tid");
+        }
+
+        // main thread exit
+        if thread.tid == process.pid {
+            assert_eq!(thread.tid, process.pid);
+
             thread.files.close_all();
-            thread.dead.store(true, Ordering::SeqCst);
-        }
 
-        // If we are the session leader, we should drop the control terminal.
-        if process.session(self.prove()).sid == process.pid {
-            if let Some(terminal) =
-                Task::block_on(process.session(self.prove()).drop_control_terminal())
-            {
-                terminal.drop_session();
+            // If we are the session leader, we should drop the control terminal.
+            if process.session(self.prove()).sid == process.pid {
+                if let Some(terminal) =
+                    Task::block_on(process.session(self.prove()).drop_control_terminal())
+                {
+                    terminal.drop_session();
+                }
             }
+
+            // Release the MMList as well as the page table.
+            unsafe {
+                // SAFETY: We are exiting the process, so no one might be using it.
+                process.mm_list.replace(None);
+            }
+
+            // Make children orphans (adopted by init)
+            {
+                let init = self.init_process();
+                inner.children.retain(|_, child| {
+                    let child = child.upgrade().unwrap();
+                    // SAFETY: `child.parent` must be ourself. So we don't need to free it.
+                    unsafe { child.parent.swap(Some(init.clone())) };
+                    init.add_child(&child, self.prove_mut());
+
+                    false
+                });
+            }
+
+            let mut init_notify = self.init_process().notify_batch();
+            process
+                .wait_list
+                .drain_exited()
+                .into_iter()
+                .for_each(|item| init_notify.notify(item));
+            init_notify.finish(self.prove());
+
+            process.parent(self.prove()).notify(
+                process.exit_signal.expect("Process must set exit signal"),
+                WaitObject {
+                    pid: process.pid,
+                    code: exit_status,
+                },
+                self.prove(),
+            );
         }
-
-        // Release the MMList as well as the page table.
-        unsafe {
-            // SAFETY: We are exiting the process, so no one might be using it.
-            process.mm_list.replace(None);
-        }
-
-        // Make children orphans (adopted by init)
-        {
-            let init = self.init_process();
-            inner.children.retain(|_, child| {
-                let child = child.upgrade().unwrap();
-                // SAFETY: `child.parent` must be ourself. So we don't need to free it.
-                unsafe { child.parent.swap(Some(init.clone())) };
-                init.add_child(&child, self.prove_mut());
-
-                false
-            });
-        }
-
-        let mut init_notify = self.init_process().notify_batch();
-        process
-            .wait_list
-            .drain_exited()
-            .into_iter()
-            .for_each(|item| init_notify.notify(item));
-        init_notify.finish(self.prove());
-
-        process.parent(self.prove()).notify(
-            WaitObject {
-                pid: process.pid,
-                code: status,
-            },
-            self.prove(),
-        );
     }
 }

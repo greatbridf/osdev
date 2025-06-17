@@ -7,10 +7,11 @@ use crate::kernel::constants::{
 };
 use crate::kernel::mem::PageBuffer;
 use crate::kernel::task::{
-    new_thread_runnable, KernelStack, ProcessBuilder, ProcessList, ProgramLoader, Signal,
-    SignalAction, SignalMask, ThreadBuilder, UserDescriptor, WaitObject, WaitType,
+    do_clone, futex_wait, futex_wake, FutexFlags, FutexOp, ProcessList, ProgramLoader, Signal,
+    SignalAction, SignalMask, WaitObject, WaitType,
 };
-use crate::kernel::user::dataflow::UserString;
+use crate::kernel::task::{parse_futexop, CloneArgs};
+use crate::kernel::user::dataflow::{CheckedUserPointer, UserString};
 use crate::kernel::user::{UserPointer, UserPointerMut};
 use crate::kernel::vfs::{self, dentry::Dentry};
 use crate::path::Path;
@@ -19,9 +20,9 @@ use crate::{kernel::user::dataflow::UserBuffer, prelude::*};
 use alloc::borrow::ToOwned;
 use alloc::ffi::CString;
 use bitflags::bitflags;
+use eonix_hal::processor::UserTLS;
 use eonix_hal::traits::trap::RawTrapContext;
 use eonix_mm::address::Addr as _;
-use eonix_runtime::scheduler::Scheduler;
 use eonix_runtime::task::Task;
 use eonix_sync::AsProof as _;
 use posix_types::signal::SigAction;
@@ -168,7 +169,7 @@ fn execve(exec: *const u8, argv: *const u32, envp: *const u32) -> KResult<()> {
 fn exit(status: u32) -> SyscallNoReturn {
     unsafe {
         let mut procs = Task::block_on(ProcessList::get().write());
-        procs.do_kill_process(&thread.process, WaitType::Exited(status));
+        Task::block_on(procs.do_exit(&thread, WaitType::Exited(status), false));
     }
 
     SyscallNoReturn
@@ -176,7 +177,12 @@ fn exit(status: u32) -> SyscallNoReturn {
 
 #[eonix_macros::define_syscall(0xfc)]
 fn exit_group(status: u32) -> SyscallNoReturn {
-    sys_exit(thread, status)
+    unsafe {
+        let mut procs = Task::block_on(ProcessList::get().write());
+        Task::block_on(procs.do_exit(&thread, WaitType::Exited(status), true));
+    }
+
+    SyscallNoReturn
 }
 
 #[eonix_macros::define_syscall(0x07)]
@@ -297,13 +303,43 @@ fn gettid() -> KResult<u32> {
     Ok(thread.tid)
 }
 
-#[eonix_macros::define_syscall(0xf3)]
-fn set_thread_area(desc: *mut UserDescriptor) -> KResult<()> {
-    let desc_pointer = UserPointerMut::new(desc)?;
-    let mut desc = desc_pointer.read()?;
+pub fn parse_user_tls(arch_tls: usize) -> KResult<UserTLS> {
+    #[cfg(target_arch = "x86_64")]
+    {
+        let desc = arch_tls as *mut posix_types::x86_64::UserDescriptor;
+        let desc_pointer = UserPointerMut::new(desc)?;
+        let mut desc = desc_pointer.read()?;
 
-    thread.set_thread_area(&mut desc)?;
-    desc_pointer.write(desc)?;
+        // Clear the TLS area if it is not present.
+        if desc.flags.is_read_exec_only() && !desc.flags.is_present() {
+            if desc.limit != 0 && desc.base != 0 {
+                let len = if desc.flags.is_limit_in_pages() {
+                    (desc.limit as usize) << 12
+                } else {
+                    desc.limit as usize
+                };
+
+                CheckedUserPointer::new(desc.base as _, len)?.zero()?;
+            }
+        }
+
+        let (new_tls, entry) =
+            UserTLS::new32(desc.base, desc.limit, desc.flags.is_limit_in_pages());
+        desc.entry = entry;
+        desc_pointer.write(desc)?;
+
+        Ok(new_tls)
+    }
+
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        todo!()
+    }
+}
+
+#[eonix_macros::define_syscall(0xf3)]
+fn set_thread_area(arch_tls: usize) -> KResult<()> {
+    thread.set_user_tls(parse_user_tls(arch_tls)?)?;
 
     // SAFETY: Preemption is disabled on calling `load_thread_area32()`.
     unsafe {
@@ -316,9 +352,8 @@ fn set_thread_area(desc: *mut UserDescriptor) -> KResult<()> {
 }
 
 #[eonix_macros::define_syscall(0x102)]
-fn set_tid_address(tidptr: *mut u32) -> KResult<u32> {
-    // TODO!!!: Implement this. We don't use it for now.
-    let _tidptr = UserPointerMut::new(tidptr)?;
+fn set_tid_address(tidptr: usize) -> KResult<u32> {
+    thread.clear_child_tid(Some(tidptr));
     Ok(thread.tid)
 }
 
@@ -537,30 +572,65 @@ fn chmod(pathname: *const u8, mode: u32) -> KResult<()> {
 }
 
 #[eonix_macros::define_syscall(0xbe)]
-fn vfork() -> u32 {
-    sys_fork(thread)
+fn vfork() -> KResult<u32> {
+    let clone_args = CloneArgs::for_vfork();
+
+    do_clone(thread, clone_args)
 }
 
 #[eonix_macros::define_syscall(0x02)]
-fn fork() -> u32 {
-    let mut procs = Task::block_on(ProcessList::get().write());
+fn fork() -> KResult<u32> {
+    let clone_args = CloneArgs::for_fork();
 
-    let current_process = thread.process.clone();
-    let current_pgroup = current_process.pgroup(procs.prove()).clone();
-    let current_session = current_process.session(procs.prove()).clone();
+    do_clone(thread, clone_args)
+}
 
-    let thread_builder = ThreadBuilder::new().fork_from(&thread);
-    let (new_thread, new_process) = ProcessBuilder::new()
-        .mm_list(Task::block_on(current_process.mm_list.new_cloned()))
-        .parent(current_process)
-        .pgroup(current_pgroup)
-        .session(current_session)
-        .thread_builder(thread_builder)
-        .build(&mut procs);
+// x86-32 riscv
+#[eonix_macros::define_syscall(0x78)]
+fn clone(
+    clone_flags: usize,
+    new_sp: usize,
+    parent_tidptr: usize,
+    tls: usize,
+    child_tidptr: usize,
+) -> KResult<u32> {
+    let clone_args = CloneArgs::for_clone(clone_flags, new_sp, child_tidptr, parent_tidptr, tls)?;
 
-    Scheduler::get().spawn::<KernelStack, _>(new_thread_runnable(new_thread));
+    do_clone(thread, clone_args)
+}
 
-    new_process.pid
+#[eonix_macros::define_syscall(0xf0)]
+fn futex(
+    uaddr: usize,
+    op: u32,
+    val: u32,
+    time_out: usize,
+    uaddr2: usize,
+    val3: u32,
+) -> KResult<usize> {
+    let (futex_op, futex_flag) = parse_futexop(op)?;
+
+    let pid = if futex_flag.contains(FutexFlags::FUTEX_PRIVATE) {
+        Some(thread.process.pid)
+    } else {
+        None
+    };
+
+    match futex_op {
+        FutexOp::FUTEX_WAIT => {
+            Task::block_on(futex_wait(uaddr, pid, val as u32, None))?;
+            return Ok(0);
+        }
+        FutexOp::FUTEX_WAKE => {
+            return Task::block_on(futex_wake(uaddr, pid, val as u32));
+        }
+        FutexOp::FUTEX_REQUEUE => {
+            todo!()
+        }
+        _ => {
+            todo!()
+        }
+    }
 }
 
 #[eonix_macros::define_syscall(0x77)]
@@ -576,7 +646,7 @@ fn sigreturn() -> KResult<SyscallNoReturn> {
                 "`sigreturn` failed in thread {} with error {err}!",
                 thread.tid
             );
-            Task::block_on(thread.process.force_kill(Signal::SIGSEGV));
+            Task::block_on(thread.force_kill(Signal::SIGSEGV));
         })?;
 
     Ok(SyscallNoReturn)

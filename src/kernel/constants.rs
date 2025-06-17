@@ -25,6 +25,7 @@ pub const ENXIO: u32 = 6;
 pub const ENOEXEC: u32 = 8;
 pub const EBADF: u32 = 9;
 pub const ECHILD: u32 = 10;
+pub const EAGAIN: u32 = 11;
 pub const ENOMEM: u32 = 12;
 pub const EACCES: u32 = 13;
 pub const EFAULT: u32 = 14;

@@ -45,6 +45,8 @@ use kernel_init::setup_memory;
 use path::Path;
 use prelude::*;
 
+use crate::kernel::task::alloc_pid;
+
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
     if let Some(location) = info.location() {
@@ -174,6 +176,7 @@ async fn init_process(early_kstack: PRange) {
 
     let mut process_list = Task::block_on(ProcessList::get().write());
     let (thread, process) = ProcessBuilder::new()
+        .pid(alloc_pid())
         .mm_list(load_info.mm_list)
         .thread_builder(thread_builder)
         .build(&mut process_list);

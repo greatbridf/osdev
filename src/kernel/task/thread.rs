@@ -6,8 +6,9 @@ use crate::{
     kernel::{
         interrupt::default_irq_handler,
         syscall::{syscall_handlers, SyscallHandler},
+        task::{clone::CloneArgs, CloneFlags},
         timer::timer_interrupt,
-        user::dataflow::CheckedUserPointer,
+        user::{dataflow::CheckedUserPointer, UserPointerMut},
         vfs::{filearray::FileArray, FsContext},
     },
     prelude::*,
@@ -36,6 +37,7 @@ use eonix_mm::address::{Addr as _, VAddr};
 use eonix_runtime::run::{Contexted, Run, RunState};
 use eonix_sync::AsProofMut as _;
 use pointers::BorrowedArc;
+use posix_types::x86_64::UserDescriptor;
 
 #[eonix_percpu::define_percpu]
 static CURRENT_THREAD: Option<NonNull<Thread>> = None;
@@ -52,8 +54,9 @@ pub struct ThreadBuilder {
     files: Option<Arc<FileArray>>,
     fs_context: Option<Arc<FsContext>>,
     signal_list: Option<SignalList>,
-    tls: Option<UserTLS>,
+    tls: Option<usize>,
     set_child_tid: Option<usize>,
+    clear_child_tid: Option<usize>,
 
     trap_ctx: Option<TrapContext>,
     fpu_state: Option<FpuState>,
@@ -69,7 +72,9 @@ struct ThreadInner {
 
     /// User pointer
     /// Store child thread's tid when child thread returns to user space.
-    set_child_tid: usize,
+    set_child_tid: Option<usize>,
+
+    clear_child_tid: Option<usize>,
 }
 
 pub struct Thread {
@@ -89,46 +94,6 @@ pub struct Thread {
     inner: Spin<ThreadInner>,
 }
 
-#[repr(transparent)]
-#[derive(Debug, Clone, Copy)]
-pub struct UserDescriptorFlags(u32);
-
-#[repr(C)]
-#[derive(Debug, Clone, Copy)]
-pub struct UserDescriptor {
-    entry: u32,
-    base: u32,
-    limit: u32,
-    flags: UserDescriptorFlags,
-}
-
-#[allow(dead_code)]
-impl UserDescriptorFlags {
-    fn is_32bit_segment(&self) -> bool {
-        self.0 & 0b1 != 0
-    }
-
-    fn contents(&self) -> u32 {
-        self.0 & 0b110
-    }
-
-    fn is_read_exec_only(&self) -> bool {
-        self.0 & 0b1000 != 0
-    }
-
-    fn is_limit_in_pages(&self) -> bool {
-        self.0 & 0b10000 != 0
-    }
-
-    fn is_present(&self) -> bool {
-        self.0 & 0b100000 == 0
-    }
-
-    fn is_usable(&self) -> bool {
-        self.0 & 0b1000000 != 0
-    }
-}
-
 impl ThreadBuilder {
     pub fn new() -> Self {
         Self {
@@ -140,6 +105,7 @@ impl ThreadBuilder {
             signal_list: None,
             tls: None,
             set_child_tid: None,
+            clear_child_tid: None,
             trap_ctx: None,
             fpu_state: None,
         }
@@ -175,13 +141,18 @@ impl ThreadBuilder {
         self
     }
 
-    pub fn tls(mut self, tls: Option<UserTLS>) -> Self {
+    pub fn tls(mut self, tls: Option<usize>) -> Self {
         self.tls = tls;
         self
     }
 
-    pub fn set_child_tid(mut self, set_child_tid: usize) -> Self {
-        self.set_child_tid = Some(set_child_tid);
+    pub fn set_child_tid(mut self, set_child_tid: Option<usize>) -> Self {
+        self.set_child_tid = set_child_tid;
+        self
+    }
+
+    pub fn clear_child_tid(mut self, clear_child_tid: Option<usize>) -> Self {
+        self.clear_child_tid = clear_child_tid;
         self
     }
 
@@ -206,23 +177,63 @@ impl ThreadBuilder {
         self
     }
 
-    /// Fork the thread from another thread.
-    ///
-    /// Sets the thread's files, fs_context, signal_list, name, tls, and set_child_tid
-    pub fn fork_from(self, thread: &Thread) -> Self {
+    /// Clone the thread from another thread.
+    pub fn clone_from(self, thread: &Thread, clone_args: &CloneArgs) -> KResult<Self> {
         let inner = thread.inner.lock();
 
         let mut trap_ctx = thread.trap_ctx.borrow().clone();
         trap_ctx.set_user_return_value(0);
 
-        self.files(FileArray::new_cloned(&thread.files))
-            .fs_context(FsContext::new_cloned(&thread.fs_context))
-            .signal_list(thread.signal_list.clone())
+        if let Some(sp) = clone_args.sp {
+            trap_ctx.set_stack_pointer(sp);
+        }
+
+        let tls = if clone_args.flags.contains(CloneFlags::CLONE_SETTLS) {
+            Some(clone_args.tls)
+        } else {
+            None
+        };
+
+        let fs_context = if clone_args.flags.contains(CloneFlags::CLONE_FS) {
+            FsContext::new_shared(&thread.fs_context)
+        } else {
+            FsContext::new_cloned(&thread.fs_context)
+        };
+
+        let files = if clone_args.flags.contains(CloneFlags::CLONE_FILES) {
+            FileArray::new_shared(&thread.files)
+        } else {
+            FileArray::new_cloned(&thread.files)
+        };
+
+        let signal_list = if clone_args.flags.contains(CloneFlags::CLONE_SIGHAND) {
+            SignalList::new_shared(&thread.signal_list)
+        } else {
+            SignalList::new_cloned(&thread.signal_list)
+        };
+
+        let set_child_tid = if clone_args.flags.contains(CloneFlags::CLONE_CHILD_SETTID) {
+            Some(clone_args.child_tid_ptr)
+        } else {
+            None
+        };
+
+        let clear_child_tid = if clone_args.flags.contains(CloneFlags::CLONE_CHILD_CLEARTID) {
+            Some(clone_args.child_tid_ptr)
+        } else {
+            None
+        };
+
+        Ok(self
+            .files(files)
+            .fs_context(fs_context)
+            .signal_list(signal_list)
             .name(inner.name.clone())
-            .tls(inner.tls.clone())
-            .set_child_tid(inner.set_child_tid)
+            .tls(tls)
+            .set_child_tid(set_child_tid)
+            .clear_child_tid(clear_child_tid)
             .trap_ctx(trap_ctx)
-            .fpu_state(thread.fpu_state.borrow().clone())
+            .fpu_state(thread.fpu_state.borrow().clone()))
     }
 
     pub fn build(self, process_list: &mut ProcessList) -> Arc<Thread> {
@@ -234,7 +245,6 @@ impl ThreadBuilder {
             .fs_context
             .unwrap_or_else(|| FsContext::global().clone());
         let signal_list = self.signal_list.unwrap_or_else(|| SignalList::new());
-        let set_child_tid = self.set_child_tid.unwrap_or(0);
         let trap_ctx = self.trap_ctx.expect("TrapContext is not set");
         let fpu_state = self.fpu_state.unwrap_or_else(FpuState::new);
 
@@ -251,8 +261,9 @@ impl ThreadBuilder {
             dead: AtomicBool::new(false),
             inner: Spin::new(ThreadInner {
                 name,
-                tls: self.tls,
-                set_child_tid,
+                tls: None,
+                set_child_tid: self.set_child_tid,
+                clear_child_tid: self.clear_child_tid,
             }),
         });
 
@@ -285,28 +296,38 @@ impl Thread {
         }
     }
 
-    pub fn set_thread_area(&self, desc: &mut UserDescriptor) -> KResult<()> {
-        let mut inner = self.inner.lock();
+    pub fn set_user_tls(&self, arch_tls: usize) -> KResult<()> {
+        #[cfg(target_arch = "x86_64")]
+        {
+            let desc = arch_tls as *mut UserDescriptor;
 
-        // Clear the TLS area if it is not present.
-        if desc.flags.is_read_exec_only() && !desc.flags.is_present() {
-            if desc.limit == 0 || desc.base == 0 {
+            let desc_pointer = UserPointerMut::new(desc)?;
+            let mut desc = desc_pointer.read()?;
+
+            // Clear the TLS area if it is not present.
+            if desc.flags.is_read_exec_only() && !desc.flags.is_present() {
+                if desc.limit == 0 || desc.base == 0 {
+                    return Ok(());
+                }
+
+                let len = if desc.flags.is_limit_in_pages() {
+                    (desc.limit as usize) << 12
+                } else {
+                    desc.limit as usize
+                };
+
+                CheckedUserPointer::new(desc.base as _, len)?.zero()?;
                 return Ok(());
             }
 
-            let len = if desc.flags.is_limit_in_pages() {
-                (desc.limit as usize) << 12
-            } else {
-                desc.limit as usize
-            };
+            let (tls, entry) =
+                UserTLS::new32(desc.base, desc.limit, desc.flags.is_limit_in_pages());
+            desc.entry = entry;
 
-            CheckedUserPointer::new(desc.base as _, len)?.zero()?;
-            return Ok(());
+            self.inner.lock().tls = Some(tls);
+            desc_pointer.write(desc)?;
         }
 
-        let (tls, entry) = UserTLS::new32(desc.base, desc.limit, desc.flags.is_limit_in_pages());
-        desc.entry = entry;
-        inner.tls = Some(tls);
         Ok(())
     }
 
@@ -316,6 +337,22 @@ impl Thread {
 
     pub fn get_name(&self) -> Arc<[u8]> {
         self.inner.lock().name.clone()
+    }
+
+    pub fn set_child_tid(&self, set_child_tid: Option<usize>) {
+        self.inner.lock().set_child_tid = set_child_tid;
+    }
+
+    pub fn clear_child_tid(&self, clear_child_tid: Option<usize>) {
+        self.inner.lock().clear_child_tid = clear_child_tid;
+    }
+
+    pub fn get_set_ctid(&self) -> Option<usize> {
+        self.inner.lock().set_child_tid
+    }
+
+    pub fn get_clear_ctid(&self) -> Option<usize> {
+        self.inner.lock().clear_child_tid
     }
 
     pub fn handle_syscall(&self, no: usize, args: [usize; 6]) -> Option<usize> {
@@ -345,6 +382,13 @@ impl Thread {
     }
 
     async fn real_run(&self) {
+        if let Some(set_ctid) = self.get_set_ctid() {
+            UserPointerMut::new(set_ctid as *mut u32)
+                .expect("set_child_tid pointer is invalid")
+                .write(self.tid)
+                .expect("set_child_tid write failed");
+        }
+
         while !self.is_dead() {
             if self.signal_list.has_pending_signal() {
                 self.signal_list

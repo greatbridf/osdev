@@ -183,7 +183,7 @@ impl MMListInner<'_> {
 
         let mut left_area = None;
         let mut right_area = None;
-        let mut mid_area = None;
+        let mut mid_area = Vec::new();
 
         self.areas.retain(|area| {
             let Some((left, mid, right)) = area.range().mask_with_checked(&range_to_protect) else {
@@ -194,14 +194,20 @@ impl MMListInner<'_> {
                 let mut page_attr = pte.get_attr().as_page_attr().expect("Not a page attribute");
 
                 page_attr.set(PageAttribute::READ, permission.read);
-                page_attr.set(PageAttribute::WRITE, permission.write);
+
+                if !page_attr.contains(PageAttribute::COPY_ON_WRITE) {
+                    page_attr.set(PageAttribute::WRITE, permission.write);
+                }
+
                 page_attr.set(PageAttribute::EXECUTE, permission.execute);
 
                 pte.set_attr(page_attr.into());
             }
 
             match (left, right) {
-                (None, None) => {}
+                (None, None) => {
+                    mid_area.push(area.clone());
+                }
                 (Some(left), None) => {
                     assert!(left_area.is_none());
                     let (Some(left), Some(right)) = area.clone().split(left.end()) else {
@@ -209,7 +215,7 @@ impl MMListInner<'_> {
                     };
 
                     left_area = Some(left);
-                    mid_area = Some(right);
+                    mid_area.push(right);
                 }
                 (None, Some(right)) => {
                     assert!(right_area.is_none());
@@ -217,7 +223,7 @@ impl MMListInner<'_> {
                         unreachable!("`right.start()` is within the area");
                     };
 
-                    mid_area = Some(left);
+                    mid_area.push(left);
                     right_area = Some(right);
                 }
                 (Some(left), Some(right)) => {
@@ -233,18 +239,18 @@ impl MMListInner<'_> {
 
                     left_area = Some(left);
                     right_area = Some(right);
-                    mid_area = Some(mid);
+                    mid_area.push(mid);
                 }
             }
 
             false
         });
 
-        assert!(mid_area.is_some());
+        assert!(mid_area.len() >= 1);
 
-        if let Some(mut mid) = mid_area {
-            mid.permission = permission;
-            self.areas.insert(mid);
+        for mut area in mid_area {
+            area.permission = permission;
+            self.areas.insert(area);
         }
         if let Some(front) = left_area {
             self.areas.insert(front);
@@ -353,6 +359,10 @@ impl MMList {
         self.flush_user_tlbs().await;
 
         list
+    }
+
+    pub async fn new_shared(&self) -> Self {
+        todo!()
     }
 
     pub fn activate(&self) {

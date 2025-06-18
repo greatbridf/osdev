@@ -41,6 +41,11 @@ pub mod platform {
         pub const CLINT_MSIP_OFFSET: usize = 0x0000; // Machine-mode Software Interrupt Pending (MSIP)
         pub const CLINT_MTIMECMP_OFFSET: usize = 0x4000; // Machine-mode Timer Compare (MTIMECMP)
         pub const CLINT_MTIME_OFFSET: usize = 0xBFF8;
+        // TODO: this should get in fdt
         pub const CPU_FREQ_HZ: u64 = 10_000_000;
     }
+}
+
+pub mod time {
+    pub const INTERRUPTS_PER_SECOND: usize = 100;
 }

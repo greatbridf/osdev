@@ -1,6 +1,9 @@
 use core::pin::Pin;
 
+use crate::arch::time;
+
 use super::config::platform::virt::*;
+use riscv::register::sie;
 use riscv_peripheral::{
     aclint::{Clint, CLINT},
     plic::{Plic, PLIC},
@@ -37,4 +40,9 @@ impl InterruptControl {
     }
 
     pub fn init(self: Pin<&mut Self>) {}
+}
+
+pub fn enable_timer_interrupt() {
+    unsafe { sie::set_stimer() };
+    time::set_next_timer();
 }

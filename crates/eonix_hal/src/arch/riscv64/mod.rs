@@ -9,3 +9,4 @@ pub mod fpu;
 pub mod interrupt;
 pub mod mm;
 pub mod trap;
+pub mod time;

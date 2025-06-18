@@ -35,6 +35,8 @@ impl PtrT {
 }
 
 impl Long {
+    pub const ZERO: Self = Self(0);
+
     pub fn new(value: usize) -> Result<Self, PosixError> {
         value.try_into().map(Self).map_err(|_| PosixError::EINVAL)
     }

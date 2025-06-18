@@ -22,8 +22,10 @@ use crate::{
 };
 use alloc::sync::Arc;
 use eonix_runtime::task::Task;
+use posix_types::ctypes::{Long, PtrT};
 use posix_types::open::{AtFlags, OpenFlags};
-use posix_types::stat::{Stat, StatX};
+use posix_types::signal::SigSet;
+use posix_types::stat::{Stat, StatX, TimeSpec};
 use posix_types::syscall_no::*;
 
 impl FromSyscallArg for OpenFlags {
@@ -230,7 +232,7 @@ fn unlink(pathname: *const u8) -> KResult<()> {
 }
 
 #[eonix_macros::define_syscall(SYS_SYMLINKAT)]
-fn symlinkat(dirfd: FD, target: *const u8, linkpath: *const u8) -> KResult<()> {
+fn symlinkat(target: *const u8, dirfd: FD, linkpath: *const u8) -> KResult<()> {
     let target = UserString::new(target)?;
     let dentry = dentry_from(thread, dirfd, linkpath, false)?;
 
@@ -240,7 +242,7 @@ fn symlinkat(dirfd: FD, target: *const u8, linkpath: *const u8) -> KResult<()> {
 #[cfg(target_arch = "x86_64")]
 #[eonix_macros::define_syscall(SYS_SYMLINK)]
 fn symlink(target: *const u8, linkpath: *const u8) -> KResult<()> {
-    sys_symlinkat(thread, FD::AT_FDCWD, target, linkpath)
+    sys_symlinkat(thread, target, FD::AT_FDCWD, linkpath)
 }
 
 #[eonix_macros::define_syscall(SYS_MKNODAT)]
@@ -291,16 +293,15 @@ fn llseek(fd: FD, offset_high: u32, offset_low: u32, result: *mut u64, whence: u
     result.copy(&new_offset)?.ok_or(EFAULT)
 }
 
-// TODO!!!: This type should differ based on architecture.
 #[repr(C)]
-#[derive(Default, Clone, Copy)]
-struct IoVec32 {
-    base: u32,
-    len: u32,
+#[derive(Clone, Copy)]
+struct IoVec {
+    base: PtrT,
+    len: Long,
 }
 
 #[eonix_macros::define_syscall(SYS_READV)]
-fn readv(fd: FD, iov_user: *const IoVec32, iovcnt: u32) -> KResult<usize> {
+fn readv(fd: FD, iov_user: *const IoVec, iovcnt: u32) -> KResult<usize> {
     let file = thread.files.get(fd).ok_or(EBADF)?;
 
     let mut iov_user = UserPointer::new(iov_user)?;
@@ -312,8 +313,10 @@ fn readv(fd: FD, iov_user: *const IoVec32, iovcnt: u32) -> KResult<usize> {
         })
         .filter_map(|iov_result| match iov_result {
             Err(err) => Some(Err(err)),
-            Ok(IoVec32 { len: 0, .. }) => None,
-            Ok(IoVec32 { base, len }) => Some(UserBuffer::new(base as *mut u8, len as usize)),
+            Ok(IoVec {
+                len: Long::ZERO, ..
+            }) => None,
+            Ok(IoVec { base, len }) => Some(UserBuffer::new(base.addr() as *mut u8, len.get())),
         })
         .collect::<KResult<Vec<_>>>()?;
 
@@ -332,7 +335,7 @@ fn readv(fd: FD, iov_user: *const IoVec32, iovcnt: u32) -> KResult<usize> {
 }
 
 #[eonix_macros::define_syscall(SYS_WRITEV)]
-fn writev(fd: FD, iov_user: *const IoVec32, iovcnt: u32) -> KResult<usize> {
+fn writev(fd: FD, iov_user: *const IoVec, iovcnt: u32) -> KResult<usize> {
     let file = thread.files.get(fd).ok_or(EBADF)?;
 
     let mut iov_user = UserPointer::new(iov_user)?;
@@ -344,9 +347,12 @@ fn writev(fd: FD, iov_user: *const IoVec32, iovcnt: u32) -> KResult<usize> {
         })
         .filter_map(|iov_result| match iov_result {
             Err(err) => Some(Err(err)),
-            Ok(IoVec32 { len: 0, .. }) => None,
-            Ok(IoVec32 { base, len }) => Some(
-                CheckedUserPointer::new(base as *mut u8, len as usize).map(|ptr| ptr.into_stream()),
+            Ok(IoVec {
+                len: Long::ZERO, ..
+            }) => None,
+            Ok(IoVec { base, len }) => Some(
+                CheckedUserPointer::new(base.addr() as *mut u8, len.get())
+                    .map(|ptr| ptr.into_stream()),
             ),
         })
         .collect::<KResult<Vec<_>>>()?;
@@ -419,9 +425,7 @@ struct UserPollFd {
     revents: u16,
 }
 
-#[cfg(target_arch = "x86_64")]
-#[eonix_macros::define_syscall(SYS_POLL)]
-fn poll(fds: *mut UserPollFd, nfds: u32, _timeout: u32) -> KResult<u32> {
+fn do_poll(thread: &Thread, fds: *mut UserPollFd, nfds: u32, _timeout: u32) -> KResult<u32> {
     match nfds {
         0 => Ok(0),
         2.. => unimplemented!("Poll with {} fds", nfds),
@@ -440,6 +444,23 @@ fn poll(fds: *mut UserPollFd, nfds: u32, _timeout: u32) -> KResult<u32> {
             Ok(1)
         }
     }
+}
+
+#[eonix_macros::define_syscall(SYS_PPOLL)]
+fn ppoll(
+    fds: *mut UserPollFd,
+    nfds: u32,
+    _timeout_ptr: *const TimeSpec,
+    _sigmask: *const SigSet,
+) -> KResult<u32> {
+    // TODO: Implement ppoll with signal mask and timeout
+    do_poll(thread, fds, nfds, 0)
+}
+
+#[cfg(target_arch = "x86_64")]
+#[eonix_macros::define_syscall(SYS_POLL)]
+fn poll(fds: *mut UserPollFd, nfds: u32, timeout: u32) -> KResult<u32> {
+    do_poll(thread, fds, nfds, timeout)
 }
 
 pub fn keep_alive() {}

@@ -1,6 +1,7 @@
 use crate::{
     kernel::{
         constants::{CLOCK_MONOTONIC, CLOCK_REALTIME, EINVAL},
+        task::Thread,
         timer::ticks,
         user::UserPointerMut,
     },
@@ -79,8 +80,7 @@ fn gettimeofday(timeval: *mut TimeVal, timezone: *mut ()) -> KResult<()> {
     Ok(())
 }
 
-#[eonix_macros::define_syscall(SYS_CLOCK_GETTIME64)]
-fn clock_gettime64(clock_id: u32, timespec: *mut TimeSpec) -> KResult<()> {
+fn do_clock_gettime64(_thread: &Thread, clock_id: u32, timespec: *mut TimeSpec) -> KResult<()> {
     if clock_id != CLOCK_REALTIME && clock_id != CLOCK_MONOTONIC {
         unimplemented!("Unsupported clock_id: {}", clock_id);
     }
@@ -91,6 +91,18 @@ fn clock_gettime64(clock_id: u32, timespec: *mut TimeSpec) -> KResult<()> {
         sec: ticks.in_secs() as u64,
         nsec: ticks.in_nsecs() as u64 % 1_000_000_000,
     })
+}
+
+#[cfg(not(target_arch = "x86_64"))]
+#[eonix_macros::define_syscall(SYS_CLOCK_GETTIME)]
+fn clock_gettime(clock_id: u32, timespec: *mut TimeSpec) -> KResult<()> {
+    do_clock_gettime64(thread, clock_id, timespec)
+}
+
+#[cfg(target_arch = "x86_64")]
+#[eonix_macros::define_syscall(SYS_CLOCK_GETTIME64)]
+fn clock_gettime64(clock_id: u32, timespec: *mut TimeSpec) -> KResult<()> {
+    do_clock_gettime64(thread, clock_id, timespec)
 }
 
 #[repr(C)]

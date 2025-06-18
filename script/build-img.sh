@@ -33,11 +33,11 @@ if [ "$ARCH" = "x86_64" ]; then
     $SUDO cp ./user-programs/busybox-minimal build/mnt/busybox_
     $SUDO cp ./user-programs/ld-musl-i386.so.1 build/mnt/ld-musl-i386.so.1
     $SUDO cp ./user-programs/pthread_test build/mnt/pthread_test
+    $SUDO cp ./user-programs/init_script_x86_64.sh build/mnt/initsh
 elif [ "$ARCH" = "riscv64" ]; then
     $SUDO cp ./user-programs/busybox.static build/mnt/busybox
+    $SUDO cp ./user-programs/init_script_riscv64.sh build/mnt/initsh
 fi
-
-$SUDO cp ./init_script.sh build/mnt/initsh
 
 # Add your custom files here
 

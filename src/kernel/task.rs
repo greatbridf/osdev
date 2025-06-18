@@ -1,3 +1,5 @@
+mod clone;
+mod futex;
 mod kernel_stack;
 mod loader;
 mod process;
@@ -7,11 +9,13 @@ mod session;
 mod signal;
 mod thread;
 
+pub use clone::{do_clone, CloneArgs, CloneFlags};
+pub use futex::{futex_wait, futex_wake, parse_futexop, FutexFlags, FutexOp};
 pub use kernel_stack::KernelStack;
 pub use loader::ProgramLoader;
-pub use process::{Process, ProcessBuilder, WaitObject, WaitType};
+pub use process::{alloc_pid, Process, ProcessBuilder, WaitObject, WaitType};
 pub use process_group::ProcessGroup;
 pub use process_list::ProcessList;
 pub use session::Session;
 pub use signal::{Signal, SignalAction, SignalMask};
-pub use thread::{new_thread_runnable, Thread, ThreadBuilder, UserDescriptor};
+pub use thread::{new_thread_runnable, Thread, ThreadBuilder};

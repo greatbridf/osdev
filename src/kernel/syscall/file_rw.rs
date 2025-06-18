@@ -108,6 +108,11 @@ fn dup2(old_fd: FD, new_fd: FD) -> KResult<FD> {
     thread.files.dup_to(old_fd, new_fd, OpenFlags::empty())
 }
 
+#[eonix_macros::define_syscall(SYS_DUP3)]
+fn dup3(old_fd: FD, new_fd: FD, flags: OpenFlags) -> KResult<FD> {
+    thread.files.dup_to(old_fd, new_fd, flags)
+}
+
 #[eonix_macros::define_syscall(SYS_PIPE2)]
 fn pipe2(pipe_fd: *mut [FD; 2], flags: OpenFlags) -> KResult<()> {
     let mut buffer = UserBuffer::new(pipe_fd as *mut u8, core::mem::size_of::<[FD; 2]>())?;

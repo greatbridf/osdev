@@ -31,7 +31,6 @@ pub struct TrapScratch {
     kernel_tp: Option<NonZero<u64>>,
     trap_context: Option<NonNull<TrapContext>>,
     handler: unsafe extern "C" fn(),
-    captured_context: Option<NonNull<TaskContext>>,
     capturer_context: TaskContext,
 }
 
@@ -42,9 +41,10 @@ pub(crate) static TRAP_SCRATCH: TrapScratch = TrapScratch {
     kernel_tp: None,
     trap_context: None,
     handler: default_trap_handler,
-    captured_context: None,
     capturer_context: TaskContext::new(),
 };
+
+static mut DIRTY_TASK_CONTEXT: TaskContext = TaskContext::new();
 
 #[unsafe(naked)]
 unsafe extern "C" fn _raw_trap_entry() -> ! {
@@ -93,6 +93,18 @@ unsafe extern "C" fn _raw_trap_entry() -> ! {
         "sd    t4, {t4}(t1)",
         "sd    t5, {t5}(t1)",
         "sd    t6, {t6}(t1)",
+        "sd    s0, {s0}(t1)",
+        "sd    s1, {s1}(t1)",
+        "sd    s2, {s2}(t1)",
+        "sd    s3, {s3}(t1)",
+        "sd    s4, {s4}(t1)",
+        "sd    s5, {s5}(t1)",
+        "sd    s6, {s6}(t1)",
+        "sd    s7, {s7}(t1)",
+        "sd    s8, {s8}(t1)",
+        "sd    s9, {s9}(t1)",
+        "sd    s10, {s10}(t1)",
+        "sd    s11, {s11}(t1)",
         "csrr  t2, sstatus",
         "csrr  t3, sepc",
         "csrr  t4, scause",
@@ -120,6 +132,18 @@ unsafe extern "C" fn _raw_trap_entry() -> ! {
         t4 = const Registers::OFFSET_T4,
         t5 = const Registers::OFFSET_T5,
         t6 = const Registers::OFFSET_T6,
+        s0 = const Registers::OFFSET_S0,
+        s1 = const Registers::OFFSET_S1,
+        s2 = const Registers::OFFSET_S2,
+        s3 = const Registers::OFFSET_S3,
+        s4 = const Registers::OFFSET_S4,
+        s5 = const Registers::OFFSET_S5,
+        s6 = const Registers::OFFSET_S6,
+        s7 = const Registers::OFFSET_S7,
+        s8 = const Registers::OFFSET_S8,
+        s9 = const Registers::OFFSET_S9,
+        s10 = const Registers::OFFSET_S10,
+        s11 = const Registers::OFFSET_S11,
         sstatus = const TrapContext::OFFSET_SSTATUS,
         sepc = const TrapContext::OFFSET_SEPC,
         scause = const TrapContext::OFFSET_SCAUSE,
@@ -146,6 +170,18 @@ unsafe extern "C" fn _raw_trap_return(ctx: &mut TrapContext) -> ! {
         "ld t3, {t3}(a0)",
         "ld t4, {sepc}(a0)",    // Load sepc from TrapContext
         "ld t5, {sstatus}(a0)", // Load sstatus from TrapContext
+        "ld s0, {s0}(a0)",
+        "ld s1, {s1}(a0)",
+        "ld s2, {s2}(a0)",
+        "ld s3, {s3}(a0)",
+        "ld s4, {s4}(a0)",
+        "ld s5, {s5}(a0)",
+        "ld s6, {s6}(a0)",
+        "ld s7, {s7}(a0)",
+        "ld s8, {s8}(a0)",
+        "ld s9, {s9}(a0)",
+        "ld s10, {s10}(a0)",
+        "ld s11, {s11}(a0)",
         "csrw sepc, t4",        // Restore sepc
         "csrw sstatus, t5",     // Restore sstatus
         "ld t4, {t4}(a0)",
@@ -172,6 +208,18 @@ unsafe extern "C" fn _raw_trap_return(ctx: &mut TrapContext) -> ! {
         t4 = const Registers::OFFSET_T4,
         t5 = const Registers::OFFSET_T5,
         t6 = const Registers::OFFSET_T6,
+        s0 = const Registers::OFFSET_S0,
+        s1 = const Registers::OFFSET_S1,
+        s2 = const Registers::OFFSET_S2,
+        s3 = const Registers::OFFSET_S3,
+        s4 = const Registers::OFFSET_S4,
+        s5 = const Registers::OFFSET_S5,
+        s6 = const Registers::OFFSET_S6,
+        s7 = const Registers::OFFSET_S7,
+        s8 = const Registers::OFFSET_S8,
+        s9 = const Registers::OFFSET_S9,
+        s10 = const Registers::OFFSET_S10,
+        s11 = const Registers::OFFSET_S11,
         sstatus = const TrapContext::OFFSET_SSTATUS,
         sepc = const TrapContext::OFFSET_SEPC,
     );
@@ -201,10 +249,10 @@ unsafe extern "C" fn default_trap_handler() {
 #[unsafe(naked)]
 unsafe extern "C" fn captured_trap_handler() {
     naked_asm!(
-        "ld   a0, {captured_context_offset}(t0)",
+        "la   a0, {dirty_task_context}",
         "addi a1, t0, {capturer_context_offset}",
         "j {switch}",
-        captured_context_offset = const offset_of!(TrapScratch, captured_context),
+        dirty_task_context = sym DIRTY_TASK_CONTEXT,
         capturer_context_offset = const offset_of!(TrapScratch, capturer_context),
         switch = sym TaskContext::switch,
     );
@@ -236,28 +284,21 @@ impl TrapScratch {
 impl TrapReturn for TrapContext {
     type TaskContext = TaskContext;
 
-    unsafe fn trap_return(&mut self, to_ctx: &mut Self::TaskContext) {
+    unsafe fn trap_return(&mut self) {
         let irq_states = disable_irqs_save();
-        let old_handler = {
-            let trap_scratch = TRAP_SCRATCH.as_mut();
-            trap_scratch.captured_context = Some(NonNull::from(&mut *to_ctx));
-            core::mem::replace(&mut trap_scratch.handler, captured_trap_handler)
-        };
+        let old_handler =
+            core::mem::replace(&mut TRAP_SCRATCH.as_mut().handler, captured_trap_handler);
 
+        let mut to_ctx = TaskContext::new();
         to_ctx.set_program_counter(captured_trap_return as usize);
         to_ctx.set_stack_pointer(&raw mut *self as usize);
         to_ctx.set_interrupt_enabled(false);
 
         unsafe {
-            TaskContext::switch(&mut TRAP_SCRATCH.as_mut().capturer_context, to_ctx);
+            TaskContext::switch(&mut TRAP_SCRATCH.as_mut().capturer_context, &mut to_ctx);
         }
 
-        {
-            let trap_scratch = TRAP_SCRATCH.as_mut();
-            trap_scratch.handler = old_handler;
-            trap_scratch.captured_context = None;
-        }
-
+        TRAP_SCRATCH.as_mut().handler = old_handler;
         irq_states.restore();
     }
 }

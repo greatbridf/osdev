@@ -37,7 +37,7 @@ pub trait TrapReturn {
     /// context before the trap is valid, that is, that the stack pointer
     /// points to a valid stack frame and the program counter points to some
     /// valid instruction.
-    unsafe fn trap_return(&mut self, task_ctx: &mut Self::TaskContext);
+    unsafe fn trap_return(&mut self);
 }
 
 pub trait IrqState {

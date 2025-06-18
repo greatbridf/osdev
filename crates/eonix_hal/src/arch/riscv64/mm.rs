@@ -112,13 +112,14 @@ impl RawAttribute for PageAttribute64 {
     fn as_table_attr(self) -> Option<TableAttribute> {
         let mut table_attr = TableAttribute::empty();
 
-        if self.0 & (PA_R | PA_W | PA_X) != 0 {
-            panic!("Encountered a huge page while parsing table attributes");
-        }
-
         if self.0 & PA_V != 0 {
             table_attr |= TableAttribute::PRESENT;
         }
+
+        if table_attr.contains(TableAttribute::PRESENT) && self.0 & (PA_R | PA_W | PA_X) != 0 {
+            return None;
+        }
+
         if self.0 & PA_G != 0 {
             table_attr |= TableAttribute::GLOBAL;
         }
@@ -135,12 +136,12 @@ impl RawAttribute for PageAttribute64 {
     fn as_page_attr(self) -> Option<PageAttribute> {
         let mut page_attr = PageAttribute::empty();
 
-        if self.0 & (PA_R | PA_W | PA_X) == 0 {
-            panic!("Invalid page attribute combination");
-        }
-
         if self.0 & PA_V != 0 {
             page_attr |= PageAttribute::PRESENT;
+        }
+
+        if page_attr.contains(PageAttribute::PRESENT) && (self.0 & (PA_R | PA_W | PA_X) == 0) {
+            return None;
         }
 
         if self.0 & PA_R != 0 {

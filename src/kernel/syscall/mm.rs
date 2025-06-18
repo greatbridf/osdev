@@ -59,26 +59,32 @@ fn do_mmap2(
 
     let mm_list = &thread.process.mm_list;
 
-    // PROT_NONE, we do unmapping.
-    if prot.is_empty() {
-        Task::block_on(mm_list.unmap(addr, len)).map(|_| 0)?;
-        return Ok(0);
-    }
-    // Otherwise, do mmapping.
-
     // TODO!!!: If we are doing mmap's in 32-bit mode, we should check whether
     //          `addr` is above user reachable memory.
     let addr = if flags.contains(UserMmapFlags::MAP_FIXED) {
-        mm_list.mmap_fixed(
-            addr,
-            len,
-            Mapping::Anonymous,
-            Permission {
-                read: prot.contains(UserMmapProtocol::PROT_READ),
-                write: prot.contains(UserMmapProtocol::PROT_WRITE),
-                execute: prot.contains(UserMmapProtocol::PROT_EXEC),
-            },
-        )
+        if prot.is_empty() {
+            Task::block_on(mm_list.protect(
+                addr,
+                len,
+                Permission {
+                    read: prot.contains(UserMmapProtocol::PROT_READ),
+                    write: prot.contains(UserMmapProtocol::PROT_WRITE),
+                    execute: prot.contains(UserMmapProtocol::PROT_EXEC),
+                },
+            ))
+            .map(|_| addr)
+        } else {
+            mm_list.mmap_fixed(
+                addr,
+                len,
+                Mapping::Anonymous,
+                Permission {
+                    read: prot.contains(UserMmapProtocol::PROT_READ),
+                    write: prot.contains(UserMmapProtocol::PROT_WRITE),
+                    execute: prot.contains(UserMmapProtocol::PROT_EXEC),
+                },
+            )
+        }
     } else {
         mm_list.mmap_hint(
             addr,
@@ -161,6 +167,11 @@ fn mprotect(addr: usize, len: usize, prot: UserMmapProtocol) -> KResult<()> {
             execute: prot.contains(UserMmapProtocol::PROT_EXEC),
         },
     ))
+}
+
+#[eonix_macros::define_syscall(SYS_MEMBARRIER)]
+fn membarrier(_cmd: usize, _flags: usize) -> KResult<()> {
+    Ok(())
 }
 
 pub fn keep_alive() {}

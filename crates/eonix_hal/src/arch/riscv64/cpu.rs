@@ -18,7 +18,7 @@ static LOCAL_CPU: LazyLock<CPU> = LazyLock::new(CPU::new);
 
 #[derive(Debug, Clone)]
 pub enum UserTLS {
-    Base(u32),
+    Base(u64),
 }
 
 /// RISC-V Hart
@@ -28,9 +28,8 @@ pub struct CPU {
 }
 
 impl UserTLS {
-    #[allow(unused_variables)]
-    pub fn new32(base: u32, _limit: u32, _is_limit_in_pages: bool) -> (Self, u32) {
-        (Self::Base(base), 0)
+    pub fn new(base: u64) -> Self {
+        Self::Base(base)
     }
 }
 

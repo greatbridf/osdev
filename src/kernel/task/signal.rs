@@ -6,6 +6,7 @@ use super::{ProcessList, Thread, WaitObject, WaitType};
 use crate::kernel::constants::{EFAULT, EINVAL};
 use crate::{kernel::user::UserPointer, prelude::*};
 use alloc::collections::binary_heap::BinaryHeap;
+use alloc::sync::Arc;
 use core::{cmp::Reverse, task::Waker};
 use eonix_hal::fpu::FpuState;
 use eonix_hal::traits::trap::RawTrapContext;
@@ -30,7 +31,7 @@ struct SignalListInner {
     stop_waker: Option<Waker>,
 
     // TODO!!!!!: Signal disposition should be per-process.
-    actions: SignalActionList,
+    actions: Arc<SignalActionList>,
 }
 
 pub struct SignalList {
@@ -105,7 +106,7 @@ impl SignalList {
                 pending: BinaryHeap::new(),
                 signal_waker: None,
                 stop_waker: None,
-                actions: SignalActionList::new(),
+                actions: Arc::new(SignalActionList::new()),
             }),
         }
     }
@@ -214,6 +215,7 @@ impl SignalList {
                     let thread = Thread::current();
                     if let Some(parent) = thread.process.parent.load() {
                         parent.notify(
+                            Some(Signal::SIGCHLD),
                             WaitObject {
                                 pid: thread.process.pid,
                                 code: WaitType::Stopped(signal),
@@ -238,6 +240,7 @@ impl SignalList {
 
                     if let Some(parent) = thread.process.parent.load() {
                         parent.notify(
+                            Some(Signal::SIGCHLD),
                             WaitObject {
                                 pid: thread.process.pid,
                                 code: WaitType::Continued,
@@ -247,8 +250,8 @@ impl SignalList {
                     }
                 }
                 signal => {
-                    // Default to terminate the process.
-                    Thread::current().process.force_kill(signal).await;
+                    // Default to terminate the thread.
+                    Thread::current().force_kill(signal).await;
                     return;
                 }
             }
@@ -271,5 +274,46 @@ impl SignalList {
         self.inner.lock().mask = UserPointer::<SignalMask>::new_vaddr(old_mask_vaddr)?.read()?;
 
         Ok(())
+    }
+}
+
+impl SignalList {
+    pub fn new_cloned(other: &Self) -> Self {
+        let inner = other.inner.lock();
+
+        debug_assert!(
+            inner.stop_waker.is_none(),
+            "We should not have a stop waker here"
+        );
+
+        Self {
+            inner: Spin::new(SignalListInner {
+                mask: inner.mask,
+                pending: BinaryHeap::new(),
+                signal_waker: None,
+                stop_waker: None,
+                actions: SignalActionList::new_cloned(&inner.actions),
+            }),
+        }
+    }
+
+    // shared only signal actions
+    pub fn new_shared(other: &Self) -> Self {
+        let inner = other.inner.lock();
+
+        debug_assert!(
+            inner.stop_waker.is_none(),
+            "We should not have a stop waker here"
+        );
+
+        Self {
+            inner: Spin::new(SignalListInner {
+                mask: inner.mask,
+                pending: BinaryHeap::new(),
+                signal_waker: None,
+                stop_waker: None,
+                actions: SignalActionList::new_shared(&inner.actions),
+            }),
+        }
     }
 }

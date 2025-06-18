@@ -67,6 +67,14 @@ impl MMList {
         let area = inner.areas.get(&VRange::from(addr)).ok_or(Signal::SIGBUS)?;
 
         // Check user access permission.
+        if error.contains(PageFaultErrorCode::Read) && !area.permission.read {
+            // Under x86_64, we don't have a way to distinguish
+            // between a read fault and a non-present fault. But it should be OK
+            // since non-readable pages are not allowed under x86 and if we read
+            // both the two false.
+            Err(Signal::SIGSEGV)?
+        }
+
         if error.contains(PageFaultErrorCode::Write) && !area.permission.write {
             Err(Signal::SIGSEGV)?
         }

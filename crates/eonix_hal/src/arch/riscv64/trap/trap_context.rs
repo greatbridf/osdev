@@ -36,6 +36,18 @@ pub struct Registers {
     t4: u64,
     t5: u64,
     t6: u64,
+    s0: u64,
+    s1: u64,
+    s2: u64,
+    s3: u64,
+    s4: u64,
+    s5: u64,
+    s6: u64,
+    s7: u64,
+    s8: u64,
+    s9: u64,
+    s10: u64,
+    s11: u64,
 }
 
 /// Saved CPU context when a trap (interrupt or exception) occurs on RISC-V 64.
@@ -69,12 +81,24 @@ impl Registers {
     pub const OFFSET_T4: usize = 16 * 8;
     pub const OFFSET_T5: usize = 17 * 8;
     pub const OFFSET_T6: usize = 18 * 8;
+    pub const OFFSET_S0: usize = 19 * 8;
+    pub const OFFSET_S1: usize = 20 * 8;
+    pub const OFFSET_S2: usize = 21 * 8;
+    pub const OFFSET_S3: usize = 22 * 8;
+    pub const OFFSET_S4: usize = 23 * 8;
+    pub const OFFSET_S5: usize = 24 * 8;
+    pub const OFFSET_S6: usize = 25 * 8;
+    pub const OFFSET_S7: usize = 26 * 8;
+    pub const OFFSET_S8: usize = 27 * 8;
+    pub const OFFSET_S9: usize = 28 * 8;
+    pub const OFFSET_S10: usize = 29 * 8;
+    pub const OFFSET_S11: usize = 30 * 8;
 }
 
 impl TrapContext {
-    pub const OFFSET_SSTATUS: usize = 19 * 8;
-    pub const OFFSET_SEPC: usize = 20 * 8;
-    pub const OFFSET_SCAUSE: usize = 21 * 8;
+    pub const OFFSET_SSTATUS: usize = 31 * 8;
+    pub const OFFSET_SEPC: usize = 32 * 8;
+    pub const OFFSET_SCAUSE: usize = 33 * 8;
 
     fn syscall_no(&self) -> usize {
         self.regs.a7 as usize

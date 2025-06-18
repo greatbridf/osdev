@@ -223,7 +223,7 @@ fn setup_cpu(alloc: impl PageAlloc, hart_id: usize) {
             .set_kernel_tp(PercpuArea::get_for(cpu.cpuid()).unwrap().cast());
     }
 
-    // set current hart's mtimecmp registerAdd commentMore actions
+    // set current hart's mtimecmp register
     enable_timer_interrupt();
 }
 

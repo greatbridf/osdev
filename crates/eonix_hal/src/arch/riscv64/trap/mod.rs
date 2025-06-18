@@ -10,7 +10,6 @@ use eonix_hal_traits::{
     context::RawTaskContext,
     trap::{IrqState as IrqStateTrait, TrapReturn},
 };
-use riscv::register::sie::Sie;
 use riscv::register::sstatus::{self, Sstatus};
 use riscv::register::stvec::TrapMode;
 use riscv::register::{scause, sepc, stval};

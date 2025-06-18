@@ -128,7 +128,7 @@ impl RawAttribute for PageAttribute64 {
         let mut table_attr = TableAttribute::empty();
 
         if self.0 & PA_PS != 0 {
-            panic!("Encountered a huge page while parsing table attributes");
+            return None;
         }
 
         if self.0 & PA_P != 0 {

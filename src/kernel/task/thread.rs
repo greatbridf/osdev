@@ -1,5 +1,5 @@
 use super::{
-    signal::{RaiseResult, Signal, SignalList},
+    signal::{RaiseResult, SignalList},
     Process, ProcessList, WaitType,
 };
 use crate::{
@@ -36,6 +36,7 @@ use eonix_mm::address::{Addr as _, VAddr};
 use eonix_runtime::run::{Contexted, Run, RunState};
 use eonix_sync::AsProofMut as _;
 use pointers::BorrowedArc;
+use posix_types::signal::Signal;
 
 #[eonix_percpu::define_percpu]
 static CURRENT_THREAD: Option<NonNull<Thread>> = None;

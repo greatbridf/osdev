@@ -24,33 +24,6 @@ SECTIONS {
 INSERT AFTER .text;
 
 SECTIONS {
-    .rodata.fixups :
-    {
-        . = ALIGN(16);
-        FIX_START = .;
-
-        KEEP(*(.fix));
-
-        FIX_END = .;
-    } > REGION_RODATA AT> RAM
-
-    .rodata.syscalls :
-    {
-        . = ALIGN(16);
-        __raw_syscall_handlers_start = .;
-
-        RAW_SYSCALL_HANDLERS = .;
-        KEEP(*(.raw_syscalls*));
-
-        __raw_syscall_handlers_end = .;
-
-        RAW_SYSCALL_HANDLERS_SIZE =
-            ABSOLUTE(__raw_syscall_handlers_end - __raw_syscall_handlers_start);
-    } > REGION_RODATA AT> RAM
-}
-INSERT AFTER .rodata;
-
-SECTIONS {
     .percpu : ALIGN(16)
     {
         __spercpu = .;
@@ -74,3 +47,45 @@ SECTIONS {
     BSS_LENGTH = ABSOLUTE(__ebss - __sbss);
 }
 INSERT AFTER .rodata;
+
+SECTIONS {
+    .rodata.syscalls :
+    {
+        . = ALIGN(16);
+        __raw_syscall_handlers_start = .;
+
+        RAW_SYSCALL_HANDLERS = .;
+        KEEP(*(.raw_syscalls*));
+
+        __raw_syscall_handlers_end = .;
+
+        RAW_SYSCALL_HANDLERS_SIZE =
+            ABSOLUTE(__raw_syscall_handlers_end - __raw_syscall_handlers_start);
+    } > REGION_RODATA AT> RAM
+}
+INSERT AFTER .rodata;
+
+SECTIONS {
+    .rodata.fixups :
+    {
+        . = ALIGN(16);
+        FIX_START = .;
+
+        KEEP(*(.fix));
+
+        FIX_END = .;
+    } > REGION_RODATA AT> RAM
+}
+INSERT AFTER .rodata;
+
+SECTIONS {
+    .vdso ALIGN(0x1000) : ALIGN(0x1000)
+    {
+        KEEP(*(.vdso .vdso.*));
+
+        . = ALIGN(0x1000);
+    } > VDSO AT> RAM
+
+    VDSO_PADDR = LOADADDR(.vdso);
+}
+INSERT AFTER .data;

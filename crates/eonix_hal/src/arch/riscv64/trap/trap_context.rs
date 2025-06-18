@@ -212,6 +212,40 @@ impl RawTrapContext for TrapContext {
     fn set_user_return_value(&mut self, retval: usize) {
         self.regs.a0 = retval as u64;
     }
+
+    fn set_user_call_frame<E>(
+        &mut self,
+        pc: usize,
+        sp: Option<usize>,
+        ra: Option<usize>,
+        args: &[usize],
+        _write_memory: impl Fn(VAddr, &[u8]) -> Result<(), E>,
+    ) -> Result<(), E> {
+        self.set_program_counter(pc);
+
+        if let Some(sp) = sp {
+            self.set_stack_pointer(sp);
+        }
+
+        if let Some(ra) = ra {
+            self.regs.ra = ra as u64;
+        }
+
+        let arg_regs = [
+            &mut self.regs.a0,
+            &mut self.regs.a1,
+            &mut self.regs.a2,
+            &mut self.regs.a3,
+            &mut self.regs.a4,
+            &mut self.regs.a5,
+        ];
+
+        for (&arg, reg) in args.iter().zip(arg_regs.into_iter()) {
+            *reg = arg as u64;
+        }
+
+        Ok(())
+    }
 }
 
 impl TrapContext {

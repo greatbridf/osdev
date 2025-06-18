@@ -1,5 +1,6 @@
 MEMORY {
     LOWMEM : org = 0x0000000000000000, len = 1M
+    VDSO   : org = 0x00007f0000000000, len = 4K
     KBSS   : org = 0xffffffffc0200000, len = 2M
     KIMAGE : org = 0xffffffffffc00000, len = 2M
 }

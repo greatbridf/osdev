@@ -291,6 +291,7 @@ fn llseek(fd: FD, offset_high: u32, offset_low: u32, result: *mut u64, whence: u
     result.copy(&new_offset)?.ok_or(EFAULT)
 }
 
+// TODO!!!: This type should differ based on architecture.
 #[repr(C)]
 #[derive(Default, Clone, Copy)]
 struct IoVec32 {

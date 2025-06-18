@@ -460,6 +460,47 @@ impl MMList {
         Ok(())
     }
 
+    pub fn map_vdso(&self) -> KResult<()> {
+        unsafe extern "C" {
+            fn VDSO_PADDR();
+        }
+        static VDSO_PADDR_VALUE: &'static unsafe extern "C" fn() =
+            &(VDSO_PADDR as unsafe extern "C" fn());
+
+        let vdso_paddr = unsafe {
+            // SAFETY: To prevent the compiler from optimizing this into `la` instructions
+            //         and causing a linking error.
+            (VDSO_PADDR_VALUE as *const _ as *const usize).read_volatile()
+        };
+
+        let vdso_pfn = PFN::from(PAddr::from(vdso_paddr));
+
+        const VDSO_START: VAddr = VAddr::from(0x7f00_0000_0000);
+        const VDSO_SIZE: usize = 0x1000;
+
+        let inner = self.inner.borrow();
+        let inner = Task::block_on(inner.lock());
+
+        let mut pte_iter = inner
+            .page_table
+            .iter_user(VRange::from(VDSO_START).grow(VDSO_SIZE));
+
+        let pte = pte_iter.next().expect("There should be at least one PTE");
+        pte.set(
+            vdso_pfn,
+            (PageAttribute::PRESENT
+                | PageAttribute::READ
+                | PageAttribute::EXECUTE
+                | PageAttribute::USER
+                | PageAttribute::ACCESSED)
+                .into(),
+        );
+
+        assert!(pte_iter.next().is_none(), "There should be only one PTE");
+
+        Ok(())
+    }
+
     pub fn mmap_hint(
         &self,
         hint: VAddr,

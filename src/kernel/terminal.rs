@@ -1,5 +1,5 @@
 use super::{
-    task::{ProcessList, Session, Signal, Thread},
+    task::{ProcessList, Session, Thread},
     user::{UserPointer, UserPointerMut},
 };
 use crate::kernel::constants::{EINTR, ENOTTY, EPERM};
@@ -12,6 +12,7 @@ use bitflags::bitflags;
 use eonix_log::ConsoleWrite;
 use eonix_runtime::task::Task;
 use eonix_sync::{AsProof as _, Mutex};
+use posix_types::signal::Signal;
 
 const BUFFER_SIZE: usize = 4096;
 

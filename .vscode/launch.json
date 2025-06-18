@@ -19,6 +19,11 @@
                     "description": "Enable GDB pretty printing",
                     "ignoreFailures": true
                 },
+                {
+                    "text": "-exec set output-radix 16",
+                    "description": "Print addresses in hexadecimal",
+                    "ignoreFailures": true
+                },
                 // {
                 //     "text": "source ${workspaceFolder}/pretty-print.py",
                 //     "description": "Load GDB pretty printers",
@@ -45,6 +50,11 @@
                 {
                     "text": "-enable-pretty-printing",
                     "description": "Enable GDB pretty printing",
+                    "ignoreFailures": true
+                },
+                {
+                    "text": "-exec set output-radix 16",
+                    "description": "Print addresses in hexadecimal",
                     "ignoreFailures": true
                 },
                 // {
@@ -74,7 +84,12 @@
                     "text": "-enable-pretty-printing",
                     "description": "Enable GDB pretty printing",
                     "ignoreFailures": true
-                }
+                },
+                {
+                    "text": "-exec set output-radix 16",
+                    "description": "Print addresses in hexadecimal",
+                    "ignoreFailures": true
+                },
             ]
         }
     ]

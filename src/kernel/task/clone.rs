@@ -5,7 +5,7 @@ use crate::{
             alloc_pid, new_thread_runnable, KernelStack, ProcessBuilder, ProcessList, Thread,
             ThreadBuilder,
         },
-        user::{dataflow::CheckedUserPointer, UserPointerMut},
+        user::UserPointerMut,
     },
     KResult,
 };
@@ -14,8 +14,7 @@ use core::num::NonZero;
 use eonix_hal::processor::UserTLS;
 use eonix_runtime::{scheduler::Scheduler, task::Task};
 use eonix_sync::AsProof;
-
-use crate::kernel::task::Signal;
+use posix_types::signal::Signal;
 
 bitflags! {
     #[derive(Debug, Default)]
@@ -71,7 +70,7 @@ impl CloneArgs {
         let clone_flags = CloneFlags::from_bits_truncate(flags & !Self::MASK);
         let exit_signal = flags & Self::MASK;
         let exit_signal = if exit_signal != 0 {
-            Some(Signal::try_from(exit_signal as u32)?)
+            Some(Signal::try_from_raw(exit_signal as u32)?)
         } else {
             None
         };
@@ -153,7 +152,7 @@ pub fn do_clone(thread: &Thread, clone_args: CloneArgs) -> KResult<u32> {
         let current_pgroup = current_process.pgroup(procs.prove()).clone();
         let current_session = current_process.session(procs.prove()).clone();
 
-        let (new_thread, new_process) = ProcessBuilder::new()
+        let (new_thread, _) = ProcessBuilder::new()
             .clone_from(current_process, &clone_args)
             .pid(new_pid)
             .pgroup(current_pgroup)

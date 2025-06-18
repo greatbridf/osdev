@@ -1,4 +1,4 @@
-use super::{Process, ProcessGroup, ProcessList, Signal, Thread};
+use super::{Process, ProcessGroup, ProcessList, Thread};
 use crate::kernel::constants::EPERM;
 use crate::{kernel::Terminal, prelude::*};
 use alloc::{
@@ -6,6 +6,7 @@ use alloc::{
     sync::{Arc, Weak},
 };
 use eonix_sync::{AsProof as _, AsProofMut as _, Locked, Proof, ProofMut, RwLock};
+use posix_types::signal::Signal;
 
 #[derive(Debug)]
 struct SessionJobControl {

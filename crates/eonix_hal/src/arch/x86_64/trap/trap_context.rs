@@ -142,4 +142,33 @@ impl RawTrapContext for TrapContext {
     fn set_user_return_value(&mut self, retval: usize) {
         self.rax = retval as u64;
     }
+
+    fn set_user_call_frame<E>(
+        &mut self,
+        pc: usize,
+        sp: Option<usize>,
+        ra: Option<usize>,
+        args: &[usize],
+        write_memory: impl Fn(VAddr, &[u8]) -> Result<(), E>,
+    ) -> Result<(), E> {
+        self.set_program_counter(pc);
+
+        let mut sp = sp.unwrap_or_else(|| self.get_stack_pointer());
+
+        let arg_size = args.len() * 4;
+
+        sp -= arg_size;
+        sp &= !0xf; // Align to 16 bytes
+        for (idx, arg) in args.iter().enumerate() {
+            write_memory(VAddr::from(sp + idx * 8), &arg.to_ne_bytes())?;
+        }
+
+        if let Some(ra) = ra {
+            sp -= 4; // Space for return address
+            write_memory(VAddr::from(sp), &ra.to_ne_bytes())?;
+        }
+
+        self.set_stack_pointer(sp);
+        Ok(())
+    }
 }

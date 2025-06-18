@@ -35,6 +35,18 @@ SECTIONS {
 }
 
 SECTIONS {
+    .vdso ALIGN(0x1000) : ALIGN(0x1000)
+    {
+        KEEP(*(.vdso .vdso.*));
+
+        . = ALIGN(0x1000);
+    } > VDSO AT> REGION_TEXT
+
+    VDSO_PADDR = LOADADDR(.vdso);
+}
+INSERT AFTER .text;
+
+SECTIONS {
     .text.syscall_fns :
     {
 

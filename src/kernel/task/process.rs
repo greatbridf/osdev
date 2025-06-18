@@ -1,6 +1,6 @@
 use super::{
     process_group::ProcessGroupBuilder, signal::RaiseResult, thread::ThreadBuilder, ProcessGroup,
-    ProcessList, Session, Signal, Thread,
+    ProcessList, Session, Thread,
 };
 use crate::kernel::constants::{ECHILD, EINTR, EPERM, ESRCH};
 use crate::kernel::task::{CloneArgs, CloneFlags};
@@ -9,7 +9,6 @@ use crate::{
     prelude::*,
     rcu::{rcu_sync, RCUPointer, RCUReadGuard},
     sync::CondVar,
-    SIGNAL_COREDUMP,
 };
 use alloc::{
     collections::{btree_map::BTreeMap, vec_deque::VecDeque},
@@ -23,6 +22,8 @@ use eonix_sync::{
 };
 use pointers::BorrowedArc;
 use posix_types::constants::{CLD_CONTINUED, CLD_DUMPED, CLD_EXITED, CLD_KILLED, CLD_STOPPED};
+use posix_types::signal::Signal;
+use posix_types::SIGNAL_COREDUMP;
 
 pub struct ProcessBuilder {
     mm_list: Option<MMList>,
@@ -118,9 +119,9 @@ impl WaitType {
     pub fn to_wstatus(self) -> u32 {
         match self {
             WaitType::Exited(status) => (status & 0xff) << 8,
-            WaitType::Signaled(signal @ SIGNAL_COREDUMP!()) => u32::from(signal) | 0x80,
-            WaitType::Signaled(signal) => u32::from(signal),
-            WaitType::Stopped(signal) => 0x7f | (u32::from(signal) << 8),
+            WaitType::Signaled(signal @ SIGNAL_COREDUMP!()) => signal.into_raw() | 0x80,
+            WaitType::Signaled(signal) => signal.into_raw(),
+            WaitType::Stopped(signal) => 0x7f | (signal.into_raw() << 8),
             WaitType::Continued => 0xffff,
         }
     }
@@ -129,10 +130,10 @@ impl WaitType {
         // TODO: CLD_TRAPPED
         match self {
             WaitType::Exited(status) => (status, CLD_EXITED),
-            WaitType::Signaled(signal @ SIGNAL_COREDUMP!()) => (u32::from(signal), CLD_DUMPED),
-            WaitType::Signaled(signal) => (u32::from(signal), CLD_KILLED),
-            WaitType::Stopped(signal) => (u32::from(signal), CLD_STOPPED),
-            WaitType::Continued => (u32::from(Signal::SIGCONT), CLD_CONTINUED),
+            WaitType::Signaled(signal @ SIGNAL_COREDUMP!()) => (signal.into_raw(), CLD_DUMPED),
+            WaitType::Signaled(signal) => (signal.into_raw(), CLD_KILLED),
+            WaitType::Stopped(signal) => (signal.into_raw(), CLD_STOPPED),
+            WaitType::Continued => (Signal::SIGCONT.into_raw(), CLD_CONTINUED),
         }
     }
 }

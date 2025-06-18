@@ -331,16 +331,17 @@ unsafe extern "C" fn captured_trap_return(trap_context: usize) -> ! {
 impl TrapReturn for TrapContext {
     type TaskContext = TaskContext;
 
-    unsafe fn trap_return(&mut self, task_ctx: &mut Self::TaskContext) {
+    unsafe fn trap_return(&mut self) {
         let irq_states = disable_irqs_save();
         let old_handler = TRAP_HANDLER.swap(captured_trap_handler);
 
-        task_ctx.set_program_counter(captured_trap_return as _);
-        task_ctx.set_stack_pointer(&raw mut *self as usize);
-        task_ctx.set_interrupt_enabled(false);
+        let mut to_ctx = TaskContext::new();
+        to_ctx.set_program_counter(captured_trap_return as _);
+        to_ctx.set_stack_pointer(&raw mut *self as usize);
+        to_ctx.set_interrupt_enabled(false);
 
         unsafe {
-            TaskContext::switch(CAPTURER_CONTEXT.as_mut(), &mut *task_ctx);
+            TaskContext::switch(CAPTURER_CONTEXT.as_mut(), &mut to_ctx);
         }
 
         TRAP_HANDLER.set(old_handler);

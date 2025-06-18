@@ -8,7 +8,7 @@ use crate::{
     kernel::{
         constants::{TCGETS, TCSETS, TIOCGPGRP, TIOCGWINSZ, TIOCSPGRP},
         mem::{paging::Page, AsMemoryBlock as _},
-        task::{Signal, Thread},
+        task::Thread,
         terminal::{Terminal, TerminalIORequest},
         user::{UserPointer, UserPointerMut},
         CharDevice,
@@ -27,7 +27,7 @@ use bitflags::bitflags;
 use core::{ops::ControlFlow, sync::atomic::Ordering};
 use eonix_runtime::task::Task;
 use eonix_sync::Mutex;
-use posix_types::stat::StatX;
+use posix_types::{signal::Signal, stat::StatX};
 
 pub struct InodeFile {
     read: bool,
@@ -103,7 +103,6 @@ impl Drop for PipeWriteEnd {
 }
 
 fn send_sigpipe_to_current() {
-    // SAFETY: current_thread is always valid.
     let current = Thread::current();
     current.raise(Signal::SIGPIPE);
 }

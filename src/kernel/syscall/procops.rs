@@ -7,15 +7,14 @@ use crate::kernel::constants::{
 };
 use crate::kernel::mem::PageBuffer;
 use crate::kernel::task::{
-    do_clone, futex_wait, futex_wake, FutexFlags, FutexOp, ProcessList, ProgramLoader, Signal,
-    SignalAction, SignalMask, Thread, WaitObject, WaitType,
+    do_clone, futex_wait, futex_wake, FutexFlags, FutexOp, ProcessList, ProgramLoader,
+    SignalAction, Thread, WaitObject, WaitType,
 };
 use crate::kernel::task::{parse_futexop, CloneArgs};
 use crate::kernel::user::dataflow::{CheckedUserPointer, UserString};
 use crate::kernel::user::{UserPointer, UserPointerMut};
 use crate::kernel::vfs::{self, dentry::Dentry};
 use crate::path::Path;
-use crate::SIGNAL_NOW;
 use crate::{kernel::user::dataflow::UserBuffer, prelude::*};
 use alloc::borrow::ToOwned;
 use alloc::ffi::CString;
@@ -28,8 +27,8 @@ use eonix_runtime::task::Task;
 use eonix_sync::AsProof as _;
 use posix_types::constants::{P_ALL, P_PID};
 use posix_types::ctypes::PtrT;
-use posix_types::signal::{SigAction, SigInfo};
-use posix_types::syscall_no::*;
+use posix_types::signal::{SigAction, SigInfo, SigSet, Signal};
+use posix_types::{syscall_no::*, SIGNAL_NOW};
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
@@ -132,7 +131,7 @@ fn get_strings(mut ptr_strings: UserPointer<'_, PtrT>) -> KResult<Vec<CString>> 
 }
 
 #[eonix_macros::define_syscall(SYS_EXECVE)]
-fn execve(exec: *const u8, argv: *const PtrT, envp: *const PtrT) -> KResult<()> {
+fn execve(exec: *const u8, argv: *const PtrT, envp: *const PtrT) -> KResult<SyscallNoReturn> {
     let exec = UserString::new(exec)?;
     let argv = get_strings(UserPointer::new(argv)?)?;
     let envp = get_strings(UserPointer::new(envp)?)?;
@@ -161,7 +160,7 @@ fn execve(exec: *const u8, argv: *const PtrT, envp: *const PtrT) -> KResult<()> 
         let mut trap_ctx = thread.trap_ctx.borrow();
         trap_ctx.set_program_counter(load_info.entry_ip.addr());
         trap_ctx.set_stack_pointer(load_info.sp.addr());
-        Ok(())
+        Ok(SyscallNoReturn)
     } else {
         // We can't hold any ownership when we call `kill_current`.
         // ProcessList::kill_current(Signal::SIGSEGV);
@@ -232,7 +231,7 @@ fn do_waitid(
             let mut siginfo = SigInfo::default();
             siginfo.si_pid = wait_object.pid;
             siginfo.si_uid = 0; // All users are root for now.
-            siginfo.si_signo = u32::from(Signal::SIGCHLD);
+            siginfo.si_signo = Signal::SIGCHLD.into_raw();
             siginfo.si_status = status;
             siginfo.si_code = code;
 
@@ -488,17 +487,17 @@ fn kill(pid: i32, sig: u32) -> KResult<()> {
         0 => thread
             .process
             .pgroup(procs.prove())
-            .raise(Signal::try_from(sig)?, procs.prove()),
+            .raise(Signal::try_from_raw(sig)?, procs.prove()),
         // Send signal to the process with the specified pid.
         1.. => procs
             .try_find_process(pid as u32)
             .ok_or(ESRCH)?
-            .raise(Signal::try_from(sig)?, procs.prove()),
+            .raise(Signal::try_from_raw(sig)?, procs.prove()),
         // Send signal to the process group with the specified pgid equals to `-pid`.
         ..-1 => procs
             .try_find_pgroup((-pid) as u32)
             .ok_or(ESRCH)?
-            .raise(Signal::try_from(sig)?, procs.prove()),
+            .raise(Signal::try_from_raw(sig)?, procs.prove()),
     }
 
     Ok(())
@@ -509,23 +508,28 @@ fn tkill(tid: u32, sig: u32) -> KResult<()> {
     Task::block_on(ProcessList::get().read())
         .try_find_thread(tid)
         .ok_or(ESRCH)?
-        .raise(Signal::try_from(sig)?);
+        .raise(Signal::try_from_raw(sig)?);
     Ok(())
 }
 
 #[eonix_macros::define_syscall(SYS_RT_SIGPROCMASK)]
-fn rt_sigprocmask(how: u32, set: *mut u64, oldset: *mut u64, sigsetsize: usize) -> KResult<()> {
-    if sigsetsize != size_of::<u64>() {
+fn rt_sigprocmask(
+    how: u32,
+    set: *mut SigSet,
+    oldset: *mut SigSet,
+    sigsetsize: usize,
+) -> KResult<()> {
+    if sigsetsize != size_of::<SigSet>() {
         return Err(EINVAL);
     }
 
-    let old_mask = u64::from(thread.signal_list.get_mask());
+    let old_mask = thread.signal_list.get_mask();
     if !oldset.is_null() {
         UserPointerMut::new(oldset)?.write(old_mask)?;
     }
 
     let new_mask = if !set.is_null() {
-        SignalMask::from(UserPointer::new(set)?.read()?)
+        UserPointer::new(set)?.read()?
     } else {
         return Ok(());
     };
@@ -547,7 +551,7 @@ fn rt_sigaction(
     oldact: *mut SigAction,
     sigsetsize: usize,
 ) -> KResult<()> {
-    let signal = Signal::try_from(signum)?;
+    let signal = Signal::try_from_raw(signum)?;
     if sigsetsize != size_of::<u64>() {
         return Err(EINVAL);
     }
@@ -734,6 +738,26 @@ fn futex(
     }
 }
 
+#[eonix_macros::define_syscall(SYS_RT_SIGRETURN)]
+fn rt_sigreturn() -> KResult<SyscallNoReturn> {
+    thread
+        .signal_list
+        .restore(
+            &mut thread.trap_ctx.borrow(),
+            &mut thread.fpu_state.borrow(),
+            false,
+        )
+        .inspect_err(|err| {
+            println_warn!(
+                "`rt_sigreturn` failed in thread {} with error {err}!",
+                thread.tid
+            );
+            Task::block_on(thread.force_kill(Signal::SIGSEGV));
+        })?;
+
+    Ok(SyscallNoReturn)
+}
+
 #[cfg(target_arch = "x86_64")]
 #[eonix_macros::define_syscall(SYS_SIGRETURN)]
 fn sigreturn() -> KResult<SyscallNoReturn> {
@@ -742,6 +766,7 @@ fn sigreturn() -> KResult<SyscallNoReturn> {
         .restore(
             &mut thread.trap_ctx.borrow(),
             &mut thread.fpu_state.borrow(),
+            true,
         )
         .inspect_err(|err| {
             println_warn!(

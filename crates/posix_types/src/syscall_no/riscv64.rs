@@ -140,6 +140,7 @@ pub const SYS_RT_SIGPROCMASK: usize = 135;
 pub const SYS_RT_SIGPENDING: usize = 136;
 pub const SYS_RT_SIGTIMEDWAIT_TIME32: usize = 137;
 pub const SYS_RT_SIGQUEUEINFO: usize = 138;
+pub const SYS_RT_SIGRETURN: usize = 139;
 pub const SYS_SETPRIORITY: usize = 140;
 pub const SYS_GETPRIORITY: usize = 141;
 pub const SYS_REBOOT: usize = 142;

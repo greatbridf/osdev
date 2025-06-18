@@ -1,27 +1,65 @@
-use super::{KResult, Signal, SignalMask, SAVED_DATA_SIZE};
+use super::{KResult, SAVED_DATA_SIZE};
 use crate::{
     io::BufferFill as _,
     kernel::{
-        constants::{EFAULT, EINVAL, ENOSYS},
+        constants::{EFAULT, EINVAL},
         user::UserBuffer,
     },
-    SIGNAL_NOW,
 };
 use alloc::{collections::btree_map::BTreeMap, sync::Arc};
-use core::num::NonZero;
+use core::arch::naked_asm;
 use eonix_hal::{fpu::FpuState, traits::trap::RawTrapContext, trap::TrapContext};
 use eonix_mm::address::{Addr as _, AddrOps as _, VAddr};
 use eonix_sync::Spin;
-use posix_types::signal::{SigAction, TryFromSigAction};
+use posix_types::{
+    ctypes::Long,
+    signal::{SigAction, SigActionHandler, SigActionRestorer, SigSet, Signal, TryFromSigAction},
+    SIGNAL_NOW,
+};
+
+#[cfg(target_arch = "x86_64")]
+#[unsafe(naked)]
+#[unsafe(link_section = ".vdso.sigreturn")]
+unsafe extern "C" fn vdso_sigreturn() {
+    naked_asm!(
+        "pop %rax",
+        "mov ${sys_sigreturn}, %eax",
+        "int $0x80",
+        sys_sigreturn = const posix_types::syscall_no::SYS_SIGRETURN,
+        options(att_syntax),
+    );
+}
+
+#[unsafe(naked)]
+#[unsafe(link_section = ".vdso.rt_sigreturn")]
+unsafe extern "C" fn vdso_rt_sigreturn() {
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "riscv64")))]
+    compile_error!("rt_sigreturn is not implemented for this architecture");
+
+    #[cfg(target_arch = "riscv64")]
+    naked_asm!(
+        "li a7, {sys_rt_sigreturn}",
+        "ecall",
+        sys_rt_sigreturn = const posix_types::syscall_no::SYS_RT_SIGRETURN,
+    );
+
+    #[cfg(target_arch = "x86_64")]
+    naked_asm!(
+        "mov ${sys_rt_sigreturn}, %eax",
+        "int $0x80",
+        sys_rt_sigreturn = const posix_types::syscall_no::SYS_RT_SIGRETURN,
+        options(att_syntax),
+    );
+}
 
 #[derive(Debug, Clone, Copy)]
 pub enum SignalAction {
     Default,
     Ignore,
     SimpleHandler {
-        handler: VAddr,
-        restorer: Option<VAddr>,
-        mask: SignalMask,
+        handler: SigActionHandler,
+        restorer: Option<SigActionRestorer>,
+        mask: SigSet,
     },
 }
 
@@ -81,7 +119,7 @@ impl SignalAction {
     pub(super) fn handle(
         self,
         signal: Signal,
-        old_mask: SignalMask,
+        old_mask: SigSet,
         trap_ctx: &mut TrapContext,
         fpu_state: &mut FpuState,
     ) -> KResult<()> {
@@ -92,16 +130,15 @@ impl SignalAction {
             unreachable!("Default and Ignore actions should not be handled here");
         };
 
-        let Some(restorer) = restorer else {
-            // We don't accept signal handlers with no signal restorers for now.
-            return Err(ENOSYS)?;
-        };
-
         let current_sp = VAddr::from(trap_ctx.get_stack_pointer());
 
+        #[cfg(target_arch = "x86_64")]
         // Save current interrupt context to 128 bytes above current user stack
         // (in order to keep away from x86 red zone) and align to 16 bytes.
         let saved_data_addr = (current_sp - 128 - SAVED_DATA_SIZE).floor_to(16);
+
+        #[cfg(not(target_arch = "x86_64"))]
+        let saved_data_addr = (current_sp - SAVED_DATA_SIZE).floor_to(16);
 
         let mut saved_data_buffer =
             UserBuffer::new(saved_data_addr.addr() as *mut u8, SAVED_DATA_SIZE)?;
@@ -110,16 +147,53 @@ impl SignalAction {
         saved_data_buffer.copy(fpu_state)?.ok_or(EFAULT)?;
         saved_data_buffer.copy(&old_mask)?.ok_or(EFAULT)?;
 
-        // We need to push the arguments to the handler and then save the return address.
-        let new_sp = saved_data_addr - 16 - 4;
-        let restorer_address = restorer.addr() as u32;
+        let return_address = if let Some(restorer) = restorer {
+            restorer.addr().addr()
+        } else {
+            #[cfg(not(any(target_arch = "x86_64", target_arch = "riscv64")))]
+            compile_error!("`vdso_sigreturn` is not implemented for this architecture");
 
-        let mut stack = UserBuffer::new(new_sp.addr() as *mut u8, 4 + 4)?;
-        stack.copy(&restorer_address)?.ok_or(EFAULT)?; // Restorer address
-        stack.copy(&u32::from(signal))?.ok_or(EFAULT)?; // The argument to the handler
+            #[cfg(target_arch = "x86_64")]
+            {
+                // TODO: Check and use `vdso_rt_sigreturn` for x86 as well.
+                static VDSO_SIGRETURN_ADDR: &'static unsafe extern "C" fn() =
+                    &(vdso_rt_sigreturn as unsafe extern "C" fn());
 
-        trap_ctx.set_program_counter(handler.addr());
-        trap_ctx.set_stack_pointer(new_sp.addr());
+                unsafe {
+                    // SAFETY: To prevent the compiler from optimizing this into `la` instructions
+                    //         and causing a linking error.
+                    (VDSO_SIGRETURN_ADDR as *const _ as *const usize).read_volatile()
+                }
+            }
+
+            #[cfg(target_arch = "riscv64")]
+            {
+                static VDSO_RT_SIGRETURN_ADDR: &'static unsafe extern "C" fn() =
+                    &(vdso_rt_sigreturn as unsafe extern "C" fn());
+
+                unsafe {
+                    // SAFETY: To prevent the compiler from optimizing this into `la` instructions
+                    //         and causing a linking error.
+                    (VDSO_RT_SIGRETURN_ADDR as *const _ as *const usize).read_volatile()
+                }
+            }
+        };
+
+        trap_ctx.set_user_call_frame(
+            handler.addr().addr(),
+            Some(saved_data_addr.addr()),
+            Some(return_address),
+            &[Long::new_val(signal.into_raw() as _).get()],
+            |vaddr, data| -> Result<(), u32> {
+                let mut buffer = UserBuffer::new(vaddr.addr() as *mut u8, data.len())?;
+                for ch in data.iter() {
+                    buffer.copy(&ch)?.ok_or(EFAULT)?;
+                }
+
+                Ok(())
+            },
+        )?;
+
         Ok(())
     }
 }
@@ -151,9 +225,9 @@ impl TryFromSigAction for SignalAction {
 
     fn new() -> Self {
         Self::SimpleHandler {
-            handler: VAddr::NULL,
+            handler: SigActionHandler::null(),
             restorer: None,
-            mask: SignalMask::empty(),
+            mask: SigSet::empty(),
         }
     }
 
@@ -161,28 +235,28 @@ impl TryFromSigAction for SignalAction {
         Err(EINVAL)
     }
 
-    fn handler(mut self, handler_addr: usize) -> Result<Self, Self::Error> {
+    fn handler(mut self, new_handler: SigActionHandler) -> Self {
         if let Self::SimpleHandler { handler, .. } = &mut self {
-            *handler = VAddr::from(handler_addr);
-            Ok(self)
+            *handler = new_handler;
+            self
         } else {
             unreachable!()
         }
     }
 
-    fn restorer(mut self, restorer_addr: usize) -> Result<Self, Self::Error> {
+    fn restorer(mut self, new_restorer: SigActionRestorer) -> Self {
         if let Self::SimpleHandler { restorer, .. } = &mut self {
-            *restorer = NonZero::new(restorer_addr).map(|x| VAddr::from(x.get()));
-            Ok(self)
+            *restorer = Some(new_restorer);
+            self
         } else {
             unreachable!()
         }
     }
 
-    fn mask(mut self, mask_value: u64) -> Result<Self, Self::Error> {
+    fn mask(mut self, new_mask: SigSet) -> Self {
         if let Self::SimpleHandler { mask, .. } = &mut self {
-            *mask = SignalMask::from(mask_value);
-            Ok(self)
+            *mask = new_mask;
+            self
         } else {
             unreachable!()
         }
@@ -199,12 +273,10 @@ impl From<SignalAction> for SigAction {
                 restorer,
                 mask,
             } => {
-                let action = SigAction::new()
-                    .handler(handler.addr())
-                    .mask(u64::from(mask));
+                let action = SigAction::new().handler(handler).mask(mask);
 
                 if let Some(restorer) = restorer {
-                    action.restorer(restorer.addr())
+                    action.restorer(restorer)
                 } else {
                     action
                 }

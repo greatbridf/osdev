@@ -283,7 +283,6 @@ impl InodeFile {
 
         let mut cursor = Task::block_on(self.cursor.lock());
 
-        // TODO!!!: use `UserBuffer`
         if self.append {
             let nwrote = self.dentry.write(stream, WriteOffset::End(&mut cursor))?;
 

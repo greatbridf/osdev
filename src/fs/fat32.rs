@@ -101,12 +101,12 @@ impl FatFs {
     fn read_cluster(&self, cluster: ClusterNo, buf: &Page) -> KResult<()> {
         let cluster = cluster - 2;
 
-        let rq = BlockDeviceRequest {
+        let rq = BlockDeviceRequest::Read {
             sector: self.data_start as u64 + cluster as u64 * self.sectors_per_cluster as u64,
             count: self.sectors_per_cluster as u64,
             buffer: core::slice::from_ref(buf),
         };
-        self.device.read_raw(rq)?;
+        self.device.commit_request(rq)?;
 
         Ok(())
     }

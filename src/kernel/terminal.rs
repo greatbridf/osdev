@@ -1,5 +1,5 @@
 use super::{
-    task::{ProcessList, Session, Signal, Thread},
+    task::{ProcessList, Session, Thread},
     user::{UserPointer, UserPointerMut},
 };
 use crate::kernel::constants::{EINTR, ENOTTY, EPERM};
@@ -12,6 +12,7 @@ use bitflags::bitflags;
 use eonix_log::ConsoleWrite;
 use eonix_runtime::task::Task;
 use eonix_sync::{AsProof as _, Mutex};
+use posix_types::signal::Signal;
 
 const BUFFER_SIZE: usize = 4096;
 
@@ -345,9 +346,8 @@ impl Termios {
 }
 
 pub trait TerminalDevice: Send + Sync {
-    fn putchar(&self, ch: u8);
-
-    fn putchar_direct(&self, ch: u8);
+    fn write_direct(&self, data: &[u8]);
+    fn write(&self, data: &[u8]);
 }
 
 struct TerminalInner {
@@ -414,9 +414,8 @@ impl Terminal {
         inner.buffer.clear();
     }
 
-    // TODO: Buffer terminal writes.
-    pub fn show_char(&self, ch: u8) {
-        self.device.putchar(ch)
+    pub fn write(&self, data: &[u8]) {
+        self.device.write(data);
     }
 
     fn erase(&self, inner: &mut TerminalInner, echo: bool) -> Option<u8> {
@@ -432,9 +431,7 @@ impl Terminal {
         let back = inner.buffer.pop_back();
 
         if echo && inner.termio.echo() && inner.termio.echoe() {
-            self.show_char(CTRL!('H')); // Backspace
-            self.show_char(b' '); // Space
-            self.show_char(CTRL!('H')); // Backspace
+            self.write(&[CTRL!('H'), b' ', CTRL!('H')]); // Backspace, Space, Backspace
         }
 
         return back;
@@ -442,15 +439,11 @@ impl Terminal {
 
     fn echo_char(&self, inner: &mut TerminalInner, ch: u8) {
         match ch {
-            b'\t' | b'\n' | CTRL!('Q') | CTRL!('S') => self.show_char(ch),
-            c if c >= 32 => self.show_char(ch),
-            _ if !inner.termio.echo() => self.show_char(ch),
-            _ if !inner.termio.echoctl() => self.show_char(ch),
-            _ if !inner.termio.iexten() => self.show_char(ch),
-            _ => {
-                self.show_char(b'^');
-                self.show_char(ch + 0x40);
-            }
+            b'\t' | b'\n' | CTRL!('Q') | CTRL!('S') | 32.. => self.write(&[ch]),
+            _ if !inner.termio.echo() => self.write(&[ch]),
+            _ if !inner.termio.echoctl() => self.write(&[ch]),
+            _ if !inner.termio.iexten() => self.write(&[ch]),
+            _ => self.write(&[b'^', ch + 0x40]),
         }
     }
 
@@ -513,7 +506,7 @@ impl Terminal {
                 ch if ch == inner.termio.vkill() => {
                     if inner.termio.echok() {
                         while self.erase(&mut inner, false).is_some() {}
-                        self.show_char(b'\n');
+                        self.write(&[b'\n']);
                     } else if inner.termio.echoke() && inner.termio.iexten() {
                         while self.erase(&mut inner, true).is_some() {}
                     }
@@ -679,8 +672,6 @@ impl Terminal {
 
 impl ConsoleWrite for Terminal {
     fn write(&self, s: &str) {
-        for &ch in s.as_bytes() {
-            self.device.putchar_direct(ch);
-        }
+        self.device.write_direct(s.as_bytes());
     }
 }

@@ -54,29 +54,9 @@ pub const S_IFMT: u32 = 0o170000;
 
 pub const RLIMIT_STACK: u32 = 0x3;
 
-pub const AT_FDCWD: i32 = -100;
-pub const AT_STATX_SYNC_AS_STAT: u32 = 0;
-pub const AT_SYMLINK_NOFOLLOW: u32 = 0x0100;
-// pub const AT_REMOVEDIR: u32 = 0x0200;
-// pub const AT_SYMLINK_FOLLOW: u32 = 0x0400;
-pub const AT_EMPTY_PATH: u32 = 0x1000;
-// pub const AT_STATX_DONT_SYNC: u32 = 0x2000;
-pub const AT_STATX_SYNC_TYPE: u32 = 0x6000;
-// pub const AT_STATX_SYNC_FORCE: u32 = 0x8000;
-
 pub const SEEK_SET: u32 = 0;
 pub const SEEK_CUR: u32 = 1;
 pub const SEEK_END: u32 = 2;
-
-// pub const O_RDONLY: u32 = 0;
-pub const O_WRONLY: u32 = 1;
-pub const O_RDWR: u32 = 2;
-pub const O_CREAT: u32 = 64;
-pub const O_EXCL: u32 = 128;
-pub const O_TRUNC: u32 = 512;
-pub const O_APPEND: u32 = 1024;
-pub const O_DIRECTORY: u32 = 65536;
-pub const O_CLOEXEC: u32 = 524288;
 
 pub const F_DUPFD: u32 = 0;
 pub const F_GETFD: u32 = 1;
@@ -84,7 +64,6 @@ pub const F_SETFD: u32 = 2;
 // pub const F_GETFL: u32 = 3;
 // pub const F_SETFL: u32 = 4;
 pub const F_DUPFD_CLOEXEC: u32 = 1030;
-pub const FD_CLOEXEC: u32 = 1;
 
 pub const STATX_TYPE: u32 = 1;
 pub const STATX_MODE: u32 = 2;

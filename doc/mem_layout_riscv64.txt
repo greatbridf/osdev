@@ -1,0 +1,13 @@
+Physical memory:
+
+0x0000 0000 - 0x7fff ffff  2GB MMIO
+0x8000 0000 - 0x801f ffff  2MB SBI
+0x8020 0000 - 0x803f ffff  2MB Kernel image
+0x8040 0000 - ?            ? B Free Memory after kernel image
+
+Kernel virtual address space:
+
+0xffff ff00 0000 0000 - 0xffff ff7f ffff ffff  512GB Physical Memory
+0xffff ff80 4000 0000 - ?                      ?   B Kernel Page Array
+0xffff ffff 4000 0000 - ?                      ?   B Kernel BSS
+0xffff ffff 8020 0000 - 0xffff ffff 803f ffff    2MB Kernel image

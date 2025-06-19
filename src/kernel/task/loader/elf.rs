@@ -1,5 +1,4 @@
 use super::{LoadInfo, ELF_MAGIC};
-
 use crate::io::UninitBuffer;
 use crate::kernel::task::loader::aux_vec::{AuxKey, AuxVec};
 use crate::path::Path;
@@ -19,7 +18,6 @@ use eonix_mm::{
     address::{Addr, AddrOps as _, VAddr},
     paging::PAGE_SIZE,
 };
-
 use xmas_elf::{
     header::{self, Class, HeaderPt1, Machine_},
     program::{self, ProgramHeader32, ProgramHeader64},
@@ -52,7 +50,7 @@ struct ElfHeader<P> {
     pt2: HeaderPt2<P>,
 }
 
-trait ProgramHeader {
+pub trait ProgramHeader {
     fn offset(&self) -> usize;
     fn file_size(&self) -> usize;
     fn virtual_addr(&self) -> usize;
@@ -99,7 +97,7 @@ struct LdsoLoadInfo {
     entry_ip: VAddr,
 }
 
-trait ElfAddr {
+pub trait ElfAddr {
     type Integer;
 
     fn from_usize(val: usize) -> Self;
@@ -125,7 +123,7 @@ macro_rules! impl_elf_addr {
 impl_elf_addr!(u32);
 impl_elf_addr!(u64);
 
-trait ElfArch {
+pub trait ElfArch {
     type Ea: ElfAddr + Clone + Copy;
     type Ph: ProgramHeader + Clone + Copy + Default;
 
@@ -134,11 +132,11 @@ trait ElfArch {
     const STACK_BASE_ADDR: usize;
 }
 
-struct ElfArch32;
+pub struct ElfArch32;
 
-struct ElfArch64;
+pub struct ElfArch64;
 
-struct Elf<E: ElfArch> {
+pub struct Elf<E: ElfArch> {
     file: Arc<Dentry>,
     elf_header: ElfHeader<E::Ea>,
     program_headers: Vec<E::Ph>,
@@ -157,9 +155,9 @@ impl ElfArch for ElfArch64 {
     type Ea = u64;
     type Ph = ProgramHeader64;
 
-    const DYN_BASE_ADDR: usize = 0xaaaa_0000_0000;
-    const LDSO_BASE_ADDR: usize = 0xf000_0000_0000;
-    const STACK_BASE_ADDR: usize = 0xffff_ffff_0000;
+    const DYN_BASE_ADDR: usize = 0x2aaa_0000_0000;
+    const LDSO_BASE_ADDR: usize = 0x7000_0000_0000;
+    const STACK_BASE_ADDR: usize = 0x7fff_ffff_0000;
 }
 
 impl<E: ElfArch> Elf<E> {
@@ -223,8 +221,11 @@ impl<E: ElfArch> Elf<E> {
         // Load Segments
         let (elf_base, data_segment_end) = self.load_segments(&mm_list)?;
 
-        // Load ldso(if have)
+        // Load ldso (if any)
         let ldso_load_info = self.load_ldso(&mm_list)?;
+
+        // Load vdso
+        self.load_vdso(&mm_list)?;
 
         // Heap
         mm_list.register_break(data_segment_end + 0x10000);
@@ -397,6 +398,10 @@ impl<E: ElfArch> Elf<E> {
         }
 
         Ok(None)
+    }
+
+    fn load_vdso(&self, mm_list: &MMList) -> KResult<()> {
+        mm_list.map_vdso()
     }
 
     fn ldso_path(&self) -> KResult<Option<String>> {

@@ -188,7 +188,7 @@ impl ProcessList {
             init_notify.finish(self.prove());
 
             process.parent(self.prove()).notify(
-                process.exit_signal.expect("Process must set exit signal"),
+                process.exit_signal,
                 WaitObject {
                     pid: process.pid,
                     code: exit_status,

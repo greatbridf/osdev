@@ -1,5 +1,5 @@
 use crate::traits::mm::Memory;
-use core::{marker::PhantomData, ptr::NonNull};
+use core::{arch::asm, marker::PhantomData, ptr::NonNull};
 use eonix_mm::{
     address::{Addr as _, AddrOps as _, PAddr, PRange, PhysAccess, VAddr},
     page_table::{
@@ -128,7 +128,7 @@ impl RawAttribute for PageAttribute64 {
         let mut table_attr = TableAttribute::empty();
 
         if self.0 & PA_PS != 0 {
-            panic!("Encountered a huge page while parsing table attributes");
+            return None;
         }
 
         if self.0 & PA_P != 0 {
@@ -371,5 +371,52 @@ impl Memory for ArchMemory {
                     }
                 }),
         )
+    }
+}
+
+#[inline(always)]
+pub fn flush_tlb(vaddr: usize) {
+    unsafe {
+        asm!(
+            "invlpg ({})",
+            in(reg) vaddr,
+            options(att_syntax)
+        );
+    }
+}
+
+#[inline(always)]
+pub fn flush_tlb_all() {
+    unsafe {
+        asm!(
+            "mov %cr3, %rax",
+            "mov %rax, %cr3",
+            out("rax") _,
+            options(att_syntax)
+        );
+    }
+}
+
+#[inline(always)]
+pub fn get_root_page_table_pfn() -> PFN {
+    let cr3: usize;
+    unsafe {
+        asm!(
+            "mov %cr3, {0}",
+            out(reg) cr3,
+            options(att_syntax)
+        );
+    }
+    PFN::from(PAddr::from(cr3))
+}
+
+#[inline(always)]
+pub fn set_root_page_table_pfn(pfn: PFN) {
+    unsafe {
+        asm!(
+            "mov {0}, %cr3",
+            in(reg) PAddr::from(pfn).addr(),
+            options(att_syntax)
+        );
     }
 }

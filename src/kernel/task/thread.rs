@@ -1,5 +1,5 @@
 use super::{
-    signal::{RaiseResult, Signal, SignalList},
+    signal::{RaiseResult, SignalList},
     Process, ProcessList, WaitType,
 };
 use crate::{
@@ -14,7 +14,6 @@ use crate::{
     prelude::*,
 };
 use alloc::sync::Arc;
-use arch::FpuState;
 use atomic_unique_refcell::AtomicUniqueRefCell;
 use core::{
     future::Future,
@@ -23,13 +22,13 @@ use core::{
     sync::atomic::{AtomicBool, Ordering},
     task::{Context, Poll, Waker},
 };
-use eonix_hal::traits::trap::IrqState;
 use eonix_hal::{
+    fpu::FpuState,
     processor::{UserTLS, CPU},
     traits::{
         fault::Fault,
         fpu::RawFpuState as _,
-        trap::{RawTrapContext, TrapReturn, TrapType},
+        trap::{IrqState as _, RawTrapContext, TrapReturn, TrapType},
     },
     trap::{disable_irqs_save, TrapContext},
 };
@@ -37,6 +36,7 @@ use eonix_mm::address::{Addr as _, VAddr};
 use eonix_runtime::run::{Contexted, Run, RunState};
 use eonix_sync::AsProofMut as _;
 use pointers::BorrowedArc;
+use posix_types::signal::Signal;
 
 #[eonix_percpu::define_percpu]
 static CURRENT_THREAD: Option<NonNull<Thread>> = None;
@@ -183,8 +183,14 @@ impl ThreadBuilder {
         let mut trap_ctx = thread.trap_ctx.borrow().clone();
         trap_ctx.set_user_return_value(0);
 
+        #[cfg(target_arch = "riscv64")]
+        {
+            let pc = trap_ctx.get_program_counter();
+            trap_ctx.set_program_counter(pc + 4);
+        }
+
         if let Some(sp) = clone_args.sp {
-            trap_ctx.set_stack_pointer(sp);
+            trap_ctx.set_stack_pointer(sp.get());
         }
 
         let fs_context = if clone_args.flags.contains(CloneFlags::CLONE_FS) {
@@ -308,14 +314,7 @@ impl Thread {
                 handler,
                 name: _name,
                 ..
-            })) => {
-                println_trace!(
-                    "trace_syscall",
-                    "Syscall {_name}({no:#x}) on tid {:#x}",
-                    self.tid
-                );
-                handler(self, args)
-            }
+            })) => handler(self, args),
             _ => {
                 println_warn!("Syscall {no}({no:#x}) isn't implemented.");
                 self.raise(Signal::SIGSYS);
@@ -368,10 +367,12 @@ impl Thread {
 
             let trap_type = self.trap_ctx.borrow().trap_type();
             match trap_type {
-                TrapType::Fault(Fault::PageFault(err_code)) => {
-                    let addr = arch::get_page_fault_address();
+                TrapType::Fault(Fault::PageFault {
+                    error_code,
+                    address: addr,
+                }) => {
                     let mms = &self.process.mm_list;
-                    if let Err(signal) = mms.handle_user_page_fault(addr, err_code).await {
+                    if let Err(signal) = mms.handle_user_page_fault(addr, error_code).await {
                         self.signal_list.raise(signal);
                     }
                 }
@@ -389,7 +390,14 @@ impl Thread {
                 }
                 TrapType::Syscall { no, args } => {
                     if let Some(retval) = self.handle_syscall(no, args) {
-                        self.trap_ctx.borrow().set_user_return_value(retval);
+                        let mut trap_ctx = self.trap_ctx.borrow();
+                        trap_ctx.set_user_return_value(retval);
+
+                        #[cfg(target_arch = "riscv64")]
+                        {
+                            let pc = trap_ctx.get_program_counter();
+                            trap_ctx.set_program_counter(pc + 4);
+                        }
                     }
                 }
             }
@@ -469,7 +477,7 @@ impl<F: Future> Contexted for ThreadRunnable<F> {
             // SAFETY:
             CPU::local()
                 .as_mut()
-                .load_interrupt_stack(trap_ctx_ptr.add(1).addr() as u64);
+                .load_interrupt_stack(trap_ctx_ptr as u64);
         }
     }
 

@@ -1,5 +1,6 @@
 use super::FromSyscallArg;
 use crate::kernel::constants::{EINVAL, ENOMEM};
+use crate::kernel::task::Thread;
 use crate::{
     kernel::{
         constants::{UserMmapFlags, UserMmapProtocol},
@@ -11,6 +12,7 @@ use align_ext::AlignExt;
 use eonix_mm::address::{Addr as _, AddrOps as _, VAddr};
 use eonix_mm::paging::PAGE_SIZE;
 use eonix_runtime::task::Task;
+use posix_types::syscall_no::*;
 
 impl FromSyscallArg for UserMmapProtocol {
     fn from_arg(value: usize) -> UserMmapProtocol {
@@ -34,8 +36,8 @@ fn check_impl(condition: bool, err: u32) -> KResult<()> {
     }
 }
 
-#[eonix_macros::define_syscall(0xc0)]
-fn mmap_pgoff(
+fn do_mmap2(
+    thread: &Thread,
     addr: usize,
     len: usize,
     prot: UserMmapProtocol,
@@ -99,7 +101,33 @@ fn mmap_pgoff(
     addr.map(|addr| addr.addr())
 }
 
-#[eonix_macros::define_syscall(0x5b)]
+#[cfg(target_arch = "riscv64")]
+#[eonix_macros::define_syscall(SYS_MMAP)]
+fn mmap(
+    addr: usize,
+    len: usize,
+    prot: UserMmapProtocol,
+    flags: UserMmapFlags,
+    fd: u32,
+    offset: usize,
+) -> KResult<usize> {
+    do_mmap2(thread, addr, len, prot, flags, fd, offset / PAGE_SIZE)
+}
+
+#[cfg(target_arch = "x86_64")]
+#[eonix_macros::define_syscall(SYS_MMAP2)]
+fn mmap2(
+    addr: usize,
+    len: usize,
+    prot: UserMmapProtocol,
+    flags: UserMmapFlags,
+    fd: u32,
+    pgoffset: usize,
+) -> KResult<usize> {
+    do_mmap2(thread, addr, len, prot, flags, fd, pgoffset)
+}
+
+#[eonix_macros::define_syscall(SYS_MUNMAP)]
 fn munmap(addr: usize, len: usize) -> KResult<usize> {
     let addr = VAddr::from(addr);
     if !addr.is_page_aligned() || len == 0 {
@@ -110,18 +138,18 @@ fn munmap(addr: usize, len: usize) -> KResult<usize> {
     Task::block_on(thread.process.mm_list.unmap(addr, len)).map(|_| 0)
 }
 
-#[eonix_macros::define_syscall(0x2d)]
+#[eonix_macros::define_syscall(SYS_BRK)]
 fn brk(addr: usize) -> KResult<usize> {
     let vaddr = if addr == 0 { None } else { Some(VAddr::from(addr)) };
     Ok(thread.process.mm_list.set_break(vaddr).addr())
 }
 
-#[eonix_macros::define_syscall(0xdb)]
+#[eonix_macros::define_syscall(SYS_MADVISE)]
 fn madvise(_addr: usize, _len: usize, _advice: u32) -> KResult<()> {
     Ok(())
 }
 
-#[eonix_macros::define_syscall(0x7d)]
+#[eonix_macros::define_syscall(SYS_MPROTECT)]
 fn mprotect(addr: usize, len: usize, prot: UserMmapProtocol) -> KResult<()> {
     let addr = VAddr::from(addr);
     if !addr.is_page_aligned() || len == 0 {
@@ -141,7 +169,7 @@ fn mprotect(addr: usize, len: usize, prot: UserMmapProtocol) -> KResult<()> {
     ))
 }
 
-#[eonix_macros::define_syscall(0x177)]
+#[eonix_macros::define_syscall(SYS_MEMBARRIER)]
 fn membarrier(_cmd: usize, _flags: usize) -> KResult<()> {
     Ok(())
 }

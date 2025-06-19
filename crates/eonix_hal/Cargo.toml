@@ -8,7 +8,6 @@ links = "eonix_hal"
 eonix_hal_traits = { path = "./eonix_hal_traits" }
 eonix_hal_macros = { path = "./eonix_hal_macros" }
 
-arch = { path = "../../arch" }
 eonix_mm = { path = "../eonix_mm" }
 eonix_sync_base = { path = "../eonix_sync/eonix_sync_base" }
 eonix_percpu = { path = "../eonix_percpu" }
@@ -16,3 +15,12 @@ eonix_preempt = { path = "../eonix_preempt" }
 
 acpi = "5.2.0"
 cfg-if = "1.0"
+
+[target.'cfg(target_arch = "riscv64")'.dependencies]
+intrusive_list = { path = "../intrusive_list" }
+buddy_allocator = { path = "../buddy_allocator" }
+sbi = "0.3.0"
+riscv = { version = "0.13.0", features = ["s-mode"] }
+riscv-peripheral = { version = "0.3.0" }
+fdt = "0.1"
+bitflags = "2.6.0"

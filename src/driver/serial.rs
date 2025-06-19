@@ -1,4 +1,3 @@
-use super::Port8;
 use crate::{
     kernel::{
         block::make_device, console::set_console, constants::EIO, interrupt::register_irq_handler,
@@ -9,8 +8,12 @@ use crate::{
 use alloc::{collections::vec_deque::VecDeque, format, sync::Arc};
 use bitflags::bitflags;
 use core::pin::pin;
+use eonix_hal::arch_exported::io::Port8;
 use eonix_runtime::{run::FutureRun, scheduler::Scheduler};
 use eonix_sync::{SpinIrq as _, WaitList};
+
+#[cfg(not(target_arch = "x86_64"))]
+compile_error!("Serial driver is only supported on x86_64 architecture");
 
 bitflags! {
     struct LineStatus: u8 {
@@ -197,14 +200,16 @@ impl Serial {
 }
 
 impl TerminalDevice for Serial {
-    fn putchar(&self, ch: u8) {
+    fn write(&self, data: &[u8]) {
         let mut tx_buffer = self.tx_buffer.lock();
-        tx_buffer.push_back(ch);
+        tx_buffer.extend(data.iter().copied());
         self.wakeup_worker();
     }
 
-    fn putchar_direct(&self, ch: u8) {
-        self.tx_rx.write(ch);
+    fn write_direct(&self, data: &[u8]) {
+        for &ch in data {
+            self.tx_rx.write(ch);
+        }
     }
 }
 

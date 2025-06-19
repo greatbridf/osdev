@@ -1,9 +1,9 @@
 use bitflags::bitflags;
+use eonix_mm::address::VAddr;
 
 bitflags! {
     #[derive(Debug)]
     pub struct PageFaultErrorCode: u32 {
-        const NonPresent = 1;
         const Read = 2;
         const Write = 4;
         const InstructionFetch = 8;
@@ -15,6 +15,9 @@ bitflags! {
 pub enum Fault {
     InvalidOp,
     BadAccess,
-    PageFault(PageFaultErrorCode),
+    PageFault {
+        error_code: PageFaultErrorCode,
+        address: VAddr,
+    },
     Unknown(usize),
 }

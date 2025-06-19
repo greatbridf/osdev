@@ -2,10 +2,7 @@ use super::{
     device::{PCIDevice, PCIE_DEVICES},
     error::PciError,
 };
-use crate::{
-    kernel::constants::{EEXIST, ENOENT},
-    KResult,
-};
+use crate::{kernel::constants::EEXIST, KResult};
 use alloc::{
     collections::btree_map::{self, BTreeMap},
     sync::Arc,
@@ -31,11 +28,11 @@ pub fn register_driver(driver: impl PCIDriver + 'static) -> KResult<()> {
         btree_map::Entry::Occupied(_) => Err(EEXIST)?,
     };
 
-    let Some(device) = PCIE_DEVICES.lock().find(&index).clone_pointer() else {
-        Err(ENOENT)?
-    };
+    let device = PCIE_DEVICES.lock().find(&index).clone_pointer();
 
-    driver.handle_device(device)?;
+    if let Some(device) = device {
+        driver.handle_device(device)?;
+    };
 
     Ok(())
 }

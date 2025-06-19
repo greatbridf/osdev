@@ -5,16 +5,16 @@ use crate::{
             alloc_pid, new_thread_runnable, KernelStack, ProcessBuilder, ProcessList, Thread,
             ThreadBuilder,
         },
-        user::{dataflow::CheckedUserPointer, UserPointerMut},
+        user::UserPointerMut,
     },
     KResult,
 };
 use bitflags::bitflags;
+use core::num::NonZero;
 use eonix_hal::processor::UserTLS;
 use eonix_runtime::{scheduler::Scheduler, task::Task};
 use eonix_sync::AsProof;
-
-use crate::kernel::task::Signal;
+use posix_types::signal::Signal;
 
 bitflags! {
     #[derive(Debug, Default)]
@@ -49,12 +49,12 @@ bitflags! {
 #[derive(Debug)]
 pub struct CloneArgs {
     pub flags: CloneFlags,
-    pub sp: Option<usize>,             // Stack pointer for the new thread.
-    pub exit_signal: Option<Signal>,   // Signal to send to the parent on exit.
-    pub set_tid_ptr: Option<usize>,    // Pointer to set child TID in user space.
-    pub clear_tid_ptr: Option<usize>,  // Pointer to clear child TID in user space.
+    pub sp: Option<NonZero<usize>>, // Stack pointer for the new thread.
+    pub exit_signal: Option<Signal>, // Signal to send to the parent on exit.
+    pub set_tid_ptr: Option<usize>, // Pointer to set child TID in user space.
+    pub clear_tid_ptr: Option<usize>, // Pointer to clear child TID in user space.
     pub parent_tid_ptr: Option<usize>, // Pointer to parent TID in user space.
-    pub tls: Option<UserTLS>,          // Pointer to TLS information.
+    pub tls: Option<UserTLS>,       // Pointer to TLS information.
 }
 
 impl CloneArgs {
@@ -70,7 +70,7 @@ impl CloneArgs {
         let clone_flags = CloneFlags::from_bits_truncate(flags & !Self::MASK);
         let exit_signal = flags & Self::MASK;
         let exit_signal = if exit_signal != 0 {
-            Some(Signal::try_from(exit_signal as u32)?)
+            Some(Signal::try_from_raw(exit_signal as u32)?)
         } else {
             None
         };
@@ -89,18 +89,15 @@ impl CloneArgs {
             .contains(CloneFlags::CLONE_PARENT_SETTID)
             .then_some(parent_tid_ptr);
 
-        #[cfg(target_arch = "x86_64")]
         let tls = if clone_flags.contains(CloneFlags::CLONE_SETTLS) {
             Some(parse_user_tls(tls)?)
         } else {
             None
         };
 
-        assert!(sp != 0);
-
         let clone_args = CloneArgs {
             flags: clone_flags,
-            sp: Some(sp),
+            sp: NonZero::new(sp),
             set_tid_ptr,
             clear_tid_ptr,
             parent_tid_ptr,
@@ -155,7 +152,7 @@ pub fn do_clone(thread: &Thread, clone_args: CloneArgs) -> KResult<u32> {
         let current_pgroup = current_process.pgroup(procs.prove()).clone();
         let current_session = current_process.session(procs.prove()).clone();
 
-        let (new_thread, new_process) = ProcessBuilder::new()
+        let (new_thread, _) = ProcessBuilder::new()
             .clone_from(current_process, &clone_args)
             .pid(new_pid)
             .pgroup(current_pgroup)

@@ -1,5 +1,8 @@
-use crate::kernel::constants::{EFAULT, EINVAL};
-use core::{arch::asm, ffi::CStr};
+use crate::{
+    io::{IntoStream, Stream},
+    kernel::constants::{EFAULT, EINVAL},
+};
+use core::{arch::asm, ffi::CStr, marker::PhantomData};
 use eonix_preempt::assert_preempt_enabled;
 
 use crate::{
@@ -7,36 +10,40 @@ use crate::{
     prelude::*,
 };
 
-pub struct CheckedUserPointer {
+pub struct CheckedUserPointer<'a> {
     ptr: *const u8,
     len: usize,
+    _phantom: PhantomData<&'a ()>,
 }
 
-pub struct UserBuffer<'lt> {
-    ptr: CheckedUserPointer,
+pub struct UserBuffer<'a> {
+    ptr: CheckedUserPointer<'a>,
     size: usize,
     cur: usize,
-    _phantom: core::marker::PhantomData<&'lt ()>,
 }
 
-pub struct UserString<'lt> {
-    ptr: CheckedUserPointer,
+pub struct UserString<'a> {
+    ptr: CheckedUserPointer<'a>,
     len: usize,
-    _phantom: core::marker::PhantomData<&'lt ()>,
 }
 
 pub struct UserPointer<'a, T: Copy, const CONST: bool> {
-    pointer: CheckedUserPointer,
-    _phantom: core::marker::PhantomData<&'a T>,
+    pointer: CheckedUserPointer<'a>,
+    _phantom: PhantomData<T>,
 }
 
-impl<'a, T: Copy, const CONST: bool> UserPointer<'a, T, CONST> {
+pub struct UserStream<'a> {
+    pointer: CheckedUserPointer<'a>,
+    cur: usize,
+}
+
+impl<T: Copy, const CONST: bool> UserPointer<'_, T, CONST> {
     pub fn new(ptr: *const T) -> KResult<Self> {
         let pointer = CheckedUserPointer::new(ptr as *const u8, core::mem::size_of::<T>())?;
 
         Ok(Self {
             pointer,
-            _phantom: core::marker::PhantomData,
+            _phantom: PhantomData,
         })
     }
 
@@ -65,14 +72,18 @@ impl<'a, T: Copy> UserPointer<'a, T, false> {
     }
 }
 
-impl CheckedUserPointer {
+impl CheckedUserPointer<'_> {
     pub fn new(ptr: *const u8, len: usize) -> KResult<Self> {
         const USER_MAX_ADDR: usize = 0x7ff_fff_fff_fff;
         let end = (ptr as usize).checked_add(len);
         if ptr.is_null() || end.ok_or(EFAULT)? > USER_MAX_ADDR {
             Err(EFAULT)
         } else {
-            Ok(Self { ptr, len })
+            Ok(Self {
+                ptr,
+                len,
+                _phantom: PhantomData,
+            })
         }
     }
 
@@ -101,6 +112,7 @@ impl CheckedUserPointer {
 
         let error_bytes: usize;
         unsafe {
+            #[cfg(target_arch = "x86_64")]
             asm!(
                 "2:",
                 "rep movsb",
@@ -108,15 +120,39 @@ impl CheckedUserPointer {
                 "nop",
                 ".pushsection .fix, \"a\", @progbits",
                 ".align 32",
-                ".quad 2b",  // instruction address
-                ".quad 3b - 2b",  // instruction length
-                ".quad 3b",  // fix jump address
-                ".quad 0x3", // type: load
+                ".quad 2b",      // instruction address
+                ".quad 3b - 2b", // instruction length
+                ".quad 3b",      // fix jump address
+                ".quad 0x3",     // type: load
                 ".popsection",
                 inout("rcx") total => error_bytes,
                 inout("rsi") self.ptr => _,
                 inout("rdi") buffer => _,
-            )
+            );
+
+            #[cfg(target_arch = "riscv64")]
+            asm!(
+                "2:",
+                "lb t0, 0(a1)",
+                "sb t0, 0(a2)",
+                "addi a1, a1, 1",
+                "addi a2, a2, 1",
+                "addi a0, a0, -1",
+                "bnez a0, 2b",
+                "3:",
+                "nop",
+                ".pushsection .fix, \"a\", @progbits",
+                ".align 16",
+                ".quad 2b",      // instruction address
+                ".quad 3b - 2b", // instruction length
+                ".quad 3b",      // fix jump address
+                ".quad 0x3",     // type: load
+                ".popsection",
+                inout("a0") total => error_bytes,
+                inout("a1") self.ptr => _,
+                inout("a2") buffer => _,
+                out("t0") _,
+            );
         }
 
         if error_bytes != 0 {
@@ -137,6 +173,7 @@ impl CheckedUserPointer {
         // TODO: align to 8 bytes when doing copy for performance
         let error_bytes: usize;
         unsafe {
+            #[cfg(target_arch = "x86_64")]
             asm!(
                 "2:",
                 "rep movsb",
@@ -152,7 +189,31 @@ impl CheckedUserPointer {
                 inout("rcx") total => error_bytes,
                 inout("rsi") data => _,
                 inout("rdi") self.ptr => _,
-            )
+            );
+
+            #[cfg(target_arch = "riscv64")]
+            asm!(
+                "2:",
+                "lb t0, 0(a1)",
+                "sb t0, 0(a2)",
+                "addi a1, a1, 1",
+                "addi a2, a2, 1",
+                "addi a0, a0, -1",
+                "bnez a0, 2b",
+                "3:",
+                "nop",
+                ".pushsection .fix, \"a\", @progbits",
+                ".align 16",
+                ".quad 2b",  // instruction address
+                ".quad 3b - 2b",  // instruction length
+                ".quad 3b",  // fix jump address
+                ".quad 0x1", // type: store
+                ".popsection",
+                inout("a0") total => error_bytes,
+                inout("a1") data => _,
+                inout("a2") self.ptr => _,
+                out("t0") _,
+            );
         };
 
         if error_bytes != 0 {
@@ -173,6 +234,7 @@ impl CheckedUserPointer {
         // TODO: align to 8 bytes when doing copy for performance
         let error_bytes: usize;
         unsafe {
+            #[cfg(target_arch = "x86_64")]
             asm!(
                 "2:",
                 "rep stosb",
@@ -189,7 +251,27 @@ impl CheckedUserPointer {
                 inout("rcx") self.len => error_bytes,
                 inout("rdi") self.ptr => _,
                 options(att_syntax)
-            )
+            );
+
+            #[cfg(target_arch = "riscv64")]
+            asm!(
+                "2:",
+                "sb zero, 0(a1)",
+                "addi a1, a1, 1",
+                "addi a0, a0, -1",
+                "bnez a0, 2b",
+                "3:",
+                "nop",
+                ".pushsection .fix, \"a\", @progbits",
+                ".align 16",
+                ".quad 2b",  // instruction address
+                ".quad 3b - 2b",  // instruction length
+                ".quad 3b",  // fix jump address
+                ".quad 0x1", // type: store
+                ".popsection",
+                inout("a0") self.len => error_bytes,
+                inout("a1") self.ptr => _,
+            );
         };
 
         if error_bytes != 0 {
@@ -204,12 +286,7 @@ impl UserBuffer<'_> {
     pub fn new(ptr: *mut u8, size: usize) -> KResult<Self> {
         let ptr = CheckedUserPointer::new(ptr, size)?;
 
-        Ok(Self {
-            ptr,
-            size,
-            cur: 0,
-            _phantom: core::marker::PhantomData,
-        })
+        Ok(Self { ptr, size, cur: 0 })
     }
 
     fn remaining(&self) -> usize {
@@ -253,11 +330,11 @@ impl<'lt> UserString<'lt> {
         assert_preempt_enabled!("UserString::new");
 
         const MAX_LEN: usize = 4096;
-        // TODO
         let ptr = CheckedUserPointer::new(ptr, MAX_LEN)?;
 
         let result: usize;
         unsafe {
+            #[cfg(target_arch = "x86_64")]
             asm!(
                 "2:",
                 "movb ({ptr}), %al",
@@ -279,7 +356,30 @@ impl<'lt> UserString<'lt> {
                 inout("rcx") MAX_LEN => result,
                 ptr = inout(reg) ptr.ptr => _,
                 options(att_syntax),
-            )
+            );
+
+            #[cfg(target_arch = "riscv64")]
+            asm!(
+                "2:",
+                "lb t0, 0(a1)",
+                "4:",
+                "beqz t0, 3f",
+                "addi a1, a1, 1",
+                "addi a0, a0, -1",
+                "bnez a0, 2b",
+                "3:",
+                "nop",
+                ".pushsection .fix, \"a\", @progbits",
+                ".align 16",
+                ".quad 2b",  // instruction address
+                ".quad 4b - 2b",  // instruction length
+                ".quad 3b",  // fix jump address
+                ".quad 0x2", // type: string
+                ".popsection",
+                out("t0") _,
+                inout("a0") MAX_LEN => result,
+                inout("a1") ptr.ptr => _,
+            );
         };
 
         if result == 0 {
@@ -288,7 +388,6 @@ impl<'lt> UserString<'lt> {
             Ok(Self {
                 ptr,
                 len: MAX_LEN - result,
-                _phantom: core::marker::PhantomData,
             })
         }
     }
@@ -299,6 +398,60 @@ impl<'lt> UserString<'lt> {
                 self.ptr.get_const(),
                 self.len + 1,
             ))
+        }
+    }
+}
+
+impl UserStream<'_> {
+    pub fn len(&self) -> usize {
+        self.pointer.len
+    }
+
+    pub fn remaining(&self) -> usize {
+        self.pointer.len - self.cur
+    }
+
+    pub fn is_drained(&self) -> bool {
+        self.cur >= self.pointer.len
+    }
+}
+
+impl Stream for UserStream<'_> {
+    fn poll_data<'a>(&mut self, buf: &'a mut [u8]) -> KResult<Option<&'a mut [u8]>> {
+        assert_preempt_enabled!("UserStream::poll_data");
+
+        if self.cur >= self.pointer.len {
+            return Ok(None);
+        }
+
+        let to_read = buf.len().min(self.pointer.len - self.cur);
+
+        self.pointer.read(buf.as_mut_ptr() as *mut (), to_read)?;
+
+        self.pointer.forward(to_read);
+        self.cur += to_read;
+        Ok(Some(&mut buf[..to_read]))
+    }
+
+    fn ignore(&mut self, len: usize) -> KResult<Option<usize>> {
+        if self.cur >= self.pointer.len {
+            return Ok(None);
+        }
+        let to_ignore = len.min(self.pointer.len - self.cur);
+
+        self.pointer.forward(to_ignore);
+        self.cur += to_ignore;
+        Ok(Some(to_ignore))
+    }
+}
+
+impl<'a> IntoStream for CheckedUserPointer<'a> {
+    type Stream = UserStream<'a>;
+
+    fn into_stream(self) -> Self::Stream {
+        UserStream {
+            pointer: self,
+            cur: 0,
         }
     }
 }

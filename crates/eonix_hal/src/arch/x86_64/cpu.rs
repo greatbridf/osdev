@@ -1,6 +1,9 @@
 use super::gdt::{GDTEntry, GDT};
 use super::interrupt::InterruptControl;
+use super::trap::TrapContext;
+use core::arch::asm;
 use core::marker::PhantomPinned;
+use core::mem::size_of;
 use core::pin::Pin;
 use eonix_preempt::PreemptGuard;
 use eonix_sync_base::LazyLock;
@@ -114,7 +117,8 @@ impl CPU {
 
     pub unsafe fn load_interrupt_stack(self: Pin<&mut Self>, rsp: u64) {
         unsafe {
-            self.map_unchecked_mut(|me| &mut me.tss).set_rsp0(rsp);
+            self.map_unchecked_mut(|me| &mut me.tss)
+                .set_rsp0(rsp + size_of::<TrapContext>() as u64);
         }
     }
 
@@ -129,7 +133,7 @@ impl CPU {
         }
 
         const IA32_KERNEL_GS_BASE: u32 = 0xc0000102;
-        arch::wrmsr(IA32_KERNEL_GS_BASE, *base);
+        wrmsr(IA32_KERNEL_GS_BASE, *base);
     }
 
     pub fn cpuid(&self) -> usize {
@@ -179,106 +183,43 @@ impl TSS {
     }
 }
 
-#[macro_export]
-macro_rules! define_smp_bootstrap {
-    ($cpu_count:literal, $ap_entry:ident, $alloc_kstack:tt) => {
-        static BOOT_SEMAPHORE: core::sync::atomic::AtomicU64 =
-            core::sync::atomic::AtomicU64::new(0);
-        static BOOT_STACK: core::sync::atomic::AtomicU64 =
-            core::sync::atomic::AtomicU64::new(0);
+#[inline(always)]
+pub fn halt() {
+    unsafe {
+        asm!("hlt", options(att_syntax, nostack));
+    }
+}
 
-        static CPU_COUNT: core::sync::atomic::AtomicU64 =
-            core::sync::atomic::AtomicU64::new(1);
+#[inline(always)]
+pub fn rdmsr(msr: u32) -> u64 {
+    let edx: u32;
+    let eax: u32;
 
-        core::arch::global_asm!(
-            r#"
-        .pushsection .stage1.smp, "ax", @progbits
-        .code16
-        .globl ap_bootstrap
-        .type ap_bootstrap, @function
-        ap_bootstrap:
-            ljmp $0x0, $2f
-
-        2:
-            # we use the shared gdt for cpu bootstrapping
-            lgdt EARLY_GDT_DESCRIPTOR
-
-            # set msr
-            mov $0xc0000080, %ecx
-            rdmsr
-            or $0x901, %eax # set LME, NXE, SCE
-            wrmsr
-
-            # set cr4
-            mov %cr4, %eax
-            or $0xa0, %eax # set PAE, PGE
-            mov %eax, %cr4
-
-            # load new page table
-            mov ${KERNEL_PML4}, %eax
-            mov %eax, %cr3
-
-            mov %cr0, %eax
-            // SET PE, WP, PG
-            or $0x80010001, %eax
-            mov %eax, %cr0
-
-            ljmp $0x08, $2f
-
-        .code64
-        2:
-            mov $0x10, %ax
-            mov %ax, %ds
-            mov %ax, %es
-            mov %ax, %ss
-
-            xor %rsp, %rsp
-            xor %rax, %rax
-            inc %rax
-        2:
-            xchg %rax, {BOOT_SEMAPHORE}
-            cmp $0, %rax
-            je 2f
-            pause
-            jmp 2b
-
-        2:
-            mov {BOOT_STACK}, %rsp # Acquire
-            cmp $0, %rsp
-            jne 2f
-            pause
-            jmp 2b
-
-        2:
-            xor %rax, %rax
-            mov %rax, {BOOT_STACK} # Release
-            xchg %rax, {BOOT_SEMAPHORE}
-
-            lock incq {CPU_COUNT}
-
-            xor %rbp, %rbp
-            push %rbp # NULL return address
-            mov ${AP_ENTRY}, %rax
-            jmp *%rax
-            .popsection
-            "#,
-            KERNEL_PML4 = const 0x1000,
-            BOOT_SEMAPHORE = sym BOOT_SEMAPHORE,
-            BOOT_STACK = sym BOOT_STACK,
-            CPU_COUNT = sym CPU_COUNT,
-            AP_ENTRY = sym $ap_entry,
+    unsafe {
+        asm!(
+            "rdmsr",
+            in("ecx") msr,
+            out("eax") eax,
+            out("edx") edx,
             options(att_syntax),
         );
+    }
 
-        pub unsafe fn wait_cpus_online() {
-            use core::sync::atomic::Ordering;
-            while CPU_COUNT.load(Ordering::Acquire) != $cpu_count {
-                if BOOT_STACK.load(Ordering::Acquire) == 0 {
-                    let stack_bottom = $alloc_kstack as u64;
-                    BOOT_STACK.store(stack_bottom, Ordering::Release);
-                }
-                $crate::pause();
-            }
-        }
-    };
+    (edx as u64) << 32 | eax as u64
+}
+
+#[inline(always)]
+pub fn wrmsr(msr: u32, value: u64) {
+    let eax = value as u32;
+    let edx = (value >> 32) as u32;
+
+    unsafe {
+        asm!(
+            "wrmsr",
+            in("ecx") msr,
+            in("eax") eax,
+            in("edx") edx,
+            options(att_syntax),
+        );
+    }
 }

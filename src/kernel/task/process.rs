@@ -1,6 +1,6 @@
 use super::{
     process_group::ProcessGroupBuilder, signal::RaiseResult, thread::ThreadBuilder, ProcessGroup,
-    ProcessList, Session, Signal, Thread,
+    ProcessList, Session, Thread,
 };
 use crate::kernel::constants::{ECHILD, EINTR, EPERM, ESRCH};
 use crate::kernel::task::{CloneArgs, CloneFlags};
@@ -9,7 +9,6 @@ use crate::{
     prelude::*,
     rcu::{rcu_sync, RCUPointer, RCUReadGuard},
     sync::CondVar,
-    SIGNAL_COREDUMP,
 };
 use alloc::{
     collections::{btree_map::BTreeMap, vec_deque::VecDeque},
@@ -22,6 +21,9 @@ use eonix_sync::{
     UnlockableGuard as _, UnlockedGuard as _,
 };
 use pointers::BorrowedArc;
+use posix_types::constants::{CLD_CONTINUED, CLD_DUMPED, CLD_EXITED, CLD_KILLED, CLD_STOPPED};
+use posix_types::signal::Signal;
+use posix_types::SIGNAL_COREDUMP;
 
 pub struct ProcessBuilder {
     mm_list: Option<MMList>,
@@ -117,10 +119,21 @@ impl WaitType {
     pub fn to_wstatus(self) -> u32 {
         match self {
             WaitType::Exited(status) => (status & 0xff) << 8,
-            WaitType::Signaled(signal @ SIGNAL_COREDUMP!()) => u32::from(signal) | 0x80,
-            WaitType::Signaled(signal) => u32::from(signal),
-            WaitType::Stopped(signal) => 0x7f | (u32::from(signal) << 8),
+            WaitType::Signaled(signal @ SIGNAL_COREDUMP!()) => signal.into_raw() | 0x80,
+            WaitType::Signaled(signal) => signal.into_raw(),
+            WaitType::Stopped(signal) => 0x7f | (signal.into_raw() << 8),
             WaitType::Continued => 0xffff,
+        }
+    }
+
+    pub fn to_status_code(self) -> (u32, u32) {
+        // TODO: CLD_TRAPPED
+        match self {
+            WaitType::Exited(status) => (status, CLD_EXITED),
+            WaitType::Signaled(signal @ SIGNAL_COREDUMP!()) => (signal.into_raw(), CLD_DUMPED),
+            WaitType::Signaled(signal) => (signal.into_raw(), CLD_KILLED),
+            WaitType::Stopped(signal) => (signal.into_raw(), CLD_STOPPED),
+            WaitType::Continued => (Signal::SIGCONT.into_raw(), CLD_CONTINUED),
         }
     }
 }
@@ -152,16 +165,18 @@ impl ProcessBuilder {
         }
     }
 
-    pub fn clone_from(self, process: Arc<Process>, clone_args: &CloneArgs) -> Self {
+    pub fn clone_from(mut self, process: Arc<Process>, clone_args: &CloneArgs) -> Self {
         let mm_list = if clone_args.flags.contains(CloneFlags::CLONE_VM) {
             Task::block_on(process.mm_list.new_shared())
         } else {
             Task::block_on(process.mm_list.new_cloned())
         };
 
-        self.mm_list(mm_list)
-            .exit_signal(clone_args.exit_signal.expect("should set exit signal"))
-            .parent(process)
+        if let Some(exit_signal) = clone_args.exit_signal {
+            self = self.exit_signal(exit_signal)
+        }
+
+        self.mm_list(mm_list).parent(process)
     }
 
     pub fn exit_signal(mut self, exit_signal: Signal) -> Self {
@@ -312,7 +327,7 @@ impl Process {
                     return Ok(None);
                 }
 
-                waits = waits.wait().await?;
+                waits = waits.wait(no_block).await?;
             }
         };
 
@@ -473,9 +488,13 @@ impl Process {
         self.parent.load()
     }
 
-    pub fn notify(&self, signal: Signal, wait: WaitObject, procs: Proof<'_, ProcessList>) {
+    pub fn notify(&self, signal: Option<Signal>, wait: WaitObject, procs: Proof<'_, ProcessList>) {
         self.wait_list.notify(wait);
-        self.raise(signal, procs);
+
+        if let Some(signal) = signal {
+            // If we have a signal, we raise it to the process.
+            self.raise(signal, procs);
+        }
     }
 
     pub fn notify_batch(&self) -> NotifyBatch<'_, '_, '_> {
@@ -546,14 +565,14 @@ impl Entry<'_, '_, '_> {
         }
     }
 
-    pub fn wait(self) -> impl core::future::Future<Output = KResult<Self>> {
+    pub fn wait(self, no_block: bool) -> impl core::future::Future<Output = KResult<Self>> {
         let wait_procs = self.wait_procs.unlock();
 
         async move {
             let process_list = self.cv.wait(self.process_list).await;
             let wait_procs = wait_procs.relock().await;
 
-            if Thread::current().signal_list.has_pending_signal() {
+            if !no_block && Thread::current().signal_list.has_pending_signal() {
                 Err(EINTR)
             } else {
                 Ok(Self {

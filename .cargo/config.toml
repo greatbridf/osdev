@@ -1,5 +1,5 @@
 [build]
-target = 'x86_64-unknown-none.json'
+target = "riscv64gc-unknown-none-elf"
 target-dir = 'build'
 
 [unstable]

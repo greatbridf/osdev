@@ -1,30 +1,28 @@
-mod signal;
 mod signal_action;
-mod signal_mask;
 
 use super::{ProcessList, Thread, WaitObject, WaitType};
 use crate::kernel::constants::{EFAULT, EINVAL};
 use crate::{kernel::user::UserPointer, prelude::*};
 use alloc::collections::binary_heap::BinaryHeap;
 use alloc::sync::Arc;
-use arch::FpuState;
 use core::{cmp::Reverse, task::Waker};
+use eonix_hal::fpu::FpuState;
 use eonix_hal::traits::trap::RawTrapContext;
 use eonix_hal::trap::TrapContext;
 use eonix_runtime::task::Task;
 use eonix_sync::AsProof as _;
 use intrusive_collections::UnsafeRef;
+use posix_types::signal::{SigSet, Signal};
+use posix_types::{SIGNAL_IGNORE, SIGNAL_NOW, SIGNAL_STOP};
 use signal_action::SignalActionList;
 
-pub use signal::{Signal, SIGNAL_IGNORE, SIGNAL_NOW, SIGNAL_STOP};
 pub use signal_action::SignalAction;
-pub use signal_mask::SignalMask;
 
 pub(self) const SAVED_DATA_SIZE: usize =
-    size_of::<TrapContext>() + size_of::<FpuState>() + size_of::<SignalMask>();
+    size_of::<TrapContext>() + size_of::<FpuState>() + size_of::<SigSet>();
 
 struct SignalListInner {
-    mask: SignalMask,
+    mask: SigSet,
     pending: BinaryHeap<Reverse<Signal>>,
 
     signal_waker: Option<UnsafeRef<dyn Fn() + Send + Sync>>,
@@ -79,7 +77,7 @@ impl SignalListInner {
             (_, SignalAction::Ignore) => {}
             (SIGNAL_IGNORE!(), SignalAction::Default) => {}
             _ => {
-                self.mask.mask(SignalMask::from(signal));
+                self.mask.mask(SigSet::from(signal));
                 self.pending.push(Reverse(signal));
 
                 if matches!(signal, Signal::SIGCONT) {
@@ -102,7 +100,7 @@ impl SignalList {
     pub fn new() -> Self {
         Self {
             inner: Spin::new(SignalListInner {
-                mask: SignalMask::empty(),
+                mask: SigSet::empty(),
                 pending: BinaryHeap::new(),
                 signal_waker: None,
                 stop_waker: None,
@@ -111,19 +109,19 @@ impl SignalList {
         }
     }
 
-    pub fn get_mask(&self) -> SignalMask {
+    pub fn get_mask(&self) -> SigSet {
         self.inner.lock().mask
     }
 
-    pub fn set_mask(&self, mask: SignalMask) {
+    pub fn set_mask(&self, mask: SigSet) {
         self.inner.lock().mask = mask;
     }
 
-    pub fn mask(&self, mask: SignalMask) {
+    pub fn mask(&self, mask: SigSet) {
         self.inner.lock().mask.mask(mask)
     }
 
-    pub fn unmask(&self, mask: SignalMask) {
+    pub fn unmask(&self, mask: SigSet) {
         self.inner.lock().mask.unmask(mask)
     }
 
@@ -201,7 +199,7 @@ impl SignalList {
                 // Default actions include stopping the thread, continuing the thread and
                 // terminating the process. All these actions will block the thread or return
                 // to the thread immediately. So we can unmask these signals now.
-                self.inner.lock().mask.unmask(SignalMask::from(signal));
+                self.inner.lock().mask.unmask(SigSet::from(signal));
                 signal
             };
 
@@ -215,7 +213,7 @@ impl SignalList {
                     let thread = Thread::current();
                     if let Some(parent) = thread.process.parent.load() {
                         parent.notify(
-                            Signal::SIGCHLD,
+                            Some(Signal::SIGCHLD),
                             WaitObject {
                                 pid: thread.process.pid,
                                 code: WaitType::Stopped(signal),
@@ -240,7 +238,7 @@ impl SignalList {
 
                     if let Some(parent) = thread.process.parent.load() {
                         parent.notify(
-                            Signal::SIGCHLD,
+                            Some(Signal::SIGCHLD),
                             WaitObject {
                                 pid: thread.process.pid,
                                 code: WaitType::Continued,
@@ -259,19 +257,47 @@ impl SignalList {
     }
 
     /// Load the signal mask, fpu state and trap context from the user stack.
-    pub fn restore(&self, trap_ctx: &mut TrapContext, fpu_state: &mut FpuState) -> KResult<()> {
-        let old_trap_ctx_vaddr = trap_ctx.get_stack_pointer() + 16 - 4;
+    pub fn restore(
+        &self,
+        trap_ctx: &mut TrapContext,
+        fpu_state: &mut FpuState,
+        old_sigreturn: bool,
+    ) -> KResult<()> {
+        #[cfg(not(any(target_arch = "x86_64", target_arch = "riscv64")))]
+        compile_error!("`restore` is not implemented for this architecture");
+
+        #[cfg(target_arch = "x86_64")]
+        let old_trap_ctx_vaddr = {
+            let mut old_trap_ctx_vaddr = trap_ctx.get_stack_pointer() + 16;
+
+            if old_sigreturn {
+                // Old sigreturn will pop 4 bytes off the stack. We sub them back.
+
+                use posix_types::ctypes::Long;
+                old_trap_ctx_vaddr -= size_of::<Long>();
+            }
+
+            old_trap_ctx_vaddr
+        };
+
+        #[cfg(target_arch = "riscv64")]
+        let old_trap_ctx_vaddr = {
+            debug_assert!(!old_sigreturn, "Old sigreturn is not supported on RISC-V");
+            trap_ctx.get_stack_pointer()
+        };
+
         let old_fpu_state_vaddr = old_trap_ctx_vaddr + size_of::<TrapContext>();
         let old_mask_vaddr = old_fpu_state_vaddr + size_of::<FpuState>();
 
         *trap_ctx = UserPointer::<TrapContext>::new_vaddr(old_trap_ctx_vaddr)?.read()?;
 
+        // Make sure that at least we won't crash the kernel.
         if !trap_ctx.is_user_mode() || !trap_ctx.is_interrupt_enabled() {
             return Err(EFAULT)?;
         }
 
         *fpu_state = UserPointer::<FpuState>::new_vaddr(old_fpu_state_vaddr)?.read()?;
-        self.inner.lock().mask = UserPointer::<SignalMask>::new_vaddr(old_mask_vaddr)?.read()?;
+        self.inner.lock().mask = UserPointer::<SigSet>::new_vaddr(old_mask_vaddr)?.read()?;
 
         Ok(())
     }

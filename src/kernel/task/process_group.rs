@@ -1,9 +1,10 @@
-use super::{Process, ProcessList, Session, Signal};
+use super::{Process, ProcessList, Session};
 use alloc::{
     collections::btree_map::BTreeMap,
     sync::{Arc, Weak},
 };
 use eonix_sync::{Locked, Proof, ProofMut};
+use posix_types::signal::Signal;
 
 pub struct ProcessGroupBuilder {
     pgid: Option<u32>,

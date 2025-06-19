@@ -1,10 +1,43 @@
-#[repr(C, packed)]
+use super::Signal;
+use crate::ctypes::PtrT;
+use bitflags::bitflags;
+
+bitflags! {
+    #[derive(Debug, Clone, Copy)]
+    pub struct SigActionFlags: usize {
+        const SA_SIGINFO = 0x00000004;   // Use sa_sigaction instead of sa_handler.
+        const SA_RESTORER = 0x04000000; // Use sa_restorer to restore the context after the handler.
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SigActionHandler(PtrT);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SigActionRestorer(PtrT);
+
+#[cfg_attr(target_arch = "x86_64", repr(align(4)))]
+#[cfg_attr(not(target_arch = "x86_64"), repr(align(8)))]
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SigSet(u64);
+
+#[cfg(target_arch = "x86_64")]
+#[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct SigAction {
-    sa_handler: u32,
-    sa_flags: u32,
-    sa_restorer: u32,
-    sa_mask: u64,
+    sa_handler: SigActionHandler,
+    sa_flags: SigActionFlags,
+    sa_restorer: SigActionRestorer,
+    sa_mask: SigSet,
+}
+
+#[cfg(not(target_arch = "x86_64"))]
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct SigAction {
+    sa_handler: SigActionHandler,
+    sa_flags: SigActionFlags,
+    sa_mask: SigSet,
 }
 
 pub trait TryFromSigAction: Sized {
@@ -15,61 +48,124 @@ pub trait TryFromSigAction: Sized {
     fn new() -> Self;
 
     fn set_siginfo(self) -> Result<Self, Self::Error>;
-    fn handler(self, handler: usize) -> Result<Self, Self::Error>;
-    fn restorer(self, restorer: usize) -> Result<Self, Self::Error>;
-    fn mask(self, mask: u64) -> Result<Self, Self::Error>;
+    fn handler(self, handler: SigActionHandler) -> Self;
+    fn restorer(self, restorer: SigActionRestorer) -> Self;
+    fn mask(self, mask: SigSet) -> Self;
 }
 
-const SIG_DFL: u32 = 0;
-const SIG_IGN: u32 = 1;
+impl SigActionHandler {
+    const DEFAULT: Self = Self(PtrT::new_val(0));
+    const IGNORE: Self = Self(PtrT::new_val(1));
 
-const SA_SIGINFO: u32 = 4;
-const SA_RESTORER: u32 = 0x04000000;
+    pub const fn new(handler: PtrT) -> Self {
+        Self(handler)
+    }
+
+    pub const fn null() -> Self {
+        Self(PtrT::null())
+    }
+
+    pub const fn addr(self) -> PtrT {
+        self.0
+    }
+}
+
+impl SigActionRestorer {
+    pub const fn new(restorer: PtrT) -> Self {
+        Self(restorer)
+    }
+
+    pub const fn null() -> Self {
+        Self(PtrT::null())
+    }
+
+    pub const fn addr(self) -> PtrT {
+        self.0
+    }
+}
+
+impl SigSet {
+    pub const fn empty() -> Self {
+        Self(0)
+    }
+
+    pub fn mask(&mut self, mask: Self) {
+        self.0 |= mask.0;
+    }
+
+    pub fn unmask(&mut self, mask: Self) {
+        self.0 &= !mask.0;
+    }
+
+    pub fn include(&self, signal: Signal) -> bool {
+        let signal_mask = Self::from(signal);
+        (self.0 & signal_mask.0) != 0
+    }
+}
+
+impl From<Signal> for SigSet {
+    fn from(signal: Signal) -> Self {
+        let mut sigset = Self::empty();
+        sigset.mask(Self(1 << (signal.into_raw() - 1)));
+        sigset
+    }
+}
 
 impl SigAction {
     pub const fn default() -> Self {
         Self {
-            sa_handler: SIG_DFL,
-            sa_flags: 0,
-            sa_restorer: 0,
-            sa_mask: 0,
+            sa_handler: SigActionHandler::DEFAULT,
+            sa_flags: SigActionFlags::empty(),
+            #[cfg(target_arch = "x86_64")]
+            sa_restorer: SigActionRestorer::null(),
+            sa_mask: SigSet::empty(),
         }
     }
 
     pub const fn ignore() -> Self {
         Self {
-            sa_handler: SIG_IGN,
-            sa_flags: 0,
-            sa_restorer: 0,
-            sa_mask: 0,
+            sa_handler: SigActionHandler::IGNORE,
+            sa_flags: SigActionFlags::empty(),
+            #[cfg(target_arch = "x86_64")]
+            sa_restorer: SigActionRestorer::null(),
+            sa_mask: SigSet::empty(),
         }
     }
 
     pub const fn new() -> Self {
         Self {
-            sa_handler: 0,
-            sa_flags: 0,
-            sa_restorer: 0,
-            sa_mask: 0,
+            sa_handler: SigActionHandler::null(),
+            sa_flags: SigActionFlags::empty(),
+            #[cfg(target_arch = "x86_64")]
+            sa_restorer: SigActionRestorer::null(),
+            sa_mask: SigSet::empty(),
         }
     }
 
-    pub const fn handler(self, handler: usize) -> Self {
+    pub fn handler(self, handler: SigActionHandler) -> Self {
         Self {
-            sa_handler: handler as u32,
+            sa_handler: handler,
             ..self
         }
     }
 
-    pub const fn restorer(self, restorer: usize) -> Self {
+    #[cfg(not(target_arch = "x86_64"))]
+    pub fn restorer(self, _restorer: SigActionRestorer) -> Self {
+        // On non-x86_64 architectures, the restorer does not exist.
+        self
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    pub fn restorer(mut self, restorer: SigActionRestorer) -> Self {
+        self.sa_flags.insert(SigActionFlags::SA_RESTORER);
+
         Self {
-            sa_restorer: restorer as u32,
-            sa_flags: self.sa_flags | SA_RESTORER,
+            sa_restorer: restorer,
             ..self
         }
     }
 
-    pub const fn mask(self, mask: u64) -> Self {
+    pub const fn mask(self, mask: SigSet) -> Self {
         Self {
             sa_mask: mask,
             ..self
@@ -81,26 +177,24 @@ impl SigAction {
         T: TryFromSigAction,
     {
         match self.sa_handler {
-            SIG_DFL => Ok(T::default()),
-            SIG_IGN => Ok(T::ignore()),
+            SigActionHandler::DEFAULT => Ok(T::default()),
+            SigActionHandler::IGNORE => Ok(T::ignore()),
             _ => {
                 let mut action = T::new();
-                if self.sa_flags & SA_SIGINFO != 0 {
+                if self.sa_flags.contains(SigActionFlags::SA_SIGINFO) {
                     action = action.set_siginfo()?;
                 }
 
-                action = action.handler(self.sa_handler as usize)?;
-                action = action.restorer(self.sa_restorer as usize)?;
-                action = action.mask(self.sa_mask)?;
+                action = action.handler(self.sa_handler);
+                action = action.mask(self.sa_mask);
+
+                #[cfg(target_arch = "x86_64")]
+                {
+                    action = action.restorer(self.sa_restorer);
+                }
 
                 Ok(action)
             }
         }
-    }
-}
-
-impl Default for SigAction {
-    fn default() -> Self {
-        Self::default()
     }
 }

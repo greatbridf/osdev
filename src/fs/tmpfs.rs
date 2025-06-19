@@ -1,3 +1,4 @@
+use crate::io::Stream;
 use crate::kernel::constants::{EINVAL, EIO, EISDIR};
 use crate::{
     io::Buffer,
@@ -39,8 +40,8 @@ impl NodeInode {
         Self::new_locked(ino, vfs, |inode, _| unsafe {
             addr_of_mut_field!(inode, devid).write(devid);
 
-            addr_of_mut_field!(inode, mode).write(mode.into());
-            addr_of_mut_field!(inode, nlink).write(1.into());
+            addr_of_mut_field!(&mut *inode, mode).write(mode.into());
+            addr_of_mut_field!(&mut *inode, nlink).write(1.into());
         })
     }
 }
@@ -63,9 +64,9 @@ impl DirectoryInode {
             addr_of_mut_field!(inode, entries)
                 .write(Locked::new(vec![(Arc::from(b".".as_slice()), ino)], rwsem));
 
-            addr_of_mut_field!(inode, size).write(1.into());
-            addr_of_mut_field!(inode, mode).write((S_IFDIR | (mode & 0o777)).into());
-            addr_of_mut_field!(inode, nlink).write(1.into()); // link from `.` to itself
+            addr_of_mut_field!(&mut *inode, size).write(1.into());
+            addr_of_mut_field!(&mut *inode, mode).write((S_IFDIR | (mode & 0o777)).into());
+            addr_of_mut_field!(&mut *inode, nlink).write(1.into()); // link from `.` to itself
         })
     }
 
@@ -228,8 +229,8 @@ impl SymlinkInode {
             let len = target.len();
             addr_of_mut_field!(inode, target).write(target);
 
-            addr_of_mut_field!(inode, mode).write((S_IFLNK | 0o777).into());
-            addr_of_mut_field!(inode, size).write((len as u64).into());
+            addr_of_mut_field!(&mut *inode, mode).write((S_IFLNK | 0o777).into());
+            addr_of_mut_field!(&mut *inode, size).write((len as u64).into());
         })
     }
 }
@@ -257,8 +258,8 @@ impl FileInode {
         Self::new_locked(ino, vfs, |inode, rwsem| unsafe {
             addr_of_mut_field!(inode, filedata).write(Locked::new(vec![], rwsem));
 
-            addr_of_mut_field!(inode, mode).write((S_IFREG | (mode & 0o777)).into());
-            addr_of_mut_field!(inode, nlink).write(1.into());
+            addr_of_mut_field!(&mut *inode, mode).write((S_IFREG | (mode & 0o777)).into());
+            addr_of_mut_field!(&mut *inode, nlink).write(1.into());
         })
     }
 }
@@ -274,32 +275,42 @@ impl Inode for FileInode {
         }
     }
 
-    fn write(&self, buffer: &[u8], offset: WriteOffset) -> KResult<usize> {
+    fn write(&self, stream: &mut dyn Stream, offset: WriteOffset) -> KResult<usize> {
         // TODO: We don't need that strong guarantee, find some way to avoid locks
         let lock = Task::block_on(self.rwsem.write());
         let filedata = self.filedata.access_mut(lock.prove_mut());
 
+        let mut store_new_end = None;
         let offset = match offset {
             WriteOffset::Position(offset) => offset,
-            // SAFETY: `lock` has done the synchronization
             WriteOffset::End(end) => {
-                let size = self.size.load(Ordering::Relaxed) as usize;
-                *end = size + buffer.len();
+                store_new_end = Some(end);
 
-                size
+                // SAFETY: `lock` has done the synchronization
+                self.size.load(Ordering::Relaxed) as usize
             }
         };
 
-        if filedata.len() < offset + buffer.len() {
-            filedata.resize(offset + buffer.len(), 0);
+        let mut pos = offset;
+        loop {
+            if pos >= filedata.len() {
+                filedata.resize(pos + 4096, 0);
+            }
+
+            match stream.poll_data(&mut filedata[pos..])? {
+                Some(data) => pos += data.len(),
+                None => break,
+            }
         }
 
-        filedata[offset..offset + buffer.len()].copy_from_slice(&buffer);
+        filedata.resize(pos, 0);
+        if let Some(store_end) = store_new_end {
+            *store_end = pos;
+        }
 
         // SAFETY: `lock` has done the synchronization
-        self.size.store(filedata.len() as u64, Ordering::Relaxed);
-
-        Ok(buffer.len())
+        self.size.store(pos as u64, Ordering::Relaxed);
+        Ok(pos - offset)
     }
 
     fn truncate(&self, length: usize) -> KResult<()> {

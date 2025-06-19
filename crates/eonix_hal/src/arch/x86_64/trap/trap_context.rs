@@ -1,7 +1,9 @@
+use core::arch::asm;
 use eonix_hal_traits::{
     fault::{Fault, PageFaultErrorCode},
     trap::{RawTrapContext, TrapType},
 };
+use eonix_mm::address::VAddr;
 
 #[derive(Clone, Copy, Default)]
 #[repr(C, align(16))]
@@ -37,9 +39,6 @@ impl TrapContext {
             13 => Fault::BadAccess,
             14 => {
                 let mut error_code = PageFaultErrorCode::empty();
-                if self.errcode & 1 != 0 {
-                    error_code |= PageFaultErrorCode::NonPresent;
-                }
 
                 if self.errcode & 2 != 0 {
                     error_code |= PageFaultErrorCode::Write;
@@ -53,7 +52,23 @@ impl TrapContext {
                     error_code |= PageFaultErrorCode::UserAccess;
                 }
 
-                Fault::PageFault(error_code)
+                #[inline(always)]
+                fn get_page_fault_address() -> VAddr {
+                    let cr2: usize;
+                    unsafe {
+                        asm!(
+                            "mov %cr2, {}",
+                            out(reg) cr2,
+                            options(att_syntax)
+                        );
+                    }
+                    VAddr::from(cr2)
+                }
+
+                Fault::PageFault {
+                    error_code,
+                    address: get_page_fault_address(),
+                }
             }
             code @ 0..0x20 => Fault::Unknown(code as usize),
             _ => unreachable!(),
@@ -126,5 +141,34 @@ impl RawTrapContext for TrapContext {
 
     fn set_user_return_value(&mut self, retval: usize) {
         self.rax = retval as u64;
+    }
+
+    fn set_user_call_frame<E>(
+        &mut self,
+        pc: usize,
+        sp: Option<usize>,
+        ra: Option<usize>,
+        args: &[usize],
+        write_memory: impl Fn(VAddr, &[u8]) -> Result<(), E>,
+    ) -> Result<(), E> {
+        self.set_program_counter(pc);
+
+        let mut sp = sp.unwrap_or_else(|| self.get_stack_pointer());
+
+        let arg_size = args.len() * 4;
+
+        sp -= arg_size;
+        sp &= !0xf; // Align to 16 bytes
+        for (idx, arg) in args.iter().enumerate() {
+            write_memory(VAddr::from(sp + idx * 8), &arg.to_ne_bytes())?;
+        }
+
+        if let Some(ra) = ra {
+            sp -= 4; // Space for return address
+            write_memory(VAddr::from(sp), &ra.to_ne_bytes())?;
+        }
+
+        self.set_stack_pointer(sp);
+        Ok(())
     }
 }

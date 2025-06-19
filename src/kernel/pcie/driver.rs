@@ -28,11 +28,10 @@ pub fn register_driver(driver: impl PCIDriver + 'static) -> KResult<()> {
         btree_map::Entry::Occupied(_) => Err(EEXIST)?,
     };
 
-    let Some(device) = PCIE_DEVICES.lock().find(&index).clone_pointer() else {
-        return Ok(());
+    let device = PCIE_DEVICES.lock().find(&index).clone_pointer();
+    if let Some(device) = device {
+        driver.handle_device(device)?;
     };
-
-    driver.handle_device(device)?;
 
     Ok(())
 }

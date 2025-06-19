@@ -1,6 +1,5 @@
 mod arcswap;
 mod condvar;
-pub mod fence;
 
 pub use arcswap::ArcSwap;
 pub use eonix_sync::Spin;

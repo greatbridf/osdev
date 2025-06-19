@@ -4,16 +4,17 @@ use super::{
     inode::{Ino, Inode, Mode, WriteOffset},
     s_isblk, s_ischr, s_isdir, s_isreg, DevId, FsContext,
 };
-use crate::kernel::constants::{
-    EEXIST, EINVAL, EISDIR, ELOOP, ENOENT, ENOTDIR, EPERM, ERANGE, O_CREAT, O_EXCL,
-};
 use crate::{
     hash::KernelHasher,
     io::{Buffer, ByteBuffer},
-    kernel::{block::BlockDevice, syscall::file_rw::StatX, CharDevice},
+    kernel::{block::BlockDevice, CharDevice},
     path::{Path, PathComponent},
     prelude::*,
     rcu::{RCUNode, RCUPointer},
+};
+use crate::{
+    io::Stream,
+    kernel::constants::{EEXIST, EINVAL, EISDIR, ELOOP, ENOENT, ENOTDIR, EPERM, ERANGE},
 };
 use alloc::sync::Arc;
 use core::{
@@ -23,6 +24,7 @@ use core::{
     sync::atomic::{AtomicPtr, Ordering},
 };
 use eonix_sync::LazyLock;
+use posix_types::{open::OpenFlags, stat::StatX};
 
 struct DentryData {
     inode: Arc<dyn Inode>,
@@ -206,18 +208,17 @@ impl Dentry {
         self.data.load().is_some()
     }
 
-    pub fn open_check(self: &Arc<Self>, flags: u32, mode: Mode) -> KResult<()> {
+    pub fn open_check(self: &Arc<Self>, flags: OpenFlags, mode: Mode) -> KResult<()> {
         let data = self.data.load();
-        let create = flags & O_CREAT != 0;
-        let excl = flags & O_EXCL != 0;
 
         if data.is_some() {
-            if create && excl {
-                return Err(EEXIST);
+            if flags.contains(OpenFlags::O_CREAT | OpenFlags::O_EXCL) {
+                Err(EEXIST)
+            } else {
+                Ok(())
             }
-            return Ok(());
         } else {
-            if !create {
+            if !flags.contains(OpenFlags::O_CREAT) {
                 return Err(ENOENT);
             }
 
@@ -386,14 +387,14 @@ impl Dentry {
         }
     }
 
-    pub fn write(&self, buffer: &[u8], offset: WriteOffset) -> KResult<usize> {
+    pub fn write(&self, stream: &mut dyn Stream, offset: WriteOffset) -> KResult<usize> {
         let inode = self.get_inode()?;
         // Safety: Changing mode alone will have no effect on the file's contents
         match inode.mode.load(Ordering::Relaxed) {
             mode if s_isdir(mode) => Err(EISDIR),
-            mode if s_isreg(mode) => inode.write(buffer, offset),
+            mode if s_isreg(mode) => inode.write(stream, offset),
             mode if s_isblk(mode) => Err(EINVAL), // TODO
-            mode if s_ischr(mode) => CharDevice::get(inode.devid()?).ok_or(EPERM)?.write(buffer),
+            mode if s_ischr(mode) => CharDevice::get(inode.devid()?).ok_or(EPERM)?.write(stream),
             _ => Err(EINVAL),
         }
     }

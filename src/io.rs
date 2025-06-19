@@ -48,6 +48,53 @@ pub trait Buffer {
     }
 }
 
+pub trait Stream {
+    fn poll_data<'a>(&mut self, buf: &'a mut [u8]) -> KResult<Option<&'a mut [u8]>>;
+    fn ignore(&mut self, len: usize) -> KResult<Option<usize>>;
+}
+
+pub trait IntoStream {
+    type Stream: Stream;
+
+    fn into_stream(self) -> Self::Stream;
+}
+
+pub trait StreamRead {
+    fn read_till_end(
+        &mut self,
+        buffer: &mut [u8],
+        func: impl Fn(&mut [u8]) -> KResult<()>,
+    ) -> KResult<usize>;
+
+    fn ignore_all(&mut self) -> KResult<usize>;
+}
+
+impl<T> StreamRead for T
+where
+    T: Stream + ?Sized,
+{
+    fn read_till_end(
+        &mut self,
+        buffer: &mut [u8],
+        func: impl Fn(&mut [u8]) -> KResult<()>,
+    ) -> KResult<usize> {
+        let mut total = 0;
+        while let Some(data) = self.poll_data(buffer)? {
+            func(data)?;
+            total += data.len();
+        }
+        Ok(total)
+    }
+
+    fn ignore_all(&mut self) -> KResult<usize> {
+        let mut total = 0;
+        while let Some(len) = self.ignore(usize::MAX)? {
+            total += len;
+        }
+        Ok(total)
+    }
+}
+
 pub trait BufferFill<T: Copy> {
     fn copy(&mut self, object: &T) -> KResult<FillResult>;
 }
@@ -219,5 +266,54 @@ impl Iterator for Chunks {
 
         self.cur += self.chunk_len;
         Some((start, len))
+    }
+}
+
+pub struct ByteStream<'a> {
+    data: &'a [u8],
+    cur: usize,
+}
+
+impl<'a> ByteStream<'a> {
+    pub fn new(data: &'a [u8]) -> Self {
+        Self { data, cur: 0 }
+    }
+}
+
+impl<'a> Stream for ByteStream<'a> {
+    fn poll_data<'b>(&mut self, buf: &'b mut [u8]) -> KResult<Option<&'b mut [u8]>> {
+        if self.cur >= self.data.len() {
+            return Ok(None);
+        }
+
+        let end = core::cmp::min(self.data.len(), self.cur + buf.len());
+
+        let data = &self.data[self.cur..end];
+        let buf = &mut buf[..data.len()];
+
+        buf.copy_from_slice(data);
+        self.cur += data.len();
+
+        Ok(Some(buf))
+    }
+
+    fn ignore(&mut self, len: usize) -> KResult<Option<usize>> {
+        if self.cur >= self.data.len() {
+            return Ok(None);
+        }
+
+        let remaining = self.data.len() - self.cur;
+        let ignored = core::cmp::min(remaining, len);
+        self.cur += ignored;
+
+        Ok(Some(ignored))
+    }
+}
+
+impl<'a> IntoStream for &'a [u8] {
+    type Stream = ByteStream<'a>;
+
+    fn into_stream(self) -> Self::Stream {
+        ByteStream::new(self)
     }
 }

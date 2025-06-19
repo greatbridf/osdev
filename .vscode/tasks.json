@@ -4,9 +4,9 @@
     "version": "2.0.0",
     "tasks": [
         {
-            "label": "debug run",
+            "label": "debug run riscv64",
             "type": "shell",
-            "command": "make srun",
+            "command": "make srun ARCH=riscv64",
             "isBackground": true,
             "problemMatcher": [
                 {
@@ -44,7 +44,63 @@
             }
         },
         {
-            "label": "kill qemu",
+            "label": "kill qemu riscv64",
+            "type": "shell",
+            "command": "killall qemu-system-riscv64",
+            "presentation": {
+                "echo": false,
+                "reveal": "never",
+                "focus": false,
+                "panel": "shared",
+                "showReuseMessage": false,
+                "clear": true
+            },
+            "group": {
+                "kind": "none",
+            }
+        },
+        {
+            "label": "debug run x86_64",
+            "type": "shell",
+            "command": "make srun ARCH=x86_64",
+            "isBackground": true,
+            "problemMatcher": [
+                {
+                    "owner": "rustc",
+                    "fileLocation": [
+                        "relative",
+                        "${workspaceFolder}"
+                    ],
+                    "pattern": {
+                        "regexp": "^(.*):(\\d+):(\\d+):\\s+(warning|error):\\s+(.*)$",
+                        "file": 1,
+                        "line": 2,
+                        "column": 3,
+                        "severity": 4,
+                        "message": 5
+                    },
+                    "background": {
+                        "activeOnStart": true,
+                        "beginsPattern": "cargo build",
+                        "endsPattern": "qemu"
+                    }
+                }
+            ],
+            "presentation": {
+                "echo": false,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared",
+                "showReuseMessage": false,
+                "clear": true
+            },
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            }
+        },
+        {
+            "label": "kill qemu x86_64",
             "type": "shell",
             "command": "killall qemu-system-x86_64",
             "presentation": {

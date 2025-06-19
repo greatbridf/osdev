@@ -1,11 +1,11 @@
 use super::{
     file::{File, InodeFile, TerminalFile},
     inode::Mode,
-    s_ischr, FsContext, Spin,
+    s_ischr, Spin,
 };
-use crate::kernel::constants::{
-    EBADF, EISDIR, ENOTDIR, FD_CLOEXEC, F_DUPFD, F_DUPFD_CLOEXEC, F_GETFD, F_SETFD, O_APPEND,
-    O_CLOEXEC, O_DIRECTORY, O_RDWR, O_TRUNC, O_WRONLY,
+use crate::kernel::{
+    constants::{EBADF, EISDIR, ENOTDIR, F_DUPFD, F_DUPFD_CLOEXEC, F_GETFD, F_SETFD},
+    syscall::{FromSyscallArg, SyscallRetVal},
 };
 use crate::{
     kernel::{
@@ -14,7 +14,6 @@ use crate::{
         vfs::{dentry::Dentry, file::Pipe, s_isdir, s_isreg},
         CharDevice,
     },
-    path::Path,
     prelude::*,
 };
 use alloc::{
@@ -26,13 +25,14 @@ use itertools::{
     FoldWhile::{Continue, Done},
     Itertools,
 };
+use posix_types::open::{FDFlags, OpenFlags};
 
-type FD = u32;
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct FD(u32);
 
 #[derive(Clone)]
 struct OpenFile {
-    /// File descriptor flags, only for `FD_CLOEXEC`.
-    flags: u64,
+    flags: FDFlags,
     file: Arc<File>,
 }
 
@@ -48,7 +48,7 @@ pub struct FileArray {
 
 impl OpenFile {
     pub fn close_on_exec(&self) -> bool {
-        self.flags & O_CLOEXEC as u64 != 0
+        self.flags.contains(FDFlags::FD_CLOEXEC)
     }
 }
 
@@ -57,7 +57,7 @@ impl FileArray {
         Arc::new(FileArray {
             inner: Spin::new(FileArrayInner {
                 files: BTreeMap::new(),
-                fd_min_avail: 0,
+                fd_min_avail: FD(0),
             }),
         })
     }
@@ -80,7 +80,7 @@ impl FileArray {
 
     pub fn close_all(&self) {
         let mut inner = self.inner.lock();
-        inner.fd_min_avail = 0;
+        inner.fd_min_avail = FD(0);
         inner.files.clear();
     }
 
@@ -124,7 +124,9 @@ impl FileArray {
         Ok(new_fd)
     }
 
-    pub fn dup_to(&self, old_fd: FD, new_fd: FD, flags: u64) -> KResult<FD> {
+    pub fn dup_to(&self, old_fd: FD, new_fd: FD, flags: OpenFlags) -> KResult<FD> {
+        let fdflags = flags.as_fd_flags();
+
         let mut inner = self.inner.lock();
         let old_file = inner.files.get(&old_fd).ok_or(EBADF)?;
 
@@ -136,7 +138,7 @@ impl FileArray {
                 let new_file = entry.into_mut();
                 let mut file_swap = new_file_data;
 
-                new_file.flags = flags;
+                new_file.flags = fdflags;
                 core::mem::swap(&mut file_swap, &mut new_file.file);
 
                 drop(inner);
@@ -145,69 +147,61 @@ impl FileArray {
         }
 
         assert_eq!(new_fd, inner.allocate_fd(new_fd));
-        inner.do_insert(new_fd, flags, new_file_data);
+        inner.do_insert(new_fd, fdflags, new_file_data);
 
         Ok(new_fd)
     }
 
     /// # Return
     /// `(read_fd, write_fd)`
-    pub fn pipe(&self, flags: u32) -> KResult<(FD, FD)> {
+    pub fn pipe(&self, flags: OpenFlags) -> KResult<(FD, FD)> {
         let mut inner = self.inner.lock();
 
         let read_fd = inner.next_fd();
         let write_fd = inner.next_fd();
 
-        let fdflag = if flags & O_CLOEXEC != 0 { FD_CLOEXEC } else { 0 };
+        let fdflag = flags.as_fd_flags();
 
         let pipe = Pipe::new();
         let (read_end, write_end) = pipe.split();
-        inner.do_insert(read_fd, fdflag as u64, read_end);
-        inner.do_insert(write_fd, fdflag as u64, write_end);
+        inner.do_insert(read_fd, fdflag, read_end);
+        inner.do_insert(write_fd, fdflag, write_end);
 
         Ok((read_fd, write_fd))
     }
 
-    pub fn open(&self, fs_context: &FsContext, path: Path, flags: u32, mode: Mode) -> KResult<FD> {
-        let dentry = Dentry::open(fs_context, path, true)?;
+    pub fn open(&self, dentry: &Arc<Dentry>, flags: OpenFlags, mode: Mode) -> KResult<FD> {
         dentry.open_check(flags, mode)?;
 
-        let fdflag = if flags & O_CLOEXEC != 0 { FD_CLOEXEC } else { 0 };
-        let can_read = flags & O_WRONLY == 0;
-        let can_write = flags & (O_WRONLY | O_RDWR) != 0;
-        let append = flags & O_APPEND != 0;
+        let fdflag = flags.as_fd_flags();
 
         let inode = dentry.get_inode()?;
         let filemode = inode.mode.load(Ordering::Relaxed);
 
-        if flags & O_DIRECTORY != 0 {
+        if flags.directory() {
             if !s_isdir(filemode) {
                 return Err(ENOTDIR);
             }
         } else {
-            if s_isdir(filemode) && can_write {
+            if s_isdir(filemode) && flags.write() {
                 return Err(EISDIR);
             }
         }
 
-        if flags & O_TRUNC != 0 {
-            if can_write && s_isreg(filemode) {
-                inode.truncate(0)?;
-            }
+        if flags.truncate() && flags.write() && s_isreg(filemode) {
+            inode.truncate(0)?;
         }
 
-        let file;
-
-        if s_ischr(filemode) {
+        let file = if s_ischr(filemode) {
             let device = CharDevice::get(inode.devid()?).ok_or(ENXIO)?;
-            file = device.open()?;
+            device.open()?
         } else {
-            file = InodeFile::new(dentry, (can_read, can_write, append));
-        }
+            InodeFile::new(dentry.clone(), flags.as_rwa())
+        };
 
         let mut inner = self.inner.lock();
         let fd = inner.next_fd();
-        inner.do_insert(fd, fdflag as u64, file);
+        inner.do_insert(fd, fdflag, file);
 
         Ok(fd)
     }
@@ -218,19 +212,21 @@ impl FileArray {
 
         match cmd {
             F_DUPFD | F_DUPFD_CLOEXEC => {
-                let cloexec = cmd == F_DUPFD_CLOEXEC || (ofile.flags & FD_CLOEXEC as u64 != 0);
-                let flags = if cloexec { O_CLOEXEC } else { 0 };
+                let cloexec = cmd == F_DUPFD_CLOEXEC || ofile.flags.close_on_exec();
+                let flags = cloexec
+                    .then_some(FDFlags::FD_CLOEXEC)
+                    .unwrap_or(FDFlags::empty());
 
                 let new_file_data = ofile.file.clone();
-                let new_fd = inner.allocate_fd(arg as FD);
+                let new_fd = inner.allocate_fd(FD(arg as u32));
 
-                inner.do_insert(new_fd, flags as u64, new_file_data);
+                inner.do_insert(new_fd, flags, new_file_data);
 
-                Ok(new_fd as usize)
+                Ok(new_fd.0 as usize)
             }
-            F_GETFD => Ok(ofile.flags as usize),
+            F_GETFD => Ok(ofile.flags.bits() as usize),
             F_SETFD => {
-                ofile.flags = arg as u64;
+                ofile.flags = FDFlags::from_bits_truncate(arg as u32);
                 Ok(0)
             }
             _ => unimplemented!("fcntl: cmd={}", cmd),
@@ -245,17 +241,17 @@ impl FileArray {
 
         inner.do_insert(
             stdin,
-            O_CLOEXEC as u64,
+            FDFlags::FD_CLOEXEC,
             TerminalFile::new(console_terminal.clone()),
         );
         inner.do_insert(
             stdout,
-            O_CLOEXEC as u64,
+            FDFlags::FD_CLOEXEC,
             TerminalFile::new(console_terminal.clone()),
         );
         inner.do_insert(
             stderr,
-            O_CLOEXEC as u64,
+            FDFlags::FD_CLOEXEC,
             TerminalFile::new(console_terminal.clone()),
         );
     }
@@ -271,7 +267,7 @@ impl FileArrayInner {
             .range(&from..)
             .fold_while(from, |current, (&key, _)| {
                 if current == key {
-                    Continue(current + 1)
+                    Continue(FD(current.0 + 1))
                 } else {
                     Done(current)
                 }
@@ -287,7 +283,7 @@ impl FileArrayInner {
         let from = FD::max(from, self.fd_min_avail);
 
         if from == self.fd_min_avail {
-            let next_min_avail = self.find_available(from + 1);
+            let next_min_avail = self.find_available(FD(from.0 + 1));
             let allocated = self.fd_min_avail;
             self.fd_min_avail = next_min_avail;
             allocated
@@ -307,7 +303,23 @@ impl FileArrayInner {
     }
 
     /// Insert a file description to the file array.
-    fn do_insert(&mut self, fd: FD, flags: u64, file: Arc<File>) {
+    fn do_insert(&mut self, fd: FD, flags: FDFlags, file: Arc<File>) {
         assert!(self.files.insert(fd, OpenFile { flags, file }).is_none());
+    }
+}
+
+impl FD {
+    pub const AT_FDCWD: FD = FD(-100i32 as u32);
+}
+
+impl FromSyscallArg for FD {
+    fn from_arg(value: usize) -> Self {
+        Self(value as u32)
+    }
+}
+
+impl SyscallRetVal for FD {
+    fn into_retval(self) -> Option<usize> {
+        Some(self.0 as usize)
     }
 }

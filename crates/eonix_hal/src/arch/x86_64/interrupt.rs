@@ -1,4 +1,4 @@
-use arch::{pause, rdmsr};
+use crate::arch::cpu::rdmsr;
 use core::{arch::asm, marker::PhantomPinned, pin::Pin, ptr::NonNull};
 
 #[repr(C)]
@@ -211,12 +211,12 @@ impl InterruptControl {
 
         icr.write(0xc4500);
         while icr.read() & 0x1000 != 0 {
-            pause();
+            core::hint::spin_loop();
         }
 
         icr.write(0xc4606);
         while icr.read() & 0x1000 != 0 {
-            pause();
+            core::hint::spin_loop();
         }
     }
 

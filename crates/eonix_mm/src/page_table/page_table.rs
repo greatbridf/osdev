@@ -176,6 +176,10 @@ where
 
     fn drop_page_table_recursive(page_table: &Page<A>, levels: &[PageTableLevel]) {
         let [level, remaining_levels @ ..] = levels else { return };
+        if remaining_levels.is_empty() {
+            // We reached the last level, no need to go deeper.
+            return;
+        }
 
         let alloc = page_table.allocator();
 

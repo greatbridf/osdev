@@ -1,19 +1,19 @@
 use super::{
-    signal::{RaiseResult, Signal, SignalList},
-    Process, ProcessList,
+    signal::{RaiseResult, SignalList},
+    Process, ProcessList, WaitType,
 };
 use crate::{
     kernel::{
         interrupt::default_irq_handler,
         syscall::{syscall_handlers, SyscallHandler},
+        task::{clone::CloneArgs, CloneFlags},
         timer::{should_reschedule, timer_interrupt},
-        user::dataflow::CheckedUserPointer,
+        user::UserPointerMut,
         vfs::{filearray::FileArray, FsContext},
     },
     prelude::*,
 };
 use alloc::sync::Arc;
-use arch::FpuState;
 use atomic_unique_refcell::AtomicUniqueRefCell;
 use core::{
     future::Future,
@@ -22,13 +22,13 @@ use core::{
     sync::atomic::{AtomicBool, Ordering},
     task::{Context, Poll, Waker},
 };
-use eonix_hal::traits::trap::IrqState;
 use eonix_hal::{
+    fpu::FpuState,
     processor::{UserTLS, CPU},
     traits::{
         fault::Fault,
         fpu::RawFpuState as _,
-        trap::{RawTrapContext, TrapReturn, TrapType},
+        trap::{IrqState as _, RawTrapContext, TrapReturn, TrapType},
     },
     trap::{disable_irqs_save, TrapContext},
 };
@@ -36,6 +36,7 @@ use eonix_mm::address::{Addr as _, VAddr};
 use eonix_runtime::run::{Contexted, Run, RunState};
 use eonix_sync::AsProofMut as _;
 use pointers::BorrowedArc;
+use posix_types::signal::Signal;
 
 #[eonix_percpu::define_percpu]
 static CURRENT_THREAD: Option<NonNull<Thread>> = None;
@@ -54,6 +55,7 @@ pub struct ThreadBuilder {
     signal_list: Option<SignalList>,
     tls: Option<UserTLS>,
     set_child_tid: Option<usize>,
+    clear_child_tid: Option<usize>,
 
     trap_ctx: Option<TrapContext>,
     fpu_state: Option<FpuState>,
@@ -69,7 +71,9 @@ struct ThreadInner {
 
     /// User pointer
     /// Store child thread's tid when child thread returns to user space.
-    set_child_tid: usize,
+    set_child_tid: Option<usize>,
+
+    clear_child_tid: Option<usize>,
 }
 
 pub struct Thread {
@@ -89,46 +93,6 @@ pub struct Thread {
     inner: Spin<ThreadInner>,
 }
 
-#[repr(transparent)]
-#[derive(Debug, Clone, Copy)]
-pub struct UserDescriptorFlags(u32);
-
-#[repr(C)]
-#[derive(Debug, Clone, Copy)]
-pub struct UserDescriptor {
-    entry: u32,
-    base: u32,
-    limit: u32,
-    flags: UserDescriptorFlags,
-}
-
-#[allow(dead_code)]
-impl UserDescriptorFlags {
-    fn is_32bit_segment(&self) -> bool {
-        self.0 & 0b1 != 0
-    }
-
-    fn contents(&self) -> u32 {
-        self.0 & 0b110
-    }
-
-    fn is_read_exec_only(&self) -> bool {
-        self.0 & 0b1000 != 0
-    }
-
-    fn is_limit_in_pages(&self) -> bool {
-        self.0 & 0b10000 != 0
-    }
-
-    fn is_present(&self) -> bool {
-        self.0 & 0b100000 == 0
-    }
-
-    fn is_usable(&self) -> bool {
-        self.0 & 0b1000000 != 0
-    }
-}
-
 impl ThreadBuilder {
     pub fn new() -> Self {
         Self {
@@ -140,6 +104,7 @@ impl ThreadBuilder {
             signal_list: None,
             tls: None,
             set_child_tid: None,
+            clear_child_tid: None,
             trap_ctx: None,
             fpu_state: None,
         }
@@ -180,8 +145,13 @@ impl ThreadBuilder {
         self
     }
 
-    pub fn set_child_tid(mut self, set_child_tid: usize) -> Self {
-        self.set_child_tid = Some(set_child_tid);
+    pub fn set_child_tid(mut self, set_child_tid: Option<usize>) -> Self {
+        self.set_child_tid = set_child_tid;
+        self
+    }
+
+    pub fn clear_child_tid(mut self, clear_child_tid: Option<usize>) -> Self {
+        self.clear_child_tid = clear_child_tid;
         self
     }
 
@@ -206,23 +176,51 @@ impl ThreadBuilder {
         self
     }
 
-    /// Fork the thread from another thread.
-    ///
-    /// Sets the thread's files, fs_context, signal_list, name, tls, and set_child_tid
-    pub fn fork_from(self, thread: &Thread) -> Self {
+    /// Clone the thread from another thread.
+    pub fn clone_from(self, thread: &Thread, clone_args: &CloneArgs) -> KResult<Self> {
         let inner = thread.inner.lock();
 
         let mut trap_ctx = thread.trap_ctx.borrow().clone();
         trap_ctx.set_user_return_value(0);
 
-        self.files(FileArray::new_cloned(&thread.files))
-            .fs_context(FsContext::new_cloned(&thread.fs_context))
-            .signal_list(thread.signal_list.clone())
+        #[cfg(target_arch = "riscv64")]
+        {
+            let pc = trap_ctx.get_program_counter();
+            trap_ctx.set_program_counter(pc + 4);
+        }
+
+        if let Some(sp) = clone_args.sp {
+            trap_ctx.set_stack_pointer(sp.get());
+        }
+
+        let fs_context = if clone_args.flags.contains(CloneFlags::CLONE_FS) {
+            FsContext::new_shared(&thread.fs_context)
+        } else {
+            FsContext::new_cloned(&thread.fs_context)
+        };
+
+        let files = if clone_args.flags.contains(CloneFlags::CLONE_FILES) {
+            FileArray::new_shared(&thread.files)
+        } else {
+            FileArray::new_cloned(&thread.files)
+        };
+
+        let signal_list = if clone_args.flags.contains(CloneFlags::CLONE_SIGHAND) {
+            SignalList::new_shared(&thread.signal_list)
+        } else {
+            SignalList::new_cloned(&thread.signal_list)
+        };
+
+        Ok(self
+            .files(files)
+            .fs_context(fs_context)
+            .signal_list(signal_list)
             .name(inner.name.clone())
-            .tls(inner.tls.clone())
-            .set_child_tid(inner.set_child_tid)
+            .tls(clone_args.tls.clone())
+            .set_child_tid(clone_args.set_tid_ptr)
+            .clear_child_tid(clone_args.clear_tid_ptr)
             .trap_ctx(trap_ctx)
-            .fpu_state(thread.fpu_state.borrow().clone())
+            .fpu_state(thread.fpu_state.borrow().clone()))
     }
 
     pub fn build(self, process_list: &mut ProcessList) -> Arc<Thread> {
@@ -234,7 +232,6 @@ impl ThreadBuilder {
             .fs_context
             .unwrap_or_else(|| FsContext::global().clone());
         let signal_list = self.signal_list.unwrap_or_else(|| SignalList::new());
-        let set_child_tid = self.set_child_tid.unwrap_or(0);
         let trap_ctx = self.trap_ctx.expect("TrapContext is not set");
         let fpu_state = self.fpu_state.unwrap_or_else(FpuState::new);
 
@@ -252,7 +249,8 @@ impl ThreadBuilder {
             inner: Spin::new(ThreadInner {
                 name,
                 tls: self.tls,
-                set_child_tid,
+                set_child_tid: self.set_child_tid,
+                clear_child_tid: self.clear_child_tid,
             }),
         });
 
@@ -285,28 +283,8 @@ impl Thread {
         }
     }
 
-    pub fn set_thread_area(&self, desc: &mut UserDescriptor) -> KResult<()> {
-        let mut inner = self.inner.lock();
-
-        // Clear the TLS area if it is not present.
-        if desc.flags.is_read_exec_only() && !desc.flags.is_present() {
-            if desc.limit == 0 || desc.base == 0 {
-                return Ok(());
-            }
-
-            let len = if desc.flags.is_limit_in_pages() {
-                (desc.limit as usize) << 12
-            } else {
-                desc.limit as usize
-            };
-
-            CheckedUserPointer::new(desc.base as _, len)?.zero()?;
-            return Ok(());
-        }
-
-        let (tls, entry) = UserTLS::new32(desc.base, desc.limit, desc.flags.is_limit_in_pages());
-        desc.entry = entry;
-        inner.tls = Some(tls);
+    pub fn set_user_tls(&self, tls: UserTLS) -> KResult<()> {
+        self.inner.lock().tls = Some(tls);
         Ok(())
     }
 
@@ -318,20 +296,25 @@ impl Thread {
         self.inner.lock().name.clone()
     }
 
+    pub fn clear_child_tid(&self, clear_child_tid: Option<usize>) {
+        self.inner.lock().clear_child_tid = clear_child_tid;
+    }
+
+    pub fn get_set_ctid(&self) -> Option<usize> {
+        self.inner.lock().set_child_tid
+    }
+
+    pub fn get_clear_ctid(&self) -> Option<usize> {
+        self.inner.lock().clear_child_tid
+    }
+
     pub fn handle_syscall(&self, no: usize, args: [usize; 6]) -> Option<usize> {
         match syscall_handlers().get(no) {
             Some(Some(SyscallHandler {
                 handler,
                 name: _name,
                 ..
-            })) => {
-                println_trace!(
-                    "trace_syscall",
-                    "Syscall {_name}({no:#x}) on tid {:#x}",
-                    self.tid
-                );
-                handler(self, args)
-            }
+            })) => handler(self, args),
             _ => {
                 println_warn!("Syscall {no}({no:#x}) isn't implemented.");
                 self.raise(Signal::SIGSYS);
@@ -340,11 +323,28 @@ impl Thread {
         }
     }
 
+    pub async fn force_kill(&self, signal: Signal) {
+        let mut proc_list = ProcessList::get().write().await;
+        unsafe {
+            // SAFETY: Preemption is disabled.
+            proc_list
+                .do_exit(self, WaitType::Signaled(signal), false)
+                .await;
+        }
+    }
+
     pub fn is_dead(&self) -> bool {
         self.dead.load(Ordering::SeqCst)
     }
 
     async fn real_run(&self) {
+        if let Some(set_ctid) = self.get_set_ctid() {
+            UserPointerMut::new(set_ctid as *mut u32)
+                .expect("set_child_tid pointer is invalid")
+                .write(self.tid)
+                .expect("set_child_tid write failed");
+        }
+
         while !self.is_dead() {
             if self.signal_list.has_pending_signal() {
                 self.signal_list
@@ -367,10 +367,12 @@ impl Thread {
 
             let trap_type = self.trap_ctx.borrow().trap_type();
             match trap_type {
-                TrapType::Fault(Fault::PageFault(err_code)) => {
-                    let addr = arch::get_page_fault_address();
+                TrapType::Fault(Fault::PageFault {
+                    error_code,
+                    address: addr,
+                }) => {
                     let mms = &self.process.mm_list;
-                    if let Err(signal) = mms.handle_user_page_fault(addr, err_code).await {
+                    if let Err(signal) = mms.handle_user_page_fault(addr, error_code).await {
                         self.signal_list.raise(signal);
                     }
                 }
@@ -391,7 +393,14 @@ impl Thread {
                 }
                 TrapType::Syscall { no, args } => {
                     if let Some(retval) = self.handle_syscall(no, args) {
-                        self.trap_ctx.borrow().set_user_return_value(retval);
+                        let mut trap_ctx = self.trap_ctx.borrow();
+                        trap_ctx.set_user_return_value(retval);
+
+                        #[cfg(target_arch = "riscv64")]
+                        {
+                            let pc = trap_ctx.get_program_counter();
+                            trap_ctx.set_program_counter(pc + 4);
+                        }
                     }
                 }
             }
@@ -471,7 +480,7 @@ impl<F: Future> Contexted for ThreadRunnable<F> {
             // SAFETY:
             CPU::local()
                 .as_mut()
-                .load_interrupt_stack(trap_ctx_ptr.add(1).addr() as u64);
+                .load_interrupt_stack(trap_ctx_ptr as u64);
         }
     }
 

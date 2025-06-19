@@ -1,9 +1,9 @@
 use crate::{
     kernel::{constants::EIO, mem::PhysAccess as _},
-    sync::fence::memory_barrier,
     KResult,
 };
 use core::ptr::NonNull;
+use eonix_hal::fence::memory_barrier;
 use eonix_mm::address::PAddr;
 
 pub struct Register<T: Copy> {

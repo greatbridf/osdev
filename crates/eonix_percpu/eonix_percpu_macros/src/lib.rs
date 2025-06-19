@@ -1,5 +1,8 @@
 extern crate proc_macro;
 
+mod riscv64;
+mod x86_64;
+
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use syn::{parse2, Ident, ItemStatic, Type};
@@ -121,6 +124,7 @@ fn define_percpu_shared_impl(
     attrs: TokenStream,
     item: TokenStream,
     get_percpu_pointer: fn(&Ident, &Type) -> TokenStream,
+    get_percpu_offset: fn(&Ident) -> TokenStream,
 ) -> TokenStream {
     if !attrs.is_empty() {
         panic!("`define_percpu_shared` attribute does not take any arguments");
@@ -136,6 +140,7 @@ fn define_percpu_shared_impl(
     let access_ident = format_ident!("_access_shared_{}", ident);
 
     let as_ptr = get_percpu_pointer(&inner_ident, &ty);
+    let get_offset = get_percpu_offset(&inner_ident);
 
     quote! {
         #[link_section = ".percpu"]
@@ -156,7 +161,7 @@ fn define_percpu_shared_impl(
             }
 
             pub fn get_for_cpu(&self, cpuid: usize) -> Option<& #ty > {
-                let offset = & #inner_ident as *const _ as usize;
+                let offset = #get_offset;
                 let base = ::eonix_percpu::PercpuArea::get_for(cpuid);
                 base.map(|base| unsafe { base.byte_add(offset).cast().as_ref() })
             }
@@ -188,12 +193,7 @@ pub fn define_percpu_x86_64(
     attrs: proc_macro::TokenStream,
     item: proc_macro::TokenStream,
 ) -> proc_macro::TokenStream {
-    define_percpu_impl(
-        attrs.into(),
-        item.into(),
-        arch_macros::x86_64::percpu::get_percpu_pointer,
-    )
-    .into()
+    define_percpu_impl(attrs.into(), item.into(), x86_64::get_percpu_pointer).into()
 }
 
 #[proc_macro_attribute]
@@ -204,7 +204,30 @@ pub fn define_percpu_shared_x86_64(
     define_percpu_shared_impl(
         attrs.into(),
         item.into(),
-        arch_macros::x86_64::percpu::get_percpu_pointer,
+        x86_64::get_percpu_pointer,
+        x86_64::get_percpu_offset,
+    )
+    .into()
+}
+
+#[proc_macro_attribute]
+pub fn define_percpu_riscv64(
+    attrs: proc_macro::TokenStream,
+    item: proc_macro::TokenStream,
+) -> proc_macro::TokenStream {
+    define_percpu_impl(attrs.into(), item.into(), riscv64::get_percpu_pointer).into()
+}
+
+#[proc_macro_attribute]
+pub fn define_percpu_shared_riscv64(
+    attrs: proc_macro::TokenStream,
+    item: proc_macro::TokenStream,
+) -> proc_macro::TokenStream {
+    define_percpu_shared_impl(
+        attrs.into(),
+        item.into(),
+        riscv64::get_percpu_pointer,
+        riscv64::get_percpu_offset,
     )
     .into()
 }

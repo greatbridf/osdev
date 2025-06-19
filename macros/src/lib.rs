@@ -2,20 +2,14 @@ extern crate proc_macro;
 
 use proc_macro2::{Span, TokenStream};
 use quote::quote;
-use syn::{parse2, FnArg, Ident, ItemFn, LitInt, LitStr};
+use syn::{parse2, FnArg, Ident, ItemFn, LitStr};
 
 fn define_syscall_impl(attrs: TokenStream, item: TokenStream) -> TokenStream {
     if attrs.is_empty() {
         panic!("`define_syscall` attribute should take one argument: `syscall_no`");
     }
 
-    let syscall_no = parse2::<LitInt>(attrs).expect("Invalid syscall number");
-    let syscall_no = syscall_no
-        .base10_parse::<usize>()
-        .expect("Invalid syscall number");
-
-    assert!(syscall_no < 512, "Syscall number must be less than 512");
-
+    let syscall_no = parse2::<Ident>(attrs).expect("Invalid syscall number");
     let item = parse2::<ItemFn>(item).unwrap();
 
     let attrs = item.attrs;
@@ -57,7 +51,7 @@ fn define_syscall_impl(attrs: TokenStream, item: TokenStream) -> TokenStream {
 
     let helper_fn = Ident::new(&format!("_do_syscall_{}", syscall_name), Span::call_site());
     let helper_fn_pointer = Ident::new(
-        &format!("_SYSCALL_ENTRY_{:03}", syscall_no),
+        &format!("_SYSCALL_ENTRY_{}", syscall_name.to_string().to_uppercase()),
         Span::call_site(),
     );
 
@@ -69,6 +63,29 @@ fn define_syscall_impl(attrs: TokenStream, item: TokenStream) -> TokenStream {
     );
     let syscall_fn_section =
         LitStr::new(&format!(".syscall_fns.{}", syscall_name), Span::call_site());
+
+    let trace_format_string = {
+        let arg_count = item.sig.inputs.len();
+        let brackets = (0..arg_count)
+            .map(|_| String::from("{:x?}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        LitStr::new(&brackets, Span::call_site())
+    };
+
+    let trace_format_args = {
+        let args = item.sig.inputs.iter();
+        let args = args.enumerate().map(|(idx, arg)| match arg {
+            FnArg::Receiver(_) => panic!("&self is not permitted."),
+            FnArg::Typed(_) => {
+                let arg_ident = Ident::new(&format!("arg_{}", idx), Span::call_site());
+                quote! { #arg_ident }
+            }
+        });
+
+        quote! { #(#args,)* }
+    };
 
     quote! {
         #[used]
@@ -91,23 +108,21 @@ fn define_syscall_impl(attrs: TokenStream, item: TokenStream) -> TokenStream {
 
             #(#args_mapped)*
 
-            // eonix_log::println_trace!(
-            //     "trace_syscall",
-            //     "tid{}: {}({}) => {{",
-            //     crate::kernel::task::Thread::current().tid,
-            //     #syscall_name_str,
-            //     crate::kernel::syscall::format_expand!($($arg, $arg),*),
-            // );
+            eonix_log::println_trace!(
+                "trace_syscall",
+                "tid{}: {}({}) => {{",
+                thd.tid,
+                #syscall_name_str,
+                format_args!(#trace_format_string, #trace_format_args),
+            );
 
             let retval = #real_fn(thd, #(#args_call),*).into_retval();
 
-            // eonix_log::println_trace!(
-            //     "trace_syscall",
-            //     "tid{}: {}({}) => {{",
-            //     crate::kernel::task::Thread::current().tid,
-            //     #syscall_name_str,
-            //     crate::kernel::syscall::format_expand!($($arg, $arg),*),
-            // );
+            eonix_log::println_trace!(
+                "trace_syscall",
+                "}} => {:x?}",
+                retval,
+            );
 
             retval
         }

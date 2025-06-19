@@ -10,7 +10,10 @@ use crate::{prelude::*, sync::ArcSwap};
 use alloc::collections::btree_set::BTreeSet;
 use core::fmt;
 use core::sync::atomic::{AtomicUsize, Ordering};
-use eonix_hal::mm::{ArchPagingMode, ArchPhysAccess, GLOBAL_PAGE_TABLE};
+use eonix_hal::mm::{
+    flush_tlb_all, get_root_page_table_pfn, set_root_page_table_pfn, ArchPagingMode,
+    ArchPhysAccess, GLOBAL_PAGE_TABLE,
+};
 use eonix_mm::address::{Addr as _, PAddr};
 use eonix_mm::page_table::PageAttribute;
 use eonix_mm::paging::PFN;
@@ -29,6 +32,7 @@ pub static EMPTY_PAGE: LazyLock<Page> = LazyLock::new(|| Page::zeroed());
 
 #[derive(Debug, Clone, Copy)]
 pub struct Permission {
+    pub read: bool,
     pub write: bool,
     pub execute: bool,
 }
@@ -170,6 +174,82 @@ impl MMListInner<'_> {
         Ok(pages_to_free)
     }
 
+    fn protect(&mut self, start: VAddr, len: usize, permission: Permission) -> KResult<()> {
+        assert_eq!(start.floor(), start);
+        assert!(len != 0);
+
+        let end = (start + len).ceil();
+        let range_to_protect = VRange::new(start, end);
+        if !range_to_protect.is_user() {
+            return Err(EINVAL);
+        }
+
+        let mut found = false;
+        let old_areas = core::mem::take(&mut self.areas);
+        for mut area in old_areas {
+            let Some((left, mid, right)) = area.range().mask_with_checked(&range_to_protect) else {
+                self.areas.insert(area);
+                continue;
+            };
+
+            found = true;
+
+            if let Some(left) = left {
+                let (Some(left), Some(right)) = area.split(left.end()) else {
+                    unreachable!("`left.end()` is within the area");
+                };
+
+                self.areas.insert(left);
+                area = right;
+            }
+
+            if let Some(right) = right {
+                let (Some(left), Some(right)) = area.split(right.start()) else {
+                    unreachable!("`right.start()` is within the area");
+                };
+
+                self.areas.insert(right);
+                area = left;
+            }
+
+            for pte in self.page_table.iter_user(mid) {
+                let mut page_attr = pte.get_attr().as_page_attr().expect("Not a page attribute");
+
+                if !permission.read && !permission.write && !permission.execute {
+                    // If no permissions are set, we just remove the page.
+                    page_attr.remove(
+                        PageAttribute::PRESENT
+                            | PageAttribute::READ
+                            | PageAttribute::WRITE
+                            | PageAttribute::EXECUTE,
+                    );
+
+                    pte.set_attr(page_attr.into());
+                    continue;
+                }
+
+                page_attr.set(PageAttribute::READ, permission.read);
+
+                if !page_attr.contains(PageAttribute::COPY_ON_WRITE) {
+                    page_attr.set(PageAttribute::WRITE, permission.write);
+                }
+
+                page_attr.set(PageAttribute::EXECUTE, permission.execute);
+
+                pte.set_attr(page_attr.into());
+            }
+
+            area.permission = permission;
+            self.areas.insert(area);
+        }
+
+        if !found {
+            return Err(ENOMEM);
+        }
+
+        Ok(())
+    }
+
     fn mmap(
         &mut self,
         at: VAddr,
@@ -178,7 +258,7 @@ impl MMListInner<'_> {
         permission: Permission,
     ) -> KResult<()> {
         assert_eq!(at.floor(), at);
-        assert_eq!(len & 0xfff, 0);
+        assert_eq!(len & (PAGE_SIZE - 1), 0);
         let range = VRange::new(at, at + len);
 
         // We are doing a area marker insertion.
@@ -196,6 +276,12 @@ impl MMListInner<'_> {
     }
 }
 
+impl Drop for MMListInner<'_> {
+    fn drop(&mut self) {
+        // TODO: Recycle all pages in the page table.
+    }
+}
+
 impl MMList {
     async fn flush_user_tlbs(&self) {
         match self.user_count.load(Ordering::Relaxed) {
@@ -203,12 +289,12 @@ impl MMList {
                 // If there are currently no users, we don't need to do anything.
             }
             1 => {
-                if PAddr::from(arch::get_root_page_table_pfn()).addr()
+                if PAddr::from(get_root_page_table_pfn()).addr()
                     == self.root_page_table.load(Ordering::Relaxed)
                 {
                     // If there is only one user and we are using the page table,
                     // flushing the TLB for the local cpu only is enough.
-                    arch::flush_tlb_all();
+                    flush_tlb_all();
                 } else {
                     // Send the TLB flush request to the core.
                     todo!();
@@ -269,16 +355,20 @@ impl MMList {
         list
     }
 
+    pub async fn new_shared(&self) -> Self {
+        todo!()
+    }
+
     pub fn activate(&self) {
         self.user_count.fetch_add(1, Ordering::Acquire);
 
         let root_page_table = self.root_page_table.load(Ordering::Relaxed);
         assert_ne!(root_page_table, 0);
-        arch::set_root_page_table_pfn(PFN::from(PAddr::from(root_page_table)));
+        set_root_page_table_pfn(PFN::from(PAddr::from(root_page_table)));
     }
 
     pub fn deactivate(&self) {
-        arch::set_root_page_table_pfn(PFN::from(GLOBAL_PAGE_TABLE.addr()));
+        set_root_page_table_pfn(PFN::from(GLOBAL_PAGE_TABLE.addr()));
 
         let old_user_count = self.user_count.fetch_sub(1, Ordering::Release);
         assert_ne!(old_user_count, 0);
@@ -292,7 +382,7 @@ impl MMList {
 
         let root_page_table = self.root_page_table.load(Ordering::Relaxed);
         assert_ne!(root_page_table, 0);
-        arch::set_root_page_table_pfn(PFN::from(PAddr::from(root_page_table)));
+        set_root_page_table_pfn(PFN::from(PAddr::from(root_page_table)));
 
         let old_user_count = to.user_count.fetch_sub(1, Ordering::Release);
         assert_ne!(old_user_count, 0);
@@ -321,7 +411,7 @@ impl MMList {
         );
 
         let old_root_page_table = self.root_page_table.load(Ordering::Relaxed);
-        let current_root_page_table = arch::get_root_page_table_pfn();
+        let current_root_page_table = get_root_page_table_pfn();
         assert_eq!(
             PAddr::from(current_root_page_table).addr(),
             old_root_page_table,
@@ -333,7 +423,7 @@ impl MMList {
             None => GLOBAL_PAGE_TABLE.addr().addr(),
         };
 
-        arch::set_root_page_table_pfn(PFN::from(PAddr::from(new_root_page_table)));
+        set_root_page_table_pfn(PFN::from(PAddr::from(new_root_page_table)));
 
         self.root_page_table
             .store(new_root_page_table, Ordering::Relaxed);
@@ -357,6 +447,56 @@ impl MMList {
 
         // Then free the pages.
         drop(pages_to_free);
+
+        Ok(())
+    }
+
+    pub async fn protect(&self, start: VAddr, len: usize, prot: Permission) -> KResult<()> {
+        self.inner.borrow().lock().await.protect(start, len, prot)?;
+
+        // flush the tlb due to the pte attribute changes
+        self.flush_user_tlbs().await;
+
+        Ok(())
+    }
+
+    pub fn map_vdso(&self) -> KResult<()> {
+        unsafe extern "C" {
+            fn VDSO_PADDR();
+        }
+        static VDSO_PADDR_VALUE: &'static unsafe extern "C" fn() =
+            &(VDSO_PADDR as unsafe extern "C" fn());
+
+        let vdso_paddr = unsafe {
+            // SAFETY: To prevent the compiler from optimizing this into `la` instructions
+            //         and causing a linking error.
+            (VDSO_PADDR_VALUE as *const _ as *const usize).read_volatile()
+        };
+
+        let vdso_pfn = PFN::from(PAddr::from(vdso_paddr));
+
+        const VDSO_START: VAddr = VAddr::from(0x7f00_0000_0000);
+        const VDSO_SIZE: usize = 0x1000;
+
+        let inner = self.inner.borrow();
+        let inner = Task::block_on(inner.lock());
+
+        let mut pte_iter = inner
+            .page_table
+            .iter_user(VRange::from(VDSO_START).grow(VDSO_SIZE));
+
+        let pte = pte_iter.next().expect("There should be at least one PTE");
+        pte.set(
+            vdso_pfn,
+            (PageAttribute::PRESENT
+                | PageAttribute::READ
+                | PageAttribute::EXECUTE
+                | PageAttribute::USER
+                | PageAttribute::ACCESSED)
+                .into(),
+        );
+
+        assert!(pte_iter.next().is_none(), "There should be only one PTE");
 
         Ok(())
     }
@@ -423,6 +563,7 @@ impl MMList {
                 break_start,
                 Mapping::Anonymous,
                 Permission {
+                    read: true,
                     write: true,
                     execute: false,
                 },
@@ -442,6 +583,7 @@ impl MMList {
         inner.page_table.set_anonymous(
             range_to_grow,
             Permission {
+                read: true,
                 write: true,
                 execute: false,
             },
@@ -584,7 +726,10 @@ where
     fn set_anonymous(&mut self, execute: bool) {
         // Writable flag is set during page fault handling while executable flag is
         // preserved across page faults, so we set executable flag now.
-        let mut attr = PageAttribute::PRESENT | PageAttribute::USER | PageAttribute::COPY_ON_WRITE;
+        let mut attr = PageAttribute::PRESENT
+            | PageAttribute::READ
+            | PageAttribute::USER
+            | PageAttribute::COPY_ON_WRITE;
         attr.set(PageAttribute::EXECUTE, execute);
 
         self.set(EMPTY_PAGE.clone().into_raw(), T::Attr::from(attr));
@@ -593,7 +738,10 @@ where
     fn set_mapped(&mut self, execute: bool) {
         // Writable flag is set during page fault handling while executable flag is
         // preserved across page faults, so we set executable flag now.
-        let mut attr = PageAttribute::MAPPED | PageAttribute::USER | PageAttribute::COPY_ON_WRITE;
+        let mut attr = PageAttribute::READ
+            | PageAttribute::USER
+            | PageAttribute::MAPPED
+            | PageAttribute::COPY_ON_WRITE;
         attr.set(PageAttribute::EXECUTE, execute);
 
         self.set(EMPTY_PAGE.clone().into_raw(), T::Attr::from(attr));

@@ -329,6 +329,8 @@ unsafe extern "C" fn captured_trap_return(trap_context: usize) -> ! {
 }
 
 impl TrapReturn for TrapContext {
+    type TaskContext = TaskContext;
+
     unsafe fn trap_return(&mut self) {
         let irq_states = disable_irqs_save();
         let old_handler = TRAP_HANDLER.swap(captured_trap_handler);

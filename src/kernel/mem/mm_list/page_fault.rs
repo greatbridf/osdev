@@ -1,9 +1,11 @@
 use super::{MMList, VAddr};
-use crate::kernel::task::{Signal, Thread};
+use crate::kernel::task::Thread;
+use eonix_hal::mm::flush_tlb;
 use eonix_hal::traits::fault::PageFaultErrorCode;
-use eonix_mm::address::{AddrOps as _, VRange};
+use eonix_mm::address::{Addr as _, AddrOps as _, VRange};
 use eonix_mm::paging::PAGE_SIZE;
 use eonix_runtime::task::Task;
+use posix_types::signal::Signal;
 
 #[repr(C)]
 struct FixEntry {
@@ -22,6 +24,7 @@ impl FixEntry {
         VAddr::from((self.start + self.length) as usize)
     }
 
+    #[allow(dead_code)]
     fn range(&self) -> VRange {
         VRange::new(self.start(), self.end())
     }
@@ -65,6 +68,14 @@ impl MMList {
         let area = inner.areas.get(&VRange::from(addr)).ok_or(Signal::SIGBUS)?;
 
         // Check user access permission.
+        if error.contains(PageFaultErrorCode::Read) && !area.permission.read {
+            // Under x86_64, we don't have a way to distinguish
+            // between a read fault and a non-present fault. But it should be OK
+            // since non-readable pages are not allowed under x86 and if we read
+            // both the two false.
+            Err(Signal::SIGSEGV)?
+        }
+
         if error.contains(PageFaultErrorCode::Write) && !area.permission.write {
             Err(Signal::SIGSEGV)?
         }
@@ -80,7 +91,11 @@ impl MMList {
             .expect("If we can find the mapped area, we should be able to find the PTE");
 
         area.handle(pte, addr.floor() - area.range().start())
-            .map_err(|_| Signal::SIGBUS)
+            .map_err(|_| Signal::SIGBUS)?;
+
+        flush_tlb(addr.floor().addr());
+
+        Ok(())
     }
 }
 

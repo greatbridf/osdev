@@ -383,9 +383,9 @@ impl Thread {
                     self.signal_list.raise(Signal::SIGILL);
                 }
                 TrapType::Fault(Fault::Unknown(_)) => unimplemented!("Unhandled fault"),
-                TrapType::Irq(irqno) => default_irq_handler(irqno),
-                TrapType::Timer => {
-                    timer_interrupt();
+                TrapType::Irq { callback } => callback(default_irq_handler),
+                TrapType::Timer { callback } => {
+                    callback(timer_interrupt);
 
                     if should_reschedule() {
                         yield_now().await;

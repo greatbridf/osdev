@@ -1,4 +1,3 @@
-use super::interrupt::end_of_interrupt;
 use alloc::{collections::BinaryHeap, vec, vec::Vec};
 use core::{
     cell::RefCell,
@@ -110,7 +109,6 @@ impl Add<Duration> for Instant {
 }
 
 pub fn timer_interrupt() {
-    end_of_interrupt();
     if CPU::local().cpuid() != 0 {
         // Only the BSP should handle the timer interrupt.
         return;

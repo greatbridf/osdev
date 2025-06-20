@@ -1,3 +1,4 @@
+use crate::processor::CPU;
 use core::arch::asm;
 use eonix_hal_traits::{
     fault::{Fault, PageFaultErrorCode},
@@ -77,16 +78,24 @@ impl TrapContext {
 }
 
 impl RawTrapContext for TrapContext {
+    type FIrq = impl FnOnce(fn(irqno: usize));
+    type FTimer = fn(handler: fn());
+
     fn new() -> Self {
         Self {
             ..Default::default()
         }
     }
 
-    fn trap_type(&self) -> TrapType {
+    fn trap_type(&self) -> TrapType<Self::FIrq, Self::FTimer> {
         match self.int_no {
             0..0x20 => TrapType::Fault(self.get_fault_type()),
-            0x40 => TrapType::Timer,
+            0x40 => TrapType::Timer {
+                callback: |handler| {
+                    handler();
+                    CPU::local().as_mut().end_of_interrupt();
+                },
+            },
             0x80 => TrapType::Syscall {
                 no: self.rax as usize,
                 args: [
@@ -98,7 +107,22 @@ impl RawTrapContext for TrapContext {
                     self.rbp as usize,
                 ],
             },
-            no => TrapType::Irq(no as usize - 0x20),
+            no => TrapType::Irq {
+                callback: move |handler| {
+                    let irqno = no as usize - 0x20;
+                    handler(irqno);
+
+                    use crate::arch::io::Port8;
+
+                    const PIC1_COMMAND: Port8 = Port8::new(0x20);
+                    const PIC2_COMMAND: Port8 = Port8::new(0xA0);
+
+                    PIC1_COMMAND.write(0x20); // EOI
+                    if irqno >= 8 {
+                        PIC2_COMMAND.write(0x20); // EOI
+                    }
+                },
+            },
         }
     }
 

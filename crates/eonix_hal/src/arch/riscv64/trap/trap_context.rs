@@ -1,3 +1,4 @@
+use crate::arch::time::set_next_timer;
 use core::arch::asm;
 use eonix_hal_traits::{
     fault::{Fault, PageFaultErrorCode},
@@ -117,6 +118,9 @@ impl TrapContext {
 }
 
 impl RawTrapContext for TrapContext {
+    type FIrq = fn(handler: fn(irqno: usize));
+    type FTimer = fn(handler: fn());
+
     fn new() -> Self {
         let mut sstatus = Sstatus::from_bits(0);
         sstatus.set_fs(FS::Initial);
@@ -130,14 +134,24 @@ impl RawTrapContext for TrapContext {
         }
     }
 
-    fn trap_type(&self) -> TrapType {
+    fn trap_type(&self) -> TrapType<Self::FIrq, Self::FTimer> {
         let cause = self.scause.cause();
         match cause {
             Trap::Interrupt(i) => {
                 match Interrupt::from_number(i).unwrap() {
-                    Interrupt::SupervisorTimer => TrapType::Timer,
-                    // TODO: need to read plic
-                    Interrupt::SupervisorExternal => TrapType::Irq(0),
+                    Interrupt::SupervisorTimer => TrapType::Timer {
+                        callback: |handler| {
+                            handler();
+                            set_next_timer();
+                        },
+                    },
+                    Interrupt::SupervisorExternal => TrapType::Irq {
+                        callback: |handler| {
+                            // TODO: Read PLIC to determine the IRQ number.
+                            //       Use 0xa (serial) for now.
+                            handler(0xa);
+                        },
+                    },
                     // soft interrupt
                     _ => TrapType::Fault(Fault::Unknown(i)),
                 }

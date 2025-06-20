@@ -143,6 +143,7 @@ async fn init_process(early_kstack: PRange) {
     fs::tmpfs::init();
     fs::procfs::init();
     fs::fat32::init();
+    fs::ext4::init();
 
     let load_info = {
         // mount fat32 /mnt directory

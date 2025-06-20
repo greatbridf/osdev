@@ -92,8 +92,8 @@ impl RawTrapContext for TrapContext {
             0..0x20 => TrapType::Fault(self.get_fault_type()),
             0x40 => TrapType::Timer {
                 callback: |handler| {
-                    handler();
                     CPU::local().as_mut().end_of_interrupt();
+                    handler();
                 },
             },
             0x80 => TrapType::Syscall {
@@ -110,7 +110,6 @@ impl RawTrapContext for TrapContext {
             no => TrapType::Irq {
                 callback: move |handler| {
                     let irqno = no as usize - 0x20;
-                    handler(irqno);
 
                     use crate::arch::io::Port8;
 
@@ -121,6 +120,8 @@ impl RawTrapContext for TrapContext {
                     if irqno >= 8 {
                         PIC2_COMMAND.write(0x20); // EOI
                     }
+
+                    handler(irqno);
                 },
             },
         }

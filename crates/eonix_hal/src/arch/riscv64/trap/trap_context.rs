@@ -1,4 +1,4 @@
-use crate::arch::time::set_next_timer;
+use crate::{arch::time::set_next_timer, processor::CPU};
 use core::arch::asm;
 use eonix_hal_traits::{
     fault::{Fault, PageFaultErrorCode},
@@ -141,15 +141,20 @@ impl RawTrapContext for TrapContext {
                 match Interrupt::from_number(i).unwrap() {
                     Interrupt::SupervisorTimer => TrapType::Timer {
                         callback: |handler| {
-                            handler();
                             set_next_timer();
+                            handler();
                         },
                     },
                     Interrupt::SupervisorExternal => TrapType::Irq {
                         callback: |handler| {
-                            // TODO: Read PLIC to determine the IRQ number.
-                            //       Use 0xa (serial) for now.
-                            handler(0xa);
+                            let mut cpu = CPU::local();
+                            match cpu.as_mut().interrupt.plic.claim_interrupt() {
+                                None => {}
+                                Some(irqno) => {
+                                    cpu.interrupt.plic.complete_interrupt(irqno);
+                                    handler(irqno);
+                                }
+                            }
                         },
                     },
                     // soft interrupt

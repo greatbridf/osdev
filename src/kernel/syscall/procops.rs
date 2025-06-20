@@ -684,19 +684,6 @@ fn getrusage(who: u32, rusage: *mut RUsage) -> KResult<()> {
     Ok(())
 }
 
-#[eonix_macros::define_syscall(SYS_FCHMOD)]
-fn chmod(pathname: *const u8, mode: u32) -> KResult<()> {
-    let path = UserString::new(pathname)?;
-    let path = Path::new(path.as_cstr().to_bytes())?;
-
-    let dentry = Dentry::open(&thread.fs_context, path, true)?;
-    if !dentry.is_valid() {
-        return Err(ENOENT);
-    }
-
-    dentry.chmod(mode)
-}
-
 #[cfg(target_arch = "x86_64")]
 #[eonix_macros::define_syscall(SYS_VFORK)]
 fn vfork() -> KResult<u32> {

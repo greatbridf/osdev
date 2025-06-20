@@ -476,4 +476,65 @@ fn poll(fds: *mut UserPollFd, nfds: u32, timeout: u32) -> KResult<u32> {
     do_poll(thread, fds, nfds, timeout)
 }
 
+#[eonix_macros::define_syscall(SYS_FCHOWNAT)]
+fn fchownat(dirfd: FD, pathname: *const u8, uid: u32, gid: u32, flags: AtFlags) -> KResult<()> {
+    let dentry = dentry_from(thread, dirfd, pathname, !flags.no_follow())?;
+    if !dentry.is_valid() {
+        return Err(ENOENT);
+    }
+
+    dentry.chown(uid, gid)
+}
+
+#[eonix_macros::define_syscall(SYS_FCHMODAT)]
+fn fchmodat(dirfd: FD, pathname: *const u8, mode: u32, flags: AtFlags) -> KResult<()> {
+    let dentry = if flags.at_empty_path() {
+        let file = thread.files.get(dirfd).ok_or(EBADF)?;
+        file.as_path().ok_or(EBADF)?.clone()
+    } else {
+        dentry_from(thread, dirfd, pathname, !flags.no_follow())?
+    };
+
+    if !dentry.is_valid() {
+        return Err(ENOENT);
+    }
+
+    dentry.chmod(mode)
+}
+
+#[eonix_macros::define_syscall(SYS_FCHMOD)]
+fn chmod(pathname: *const u8, mode: u32) -> KResult<()> {
+    sys_fchmodat(thread, FD::AT_FDCWD, pathname, mode, AtFlags::empty())
+}
+
+#[eonix_macros::define_syscall(SYS_UTIMENSAT)]
+fn utimensat(
+    dirfd: FD,
+    pathname: *const u8,
+    times: *const TimeSpec,
+    flags: AtFlags,
+) -> KResult<()> {
+    let dentry = if flags.at_empty_path() {
+        let file = thread.files.get(dirfd).ok_or(EBADF)?;
+        file.as_path().ok_or(EBADF)?.clone()
+    } else {
+        dentry_from(thread, dirfd, pathname, !flags.no_follow())?
+    };
+
+    if !dentry.is_valid() {
+        return Err(ENOENT);
+    }
+
+    let _times = if times.is_null() {
+        [TimeSpec::default(), TimeSpec::default()]
+    } else {
+        let times = UserPointer::new(times)?;
+        [times.read()?, times.offset(1)?.read()?]
+    };
+
+    // TODO: Implement utimensat
+    // dentry.utimens(&times)
+    Ok(())
+}
+
 pub fn keep_alive() {}

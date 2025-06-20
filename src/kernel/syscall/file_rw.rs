@@ -383,13 +383,14 @@ fn writev(fd: FD, iov_user: *const IoVec, iovcnt: u32) -> KResult<usize> {
     Ok(tot)
 }
 
-#[cfg(target_arch = "x86_64")]
-#[eonix_macros::define_syscall(SYS_ACCESS)]
-fn access(pathname: *const u8, _mode: u32) -> KResult<()> {
-    let path = UserString::new(pathname)?;
-    let path = Path::new(path.as_cstr().to_bytes())?;
-
-    let dentry = Dentry::open(&thread.fs_context, path, true)?;
+#[eonix_macros::define_syscall(SYS_FACCESSAT)]
+fn faccessat(dirfd: FD, pathname: *const u8, _mode: u32, flags: AtFlags) -> KResult<()> {
+    let dentry = if flags.at_empty_path() {
+        let file = thread.files.get(dirfd).ok_or(EBADF)?;
+        file.as_path().ok_or(EBADF)?.clone()
+    } else {
+        dentry_from(thread, dirfd, pathname, !flags.no_follow())?
+    };
 
     if !dentry.is_valid() {
         return Err(ENOENT);
@@ -403,7 +404,14 @@ fn access(pathname: *const u8, _mode: u32) -> KResult<()> {
     //     X_OK => todo!(),
     //     _ => Err(EINVAL),
     // }
+
     Ok(())
+}
+
+#[cfg(target_arch = "x86_64")]
+#[eonix_macros::define_syscall(SYS_ACCESS)]
+fn access(pathname: *const u8, mode: u32) -> KResult<()> {
+    sys_faccessat(thread, FD::AT_FDCWD, pathname, mode, AtFlags::empty())
 }
 
 #[eonix_macros::define_syscall(SYS_SENDFILE64)]

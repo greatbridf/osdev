@@ -453,4 +453,8 @@ impl Dentry {
     pub fn chmod(&self, mode: Mode) -> KResult<()> {
         self.get_inode()?.chmod(mode)
     }
+
+    pub fn chown(&self, uid: u32, gid: u32) -> KResult<()> {
+        self.get_inode()?.chown(uid, gid)
+    }
 }

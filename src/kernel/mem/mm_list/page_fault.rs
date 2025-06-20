@@ -35,15 +35,15 @@ impl FixEntry {
 
     fn entries() -> &'static [FixEntry] {
         extern "C" {
-            static FIX_START: *const FixEntry;
-            static FIX_END: *const FixEntry;
+            fn FIX_START();
+            fn FIX_END();
         }
 
         unsafe {
             // SAFETY: `FIX_START` and `FIX_END` are defined in the
             //         linker script in `.rodata` section.
             core::slice::from_raw_parts(
-                FIX_START,
+                FIX_START as usize as *const FixEntry,
                 (FIX_END as usize - FIX_START as usize) / size_of::<FixEntry>(),
             )
         }

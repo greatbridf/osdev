@@ -144,6 +144,10 @@ pub trait Inode: Send + Sync + InodeInner {
         Err(EPERM)
     }
 
+    fn chown(&self, uid: u32, gid: u32) -> KResult<()> {
+        Err(EPERM)
+    }
+
     fn statx(&self, stat: &mut StatX, mask: u32) -> KResult<()> {
         // Safety: ffi should have checked reference
         let vfs = self.vfs.upgrade().expect("Vfs is dropped");

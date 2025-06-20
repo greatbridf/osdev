@@ -377,9 +377,8 @@ impl<E: ElfArch> Elf<E> {
 
         if let Some(ldso_path) = ldso_path {
             let fs_context = FsContext::global();
-            let ldso_file =
-                Dentry::open(fs_context, Path::new(ldso_path.as_bytes()).unwrap(), true).unwrap();
-            let ldso_elf = Elf::<E>::parse(ldso_file).unwrap();
+            let ldso_file = Dentry::open(fs_context, Path::new(ldso_path.as_bytes())?, true)?;
+            let ldso_elf = Elf::<E>::parse(ldso_file)?;
 
             let base = VAddr::from(E::LDSO_BASE_ADDR);
 

@@ -46,14 +46,14 @@ pub struct Stat {
     pub st_dev: u64,
     pub st_ino: u64,
     pub st_mode: u32,
-    pub st_nlink: usize,
+    pub st_nlink: u32,
     pub st_uid: u32,
     pub st_gid: u32,
     pub st_rdev: u64,
-    __padding: usize,
+    __padding: u64,
 
     pub st_size: u64,
-    pub st_blksize: usize,
+    pub st_blksize: u32,
     __padding2: u32,
 
     pub st_blocks: u64,
@@ -65,17 +65,17 @@ pub struct Stat {
 impl From<StatX> for Stat {
     fn from(statx: StatX) -> Self {
         Self {
-            st_dev: statx.stx_dev_major as u64 | ((statx.stx_dev_minor as u64) << 32),
+            st_dev: statx.stx_dev_minor as u64 | ((statx.stx_dev_major as u64) << 8),
             st_ino: statx.stx_ino,
             st_mode: statx.stx_mode as u32,
-            st_nlink: statx.stx_nlink as usize,
+            st_nlink: statx.stx_nlink,
             st_uid: statx.stx_uid,
             st_gid: statx.stx_gid,
-            st_rdev: statx.stx_rdev_major as u64 | ((statx.stx_rdev_minor as u64) << 32),
+            st_rdev: statx.stx_rdev_minor as u64 | ((statx.stx_rdev_major as u64) << 8),
             __padding: 0,
 
             st_size: statx.stx_size,
-            st_blksize: statx.stx_blksize as usize,
+            st_blksize: statx.stx_blksize,
             __padding2: 0,
 
             st_blocks: statx.stx_blocks,

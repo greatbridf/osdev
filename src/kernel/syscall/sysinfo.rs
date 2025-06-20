@@ -40,9 +40,15 @@ fn newuname(buffer: *mut NewUTSName) -> KResult<()> {
     // Linux compatible
     copy_cstr_to_array(b"Linux", &mut uname.sysname);
     copy_cstr_to_array(b"(none)", &mut uname.nodename);
-    copy_cstr_to_array(b"1.0.0", &mut uname.release);
-    copy_cstr_to_array(b"1.0.0", &mut uname.version);
+    copy_cstr_to_array(b"5.17.1", &mut uname.release);
+    copy_cstr_to_array(b"eonix 1.1.4", &mut uname.version);
+
+    #[cfg(target_arch = "x86_64")]
     copy_cstr_to_array(b"x86", &mut uname.machine);
+
+    #[cfg(target_arch = "riscv64")]
+    copy_cstr_to_array(b"riscv64", &mut uname.machine);
+
     copy_cstr_to_array(b"(none)", &mut uname.domainname);
 
     buffer.write(uname)

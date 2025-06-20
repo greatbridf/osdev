@@ -516,7 +516,7 @@ impl File {
 
     pub fn as_path(&self) -> Option<&Arc<Dentry>> {
         match self {
-            File::Inode(inode_file) if s_isdir(inode_file.mode) => Some(&inode_file.dentry),
+            File::Inode(inode_file) => Some(&inode_file.dentry),
             _ => None,
         }
     }

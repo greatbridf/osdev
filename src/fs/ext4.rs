@@ -20,28 +20,26 @@ use crate::{
 
 pub struct Ext4BlockDevice {
     device: Arc<BlockDevice>,
-    block_size: u64,
 }
 
 impl Ext4BlockDevice {
-    pub fn new(device: Arc<BlockDevice>, block_size: u64) -> Self {
+    pub fn new(device: Arc<BlockDevice>) -> Self {
         Self {
             device,
-            block_size,
         }
     }
 }
 
 impl Ext4BlockDeviceTrait for Ext4BlockDevice {
     fn read_offset(&self, offset: usize) -> Vec<u8> {
-        let mut buffer = vec![0u8; self.block_size as usize];
+        let mut buffer = vec![0u8; 4096];
         let mut byte_buffer = ByteBuffer::new(buffer.as_mut_slice());
         match self.device.read_some(offset, &mut byte_buffer) {
             Ok(fill_result) => {
                 buffer
             }
             Err(_) => {
-                vec![0u8; self.block_size as usize]
+                vec![0u8; 4096]
             }
         }
     }
@@ -92,8 +90,7 @@ impl Ext4Fs {
 impl Ext4Fs {
     pub fn create(device: DevId) -> KResult<(Arc<Self>, Arc<dyn Inode>)>  {
         let device = BlockDevice::get(device)?;
-        let device_size = device.size();
-        let ext4_device = Ext4BlockDevice::new(device.clone(), device_size);
+        let ext4_device = Ext4BlockDevice::new(device.clone());
         let ext4 = Ext4::open(Arc::new(ext4_device));
         let mut ext4fs = Arc::new_cyclic(|weak: &Weak<Ext4Fs>| Self {
             inner: ext4,
@@ -101,7 +98,6 @@ impl Ext4Fs {
             icache: BTreeMap::new(),
             weak: weak.clone(),
         });
-        
         let root_inode_ref = ext4fs.inner.get_inode_ref(2);
         let root_inode = DirInode::new(root_inode_ref.inode_num as Ino, ext4fs.weak.clone(), root_inode_ref.inode.size() as u32);
         Ok((ext4fs, root_inode))
@@ -203,7 +199,7 @@ impl Inode for DirInode {
 
         let entries = ext4fs.inner.fuse_readdir(self.ino as u64, 0, offset as i64)
             .map_err(|_| EIO)?;
-        let mut nread = 0usize;
+        let mut current_offset = 0;
 
         for entry in entries {
             let name_len = entry.name_len as usize;
@@ -221,9 +217,9 @@ impl Inode for DirInode {
                 break;
             }
 
-            nread += entry.entry_len as usize;
+            current_offset += 1;
         }
-        Ok(nread)
+        Ok(current_offset)
     }
 }
 
@@ -231,7 +227,9 @@ struct Ext4MountCreator;
 
 impl MountCreator for Ext4MountCreator {
     fn create_mount(&self, _source: &str, _flags: u64, mp: &Arc<Dentry>) -> KResult<Mount> {
-        let (ext4fs, root_inode) = Ext4Fs::create(make_device(8, 1))?;
+        // TODO: temporarily the second disk, should generate from _source
+        let (ext4fs, root_inode) = 
+            Ext4Fs::create(make_device(8, 16))?;
 
         Mount::new(mp, ext4fs, root_inode)
     }

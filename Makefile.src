@@ -49,14 +49,14 @@ QEMU_ARGS += \
 	-device virtio-blk-device,drive=disk1,bus=virtio-mmio-bus.1 \
 	-device virtio-net-device,netdev=mynet0 \
 	-drive id=disk0,file=build/boot-riscv64.img,format=raw,if=none \
-	-drive id=disk1,file=build/fs-riscv64.img,format=raw,if=none \
+	-drive id=disk1,file=test/sdcard-rv.img,format=raw,if=none \
 	-netdev user,id=mynet0 \
 	-rtc base=utc
 
 CARGO_FLAGS += --target riscv64gc-unknown-none-elf
 
 .PHONY: build
-build: $(BINARY_DIR)/eonix_kernel build/boot-riscv64.img build/fs-riscv64.img
+build: $(BINARY_DIR)/eonix_kernel build/boot-riscv64.img
 
 else ifeq ($(ARCH),x86_64)
 
@@ -66,8 +66,10 @@ BINARY_DIR := $(BINARY_DIR_BASE)/$(MODE)
 QEMU_ARGS += \
 	-machine q35 \
 	-device ahci,id=ahci -device ide-hd,drive=disk,bus=ahci.0 \
+	-device ide-hd,drive=disk1,bus=ahci.1 \
 	-device e1000e,netdev=mynet0 \
 	-drive id=disk,file=build/boot-x86_64.img,format=raw,if=none \
+	-drive id=disk1,file=test/sdcard-rv.img,format=raw,if=none \
 	-netdev user,id=mynet0
 
 CARGO_FLAGS += --target x86_64-unknown-none.json
@@ -119,9 +121,6 @@ $(BINARY_DIR)/eonix_kernel: $(KERNEL_DEPS)
 
 build/kernel.sym: $(BINARY_DIR)/eonix_kernel
 	cargo objcopy -q $(CARGO_FLAGS) -- --only-keep-debug build/kernel.sym
-
-build/fs-%.img: user-programs/init_script_%.sh script/build-img.sh $(USER_PROGRAMS)
-	ARCH=$* OUTPUT=$@ sh script/build-img.sh
 
 build/mbr.bin: $(BINARY_DIR)/eonix_kernel
 	cargo objcopy -q $(CARGO_FLAGS) -- -O binary -j .mbr build/mbr.bin

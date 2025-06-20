@@ -281,10 +281,6 @@ impl BlockDevice {
             Ok(FillResult::Partial(nfilled))
         }
     }
-
-    pub fn size(&self) -> u64 {
-        self.size
-    }
 }
 
 pub struct BlockDeviceRequest<'lt> {

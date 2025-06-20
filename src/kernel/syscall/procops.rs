@@ -170,24 +170,22 @@ fn execve(exec: *const u8, argv: *const PtrT, envp: *const PtrT) -> KResult<Sysc
 
     // TODO: When `execve` is called by one of the threads in a process, the other threads
     //       should be terminated and `execve` is performed in the thread group leader.
-    if let Ok(load_info) = ProgramLoader::parse(dentry.clone())?.load(argv, envp) {
-        unsafe {
-            // SAFETY: We are doing execve, all other threads are terminated.
-            thread.process.mm_list.replace(Some(load_info.mm_list));
-        }
-        thread.files.on_exec();
-        thread.signal_list.clear_non_ignore();
-        thread.set_name(dentry.name().clone());
+    let load_info = ProgramLoader::parse(dentry.clone())?.load(argv, envp)?;
 
-        let mut trap_ctx = thread.trap_ctx.borrow();
-        trap_ctx.set_program_counter(load_info.entry_ip.addr());
-        trap_ctx.set_stack_pointer(load_info.sp.addr());
-        Ok(SyscallNoReturn)
-    } else {
-        // We can't hold any ownership when we call `kill_current`.
-        // ProcessList::kill_current(Signal::SIGSEGV);
-        todo!()
+    unsafe {
+        // SAFETY: We are doing execve, all other threads are terminated.
+        thread.process.mm_list.replace(Some(load_info.mm_list));
     }
+
+    thread.files.on_exec();
+    thread.signal_list.clear_non_ignore();
+    thread.set_name(dentry.name().clone());
+
+    let mut trap_ctx = thread.trap_ctx.borrow();
+    trap_ctx.set_program_counter(load_info.entry_ip.addr());
+    trap_ctx.set_stack_pointer(load_info.sp.addr());
+
+    Ok(SyscallNoReturn)
 }
 
 #[eonix_macros::define_syscall(SYS_EXIT)]

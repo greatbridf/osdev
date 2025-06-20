@@ -89,3 +89,46 @@ impl Command for ReadLBACommand<'_> {
         false
     }
 }
+
+pub struct WriteLBACommand<'a> {
+    pages: &'a [Page],
+    lba: u64,
+    count: u16,
+}
+
+impl<'a> WriteLBACommand<'a> {
+    pub fn new(pages: &'a [Page], lba: u64, count: u16) -> KResult<Self> {
+        if pages.len() > 248 {
+            return Err(EINVAL);
+        }
+
+        let buffer_tot_len = pages.iter().fold(0, |acc, page| acc + page.len());
+        if buffer_tot_len < count as usize * 512 {
+            return Err(EINVAL);
+        }
+
+        Ok(Self { pages, lba, count })
+    }
+}
+
+impl Command for WriteLBACommand<'_> {
+    fn pages(&self) -> &[Page] {
+        self.pages
+    }
+
+    fn lba(&self) -> u64 {
+        self.lba
+    }
+
+    fn count(&self) -> u16 {
+        self.count
+    }
+
+    fn cmd(&self) -> u8 {
+        0xCA
+    }
+
+    fn write(&self) -> bool {
+        true
+    }
+}

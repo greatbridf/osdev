@@ -40,8 +40,8 @@ impl NodeInode {
         Self::new_locked(ino, vfs, |inode, _| unsafe {
             addr_of_mut_field!(inode, devid).write(devid);
 
-            addr_of_mut_field!(inode, mode).write(mode.into());
-            addr_of_mut_field!(inode, nlink).write(1.into());
+            addr_of_mut_field!(&mut *inode, mode).write(mode.into());
+            addr_of_mut_field!(&mut *inode, nlink).write(1.into());
         })
     }
 }
@@ -64,9 +64,9 @@ impl DirectoryInode {
             addr_of_mut_field!(inode, entries)
                 .write(Locked::new(vec![(Arc::from(b".".as_slice()), ino)], rwsem));
 
-            addr_of_mut_field!(inode, size).write(1.into());
-            addr_of_mut_field!(inode, mode).write((S_IFDIR | (mode & 0o777)).into());
-            addr_of_mut_field!(inode, nlink).write(1.into()); // link from `.` to itself
+            addr_of_mut_field!(&mut *inode, size).write(1.into());
+            addr_of_mut_field!(&mut *inode, mode).write((S_IFDIR | (mode & 0o777)).into());
+            addr_of_mut_field!(&mut *inode, nlink).write(1.into()); // link from `.` to itself
         })
     }
 
@@ -229,8 +229,8 @@ impl SymlinkInode {
             let len = target.len();
             addr_of_mut_field!(inode, target).write(target);
 
-            addr_of_mut_field!(inode, mode).write((S_IFLNK | 0o777).into());
-            addr_of_mut_field!(inode, size).write((len as u64).into());
+            addr_of_mut_field!(&mut *inode, mode).write((S_IFLNK | 0o777).into());
+            addr_of_mut_field!(&mut *inode, size).write((len as u64).into());
         })
     }
 }
@@ -258,8 +258,8 @@ impl FileInode {
         Self::new_locked(ino, vfs, |inode, rwsem| unsafe {
             addr_of_mut_field!(inode, filedata).write(Locked::new(vec![], rwsem));
 
-            addr_of_mut_field!(inode, mode).write((S_IFREG | (mode & 0o777)).into());
-            addr_of_mut_field!(inode, nlink).write(1.into());
+            addr_of_mut_field!(&mut *inode, mode).write((S_IFREG | (mode & 0o777)).into());
+            addr_of_mut_field!(&mut *inode, nlink).write(1.into());
         })
     }
 }

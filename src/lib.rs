@@ -135,6 +135,7 @@ async fn init_process(early_kstack: PRange) {
 
     #[cfg(target_arch = "riscv64")]
     {
+        driver::serial::init().unwrap();
         driver::virtio::init_virtio_devices();
         driver::e1000e::register_e1000e_driver();
         driver::ahci::register_ahci_driver();

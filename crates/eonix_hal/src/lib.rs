@@ -1,6 +1,7 @@
 #![no_std]
 #![feature(allocator_api)]
 #![feature(doc_notable_trait)]
+#![feature(impl_trait_in_assoc_type)]
 
 pub(crate) mod arch;
 

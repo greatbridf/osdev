@@ -15,10 +15,7 @@ use riscv::register::stvec::TrapMode;
 use riscv::register::{scause, sepc, stval};
 use riscv::{
     asm::sfence_vma_all,
-    register::{
-        sie,
-        stvec::{self, Stvec},
-    },
+    register::stvec::{self, Stvec},
 };
 use sbi::SbiError;
 

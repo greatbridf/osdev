@@ -13,6 +13,7 @@ use alloc::{format, sync::Arc};
 use control::AdapterControl;
 use defs::*;
 use eonix_mm::address::{AddrOps as _, PAddr};
+use eonix_runtime::task::Task;
 use eonix_sync::SpinIrq as _;
 use port::AdapterPort;
 
@@ -132,7 +133,7 @@ impl Device<'static> {
                     port,
                 )?;
 
-                port.partprobe()?;
+                Task::block_on(port.partprobe())?;
 
                 Ok(())
             })() {

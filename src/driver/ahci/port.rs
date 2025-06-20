@@ -1,4 +1,4 @@
-use super::command::{Command, IdentifyCommand, ReadLBACommand};
+use super::command::{Command, IdentifyCommand, ReadLBACommand, WriteLBACommand};
 use super::slot::CommandSlot;
 use super::stats::AdapterPortStats;
 use super::{
@@ -275,13 +275,33 @@ impl BlockRequestQueue for AdapterPort<'_> {
     }
 
     fn submit(&self, req: BlockDeviceRequest) -> KResult<()> {
-        // TODO: check disk size limit using newtype
-        if req.count > 65535 {
-            return Err(EINVAL);
+        match req {
+            BlockDeviceRequest::Read {
+                sector,
+                count,
+                buffer,
+            } => {
+                if count > 65535 {
+                    return Err(EINVAL);
+                }
+
+                let command = ReadLBACommand::new(buffer, sector, count as u16)?;
+
+                self.send_command(&command)
+            }
+            BlockDeviceRequest::Write {
+                sector,
+                count,
+                buffer,
+            } => {
+                if count > 65535 {
+                    return Err(EINVAL);
+                }
+
+                let command = WriteLBACommand::new(buffer, sector, count as u16)?;
+
+                self.send_command(&command)
+            }
         }
-
-        let command = ReadLBACommand::new(req.buffer, req.sector, req.count as u16)?;
-
-        self.send_command(&command)
     }
 }

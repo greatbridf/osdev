@@ -8,9 +8,12 @@ use eonix_mm::address::VAddr;
 /// and will be used in the HAL crates.
 #[doc(notable_trait)]
 pub trait RawTrapContext: Copy {
+    type FIrq: FnOnce(fn(irqno: usize));
+    type FTimer: FnOnce(fn());
+
     fn new() -> Self;
 
-    fn trap_type(&self) -> TrapType;
+    fn trap_type(&self) -> TrapType<Self::FIrq, Self::FTimer>;
 
     fn get_program_counter(&self) -> usize;
     fn get_stack_pointer(&self) -> usize;
@@ -56,11 +59,15 @@ pub trait IrqState {
 }
 
 /// The reason that caused the trap.
-pub enum TrapType {
+pub enum TrapType<FIrq, FTimer>
+where
+    FIrq: FnOnce(fn(irqno: usize)),
+    FTimer: FnOnce(fn()),
+{
     Syscall { no: usize, args: [usize; 6] },
     Fault(Fault),
-    Irq(usize),
-    Timer,
+    Irq { callback: FIrq },
+    Timer { callback: FTimer },
 }
 
 /// A marker type that indicates that the type is a raw trap context.

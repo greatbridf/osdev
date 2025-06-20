@@ -1,6 +1,8 @@
 use super::{
     config::{self, mm::*},
     console::write_str,
+    cpu::CPUID,
+    time::set_next_timer,
     trap::TRAP_SCRATCH,
 };
 use crate::{
@@ -8,7 +10,6 @@ use crate::{
         cpu::CPU,
         fdt::{init_dtb_and_fdt, FdtExt},
         mm::{ArchPhysAccess, FreeRam, PageAttribute64, GLOBAL_PAGE_TABLE},
-        interrupt::enable_timer_interrupt,
     },
     bootstrap::BootStrapData,
     mm::{ArchMemory, ArchPagingMode, BasicPageAlloc, BasicPageAllocRef, ScopedAllocator},
@@ -209,9 +210,11 @@ fn setup_cpu(alloc: impl PageAlloc, hart_id: usize) {
         }
     });
 
+    CPUID.set(hart_id);
+
     let mut cpu = CPU::local();
     unsafe {
-        cpu.as_mut().init(hart_id);
+        cpu.as_mut().init();
     }
 
     percpu_area.register(cpu.cpuid());
@@ -224,7 +227,7 @@ fn setup_cpu(alloc: impl PageAlloc, hart_id: usize) {
     }
 
     // set current hart's mtimecmp register
-    enable_timer_interrupt();
+    set_next_timer();
 }
 
 /// TODO

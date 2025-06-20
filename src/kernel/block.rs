@@ -1,11 +1,13 @@
+mod mbr;
+
 use super::{
     constants::ENOENT,
     mem::{paging::Page, AsMemoryBlock as _},
     vfs::DevId,
 };
-use crate::kernel::constants::{EEXIST, EINVAL, EIO};
+use crate::kernel::constants::{EEXIST, EINVAL};
 use crate::{
-    io::{Buffer, FillResult, UninitBuffer},
+    io::{Buffer, FillResult},
     prelude::*,
 };
 use alloc::{
@@ -13,40 +15,44 @@ use alloc::{
     sync::Arc,
 };
 use core::cmp::Ordering;
+use mbr::MBRPartTable;
 
 pub fn make_device(major: u32, minor: u32) -> DevId {
     (major << 8) & 0xff00u32 | minor & 0xffu32
 }
 
+pub struct Partition {
+    pub lba_offset: u64,
+    pub sector_count: u64,
+}
+
+pub trait PartTable {
+    fn partitions(&self) -> impl Iterator<Item = Partition> + use<'_, Self>;
+}
+
 pub trait BlockRequestQueue: Send + Sync {
     /// Maximum number of sectors that can be read in one request
-    ///
     fn max_request_pages(&self) -> u64;
 
     fn submit(&self, req: BlockDeviceRequest) -> KResult<()>;
 }
 
-struct BlockDeviceDisk {
-    queue: Arc<dyn BlockRequestQueue>,
-}
-
-#[allow(dead_code)]
-struct BlockDevicePartition {
-    disk_dev: DevId,
-    offset: u64,
-
-    queue: Arc<dyn BlockRequestQueue>,
-}
-
 enum BlockDeviceType {
-    Disk(BlockDeviceDisk),
-    Partition(BlockDevicePartition),
+    Disk {
+        queue: Arc<dyn BlockRequestQueue>,
+    },
+    Partition {
+        disk_dev: DevId,
+        lba_offset: u64,
+        queue: Arc<dyn BlockRequestQueue>,
+    },
 }
 
 pub struct BlockDevice {
+    /// Unique device identifier, major and minor numbers
     devid: DevId,
-    size: u64,
-    max_pages: u64,
+    /// Total size of the device in sectors (512 bytes each)
+    sector_count: u64,
 
     dev_type: BlockDeviceType,
 }
@@ -73,37 +79,16 @@ impl Ord for BlockDevice {
 
 static BLOCK_DEVICE_LIST: Spin<BTreeMap<DevId, Arc<BlockDevice>>> = Spin::new(BTreeMap::new());
 
-#[derive(Debug, Clone, Copy)]
-#[repr(C)]
-struct MBREntry {
-    attr: u8,
-    chs_start: [u8; 3],
-    part_type: u8,
-    chs_end: [u8; 3],
-    lba_start: u32,
-    cnt: u32,
-}
-
-#[derive(Debug, Clone, Copy)]
-#[repr(C, packed)]
-struct MBR {
-    code: [u8; 446],
-    entries: [MBREntry; 4],
-    magic: [u8; 2],
-}
-
 impl BlockDevice {
     pub fn register_disk(
         devid: DevId,
         size: u64,
         queue: Arc<dyn BlockRequestQueue>,
     ) -> KResult<Arc<Self>> {
-        let max_pages = queue.max_request_pages();
         let device = Arc::new(Self {
             devid,
-            size,
-            max_pages,
-            dev_type: BlockDeviceType::Disk(BlockDeviceDisk { queue }),
+            sector_count: size,
+            dev_type: BlockDeviceType::Disk { queue },
         });
 
         match BLOCK_DEVICE_LIST.lock().entry(devid) {
@@ -122,21 +107,27 @@ impl BlockDevice {
         self.devid
     }
 
+    fn queue(&self) -> &Arc<dyn BlockRequestQueue> {
+        match &self.dev_type {
+            BlockDeviceType::Disk { queue } => queue,
+            BlockDeviceType::Partition { queue, .. } => queue,
+        }
+    }
+
     pub fn register_partition(&self, idx: u32, offset: u64, size: u64) -> KResult<Arc<Self>> {
-        let queue = match self.dev_type {
-            BlockDeviceType::Disk(ref disk) => disk.queue.clone(),
-            BlockDeviceType::Partition(_) => return Err(EINVAL),
+        let queue = match &self.dev_type {
+            BlockDeviceType::Disk { queue } => queue.clone(),
+            BlockDeviceType::Partition { .. } => return Err(EINVAL),
         };
 
         let device = Arc::new(BlockDevice {
             devid: make_device(self.devid >> 8, idx as u32),
-            size,
-            max_pages: self.max_pages,
-            dev_type: BlockDeviceType::Partition(BlockDevicePartition {
+            sector_count: size,
+            dev_type: BlockDeviceType::Partition {
                 disk_dev: self.devid,
-                offset,
+                lba_offset: offset,
                 queue,
-            }),
+            },
         });
 
         match BLOCK_DEVICE_LIST.lock().entry(device.devid()) {
@@ -145,29 +136,21 @@ impl BlockDevice {
         }
     }
 
-    pub fn partprobe(&self) -> KResult<()> {
+    pub async fn partprobe(&self) -> KResult<()> {
         match self.dev_type {
-            BlockDeviceType::Partition(_) => Err(EINVAL),
-            BlockDeviceType::Disk(_) => {
-                let mut mbr: UninitBuffer<MBR> = UninitBuffer::new();
-                self.read_some(0, &mut mbr)?.ok_or(EIO)?;
-                let mbr = mbr.assume_filled_ref()?;
+            BlockDeviceType::Partition { .. } => Err(EINVAL),
+            BlockDeviceType::Disk { .. } => {
+                let mbr_table = MBRPartTable::from_disk(self).await?;
 
-                if mbr.magic != [0x55, 0xaa] {
-                    return Ok(());
-                }
-
-                let entries = mbr.entries;
-
-                for (idx, entry) in entries.iter().enumerate() {
-                    if entry.part_type == 0 {
-                        continue;
-                    }
-
-                    let offset = entry.lba_start as u64;
-                    let size = entry.cnt as u64;
-
-                    self.register_partition(idx as u32 + 1, offset, size)?;
+                for (
+                    idx,
+                    Partition {
+                        lba_offset,
+                        sector_count,
+                    },
+                ) in mbr_table.partitions().enumerate()
+                {
+                    self.register_partition(idx as u32 + 1, lba_offset, sector_count)?;
                 }
 
                 Ok(())
@@ -183,19 +166,32 @@ impl BlockDevice {
     /// - `req.sector` must be within the disk size
     /// - `req.buffer` must be enough to hold the data
     ///
-    pub fn read_raw(&self, mut req: BlockDeviceRequest) -> KResult<()> {
-        // TODO: check disk size limit
-        if req.sector + req.count > self.size {
-            return Err(EINVAL);
-        }
+    pub fn commit_request(&self, mut req: BlockDeviceRequest) -> KResult<()> {
+        // Verify the request parameters.
+        match &mut req {
+            BlockDeviceRequest::Read { sector, count, .. } => {
+                if *sector + *count > self.sector_count {
+                    return Err(EINVAL);
+                }
 
-        match self.dev_type {
-            BlockDeviceType::Disk(ref disk) => disk.queue.submit(req),
-            BlockDeviceType::Partition(ref part) => {
-                req.sector += part.offset;
-                part.queue.submit(req)
+                if let BlockDeviceType::Partition { lba_offset, .. } = &self.dev_type {
+                    // Adjust the sector for partition offset.
+                    *sector += lba_offset;
+                }
+            }
+            BlockDeviceRequest::Write { sector, count, .. } => {
+                if *sector + *count > self.sector_count {
+                    return Err(EINVAL);
+                }
+
+                if let BlockDeviceType::Partition { lba_offset, .. } = &self.dev_type {
+                    // Adjust the sector for partition offset.
+                    *sector += lba_offset;
+                }
             }
         }
+
+        self.queue().submit(req)
     }
 
     /// Read some from the block device, may involve some copy and fragmentation
@@ -234,7 +230,7 @@ impl BlockDevice {
                     pages = core::slice::from_ref(page.as_ref().unwrap());
                 }
                 count => {
-                    nread = count.min(self.max_pages);
+                    nread = count.min(self.queue().max_request_pages());
 
                     let npages = (nread + 15) / 16;
                     let mut _page_vec = Vec::with_capacity(npages as usize);
@@ -246,13 +242,13 @@ impl BlockDevice {
                 }
             }
 
-            let req = BlockDeviceRequest {
+            let req = BlockDeviceRequest::Read {
                 sector: sector_start,
                 count: nread,
                 buffer: &pages,
             };
 
-            self.read_raw(req)?;
+            self.commit_request(req)?;
 
             for page in pages.iter() {
                 // SAFETY: We are the only owner of the page so no one could be mutating it.
@@ -283,8 +279,21 @@ impl BlockDevice {
     }
 }
 
-pub struct BlockDeviceRequest<'lt> {
-    pub sector: u64, // Sector to read from, in 512-byte blocks
-    pub count: u64,  // Number of sectors to read
-    pub buffer: &'lt [Page],
+pub enum BlockDeviceRequest<'lt> {
+    Read {
+        /// Sector to read from, in 512-byte blocks
+        sector: u64,
+        /// Number of sectors to read
+        count: u64,
+        /// Buffer pages to read into
+        buffer: &'lt [Page],
+    },
+    Write {
+        /// Sector to write to, in 512-byte blocks
+        sector: u64,
+        /// Number of sectors to write
+        count: u64,
+        /// Buffer pages to write from
+        buffer: &'lt [Page],
+    },
 }

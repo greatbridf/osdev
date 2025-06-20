@@ -25,8 +25,11 @@ use eonix_runtime::task::Task;
 use posix_types::ctypes::{Long, PtrT};
 use posix_types::open::{AtFlags, OpenFlags};
 use posix_types::signal::SigSet;
-use posix_types::stat::{Stat, StatX, TimeSpec};
+use posix_types::stat::{StatX, TimeSpec};
 use posix_types::syscall_no::*;
+
+#[cfg(not(target_arch = "x86_64"))]
+use posix_types::stat::Stat;
 
 impl FromSyscallArg for OpenFlags {
     fn from_arg(value: usize) -> Self {

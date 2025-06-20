@@ -275,20 +275,30 @@ fn readlink(pathname: *const u8, buffer: *mut u8, bufsize: usize) -> KResult<usi
     sys_readlinkat(thread, FD::AT_FDCWD, pathname, buffer, bufsize)
 }
 
-#[cfg(target_arch = "x86_64")]
-#[eonix_macros::define_syscall(SYS_LLSEEK)]
-fn llseek(fd: FD, offset_high: u32, offset_low: u32, result: *mut u64, whence: u32) -> KResult<()> {
-    let mut result = UserBuffer::new(result as *mut u8, core::mem::size_of::<u64>())?;
+fn do_lseek(thread: &Thread, fd: FD, offset: u64, whence: u32) -> KResult<u64> {
     let file = thread.files.get(fd).ok_or(EBADF)?;
 
-    let offset = ((offset_high as u64) << 32) | offset_low as u64;
-
-    let new_offset = match whence {
+    Ok(match whence {
         SEEK_SET => file.seek(SeekOption::Set(offset as usize))?,
         SEEK_CUR => file.seek(SeekOption::Current(offset as isize))?,
         SEEK_END => file.seek(SeekOption::End(offset as isize))?,
         _ => return Err(EINVAL),
-    } as u64;
+    } as u64)
+}
+
+#[cfg(not(target_arch = "x86_64"))]
+#[eonix_macros::define_syscall(SYS_LSEEK)]
+fn lseek(fd: FD, offset: u64, whence: u32) -> KResult<u64> {
+    do_lseek(thread, fd, offset, whence)
+}
+
+#[cfg(target_arch = "x86_64")]
+#[eonix_macros::define_syscall(SYS_LLSEEK)]
+fn llseek(fd: FD, offset_high: u32, offset_low: u32, result: *mut u64, whence: u32) -> KResult<()> {
+    let mut result = UserBuffer::new(result as *mut u8, core::mem::size_of::<u64>())?;
+    let offset = ((offset_high as u64) << 32) | (offset_low as u64);
+
+    let new_offset = do_lseek(thread, fd, offset, whence)?;
 
     result.copy(&new_offset)?.ok_or(EFAULT)
 }

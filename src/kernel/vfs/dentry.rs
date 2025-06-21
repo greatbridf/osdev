@@ -103,7 +103,7 @@ impl Dentry {
         hasher.finish()
     }
 
-    fn find(self: &Arc<Self>, name: &[u8]) -> KResult<Arc<Self>> {
+    pub fn find(self: &Arc<Self>, name: &[u8]) -> KResult<Arc<Self>> {
         let data = self.data.load();
         let data = data.as_ref().ok_or(ENOENT)?;
 

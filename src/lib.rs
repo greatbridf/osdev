@@ -22,6 +22,7 @@ mod sync;
 
 use crate::kernel::task::alloc_pid;
 use alloc::{ffi::CString, sync::Arc};
+use eonix_log::println;
 use core::{
     hint::spin_loop,
     sync::atomic::{AtomicBool, Ordering},
@@ -146,7 +147,7 @@ async fn init_process(early_kstack: PRange) {
     fs::ext4::init();
 
     let load_info = {
-        // mount fat32 /mnt directory
+        // mount ext4 /mnt directory
         let fs_context = FsContext::global();
         let mnt_dir = Dentry::open(fs_context, Path::new(b"/mnt/").unwrap(), true).unwrap();
 
@@ -156,10 +157,17 @@ async fn init_process(early_kstack: PRange) {
             &mnt_dir,
             "/dev/sda",
             "/mnt",
-            "fat32",
+            "ext4",
             MS_RDONLY | MS_NOATIME | MS_NODEV | MS_NOSUID,
         )
         .unwrap();
+
+        println!("{:?}", mnt_dir.find(b"musl"));
+
+        let musl_dir = Dentry::open(fs_context, Path::new(b"/mnt/musl/").unwrap(), true).unwrap();
+        println!("{:?}", musl_dir.find(b"basic"));
+        let basic_dir = Dentry::open(fs_context, Path::new(b"/mnt/musl/basic/").unwrap(), true).unwrap();
+        println!("{:?}", basic_dir.find(b"run-all.sh"));
 
         let init_names = [
             &b"/sbin/init"[..],

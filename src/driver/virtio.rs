@@ -15,6 +15,7 @@ use eonix_mm::{
     address::{Addr, PAddr, PhysAccess},
     paging::PFN,
 };
+use eonix_runtime::task::Task;
 use eonix_sync::Spin;
 use virtio_drivers::{
     device::blk::VirtIOBlk,
@@ -113,8 +114,7 @@ pub fn init_virtio_devices() {
                     )
                     .expect("Failed to register VirtIO Block device");
 
-                    block_device
-                        .partprobe()
+                    Task::block_on(block_device.partprobe())
                         .expect("Failed to probe partitions for VirtIO Block device");
 
                     disk_id += 1;

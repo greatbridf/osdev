@@ -1,5 +1,6 @@
 use core::arch::asm;
 
+#[derive(Clone, Copy)]
 pub struct Port8 {
     no: u16,
 }

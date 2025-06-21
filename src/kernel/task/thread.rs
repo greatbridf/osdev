@@ -7,7 +7,7 @@ use crate::{
         interrupt::default_irq_handler,
         syscall::{syscall_handlers, SyscallHandler},
         task::{clone::CloneArgs, CloneFlags},
-        timer::timer_interrupt,
+        timer::{should_reschedule, timer_interrupt},
         user::UserPointerMut,
         vfs::{filearray::FileArray, FsContext},
     },
@@ -383,10 +383,13 @@ impl Thread {
                     self.signal_list.raise(Signal::SIGILL);
                 }
                 TrapType::Fault(Fault::Unknown(_)) => unimplemented!("Unhandled fault"),
-                TrapType::Irq(irqno) => default_irq_handler(irqno),
-                TrapType::Timer => {
-                    timer_interrupt();
-                    yield_now().await;
+                TrapType::Irq { callback } => callback(default_irq_handler),
+                TrapType::Timer { callback } => {
+                    callback(timer_interrupt);
+
+                    if should_reschedule() {
+                        yield_now().await;
+                    }
                 }
                 TrapType::Syscall { no, args } => {
                     if let Some(retval) = self.handle_syscall(no, args) {

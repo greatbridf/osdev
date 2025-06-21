@@ -29,12 +29,5 @@ pub fn init_console() {
 
     let console = Arc::new(SbiConsole);
     let terminal = Terminal::new(console.clone());
-    crate::kernel::console::set_console(terminal.clone()).expect("Failed to set console");
-
-    CharDevice::register(
-        make_device(4, 64),
-        Arc::from("sbi_console"),
-        CharDeviceType::Terminal(terminal),
-    )
-    .expect("Failed to register SBI console as a character device");
+    crate::kernel::console::set_console(terminal).expect("Failed to set console");
 }

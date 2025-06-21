@@ -146,12 +146,57 @@ impl InterruptControl {
     pub fn setup_timer(&self) {
         self.apic_base.task_priority().write(0);
         self.apic_base.timer_divide().write(0x3); // Divide by 16
-        self.apic_base.timer_register().write(0x20040);
+        self.apic_base.timer_register().write(0x0040);
 
-        // TODO: Get the bus frequency from...?
-        let freq = 200;
-        let count = freq * 1_000_000 / 16 / 100;
-        self.apic_base.timer_initial_count().write(count as u32);
+        // Setup the PIT to generate interrupts at 100Hz.
+        unsafe {
+            asm!(
+                "in $0x61, %al",
+                "and $0xfd, %al",
+                "or $0x1, %al",
+                "out %al, %dx",
+                "mov $0xb2, %al",
+                "out %al, $0x43",
+                "mov $0x9b, %al",
+                "out %al, $0x42",
+                "in $0x60, %al",
+                "mov $0x2e, %al",
+                "out %al, $0x42",
+                "in $0x61, %al",
+                "and $0xfe, %al",
+                "out %al, $0x61",
+                "or $0x1, %al",
+                "out %al, $0x61",
+                out("eax") _,
+                out("edx") _,
+                options(att_syntax, nomem, nostack, preserves_flags),
+            );
+        }
+
+        self.apic_base.timer_initial_count().write(u32::MAX);
+
+        unsafe {
+            asm!(
+                "2:",
+                "in $0x61, %al",
+                "and $0x20, %al",
+                "jz 2b",
+                out("ax") _,
+                options(att_syntax, nomem, nostack, preserves_flags),
+            )
+        }
+
+        self.apic_base.timer_register().write(0x10000);
+
+        let counts = self.apic_base.timer_current_count().read();
+        let freq = (u32::MAX - counts) as u64 * 16 * 100;
+
+        self.apic_base
+            .timer_initial_count()
+            .write((freq / 16 / 1_000) as u32);
+
+        self.apic_base.timer_register().write(0x20040);
+        self.apic_base.timer_divide().write(0x3); // Divide by 16
     }
 
     pub fn setup_idt(self: Pin<&mut Self>) {

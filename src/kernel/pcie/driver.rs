@@ -29,7 +29,6 @@ pub fn register_driver(driver: impl PCIDriver + 'static) -> KResult<()> {
     };
 
     let device = PCIE_DEVICES.lock().find(&index).clone_pointer();
-
     if let Some(device) = device {
         driver.handle_device(device)?;
     };

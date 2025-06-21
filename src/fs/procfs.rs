@@ -119,8 +119,8 @@ impl DirInode {
     pub fn new(ino: Ino, vfs: Weak<ProcFs>) -> Arc<Self> {
         Self::new_locked(ino, vfs, |inode, rwsem| unsafe {
             addr_of_mut_field!(inode, entries).write(Locked::new(vec![], rwsem));
-            addr_of_mut_field!(inode, mode).write((S_IFDIR | 0o755).into());
-            addr_of_mut_field!(inode, nlink).write(1.into());
+            addr_of_mut_field!(&mut *inode, mode).write((S_IFDIR | 0o755).into());
+            addr_of_mut_field!(&mut *inode, nlink).write(1.into());
         })
     }
 }

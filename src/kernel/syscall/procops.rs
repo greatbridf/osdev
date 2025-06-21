@@ -1,3 +1,5 @@
+use core::time::Duration;
+
 use super::sysinfo::TimeVal;
 use super::SyscallNoReturn;
 use crate::io::Buffer;
@@ -8,9 +10,10 @@ use crate::kernel::constants::{
 use crate::kernel::mem::PageBuffer;
 use crate::kernel::task::{
     do_clone, futex_wait, futex_wake, FutexFlags, FutexOp, ProcessList, ProgramLoader,
-    SignalAction, Thread, WaitObject, WaitType,
+    SignalAction, Thread, WaitType,
 };
 use crate::kernel::task::{parse_futexop, CloneArgs};
+use crate::kernel::timer::sleep;
 use crate::kernel::user::dataflow::{CheckedUserPointer, UserString};
 use crate::kernel::user::{UserPointer, UserPointerMut};
 use crate::kernel::vfs::{self, dentry::Dentry};
@@ -43,6 +46,25 @@ bitflags! {
         const WUNTRACED = 2;
         const WCONTINUED = 8;
     }
+}
+
+#[eonix_macros::define_syscall(SYS_NANOSLEEP)]
+fn nanosleep(req: *const (u32, u32), rem: *mut (u32, u32)) -> KResult<usize> {
+    let req = UserPointer::new(req)?.read()?;
+    let rem = if rem.is_null() {
+        None
+    } else {
+        Some(UserPointerMut::new(rem)?)
+    };
+
+    let duration = Duration::from_secs(req.0 as u64) + Duration::from_nanos(req.1 as u64);
+    Task::block_on(sleep(duration));
+
+    if let Some(rem) = rem {
+        rem.write((0, 0))?;
+    }
+
+    Ok(0)
 }
 
 #[eonix_macros::define_syscall(SYS_UMASK)]

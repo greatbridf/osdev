@@ -1,6 +1,3 @@
-use core::time::Duration;
-
-use super::sysinfo::TimeVal;
 use super::SyscallNoReturn;
 use crate::io::Buffer;
 use crate::kernel::constants::{EINVAL, ENOENT, ENOTDIR, ERANGE, ESRCH};
@@ -23,6 +20,7 @@ use alloc::borrow::ToOwned;
 use alloc::ffi::CString;
 use bitflags::bitflags;
 use core::ptr::NonNull;
+use core::time::Duration;
 use eonix_hal::processor::UserTLS;
 use eonix_hal::traits::trap::RawTrapContext;
 use eonix_mm::address::Addr as _;
@@ -31,6 +29,7 @@ use eonix_sync::AsProof as _;
 use posix_types::constants::{P_ALL, P_PID};
 use posix_types::ctypes::PtrT;
 use posix_types::signal::{SigAction, SigInfo, SigSet, Signal};
+use posix_types::stat::TimeVal;
 use posix_types::{syscall_no::*, SIGNAL_NOW};
 
 #[repr(C)]

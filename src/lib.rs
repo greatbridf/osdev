@@ -139,6 +139,7 @@ async fn init_process(early_kstack: PRange) {
         driver::virtio::init_virtio_devices();
         driver::e1000e::register_e1000e_driver();
         driver::ahci::register_ahci_driver();
+        driver::goldfish_rtc::probe();
     }
 
     fs::tmpfs::init();

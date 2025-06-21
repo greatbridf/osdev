@@ -5,7 +5,7 @@ use super::{
     task::{ProcessList, Thread},
     terminal::Terminal,
     vfs::{
-        file::{File, TerminalFile},
+        file::{File, FileType, TerminalFile},
         DevId,
     },
 };
@@ -20,6 +20,7 @@ use alloc::{
 };
 use eonix_runtime::task::Task;
 use eonix_sync::AsProof as _;
+use posix_types::open::OpenFlags;
 
 pub trait VirtualCharDevice: Send + Sync {
     fn read(&self, buffer: &mut dyn Buffer) -> KResult<usize>;
@@ -71,7 +72,7 @@ impl CharDevice {
         }
     }
 
-    pub fn open(self: &Arc<Self>) -> KResult<Arc<File>> {
+    pub fn open(self: &Arc<Self>, flags: OpenFlags) -> KResult<Arc<File>> {
         Ok(match &self.device {
             CharDeviceType::Terminal(terminal) => {
                 let procs = Task::block_on(ProcessList::get().read());
@@ -87,9 +88,9 @@ impl CharDevice {
                     )));
                 }
 
-                TerminalFile::new(terminal.clone())
+                TerminalFile::new(terminal.clone(), flags)
             }
-            CharDeviceType::Virtual(_) => Arc::new(File::CharDev(self.clone())),
+            CharDeviceType::Virtual(_) => File::new(flags, FileType::CharDev(self.clone())),
         })
     }
 }

@@ -1,5 +1,6 @@
 use crate::io::Stream;
 use crate::kernel::constants::{EINVAL, EIO, EISDIR};
+use crate::kernel::timer::Instant;
 use crate::{
     io::Buffer,
     kernel::constants::{S_IFBLK, S_IFCHR, S_IFDIR, S_IFLNK, S_IFREG},
@@ -42,6 +43,9 @@ impl NodeInode {
 
             addr_of_mut_field!(&mut *inode, mode).write(mode.into());
             addr_of_mut_field!(&mut *inode, nlink).write(1.into());
+            addr_of_mut_field!(&mut *inode, ctime).write(Spin::new(Instant::now()));
+            addr_of_mut_field!(&mut *inode, mtime).write(Spin::new(Instant::now()));
+            addr_of_mut_field!(&mut *inode, atime).write(Spin::new(Instant::now()));
         })
     }
 }
@@ -67,6 +71,9 @@ impl DirectoryInode {
             addr_of_mut_field!(&mut *inode, size).write(1.into());
             addr_of_mut_field!(&mut *inode, mode).write((S_IFDIR | (mode & 0o777)).into());
             addr_of_mut_field!(&mut *inode, nlink).write(1.into()); // link from `.` to itself
+            addr_of_mut_field!(&mut *inode, ctime).write(Spin::new(Instant::now()));
+            addr_of_mut_field!(&mut *inode, mtime).write(Spin::new(Instant::now()));
+            addr_of_mut_field!(&mut *inode, atime).write(Spin::new(Instant::now()));
         })
     }
 
@@ -77,6 +84,7 @@ impl DirectoryInode {
 
         // SAFETY: `rwsem` has done the synchronization
         self.size.fetch_add(1, Ordering::Relaxed);
+        *self.mtime.lock() = Instant::now();
 
         self.entries.access_mut(dlock).push((name, file.ino));
     }
@@ -182,6 +190,8 @@ impl Inode for DirectoryInode {
             self.size.fetch_sub(1, Ordering::Relaxed) - 1
         );
 
+        *self.mtime.lock() = Instant::now();
+
         // SAFETY: `flock` has done the synchronization
         let file_nlink = file.nlink.fetch_sub(1, Ordering::Relaxed) - 1;
 
@@ -213,6 +223,8 @@ impl Inode for DirectoryInode {
         let old = self.mode.load(Ordering::Relaxed);
         self.mode
             .store((old & !0o777) | (mode & 0o777), Ordering::Relaxed);
+        *self.ctime.lock() = Instant::now();
+
         Ok(())
     }
 }
@@ -231,6 +243,9 @@ impl SymlinkInode {
 
             addr_of_mut_field!(&mut *inode, mode).write((S_IFLNK | 0o777).into());
             addr_of_mut_field!(&mut *inode, size).write((len as u64).into());
+            addr_of_mut_field!(&mut *inode, ctime).write(Spin::new(Instant::now()));
+            addr_of_mut_field!(&mut *inode, mtime).write(Spin::new(Instant::now()));
+            addr_of_mut_field!(&mut *inode, atime).write(Spin::new(Instant::now()));
         })
     }
 }
@@ -260,6 +275,9 @@ impl FileInode {
 
             addr_of_mut_field!(&mut *inode, mode).write((S_IFREG | (mode & 0o777)).into());
             addr_of_mut_field!(&mut *inode, nlink).write(1.into());
+            addr_of_mut_field!(&mut *inode, ctime).write(Spin::new(Instant::now()));
+            addr_of_mut_field!(&mut *inode, mtime).write(Spin::new(Instant::now()));
+            addr_of_mut_field!(&mut *inode, atime).write(Spin::new(Instant::now()));
         })
     }
 }
@@ -310,6 +328,8 @@ impl Inode for FileInode {
 
         // SAFETY: `lock` has done the synchronization
         self.size.store(pos as u64, Ordering::Relaxed);
+        *self.mtime.lock() = Instant::now();
+
         Ok(pos - offset)
     }
 
@@ -320,6 +340,8 @@ impl Inode for FileInode {
 
         // SAFETY: `lock` has done the synchronization
         self.size.store(length as u64, Ordering::Relaxed);
+        *self.mtime.lock() = Instant::now();
+
         filedata.resize(length, 0);
 
         Ok(())
@@ -333,6 +355,8 @@ impl Inode for FileInode {
         let old = self.mode.load(Ordering::Relaxed);
         self.mode
             .store((old & !0o777) | (mode & 0o777), Ordering::Relaxed);
+        *self.ctime.lock() = Instant::now();
+
         Ok(())
     }
 }

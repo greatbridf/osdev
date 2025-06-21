@@ -1,9 +1,10 @@
-use super::{dentry::Dentry, s_isblk, s_ischr, vfs::Vfs, DevId, TimeSpec};
+use super::{dentry::Dentry, s_isblk, s_ischr, vfs::Vfs, DevId};
 use crate::io::Stream;
 use crate::kernel::constants::{
     EINVAL, EISDIR, ENOTDIR, EPERM, STATX_ATIME, STATX_BLOCKS, STATX_CTIME, STATX_GID, STATX_INO,
     STATX_MODE, STATX_MTIME, STATX_NLINK, STATX_SIZE, STATX_TYPE, STATX_UID, S_IFDIR, S_IFMT,
 };
+use crate::kernel::timer::Instant;
 use crate::{io::Buffer, prelude::*};
 use alloc::sync::{Arc, Weak};
 use core::{
@@ -42,9 +43,9 @@ pub struct InodeData {
     pub gid: AtomicGid,
     pub mode: AtomicMode,
 
-    pub atime: Spin<TimeSpec>,
-    pub ctime: Spin<TimeSpec>,
-    pub mtime: Spin<TimeSpec>,
+    pub atime: Spin<Instant>,
+    pub ctime: Spin<Instant>,
+    pub mtime: Spin<Instant>,
 
     pub rwsem: RwLock<()>,
 
@@ -56,9 +57,9 @@ impl InodeData {
         Self {
             ino,
             vfs,
-            atime: Spin::new(TimeSpec::default()),
-            ctime: Spin::new(TimeSpec::default()),
-            mtime: Spin::new(TimeSpec::default()),
+            atime: Spin::new(Instant::default()),
+            ctime: Spin::new(Instant::default()),
+            mtime: Spin::new(Instant::default()),
             rwsem: RwLock::new(()),
             size: AtomicU64::new(0),
             nlink: AtomicNlink::new(0),
@@ -161,23 +162,20 @@ pub trait Inode: Send + Sync + InodeInner {
         }
 
         if mask & STATX_ATIME != 0 {
-            let atime = self.atime.lock();
-            stat.stx_atime.tv_nsec = atime.nsec as _;
-            stat.stx_atime.tv_sec = atime.sec as _;
+            let atime = *self.atime.lock();
+            stat.stx_atime = atime.into();
             stat.stx_mask |= STATX_ATIME;
         }
 
         if mask & STATX_MTIME != 0 {
-            let mtime = self.mtime.lock();
-            stat.stx_mtime.tv_nsec = mtime.nsec as _;
-            stat.stx_mtime.tv_sec = mtime.sec as _;
+            let mtime = *self.mtime.lock();
+            stat.stx_mtime = mtime.into();
             stat.stx_mask |= STATX_MTIME;
         }
 
         if mask & STATX_CTIME != 0 {
-            let ctime = self.ctime.lock();
-            stat.stx_ctime.tv_nsec = ctime.nsec as _;
-            stat.stx_ctime.tv_sec = ctime.sec as _;
+            let ctime = *self.ctime.lock();
+            stat.stx_ctime = ctime.into();
             stat.stx_mask |= STATX_CTIME;
         }
 

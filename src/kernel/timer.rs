@@ -9,6 +9,7 @@ use core::{
 };
 use eonix_hal::processor::CPU;
 use eonix_sync::{Spin, SpinIrq as _};
+use posix_types::stat::{StatXTimestamp, TimeSpec, TimeVal};
 
 static TICKS: AtomicUsize = AtomicUsize::new(0);
 static WAKEUP_TICK: AtomicUsize = AtomicUsize::new(usize::MAX);
@@ -17,6 +18,7 @@ static SLEEPERS_LIST: Spin<BinaryHeap<Reverse<Sleepers>>> = Spin::new(BinaryHeap
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
 pub struct Ticks(usize);
 
+#[derive(Default, Clone, Copy)]
 pub struct Instant {
     secs_since_epoch: u64,
     nsecs_within: u32,
@@ -74,6 +76,13 @@ impl Ticks {
 }
 
 impl Instant {
+    pub const fn default() -> Self {
+        Instant {
+            secs_since_epoch: 0,
+            nsecs_within: 0,
+        }
+    }
+
     pub fn new(secs_since_epoch: u64, nsecs_within: u32) -> Self {
         Instant {
             secs_since_epoch,
@@ -99,6 +108,33 @@ impl Instant {
 
     pub fn since_epoch(&self) -> Duration {
         Duration::new(self.secs_since_epoch, self.nsecs_within)
+    }
+}
+
+impl From<Instant> for TimeSpec {
+    fn from(value: Instant) -> Self {
+        Self {
+            tv_sec: value.secs_since_epoch,
+            tv_nsec: value.nsecs_within,
+        }
+    }
+}
+
+impl From<Instant> for TimeVal {
+    fn from(value: Instant) -> Self {
+        Self {
+            tv_sec: value.secs_since_epoch,
+            tv_usec: value.nsecs_within / 1_000,
+        }
+    }
+}
+
+impl From<Instant> for StatXTimestamp {
+    fn from(value: Instant) -> Self {
+        Self {
+            tv_sec: value.secs_since_epoch,
+            tv_nsec: value.nsecs_within,
+        }
     }
 }
 

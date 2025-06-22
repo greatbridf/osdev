@@ -753,7 +753,7 @@ where
             .as_page_attr()
             .expect("Not a page attribute");
 
-        if !from_attr.contains(PageAttribute::PRESENT) {
+        if !from_attr.intersects(PageAttribute::PRESENT | PageAttribute::MAPPED) {
             return;
         }
 

@@ -46,8 +46,10 @@ BINARY_DIR := $(BINARY_DIR_BASE)/$(MODE)
 QEMU_ARGS += \
 	-machine virt -kernel $(BINARY_DIR)/eonix_kernel \
 	-device virtio-blk-device,drive=disk0,bus=virtio-mmio-bus.0 \
+	-device virtio-blk-device,drive=disk1,bus=virtio-mmio-bus.1 \
 	-device virtio-net-device,netdev=mynet0 \
-	-drive id=disk0,file=test/sdcard-rv.img,format=raw,if=none \
+	-drive id=disk0,file=build/boot-riscv64.img,format=raw,if=none \
+	-drive id=disk1,file=test/sdcard-rv.img,format=raw,if=none \
 	-netdev user,id=mynet0 \
 	-rtc base=utc
 
@@ -122,7 +124,7 @@ build/kernel.sym: $(BINARY_DIR)/eonix_kernel
 
 build/fs-%.img: user-programs/init_script_%.sh script/build-img.sh $(USER_PROGRAMS)
 	ARCH=$* OUTPUT=$@ sh script/build-img.sh
-	
+
 build/mbr.bin: $(BINARY_DIR)/eonix_kernel
 	cargo objcopy -q $(CARGO_FLAGS) -- -O binary -j .mbr build/mbr.bin
 

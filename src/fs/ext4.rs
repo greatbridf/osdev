@@ -229,7 +229,7 @@ impl MountCreator for Ext4MountCreator {
     fn create_mount(&self, _source: &str, _flags: u64, mp: &Arc<Dentry>) -> KResult<Mount> {
         // TODO: temporarily the second disk, should generate from _source
         let (ext4fs, root_inode) = 
-            Ext4Fs::create(make_device(8, 0))?;
+            Ext4Fs::create(make_device(8, 16))?;
 
         Mount::new(mp, ext4fs, root_inode)
     }

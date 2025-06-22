@@ -256,3 +256,64 @@ async fn futex_requeue(
 
     todo!()
 }
+
+// The purpose of the robust futex list is to ensure that if a thread
+// accidentally fails to unlock a futex before terminating or calling
+// execve(2), another thread that is waiting on that futex is
+// notified that the former owner of the futex has died.  This
+// notification consists of two pieces: the FUTEX_OWNER_DIED bit is
+// set in the futex word, and the kernel performs a futex(2)
+// FUTEX_WAKE operation on one of the threads waiting on the futex.
+// https://man7.org/linux/man-pages/man2/get_robust_list.2.html
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+struct RobustList {
+    next: usize, // Pointer to the next RobustList entry
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct RobustListHead {
+    robust_list: RobustList,
+    futex_offset: isize,
+    list_op_pending: usize,
+}
+
+impl RobustListHead {
+    fn futex_addr(&self, entry_ptr: usize) -> usize {
+        (self.futex_offset + entry_ptr as isize) as usize
+    }
+
+    pub async fn wake_all(&self) -> KResult<()> {
+        let end_ptr = self.robust_list.next;
+        let mut entry_ptr = end_ptr;
+
+        if entry_ptr == 0 {
+            return Ok(());
+        }
+
+        loop {
+            // Wake up the futex at the entry_ptr address.
+            let futex_addr = self.futex_addr(entry_ptr);
+            futex_wake(futex_addr, None, usize::MAX as u32).await?;
+
+            // Move to the next entry in the robust list.
+            let robust_list = UserPointer::new(entry_ptr as *const RobustList)?.read()?;
+
+            entry_ptr = robust_list.next;
+
+            if entry_ptr == end_ptr || entry_ptr == 0 {
+                break;
+            }
+        }
+
+        if self.list_op_pending != 0 {
+            // If there is a pending operation, we need to wake it up.
+            let pending_futex_addr = self.futex_addr(self.list_op_pending);
+            futex_wake(pending_futex_addr, None, usize::MAX as u32).await?;
+        }
+
+        Ok(())
+    }
+}

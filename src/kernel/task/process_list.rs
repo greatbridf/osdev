@@ -145,6 +145,10 @@ impl ProcessList {
                 .expect("should wake up child tid");
         }
 
+        if let Some(robust_list) = thread.get_robust_list() {
+            let _ = robust_list.wake_all().await;
+        }
+
         // main thread exit
         if thread.tid == process.pid {
             assert_eq!(thread.tid, process.pid);

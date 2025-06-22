@@ -10,7 +10,7 @@ mod signal;
 mod thread;
 
 pub use clone::{do_clone, CloneArgs, CloneFlags};
-pub use futex::{futex_wait, futex_wake, parse_futexop, FutexFlags, FutexOp};
+pub use futex::{futex_wait, futex_wake, parse_futexop, FutexFlags, FutexOp, RobustListHead};
 pub use kernel_stack::KernelStack;
 pub use loader::ProgramLoader;
 pub use process::{alloc_pid, Process, ProcessBuilder, WaitObject, WaitType};

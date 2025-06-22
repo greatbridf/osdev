@@ -6,7 +6,7 @@ use crate::{
     kernel::{
         interrupt::default_irq_handler,
         syscall::{syscall_handlers, SyscallHandler},
-        task::{clone::CloneArgs, CloneFlags},
+        task::{clone::CloneArgs, futex::RobustListHead, CloneFlags},
         timer::{should_reschedule, timer_interrupt},
         user::UserPointerMut,
         vfs::{filearray::FileArray, FsContext},
@@ -74,6 +74,8 @@ struct ThreadInner {
     set_child_tid: Option<usize>,
 
     clear_child_tid: Option<usize>,
+
+    robust_list: Option<RobustListHead>,
 }
 
 pub struct Thread {
@@ -251,6 +253,7 @@ impl ThreadBuilder {
                 tls: self.tls,
                 set_child_tid: self.set_child_tid,
                 clear_child_tid: self.clear_child_tid,
+                robust_list: None,
             }),
         });
 
@@ -286,6 +289,14 @@ impl Thread {
     pub fn set_user_tls(&self, tls: UserTLS) -> KResult<()> {
         self.inner.lock().tls = Some(tls);
         Ok(())
+    }
+
+    pub fn set_robust_list(&self, robust_list: Option<RobustListHead>) {
+        self.inner.lock().robust_list = robust_list;
+    }
+
+    pub fn get_robust_list(&self) -> Option<RobustListHead> {
+        self.inner.lock().robust_list
     }
 
     pub fn set_name(&self, name: Arc<[u8]>) {

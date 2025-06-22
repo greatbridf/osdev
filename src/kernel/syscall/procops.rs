@@ -10,7 +10,7 @@ use crate::kernel::constants::{
 use crate::kernel::mem::PageBuffer;
 use crate::kernel::task::{
     do_clone, futex_wait, futex_wake, FutexFlags, FutexOp, ProcessList, ProgramLoader,
-    SignalAction, Thread, WaitType,
+    RobustListHead, SignalAction, Thread, WaitType,
 };
 use crate::kernel::task::{parse_futexop, CloneArgs};
 use crate::kernel::timer::sleep;
@@ -171,6 +171,11 @@ fn execve(exec: *const u8, argv: *const PtrT, envp: *const PtrT) -> KResult<Sysc
     // TODO: When `execve` is called by one of the threads in a process, the other threads
     //       should be terminated and `execve` is performed in the thread group leader.
     if let Ok(load_info) = ProgramLoader::parse(dentry.clone())?.load(argv, envp) {
+        if let Some(robust_list) = thread.get_robust_list() {
+            let _ = Task::block_on(robust_list.wake_all());
+            thread.set_robust_list(None);
+        }
+
         unsafe {
             // SAFETY: We are doing execve, all other threads are terminated.
             thread.process.mm_list.replace(Some(load_info.mm_list));
@@ -758,6 +763,18 @@ fn futex(
             todo!()
         }
     }
+}
+
+#[eonix_macros::define_syscall(SYS_SET_ROBUST_LIST)]
+fn set_robust_list(head: *const RobustListHead, len: usize) -> KResult<()> {
+    if len != size_of::<RobustListHead>() {
+        return Err(EINVAL);
+    }
+
+    let robust_list_head = UserPointer::new(head)?.read()?;
+
+    thread.set_robust_list(Some(robust_list_head));
+    Ok(())
 }
 
 #[eonix_macros::define_syscall(SYS_RT_SIGRETURN)]

@@ -42,9 +42,9 @@ static BOOT_STACK: [u8; 4096 * 16] = [0; 4096 * 16];
 static BOOT_STACK_START: &'static [u8; 4096 * 16] = &BOOT_STACK;
 
 #[unsafe(link_section = ".bootstrap.stack")]
-static BOOT_AP_STACK: [u8; 512] = [0; 512];
+static TEMP_AP_STACK: [u8; 32 * 8] = [0; 32 * 8];
 
-static BOOT_AP_STACK_START: &'static [u8; 512] = &BOOT_AP_STACK;
+static TEMP_AP_STACK_START: &'static [u8; 32 * 8] = &TEMP_AP_STACK;
 
 #[repr(C, align(4096))]
 struct PageTable([u64; PTES_PER_PAGE]);
@@ -244,6 +244,17 @@ fn setup_cpu(alloc: impl PageAlloc, hart_id: usize) {
     }
 }
 
+fn get_ap_start_addr() -> usize {
+    unsafe extern "C" {
+        fn _ap_start();
+    }
+    static AP_START_VALUE:&'static unsafe extern "C" fn() =
+        &(_ap_start as unsafe extern "C" fn());
+    unsafe {
+        (AP_START_VALUE as *const _ as *const usize).read_volatile()
+    }
+}
+
 fn bootstrap_smp(alloc: impl Allocator, page_alloc: &RefCell<BasicPageAlloc>) {
     let local_hart_id = CPU::local().cpuid();
     let hart_count = FDT.hart_count();
@@ -274,8 +285,7 @@ fn bootstrap_smp(alloc: impl Allocator, page_alloc: &RefCell<BasicPageAlloc>) {
         }
 
         unsafe {
-            // TODO: address
-            hart_start(current_hart_id, PhysicalAddress::new(0x8020_0078), 0);
+            hart_start(current_hart_id, PhysicalAddress::new(get_ap_start_addr()), 0);
         }
 
         while AP_COUNT.load(Ordering::Acquire) == ap_count {
@@ -322,7 +332,7 @@ unsafe extern "C" fn _ap_start(hart_id: usize) -> ! {
             4: .8byte {ap_entry}
             .popsection
         ",
-        temp_stack = sym BOOT_AP_STACK_START,
+        temp_stack = sym TEMP_AP_STACK_START,
         page_table = sym BOOT_PAGE_TABLE,
         get_ap_stack = sym get_ap_stack,
         ap_entry = sym ap_entry,

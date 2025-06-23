@@ -2,8 +2,6 @@ SECTIONS {
     .bootstrap ORIGIN(RAM) :
     {
         KEEP(*(.bootstrap.entry));
-
-        . = ALIGN(16);
         KEEP(*(.bootstrap.apentry .bootstrap.data));
 
         . = ORIGIN(RAM) + 0x1000;

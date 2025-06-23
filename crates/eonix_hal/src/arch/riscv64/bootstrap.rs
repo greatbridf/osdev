@@ -8,13 +8,17 @@ use super::{
 use crate::{
     arch::{
         cpu::CPU,
-        fdt::{init_dtb_and_fdt, FdtExt},
+        fdt::{init_dtb_and_fdt, FdtExt, FDT},
         mm::{ArchPhysAccess, FreeRam, PageAttribute64, GLOBAL_PAGE_TABLE},
     },
     bootstrap::BootStrapData,
     mm::{ArchMemory, ArchPagingMode, BasicPageAlloc, BasicPageAllocRef, ScopedAllocator},
 };
-use core::arch::naked_asm;
+use core::{
+    arch::{global_asm, naked_asm},
+    hint::spin_loop,
+    sync::atomic::{AtomicPtr, Ordering}
+};
 use core::{
     alloc::Allocator,
     arch::asm,
@@ -30,12 +34,17 @@ use eonix_mm::{
 use eonix_percpu::PercpuArea;
 use fdt::Fdt;
 use riscv::{asm::sfence_vma_all, register::satp};
-use sbi::legacy::console_putchar;
+use sbi::{hsm::hart_start, legacy::console_putchar, PhysicalAddress};
 
 #[unsafe(link_section = ".bootstrap.stack")]
 static BOOT_STACK: [u8; 4096 * 16] = [0; 4096 * 16];
 
 static BOOT_STACK_START: &'static [u8; 4096 * 16] = &BOOT_STACK;
+
+#[unsafe(link_section = ".bootstrap.stack")]
+static BOOT_AP_STACK: [u8; 512] = [0; 512];
+
+static BOOT_AP_STACK_START: &'static [u8; 512] = &BOOT_AP_STACK;
 
 #[repr(C, align(4096))]
 struct PageTable([u64; PTES_PER_PAGE]);
@@ -59,6 +68,12 @@ static PT1: PageTable = {
 
     PageTable(arr)
 };
+
+static BSP_PAGE_ALLOC: AtomicPtr<RefCell<BasicPageAlloc>> = AtomicPtr::new(core::ptr::null_mut());
+
+static AP_COUNT: AtomicUsize = AtomicUsize::new(0);
+static AP_STACK: AtomicUsize = AtomicUsize::new(0);
+static AP_SEM: AtomicBool = AtomicBool::new(false);
 
 /// bootstrap in rust
 #[unsafe(naked)]
@@ -131,6 +146,9 @@ pub unsafe extern "C" fn riscv64_start(hart_id: usize, dtb_addr: PAddr) -> ! {
         allocator: Some(real_allocator),
     };
 
+    // set current hart's mtimecmp register
+    set_next_timer();
+
     unsafe {
         _eonix_hal_main(bootstrap_data);
     }
@@ -138,7 +156,6 @@ pub unsafe extern "C" fn riscv64_start(hart_id: usize, dtb_addr: PAddr) -> ! {
 
 unsafe extern "C" {
     fn BSS_LENGTH();
-    fn KIMAGE_PAGES();
 }
 
 /// TODO:
@@ -225,13 +242,166 @@ fn setup_cpu(alloc: impl PageAlloc, hart_id: usize) {
             .as_mut()
             .set_kernel_tp(PercpuArea::get_for(cpu.cpuid()).unwrap().cast());
     }
+}
+
+fn bootstrap_smp(alloc: impl Allocator, page_alloc: &RefCell<BasicPageAlloc>) {
+    let local_hart_id = CPU::local().cpuid();
+    let hart_count = FDT.hart_count();
+    let mut ap_count = 0;
+    
+    for current_hart_id in 0..hart_count {
+        if current_hart_id == local_hart_id {
+            continue;
+        }
+        let stack_range = {
+            let page_alloc = BasicPageAllocRef::new(&page_alloc);
+            let ap_stack = Page::alloc_order_in(4, page_alloc);
+            let stack_range = ap_stack.range();
+            ap_stack.into_raw();
+            stack_range
+        };
+
+        let old = BSP_PAGE_ALLOC.swap((&raw const *page_alloc) as *mut _, Ordering::Release);
+        assert!(old.is_null());
+
+        while AP_STACK.compare_exchange_weak(
+            0,
+            stack_range.end().addr(),
+            Ordering::Release,
+            Ordering::Relaxed,
+        ).is_err() {
+            spin_loop();
+        }
+
+        unsafe {
+            // TODO: address
+            hart_start(current_hart_id, PhysicalAddress::new(0x8020_0078), 0);
+        }
+
+        while AP_COUNT.load(Ordering::Acquire) == ap_count {
+            spin_loop();
+        }
+
+        let old = BSP_PAGE_ALLOC.swap(core::ptr::null_mut(), Ordering::Acquire);
+        assert_eq!(old as *const _, &raw const *page_alloc);
+        ap_count += 1;
+    }
+}
+
+#[unsafe(naked)]
+#[unsafe(no_mangle)]
+#[unsafe(link_section = ".bootstrap.apentry")]
+unsafe extern "C" fn _ap_start(hart_id: usize) -> ! {
+    naked_asm!(
+        "
+            la    sp, 1f        // set temp stack
+            mv    s0, a0        // save hart id
+            li    t0, 32
+            mul   t0, t0, a0
+            sub   sp, sp, t0
+
+            ld    t0, 2f
+            srli  t0, t0, 12
+            li    t1, 9 << 60
+            or    t0, t0, t1
+            csrw  satp, t0
+            sfence.vma
+
+            ld    t0, 3f
+            jalr  t0
+            mv    sp, a0
+
+            mv    a0, s0
+            ld    t0, 4f
+            jalr  t0
+
+            .pushsection .bootstrap.data, \"aw\", @progbits
+            1: .8byte {temp_stack}
+            2: .8byte {page_table}
+            3: .8byte {get_ap_stack}
+            4: .8byte {ap_entry}
+            .popsection
+        ",
+        temp_stack = sym BOOT_AP_STACK_START,
+        page_table = sym BOOT_PAGE_TABLE,
+        get_ap_stack = sym get_ap_stack,
+        ap_entry = sym ap_entry,
+    )
+}
+
+fn get_ap_stack() -> usize {
+    while AP_SEM.compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed).is_err() {
+        core::hint::spin_loop();
+    }
+    
+    let stack_addr = loop {
+        let addr = AP_STACK.swap(0, Ordering::AcqRel);
+        if addr != 0 {
+            break addr;
+        }
+        core::hint::spin_loop();
+    };
+    
+    AP_SEM.store(false, Ordering::Release);
+    
+    stack_addr
+}
+
+fn ap_entry(hart_id: usize, stack_bottom: PAddr) -> ! {
+    let stack_range = PRange::new(stack_bottom - (1 << 3) * PAGE_SIZE, stack_bottom);
+
+    {
+        // SAFETY: Acquire all the work done by the BSP and other APs.
+        let alloc = loop {
+            let alloc = BSP_PAGE_ALLOC.swap(core::ptr::null_mut(), Ordering::AcqRel);
+
+            if !alloc.is_null() {
+                break alloc;
+            }
+        };
+
+        let ref_alloc = unsafe { &*alloc };
+        setup_cpu(BasicPageAllocRef::new(&ref_alloc), hart_id);
+
+        // SAFETY: Release our allocation work.
+        BSP_PAGE_ALLOC.store(alloc, Ordering::Release);
+    }
+
+    // SAFETY: Make sure the allocator is set before we increment the AP count.
+    AP_COUNT.fetch_add(1, Ordering::Release);
+
+    unsafe extern "Rust" {
+        fn _eonix_hal_ap_main(stack_range: PRange) -> !;
+    }
 
     // set current hart's mtimecmp register
     set_next_timer();
+
+    unsafe {
+        _eonix_hal_ap_main(stack_range);
+    }
 }
 
-/// TODO
-fn bootstrap_smp(alloc: impl Allocator, page_alloc: &RefCell<BasicPageAlloc>) {}
+fn print_number(number: usize) {
+    if number == 0 {
+        write_str("0");
+        return;
+    }
+
+    let mut buffer = [0u8; 20];
+    let mut index = 0;
+
+    let mut num = number;
+    while num > 0 {
+        buffer[index] = (num % 10) as u8 + b'0';
+        num /= 10;
+        index += 1;
+    }
+
+    for i in (0..index).rev() {
+        sbi::legacy::console_putchar(buffer[i]);
+    }
+}
 
 pub fn early_console_write(s: &str) {
     write_str(s);

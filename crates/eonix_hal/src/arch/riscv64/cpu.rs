@@ -61,7 +61,7 @@ impl CPU {
     pub unsafe fn bootstrap_cpus(&self) {
         let total_harts = FDT.hart_count();
         for i in (0..total_harts).filter(|&i| i != self.cpuid()) {
-            sbi::hsm::hart_start(i, todo!("AP entry"), 0)
+            sbi::hsm::hart_start(i, PhysicalAddress::new(0x8020_0078), 0)
                 .expect("Failed to start secondary hart via SBI");
         }
     }

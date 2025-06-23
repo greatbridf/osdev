@@ -139,11 +139,7 @@ impl Inode for DirInode {
             .entries
             .access(lock.prove())
             .iter()
-            .find_map(|(name, node)| {
-                name.as_ref()
-                    .eq(dentry.name().as_ref())
-                    .then(|| node.unwrap())
-            }))
+            .find_map(|(name, node)| (name == &***dentry.name()).then(|| node.unwrap())))
     }
 
     fn do_readdir(

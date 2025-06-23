@@ -1,6 +1,7 @@
 use crate::io::Stream;
-use crate::kernel::constants::{EINVAL, EIO, EISDIR};
+use crate::kernel::constants::{EEXIST, EINVAL, EIO, EISDIR, ENOENT, ENOSYS, ENOTDIR};
 use crate::kernel::timer::Instant;
+use crate::kernel::vfs::inode::RenameData;
 use crate::{
     io::Buffer,
     kernel::constants::{S_IFBLK, S_IFCHR, S_IFDIR, S_IFLNK, S_IFREG},
@@ -17,7 +18,7 @@ use crate::{
 use alloc::sync::{Arc, Weak};
 use core::{ops::ControlFlow, sync::atomic::Ordering};
 use eonix_runtime::task::Task;
-use eonix_sync::{AsProof as _, AsProofMut as _, Locked, ProofMut};
+use eonix_sync::{AsProof as _, AsProofMut as _, Locked, Mutex, ProofMut};
 use itertools::Itertools;
 
 fn acquire(vfs: &Weak<dyn Vfs>) -> KResult<Arc<dyn Vfs>> {
@@ -78,15 +79,52 @@ impl DirectoryInode {
     }
 
     fn link(&self, name: Arc<[u8]>, file: &dyn Inode, dlock: ProofMut<'_, ()>) {
+        let now = Instant::now();
+
         // SAFETY: Only `unlink` will do something based on `nlink` count
         //         No need to synchronize here
         file.nlink.fetch_add(1, Ordering::Relaxed);
+        *self.ctime.lock() = now;
 
         // SAFETY: `rwsem` has done the synchronization
         self.size.fetch_add(1, Ordering::Relaxed);
-        *self.mtime.lock() = Instant::now();
+        *self.mtime.lock() = now;
 
         self.entries.access_mut(dlock).push((name, file.ino));
+    }
+
+    fn do_unlink(
+        &self,
+        file: &Arc<dyn Inode>,
+        filename: &[u8],
+        entries: &mut Vec<(Arc<[u8]>, Ino)>,
+        now: Instant,
+        decrease_size: bool,
+        _dir_lock: ProofMut<()>,
+        _file_lock: ProofMut<()>,
+    ) -> KResult<()> {
+        // SAFETY: `file_lock` has done the synchronization
+        if file.mode.load(Ordering::Relaxed) & S_IFDIR != 0 {
+            return Err(EISDIR);
+        }
+
+        entries.retain(|(name, ino)| *ino != file.ino || name.as_ref() != filename);
+
+        if decrease_size {
+            // SAFETY: `dir_lock` has done the synchronization
+            self.size.fetch_sub(1, Ordering::Relaxed);
+        }
+
+        *self.mtime.lock() = now;
+
+        // The last reference to the inode is held by some dentry
+        // and will be released when the dentry is released
+
+        // SAFETY: `file_lock` has done the synchronization
+        file.nlink.fetch_sub(1, Ordering::Relaxed);
+        *file.ctime.lock() = now;
+
+        Ok(())
     }
 }
 
@@ -116,7 +154,7 @@ impl Inode for DirectoryInode {
         let ino = vfs.assign_ino();
         let file = FileInode::new(ino, self.vfs.clone(), mode);
 
-        self.link(at.name().clone(), file.as_ref(), rwsem.prove_mut());
+        self.link(at.get_name(), file.as_ref(), rwsem.prove_mut());
         at.save_reg(file)
     }
 
@@ -138,7 +176,7 @@ impl Inode for DirectoryInode {
             dev,
         );
 
-        self.link(at.name().clone(), file.as_ref(), rwsem.prove_mut());
+        self.link(at.get_name(), file.as_ref(), rwsem.prove_mut());
         at.save_reg(file)
     }
 
@@ -151,7 +189,7 @@ impl Inode for DirectoryInode {
         let ino = vfs.assign_ino();
         let file = SymlinkInode::new(ino, self.vfs.clone(), target.into());
 
-        self.link(at.name().clone(), file.as_ref(), rwsem.prove_mut());
+        self.link(at.get_name(), file.as_ref(), rwsem.prove_mut());
         at.save_symlink(file)
     }
 
@@ -164,51 +202,32 @@ impl Inode for DirectoryInode {
         let ino = vfs.assign_ino();
         let newdir = DirectoryInode::new(ino, self.vfs.clone(), mode);
 
-        self.link(at.name().clone(), newdir.as_ref(), rwsem.prove_mut());
+        self.link(at.get_name(), newdir.as_ref(), rwsem.prove_mut());
         at.save_dir(newdir)
     }
 
     fn unlink(&self, at: &Arc<Dentry>) -> KResult<()> {
         let _vfs = acquire(&self.vfs)?;
 
-        let dlock = Task::block_on(self.rwsem.write());
+        let dir_lock = Task::block_on(self.rwsem.write());
 
         let file = at.get_inode()?;
-        let _flock = file.rwsem.write();
+        let filename = at.get_name();
+        let file_lock = Task::block_on(file.rwsem.write());
 
-        // SAFETY: `flock` has done the synchronization
-        if file.mode.load(Ordering::Relaxed) & S_IFDIR != 0 {
-            return Err(EISDIR);
-        }
+        let entries = self.entries.access_mut(dir_lock.prove_mut());
 
-        let entries = self.entries.access_mut(dlock.prove_mut());
-        entries.retain(|(_, ino)| *ino != file.ino);
+        self.do_unlink(
+            &file,
+            &filename,
+            entries,
+            Instant::now(),
+            true,
+            dir_lock.prove_mut(),
+            file_lock.prove_mut(),
+        )?;
 
-        assert_eq!(
-            entries.len() as u64,
-            // SAFETY: `dlock` has done the synchronization
-            self.size.fetch_sub(1, Ordering::Relaxed) - 1
-        );
-
-        *self.mtime.lock() = Instant::now();
-
-        // SAFETY: `flock` has done the synchronization
-        let file_nlink = file.nlink.fetch_sub(1, Ordering::Relaxed) - 1;
-
-        if file_nlink == 0 {
-            // Remove the file inode from the inode cache
-            // The last reference to the inode is held by some dentry
-            // and will be released when the dentry is released
-            //
-            // TODO: Should we use some inode cache in tmpfs?
-            //
-            // vfs.icache.lock().retain(|ino, _| *ino != file.ino);
-        }
-
-        // Postpone the invalidation of the dentry and inode until the
-        // last reference to the dentry is released
-        //
-        // But we can remove it from the dentry cache immediately
+        // Remove the dentry from the dentry cache immediately
         // so later lookup will fail with ENOENT
         dcache::d_remove(at);
 
@@ -224,6 +243,184 @@ impl Inode for DirectoryInode {
         self.mode
             .store((old & !0o777) | (mode & 0o777), Ordering::Relaxed);
         *self.ctime.lock() = Instant::now();
+
+        Ok(())
+    }
+
+    fn rename(&self, rename_data: RenameData) -> KResult<()> {
+        let RenameData {
+            old_dentry,
+            new_dentry,
+            new_parent,
+            is_exchange,
+            no_replace,
+            vfs,
+        } = rename_data;
+
+        if is_exchange {
+            println_warn!("TmpFs does not support exchange rename for now");
+            return Err(ENOSYS);
+        }
+
+        let vfs = vfs
+            .as_any()
+            .downcast_ref::<TmpFs>()
+            .expect("vfs must be a TmpFs");
+
+        let _rename_lock = Task::block_on(vfs.rename_lock.lock());
+
+        let old_file = old_dentry.get_inode()?;
+        let new_file = new_dentry.get_inode();
+
+        if no_replace && new_file.is_ok() {
+            return Err(EEXIST);
+        }
+
+        let same_parent = Arc::as_ptr(&new_parent) == &raw const *self;
+        if same_parent {
+            // Same directory rename
+            // Remove from old location and add to new location
+            let parent_lock = Task::block_on(self.rwsem.write());
+            let entries = self.entries.access_mut(parent_lock.prove_mut());
+
+            fn rename_old(
+                old_entry: &mut (Arc<[u8]>, Ino),
+                old_file: &Arc<dyn Inode + 'static>,
+                new_dentry: &Arc<Dentry>,
+                now: Instant,
+            ) {
+                let (name, _) = old_entry;
+                *name = new_dentry.get_name();
+                *old_file.ctime.lock() = now;
+            }
+
+            let old_ino = old_file.ino;
+            let new_ino = new_file.as_ref().ok().map(|f| f.ino);
+            let old_name = old_dentry.get_name();
+            let new_name = new_dentry.get_name();
+
+            // Find the old and new entries in the directory after we've locked the directory.
+            let indices =
+                entries
+                    .iter()
+                    .enumerate()
+                    .fold([None, None], |[old, new], (idx, (name, ino))| {
+                        if Some(*ino) == new_ino && *name == new_name {
+                            [old, Some(idx)]
+                        } else if *ino == old_ino && *name == old_name {
+                            [Some(idx), new]
+                        } else {
+                            [old, new]
+                        }
+                    });
+
+            let (old_entry_idx, new_entry_idx) = match indices {
+                [None, ..] => return Err(ENOENT),
+                [Some(old_idx), new_idx] => (old_idx, new_idx),
+            };
+
+            let now = Instant::now();
+
+            if let Some(new_idx) = new_entry_idx {
+                // Replace existing file (i.e. rename the old and unlink the new)
+                let new_file = new_file.unwrap();
+                let _new_file_lock = Task::block_on(new_file.rwsem.write());
+
+                // SAFETY: `new_file_lock` has done the synchronization
+                if new_file.mode.load(Ordering::Relaxed) & S_IFDIR != 0 {
+                    return Err(EISDIR);
+                } else {
+                    if old_file.mode.load(Ordering::Relaxed) & S_IFDIR != 0 {
+                        return Err(ENOTDIR);
+                    }
+                }
+
+                entries.remove(new_idx);
+
+                // SAFETY: `parent_lock` has done the synchronization
+                self.size.fetch_sub(1, Ordering::Relaxed);
+
+                // The last reference to the inode is held by some dentry
+                // and will be released when the dentry is released
+
+                // SAFETY: `new_file_lock` has done the synchronization
+                new_file.nlink.fetch_sub(1, Ordering::Relaxed);
+                *new_file.ctime.lock() = now;
+            }
+
+            rename_old(&mut entries[old_entry_idx], &old_file, new_dentry, now);
+            *self.mtime.lock() = now;
+        } else {
+            // Cross-directory rename - handle similar to same directory case
+
+            // Get new parent directory
+            let new_parent_inode = new_dentry.parent().get_inode()?;
+            assert!(new_parent_inode.is_dir());
+            let new_parent = (new_parent_inode.as_ref() as &dyn Any)
+                .downcast_ref::<DirectoryInode>()
+                .expect("new parent must be a DirectoryInode");
+
+            let old_parent_lock = Task::block_on(self.rwsem.write());
+            let new_parent_lock = Task::block_on(new_parent_inode.rwsem.write());
+
+            let old_ino = old_file.ino;
+            let new_ino = new_file.as_ref().ok().map(|f| f.ino);
+            let old_name = old_dentry.get_name();
+            let new_name = new_dentry.get_name();
+
+            // Find the old entry in the old directory
+            let old_entries = self.entries.access_mut(old_parent_lock.prove_mut());
+            let old_pos = old_entries
+                .iter()
+                .position(|(name, ino)| *ino == old_ino && *name == old_name)
+                .ok_or(ENOENT)?;
+
+            // Find the new entry in the new directory (if it exists)
+            let new_entries = new_parent.entries.access_mut(new_parent_lock.prove_mut());
+            let has_new = new_entries
+                .iter()
+                .position(|(name, ino)| Some(*ino) == new_ino && *name == new_name)
+                .is_some();
+
+            let now = Instant::now();
+
+            if has_new {
+                // Replace existing file (i.e. move the old and unlink the new)
+                let new_file = new_file.unwrap();
+                let new_file_lock = Task::block_on(new_file.rwsem.write());
+
+                if old_file.mode.load(Ordering::Relaxed) & S_IFDIR != 0
+                    && new_file.mode.load(Ordering::Relaxed) & S_IFDIR == 0
+                {
+                    return Err(ENOTDIR);
+                }
+
+                // Unlink the old file that was replaced
+                new_parent.do_unlink(
+                    &new_file,
+                    &new_name,
+                    new_entries,
+                    now,
+                    false,
+                    new_parent_lock.prove_mut(),
+                    new_file_lock.prove_mut(),
+                )?;
+            } else {
+                new_parent.size.fetch_add(1, Ordering::Relaxed);
+            }
+
+            // Remove from old directory
+            old_entries.remove(old_pos);
+
+            // Add new entry
+            new_entries.push((new_name, old_ino));
+
+            self.size.fetch_sub(1, Ordering::Relaxed);
+            *self.mtime.lock() = now;
+            *old_file.ctime.lock() = now;
+        }
+
+        Task::block_on(dcache::d_exchange(old_dentry, new_dentry));
 
         Ok(())
     }
@@ -365,6 +562,7 @@ impl_any!(TmpFs);
 struct TmpFs {
     next_ino: AtomicIno,
     readonly: bool,
+    rename_lock: Mutex<()>,
 }
 
 impl Vfs for TmpFs {
@@ -390,6 +588,7 @@ impl TmpFs {
         let tmpfs = Arc::new(Self {
             next_ino: AtomicIno::new(1),
             readonly,
+            rename_lock: Mutex::new(()),
         });
 
         let weak = Arc::downgrade(&tmpfs);

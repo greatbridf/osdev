@@ -80,11 +80,8 @@ fn getcwd(buffer: *mut u8, bufsize: usize) -> KResult<usize> {
     let mut user_buffer = UserBuffer::new(buffer, bufsize)?;
     let mut buffer = PageBuffer::new();
 
-    thread
-        .fs_context
-        .cwd
-        .lock()
-        .get_path(&thread.fs_context, &mut buffer)?;
+    let cwd = thread.fs_context.cwd.lock().clone();
+    cwd.get_path(&thread.fs_context, &mut buffer)?;
 
     user_buffer.fill(buffer.data())?.ok_or(ERANGE)?;
 
@@ -178,7 +175,7 @@ fn execve(exec: *const u8, argv: *const PtrT, envp: *const PtrT) -> KResult<Sysc
 
     thread.files.on_exec();
     thread.signal_list.clear_non_ignore();
-    thread.set_name(dentry.name().clone());
+    thread.set_name(dentry.get_name());
 
     let mut trap_ctx = thread.trap_ctx.borrow();
     trap_ctx.set_program_counter(load_info.entry_ip.addr());

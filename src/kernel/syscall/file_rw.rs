@@ -23,6 +23,7 @@ use crate::{
 use alloc::sync::Arc;
 use eonix_runtime::task::Task;
 use posix_types::ctypes::{Long, PtrT};
+use posix_types::namei::RenameFlags;
 use posix_types::open::{AtFlags, OpenFlags};
 use posix_types::signal::SigSet;
 use posix_types::stat::{StatX, TimeSpec};
@@ -543,6 +544,40 @@ fn utimensat(
     // TODO: Implement utimensat
     // dentry.utimens(&times)
     Ok(())
+}
+
+#[eonix_macros::define_syscall(SYS_RENAMEAT2)]
+fn renameat2(
+    old_dirfd: FD,
+    old_pathname: *const u8,
+    new_dirfd: FD,
+    new_pathname: *const u8,
+    flags: u32,
+) -> KResult<()> {
+    let flags = RenameFlags::from_bits(flags).ok_or(EINVAL)?;
+
+    // The two flags RENAME_NOREPLACE and RENAME_EXCHANGE are mutually exclusive.
+    if flags.contains(RenameFlags::RENAME_NOREPLACE | RenameFlags::RENAME_EXCHANGE) {
+        Err(EINVAL)?;
+    }
+
+    let old_dentry = dentry_from(thread, old_dirfd, old_pathname, false)?;
+    let new_dentry = dentry_from(thread, new_dirfd, new_pathname, false)?;
+
+    old_dentry.rename(&new_dentry, flags)
+}
+
+#[cfg(target_arch = "x86_64")]
+#[eonix_macros::define_syscall(SYS_RENAME)]
+fn rename(old_pathname: *const u8, new_pathname: *const u8) -> KResult<()> {
+    sys_renameat2(
+        thread,
+        FD::AT_FDCWD,
+        old_pathname,
+        FD::AT_FDCWD,
+        new_pathname,
+        0,
+    )
 }
 
 pub fn keep_alive() {}

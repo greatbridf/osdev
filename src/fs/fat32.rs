@@ -296,7 +296,7 @@ impl Inode for DirInode {
         let entry = entries.find(|entry| {
             entry
                 .as_ref()
-                .map(|entry| &entry.filename == dentry.name())
+                .map(|entry| &entry.filename == &***dentry.name())
                 .unwrap_or(true)
         });
 

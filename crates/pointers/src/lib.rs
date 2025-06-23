@@ -42,11 +42,9 @@ impl<'a, T: ?Sized> BorrowedArc<'a, T> {
         }
     }
 
-    #[allow(dead_code)]
-    pub fn new(ptr: &'a *const T) -> Self {
-        assert!(!ptr.is_null());
+    pub fn new(ptr: &'a Arc<T>) -> Self {
         Self {
-            arc: ManuallyDrop::new(unsafe { Arc::from_raw(*ptr) }),
+            arc: ManuallyDrop::new(unsafe { core::mem::transmute_copy(ptr) }),
             _phantom: PhantomData,
         }
     }

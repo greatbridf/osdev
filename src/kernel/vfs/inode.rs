@@ -15,6 +15,7 @@ use core::{
 };
 use eonix_runtime::task::Task;
 use eonix_sync::RwLock;
+use posix_types::namei::RenameFlags;
 use posix_types::stat::StatX;
 
 pub type Ino = u64;
@@ -83,8 +84,17 @@ pub enum WriteOffset<'end> {
     End(&'end mut usize),
 }
 
+pub struct RenameData<'a, 'b> {
+    pub old_dentry: &'a Arc<Dentry>,
+    pub new_dentry: &'b Arc<Dentry>,
+    pub new_parent: Arc<dyn Inode>,
+    pub vfs: Arc<dyn Vfs>,
+    pub is_exchange: bool,
+    pub no_replace: bool,
+}
+
 #[allow(unused_variables)]
-pub trait Inode: Send + Sync + InodeInner {
+pub trait Inode: Send + Sync + InodeInner + Any {
     fn is_dir(&self) -> bool {
         self.mode.load(Ordering::SeqCst) & S_IFDIR != 0
     }
@@ -131,6 +141,10 @@ pub trait Inode: Send + Sync + InodeInner {
 
     fn truncate(&self, length: usize) -> KResult<()> {
         Err(if self.is_dir() { EISDIR } else { EPERM })
+    }
+
+    fn rename(&self, rename_data: RenameData) -> KResult<()> {
+        Err(if !self.is_dir() { ENOTDIR } else { EPERM })
     }
 
     fn do_readdir(

@@ -170,29 +170,27 @@ fn execve(exec: *const u8, argv: *const PtrT, envp: *const PtrT) -> KResult<Sysc
 
     // TODO: When `execve` is called by one of the threads in a process, the other threads
     //       should be terminated and `execve` is performed in the thread group leader.
-    if let Ok(load_info) = ProgramLoader::parse(dentry.clone())?.load(argv, envp) {
-        if let Some(robust_list) = thread.get_robust_list() {
-            let _ = Task::block_on(robust_list.wake_all());
-            thread.set_robust_list(None);
-        }
+    let load_info = ProgramLoader::parse(dentry.clone())?.load(argv, envp)?;
 
-        unsafe {
-            // SAFETY: We are doing execve, all other threads are terminated.
-            thread.process.mm_list.replace(Some(load_info.mm_list));
-        }
-        thread.files.on_exec();
-        thread.signal_list.clear_non_ignore();
-        thread.set_name(dentry.name().clone());
-
-        let mut trap_ctx = thread.trap_ctx.borrow();
-        trap_ctx.set_program_counter(load_info.entry_ip.addr());
-        trap_ctx.set_stack_pointer(load_info.sp.addr());
-        Ok(SyscallNoReturn)
-    } else {
-        // We can't hold any ownership when we call `kill_current`.
-        // ProcessList::kill_current(Signal::SIGSEGV);
-        todo!()
+    if let Some(robust_list) = thread.get_robust_list() {
+        let _ = Task::block_on(robust_list.wake_all());
+        thread.set_robust_list(None);
     }
+
+    unsafe {
+        // SAFETY: We are doing execve, all other threads are terminated.
+        thread.process.mm_list.replace(Some(load_info.mm_list));
+    }
+
+    thread.files.on_exec();
+    thread.signal_list.clear_non_ignore();
+    thread.set_name(dentry.name().clone());
+
+    let mut trap_ctx = thread.trap_ctx.borrow();
+    trap_ctx.set_program_counter(load_info.entry_ip.addr());
+    trap_ctx.set_stack_pointer(load_info.sp.addr());
+
+    Ok(SyscallNoReturn)
 }
 
 #[eonix_macros::define_syscall(SYS_EXIT)]
@@ -687,19 +685,6 @@ fn getrusage(who: u32, rusage: *mut RUsage) -> KResult<()> {
     })?;
 
     Ok(())
-}
-
-#[eonix_macros::define_syscall(SYS_FCHMOD)]
-fn chmod(pathname: *const u8, mode: u32) -> KResult<()> {
-    let path = UserString::new(pathname)?;
-    let path = Path::new(path.as_cstr().to_bytes())?;
-
-    let dentry = Dentry::open(&thread.fs_context, path, true)?;
-    if !dentry.is_valid() {
-        return Err(ENOENT);
-    }
-
-    dentry.chmod(mode)
 }
 
 #[cfg(target_arch = "x86_64")]

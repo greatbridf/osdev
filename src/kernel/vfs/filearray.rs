@@ -79,9 +79,11 @@ impl FileArray {
     }
 
     pub fn close_all(&self) {
-        let mut inner = self.inner.lock();
-        inner.fd_min_avail = FD(0);
-        inner.files.clear();
+        let _old_files = {
+            let mut inner = self.inner.lock();
+            inner.fd_min_avail = FD(0);
+            core::mem::take(&mut inner.files)
+        };
     }
 
     pub fn close(&self, fd: FD) -> KResult<()> {

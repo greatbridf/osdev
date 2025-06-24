@@ -172,10 +172,10 @@ async fn init_process(early_kstack: PRange) {
 
         let mut init_name = None;
         let mut init = None;
-        for name in &init_names {
+        for name in init_names {
             if let Ok(dentry) = Dentry::open(fs_context, Path::new(name).unwrap(), true) {
                 if dentry.is_valid() {
-                    init_name = Some(*name);
+                    init_name = Some(CString::new(name).unwrap());
                     init = Some(dentry);
                     break;
                 }
@@ -186,7 +186,7 @@ async fn init_process(early_kstack: PRange) {
         let init_name = init_name.unwrap();
 
         let argv = vec![
-            CString::new(init_name).unwrap(),
+            init_name.clone(),
             CString::new("sh").unwrap(),
             CString::new("/mnt/initsh").unwrap(),
         ];
@@ -198,10 +198,10 @@ async fn init_process(early_kstack: PRange) {
             CString::new("PWD=/").unwrap(),
         ];
 
-        ProgramLoader::parse(init.clone())
-            .unwrap()
-            .load(argv, envp)
-            .unwrap()
+        ProgramLoader::parse(fs_context, init_name, init.clone(), argv, envp)
+            .expect("Failed to parse init program")
+            .load()
+            .expect("Failed to load init program")
     };
 
     let thread_builder = ThreadBuilder::new()

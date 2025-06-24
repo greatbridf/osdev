@@ -174,7 +174,12 @@ impl FatFs {
 
         let root_dir_cluster_count = ClusterIterator::new(fat, fatfs.rootdir_cluster).count();
         let root_dir_size = root_dir_cluster_count as u32 * info.sectors_per_cluster as u32 * 512;
-        let root_inode = DirInode::new(info.root_cluster as Ino, fatfs.weak.clone(), root_dir_size);
+
+        let root_inode = DirInode::new(
+            (info.root_cluster & !0xF000_0000) as Ino,
+            fatfs.weak.clone(),
+            root_dir_size,
+        );
 
         Ok((fatfs_arc, root_inode))
     }
@@ -195,14 +200,16 @@ impl<'fat> Iterator for ClusterIterator<'fat> {
     type Item = ClusterNo;
 
     fn next(&mut self) -> Option<Self::Item> {
-        const EOC: ClusterNo = 0x0FFFFFF8;
-        let next = self.cur;
+        const EOC: ClusterNo = 0x0FFF_FFF8;
+        const INVL: ClusterNo = 0xF000_0000;
 
-        if next >= EOC {
-            None
-        } else {
-            self.cur = self.fat[next as usize];
-            Some(next)
+        match self.cur {
+            ..2 | EOC..INVL => None,
+            INVL.. => unreachable!("Invalid cluster number: {}", self.cur),
+            next => {
+                self.cur = self.fat[next as usize] & !INVL;
+                Some(next)
+            }
         }
     }
 }

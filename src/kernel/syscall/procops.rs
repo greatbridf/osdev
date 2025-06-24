@@ -403,16 +403,21 @@ fn geteuid() -> KResult<u32> {
     do_geteuid(thread)
 }
 
-#[eonix_macros::define_syscall(SYS_GETGID)]
-fn getgid() -> KResult<u32> {
+#[eonix_macros::define_syscall(SYS_GETEGID)]
+fn getegid() -> KResult<u32> {
     // All users are root for now.
     Ok(0)
+}
+
+#[eonix_macros::define_syscall(SYS_GETGID)]
+fn getgid() -> KResult<u32> {
+    sys_getegid(thread)
 }
 
 #[cfg(target_arch = "x86_64")]
 #[eonix_macros::define_syscall(SYS_GETGID32)]
 fn getgid32() -> KResult<u32> {
-    sys_getgid(thread)
+    sys_getegid(thread)
 }
 
 #[eonix_macros::define_syscall(SYS_GETTID)]

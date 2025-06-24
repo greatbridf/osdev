@@ -26,11 +26,9 @@ use posix_types::ctypes::{Long, PtrT};
 use posix_types::namei::RenameFlags;
 use posix_types::open::{AtFlags, OpenFlags};
 use posix_types::signal::SigSet;
+use posix_types::stat::Stat;
 use posix_types::stat::{StatX, TimeSpec};
 use posix_types::syscall_no::*;
-
-#[cfg(not(target_arch = "x86_64"))]
-use posix_types::stat::Stat;
 
 impl FromSyscallArg for OpenFlags {
     fn from_arg(value: usize) -> Self {
@@ -150,11 +148,11 @@ fn getdents64(fd: FD, buffer: *mut u8, bufsize: usize) -> KResult<usize> {
     Ok(buffer.wrote())
 }
 
-#[cfg_attr(target_arch = "x86_64", eonix_macros::define_syscall(SYS_FSTATAT64))]
 #[cfg_attr(
     not(target_arch = "x86_64"),
     eonix_macros::define_syscall(SYS_NEWFSTATAT)
 )]
+#[cfg_attr(target_arch = "x86_64", eonix_macros::define_syscall(SYS_FSTATAT64))]
 fn newfstatat(dirfd: FD, pathname: *const u8, statbuf: *mut Stat, flags: AtFlags) -> KResult<()> {
     let dentry = if flags.at_empty_path() {
         let file = thread.files.get(dirfd).ok_or(EBADF)?;
@@ -173,7 +171,11 @@ fn newfstatat(dirfd: FD, pathname: *const u8, statbuf: *mut Stat, flags: AtFlags
     Ok(())
 }
 
-#[eonix_macros::define_syscall(SYS_NEWFSTAT)]
+#[cfg_attr(
+    not(target_arch = "x86_64"),
+    eonix_macros::define_syscall(SYS_NEWFSTAT)
+)]
+#[cfg_attr(target_arch = "x86_64", eonix_macros::define_syscall(SYS_FSTAT64))]
 fn newfstat(fd: FD, statbuf: *mut Stat) -> KResult<()> {
     sys_newfstatat(
         thread,

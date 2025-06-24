@@ -67,6 +67,7 @@ macro_rules! println_fatal {
     };
 }
 
+#[allow(unused_macros)]
 macro_rules! println_trace {
     ($feat:literal) => {
         #[deny(unexpected_cfgs)]

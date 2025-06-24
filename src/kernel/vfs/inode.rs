@@ -15,7 +15,6 @@ use core::{
 };
 use eonix_runtime::task::Task;
 use eonix_sync::RwLock;
-use posix_types::namei::RenameFlags;
 use posix_types::stat::StatX;
 
 pub type Ino = u64;

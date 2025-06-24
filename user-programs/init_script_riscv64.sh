@@ -42,10 +42,13 @@ echo ok >&2
 do_or_freeze mkdir -p /etc /root /proc
 do_or_freeze mount -t procfs proc proc
 
-echo -n -e "Mounting the ext4 image... " >&2
-do_or_freeze mkdir -p /mnt1
-do_or_freeze mount -t ext4 /dev/sdb /mnt1
-echo ok >&2
+# Check if the device /dev/sdb is available and can be read
+if dd if=/dev/sdb of=/dev/null bs=512 count=1; then
+    echo -n -e "Mounting the ext4 image... " >&2
+    do_or_freeze mkdir -p /mnt1
+    do_or_freeze mount -t ext4 /dev/sdb /mnt1
+    echo ok >&2
+fi
 
 cp /mnt/ld-musl-i386.so.1 /lib/ld-musl-i386.so.1
 ln -s /lib/ld-musl-i386.so.1 /lib/libc.so

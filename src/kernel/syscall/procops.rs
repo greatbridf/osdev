@@ -10,7 +10,7 @@ use crate::kernel::constants::{
 use crate::kernel::mem::PageBuffer;
 use crate::kernel::task::{
     do_clone, futex_wait, futex_wake, FutexFlags, FutexOp, ProcessList, ProgramLoader,
-    SignalAction, Thread, WaitType,
+    RobustListHead, SignalAction, Thread, WaitType,
 };
 use crate::kernel::task::{parse_futexop, CloneArgs};
 use crate::kernel::timer::sleep;
@@ -25,7 +25,7 @@ use bitflags::bitflags;
 use core::ptr::NonNull;
 use eonix_hal::processor::UserTLS;
 use eonix_hal::traits::trap::RawTrapContext;
-use eonix_mm::address::Addr as _;
+use eonix_mm::address::{Addr as _, VAddr};
 use eonix_runtime::task::Task;
 use eonix_sync::AsProof as _;
 use posix_types::constants::{P_ALL, P_PID};
@@ -171,6 +171,11 @@ fn execve(exec: *const u8, argv: *const PtrT, envp: *const PtrT) -> KResult<Sysc
     // TODO: When `execve` is called by one of the threads in a process, the other threads
     //       should be terminated and `execve` is performed in the thread group leader.
     let load_info = ProgramLoader::parse(dentry.clone())?.load(argv, envp)?;
+
+    if let Some(robust_list) = thread.get_robust_list() {
+        let _ = Task::block_on(robust_list.wake_all());
+        thread.set_robust_list(None);
+    }
 
     unsafe {
         // SAFETY: We are doing execve, all other threads are terminated.
@@ -743,6 +748,16 @@ fn futex(
             todo!()
         }
     }
+}
+
+#[eonix_macros::define_syscall(SYS_SET_ROBUST_LIST)]
+fn set_robust_list(head: usize, len: usize) -> KResult<()> {
+    if len != size_of::<RobustListHead>() {
+        return Err(EINVAL);
+    }
+
+    thread.set_robust_list(Some(VAddr::from(head)));
+    Ok(())
 }
 
 #[eonix_macros::define_syscall(SYS_RT_SIGRETURN)]

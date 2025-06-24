@@ -22,7 +22,6 @@ mod sync;
 
 use crate::kernel::task::alloc_pid;
 use alloc::{ffi::CString, sync::Arc};
-use eonix_log::println;
 use core::{
     hint::spin_loop,
     sync::atomic::{AtomicBool, Ordering},

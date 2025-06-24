@@ -7,6 +7,8 @@ QEMU ?= ##QEMU##
 GDB ?= ##GDB##
 FDISK ?= ##FDISK##
 
+IMG ?= ##IMAGE##
+
 COMMA := ,
 
 PROFILE = $(MODE)
@@ -46,12 +48,16 @@ BINARY_DIR := $(BINARY_DIR_BASE)/$(MODE)
 QEMU_ARGS += \
 	-machine virt -kernel $(BINARY_DIR)/eonix_kernel \
 	-device virtio-blk-device,drive=disk0,bus=virtio-mmio-bus.0 \
-	-device virtio-blk-device,drive=disk1,bus=virtio-mmio-bus.1 \
 	-device virtio-net-device,netdev=mynet0 \
 	-drive id=disk0,file=build/boot-riscv64.img,format=raw,if=none \
-	-drive id=disk1,file=test/sdcard-rv.img,format=raw,if=none \
 	-netdev user,id=mynet0 \
 	-rtc base=utc
+
+ifneq ($(IMG),)
+QEMU_ARGS += \
+	-drive id=disk1,file=$(IMG),format=raw,if=none \
+	-device virtio-blk-device,drive=disk1,bus=virtio-mmio-bus.1
+endif
 
 CARGO_FLAGS += --target riscv64gc-unknown-none-elf
 
@@ -65,12 +71,17 @@ BINARY_DIR := $(BINARY_DIR_BASE)/$(MODE)
 
 QEMU_ARGS += \
 	-machine q35 \
-	-device ahci,id=ahci -device ide-hd,drive=disk,bus=ahci.0 \
-	-device ide-hd,drive=disk1,bus=ahci.1 \
+	-device ahci,id=ahci \
+	-device ide-hd,drive=disk0,bus=ahci.0 \
 	-device e1000e,netdev=mynet0 \
-	-drive id=disk,file=build/boot-x86_64.img,format=raw,if=none \
-	-drive id=disk1,file=test/sdcard-rv.img,format=raw,if=none \
+	-drive id=disk0,file=build/boot-x86_64.img,format=raw,if=none \
 	-netdev user,id=mynet0
+
+ifneq ($(IMG),)
+QEMU_ARGS += \
+	-drive id=disk1,file=$(IMG),format=raw,if=none \
+	-device ide-hd,drive=disk1,bus=ahci.1
+endif
 
 CARGO_FLAGS += --target x86_64-unknown-none.json
 

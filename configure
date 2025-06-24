@@ -112,9 +112,17 @@ else
     echo `which mkfs.fat`
 fi
 
+event "checking additional image"
+if [ "$IMG" = "" ]; then
+    echo "no"
+else
+    echo "$IMG"
+fi
+
 cp Makefile.src Makefile
 sed -i '' -e "s|##DEFAULT_ARCH##|$DEFAULT_ARCH|" Makefile > /dev/null 2>&1
 sed -i '' -e "s|##GDB##|$GDB|" Makefile > /dev/null 2>&1
 sed -i '' -e "s|##QEMU##|$QEMU|" Makefile > /dev/null 2>&1
 sed -i '' -e "s|##FDISK##|$FDISK|" Makefile > /dev/null 2>&1
+sed -i '' -e "s|##IMAGE##|$IMG|" Makefile > /dev/null 2>&1
 exit 0

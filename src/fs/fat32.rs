@@ -343,6 +343,14 @@ impl Inode for DirInode {
 struct FatMountCreator;
 
 impl MountCreator for FatMountCreator {
+    fn check_signature(&self, mut first_block: &[u8]) -> KResult<bool> {
+        match first_block.split_off(82..) {
+            Some([b'F', b'A', b'T', b'3', b'2', b' ', b' ', b' ', ..]) => Ok(true),
+            Some(..) => Ok(false),
+            None => Err(EIO),
+        }
+    }
+
     fn create_mount(&self, _source: &str, _flags: u64, mp: &Arc<Dentry>) -> KResult<Mount> {
         let (fatfs, root_inode) = FatFs::create(make_device(8, 1))?;
 

@@ -48,6 +48,21 @@ enum BlockDeviceType {
     },
 }
 
+#[derive(Debug, Clone)]
+pub enum FileSystemType {
+    Ext4,
+    Fat32,
+}
+
+impl FileSystemType {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            FileSystemType::Ext4 => "ext4",
+            FileSystemType::Fat32 => "fat32",
+        }
+    }
+}
+
 pub struct BlockDevice {
     /// Unique device identifier, major and minor numbers
     devid: DevId,
@@ -114,14 +129,14 @@ impl BlockDevice {
         }
     }
 
-    pub fn register_partition(&self, idx: u32, offset: u64, size: u64) -> KResult<Arc<Self>> {
+    pub fn register_partition(&self, idx: usize, offset: u64, size: u64) -> KResult<Arc<Self>> {
         let queue = match &self.dev_type {
             BlockDeviceType::Disk { queue } => queue.clone(),
             BlockDeviceType::Partition { .. } => return Err(EINVAL),
         };
 
         let device = Arc::new(BlockDevice {
-            devid: make_device(self.devid >> 8, idx as u32),
+            devid: make_device(self.devid >> 8, (self.devid & 0xff) + idx as u32 + 1),
             sector_count: size,
             dev_type: BlockDeviceType::Partition {
                 disk_dev: self.devid,
@@ -140,17 +155,10 @@ impl BlockDevice {
         match self.dev_type {
             BlockDeviceType::Partition { .. } => Err(EINVAL),
             BlockDeviceType::Disk { .. } => {
-                let mbr_table = MBRPartTable::from_disk(self).await?;
-
-                for (
-                    idx,
-                    Partition {
-                        lba_offset,
-                        sector_count,
-                    },
-                ) in mbr_table.partitions().enumerate()
-                {
-                    self.register_partition(idx as u32 + 1, lba_offset, sector_count)?;
+                if let Ok(mbr_table) = MBRPartTable::from_disk(self).await {
+                    for (idx, partition) in mbr_table.partitions().enumerate() {
+                        self.register_partition(idx, partition.lba_offset, partition.sector_count)?;
+                    }
                 }
 
                 Ok(())

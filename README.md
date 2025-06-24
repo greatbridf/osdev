@@ -205,6 +205,7 @@ make tmux-debug
 - `QEMU`: 用于调试运行的 QEMU。默认使用 `qemu-system-$(ARCH)`。
 - `GDB`: 用于 `make debug` 的 GDB。我们将默认查找 `$(ARCH)-elf-gdb` 并检查支持的架构。
 - `FDISK`: 用于创建磁盘镜像分区表的 fdisk 可执行文件，要求使用来自 util-linux 版本的 fdisk。默认使用 `fdisk`。
+- `IMG`: 除启动磁盘以外，额外的磁盘镜像文件。默认不使用。
 
 在运行 make 时可以指定的额外选项：
 
@@ -217,3 +218,4 @@ make tmux-debug
 - `FDISK`: 手动指定 fdisk 路径。
 - `QEMU_ACCEL`: 手动指定要使用的 qemu 加速方法。
 - `DEBUG_TRAPS`: 是否要进行 trap 的调试，使 qemu 输出详细的 trap 日志。
+- `FEATURES`: 手动指定要编译的特性，使用逗号分隔。具体见 `Cargo.toml` 中的 `features` 字段。

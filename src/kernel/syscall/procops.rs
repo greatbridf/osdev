@@ -25,7 +25,7 @@ use bitflags::bitflags;
 use core::ptr::NonNull;
 use eonix_hal::processor::UserTLS;
 use eonix_hal::traits::trap::RawTrapContext;
-use eonix_mm::address::Addr as _;
+use eonix_mm::address::{Addr as _, VAddr};
 use eonix_runtime::task::Task;
 use eonix_sync::AsProof as _;
 use posix_types::constants::{P_ALL, P_PID};
@@ -766,14 +766,12 @@ fn futex(
 }
 
 #[eonix_macros::define_syscall(SYS_SET_ROBUST_LIST)]
-fn set_robust_list(head: *const RobustListHead, len: usize) -> KResult<()> {
+fn set_robust_list(head: usize, len: usize) -> KResult<()> {
     if len != size_of::<RobustListHead>() {
         return Err(EINVAL);
     }
 
-    let robust_list_head = UserPointer::new(head)?.read()?;
-
-    thread.set_robust_list(Some(robust_list_head));
+    thread.set_robust_list(Some(VAddr::from(head)));
     Ok(())
 }
 

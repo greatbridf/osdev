@@ -8,7 +8,7 @@ use crate::{
         syscall::{syscall_handlers, SyscallHandler},
         task::{clone::CloneArgs, futex::RobustListHead, CloneFlags},
         timer::{should_reschedule, timer_interrupt},
-        user::UserPointerMut,
+        user::{UserPointer, UserPointerMut},
         vfs::{filearray::FileArray, FsContext},
     },
     prelude::*,
@@ -75,7 +75,7 @@ struct ThreadInner {
 
     clear_child_tid: Option<usize>,
 
-    robust_list: Option<RobustListHead>,
+    robust_list_address: Option<VAddr>,
 }
 
 pub struct Thread {
@@ -253,7 +253,7 @@ impl ThreadBuilder {
                 tls: self.tls,
                 set_child_tid: self.set_child_tid,
                 clear_child_tid: self.clear_child_tid,
-                robust_list: None,
+                robust_list_address: None,
             }),
         });
 
@@ -291,12 +291,15 @@ impl Thread {
         Ok(())
     }
 
-    pub fn set_robust_list(&self, robust_list: Option<RobustListHead>) {
-        self.inner.lock().robust_list = robust_list;
+    pub fn set_robust_list(&self, robust_list_address: Option<VAddr>) {
+        self.inner.lock().robust_list_address = robust_list_address;
     }
 
     pub fn get_robust_list(&self) -> Option<RobustListHead> {
-        self.inner.lock().robust_list
+        let addr = self.inner.lock().robust_list_address?;
+        let user_pointer = UserPointer::new(addr.addr() as *const RobustListHead).ok()?;
+
+        user_pointer.read().ok()
     }
 
     pub fn set_name(&self, name: Arc<[u8]>) {

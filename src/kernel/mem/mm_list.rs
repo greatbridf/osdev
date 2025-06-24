@@ -553,6 +553,10 @@ impl MMList {
             Some(pos) => pos.ceil(),
         };
 
+        if current_break > pos {
+            return current_break;
+        }
+
         let range = VRange::new(current_break, pos);
         if !inner.check_overlapping_range(range) {
             return current_break;

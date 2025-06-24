@@ -163,12 +163,7 @@ async fn init_process(early_kstack: PRange) {
         )
         .unwrap();
 
-        let init_names = [
-            &b"/sbin/init"[..],
-            &b"/init"[..],
-            &b"/bin/busybox"[..],
-            &b"/mnt/busybox"[..],
-        ];
+        let init_names = [&b"/init"[..], &b"/sbin/init"[..], &b"/mnt/initsh"[..]];
 
         let mut init_name = None;
         let mut init = None;
@@ -185,11 +180,7 @@ async fn init_process(early_kstack: PRange) {
         let init = init.expect("No init binary found in the system.");
         let init_name = init_name.unwrap();
 
-        let argv = vec![
-            init_name.clone(),
-            CString::new("sh").unwrap(),
-            CString::new("/mnt/initsh").unwrap(),
-        ];
+        let argv = vec![init_name.clone()];
 
         let envp = vec![
             CString::new("LANG=C").unwrap(),

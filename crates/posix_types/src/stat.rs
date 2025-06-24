@@ -1,9 +1,8 @@
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone)]
 pub struct StatXTimestamp {
-    pub tv_sec: i64,
+    pub tv_sec: u64,
     pub tv_nsec: u32,
-    pub __reserved: i32,
 }
 
 #[repr(C)]
@@ -37,7 +36,14 @@ pub struct StatX {
 #[derive(Debug, Default, Copy, Clone)]
 pub struct TimeSpec {
     pub tv_sec: u64,
-    pub tv_nsec: u64,
+    pub tv_nsec: u32,
+}
+
+#[repr(C)]
+#[derive(Debug, Default, Copy, Clone)]
+pub struct TimeVal {
+    pub tv_sec: u64,
+    pub tv_usec: u32,
 }
 
 #[repr(C)]
@@ -80,16 +86,16 @@ impl From<StatX> for Stat {
 
             st_blocks: statx.stx_blocks,
             st_atime: TimeSpec {
-                tv_sec: statx.stx_atime.tv_sec as u64,
-                tv_nsec: statx.stx_atime.tv_nsec as u64,
+                tv_sec: statx.stx_atime.tv_sec,
+                tv_nsec: statx.stx_atime.tv_nsec,
             },
             st_mtime: TimeSpec {
-                tv_sec: statx.stx_mtime.tv_sec as u64,
-                tv_nsec: statx.stx_mtime.tv_nsec as u64,
+                tv_sec: statx.stx_mtime.tv_sec,
+                tv_nsec: statx.stx_mtime.tv_nsec,
             },
             st_ctime: TimeSpec {
-                tv_sec: statx.stx_ctime.tv_sec as u64,
-                tv_nsec: statx.stx_ctime.tv_nsec as u64,
+                tv_sec: statx.stx_ctime.tv_sec,
+                tv_nsec: statx.stx_ctime.tv_nsec,
             },
         }
     }

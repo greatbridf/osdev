@@ -297,6 +297,10 @@ impl<E: ElfArch> Elf<E> {
             self.entry_point()
         };
         aux_vec.set(AuxKey::AT_ENTRY, E::Ea::from_usize(elf_entry))?;
+        aux_vec.set(
+            AuxKey::AT_RANDOM,
+            E::Ea::from_usize(E::STACK_BASE_ADDR - 16),
+        )?;
 
         if let Some(ldso_base) = ldso_base {
             aux_vec.set(AuxKey::AT_BASE, E::Ea::from_usize(ldso_base.addr()))?;

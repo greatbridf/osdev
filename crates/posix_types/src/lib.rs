@@ -2,6 +2,7 @@
 
 pub mod constants;
 pub mod ctypes;
+pub mod namei;
 pub mod open;
 pub mod result;
 pub mod signal;

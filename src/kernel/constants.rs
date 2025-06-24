@@ -61,8 +61,8 @@ pub const SEEK_END: u32 = 2;
 pub const F_DUPFD: u32 = 0;
 pub const F_GETFD: u32 = 1;
 pub const F_SETFD: u32 = 2;
-// pub const F_GETFL: u32 = 3;
-// pub const F_SETFL: u32 = 4;
+pub const F_GETFL: u32 = 3;
+pub const F_SETFL: u32 = 4;
 pub const F_DUPFD_CLOEXEC: u32 = 1030;
 
 pub const STATX_TYPE: u32 = 1;

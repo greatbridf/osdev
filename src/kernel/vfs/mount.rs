@@ -36,7 +36,7 @@ pub struct Mount {
 
 impl Mount {
     pub fn new(mp: &Dentry, vfs: Arc<dyn Vfs>, root_inode: Arc<dyn Inode>) -> KResult<Self> {
-        let root_dentry = Dentry::create(mp.parent().clone(), mp.name());
+        let root_dentry = Dentry::create(mp.parent().clone(), &mp.get_name());
         root_dentry.save_dir(root_inode)?;
 
         Ok(Self {
@@ -171,7 +171,7 @@ impl Dentry {
 
             let root_dentry = mount.root().clone();
 
-            dcache::d_add(&root_dentry);
+            dcache::d_add(root_dentry.clone());
 
             MOUNTS.lock().push((
                 DROOT.clone(),

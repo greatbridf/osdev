@@ -1,9 +1,10 @@
-use super::{dentry::Dentry, s_isblk, s_ischr, vfs::Vfs, DevId, TimeSpec};
+use super::{dentry::Dentry, s_isblk, s_ischr, vfs::Vfs, DevId};
 use crate::io::Stream;
 use crate::kernel::constants::{
     EINVAL, EISDIR, ENOTDIR, EPERM, STATX_ATIME, STATX_BLOCKS, STATX_CTIME, STATX_GID, STATX_INO,
     STATX_MODE, STATX_MTIME, STATX_NLINK, STATX_SIZE, STATX_TYPE, STATX_UID, S_IFDIR, S_IFMT,
 };
+use crate::kernel::timer::Instant;
 use crate::{io::Buffer, prelude::*};
 use alloc::sync::{Arc, Weak};
 use core::{
@@ -14,6 +15,7 @@ use core::{
 };
 use eonix_runtime::task::Task;
 use eonix_sync::RwLock;
+use posix_types::namei::RenameFlags;
 use posix_types::stat::StatX;
 
 pub type Ino = u64;
@@ -42,9 +44,9 @@ pub struct InodeData {
     pub gid: AtomicGid,
     pub mode: AtomicMode,
 
-    pub atime: Spin<TimeSpec>,
-    pub ctime: Spin<TimeSpec>,
-    pub mtime: Spin<TimeSpec>,
+    pub atime: Spin<Instant>,
+    pub ctime: Spin<Instant>,
+    pub mtime: Spin<Instant>,
 
     pub rwsem: RwLock<()>,
 
@@ -56,9 +58,9 @@ impl InodeData {
         Self {
             ino,
             vfs,
-            atime: Spin::new(TimeSpec::default()),
-            ctime: Spin::new(TimeSpec::default()),
-            mtime: Spin::new(TimeSpec::default()),
+            atime: Spin::new(Instant::default()),
+            ctime: Spin::new(Instant::default()),
+            mtime: Spin::new(Instant::default()),
             rwsem: RwLock::new(()),
             size: AtomicU64::new(0),
             nlink: AtomicNlink::new(0),
@@ -82,8 +84,17 @@ pub enum WriteOffset<'end> {
     End(&'end mut usize),
 }
 
+pub struct RenameData<'a, 'b> {
+    pub old_dentry: &'a Arc<Dentry>,
+    pub new_dentry: &'b Arc<Dentry>,
+    pub new_parent: Arc<dyn Inode>,
+    pub vfs: Arc<dyn Vfs>,
+    pub is_exchange: bool,
+    pub no_replace: bool,
+}
+
 #[allow(unused_variables)]
-pub trait Inode: Send + Sync + InodeInner {
+pub trait Inode: Send + Sync + InodeInner + Any {
     fn is_dir(&self) -> bool {
         self.mode.load(Ordering::SeqCst) & S_IFDIR != 0
     }
@@ -132,6 +143,10 @@ pub trait Inode: Send + Sync + InodeInner {
         Err(if self.is_dir() { EISDIR } else { EPERM })
     }
 
+    fn rename(&self, rename_data: RenameData) -> KResult<()> {
+        Err(if !self.is_dir() { ENOTDIR } else { EPERM })
+    }
+
     fn do_readdir(
         &self,
         offset: usize,
@@ -161,23 +176,20 @@ pub trait Inode: Send + Sync + InodeInner {
         }
 
         if mask & STATX_ATIME != 0 {
-            let atime = self.atime.lock();
-            stat.stx_atime.tv_nsec = atime.nsec as _;
-            stat.stx_atime.tv_sec = atime.sec as _;
+            let atime = *self.atime.lock();
+            stat.stx_atime = atime.into();
             stat.stx_mask |= STATX_ATIME;
         }
 
         if mask & STATX_MTIME != 0 {
-            let mtime = self.mtime.lock();
-            stat.stx_mtime.tv_nsec = mtime.nsec as _;
-            stat.stx_mtime.tv_sec = mtime.sec as _;
+            let mtime = *self.mtime.lock();
+            stat.stx_mtime = mtime.into();
             stat.stx_mask |= STATX_MTIME;
         }
 
         if mask & STATX_CTIME != 0 {
-            let ctime = self.ctime.lock();
-            stat.stx_ctime.tv_nsec = ctime.nsec as _;
-            stat.stx_ctime.tv_sec = ctime.sec as _;
+            let ctime = *self.ctime.lock();
+            stat.stx_ctime = ctime.into();
             stat.stx_mask |= STATX_CTIME;
         }
 

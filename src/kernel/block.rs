@@ -5,10 +5,7 @@ use super::{
     mem::{paging::Page, AsMemoryBlock as _},
     vfs::DevId,
 };
-use crate::{
-    io::ByteBuffer,
-    kernel::constants::{EEXIST, EINVAL, EIO}
-};
+use crate::kernel::constants::{EEXIST, EINVAL};
 use crate::{
     io::{Buffer, FillResult},
     prelude::*,
@@ -55,6 +52,15 @@ enum BlockDeviceType {
 pub enum FileSystemType {
     Ext4,
     Fat32,
+}
+
+impl FileSystemType {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            FileSystemType::Ext4 => "ext4",
+            FileSystemType::Fat32 => "fat32",
+        }
+    }
 }
 
 pub struct BlockDevice {
@@ -123,14 +129,14 @@ impl BlockDevice {
         }
     }
 
-    pub fn register_partition(&self, idx: u32, offset: u64, size: u64) -> KResult<Arc<Self>> {
+    pub fn register_partition(&self, idx: usize, offset: u64, size: u64) -> KResult<Arc<Self>> {
         let queue = match &self.dev_type {
             BlockDeviceType::Disk { queue } => queue.clone(),
             BlockDeviceType::Partition { .. } => return Err(EINVAL),
         };
 
         let device = Arc::new(BlockDevice {
-            devid: make_device(self.devid >> 8, idx as u32),
+            devid: make_device(self.devid >> 8, (self.devid & 0xff) + idx as u32 + 1),
             sector_count: size,
             dev_type: BlockDeviceType::Partition {
                 disk_dev: self.devid,
@@ -145,81 +151,17 @@ impl BlockDevice {
         }
     }
 
-    fn is_ext4_signature(&self, buffer: &[u8]) -> bool {
-        if buffer.len() >= 1080 + 2 {
-            &buffer[1080..1082] == &[0x53, 0xEF]
-        } else {
-            false
-        }
-    }
-
-    fn is_fat32_signature(&self, buffer: &[u8]) -> bool {
-        if buffer.len() >= 90 {
-            &buffer[82..90] == b"FAT32   "
-        } else {
-            false
-        }
-    }
-
-    fn detect_filesystem(&self) -> KResult<FileSystemType> {
-        let mut buffer = vec![0u8; 4096];
-        let mut byte_buffer = ByteBuffer::new(buffer.as_mut_slice());
-        self.read_some(0, &mut byte_buffer)?.ok_or(EIO)?;
-
-        if self.is_ext4_signature(&buffer) {
-            Ok(FileSystemType::Ext4)
-        } else if self.is_fat32_signature(&buffer) {
-            Ok(FileSystemType::Fat32)
-        } else {
-            Err(0)
-        }
-    }
-
-    fn register_whole_disk_partition(&self) -> KResult<Arc<Self>> {
-        let queue = match &self.dev_type {
-            BlockDeviceType::Disk { queue } => queue.clone(),
-            BlockDeviceType::Partition { .. } => return Err(EINVAL),
-        };
-
-        let device = Arc::new(BlockDevice {
-            devid: make_device(self.devid >> 8, 0u32),
-            sector_count: self.sector_count,
-            dev_type: BlockDeviceType::Partition {
-                disk_dev: self.devid,
-                lba_offset: 0,
-                queue,
-            },
-        });
-
-        match BLOCK_DEVICE_LIST.lock().entry(device.devid()) {
-            Entry::Vacant(entry) => Ok(entry.insert(device).clone()),
-            Entry::Occupied(_) => Err(EEXIST),
-        }
-    }
-
     pub async fn partprobe(&self) -> KResult<()> {
         match self.dev_type {
             BlockDeviceType::Partition { .. } => Err(EINVAL),
             BlockDeviceType::Disk { .. } => {
-                let base_minor = (self.devid & 0xFF) as u32;
                 if let Ok(mbr_table) = MBRPartTable::from_disk(self).await {
                     for (idx, partition) in mbr_table.partitions().enumerate() {
-                        self.register_partition(
-                            base_minor + idx as u32 + 1,
-                            partition.lba_offset,
-                            partition.sector_count,
-                        )?;
-                    }
-                    Ok(())
-                } else {
-                    match self.detect_filesystem() {
-                        Ok(_fs_type) => {
-                            self.register_whole_disk_partition();
-                            Ok(())
-                        }
-                        Err(_) => Ok(()),
+                        self.register_partition(idx, partition.lba_offset, partition.sector_count)?;
                     }
                 }
+
+                Ok(())
             }
         }
     }

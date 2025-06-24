@@ -54,6 +54,7 @@ unsafe impl Send for Mount {}
 unsafe impl Sync for Mount {}
 
 pub trait MountCreator: Send + Sync {
+    fn check_signature(&self, first_block: &[u8]) -> KResult<bool>;
     fn create_mount(&self, source: &str, flags: u64, mp: &Arc<Dentry>) -> KResult<Mount>;
 }
 

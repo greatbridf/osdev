@@ -202,6 +202,10 @@ impl MountCreator for ProcFsMountCreator {
         let root_inode = vfs.root_node.clone();
         Mount::new(mp, vfs, root_inode)
     }
+
+    fn check_signature(&self, _: &[u8]) -> KResult<bool> {
+        Ok(true)
+    }
 }
 
 pub fn root() -> ProcFsNode {

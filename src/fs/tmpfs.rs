@@ -383,6 +383,10 @@ impl MountCreator for TmpFsMountCreator {
 
         Mount::new(mp, fs, root_inode)
     }
+
+    fn check_signature(&self, _: &[u8]) -> KResult<bool> {
+        Ok(true)
+    }
 }
 
 pub fn init() {

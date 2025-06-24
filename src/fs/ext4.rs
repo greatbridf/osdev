@@ -5,6 +5,7 @@ use crate::{
     kernel::{
         block::BlockDevice,
         constants::EIO,
+        timer::Instant,
         vfs::{
             dentry::Dentry,
             inode::{define_struct_inode, AtomicNlink, Ino, Inode, InodeData},
@@ -135,18 +136,18 @@ impl Ext4Fs {
                     uid: AtomicU32::new(root_inode.inode.uid() as _),
                     gid: AtomicU32::new(root_inode.inode.gid() as _),
                     mode: AtomicU32::new(root_inode.inode.mode() as _),
-                    atime: Spin::new(TimeSpec {
-                        sec: root_inode.inode.atime() as _,
-                        nsec: root_inode.inode.i_atime_extra() as _,
-                    }),
-                    ctime: Spin::new(TimeSpec {
-                        sec: root_inode.inode.ctime() as _,
-                        nsec: root_inode.inode.i_ctime_extra() as _,
-                    }),
-                    mtime: Spin::new(TimeSpec {
-                        sec: root_inode.inode.mtime() as _,
-                        nsec: root_inode.inode.i_mtime_extra() as _,
-                    }),
+                    atime: Spin::new(Instant::new(
+                        root_inode.inode.atime() as _,
+                        root_inode.inode.i_atime_extra() as _,
+                    )),
+                    ctime: Spin::new(Instant::new(
+                        root_inode.inode.ctime() as _,
+                        root_inode.inode.i_ctime_extra() as _,
+                    )),
+                    mtime: Spin::new(Instant::new(
+                        root_inode.inode.mtime() as _,
+                        root_inode.inode.i_mtime_extra() as _,
+                    )),
                     rwsem: RwLock::new(()),
                     vfs: Arc::downgrade(&ext4fs) as _,
                 },
@@ -201,7 +202,8 @@ impl Inode for DirInode {
         let vfs = self.vfs.upgrade().ok_or(EIO)?;
         let ext4fs = vfs.as_any().downcast_ref::<Ext4Fs>().unwrap();
 
-        let name = String::from_utf8_lossy(&dentry.name());
+        let name = dentry.get_name();
+        let name = String::from_utf8_lossy(&name);
         let lookup_result = ext4fs.inner.fuse_lookup(self.ino, &name);
 
         const EXT4_ERROR_ENOENT: Ext4Error = Ext4Error::new(Errno::ENOENT);
@@ -232,18 +234,9 @@ impl Inode for DirInode {
                 uid: AtomicU32::new(attr.uid),
                 gid: AtomicU32::new(attr.gid),
                 mode: AtomicU32::new(attr.kind.bits() as u32 | real_perm),
-                atime: Spin::new(TimeSpec {
-                    sec: attr.atime as _,
-                    nsec: 0,
-                }),
-                ctime: Spin::new(TimeSpec {
-                    sec: attr.ctime as _,
-                    nsec: 0,
-                }),
-                mtime: Spin::new(TimeSpec {
-                    sec: attr.mtime as _,
-                    nsec: 0,
-                }),
+                atime: Spin::new(Instant::new(attr.atime as _, 0)),
+                ctime: Spin::new(Instant::new(attr.ctime as _, 0)),
+                mtime: Spin::new(Instant::new(attr.mtime as _, 0)),
                 rwsem: RwLock::new(()),
                 vfs: self.vfs.clone(),
             },

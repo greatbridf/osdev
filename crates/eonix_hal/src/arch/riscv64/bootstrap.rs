@@ -42,9 +42,9 @@ static BOOT_STACK: [u8; 4096 * 16] = [0; 4096 * 16];
 static BOOT_STACK_START: &'static [u8; 4096 * 16] = &BOOT_STACK;
 
 #[unsafe(link_section = ".bootstrap.stack")]
-static TEMP_AP_STACK: [u8; 32 * 8] = [0; 32 * 8];
+static TEMP_AP_STACK: [u8; 256] = [0; 256];
 
-static TEMP_AP_STACK_START: &'static [u8; 32 * 8] = &TEMP_AP_STACK;
+static TEMP_AP_STACK_START: &'static [u8; 256] = &TEMP_AP_STACK;
 
 #[repr(C, align(4096))]
 struct PageTable([u64; PTES_PER_PAGE]);
@@ -301,8 +301,6 @@ unsafe extern "C" fn _ap_start(hart_id: usize) -> ! {
         "
             la    sp, 1f        // set temp stack
             mv    s0, a0        // save hart id
-            slli  t0, a0, 5
-            sub   sp, sp, t0
 
             ld    t0, 2f
             srli  t0, t0, 12

@@ -253,13 +253,9 @@ fn get_ap_start_addr() -> usize {
 
 fn bootstrap_smp(alloc: impl Allocator, page_alloc: &RefCell<BasicPageAlloc>) {
     let local_hart_id = CPU::local().cpuid();
-    let hart_count = FDT.hart_count();
     let mut ap_count = 0;
 
-    for current_hart_id in 0..hart_count {
-        if current_hart_id == local_hart_id {
-            continue;
-        }
+    for hart_id in FDT.harts().filter(|&id| id != local_hart_id) {
         let stack_range = {
             let page_alloc = BasicPageAllocRef::new(&page_alloc);
             let ap_stack = Page::alloc_order_in(4, page_alloc);
@@ -284,11 +280,7 @@ fn bootstrap_smp(alloc: impl Allocator, page_alloc: &RefCell<BasicPageAlloc>) {
         }
 
         unsafe {
-            hart_start(
-                current_hart_id,
-                PhysicalAddress::new(get_ap_start_addr()),
-                0,
-            );
+            hart_start(hart_id, PhysicalAddress::new(get_ap_start_addr()), 0);
         }
 
         while AP_COUNT.load(Ordering::Acquire) == ap_count {

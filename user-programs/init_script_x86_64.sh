@@ -25,6 +25,7 @@ do_or_freeze $BUSYBOX mknod -m 666 /dev/null c 1 3
 do_or_freeze $BUSYBOX mknod -m 666 /dev/zero c 1 5
 do_or_freeze $BUSYBOX mknod -m 666 /dev/sda b 8 0
 do_or_freeze $BUSYBOX mknod -m 666 /dev/sda1 b 8 1
+do_or_freeze $BUSYBOX mknod -m 666 /dev/sdb b 8 16
 do_or_freeze $BUSYBOX mknod -m 666 /dev/ttyS0 c 4 64
 do_or_freeze $BUSYBOX mknod -m 666 /dev/ttyS1 c 4 65
 
@@ -40,6 +41,14 @@ echo ok >&2
 
 do_or_freeze mkdir -p /etc /root /proc
 do_or_freeze mount -t procfs proc proc
+
+# Check if the device /dev/sdb is available and can be read
+if dd if=/dev/sdb of=/dev/null bs=512 count=1; then
+    echo -n -e "Mounting the ext4 image... " >&2
+    do_or_freeze mkdir -p /mnt1
+    do_or_freeze mount -t ext4 /dev/sdb /mnt1
+    echo ok >&2
+fi
 
 cp /mnt/ld-musl-i386.so.1 /lib/ld-musl-i386.so.1
 ln -s /lib/ld-musl-i386.so.1 /lib/libc.so

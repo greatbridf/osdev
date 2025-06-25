@@ -9,6 +9,7 @@ use core::{
 };
 use eonix_hal::processor::CPU;
 use eonix_sync::{Spin, SpinIrq as _};
+use posix_types::stat::{StatXTimestamp, TimeSpec, TimeVal};
 
 static TICKS: AtomicUsize = AtomicUsize::new(0);
 static WAKEUP_TICK: AtomicUsize = AtomicUsize::new(usize::MAX);
@@ -17,7 +18,11 @@ static SLEEPERS_LIST: Spin<BinaryHeap<Reverse<Sleepers>>> = Spin::new(BinaryHeap
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
 pub struct Ticks(usize);
 
-pub struct Instant(Ticks);
+#[derive(Default, Clone, Copy)]
+pub struct Instant {
+    secs_since_epoch: u64,
+    nsecs_within: u32,
+}
 
 struct Sleepers {
     wakeup_tick: Ticks,
@@ -71,24 +76,65 @@ impl Ticks {
 }
 
 impl Instant {
-    pub fn now() -> Self {
-        Instant(Ticks::now())
+    pub const fn default() -> Self {
+        Instant {
+            secs_since_epoch: 0,
+            nsecs_within: 0,
+        }
+    }
+
+    pub fn new(secs_since_epoch: u64, nsecs_within: u32) -> Self {
+        Instant {
+            secs_since_epoch,
+            nsecs_within,
+        }
     }
 
     pub fn elapsed(&self) -> Duration {
-        Duration::from_nanos((Ticks::now().in_nsecs() - self.0.in_nsecs()) as u64)
+        let now = Instant::now();
+        if now.nsecs_within < self.nsecs_within {
+            // We have wrapped around the nanoseconds.
+            Duration::new(
+                now.secs_since_epoch - self.secs_since_epoch - 1,
+                1_000_000_000 + now.nsecs_within - self.nsecs_within,
+            )
+        } else {
+            Duration::new(
+                now.secs_since_epoch - self.secs_since_epoch,
+                now.nsecs_within - self.nsecs_within,
+            )
+        }
+    }
+
+    pub fn since_epoch(&self) -> Duration {
+        Duration::new(self.secs_since_epoch, self.nsecs_within)
     }
 }
 
-impl From<Ticks> for Instant {
-    fn from(ticks: Ticks) -> Self {
-        Instant(ticks)
+impl From<Instant> for TimeSpec {
+    fn from(value: Instant) -> Self {
+        Self {
+            tv_sec: value.secs_since_epoch,
+            tv_nsec: value.nsecs_within,
+        }
     }
 }
 
-impl From<Instant> for Ticks {
-    fn from(instant: Instant) -> Self {
-        instant.0
+impl From<Instant> for TimeVal {
+    fn from(value: Instant) -> Self {
+        Self {
+            tv_sec: value.secs_since_epoch,
+            tv_usec: value.nsecs_within / 1_000,
+        }
+    }
+}
+
+impl From<Instant> for StatXTimestamp {
+    fn from(value: Instant) -> Self {
+        Self {
+            tv_sec: value.secs_since_epoch,
+            tv_nsec: value.nsecs_within,
+        }
     }
 }
 
@@ -104,7 +150,15 @@ impl Add<Duration> for Instant {
     type Output = Instant;
 
     fn add(self, duration: Duration) -> Self::Output {
-        Instant(self.0 + Ticks(duration.as_millis() as usize))
+        let nsecs = self.nsecs_within + duration.subsec_nanos();
+        let nsecs_within = nsecs % 1_000_000_000;
+        let secs_since_epoch =
+            self.secs_since_epoch + duration.as_secs() + (nsecs / 1_000_000_000) as u64;
+
+        Instant {
+            secs_since_epoch,
+            nsecs_within: nsecs_within,
+        }
     }
 }
 
@@ -156,13 +210,8 @@ pub fn should_reschedule() -> bool {
     }
 }
 
-pub fn ticks() -> Ticks {
-    Ticks::now()
-}
-
 pub async fn sleep(duration: Duration) {
-    let wakeup_time = Instant::now() + duration;
-    let wakeup_tick = Ticks::from(wakeup_time);
+    let wakeup_tick = Ticks::now() + Ticks(duration.as_millis() as usize);
 
     core::future::poll_fn(|ctx| {
         if Ticks::now() >= wakeup_tick {

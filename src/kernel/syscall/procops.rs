@@ -1,6 +1,3 @@
-use core::time::Duration;
-
-use super::sysinfo::TimeVal;
 use super::SyscallNoReturn;
 use crate::io::Buffer;
 use crate::kernel::constants::{EINVAL, ENOENT, ENOTDIR, ERANGE, ESRCH};
@@ -10,7 +7,7 @@ use crate::kernel::constants::{
 use crate::kernel::mem::PageBuffer;
 use crate::kernel::task::{
     do_clone, futex_wait, futex_wake, FutexFlags, FutexOp, ProcessList, ProgramLoader,
-    SignalAction, Thread, WaitType,
+    RobustListHead, SignalAction, Thread, WaitType,
 };
 use crate::kernel::task::{parse_futexop, CloneArgs};
 use crate::kernel::timer::sleep;
@@ -23,14 +20,16 @@ use alloc::borrow::ToOwned;
 use alloc::ffi::CString;
 use bitflags::bitflags;
 use core::ptr::NonNull;
+use core::time::Duration;
 use eonix_hal::processor::UserTLS;
 use eonix_hal::traits::trap::RawTrapContext;
-use eonix_mm::address::Addr as _;
+use eonix_mm::address::{Addr as _, VAddr};
 use eonix_runtime::task::Task;
 use eonix_sync::AsProof as _;
 use posix_types::constants::{P_ALL, P_PID};
 use posix_types::ctypes::PtrT;
 use posix_types::signal::{SigAction, SigInfo, SigSet, Signal};
+use posix_types::stat::TimeVal;
 use posix_types::{syscall_no::*, SIGNAL_NOW};
 
 #[repr(C)]
@@ -81,11 +80,8 @@ fn getcwd(buffer: *mut u8, bufsize: usize) -> KResult<usize> {
     let mut user_buffer = UserBuffer::new(buffer, bufsize)?;
     let mut buffer = PageBuffer::new();
 
-    thread
-        .fs_context
-        .cwd
-        .lock()
-        .get_path(&thread.fs_context, &mut buffer)?;
+    let cwd = thread.fs_context.cwd.lock().clone();
+    cwd.get_path(&thread.fs_context, &mut buffer)?;
 
     user_buffer.fill(buffer.data())?.ok_or(ERANGE)?;
 
@@ -172,6 +168,11 @@ fn execve(exec: *const u8, argv: *const PtrT, envp: *const PtrT) -> KResult<Sysc
     //       should be terminated and `execve` is performed in the thread group leader.
     let load_info = ProgramLoader::parse(dentry.clone())?.load(argv, envp)?;
 
+    if let Some(robust_list) = thread.get_robust_list() {
+        let _ = Task::block_on(robust_list.wake_all());
+        thread.set_robust_list(None);
+    }
+
     unsafe {
         // SAFETY: We are doing execve, all other threads are terminated.
         thread.process.mm_list.replace(Some(load_info.mm_list));
@@ -179,7 +180,7 @@ fn execve(exec: *const u8, argv: *const PtrT, envp: *const PtrT) -> KResult<Sysc
 
     thread.files.on_exec();
     thread.signal_list.clear_non_ignore();
-    thread.set_name(dentry.name().clone());
+    thread.set_name(dentry.get_name());
 
     let mut trap_ctx = thread.trap_ctx.borrow();
     trap_ctx.set_program_counter(load_info.entry_ip.addr());
@@ -743,6 +744,16 @@ fn futex(
             todo!()
         }
     }
+}
+
+#[eonix_macros::define_syscall(SYS_SET_ROBUST_LIST)]
+fn set_robust_list(head: usize, len: usize) -> KResult<()> {
+    if len != size_of::<RobustListHead>() {
+        return Err(EINVAL);
+    }
+
+    thread.set_robust_list(Some(VAddr::from(head)));
+    Ok(())
 }
 
 #[eonix_macros::define_syscall(SYS_RT_SIGRETURN)]

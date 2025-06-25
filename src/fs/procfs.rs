@@ -1,4 +1,5 @@
 use crate::kernel::constants::{EACCES, ENOTDIR};
+use crate::kernel::timer::Instant;
 use crate::{
     io::Buffer,
     kernel::{
@@ -76,13 +77,16 @@ impl FileInode {
             mode |= 0o200;
         }
 
-        let inode = Self {
+        let mut inode = Self {
             idata: InodeData::new(ino, vfs),
             file,
         };
 
         inode.idata.mode.store(mode, Ordering::Relaxed);
         inode.idata.nlink.store(1, Ordering::Relaxed);
+        *inode.ctime.get_mut() = Instant::now();
+        *inode.mtime.get_mut() = Instant::now();
+        *inode.atime.get_mut() = Instant::now();
 
         Arc::new(inode)
     }
@@ -121,6 +125,9 @@ impl DirInode {
             addr_of_mut_field!(inode, entries).write(Locked::new(vec![], rwsem));
             addr_of_mut_field!(&mut *inode, mode).write((S_IFDIR | 0o755).into());
             addr_of_mut_field!(&mut *inode, nlink).write(1.into());
+            addr_of_mut_field!(&mut *inode, ctime).write(Spin::new(Instant::now()));
+            addr_of_mut_field!(&mut *inode, mtime).write(Spin::new(Instant::now()));
+            addr_of_mut_field!(&mut *inode, atime).write(Spin::new(Instant::now()));
         })
     }
 }
@@ -132,11 +139,7 @@ impl Inode for DirInode {
             .entries
             .access(lock.prove())
             .iter()
-            .find_map(|(name, node)| {
-                name.as_ref()
-                    .eq(dentry.name().as_ref())
-                    .then(|| node.unwrap())
-            }))
+            .find_map(|(name, node)| (name == &***dentry.name()).then(|| node.unwrap())))
     }
 
     fn do_readdir(
@@ -201,6 +204,10 @@ impl MountCreator for ProcFsMountCreator {
         let vfs = ProcFsMountCreator::get();
         let root_inode = vfs.root_node.clone();
         Mount::new(mp, vfs, root_inode)
+    }
+
+    fn check_signature(&self, _: &[u8]) -> KResult<bool> {
+        Ok(true)
     }
 }
 

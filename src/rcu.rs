@@ -17,12 +17,20 @@ pub struct RCUReadGuard<'data, T: 'data> {
 
 static GLOBAL_RCU_SEM: RwLock<()> = RwLock::new(());
 
-impl<'data, T: 'data> RCUReadGuard<'data, T> {
-    fn lock(value: T) -> Self {
+impl<'data, T> RCUReadGuard<'data, BorrowedArc<'data, T>> {
+    fn lock(value: BorrowedArc<'data, T>) -> Self {
         Self {
             value,
             _guard: Task::block_on(GLOBAL_RCU_SEM.read()),
             _phantom: PhantomData,
+        }
+    }
+
+    pub fn borrow(&self) -> BorrowedArc<'data, T> {
+        unsafe {
+            BorrowedArc::from_raw(NonNull::new_unchecked(
+                &raw const *self.value.borrow() as *mut T
+            ))
         }
     }
 }
@@ -194,13 +202,24 @@ impl<T: core::fmt::Debug> core::fmt::Debug for RCUPointer<T> {
 }
 
 impl<T> RCUPointer<T> {
-    pub fn empty() -> Self {
+    pub const fn empty() -> Self {
         Self(AtomicPtr::new(core::ptr::null_mut()))
+    }
+
+    pub fn new(value: Arc<T>) -> Self {
+        Self(AtomicPtr::new(Arc::into_raw(value) as *mut T))
     }
 
     pub fn load<'lt>(&self) -> Option<RCUReadGuard<'lt, BorrowedArc<'lt, T>>> {
         NonNull::new(self.0.load(Ordering::Acquire))
             .map(|p| RCUReadGuard::lock(unsafe { BorrowedArc::from_raw(p) }))
+    }
+
+    pub fn load_protected<'a, U: 'a>(
+        &self,
+        _guard: &RCUReadGuard<'a, U>,
+    ) -> Option<BorrowedArc<'a, T>> {
+        NonNull::new(self.0.load(Ordering::Acquire)).map(|p| unsafe { BorrowedArc::from_raw(p) })
     }
 
     /// # Safety
@@ -223,6 +242,19 @@ impl<T> RCUPointer<T> {
         } else {
             Some(unsafe { Arc::from_raw(old) })
         }
+    }
+
+    /// Exchange the value of the pointers.
+    ///
+    /// # Safety
+    /// Presence of readers is acceptable.
+    /// But the caller must ensure that we are the only one **altering** the pointers.
+    pub unsafe fn exchange(old: &Self, new: &Self) {
+        let old_value = old.0.load(Ordering::Acquire);
+
+        let new_value = new.0.swap(old_value, Ordering::AcqRel);
+
+        old.0.store(new_value, Ordering::Release);
     }
 }
 

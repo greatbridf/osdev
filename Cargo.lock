@@ -144,6 +144,7 @@ dependencies = [
  "eonix_preempt",
  "eonix_runtime",
  "eonix_sync",
+ "ext4_rs",
  "intrusive-collections",
  "intrusive_list",
  "itertools",
@@ -244,6 +245,16 @@ dependencies = [
  "eonix_spin",
  "eonix_sync_base",
  "intrusive-collections",
+]
+
+[[package]]
+name = "ext4_rs"
+version = "1.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9a1a97344bde15b0ace15e265dab27228d4bdc37a0bfa8548c5645d7cfa6a144"
+dependencies = [
+ "bitflags",
+ "log",
 ]
 
 [[package]]

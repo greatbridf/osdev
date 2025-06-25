@@ -23,13 +23,12 @@ use crate::{
 use alloc::sync::Arc;
 use eonix_runtime::task::Task;
 use posix_types::ctypes::{Long, PtrT};
+use posix_types::namei::RenameFlags;
 use posix_types::open::{AtFlags, OpenFlags};
 use posix_types::signal::SigSet;
+use posix_types::stat::Stat;
 use posix_types::stat::{StatX, TimeSpec};
 use posix_types::syscall_no::*;
-
-#[cfg(not(target_arch = "x86_64"))]
-use posix_types::stat::Stat;
 
 impl FromSyscallArg for OpenFlags {
     fn from_arg(value: usize) -> Self {
@@ -149,8 +148,11 @@ fn getdents64(fd: FD, buffer: *mut u8, bufsize: usize) -> KResult<usize> {
     Ok(buffer.wrote())
 }
 
-#[cfg(not(target_arch = "x86_64"))]
-#[eonix_macros::define_syscall(SYS_NEWFSTATAT)]
+#[cfg_attr(
+    not(target_arch = "x86_64"),
+    eonix_macros::define_syscall(SYS_NEWFSTATAT)
+)]
+#[cfg_attr(target_arch = "x86_64", eonix_macros::define_syscall(SYS_FSTATAT64))]
 fn newfstatat(dirfd: FD, pathname: *const u8, statbuf: *mut Stat, flags: AtFlags) -> KResult<()> {
     let dentry = if flags.at_empty_path() {
         let file = thread.files.get(dirfd).ok_or(EBADF)?;
@@ -167,6 +169,21 @@ fn newfstatat(dirfd: FD, pathname: *const u8, statbuf: *mut Stat, flags: AtFlags
     statbuf.write(statx.into())?;
 
     Ok(())
+}
+
+#[cfg_attr(
+    not(target_arch = "x86_64"),
+    eonix_macros::define_syscall(SYS_NEWFSTAT)
+)]
+#[cfg_attr(target_arch = "x86_64", eonix_macros::define_syscall(SYS_FSTAT64))]
+fn newfstat(fd: FD, statbuf: *mut Stat) -> KResult<()> {
+    sys_newfstatat(
+        thread,
+        fd,
+        core::ptr::null(),
+        statbuf,
+        AtFlags::AT_EMPTY_PATH,
+    )
 }
 
 #[eonix_macros::define_syscall(SYS_STATX)]
@@ -543,6 +560,40 @@ fn utimensat(
     // TODO: Implement utimensat
     // dentry.utimens(&times)
     Ok(())
+}
+
+#[eonix_macros::define_syscall(SYS_RENAMEAT2)]
+fn renameat2(
+    old_dirfd: FD,
+    old_pathname: *const u8,
+    new_dirfd: FD,
+    new_pathname: *const u8,
+    flags: u32,
+) -> KResult<()> {
+    let flags = RenameFlags::from_bits(flags).ok_or(EINVAL)?;
+
+    // The two flags RENAME_NOREPLACE and RENAME_EXCHANGE are mutually exclusive.
+    if flags.contains(RenameFlags::RENAME_NOREPLACE | RenameFlags::RENAME_EXCHANGE) {
+        Err(EINVAL)?;
+    }
+
+    let old_dentry = dentry_from(thread, old_dirfd, old_pathname, false)?;
+    let new_dentry = dentry_from(thread, new_dirfd, new_pathname, false)?;
+
+    old_dentry.rename(&new_dentry, flags)
+}
+
+#[cfg(target_arch = "x86_64")]
+#[eonix_macros::define_syscall(SYS_RENAME)]
+fn rename(old_pathname: *const u8, new_pathname: *const u8) -> KResult<()> {
+    sys_renameat2(
+        thread,
+        FD::AT_FDCWD,
+        old_pathname,
+        FD::AT_FDCWD,
+        new_pathname,
+        0,
+    )
 }
 
 pub fn keep_alive() {}

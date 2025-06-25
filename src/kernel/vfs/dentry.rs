@@ -1,7 +1,7 @@
 pub mod dcache;
 
 use super::{
-    inode::{Ino, Inode, Mode, WriteOffset},
+    inode::{Ino, Inode, Mode, RenameData, WriteOffset},
     s_isblk, s_ischr, s_isdir, s_isreg, DevId, FsContext,
 };
 use crate::{
@@ -10,21 +10,22 @@ use crate::{
     kernel::{block::BlockDevice, CharDevice},
     path::{Path, PathComponent},
     prelude::*,
-    rcu::{RCUNode, RCUPointer},
+    rcu::{RCUNode, RCUPointer, RCUReadGuard},
 };
 use crate::{
     io::Stream,
-    kernel::constants::{EEXIST, EINVAL, EISDIR, ELOOP, ENOENT, ENOTDIR, EPERM, ERANGE},
+    kernel::constants::{EEXIST, EINVAL, EIO, EISDIR, ELOOP, ENOENT, ENOTDIR, EPERM, ERANGE},
 };
-use alloc::sync::Arc;
+use alloc::sync::{Arc, Weak};
 use core::{
     fmt,
     hash::{BuildHasher, BuildHasherDefault, Hasher},
     ops::ControlFlow,
-    sync::atomic::{AtomicPtr, Ordering},
+    sync::atomic::{AtomicPtr, AtomicU64, Ordering},
 };
 use eonix_sync::LazyLock;
-use posix_types::{open::OpenFlags, stat::StatX};
+use pointers::BorrowedArc;
+use posix_types::{namei::RenameFlags, open::OpenFlags, result::PosixError, stat::StatX};
 
 struct DentryData {
     inode: Arc<dyn Inode>,
@@ -39,9 +40,9 @@ struct DentryData {
 /// the last reference is dropped.
 pub struct Dentry {
     // Const after insertion into dcache
-    parent: Arc<Dentry>,
-    name: Arc<[u8]>,
-    hash: u64,
+    parent: RCUPointer<Dentry>,
+    name: RCUPointer<Arc<[u8]>>,
+    hash: AtomicU64,
 
     // Used by the dentry cache
     prev: AtomicPtr<Dentry>,
@@ -51,27 +52,29 @@ pub struct Dentry {
     data: RCUPointer<DentryData>,
 }
 
-pub(super) static DROOT: LazyLock<Arc<Dentry>> = LazyLock::new(|| unsafe {
-    let mut dentry = Arc::new_uninit();
-    let parent = dentry.clone().assume_init();
-
-    Arc::get_mut_unchecked(&mut dentry).write(Dentry {
-        parent,
-        name: Arc::from("[root]".as_ref()),
-        hash: 0,
+pub(super) static DROOT: LazyLock<Arc<Dentry>> = LazyLock::new(|| {
+    let root = Arc::new(Dentry {
+        parent: RCUPointer::empty(),
+        name: RCUPointer::new(Arc::new(Arc::from(&b"[root]"[..]))),
+        hash: AtomicU64::new(0),
         prev: AtomicPtr::default(),
         next: AtomicPtr::default(),
         data: RCUPointer::empty(),
     });
 
-    dentry.assume_init()
+    unsafe {
+        root.parent.swap(Some(root.clone()));
+    }
+
+    root.rehash();
+
+    root
 });
 
 impl fmt::Debug for Dentry {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Dentry")
-            .field("name", &String::from_utf8_lossy(&self.name))
-            .field("parent", &String::from_utf8_lossy(&self.parent.name))
+            .field("name", &String::from_utf8_lossy(&self.name()))
             .finish()
     }
 }
@@ -93,14 +96,24 @@ impl RCUNode<Dentry> for Dentry {
 }
 
 impl Dentry {
-    fn rehash(self: &Arc<Self>) -> u64 {
+    fn is_hashed(&self) -> bool {
+        self.prev.load(Ordering::Relaxed) != core::ptr::null_mut()
+    }
+
+    fn rehash(&self) {
+        assert!(
+            !self.is_hashed(),
+            "`rehash()` called on some already hashed dentry"
+        );
+
         let builder: BuildHasherDefault<KernelHasher> = Default::default();
         let mut hasher = builder.build_hasher();
 
         hasher.write_usize(self.parent_addr() as usize);
-        hasher.write(self.name.as_ref());
+        hasher.write(&self.name());
+        let hash = hasher.finish();
 
-        hasher.finish()
+        self.hash.store(hash, Ordering::Relaxed);
     }
 
     fn find(self: &Arc<Self>, name: &[u8]) -> KResult<Arc<Self>> {
@@ -113,15 +126,25 @@ impl Dentry {
 
         match name {
             b"." => Ok(self.clone()),
-            b".." => Ok(self.parent.clone()),
+            b".." => Ok(self.parent().clone()),
             _ => {
                 let dentry = Dentry::create(self.clone(), name);
-                Ok(dcache::d_find_fast(&dentry).unwrap_or_else(|| {
-                    dcache::d_try_revalidate(&dentry);
-                    dcache::d_add(&dentry);
 
-                    dentry
-                }))
+                if let Some(found) = dcache::d_find_fast(&dentry) {
+                    unsafe {
+                        // SAFETY: This is safe because the dentry is never shared with
+                        //         others so we can drop them safely.
+                        let _ = dentry.name.swap(None);
+                        let _ = dentry.parent.swap(None);
+                    }
+
+                    return Ok(found);
+                }
+
+                dcache::d_try_revalidate(&dentry);
+                dcache::d_add(dentry.clone());
+
+                Ok(dentry)
             }
         }
     }
@@ -129,40 +152,44 @@ impl Dentry {
 
 impl Dentry {
     pub fn create(parent: Arc<Dentry>, name: &[u8]) -> Arc<Self> {
-        let mut val = Arc::new(Self {
-            parent,
-            name: Arc::from(name),
-            hash: 0,
+        let val = Arc::new(Self {
+            parent: RCUPointer::new(parent),
+            name: RCUPointer::new(Arc::new(Arc::from(name))),
+            hash: AtomicU64::new(0),
             prev: AtomicPtr::default(),
             next: AtomicPtr::default(),
             data: RCUPointer::empty(),
         });
-        let hash = val.rehash();
-        let val_mut = Arc::get_mut(&mut val).unwrap();
-        val_mut.hash = hash;
 
+        val.rehash();
         val
     }
 
     /// Check the equality of two denties inside the same dentry cache hash group
     /// where `other` is identified by `hash`, `parent` and `name`
     ///
-    fn hash_eq(self: &Arc<Self>, other: &Arc<Self>) -> bool {
-        self.hash == other.hash
+    fn hash_eq(&self, other: &Self) -> bool {
+        self.hash.load(Ordering::Relaxed) == other.hash.load(Ordering::Relaxed)
             && self.parent_addr() == other.parent_addr()
-            && self.name == other.name
+            && &***self.name() == &***other.name()
     }
 
-    pub fn name(&self) -> &Arc<[u8]> {
-        &self.name
+    pub fn name(&self) -> RCUReadGuard<BorrowedArc<Arc<[u8]>>> {
+        self.name.load().expect("Dentry has no name")
     }
 
-    pub fn parent(&self) -> &Arc<Self> {
-        &self.parent
+    pub fn get_name(&self) -> Arc<[u8]> {
+        (***self.name()).clone()
+    }
+
+    pub fn parent<'a>(&self) -> RCUReadGuard<'a, BorrowedArc<Dentry>> {
+        self.parent.load().expect("Dentry has no parent")
     }
 
     pub fn parent_addr(&self) -> *const Self {
-        Arc::as_ptr(&self.parent)
+        self.parent
+            .load()
+            .map_or(core::ptr::null(), |parent| Arc::as_ptr(&parent))
     }
 
     fn save_data(&self, inode: Arc<dyn Inode>, flags: u64) -> KResult<()> {
@@ -251,7 +278,8 @@ impl Dentry {
                 data.inode.readlink(&mut buffer)?;
                 let path = Path::new(buffer.data())?;
 
-                let dentry = Self::open_recursive(context, &dentry.parent, path, true, nrecur + 1)?;
+                let dentry =
+                    Self::open_recursive(context, &dentry.parent(), path, true, nrecur + 1)?;
 
                 Self::resolve_directory(context, dentry, nrecur + 1)
             }
@@ -291,7 +319,8 @@ impl Dentry {
                 PathComponent::TrailingEmpty | PathComponent::Current => {} // pass
                 PathComponent::Parent => {
                     if !cwd.hash_eq(&context.fsroot) {
-                        cwd = Self::resolve_directory(context, cwd.parent.clone(), nrecur)?;
+                        let parent = cwd.parent().clone();
+                        cwd = Self::resolve_directory(context, parent, nrecur)?;
                     }
                     continue;
                 }
@@ -314,7 +343,8 @@ impl Dentry {
                     data.inode.readlink(&mut buffer)?;
                     let path = Path::new(buffer.data())?;
 
-                    cwd = Self::open_recursive(context, &cwd.parent, path, true, nrecur + 1)?;
+                    let parent = cwd.parent().clone();
+                    cwd = Self::open_recursive(context, &parent, path, true, nrecur + 1)?;
                 }
             }
         }
@@ -341,19 +371,26 @@ impl Dentry {
         context: &FsContext,
         buffer: &mut dyn Buffer,
     ) -> KResult<()> {
-        let mut dentry = self;
-        let root = &context.fsroot;
+        let locked_parent = self.parent();
 
-        let mut path = vec![];
+        let path = {
+            let mut path = vec![];
 
-        while Arc::as_ptr(dentry) != Arc::as_ptr(root) {
-            if path.len() > 32 {
-                return Err(ELOOP);
+            let mut parent = locked_parent.borrow();
+            let mut dentry = BorrowedArc::new(self);
+
+            while Arc::as_ptr(&dentry) != Arc::as_ptr(&context.fsroot) {
+                if path.len() > 32 {
+                    return Err(ELOOP);
+                }
+
+                path.push(dentry.name().clone());
+                dentry = parent;
+                parent = dentry.parent.load_protected(&locked_parent).unwrap();
             }
 
-            path.push(dentry.name().clone());
-            dentry = dentry.parent();
-        }
+            path
+        };
 
         buffer.fill(b"/")?.ok_or(ERANGE)?;
         for item in path.iter().rev().map(|name| name.as_ref()) {
@@ -403,14 +440,16 @@ impl Dentry {
     where
         F: FnMut(&[u8], Ino) -> KResult<ControlFlow<(), ()>>,
     {
-        self.get_inode()?.do_readdir(offset, &mut callback)
+        let dir = self.get_inode()?;
+        dir.do_readdir(offset, &mut callback)
     }
 
     pub fn mkdir(&self, mode: Mode) -> KResult<()> {
         if self.get_inode().is_ok() {
             Err(EEXIST)
         } else {
-            self.parent.get_inode().unwrap().mkdir(self, mode)
+            let dir = self.parent().get_inode()?;
+            dir.mkdir(self, mode)
         }
     }
 
@@ -426,7 +465,8 @@ impl Dentry {
         if self.get_inode().is_err() {
             Err(ENOENT)
         } else {
-            self.parent.get_inode().unwrap().unlink(self)
+            let dir = self.parent().get_inode()?;
+            dir.unlink(self)
         }
     }
 
@@ -434,7 +474,8 @@ impl Dentry {
         if self.get_inode().is_ok() {
             Err(EEXIST)
         } else {
-            self.parent.get_inode().unwrap().symlink(self, link)
+            let dir = self.parent().get_inode()?;
+            dir.symlink(self, link)
         }
     }
 
@@ -446,7 +487,8 @@ impl Dentry {
         if self.get_inode().is_ok() {
             Err(EEXIST)
         } else {
-            self.parent.get_inode().unwrap().mknod(self, mode, devid)
+            let dir = self.parent().get_inode()?;
+            dir.mknod(self, mode, devid)
         }
     }
 
@@ -456,5 +498,33 @@ impl Dentry {
 
     pub fn chown(&self, uid: u32, gid: u32) -> KResult<()> {
         self.get_inode()?.chown(uid, gid)
+    }
+
+    pub fn rename(self: &Arc<Self>, new: &Arc<Self>, flags: RenameFlags) -> KResult<()> {
+        if Arc::ptr_eq(self, new) {
+            return Ok(());
+        }
+
+        let old_parent = self.parent().get_inode()?;
+        let new_parent = new.parent().get_inode()?;
+
+        // If the two dentries are not in the same filesystem, return EXDEV.
+        if !Weak::ptr_eq(&old_parent.vfs, &new_parent.vfs) {
+            Err(PosixError::EXDEV)?;
+        }
+
+        let vfs = old_parent.vfs.upgrade().ok_or(EIO)?;
+
+        let rename_data = RenameData {
+            old_dentry: self,
+            new_dentry: new,
+            new_parent,
+            vfs,
+            is_exchange: flags.contains(RenameFlags::RENAME_EXCHANGE),
+            no_replace: flags.contains(RenameFlags::RENAME_NOREPLACE),
+        };
+
+        // Delegate to the parent directory's rename implementation
+        old_parent.rename(rename_data)
     }
 }

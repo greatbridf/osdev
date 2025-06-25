@@ -232,7 +232,7 @@ where
             size: entry.size,
             entry_offset,
             filename,
-            cluster: entry.cluster_low as u32 | ((entry.cluster_high as u32) << 16),
+            cluster: entry.cluster_low as u32 | (((entry.cluster_high & !0xF000) as u32) << 16),
             is_directory: entry.is_directory(),
         }))
     }

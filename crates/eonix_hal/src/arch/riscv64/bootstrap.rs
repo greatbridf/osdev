@@ -15,15 +15,15 @@ use crate::{
     mm::{ArchMemory, ArchPagingMode, BasicPageAlloc, BasicPageAllocRef, ScopedAllocator},
 };
 use core::{
-    arch::{global_asm, naked_asm},
-    hint::spin_loop,
-    sync::atomic::{AtomicPtr, Ordering}
-};
-use core::{
     alloc::Allocator,
     arch::asm,
     cell::RefCell,
     sync::atomic::{AtomicBool, AtomicUsize},
+};
+use core::{
+    arch::{global_asm, naked_asm},
+    hint::spin_loop,
+    sync::atomic::{AtomicPtr, Ordering},
 };
 use eonix_hal_traits::mm::Memory;
 use eonix_mm::{
@@ -248,16 +248,14 @@ fn get_ap_start_addr() -> usize {
     }
     static AP_START_VALUE: &'static unsafe extern "C" fn() =
         &(_ap_start as unsafe extern "C" fn());
-    unsafe {
-        (AP_START_VALUE as *const _ as *const usize).read_volatile()
-    }
+    unsafe { (AP_START_VALUE as *const _ as *const usize).read_volatile() }
 }
 
 fn bootstrap_smp(alloc: impl Allocator, page_alloc: &RefCell<BasicPageAlloc>) {
     let local_hart_id = CPU::local().cpuid();
     let hart_count = FDT.hart_count();
     let mut ap_count = 0;
-    
+
     for current_hart_id in 0..hart_count {
         if current_hart_id == local_hart_id {
             continue;
@@ -273,17 +271,24 @@ fn bootstrap_smp(alloc: impl Allocator, page_alloc: &RefCell<BasicPageAlloc>) {
         let old = BSP_PAGE_ALLOC.swap((&raw const *page_alloc) as *mut _, Ordering::Release);
         assert!(old.is_null());
 
-        while AP_STACK.compare_exchange_weak(
-            0,
-            stack_range.end().addr(),
-            Ordering::Release,
-            Ordering::Relaxed,
-        ).is_err() {
+        while AP_STACK
+            .compare_exchange_weak(
+                0,
+                stack_range.end().addr(),
+                Ordering::Release,
+                Ordering::Relaxed,
+            )
+            .is_err()
+        {
             spin_loop();
         }
 
         unsafe {
-            hart_start(current_hart_id, PhysicalAddress::new(get_ap_start_addr()), 0);
+            hart_start(
+                current_hart_id,
+                PhysicalAddress::new(get_ap_start_addr()),
+                0,
+            );
         }
 
         while AP_COUNT.load(Ordering::Acquire) == ap_count {
@@ -304,8 +309,7 @@ unsafe extern "C" fn _ap_start(hart_id: usize) -> ! {
         "
             la    sp, 1f        // set temp stack
             mv    s0, a0        // save hart id
-            li    t0, 32
-            mul   t0, t0, a0
+            slli  t0, a0, 5
             sub   sp, sp, t0
 
             ld    t0, 2f
@@ -338,10 +342,13 @@ unsafe extern "C" fn _ap_start(hart_id: usize) -> ! {
 }
 
 fn get_ap_stack() -> usize {
-    while AP_SEM.compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed).is_err() {
+    while AP_SEM
+        .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
+        .is_err()
+    {
         core::hint::spin_loop();
     }
-    
+
     let stack_addr = loop {
         let addr = AP_STACK.swap(0, Ordering::AcqRel);
         if addr != 0 {
@@ -349,9 +356,9 @@ fn get_ap_stack() -> usize {
         }
         core::hint::spin_loop();
     };
-    
+
     AP_SEM.store(false, Ordering::Release);
-    
+
     stack_addr
 }
 

@@ -109,8 +109,6 @@ unsafe extern "C" fn _start(hart_id: usize, dtb_addr: usize) -> ! {
     )
 }
 
-/// TODO:
-/// 启动所有的cpu
 pub unsafe extern "C" fn riscv64_start(hart_id: usize, dtb_addr: PAddr) -> ! {
     let fdt = Fdt::from_ptr(ArchPhysAccess::as_ptr(dtb_addr).as_ptr())
         .expect("Failed to parse DTB from static memory.");
@@ -248,7 +246,7 @@ fn get_ap_start_addr() -> usize {
     unsafe extern "C" {
         fn _ap_start();
     }
-    static AP_START_VALUE:&'static unsafe extern "C" fn() =
+    static AP_START_VALUE: &'static unsafe extern "C" fn() =
         &(_ap_start as unsafe extern "C" fn());
     unsafe {
         (AP_START_VALUE as *const _ as *const usize).read_volatile()
@@ -389,27 +387,6 @@ fn ap_entry(hart_id: usize, stack_bottom: PAddr) -> ! {
 
     unsafe {
         _eonix_hal_ap_main(stack_range);
-    }
-}
-
-fn print_number(number: usize) {
-    if number == 0 {
-        write_str("0");
-        return;
-    }
-
-    let mut buffer = [0u8; 20];
-    let mut index = 0;
-
-    let mut num = number;
-    while num > 0 {
-        buffer[index] = (num % 10) as u8 + b'0';
-        num /= 10;
-        index += 1;
-    }
-
-    for i in (0..index).rev() {
-        sbi::legacy::console_putchar(buffer[i]);
     }
 }
 

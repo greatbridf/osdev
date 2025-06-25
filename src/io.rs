@@ -3,6 +3,7 @@ use crate::prelude::*;
 use core::{cmp, mem::MaybeUninit};
 
 #[must_use]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FillResult {
     Done(usize),
     Partial(usize),
@@ -63,7 +64,7 @@ pub trait StreamRead {
     fn read_till_end(
         &mut self,
         buffer: &mut [u8],
-        func: impl Fn(&mut [u8]) -> KResult<()>,
+        func: impl FnMut(&mut [u8]) -> KResult<()>,
     ) -> KResult<usize>;
 
     fn ignore_all(&mut self) -> KResult<usize>;
@@ -76,7 +77,7 @@ where
     fn read_till_end(
         &mut self,
         buffer: &mut [u8],
-        func: impl Fn(&mut [u8]) -> KResult<()>,
+        mut func: impl FnMut(&mut [u8]) -> KResult<()>,
     ) -> KResult<usize> {
         let mut total = 0;
         while let Some(data) = self.poll_data(buffer)? {

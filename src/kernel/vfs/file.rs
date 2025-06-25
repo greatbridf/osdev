@@ -11,6 +11,7 @@ use crate::{
         task::Thread,
         terminal::{Terminal, TerminalIORequest},
         user::{UserPointer, UserPointerMut},
+        vfs::inode::Inode,
         CharDevice,
     },
     prelude::*,
@@ -84,6 +85,15 @@ pub enum FileType {
 pub struct File {
     flags: AtomicU32,
     file_type: FileType,
+}
+
+impl File {
+    pub fn get_inode(&self) -> KResult<Option<Arc<dyn Inode>>> {
+        match &self.file_type {
+            FileType::Inode(inode_file) => Ok(Some(inode_file.dentry.get_inode()?)),
+            _ => Ok(None),
+        }
+    }
 }
 
 pub enum SeekOption {

@@ -1,6 +1,8 @@
 use crate::io::Stream;
 use crate::kernel::constants::{EEXIST, EINVAL, EIO, EISDIR, ENOENT, ENOSYS, ENOTDIR};
+use crate::kernel::mem::{CachePage, PageCache, PageCacheBackend};
 use crate::kernel::timer::Instant;
+use crate::kernel::vfs::inode::InodeData;
 use crate::kernel::vfs::inode::RenameData;
 use crate::{
     io::Buffer,
@@ -17,6 +19,7 @@ use crate::{
 };
 use alloc::sync::{Arc, Weak};
 use core::{ops::ControlFlow, sync::atomic::Ordering};
+use eonix_mm::paging::PAGE_SIZE;
 use eonix_runtime::task::Task;
 use eonix_sync::{AsProof as _, AsProofMut as _, Locked, Mutex, ProofMut};
 use itertools::Itertools;
@@ -58,7 +61,7 @@ impl Inode for NodeInode {
 }
 
 define_struct_inode! {
-    struct DirectoryInode {
+    pub(super) struct DirectoryInode {
         entries: Locked<Vec<(Arc<[u8]>, Ino)>, ()>,
     }
 }
@@ -460,40 +463,50 @@ impl Inode for SymlinkInode {
 }
 
 define_struct_inode! {
-    struct FileInode {
-        filedata: Locked<Vec<u8>, ()>,
+    pub struct FileInode {
+        pages: PageCache,
     }
 }
 
 impl FileInode {
-    fn new(ino: Ino, vfs: Weak<dyn Vfs>, mode: Mode) -> Arc<Self> {
-        Self::new_locked(ino, vfs, |inode, rwsem| unsafe {
-            addr_of_mut_field!(inode, filedata).write(Locked::new(vec![], rwsem));
-
-            addr_of_mut_field!(&mut *inode, mode).write((S_IFREG | (mode & 0o777)).into());
-            addr_of_mut_field!(&mut *inode, nlink).write(1.into());
-            addr_of_mut_field!(&mut *inode, ctime).write(Spin::new(Instant::now()));
-            addr_of_mut_field!(&mut *inode, mtime).write(Spin::new(Instant::now()));
-            addr_of_mut_field!(&mut *inode, atime).write(Spin::new(Instant::now()));
+    pub fn new(ino: Ino, vfs: Weak<dyn Vfs>, mode: Mode) -> Arc<Self> {
+        Arc::new_cyclic(|weak_self: &Weak<FileInode>| FileInode {
+            idata: {
+                let inode_data = InodeData::new(ino, vfs);
+                inode_data
+                    .mode
+                    .store(S_IFREG | (mode & 0o777), Ordering::Relaxed);
+                inode_data.nlink.store(1, Ordering::Relaxed);
+                inode_data
+            },
+            pages: PageCache::new(weak_self.clone(), 0),
         })
     }
 }
 
-impl Inode for FileInode {
-    fn read(&self, buffer: &mut dyn Buffer, offset: usize) -> KResult<usize> {
-        // TODO: We don't need that strong guarantee, find some way to avoid locks
-        let lock = Task::block_on(self.rwsem.read());
+impl PageCacheBackend for FileInode {
+    fn read_page(&self, _cache_page: &mut CachePage, _offset: usize) -> KResult<usize> {
+        Ok(PAGE_SIZE)
+    }
 
-        match self.filedata.access(lock.prove()).split_at_checked(offset) {
-            Some((_, data)) => buffer.fill(data).map(|result| result.allow_partial()),
-            None => Ok(0),
-        }
+    fn write_page(&self, _page: &CachePage, _offset: usize) -> KResult<usize> {
+        Ok(PAGE_SIZE)
+    }
+}
+
+impl Inode for FileInode {
+    fn page_cache(&self) -> Option<&PageCache> {
+        Some(&self.pages)
+    }
+
+    fn read(&self, buffer: &mut dyn Buffer, offset: usize) -> KResult<usize> {
+        let lock = Task::block_on(self.rwsem.write());
+        Task::block_on(self.pages.read(buffer, offset))
     }
 
     fn write(&self, stream: &mut dyn Stream, offset: WriteOffset) -> KResult<usize> {
         // TODO: We don't need that strong guarantee, find some way to avoid locks
         let lock = Task::block_on(self.rwsem.write());
-        let filedata = self.filedata.access_mut(lock.prove_mut());
 
         let mut store_new_end = None;
         let offset = match offset {
@@ -506,41 +519,25 @@ impl Inode for FileInode {
             }
         };
 
-        let mut pos = offset;
-        loop {
-            if pos >= filedata.len() {
-                filedata.resize(pos + 4096, 0);
-            }
+        let wrote = Task::block_on(self.pages.write(stream, offset))?;
+        let cursor_end = offset + wrote;
 
-            match stream.poll_data(&mut filedata[pos..])? {
-                Some(data) => pos += data.len(),
-                None => break,
-            }
-        }
-
-        filedata.resize(pos, 0);
         if let Some(store_end) = store_new_end {
-            *store_end = pos;
+            *store_end = cursor_end;
         }
 
         // SAFETY: `lock` has done the synchronization
-        self.size.store(pos as u64, Ordering::Relaxed);
         *self.mtime.lock() = Instant::now();
+        self.size.store(cursor_end as u64, Ordering::Relaxed);
 
-        Ok(pos - offset)
+        Ok(wrote)
     }
 
     fn truncate(&self, length: usize) -> KResult<()> {
-        // TODO: We don't need that strong guarantee, find some way to avoid locks
         let lock = Task::block_on(self.rwsem.write());
-        let filedata = self.filedata.access_mut(lock.prove_mut());
-
-        // SAFETY: `lock` has done the synchronization
+        Task::block_on(self.pages.resize(length))?;
         self.size.store(length as u64, Ordering::Relaxed);
         *self.mtime.lock() = Instant::now();
-
-        filedata.resize(length, 0);
-
         Ok(())
     }
 
@@ -559,7 +556,7 @@ impl Inode for FileInode {
 }
 
 impl_any!(TmpFs);
-struct TmpFs {
+pub(super) struct TmpFs {
     next_ino: AtomicIno,
     readonly: bool,
     rename_lock: Mutex<()>,
@@ -580,11 +577,11 @@ impl Vfs for TmpFs {
 }
 
 impl TmpFs {
-    fn assign_ino(&self) -> Ino {
+    pub(super) fn assign_ino(&self) -> Ino {
         self.next_ino.fetch_add(1, Ordering::AcqRel)
     }
 
-    pub fn create(readonly: bool) -> KResult<(Arc<dyn Vfs>, Arc<dyn Inode>)> {
+    pub fn create(readonly: bool) -> KResult<(Arc<TmpFs>, Arc<DirectoryInode>)> {
         let tmpfs = Arc::new(Self {
             next_ino: AtomicIno::new(1),
             readonly,

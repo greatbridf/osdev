@@ -4,6 +4,7 @@ use crate::kernel::constants::{
     EINVAL, EISDIR, ENOTDIR, EPERM, STATX_ATIME, STATX_BLOCKS, STATX_CTIME, STATX_GID, STATX_INO,
     STATX_MODE, STATX_MTIME, STATX_NLINK, STATX_SIZE, STATX_TYPE, STATX_UID, S_IFDIR, S_IFMT,
 };
+use crate::kernel::mem::PageCache;
 use crate::kernel::timer::Instant;
 use crate::{io::Buffer, prelude::*};
 use alloc::sync::{Arc, Weak};
@@ -15,7 +16,6 @@ use core::{
 };
 use eonix_runtime::task::Task;
 use eonix_sync::RwLock;
-use posix_types::namei::RenameFlags;
 use posix_types::stat::StatX;
 
 pub type Ino = u64;
@@ -54,13 +54,13 @@ pub struct InodeData {
 }
 
 impl InodeData {
-    pub const fn new(ino: Ino, vfs: Weak<dyn Vfs>) -> Self {
+    pub fn new(ino: Ino, vfs: Weak<dyn Vfs>) -> Self {
         Self {
             ino,
             vfs,
-            atime: Spin::new(Instant::default()),
-            ctime: Spin::new(Instant::default()),
-            mtime: Spin::new(Instant::default()),
+            atime: Spin::new(Instant::now()),
+            ctime: Spin::new(Instant::now()),
+            mtime: Spin::new(Instant::now()),
             rwsem: RwLock::new(()),
             size: AtomicU64::new(0),
             nlink: AtomicNlink::new(0),
@@ -127,7 +127,15 @@ pub trait Inode: Send + Sync + InodeInner + Any {
         Err(if self.is_dir() { EISDIR } else { EINVAL })
     }
 
+    fn read_direct(&self, buffer: &mut dyn Buffer, offset: usize) -> KResult<usize> {
+        Err(if self.is_dir() { EISDIR } else { EINVAL })
+    }
+
     fn write(&self, stream: &mut dyn Stream, offset: WriteOffset) -> KResult<usize> {
+        Err(if self.is_dir() { EISDIR } else { EINVAL })
+    }
+
+    fn write_direct(&self, stream: &mut dyn Stream, offset: WriteOffset) -> KResult<usize> {
         Err(if self.is_dir() { EISDIR } else { EINVAL })
     }
 
@@ -161,6 +169,10 @@ pub trait Inode: Send + Sync + InodeInner + Any {
 
     fn chown(&self, uid: u32, gid: u32) -> KResult<()> {
         Err(EPERM)
+    }
+
+    fn page_cache(&self) -> Option<&PageCache> {
+        None
     }
 
     fn statx(&self, stat: &mut StatX, mask: u32) -> KResult<()> {

@@ -30,15 +30,27 @@ itertools = { version = "0.13.0", default-features = false }
 acpi = "5.2.0"
 align_ext = "0.1.0"
 xmas-elf = "0.10.0"
+smoltcp = { version = "0.12.0", default-features = false, features = [
+    "alloc",
+    "medium-ethernet",
+    "proto-ipv4",
+    "proto-ipv6",
+    "socket-tcp",
+    "socket-udp",
+    "socket-dhcpv4",
+    "socket-dns",
+    "async",
+] }
 
 [target.'cfg(target_arch = "riscv64")'.dependencies]
 virtio-drivers = { version = "0.11.0" }
 
 [features]
 default = []
+trace_net = []
 trace_syscall = []
 trace_scheduler = []
-log_trace = ["trace_syscall", "trace_scheduler"]
+log_trace = ["trace_syscall", "trace_scheduler", "trace_net"]
 log_debug = []
 smp = []
 

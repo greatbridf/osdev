@@ -44,7 +44,7 @@ macro_rules! impl_any {
 
 macro_rules! addr_of_mut_field {
     ($pointer:expr, $field:ident) => {
-        core::ptr::addr_of_mut!((*$pointer).$field)
+        core::ptr::addr_of_mut!((&mut (*$pointer)).$field)
     };
 }
 

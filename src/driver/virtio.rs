@@ -7,7 +7,7 @@ use crate::kernel::{
     block::{make_device, BlockDevice},
     mem::{AsMemoryBlock, MemoryBlock, Page},
 };
-use alloc::sync::Arc;
+use alloc::{sync::Arc, vec::Vec};
 use core::num::NonZero;
 use eonix_hal::{arch_exported::fdt::FDT, mm::ArchPhysAccess};
 use eonix_log::{println_info, println_warn};
@@ -84,7 +84,7 @@ unsafe impl Hal for HAL {
 
 pub fn init_virtio_devices() {
     let mut disk_id = 0;
-    for reg in FDT
+    let mut virtio_devices: Vec<_> = FDT
         .all_nodes()
         .filter(|node| {
             node.compatible()
@@ -92,7 +92,10 @@ pub fn init_virtio_devices() {
         })
         .filter_map(|node| node.reg())
         .flatten()
-    {
+        .collect();
+    virtio_devices.sort_by_key(|reg| reg.starting_address);
+
+    for reg in virtio_devices {
         let base = PAddr::from(reg.starting_address as usize);
         let size = reg.size.expect("Virtio device must have a size");
 

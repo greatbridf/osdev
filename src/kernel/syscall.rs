@@ -68,6 +68,14 @@ impl SyscallRetVal for SyscallNoReturn {
     }
 }
 
+#[cfg(not(target_arch = "x86_64"))]
+impl SyscallRetVal for u64 {
+    fn into_retval(self) -> Option<usize> {
+        Some(self as usize)
+    }
+}
+
+#[cfg(not(target_arch = "x86_64"))]
 impl FromSyscallArg for u64 {
     fn from_arg(value: usize) -> u64 {
         value as u64

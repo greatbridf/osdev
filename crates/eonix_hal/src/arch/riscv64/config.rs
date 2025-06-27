@@ -47,5 +47,5 @@ pub mod platform {
 }
 
 pub mod time {
-    pub const INTERRUPTS_PER_SECOND: usize = 100;
+    pub const INTERRUPTS_PER_SECOND: usize = 1000;
 }

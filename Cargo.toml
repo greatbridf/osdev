@@ -30,6 +30,7 @@ itertools = { version = "0.13.0", default-features = false }
 acpi = "5.2.0"
 align_ext = "0.1.0"
 xmas-elf = "0.10.0"
+ext4_rs = "1.3.2"
 smoltcp = { version = "0.12.0", default-features = false, features = [
     "alloc",
     "medium-ethernet",

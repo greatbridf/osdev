@@ -1,3 +1,9 @@
+mod defs;
+mod dev;
+mod error;
+mod rx_desc;
+mod tx_desc;
+
 use crate::kernel::constants::{EAGAIN, EFAULT, EINVAL, EIO};
 use crate::kernel::interrupt::register_irq_handler;
 use crate::kernel::mem::paging::{self, AllocZeroed};
@@ -9,22 +15,11 @@ use alloc::boxed::Box;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::ptr::NonNull;
+use dev::E1000eDev;
 use eonix_hal::fence::memory_barrier;
 use eonix_mm::address::{Addr, PAddr};
 use eonix_sync::SpinIrq;
 use paging::Page;
-
-mod defs;
-mod dev;
-mod error;
-mod rx_desc;
-mod tx_desc;
-
-use crate::kernel::constants::{EINVAL, EIO};
-use crate::kernel::pcie::{self, Header, PCIDevice, PCIDriver, PciError};
-use alloc::sync::Arc;
-use dev::E1000eDev;
-use eonix_mm::address::PAddr;
 
 struct Driver {
     dev_id: u16,

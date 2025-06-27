@@ -142,11 +142,10 @@ impl CheckedUserPointer<'_> {
                 "3:",
                 "nop",
                 ".pushsection .fix, \"a\", @progbits",
-                ".align 16",
-                ".quad 2b",      // instruction address
-                ".quad 3b - 2b", // instruction length
-                ".quad 3b",      // fix jump address
-                ".quad 0x3",     // type: load
+                ".8byte 2b",      // instruction address
+                ".8byte 3b - 2b", // instruction length
+                ".8byte 3b",      // fix jump address
+                ".8byte 0x3",     // type: load
                 ".popsection",
                 inout("a0") total => error_bytes,
                 inout("a1") self.ptr => _,
@@ -203,11 +202,10 @@ impl CheckedUserPointer<'_> {
                 "3:",
                 "nop",
                 ".pushsection .fix, \"a\", @progbits",
-                ".align 16",
-                ".quad 2b",  // instruction address
-                ".quad 3b - 2b",  // instruction length
-                ".quad 3b",  // fix jump address
-                ".quad 0x1", // type: store
+                ".8byte 2b",  // instruction address
+                ".8byte 3b - 2b",  // instruction length
+                ".8byte 3b",  // fix jump address
+                ".8byte 0x1", // type: store
                 ".popsection",
                 inout("a0") total => error_bytes,
                 inout("a1") data => _,
@@ -263,11 +261,10 @@ impl CheckedUserPointer<'_> {
                 "3:",
                 "nop",
                 ".pushsection .fix, \"a\", @progbits",
-                ".align 16",
-                ".quad 2b",  // instruction address
-                ".quad 3b - 2b",  // instruction length
-                ".quad 3b",  // fix jump address
-                ".quad 0x1", // type: store
+                ".8byte 2b",  // instruction address
+                ".8byte 3b - 2b",  // instruction length
+                ".8byte 3b",  // fix jump address
+                ".8byte 0x1", // type: store
                 ".popsection",
                 inout("a0") self.len => error_bytes,
                 inout("a1") self.ptr => _,
@@ -370,11 +367,10 @@ impl<'lt> UserString<'lt> {
                 "3:",
                 "nop",
                 ".pushsection .fix, \"a\", @progbits",
-                ".align 16",
-                ".quad 2b",  // instruction address
-                ".quad 4b - 2b",  // instruction length
-                ".quad 3b",  // fix jump address
-                ".quad 0x2", // type: string
+                ".8byte 2b",  // instruction address
+                ".8byte 4b - 2b",  // instruction length
+                ".8byte 3b",  // fix jump address
+                ".8byte 0x2", // type: string
                 ".popsection",
                 out("t0") _,
                 inout("a0") MAX_LEN => result,

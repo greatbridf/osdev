@@ -4,7 +4,9 @@ use super::{
     s_ischr, Spin,
 };
 use crate::kernel::{
-    constants::{EBADF, EISDIR, ENOTDIR, F_DUPFD, F_DUPFD_CLOEXEC, F_GETFD, F_SETFD},
+    constants::{
+        EBADF, EISDIR, ENOTDIR, F_DUPFD, F_DUPFD_CLOEXEC, F_GETFD, F_GETFL, F_SETFD, F_SETFL,
+    },
     syscall::{FromSyscallArg, SyscallRetVal},
 };
 use crate::{
@@ -79,9 +81,11 @@ impl FileArray {
     }
 
     pub fn close_all(&self) {
-        let mut inner = self.inner.lock();
-        inner.fd_min_avail = FD(0);
-        inner.files.clear();
+        let _old_files = {
+            let mut inner = self.inner.lock();
+            inner.fd_min_avail = FD(0);
+            core::mem::take(&mut inner.files)
+        };
     }
 
     pub fn close(&self, fd: FD) -> KResult<()> {
@@ -162,8 +166,7 @@ impl FileArray {
 
         let fdflag = flags.as_fd_flags();
 
-        let pipe = Pipe::new();
-        let (read_end, write_end) = pipe.split();
+        let (read_end, write_end) = Pipe::new(flags);
         inner.do_insert(read_fd, fdflag, read_end);
         inner.do_insert(write_fd, fdflag, write_end);
 
@@ -194,9 +197,9 @@ impl FileArray {
 
         let file = if s_ischr(filemode) {
             let device = CharDevice::get(inode.devid()?).ok_or(ENXIO)?;
-            device.open()?
+            device.open(flags)?
         } else {
-            InodeFile::new(dentry.clone(), flags.as_rwa())
+            InodeFile::new(dentry.clone(), flags)
         };
 
         let mut inner = self.inner.lock();
@@ -229,6 +232,14 @@ impl FileArray {
                 ofile.flags = FDFlags::from_bits_truncate(arg as u32);
                 Ok(0)
             }
+            F_GETFL => Ok(ofile.file.get_flags().bits() as usize),
+            F_SETFL => {
+                ofile
+                    .file
+                    .set_flags(OpenFlags::from_bits_retain(arg as u32));
+
+                Ok(0)
+            }
             _ => unimplemented!("fcntl: cmd={}", cmd),
         }
     }
@@ -242,17 +253,17 @@ impl FileArray {
         inner.do_insert(
             stdin,
             FDFlags::FD_CLOEXEC,
-            TerminalFile::new(console_terminal.clone()),
+            TerminalFile::new(console_terminal.clone(), OpenFlags::empty()),
         );
         inner.do_insert(
             stdout,
             FDFlags::FD_CLOEXEC,
-            TerminalFile::new(console_terminal.clone()),
+            TerminalFile::new(console_terminal.clone(), OpenFlags::empty()),
         );
         inner.do_insert(
             stderr,
             FDFlags::FD_CLOEXEC,
-            TerminalFile::new(console_terminal.clone()),
+            TerminalFile::new(console_terminal.clone(), OpenFlags::empty()),
         );
     }
 }

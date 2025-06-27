@@ -1,7 +1,7 @@
 use super::{
     dentry::Dentry,
     inode::{Mode, WriteOffset},
-    s_isblk, s_isdir, s_isreg,
+    s_isblk, s_isreg,
 };
 use crate::{
     io::{Buffer, BufferFill, ByteBuffer, Chunks, IntoStream},
@@ -24,10 +24,13 @@ use crate::{
 };
 use alloc::{collections::vec_deque::VecDeque, sync::Arc};
 use bitflags::bitflags;
-use core::{ops::ControlFlow, sync::atomic::Ordering};
+use core::{
+    ops::{ControlFlow, Deref},
+    sync::atomic::{AtomicU32, Ordering},
+};
 use eonix_runtime::task::Task;
 use eonix_sync::Mutex;
-use posix_types::{signal::Signal, stat::StatX};
+use posix_types::{open::OpenFlags, signal::Signal, stat::StatX};
 
 pub struct InodeFile {
     read: bool,
@@ -70,12 +73,17 @@ pub struct TerminalFile {
 //       `Clone` semantics.
 //
 //       e.g. The `CharDevice` itself is stateless.
-pub enum File {
+pub enum FileType {
     Inode(InodeFile),
     PipeRead(PipeReadEnd),
     PipeWrite(PipeWriteEnd),
     TTY(TerminalFile),
     CharDev(Arc<CharDevice>),
+}
+
+pub struct File {
+    flags: AtomicU32,
+    file_type: FileType,
 }
 
 pub enum SeekOption {
@@ -87,6 +95,7 @@ pub enum SeekOption {
 bitflags! {
     pub struct PollEvent: u16 {
         const Readable = 0x0001;
+        const Writable = 0x0002;
     }
 }
 
@@ -110,8 +119,10 @@ fn send_sigpipe_to_current() {
 impl Pipe {
     const PIPE_SIZE: usize = 4096;
 
-    pub fn new() -> Arc<Self> {
-        Arc::new(Self {
+    /// # Return
+    /// `(read_end, write_end)`
+    pub fn new(flags: OpenFlags) -> (Arc<File>, Arc<File>) {
+        let pipe = Arc::new(Self {
             inner: Mutex::new(PipeInner {
                 buffer: VecDeque::with_capacity(Self::PIPE_SIZE),
                 read_closed: false,
@@ -119,15 +130,21 @@ impl Pipe {
             }),
             cv_read: CondVar::new(),
             cv_write: CondVar::new(),
-        })
-    }
+        });
 
-    /// # Return
-    /// `(read_end, write_end)`
-    pub fn split(self: &Arc<Self>) -> (Arc<File>, Arc<File>) {
+        let read_flags = flags.difference(OpenFlags::O_WRONLY | OpenFlags::O_RDWR);
+        let mut write_flags = read_flags;
+        write_flags.insert(OpenFlags::O_WRONLY);
+
         (
-            Arc::new(File::PipeRead(PipeReadEnd { pipe: self.clone() })),
-            Arc::new(File::PipeWrite(PipeWriteEnd { pipe: self.clone() })),
+            Arc::new(File {
+                flags: AtomicU32::new(read_flags.bits()),
+                file_type: FileType::PipeRead(PipeReadEnd { pipe: pipe.clone() }),
+            }),
+            Arc::new(File {
+                flags: AtomicU32::new(write_flags.bits()),
+                file_type: FileType::PipeWrite(PipeWriteEnd { pipe }),
+            }),
         )
     }
 
@@ -149,6 +166,32 @@ impl Pipe {
 
         inner.write_closed = true;
         self.cv_read.notify_all();
+    }
+
+    async fn poll(&self, event: PollEvent) -> KResult<PollEvent> {
+        if !event.contains(PollEvent::Readable) {
+            unimplemented!("Poll event not supported.");
+        }
+
+        let mut inner = self.inner.lock().await;
+        while inner.buffer.is_empty() && !inner.write_closed {
+            inner = self.cv_read.wait(inner).await;
+        }
+
+        if Thread::current().signal_list.has_pending_signal() {
+            return Err(EINTR);
+        }
+
+        let mut retval = PollEvent::empty();
+        if inner.write_closed {
+            retval |= PollEvent::Writable;
+        }
+
+        if !inner.buffer.is_empty() {
+            retval |= PollEvent::Readable;
+        }
+
+        Ok(retval)
     }
 
     async fn read(&self, buffer: &mut dyn Buffer) -> KResult<usize> {
@@ -239,7 +282,7 @@ struct UserDirent {
 }
 
 impl InodeFile {
-    pub fn new(dentry: Arc<Dentry>, rwa: (bool, bool, bool)) -> Arc<File> {
+    pub fn new(dentry: Arc<Dentry>, flags: OpenFlags) -> Arc<File> {
         // SAFETY: `dentry` used to create `InodeFile` is valid.
         // SAFETY: `mode` should never change with respect to the `S_IFMT` fields.
         let cached_mode = dentry
@@ -249,14 +292,19 @@ impl InodeFile {
             .load(Ordering::Relaxed)
             & S_IFMT;
 
-        Arc::new(File::Inode(InodeFile {
-            dentry,
-            read: rwa.0,
-            write: rwa.1,
-            append: rwa.2,
-            mode: cached_mode,
-            cursor: Mutex::new(0),
-        }))
+        let (read, write, append) = flags.as_rwa();
+
+        Arc::new(File {
+            flags: AtomicU32::new(flags.bits()),
+            file_type: FileType::Inode(InodeFile {
+                dentry,
+                read,
+                write,
+                append,
+                mode: cached_mode,
+                cursor: Mutex::new(0),
+            }),
+        })
     }
 
     fn seek(&self, option: SeekOption) -> KResult<usize> {
@@ -369,8 +417,11 @@ impl InodeFile {
 }
 
 impl TerminalFile {
-    pub fn new(tty: Arc<Terminal>) -> Arc<File> {
-        Arc::new(File::TTY(TerminalFile { terminal: tty }))
+    pub fn new(tty: Arc<Terminal>, flags: OpenFlags) -> Arc<File> {
+        Arc::new(File {
+            flags: AtomicU32::new(flags.bits()),
+            file_type: FileType::TTY(TerminalFile { terminal: tty }),
+        })
     }
 
     async fn read(&self, buffer: &mut dyn Buffer) -> KResult<usize> {
@@ -404,13 +455,13 @@ impl TerminalFile {
     }
 }
 
-impl File {
+impl FileType {
     pub async fn read(&self, buffer: &mut dyn Buffer) -> KResult<usize> {
         match self {
-            File::Inode(inode) => inode.read(buffer),
-            File::PipeRead(pipe) => pipe.pipe.read(buffer).await,
-            File::TTY(tty) => tty.read(buffer).await,
-            File::CharDev(device) => device.read(buffer),
+            FileType::Inode(inode) => inode.read(buffer),
+            FileType::PipeRead(pipe) => pipe.pipe.read(buffer).await,
+            FileType::TTY(tty) => tty.read(buffer).await,
+            FileType::CharDev(device) => device.read(buffer),
             _ => Err(EBADF),
         }
     }
@@ -432,31 +483,31 @@ impl File {
 
     pub async fn write(&self, stream: &mut dyn Stream) -> KResult<usize> {
         match self {
-            File::Inode(inode) => inode.write(stream),
-            File::PipeWrite(pipe) => pipe.pipe.write(stream).await,
-            File::TTY(tty) => tty.write(stream),
-            File::CharDev(device) => device.write(stream),
+            FileType::Inode(inode) => inode.write(stream),
+            FileType::PipeWrite(pipe) => pipe.pipe.write(stream).await,
+            FileType::TTY(tty) => tty.write(stream),
+            FileType::CharDev(device) => device.write(stream),
             _ => Err(EBADF),
         }
     }
 
     pub fn seek(&self, option: SeekOption) -> KResult<usize> {
         match self {
-            File::Inode(inode) => inode.seek(option),
+            FileType::Inode(inode) => inode.seek(option),
             _ => Err(ESPIPE),
         }
     }
 
     pub fn getdents(&self, buffer: &mut dyn Buffer) -> KResult<()> {
         match self {
-            File::Inode(inode) => inode.getdents(buffer),
+            FileType::Inode(inode) => inode.getdents(buffer),
             _ => Err(ENOTDIR),
         }
     }
 
     pub fn getdents64(&self, buffer: &mut dyn Buffer) -> KResult<()> {
         match self {
-            File::Inode(inode) => inode.getdents64(buffer),
+            FileType::Inode(inode) => inode.getdents64(buffer),
             _ => Err(ENOTDIR),
         }
     }
@@ -467,7 +518,7 @@ impl File {
         let buffer = unsafe { buffer_page.as_memblk().as_bytes_mut() };
 
         match self {
-            File::Inode(file) if s_isblk(file.mode) || s_isreg(file.mode) => (),
+            FileType::Inode(file) if s_isblk(file.mode) || s_isreg(file.mode) => (),
             _ => return Err(EINVAL),
         }
 
@@ -494,30 +545,66 @@ impl File {
 
     pub fn ioctl(&self, request: usize, arg3: usize) -> KResult<usize> {
         match self {
-            File::TTY(tty) => tty.ioctl(request, arg3).map(|_| 0),
+            FileType::TTY(tty) => tty.ioctl(request, arg3).map(|_| 0),
             _ => Err(ENOTTY),
         }
     }
 
     pub async fn poll(&self, event: PollEvent) -> KResult<PollEvent> {
         match self {
-            File::Inode(_) => Ok(event),
-            File::TTY(tty) => tty.poll(event).await,
+            FileType::Inode(_) => Ok(event),
+            FileType::TTY(tty) => tty.poll(event).await,
+            FileType::PipeRead(PipeReadEnd { pipe })
+            | FileType::PipeWrite(PipeWriteEnd { pipe }) => pipe.poll(event).await,
             _ => unimplemented!("Poll event not supported."),
         }
     }
 
     pub fn statx(&self, buffer: &mut StatX, mask: u32) -> KResult<()> {
         match self {
-            File::Inode(inode) => inode.dentry.statx(buffer, mask),
+            FileType::Inode(inode) => inode.dentry.statx(buffer, mask),
             _ => Err(EBADF),
         }
     }
 
     pub fn as_path(&self) -> Option<&Arc<Dentry>> {
         match self {
-            File::Inode(inode_file) if s_isdir(inode_file.mode) => Some(&inode_file.dentry),
+            FileType::Inode(inode_file) => Some(&inode_file.dentry),
             _ => None,
         }
+    }
+}
+
+impl File {
+    pub fn new(flags: OpenFlags, file_type: FileType) -> Arc<Self> {
+        Arc::new(Self {
+            flags: AtomicU32::new(flags.bits()),
+            file_type,
+        })
+    }
+
+    pub fn get_flags(&self) -> OpenFlags {
+        OpenFlags::from_bits_retain(self.flags.load(Ordering::Relaxed))
+    }
+
+    pub fn set_flags(&self, flags: OpenFlags) {
+        let flags = flags.difference(
+            OpenFlags::O_WRONLY
+                | OpenFlags::O_RDWR
+                | OpenFlags::O_CREAT
+                | OpenFlags::O_TRUNC
+                | OpenFlags::O_EXCL,
+            // | OpenFlags::O_NOCTTY,
+        );
+
+        self.flags.store(flags.bits(), Ordering::Relaxed);
+    }
+}
+
+impl Deref for File {
+    type Target = FileType;
+
+    fn deref(&self) -> &Self::Target {
+        &self.file_type
     }
 }

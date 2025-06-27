@@ -135,14 +135,15 @@ impl ProcessList {
         }
 
         if let Some(clear_ctid) = thread.get_clear_ctid() {
-            UserPointerMut::new(clear_ctid as *mut u32)
+            let _ = UserPointerMut::new(clear_ctid as *mut u32)
                 .unwrap()
-                .write(0u32)
-                .expect("should clear child tid successfully");
+                .write(0u32);
 
-            futex_wake(clear_ctid, None, 1)
-                .await
-                .expect("should wake up child tid");
+            let _ = futex_wake(clear_ctid, None, 1).await;
+        }
+
+        if let Some(robust_list) = thread.get_robust_list() {
+            let _ = robust_list.wake_all().await;
         }
 
         // main thread exit

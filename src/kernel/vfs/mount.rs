@@ -36,7 +36,7 @@ pub struct Mount {
 
 impl Mount {
     pub fn new(mp: &Dentry, vfs: Arc<dyn Vfs>, root_inode: Arc<dyn Inode>) -> KResult<Self> {
-        let root_dentry = Dentry::create(mp.parent().clone(), mp.name());
+        let root_dentry = Dentry::create(mp.parent().clone(), &mp.get_name());
         root_dentry.save_dir(root_inode)?;
 
         Ok(Self {
@@ -54,6 +54,7 @@ unsafe impl Send for Mount {}
 unsafe impl Sync for Mount {}
 
 pub trait MountCreator: Send + Sync {
+    fn check_signature(&self, first_block: &[u8]) -> KResult<bool>;
     fn create_mount(&self, source: &str, flags: u64, mp: &Arc<Dentry>) -> KResult<Mount>;
 }
 
@@ -170,7 +171,7 @@ impl Dentry {
 
             let root_dentry = mount.root().clone();
 
-            dcache::d_add(&root_dentry);
+            dcache::d_add(root_dentry.clone());
 
             MOUNTS.lock().push((
                 DROOT.clone(),

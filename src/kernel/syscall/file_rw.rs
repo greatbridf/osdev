@@ -23,9 +23,11 @@ use crate::{
 use alloc::sync::Arc;
 use eonix_runtime::task::Task;
 use posix_types::ctypes::{Long, PtrT};
+use posix_types::namei::RenameFlags;
 use posix_types::open::{AtFlags, OpenFlags};
 use posix_types::signal::SigSet;
-use posix_types::stat::{Stat, StatX, TimeSpec};
+use posix_types::stat::Stat;
+use posix_types::stat::{StatX, TimeSpec};
 use posix_types::syscall_no::*;
 
 impl FromSyscallArg for OpenFlags {
@@ -146,8 +148,11 @@ fn getdents64(fd: FD, buffer: *mut u8, bufsize: usize) -> KResult<usize> {
     Ok(buffer.wrote())
 }
 
-#[cfg(not(target_arch = "x86_64"))]
-#[eonix_macros::define_syscall(SYS_NEWFSTATAT)]
+#[cfg_attr(
+    not(target_arch = "x86_64"),
+    eonix_macros::define_syscall(SYS_NEWFSTATAT)
+)]
+#[cfg_attr(target_arch = "x86_64", eonix_macros::define_syscall(SYS_FSTATAT64))]
 fn newfstatat(dirfd: FD, pathname: *const u8, statbuf: *mut Stat, flags: AtFlags) -> KResult<()> {
     let dentry = if flags.at_empty_path() {
         let file = thread.files.get(dirfd).ok_or(EBADF)?;
@@ -164,6 +169,21 @@ fn newfstatat(dirfd: FD, pathname: *const u8, statbuf: *mut Stat, flags: AtFlags
     statbuf.write(statx.into())?;
 
     Ok(())
+}
+
+#[cfg_attr(
+    not(target_arch = "x86_64"),
+    eonix_macros::define_syscall(SYS_NEWFSTAT)
+)]
+#[cfg_attr(target_arch = "x86_64", eonix_macros::define_syscall(SYS_FSTAT64))]
+fn newfstat(fd: FD, statbuf: *mut Stat) -> KResult<()> {
+    sys_newfstatat(
+        thread,
+        fd,
+        core::ptr::null(),
+        statbuf,
+        AtFlags::AT_EMPTY_PATH,
+    )
 }
 
 #[eonix_macros::define_syscall(SYS_STATX)]
@@ -275,20 +295,30 @@ fn readlink(pathname: *const u8, buffer: *mut u8, bufsize: usize) -> KResult<usi
     sys_readlinkat(thread, FD::AT_FDCWD, pathname, buffer, bufsize)
 }
 
-#[cfg(target_arch = "x86_64")]
-#[eonix_macros::define_syscall(SYS_LLSEEK)]
-fn llseek(fd: FD, offset_high: u32, offset_low: u32, result: *mut u64, whence: u32) -> KResult<()> {
-    let mut result = UserBuffer::new(result as *mut u8, core::mem::size_of::<u64>())?;
+fn do_lseek(thread: &Thread, fd: FD, offset: u64, whence: u32) -> KResult<u64> {
     let file = thread.files.get(fd).ok_or(EBADF)?;
 
-    let offset = ((offset_high as u64) << 32) | offset_low as u64;
-
-    let new_offset = match whence {
+    Ok(match whence {
         SEEK_SET => file.seek(SeekOption::Set(offset as usize))?,
         SEEK_CUR => file.seek(SeekOption::Current(offset as isize))?,
         SEEK_END => file.seek(SeekOption::End(offset as isize))?,
         _ => return Err(EINVAL),
-    } as u64;
+    } as u64)
+}
+
+#[cfg(not(target_arch = "x86_64"))]
+#[eonix_macros::define_syscall(SYS_LSEEK)]
+fn lseek(fd: FD, offset: u64, whence: u32) -> KResult<u64> {
+    do_lseek(thread, fd, offset, whence)
+}
+
+#[cfg(target_arch = "x86_64")]
+#[eonix_macros::define_syscall(SYS_LLSEEK)]
+fn llseek(fd: FD, offset_high: u32, offset_low: u32, result: *mut u64, whence: u32) -> KResult<()> {
+    let mut result = UserBuffer::new(result as *mut u8, core::mem::size_of::<u64>())?;
+    let offset = ((offset_high as u64) << 32) | (offset_low as u64);
+
+    let new_offset = do_lseek(thread, fd, offset, whence)?;
 
     result.copy(&new_offset)?.ok_or(EFAULT)
 }
@@ -370,13 +400,14 @@ fn writev(fd: FD, iov_user: *const IoVec, iovcnt: u32) -> KResult<usize> {
     Ok(tot)
 }
 
-#[cfg(target_arch = "x86_64")]
-#[eonix_macros::define_syscall(SYS_ACCESS)]
-fn access(pathname: *const u8, _mode: u32) -> KResult<()> {
-    let path = UserString::new(pathname)?;
-    let path = Path::new(path.as_cstr().to_bytes())?;
-
-    let dentry = Dentry::open(&thread.fs_context, path, true)?;
+#[eonix_macros::define_syscall(SYS_FACCESSAT)]
+fn faccessat(dirfd: FD, pathname: *const u8, _mode: u32, flags: AtFlags) -> KResult<()> {
+    let dentry = if flags.at_empty_path() {
+        let file = thread.files.get(dirfd).ok_or(EBADF)?;
+        file.as_path().ok_or(EBADF)?.clone()
+    } else {
+        dentry_from(thread, dirfd, pathname, !flags.no_follow())?
+    };
 
     if !dentry.is_valid() {
         return Err(ENOENT);
@@ -390,7 +421,14 @@ fn access(pathname: *const u8, _mode: u32) -> KResult<()> {
     //     X_OK => todo!(),
     //     _ => Err(EINVAL),
     // }
+
     Ok(())
+}
+
+#[cfg(target_arch = "x86_64")]
+#[eonix_macros::define_syscall(SYS_ACCESS)]
+fn access(pathname: *const u8, mode: u32) -> KResult<()> {
+    sys_faccessat(thread, FD::AT_FDCWD, pathname, mode, AtFlags::empty())
 }
 
 #[eonix_macros::define_syscall(SYS_SENDFILE64)]
@@ -461,6 +499,101 @@ fn ppoll(
 #[eonix_macros::define_syscall(SYS_POLL)]
 fn poll(fds: *mut UserPollFd, nfds: u32, timeout: u32) -> KResult<u32> {
     do_poll(thread, fds, nfds, timeout)
+}
+
+#[eonix_macros::define_syscall(SYS_FCHOWNAT)]
+fn fchownat(dirfd: FD, pathname: *const u8, uid: u32, gid: u32, flags: AtFlags) -> KResult<()> {
+    let dentry = dentry_from(thread, dirfd, pathname, !flags.no_follow())?;
+    if !dentry.is_valid() {
+        return Err(ENOENT);
+    }
+
+    dentry.chown(uid, gid)
+}
+
+#[eonix_macros::define_syscall(SYS_FCHMODAT)]
+fn fchmodat(dirfd: FD, pathname: *const u8, mode: u32, flags: AtFlags) -> KResult<()> {
+    let dentry = if flags.at_empty_path() {
+        let file = thread.files.get(dirfd).ok_or(EBADF)?;
+        file.as_path().ok_or(EBADF)?.clone()
+    } else {
+        dentry_from(thread, dirfd, pathname, !flags.no_follow())?
+    };
+
+    if !dentry.is_valid() {
+        return Err(ENOENT);
+    }
+
+    dentry.chmod(mode)
+}
+
+#[eonix_macros::define_syscall(SYS_FCHMOD)]
+fn chmod(pathname: *const u8, mode: u32) -> KResult<()> {
+    sys_fchmodat(thread, FD::AT_FDCWD, pathname, mode, AtFlags::empty())
+}
+
+#[eonix_macros::define_syscall(SYS_UTIMENSAT)]
+fn utimensat(
+    dirfd: FD,
+    pathname: *const u8,
+    times: *const TimeSpec,
+    flags: AtFlags,
+) -> KResult<()> {
+    let dentry = if flags.at_empty_path() {
+        let file = thread.files.get(dirfd).ok_or(EBADF)?;
+        file.as_path().ok_or(EBADF)?.clone()
+    } else {
+        dentry_from(thread, dirfd, pathname, !flags.no_follow())?
+    };
+
+    if !dentry.is_valid() {
+        return Err(ENOENT);
+    }
+
+    let _times = if times.is_null() {
+        [TimeSpec::default(), TimeSpec::default()]
+    } else {
+        let times = UserPointer::new(times)?;
+        [times.read()?, times.offset(1)?.read()?]
+    };
+
+    // TODO: Implement utimensat
+    // dentry.utimens(&times)
+    Ok(())
+}
+
+#[eonix_macros::define_syscall(SYS_RENAMEAT2)]
+fn renameat2(
+    old_dirfd: FD,
+    old_pathname: *const u8,
+    new_dirfd: FD,
+    new_pathname: *const u8,
+    flags: u32,
+) -> KResult<()> {
+    let flags = RenameFlags::from_bits(flags).ok_or(EINVAL)?;
+
+    // The two flags RENAME_NOREPLACE and RENAME_EXCHANGE are mutually exclusive.
+    if flags.contains(RenameFlags::RENAME_NOREPLACE | RenameFlags::RENAME_EXCHANGE) {
+        Err(EINVAL)?;
+    }
+
+    let old_dentry = dentry_from(thread, old_dirfd, old_pathname, false)?;
+    let new_dentry = dentry_from(thread, new_dirfd, new_pathname, false)?;
+
+    old_dentry.rename(&new_dentry, flags)
+}
+
+#[cfg(target_arch = "x86_64")]
+#[eonix_macros::define_syscall(SYS_RENAME)]
+fn rename(old_pathname: *const u8, new_pathname: *const u8) -> KResult<()> {
+    sys_renameat2(
+        thread,
+        FD::AT_FDCWD,
+        old_pathname,
+        FD::AT_FDCWD,
+        new_pathname,
+        0,
+    )
 }
 
 pub fn keep_alive() {}

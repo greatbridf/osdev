@@ -297,6 +297,10 @@ impl<E: ElfArch> Elf<E> {
             self.entry_point()
         };
         aux_vec.set(AuxKey::AT_ENTRY, E::Ea::from_usize(elf_entry))?;
+        aux_vec.set(
+            AuxKey::AT_RANDOM,
+            E::Ea::from_usize(E::STACK_BASE_ADDR - 16),
+        )?;
 
         if let Some(ldso_base) = ldso_base {
             aux_vec.set(AuxKey::AT_BASE, E::Ea::from_usize(ldso_base.addr()))?;
@@ -377,9 +381,8 @@ impl<E: ElfArch> Elf<E> {
 
         if let Some(ldso_path) = ldso_path {
             let fs_context = FsContext::global();
-            let ldso_file =
-                Dentry::open(fs_context, Path::new(ldso_path.as_bytes()).unwrap(), true).unwrap();
-            let ldso_elf = Elf::<E>::parse(ldso_file).unwrap();
+            let ldso_file = Dentry::open(fs_context, Path::new(ldso_path.as_bytes())?, true)?;
+            let ldso_elf = Elf::<E>::parse(ldso_file)?;
 
             let base = VAddr::from(E::LDSO_BASE_ADDR);
 

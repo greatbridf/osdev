@@ -2,12 +2,15 @@ use crate::{
     kernel::{
         constants::{CLOCK_MONOTONIC, CLOCK_REALTIME, EINVAL},
         task::Thread,
-        timer::ticks,
+        timer::{Instant, Ticks},
         user::UserPointerMut,
     },
     prelude::*,
 };
-use posix_types::syscall_no::*;
+use posix_types::{
+    stat::{TimeSpec, TimeVal},
+    syscall_no::*,
+};
 
 #[derive(Clone, Copy)]
 struct NewUTSName {
@@ -40,26 +43,18 @@ fn newuname(buffer: *mut NewUTSName) -> KResult<()> {
     // Linux compatible
     copy_cstr_to_array(b"Linux", &mut uname.sysname);
     copy_cstr_to_array(b"(none)", &mut uname.nodename);
-    copy_cstr_to_array(b"1.0.0", &mut uname.release);
-    copy_cstr_to_array(b"1.0.0", &mut uname.version);
+    copy_cstr_to_array(b"5.17.1", &mut uname.release);
+    copy_cstr_to_array(b"eonix 1.1.4", &mut uname.version);
+
+    #[cfg(target_arch = "x86_64")]
     copy_cstr_to_array(b"x86", &mut uname.machine);
+
+    #[cfg(target_arch = "riscv64")]
+    copy_cstr_to_array(b"riscv64", &mut uname.machine);
+
     copy_cstr_to_array(b"(none)", &mut uname.domainname);
 
     buffer.write(uname)
-}
-
-#[allow(dead_code)]
-#[derive(Default, Clone, Copy)]
-pub struct TimeVal {
-    sec: u64,
-    usec: u64,
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Copy)]
-pub struct TimeSpec {
-    sec: u64,
-    nsec: u64,
 }
 
 #[eonix_macros::define_syscall(SYS_GETTIMEOFDAY)]
@@ -70,10 +65,12 @@ fn gettimeofday(timeval: *mut TimeVal, timezone: *mut ()) -> KResult<()> {
 
     if !timeval.is_null() {
         let timeval = UserPointerMut::new(timeval)?;
-        let ticks = ticks();
+        let now = Instant::now();
+        let since_epoch = now.since_epoch();
+
         timeval.write(TimeVal {
-            sec: ticks.in_secs() as u64,
-            usec: ticks.in_usecs() as u64 % 1_000_000,
+            tv_sec: since_epoch.as_secs(),
+            tv_usec: since_epoch.subsec_micros(),
         })?;
     }
 
@@ -86,10 +83,12 @@ fn do_clock_gettime64(_thread: &Thread, clock_id: u32, timespec: *mut TimeSpec) 
     }
 
     let timespec = UserPointerMut::new(timespec)?;
-    let ticks = ticks();
+    let now = Instant::now();
+    let since_epoch = now.since_epoch();
+
     timespec.write(TimeSpec {
-        sec: ticks.in_secs() as u64,
-        nsec: ticks.in_nsecs() as u64 % 1_000_000_000,
+        tv_sec: since_epoch.as_secs(),
+        tv_nsec: since_epoch.subsec_nanos(),
     })
 }
 
@@ -127,7 +126,7 @@ struct Sysinfo {
 fn sysinfo(info: *mut Sysinfo) -> KResult<()> {
     let info = UserPointerMut::new(info)?;
     info.write(Sysinfo {
-        uptime: ticks().in_secs() as u32,
+        uptime: Ticks::since_boot().as_secs() as u32,
         loads: [0; 3],
         totalram: 100,
         freeram: 50,

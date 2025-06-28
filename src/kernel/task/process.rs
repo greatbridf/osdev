@@ -2,7 +2,7 @@ use super::{
     process_group::ProcessGroupBuilder, signal::RaiseResult, thread::ThreadBuilder, ProcessGroup,
     ProcessList, Session, Thread,
 };
-use crate::kernel::constants::{ECHILD, EINTR, EPERM, ESRCH};
+use crate::kernel::constants::{ECHILD, EINTR, EINVAL, EPERM, ESRCH};
 use crate::kernel::task::{CloneArgs, CloneFlags};
 use crate::{
     kernel::mem::MMList,
@@ -21,7 +21,10 @@ use eonix_sync::{
     UnlockableGuard as _, UnlockedGuard as _,
 };
 use pointers::BorrowedArc;
-use posix_types::constants::{CLD_CONTINUED, CLD_DUMPED, CLD_EXITED, CLD_KILLED, CLD_STOPPED};
+use posix_types::constants::{
+    CLD_CONTINUED, CLD_DUMPED, CLD_EXITED, CLD_KILLED, CLD_STOPPED, P_PGID, P_PIDFD,
+};
+use posix_types::constants::{P_ALL, P_PID};
 use posix_types::signal::Signal;
 use posix_types::SIGNAL_COREDUMP;
 
@@ -95,10 +98,44 @@ pub struct Entry<'waitlist, 'proclist, 'cv> {
     cv: &'cv CondVar,
     want_stop: bool,
     want_continue: bool,
+    want_id: WaitId,
 }
 
 pub struct DrainExited<'waitlist> {
     wait_procs: SpinGuard<'waitlist, VecDeque<WaitObject>>,
+}
+
+pub enum WaitId {
+    Any,
+    Pid(u32),
+    Pgid(u32),
+}
+
+impl WaitId {
+    pub fn from_type_and_id(id_type: u32, id: u32) -> KResult<Self> {
+        match id_type {
+            P_ALL => Ok(WaitId::Any),
+            P_PID => Ok(WaitId::Pid(id)),
+            P_PGID => Ok(WaitId::Pgid(id)),
+            P_PIDFD => {
+                panic!("PDIFD type is unsupported")
+            }
+            _ => Err(EINVAL),
+        }
+    }
+
+    pub fn from_id(id: i32, thread: &Thread) -> Self {
+        if id < -1 {
+            WaitId::Pgid((-id).cast_unsigned())
+        } else if id == -1 {
+            WaitId::Any
+        } else if id == 0 {
+            let procs = Task::block_on(ProcessList::get().read());
+            WaitId::Pgid(thread.process.pgroup(procs.prove()).pgid)
+        } else {
+            WaitId::Pid(id.cast_unsigned())
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -303,12 +340,13 @@ impl Process {
 
     pub async fn wait(
         &self,
+        wait_id: WaitId,
         no_block: bool,
         trace_stop: bool,
         trace_continue: bool,
     ) -> KResult<Option<WaitObject>> {
         let wait_object = {
-            let mut waits = self.wait_list.entry(trace_stop, trace_continue);
+            let mut waits = self.wait_list.entry(wait_id, trace_stop, trace_continue);
             loop {
                 if let Some(object) = waits.get() {
                     break object;
@@ -530,13 +568,14 @@ impl WaitList {
     /// # Safety
     /// Locks `ProcessList` and `WaitList` at the same time. When `wait` is called,
     /// releases the lock on `ProcessList` and `WaitList` and waits on `cv_wait_procs`.
-    pub fn entry(&self, want_stop: bool, want_continue: bool) -> Entry {
+    pub fn entry(&self, wait_id: WaitId, want_stop: bool, want_continue: bool) -> Entry {
         Entry {
             process_list: Task::block_on(ProcessList::get().read()),
             wait_procs: self.wait_procs.lock(),
             cv: &self.cv_wait_procs,
             want_stop,
             want_continue,
+            want_id: wait_id,
         }
     }
 }
@@ -554,6 +593,17 @@ impl Entry<'_, '_, '_> {
                     self.want_continue
                 } else {
                     true
+                }
+            })
+            .filter(|(_, item)| match self.want_id {
+                WaitId::Any => true,
+                WaitId::Pid(pid) => item.pid == pid,
+                WaitId::Pgid(pgid) => {
+                    let procs = Task::block_on(ProcessList::get().read());
+                    if let Some(process) = procs.try_find_process(item.pid) {
+                        return process.pgroup(procs.prove()).pgid == pgid;
+                    }
+                    false
                 }
             })
             .map(|(idx, _)| idx)
@@ -581,6 +631,7 @@ impl Entry<'_, '_, '_> {
                     cv: self.cv,
                     want_stop: self.want_stop,
                     want_continue: self.want_continue,
+                    want_id: self.want_id,
                 })
             }
         }

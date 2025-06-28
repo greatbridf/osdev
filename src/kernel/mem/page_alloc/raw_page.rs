@@ -1,17 +1,16 @@
+use crate::kernel::mem::PhysAccess;
 use buddy_allocator::BuddyRawPage;
 use core::{
     ptr::NonNull,
     sync::atomic::{AtomicU32, AtomicUsize, Ordering},
 };
+use eonix_hal::mm::ArchPhysAccess;
 use eonix_mm::{
-    address::{PAddr, VAddr},
-    paging::{RawPage as RawPageTrait, PAGE_SIZE, PFN},
+    address::{PAddr, PhysAccess as _},
+    paging::{RawPage as RawPageTrait, PFN},
 };
 use intrusive_list::{container_of, Link};
 use slab_allocator::SlabRawPage;
-
-use crate::kernel::mem::access::RawPageAccess;
-use crate::kernel::mem::PhysAccess;
 
 const PAGE_ARRAY: NonNull<RawPage> =
     unsafe { NonNull::new_unchecked(0xffffff8040000000 as *mut _) };
@@ -206,8 +205,17 @@ impl SlabRawPage for RawPagePtr {
     }
 
     fn in_which(ptr: *mut u8) -> RawPagePtr {
-        let vaddr = VAddr::from(ptr as usize & !(PAGE_SIZE - 1));
-        unsafe { vaddr.as_raw_page() }
+        unsafe {
+            // SAFETY: The pointer is allocated from the slab allocator,
+            //         which can't be null.
+            let ptr = NonNull::new_unchecked(ptr);
+
+            // SAFETY: The pointer is valid.
+            let paddr = ArchPhysAccess::from_ptr(ptr);
+            let pfn = PFN::from(paddr);
+
+            RawPagePtr::from(pfn)
+        }
     }
 
     fn allocated_count(&self) -> &mut u32 {

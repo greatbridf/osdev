@@ -263,7 +263,11 @@ impl SignalList {
         fpu_state: &mut FpuState,
         old_sigreturn: bool,
     ) -> KResult<()> {
-        #[cfg(not(any(target_arch = "x86_64", target_arch = "riscv64")))]
+        #[cfg(not(any(
+            target_arch = "x86_64",
+            target_arch = "riscv64",
+            target_arch = "loongarch64"
+        )))]
         compile_error!("`restore` is not implemented for this architecture");
 
         #[cfg(target_arch = "x86_64")]
@@ -280,9 +284,12 @@ impl SignalList {
             old_trap_ctx_vaddr
         };
 
-        #[cfg(target_arch = "riscv64")]
+        #[cfg(any(target_arch = "riscv64", target_arch = "loongarch64"))]
         let old_trap_ctx_vaddr = {
-            debug_assert!(!old_sigreturn, "Old sigreturn is not supported on RISC-V");
+            debug_assert!(
+                !old_sigreturn,
+                "Old sigreturn is not supported on RISC-V and LoongArch64"
+            );
             trap_ctx.get_stack_pointer()
         };
 

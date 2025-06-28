@@ -152,6 +152,29 @@ impl CheckedUserPointer<'_> {
                 inout("a2") buffer => _,
                 out("t0") _,
             );
+
+            #[cfg(target_arch = "loongarch64")]
+            asm!(
+                "2:",
+                "ld.bu  $t0, $a1,  0",
+                "st.b   $t0, $a2,  0",
+                "addi.d $a1, $a1,  1",
+                "addi.d $a2, $a2,  1",
+                "addi.d $a0, $a0, -1",
+                "bnez   $a0, 2b",
+                "3:",
+                "nop",
+                ".pushsection .fix, \"a\", @progbits",
+                ".8byte 2b",      // instruction address
+                ".8byte 3b - 2b", // instruction length
+                ".8byte 3b",      // fix jump address
+                ".8byte 0x3",     // type: load
+                ".popsection",
+                inout("$a0") total => error_bytes,
+                inout("$a1") self.ptr => _,
+                inout("$a2") buffer => _,
+                out("$t0") _,
+            );
         }
 
         if error_bytes != 0 {
@@ -212,6 +235,29 @@ impl CheckedUserPointer<'_> {
                 inout("a2") self.ptr => _,
                 out("t0") _,
             );
+
+            #[cfg(target_arch = "loongarch64")]
+            asm!(
+                "2:",
+                "ld.bu  $t0, $a1,  0",
+                "st.b   $t0, $a2,  0",
+                "addi.d $a1, $a1,  1",
+                "addi.d $a2, $a2,  1",
+                "addi.d $a0, $a0, -1",
+                "bnez   $a0, 2b",
+                "3:",
+                "nop",
+                ".pushsection .fix, \"a\", @progbits",
+                ".8byte 2b",  // instruction address
+                ".8byte 3b - 2b",  // instruction length
+                ".8byte 3b",  // fix jump address
+                ".8byte 0x1", // type: store
+                ".popsection",
+                inout("$a0") total => error_bytes,
+                inout("$a1") data => _,
+                inout("$a2") self.ptr => _,
+                out("$t0") _,
+            );
         };
 
         if error_bytes != 0 {
@@ -268,6 +314,25 @@ impl CheckedUserPointer<'_> {
                 ".popsection",
                 inout("a0") self.len => error_bytes,
                 inout("a1") self.ptr => _,
+            );
+
+            #[cfg(target_arch = "loongarch64")]
+            asm!(
+                "2:",
+                "sb   $zero, $a1,  0",
+                "addi $a1,   $a1,  1",
+                "addi $a0,   $a0, -1",
+                "bnez $a0,   2b",
+                "3:",
+                "nop",
+                ".pushsection .fix, \"a\", @progbits",
+                ".8byte 2b",  // instruction address
+                ".8byte 3b - 2b",  // instruction length
+                ".8byte 3b",  // fix jump address
+                ".8byte 0x1", // type: store
+                ".popsection",
+                inout("$a0") self.len => error_bytes,
+                inout("$a1") self.ptr => _,
             );
         };
 
@@ -375,6 +440,28 @@ impl<'lt> UserString<'lt> {
                 out("t0") _,
                 inout("a0") MAX_LEN => result,
                 inout("a1") ptr.ptr => _,
+            );
+
+            #[cfg(target_arch = "loongarch64")]
+            asm!(
+                "2:",
+                "ld.bu  $t0, $a1,  0",
+                "4:",
+                "beqz   $t0, 3f",
+                "addi.d $a1, $a1,  1",
+                "addi.d $a0, $a0, -1",
+                "bnez   $a0, 2b",
+                "3:",
+                "nop",
+                ".pushsection .fix, \"a\", @progbits",
+                ".8byte 2b",  // instruction address
+                ".8byte 4b - 2b",  // instruction length
+                ".8byte 3b",  // fix jump address
+                ".8byte 0x2", // type: string
+                ".popsection",
+                out("$t0") _,
+                inout("$a0") MAX_LEN => result,
+                inout("$a1") ptr.ptr => _,
             );
         };
 

@@ -453,7 +453,7 @@ pub fn parse_user_tls(arch_tls: usize) -> KResult<UserTLS> {
         Ok(new_tls)
     }
 
-    #[cfg(target_arch = "riscv64")]
+    #[cfg(any(target_arch = "riscv64", target_arch = "loongarch64"))]
     {
         Ok(UserTLS::new(arch_tls as u64))
     }

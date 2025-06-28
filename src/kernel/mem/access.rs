@@ -1,11 +1,6 @@
 use core::{num::NonZero, ptr::NonNull};
 use eonix_hal::mm::ArchPhysAccess;
-use eonix_mm::address::{Addr as _, PAddr, PhysAccess as _PhysAccess, VAddr};
-use eonix_mm::paging::PFN;
-
-use super::page_alloc::RawPagePtr;
-
-const PHYS_OFFSET: usize = 0xffff_ff00_0000_0000;
+use eonix_mm::address::{PAddr, PhysAccess as _PhysAccess};
 
 /// A block of memory starting at a non-zero address and having a specific length.
 ///
@@ -139,24 +134,5 @@ impl MemoryBlock {
 impl PhysAccess for PAddr {
     unsafe fn as_ptr<T>(&self) -> NonNull<T> {
         ArchPhysAccess::as_ptr(*self)
-    }
-}
-
-pub trait RawPageAccess {
-    /// Translate the address belonged RawPage ptr
-    /// Use it with care.
-    ///
-    /// # Panic
-    /// If the address is not properly aligned.
-    ///
-    /// # Safety
-    /// the address must be kernel accessible pointer
-    unsafe fn as_raw_page(&self) -> RawPagePtr;
-}
-
-impl RawPageAccess for VAddr {
-    unsafe fn as_raw_page(&self) -> RawPagePtr {
-        let pfn: PFN = PAddr::from(self.addr() - PHYS_OFFSET).into();
-        RawPagePtr::from(pfn)
     }
 }

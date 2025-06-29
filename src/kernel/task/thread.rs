@@ -446,7 +446,7 @@ impl Thread {
     }
 }
 
-async fn yield_now() {
+pub async fn yield_now() {
     struct Yield {
         yielded: bool,
     }

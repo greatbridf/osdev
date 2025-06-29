@@ -57,15 +57,6 @@ impl CPU {
         sscratch::write(TRAP_SCRATCH.as_ptr() as usize);
     }
 
-    /// Boot all other hart.
-    pub unsafe fn bootstrap_cpus(&self) {
-        let total_harts = FDT.hart_count();
-        for i in (0..total_harts).filter(|&i| i != self.cpuid()) {
-            sbi::hsm::hart_start(i, todo!("AP entry"), 0)
-                .expect("Failed to start secondary hart via SBI");
-        }
-    }
-
     pub unsafe fn load_interrupt_stack(self: Pin<&mut Self>, sp: u64) {
         TRAP_SCRATCH
             .as_mut()

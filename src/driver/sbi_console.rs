@@ -1,4 +1,4 @@
-use crate::kernel::{block::make_device, CharDevice, CharDeviceType, Terminal, TerminalDevice};
+use crate::kernel::{Terminal, TerminalDevice};
 use alloc::sync::Arc;
 use eonix_log::ConsoleWrite;
 

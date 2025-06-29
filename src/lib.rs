@@ -69,8 +69,6 @@ static BSP_OK: AtomicBool = AtomicBool::new(false);
 fn kernel_init(mut data: eonix_hal::bootstrap::BootStrapData) -> ! {
     setup_memory(&mut data);
 
-    BSP_OK.store(true, Ordering::Release);
-
     #[cfg(target_arch = "riscv64")]
     {
         driver::sbi_console::init_console();
@@ -86,6 +84,8 @@ fn kernel_init(mut data: eonix_hal::bootstrap::BootStrapData) -> ! {
     Scheduler::init_local_scheduler::<KernelStack>();
 
     Scheduler::get().spawn::<KernelStack, _>(FutureRun::new(init_process(data.get_early_stack())));
+
+    BSP_OK.store(true, Ordering::Release);
 
     drop(data);
     unsafe {
@@ -163,19 +163,14 @@ async fn init_process(early_kstack: PRange) {
         )
         .unwrap();
 
-        let init_names = [
-            &b"/sbin/init"[..],
-            &b"/init"[..],
-            &b"/bin/busybox"[..],
-            &b"/mnt/busybox"[..],
-        ];
+        let init_names = [&b"/init"[..], &b"/sbin/init"[..], &b"/mnt/initsh"[..]];
 
         let mut init_name = None;
         let mut init = None;
-        for name in &init_names {
+        for name in init_names {
             if let Ok(dentry) = Dentry::open(fs_context, Path::new(name).unwrap(), true) {
                 if dentry.is_valid() {
-                    init_name = Some(*name);
+                    init_name = Some(CString::new(name).unwrap());
                     init = Some(dentry);
                     break;
                 }
@@ -185,11 +180,7 @@ async fn init_process(early_kstack: PRange) {
         let init = init.expect("No init binary found in the system.");
         let init_name = init_name.unwrap();
 
-        let argv = vec![
-            CString::new(init_name).unwrap(),
-            CString::new("sh").unwrap(),
-            CString::new("/mnt/initsh").unwrap(),
-        ];
+        let argv = vec![init_name.clone()];
 
         let envp = vec![
             CString::new("LANG=C").unwrap(),
@@ -198,10 +189,10 @@ async fn init_process(early_kstack: PRange) {
             CString::new("PWD=/").unwrap(),
         ];
 
-        ProgramLoader::parse(init.clone())
-            .unwrap()
-            .load(argv, envp)
-            .unwrap()
+        ProgramLoader::parse(fs_context, init_name, init.clone(), argv, envp)
+            .expect("Failed to parse init program")
+            .load()
+            .expect("Failed to load init program")
     };
 
     let thread_builder = ThreadBuilder::new()

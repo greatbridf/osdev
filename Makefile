@@ -17,3 +17,4 @@ all:
 		kernel-la
 	
 	xz -k -d disk.img.xz >/dev/null 2>&1 || true
+	cp disk.img disk-la.img

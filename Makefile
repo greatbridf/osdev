@@ -1,6 +1,6 @@
 .PHONY: all
 all:
-	FDISK='/opt/homebrew/Cellar/util-linux/2.39.3/sbin/fdisk' OUT="Makefile.real" ./configure
+	OUT="Makefile.real" ./configure
 
 	make -f Makefile.real \
 		build/riscv64gc-unknown-none-elf/release/eonix_kernel \

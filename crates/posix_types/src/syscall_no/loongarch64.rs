@@ -112,7 +112,7 @@ pub const SYS_TIMER_GETOVERRUN: usize = 109;
 pub const SYS_TIMER_SETTIME32: usize = 110;
 pub const SYS_TIMER_DELETE: usize = 111;
 pub const SYS_CLOCK_SETTIME32: usize = 112;
-pub const SYS_CLOCK_GETTIME32: usize = 113;
+pub const SYS_CLOCK_GETTIME: usize = 113;
 pub const SYS_CLOCK_GETRES_TIME32: usize = 114;
 pub const SYS_CLOCK_NANOSLEEP_TIME32: usize = 115;
 pub const SYS_SYSLOG: usize = 116;
@@ -280,7 +280,6 @@ pub const SYS_IO_PGETEVENTS_TIME32: usize = 292;
 pub const SYS_RSEQ: usize = 293;
 pub const SYS_KEXEC_FILE_LOAD: usize = 294;
 // 64-bit time syscalls
-pub const SYS_CLOCK_GETTIME: usize = 403;
 pub const SYS_CLOCK_SETTIME: usize = 404;
 pub const SYS_CLOCK_ADJTIME: usize = 405;
 pub const SYS_CLOCK_GETRES: usize = 406;

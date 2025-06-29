@@ -541,6 +541,19 @@ fn tkill(tid: u32, sig: u32) -> KResult<()> {
     Ok(())
 }
 
+#[eonix_macros::define_syscall(SYS_TGKILL)]
+fn tgkill(tgid: u32, tid: u32, sig: u32) -> KResult<()> {
+    let procs = Task::block_on(ProcessList::get().read());
+
+    let thread_to_kill = procs.try_find_thread(tid).ok_or(ESRCH)?;
+    if thread_to_kill.process.pid != tgid {
+        return Err(ESRCH);
+    }
+
+    thread_to_kill.raise(Signal::try_from_raw(sig)?);
+    Ok(())
+}
+
 #[eonix_macros::define_syscall(SYS_RT_SIGPROCMASK)]
 fn rt_sigprocmask(
     how: u32,

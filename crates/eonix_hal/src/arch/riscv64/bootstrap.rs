@@ -393,3 +393,7 @@ pub fn early_console_write(s: &str) {
 pub fn early_console_putchar(ch: u8) {
     console_putchar(ch);
 }
+
+pub fn shutdown() -> ! {
+    sbi::legacy::shutdown();
+}

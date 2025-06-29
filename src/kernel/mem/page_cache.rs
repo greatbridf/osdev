@@ -7,15 +7,12 @@ use crate::{
 };
 use align_ext::AlignExt;
 use alloc::{collections::btree_map::BTreeMap, sync::Weak};
-use eonix_log::println_debug;
-
 use core::sync::atomic::{AtomicUsize, Ordering};
 use eonix_mm::paging::{PageAlloc, RawPage, PAGE_SIZE, PAGE_SIZE_BITS};
 use eonix_sync::Mutex;
 
 pub struct PageCache {
     pages: Mutex<BTreeMap<usize, CachePage>>,
-    size: AtomicUsize,
     backend: Weak<dyn PageCacheBackend>,
 }
 
@@ -111,11 +108,10 @@ impl CachePage {
 }
 
 impl PageCache {
-    pub fn new(backend: Weak<dyn PageCacheBackend>, size: usize) -> Self {
+    pub fn new(backend: Weak<dyn PageCacheBackend>) -> Self {
         Self {
             pages: Mutex::new(BTreeMap::new()),
             backend: backend,
-            size: AtomicUsize::new(size),
         }
     }
 
@@ -166,7 +162,7 @@ impl PageCache {
 
     pub async fn write(&self, stream: &mut dyn Stream, mut offset: usize) -> KResult<usize> {
         let mut pages = self.pages.lock().await;
-        let old_size = self.size.load(Ordering::Relaxed);
+        let old_size = self.backend.upgrade().unwrap().size();
         let mut wrote = 0;
 
         loop {
@@ -210,8 +206,6 @@ impl PageCache {
             }
         }
 
-        let cursor_end = offset + wrote;
-        self.size.fetch_max(cursor_end, Ordering::Relaxed);
         Ok(wrote)
     }
 
@@ -232,7 +226,7 @@ impl PageCache {
     // This function is used for extend write or truncate
     pub async fn resize(&self, new_size: usize) -> KResult<()> {
         let mut pages = self.pages.lock().await;
-        let old_size = self.size.load(Ordering::Relaxed);
+        let old_size = self.backend.upgrade().unwrap().size();
 
         if new_size < old_size {
             let begin = new_size.align_down(PAGE_SIZE) >> PAGE_SIZE_BITS;
@@ -260,22 +254,15 @@ impl PageCache {
             }
         }
 
-        self.size.store(new_size, Ordering::Relaxed);
-
         Ok(())
     }
 
     pub async fn get_page(&self, offset: usize) -> KResult<Option<RawPagePtr>> {
         let offset_aligin = offset.align_down(PAGE_SIZE);
         let page_id = offset_aligin >> PAGE_SIZE_BITS;
+        let size = self.backend.upgrade().unwrap().size();
 
-        // println_debug!(
-        //     "pagecache {} {}",
-        //     self.pages.lock().await.len(),
-        //     self.size.load(Ordering::Relaxed)
-        // );
-
-        if offset_aligin > self.size.load(Ordering::Relaxed) {
+        if offset_aligin > size {
             return Ok(None);
         }
 
@@ -303,6 +290,8 @@ pub trait PageCacheBackend {
     fn read_page(&self, page: &mut CachePage, offset: usize) -> KResult<usize>;
 
     fn write_page(&self, page: &CachePage, offset: usize) -> KResult<usize>;
+
+    fn size(&self) -> usize;
 }
 
 pub trait PageCacheRawPage: RawPage {

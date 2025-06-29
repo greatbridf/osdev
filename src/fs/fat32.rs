@@ -248,7 +248,7 @@ impl FileInode {
     fn new(ino: Ino, weak: Weak<FatFs>, size: u32) -> Arc<Self> {
         let inode = Arc::new_cyclic(|weak_self: &Weak<FileInode>| Self {
             idata: InodeData::new(ino, weak),
-            page_cache: PageCache::new(weak_self.clone(), size as usize),
+            page_cache: PageCache::new(weak_self.clone()),
         });
 
         // Safety: We are initializing the inode
@@ -324,6 +324,10 @@ impl PageCacheBackend for FileInode {
 
     fn write_page(&self, page: &CachePage, offset: usize) -> KResult<usize> {
         todo!()
+    }
+
+    fn size(&self) -> usize {
+        self.size.load(Ordering::Relaxed) as usize
     }
 }
 

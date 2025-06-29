@@ -95,6 +95,13 @@ ln -s /mnt1/musl/lib/libc.so /lib/ld-musl-riscv64-sf.so.1
 ln -s $BUSYBOX /busybox
 ln -s $BUSYBOX /bin/busybox
 
+print_wtf() {
+    echo "#### OS COMP TEST GROUP START $1 ####"
+    echo "#### OS COMP TEST GROUP END $1 ####"
+}
+
+### MUSL ###
+
 mkdir /musl-tests
 cd /musl-tests
 
@@ -122,6 +129,18 @@ sh iozone_testcode.sh
 sh busybox_testcode.sh
 sh basic_testcode.sh
 sh lua_testcode.sh
+
+print_wtf "cyclictest-musl"
+print_wtf "iperf-musl"
+print_wtf "libcbench-musl"
+print_wtf "libctest-musl"
+print_wtf "lmbench-musl"
+print_wtf "ltp-musl"
+print_wtf "netperf-musl"
+print_wtf "scene-musl"
+print_wtf "unixbench-musl"
+
+### END MUSL ###
 
 cd /
 mkdir glibc-tests
@@ -152,4 +171,14 @@ sh busybox_testcode.sh
 sh basic_testcode.sh
 sh lua_testcode.sh
 
-exec $BUSYBOX sh -l < /dev/ttyS0 > /dev/ttyS0 2> /dev/ttyS0
+print_wtf "cyclictest-glibc"
+print_wtf "iperf-glibc"
+print_wtf "libcbench-glibc"
+print_wtf "libctest-glibc"
+print_wtf "lmbench-glibc"
+print_wtf "ltp-glibc"
+print_wtf "netperf-glibc"
+print_wtf "scene-glibc"
+print_wtf "unixbench-glibc"
+
+# exec $BUSYBOX sh -l < /dev/ttyS0 > /dev/ttyS0 2> /dev/ttyS0

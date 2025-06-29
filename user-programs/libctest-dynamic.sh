@@ -1,5 +1,3 @@
-cd /mnt1/musl
-
 ./runtest.exe -w entry-dynamic.exe argv
 ./runtest.exe -w entry-dynamic.exe basename
 ./runtest.exe -w entry-dynamic.exe clocale_mbfuncs
@@ -110,3 +108,5 @@ cd /mnt1/musl
 ./runtest.exe -w entry-dynamic.exe uselocale_0
 ./runtest.exe -w entry-dynamic.exe wcsncpy_read_overflow
 ./runtest.exe -w entry-dynamic.exe wcsstr_false_negative
+
+echo "#### OS COMP TEST GROUP END libctest-musl ####"

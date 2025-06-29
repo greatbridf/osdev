@@ -121,6 +121,10 @@ for item in `ls /mnt1/musl/*.lua`; do
     ln -s $item .
 done
 
+for item in `ls /mnt1/musl/*.exe`; do
+    ln -s $item .
+done
+
 ln -s /mnt1/musl/iozone_testcode.sh .
 ln -s /mnt1/musl/lua_testcode.sh .
 ln -s /mnt1/musl/busybox_testcode.sh .
@@ -136,7 +140,7 @@ sh lua_testcode.sh
 print_wtf "cyclictest-musl"
 print_wtf "iperf-musl"
 print_wtf "libcbench-musl"
-print_wtf "libctest-musl"
+#print_wtf "libctest-musl"
 print_wtf "lmbench-musl"
 print_wtf "ltp-musl"
 print_wtf "netperf-musl"

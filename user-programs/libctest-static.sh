@@ -1,5 +1,4 @@
-cd /mnt1/musl
-
+echo "#### OS COMP TEST GROUP START libctest-musl ####"
 ./runtest.exe -w entry-static.exe argv
 ./runtest.exe -w entry-static.exe basename
 ./runtest.exe -w entry-static.exe clocale_mbfuncs

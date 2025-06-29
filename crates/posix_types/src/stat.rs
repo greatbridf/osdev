@@ -1,3 +1,5 @@
+use core::time::Duration;
+
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone)]
 pub struct StatXTimestamp {
@@ -98,5 +100,11 @@ impl From<StatX> for Stat {
                 tv_nsec: statx.stx_ctime.tv_nsec,
             },
         }
+    }
+}
+
+impl From<TimeSpec> for Duration {
+    fn from(value: TimeSpec) -> Self {
+        Self::new(value.tv_sec, value.tv_nsec)
     }
 }

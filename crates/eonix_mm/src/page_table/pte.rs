@@ -10,7 +10,7 @@ bitflags! {
         const GLOBAL = 8;
     }
 
-    #[derive(Clone, Copy, PartialEq)]
+    #[derive(Debug, Clone, Copy, PartialEq)]
     pub struct PageAttribute: usize {
         const PRESENT = 1;
         const READ = 2;

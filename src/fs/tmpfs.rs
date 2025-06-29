@@ -18,6 +18,7 @@ use crate::{
     prelude::*,
 };
 use alloc::sync::{Arc, Weak};
+use core::fmt::Debug;
 use core::{ops::ControlFlow, sync::atomic::Ordering};
 use eonix_mm::paging::PAGE_SIZE;
 use eonix_runtime::task::Task;
@@ -155,7 +156,7 @@ impl Inode for DirectoryInode {
         let rwsem = Task::block_on(self.rwsem.write());
 
         let ino = vfs.assign_ino();
-        let file = FileInode::new(ino, self.vfs.clone(), mode);
+        let file = FileInode::new(ino, self.vfs.clone(), 0, mode);
 
         self.link(at.get_name(), file.as_ref(), rwsem.prove_mut());
         at.save_reg(file)
@@ -468,19 +469,25 @@ define_struct_inode! {
     }
 }
 
+impl Debug for FileInode {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "FileInode({:?})", self.idata)
+    }
+}
+
 impl FileInode {
-    pub fn new(ino: Ino, vfs: Weak<dyn Vfs>, mode: Mode) -> Arc<Self> {
-        Arc::new_cyclic(|weak_self: &Weak<FileInode>| FileInode {
-            idata: {
-                let inode_data = InodeData::new(ino, vfs);
-                inode_data
-                    .mode
-                    .store(S_IFREG | (mode & 0o777), Ordering::Relaxed);
-                inode_data.nlink.store(1, Ordering::Relaxed);
-                inode_data
-            },
-            pages: PageCache::new(weak_self.clone(), 0),
-        })
+    pub fn new(ino: Ino, vfs: Weak<dyn Vfs>, size: usize, mode: Mode) -> Arc<Self> {
+        let inode = Arc::new_cyclic(|weak_self: &Weak<FileInode>| FileInode {
+            idata: InodeData::new(ino, vfs),
+            pages: PageCache::new(weak_self.clone()),
+        });
+
+        inode
+            .mode
+            .store(S_IFREG | (mode & 0o777), Ordering::Relaxed);
+        inode.nlink.store(1, Ordering::Relaxed);
+        inode.size.store(size as u64, Ordering::Relaxed);
+        inode
     }
 }
 
@@ -491,6 +498,10 @@ impl PageCacheBackend for FileInode {
 
     fn write_page(&self, _page: &CachePage, _offset: usize) -> KResult<usize> {
         Ok(PAGE_SIZE)
+    }
+
+    fn size(&self) -> usize {
+        self.size.load(Ordering::Relaxed) as usize
     }
 }
 

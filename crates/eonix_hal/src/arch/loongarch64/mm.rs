@@ -211,7 +211,7 @@ impl From<TableAttribute> for PageAttribute64 {
 }
 
 impl ArchPhysAccess {
-    const PHYS_OFFSET: usize = 0xffff_0000_0000_0000;
+    const PHYS_OFFSET: usize = 0xffff_ff00_0000_0000;
 }
 
 impl PhysAccess for ArchPhysAccess {
@@ -253,8 +253,8 @@ impl Memory for ArchMemory {
             fn __kernel_end();
         }
 
-        let kernel_start = PAddr::from(__kernel_start as usize - KIMAGE_OFFSET);
-        let kernel_end = PAddr::from(__kernel_end as usize - KIMAGE_OFFSET);
+        let kernel_start = PAddr::from(__kernel_start as usize);
+        let kernel_end = PAddr::from(__kernel_end as usize);
         let paddr_after_kimage_aligned = kernel_end.ceil_to(PAGE_SIZE);
 
         Self::present_ram()
@@ -296,7 +296,7 @@ pub fn flush_tlb_all() {
 
 #[inline(always)]
 pub fn get_root_page_table_pfn() -> PFN {
-    PFN::from(pgdl::read().base())
+    PFN::from(PAddr::from(pgdl::read().base()))
 }
 
 #[inline(always)]
@@ -311,6 +311,6 @@ pub fn set_root_page_table_pfn(pfn: PFN) {
 
     // Invalidate all user space TLB entries.
     unsafe {
-        asm!("dbar 0x0", "invtlb 0x3, $zero, $zero");
+        asm!("dbar 0x0", "invtlb 0x0, $zero, $zero");
     }
 }

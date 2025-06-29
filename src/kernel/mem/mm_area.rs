@@ -155,7 +155,7 @@ impl MMArea {
         Ok(())
     }
 
-    pub fn handle(&self, pte: &mut impl PTE, offset: usize) -> KResult<()> {
+    pub fn handle(&self, pte: &mut impl PTE, offset: usize, write: bool) -> KResult<()> {
         let mut attr = pte.get_attr().as_page_attr().expect("Not a page attribute");
         let mut pfn = pte.get_pfn();
 
@@ -167,7 +167,12 @@ impl MMArea {
             self.handle_mmap(&mut pfn, &mut attr, offset)?;
         }
 
-        attr.set(PageAttribute::ACCESSED, true);
+        attr.insert(PageAttribute::ACCESSED);
+
+        if write {
+            attr.insert(PageAttribute::DIRTY);
+        }
+
         pte.set(pfn, attr.into());
 
         Ok(())

@@ -50,7 +50,7 @@ unsafe extern "C" fn vdso_rt_sigreturn() {
     #[cfg(target_arch = "loongarch64")]
     naked_asm!(
         "li.d $a7, {sys_rt_sigreturn}",
-        "syscall {sys_rt_sigreturn}",
+        "syscall 0",
         sys_rt_sigreturn = const posix_types::syscall_no::SYS_RT_SIGRETURN,
     );
 

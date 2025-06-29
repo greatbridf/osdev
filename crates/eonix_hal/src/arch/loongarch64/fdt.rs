@@ -7,7 +7,8 @@ use fdt::Fdt;
 const FDT_PADDR: PAddr = PAddr::from_val(0x100000);
 
 pub static FDT: LazyLock<Fdt<'static>> = LazyLock::new(|| unsafe {
-    Fdt::from_ptr(FDT_PADDR.addr() as *const u8).expect("Failed to parse DTB from static memory.")
+    Fdt::from_ptr(ArchPhysAccess::as_ptr(FDT_PADDR).as_ptr())
+        .expect("Failed to parse DTB from static memory.")
 });
 
 pub trait FdtExt {

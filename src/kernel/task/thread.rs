@@ -185,7 +185,7 @@ impl ThreadBuilder {
         let mut trap_ctx = thread.trap_ctx.borrow().clone();
         trap_ctx.set_user_return_value(0);
 
-        #[cfg(target_arch = "riscv64")]
+        #[cfg(any(target_arch = "riscv64", target_arch = "loongarch64"))]
         {
             let pc = trap_ctx.get_program_counter();
             trap_ctx.set_program_counter(pc + 4);
@@ -410,7 +410,7 @@ impl Thread {
                         let mut trap_ctx = self.trap_ctx.borrow();
                         trap_ctx.set_user_return_value(retval);
 
-                        #[cfg(target_arch = "riscv64")]
+                        #[cfg(any(target_arch = "riscv64", target_arch = "loongarch64"))]
                         {
                             let pc = trap_ctx.get_program_counter();
                             trap_ctx.set_program_counter(pc + 4);

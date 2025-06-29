@@ -16,7 +16,7 @@ pub fn get_percpu_pointer(percpu: &Ident, ty: &Type) -> TokenStream {
                 "sub.d     {base}, {base}, {start}",
                 "add.d     {base}, {base}, $tp",
                 base = inout(reg) &raw const #percpu => base,
-                start = inout(reg) PERCPU_DATA_START as usize => _,
+                start = in(reg) PERCPU_DATA_START as usize,
                 options(nostack, preserves_flags)
             );
 

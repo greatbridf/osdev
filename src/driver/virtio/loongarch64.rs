@@ -1,15 +1,13 @@
-use crate::{
-    kernel::{
-        block::{make_device, BlockDevice},
-        constants::EIO,
-        pcie::{self, PCIDevice, PCIDriver, PciError, SegmentGroup},
-    },
-    println_debug,
+use super::virtio_blk::HAL;
+use crate::kernel::{
+    block::{make_device, BlockDevice},
+    constants::EIO,
+    pcie::{self, PCIDevice, PCIDriver, PciError, SegmentGroup},
 };
 use alloc::sync::Arc;
 use core::sync::atomic::{AtomicUsize, Ordering};
 use eonix_hal::{fence::memory_barrier, mm::ArchPhysAccess};
-use eonix_log::{println_trace, println_warn};
+use eonix_log::println_warn;
 use eonix_mm::address::PhysAccess;
 use eonix_runtime::task::Task;
 use eonix_sync::Spin;
@@ -23,8 +21,6 @@ use virtio_drivers::{
         DeviceType, Transport,
     },
 };
-
-use super::virtio_blk::HAL;
 
 impl ConfigurationAccess for &SegmentGroup {
     fn read_word(&self, device_function: DeviceFunction, register_offset: u8) -> u32 {

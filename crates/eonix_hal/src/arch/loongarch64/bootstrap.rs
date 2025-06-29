@@ -25,7 +25,7 @@ use eonix_mm::{
     paging::{Page, PageAccess, PageAlloc, PAGE_SIZE, PFN},
 };
 use eonix_percpu::PercpuArea;
-use loongArch64::register::euen;
+use loongArch64::register::{euen, pgdl};
 
 #[unsafe(link_section = ".bootstrap.stack")]
 static BOOT_STACK: [u8; 4096 * 16] = [0; 4096 * 16];
@@ -34,11 +34,12 @@ static BOOT_STACK_START: &'static [u8; 4096 * 16] = &BOOT_STACK;
 #[repr(C, align(4096))]
 struct PageTable([u64; 512]);
 
-/// map 0x8000_0000 to 0xffff_0000_8000_0000 and 0xffff_ffff_8000_0000
+/// map 0x8000_0000 to 0x8000_0000 and 0xffff_ffff_8000_0000
 #[unsafe(link_section = ".bootstrap.page_table.1")]
 static BOOT_PAGE_TABLE: PageTable = {
     let mut arr = [0; 512];
     arr[0] = 0 | 0x11d3; // G | W | P | H | Cached | D | V
+    arr[510] = 0 | 0x11d3; // G | W | P | H | Cached | D | V
     arr[511] = 0x8000_2000 | (1 << 60); // PT1, PT
 
     PageTable(arr)
@@ -57,7 +58,7 @@ static PT1: PageTable = {
 #[unsafe(naked)]
 #[unsafe(no_mangle)]
 #[unsafe(link_section = ".bootstrap.entry")]
-unsafe extern "C" fn _start(hart_id: usize, dtb_addr: usize) -> ! {
+unsafe extern "C" fn _start() -> ! {
     naked_asm!(
         "
             li.d      $t0, 0xc
@@ -87,6 +88,8 @@ unsafe extern "C" fn _start(hart_id: usize, dtb_addr: usize) -> ! {
             csrwr     $t0, {CSR_CRMD}
 
             la.global $sp, {boot_stack}
+            li.d      $t0, 0xffffff0000000000
+            or        $sp, $sp, $t0
             li.d      $t0, {BOOT_STACK_SIZE}
             add.d     $sp, $sp, $t0
 
@@ -135,7 +138,10 @@ unsafe extern "C" fn tlb_refill_entry() {
 
 /// TODO:
 /// 启动所有的cpu
-pub unsafe extern "C" fn riscv64_start(hart_id: usize, dtb_addr: PAddr) -> ! {
+pub unsafe extern "C" fn riscv64_start(hart_id: usize) -> ! {
+    pgdl::set_base(0xffff_ffff_ffff_0000);
+    flush_tlb_all();
+
     let real_allocator = RefCell::new(BasicPageAlloc::new());
     let alloc = BasicPageAllocRef::new(&real_allocator);
 
@@ -217,6 +223,7 @@ fn setup_kernel_page_table(alloc: impl PageAlloc) {
 fn setup_cpu(alloc: impl PageAlloc, hart_id: usize) {
     // enable FPU
     euen::set_fpe(true);
+    euen::set_sxe(true);
 
     let mut percpu_area = PercpuArea::new(|layout| {
         let page_count = layout.size().div_ceil(PAGE_SIZE);
@@ -252,7 +259,7 @@ fn setup_cpu(alloc: impl PageAlloc, hart_id: usize) {
     unsafe {
         asm!(
             "csrwr {tp}, {CSR_KERNEL_TP}",
-            tp = in(reg) PercpuArea::get_for(cpu.cpuid()).unwrap().as_ptr(),
+            tp = inout(reg) PercpuArea::get_for(cpu.cpuid()).unwrap().as_ptr() => _,
             CSR_KERNEL_TP = const CSR_KERNEL_TP,
         )
     }

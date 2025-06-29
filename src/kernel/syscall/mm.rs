@@ -101,7 +101,7 @@ fn do_mmap2(
     addr.map(|addr| addr.addr())
 }
 
-#[cfg(target_arch = "riscv64")]
+#[cfg(any(target_arch = "riscv64", target_arch = "loongarch64"))]
 #[eonix_macros::define_syscall(SYS_MMAP)]
 fn mmap(
     addr: usize,

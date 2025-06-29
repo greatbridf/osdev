@@ -13,6 +13,8 @@ SECTIONS {
         . = ALIGN(16);
         KEEP(*(.bootstrap.stack));
     } > RAM
+
+    __kernel_start = ORIGIN(RAM);
 }
 INSERT BEFORE .text;
 
@@ -43,9 +45,8 @@ SECTIONS {
 
     PERCPU_LENGTH = ABSOLUTE(__epercpu - __spercpu);
 
-    KIMAGE_PAGES = (__edata - _stext + 0x1000 - 1) / 0x1000;
+    KIMAGE_PAGES = (__kernel_end - _stext + 0x1000 - 1) / 0x1000;
     KIMAGE_32K_COUNT = (KIMAGE_PAGES + 8 - 1) / 8;
-    __kernel_end = .;
 
     BSS_LENGTH = ABSOLUTE(__ebss - __sbss);
 }
@@ -90,5 +91,6 @@ SECTIONS {
     } > VDSO AT> RAM
 
     VDSO_PADDR = LOADADDR(.vdso);
+    __kernel_end = ABSOLUTE(LOADADDR(.vdso) + SIZEOF(.vdso));
 }
-INSERT AFTER .data;
+INSERT BEFORE .bss;

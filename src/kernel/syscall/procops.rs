@@ -702,6 +702,9 @@ fn fork() -> KResult<u32> {
     do_clone(thread, clone_args)
 }
 
+// Some old platforms including x86_32, riscv and arm have the last two arguments
+// swapped, so we need to define two versions of `clone` syscall.
+#[cfg(not(target_arch = "loongarch64"))]
 #[eonix_macros::define_syscall(SYS_CLONE)]
 fn clone(
     clone_flags: usize,
@@ -709,6 +712,20 @@ fn clone(
     parent_tidptr: usize,
     tls: usize,
     child_tidptr: usize,
+) -> KResult<u32> {
+    let clone_args = CloneArgs::for_clone(clone_flags, new_sp, child_tidptr, parent_tidptr, tls)?;
+
+    do_clone(thread, clone_args)
+}
+
+#[cfg(target_arch = "loongarch64")]
+#[eonix_macros::define_syscall(SYS_CLONE)]
+fn clone(
+    clone_flags: usize,
+    new_sp: usize,
+    parent_tidptr: usize,
+    child_tidptr: usize,
+    tls: usize,
 ) -> KResult<u32> {
     let clone_args = CloneArgs::for_clone(clone_flags, new_sp, child_tidptr, parent_tidptr, tls)?;
 

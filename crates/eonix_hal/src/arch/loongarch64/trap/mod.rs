@@ -281,8 +281,8 @@ impl TrapReturn for TrapContext {
             asm!(
                 "csrwr {captured_trap_context}, {CSR_CAPTURED_TRAP_CONTEXT_ADDR}",
                 "csrwr {capturer_task_context}, {CSR_CAPTURER_TASK_CONTEXT_ADDR}",
-                captured_trap_context = in(reg) &raw mut *self,
-                capturer_task_context = in(reg) &raw mut capturer_ctx,
+                captured_trap_context = inout(reg) &raw mut *self => _,
+                capturer_task_context = inout(reg) &raw mut capturer_ctx => _,
                 CSR_CAPTURED_TRAP_CONTEXT_ADDR = const CSR_CAPTURED_TRAP_CONTEXT_ADDR,
                 CSR_CAPTURER_TASK_CONTEXT_ADDR = const CSR_CAPTURER_TASK_CONTEXT_ADDR,
                 options(nomem, nostack, preserves_flags),

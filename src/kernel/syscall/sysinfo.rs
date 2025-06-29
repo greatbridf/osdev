@@ -53,6 +53,9 @@ fn newuname(buffer: *mut NewUTSName) -> KResult<()> {
     #[cfg(target_arch = "riscv64")]
     copy_cstr_to_array(b"riscv64", &mut uname.machine);
 
+    #[cfg(target_arch = "loongarch64")]
+    copy_cstr_to_array(b"loongarch64", &mut uname.machine);
+
     copy_cstr_to_array(b"(none)", &mut uname.domainname);
 
     buffer.write(uname)

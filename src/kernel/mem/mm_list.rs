@@ -644,7 +644,7 @@ impl MMList {
                 let page_start = current.floor() + idx * 0x1000;
                 let page_end = page_start + 0x1000;
 
-                area.handle(pte, page_start - area_start)?;
+                area.handle(pte, page_start - area_start, true)?;
 
                 let start_offset;
                 if page_start < current {
@@ -761,7 +761,7 @@ where
             return;
         }
 
-        from_attr.remove(PageAttribute::WRITE);
+        from_attr.remove(PageAttribute::WRITE | PageAttribute::DIRTY);
         from_attr.insert(PageAttribute::COPY_ON_WRITE);
 
         let pfn = unsafe {

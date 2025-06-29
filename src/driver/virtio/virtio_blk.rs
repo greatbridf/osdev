@@ -3,11 +3,10 @@ use crate::{
     kernel::{
         block::{BlockDeviceRequest, BlockRequestQueue},
         constants::EIO,
-        mem::{AsMemoryBlock, MemoryBlock, Page},
+        mem::{AsMemoryBlock, Page},
     },
     prelude::KResult,
 };
-use core::num::NonZero;
 use eonix_hal::mm::ArchPhysAccess;
 use eonix_mm::{
     address::{Addr, PAddr, PhysAccess},
@@ -50,9 +49,9 @@ unsafe impl Hal for HAL {
 
     unsafe fn mmio_phys_to_virt(
         paddr: virtio_drivers::PhysAddr,
-        size: usize,
+        _size: usize,
     ) -> core::ptr::NonNull<u8> {
-        MemoryBlock::new(NonZero::new(paddr).expect("paddr must be non-zero"), size).as_byte_ptr()
+        unsafe { ArchPhysAccess::as_ptr(PAddr::from(paddr)) }
     }
 
     unsafe fn share(

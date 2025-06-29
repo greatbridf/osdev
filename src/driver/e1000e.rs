@@ -451,15 +451,19 @@ impl PCIDriver for Driver {
             Err(EINVAL)?
         };
 
-        let bar0 = header.bars[0];
+        let bar0 = header.bars().iter().next().ok_or(EINVAL)?.get();
+        let base = match bar0 {
+            pcie::Bar::MemoryMapped32 {
+                base: Some(base), ..
+            } => PAddr::from(base.get() as usize),
 
-        if bar0 & 0xf != 0 {
-            Err(EINVAL)?;
-        }
+            pcie::Bar::MemoryMapped64 {
+                base: Some(base), ..
+            } => PAddr::from(base.get() as usize),
 
-        device.enable_bus_mastering();
+            _ => todo!("Unsupported BAR type"),
+        };
 
-        let base = PAddr::from(bar0 as usize);
         let e1000e = E1000eDev::new(base, header.interrupt_line as usize)?;
 
         let dev = netdev::register_netdev(e1000e)?;

@@ -10,7 +10,6 @@ use crate::{
 use alloc::{collections::vec_deque::VecDeque, format, sync::Arc};
 use bitflags::bitflags;
 use core::pin::pin;
-use eonix_mm::address::PAddr;
 use eonix_runtime::{run::FutureRun, scheduler::Scheduler};
 use eonix_sync::{SpinIrq as _, WaitList};
 use io::SerialIO;
@@ -215,6 +214,7 @@ pub fn init() -> KResult<()> {
     #[cfg(target_arch = "riscv64")]
     {
         use eonix_hal::arch_exported::fdt::FDT;
+        use eonix_mm::address::PAddr;
 
         if let Some(uart) = FDT.find_compatible(&["ns16550a", "ns16550"]) {
             let regs = uart.reg().unwrap();
@@ -236,6 +236,22 @@ pub fn init() -> KResult<()> {
                     .expect("UART device should have an interrupt pin"),
             )?;
         }
+    }
+
+    #[cfg(target_arch = "loongarch64")]
+    {
+        use eonix_mm::address::PAddr;
+
+        let port = unsafe {
+            // SAFETY: The base address is provided by the FDT and should be valid.
+            SerialIO::new(PAddr::from(0x1fe0_01e0))
+        };
+
+        let serial = Serial::new(0, port)?;
+        serial.register_as_char_device(
+            // 2 or 4 here, let's try 2 first!
+            2,
+        )?;
     }
 
     Ok(())

@@ -19,6 +19,18 @@ fn process_ldscript_riscv64(script: &mut String) -> Result<(), Box<dyn std::erro
     Ok(())
 }
 
+fn process_ldscript_loongarch64(script: &mut String) -> Result<(), Box<dyn std::error::Error>> {
+    println!("cargo:extra-link-args= --no-check-sections");
+
+    let memory = read_dependent_script("src/arch/loongarch64/memory.x")?;
+    let link = read_dependent_script("src/arch/loongarch64/link.x")?;
+
+    *script = memory + script;
+    script.push_str(&link);
+
+    Ok(())
+}
+
 fn process_ldscript_x86(script: &mut String) -> Result<(), Box<dyn std::error::Error>> {
     // Otherwise `bootstrap.rs` might be ignored and not linked in.
     println!("cargo:extra-link-args=--undefined=move_mbr --no-check-sections");
@@ -42,6 +54,9 @@ fn process_ldscript_arch(
         }
         "riscv64" => {
             process_ldscript_riscv64(script)?;
+        }
+        "loongarch64" => {
+            process_ldscript_loongarch64(script)?;
         }
         _ => panic!("Unsupported architecture: {}", arch),
     }

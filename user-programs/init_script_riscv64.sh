@@ -114,6 +114,8 @@ ln -s /mnt1/musl/iozone .
 
 ln -s /mnt1/musl/lua .
 ln -s /mnt1/musl/test.sh .
+ln -s /mnt/libctest-static.sh .
+ln -s /mnt/libctest-dynamic.sh .
 
 for item in `ls /mnt1/musl/*.lua`; do
     ln -s $item .
@@ -124,6 +126,8 @@ ln -s /mnt1/musl/lua_testcode.sh .
 ln -s /mnt1/musl/busybox_testcode.sh .
 ln -s /mnt1/musl/basic_testcode.sh .
 
+sh libctest-static.sh
+sh libctest-dynamic.sh
 sh iozone_testcode.sh
 sh busybox_testcode.sh
 sh basic_testcode.sh

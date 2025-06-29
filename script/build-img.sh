@@ -40,6 +40,8 @@ if [ "$ARCH" = "x86_64" ]; then
 elif [ "$ARCH" = "riscv64" ]; then
     $SUDO cp ./user-programs/busybox.static build/mnt/busybox
     $SUDO cp ./user-programs/init_script_riscv64.sh build/mnt/initsh
+    $SUDO cp ./user-programs/libctest-static.sh build/mnt/libctest-static.sh
+    $SUDO cp ./user-programs/libctest-dynamic.sh build/mnt/libctest-dynamic.sh
 elif [ "$ARCH" = "loongarch64" ]; then
     $SUDO cp ./user-programs/busybox.la64 build/mnt/busybox
     $SUDO cp ./user-programs/init_script_loongarch64.sh build/mnt/initsh

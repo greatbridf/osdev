@@ -21,6 +21,8 @@ cross-compile.cmake
 
 disk.img
 disk-la.img
+sdcard-la.img
+sdcard-rv.img
 kernel-rv
 kernel-la
 

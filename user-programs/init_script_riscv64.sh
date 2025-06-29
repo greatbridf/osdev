@@ -130,6 +130,8 @@ ln -s /mnt1/musl/lua_testcode.sh .
 ln -s /mnt1/musl/busybox_testcode.sh .
 ln -s /mnt1/musl/basic_testcode.sh .
 
+#echo "all: $(sh libctest-static.sh 2>&1 | grep -c 'Pass') Pass"
+#echo "all: $(sh libctest-dynamic.sh 2>&1 | grep -c 'Pass') Pass"
 sh libctest-static.sh
 sh libctest-dynamic.sh
 sh iozone_testcode.sh
@@ -140,7 +142,6 @@ sh lua_testcode.sh
 print_wtf "cyclictest-musl"
 print_wtf "iperf-musl"
 print_wtf "libcbench-musl"
-#print_wtf "libctest-musl"
 print_wtf "lmbench-musl"
 print_wtf "ltp-musl"
 print_wtf "netperf-musl"

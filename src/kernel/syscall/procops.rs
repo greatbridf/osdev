@@ -23,6 +23,7 @@ use core::ptr::NonNull;
 use core::time::Duration;
 use eonix_hal::processor::UserTLS;
 use eonix_hal::traits::trap::RawTrapContext;
+use eonix_hal::trap::TrapContext;
 use eonix_mm::address::{Addr as _, VAddr};
 use eonix_runtime::task::Task;
 use eonix_sync::AsProof as _;
@@ -183,6 +184,10 @@ fn execve(exec: *const u8, argv: *const PtrT, envp: *const PtrT) -> KResult<Sysc
     thread.set_name(dentry.get_name());
 
     let mut trap_ctx = thread.trap_ctx.borrow();
+    *trap_ctx = TrapContext::new();
+
+    trap_ctx.set_user_mode(true);
+    trap_ctx.set_interrupt_enabled(true);
     trap_ctx.set_program_counter(load_info.entry_ip.addr());
     trap_ctx.set_stack_pointer(load_info.sp.addr());
 

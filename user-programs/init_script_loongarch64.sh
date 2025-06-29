@@ -88,6 +88,14 @@ int main() {
 }
 EOF
 
+mkdir /lib64
+
+for item in `ls /mnt1/glibc/lib`; do
+    ln -s /mnt1/glibc/lib/$item /lib64/
+done
+
+ln -s /mnt1/musl/lib/libc.so /lib64/ld-musl-loongarch-lp64d.so.1
+
 ln -s $BUSYBOX /busybox
 ln -s $BUSYBOX /bin/busybox
 
@@ -123,10 +131,9 @@ ln -s /mnt1/musl/basic_testcode.sh .
 
 sh iozone_testcode.sh
 sh basic_testcode.sh
-# sh busybox_testcode.sh
+sh busybox_testcode.sh
 sh lua_testcode.sh
 
-print_wtf "busybox-musl"
 print_wtf "cyclictest-musl"
 print_wtf "iperf-musl"
 print_wtf "libcbench-musl"
@@ -164,11 +171,10 @@ ln -s /mnt1/glibc/busybox_testcode.sh .
 ln -s /mnt1/glibc/basic_testcode.sh .
 
 sh iozone_testcode.sh
-# sh busybox_testcode.sh
+sh busybox_testcode.sh
 sh basic_testcode.sh
 sh lua_testcode.sh
 
-print_wtf "busybox-glibc"
 print_wtf "cyclictest-glibc"
 print_wtf "iperf-glibc"
 print_wtf "libcbench-glibc"

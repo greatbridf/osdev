@@ -187,21 +187,12 @@ async fn init_process(early_kstack: PRange) {
         )
         .unwrap();
 
-        #[cfg(target_arch = "riscv64")]
-        let init_name = CString::new(b"/mnt/busyboxr").unwrap();
-
-        #[cfg(target_arch = "loongarch64")]
-        let init_name = CString::new(b"/mnt/busyboxl").unwrap();
+        let init_name = CString::new(b"/mnt/initsh").unwrap();
 
         let init =
             Dentry::open(fs_context, Path::new(init_name.as_bytes()).unwrap(), true).unwrap();
 
-        let argv = vec![
-            init_name.clone(),
-            CString::new(b"sh").unwrap(),
-            CString::new(b"/mnt/initsh").unwrap(),
-            init_name.clone(),
-        ];
+        let argv = vec![init_name.clone()];
 
         let envp = vec![
             CString::new("LANG=C").unwrap(),

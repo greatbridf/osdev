@@ -191,10 +191,4 @@ build/boot-loongarch64.img: build/fs-loongarch64.img
 	sh -c 'echo n; echo; echo; echo 8192; echo; echo a; echo w' \
 		| $(FDISK) $@ 2> /dev/null > /dev/null
 
-build/boot-comp.img: build/fs-comp.img
-	dd if=$< of=$@ bs=$(shell expr 4 \* 1024 \* 1024) \
-		seek=1 conv=notrunc 2> /dev/null
-	sh -c 'echo n; echo; echo; echo 8192; echo; echo a; echo w' \
-		| $(FDISK) $@ 2> /dev/null > /dev/null
-
 .DEFAULT_GOAL := build

@@ -20,6 +20,7 @@ cross-compile.cmake
 .gdbinit
 
 disk.img
+disk-la.img
 kernel-rv
 kernel-la
 

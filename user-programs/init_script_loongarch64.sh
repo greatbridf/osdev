@@ -23,9 +23,9 @@ do_or_freeze $BUSYBOX mkdir -p /dev
 do_or_freeze $BUSYBOX mknod -m 666 /dev/console c 5 1
 do_or_freeze $BUSYBOX mknod -m 666 /dev/null c 1 3
 do_or_freeze $BUSYBOX mknod -m 666 /dev/zero c 1 5
-do_or_freeze $BUSYBOX mknod -m 666 /dev/sda b 8 0
-do_or_freeze $BUSYBOX mknod -m 666 /dev/sda1 b 8 1
-do_or_freeze $BUSYBOX mknod -m 666 /dev/sdb b 8 16
+do_or_freeze $BUSYBOX mknod -m 666 /dev/vda b 8 0
+do_or_freeze $BUSYBOX mknod -m 666 /dev/vdb b 8 16
+do_or_freeze $BUSYBOX mknod -m 666 /dev/vdb1 b 8 17
 do_or_freeze $BUSYBOX mknod -m 666 /dev/ttyS0 c 4 64
 do_or_freeze $BUSYBOX mknod -m 666 /dev/ttyS1 c 4 65
 
@@ -42,16 +42,13 @@ echo ok >&2
 do_or_freeze mkdir -p /etc /root /proc
 do_or_freeze mount -t procfs proc proc
 
-# Check if the device /dev/sdb is available and can be read
-if dd if=/dev/sdb of=/dev/null bs=512 count=1; then
+# Check if the device /dev/vda is available and can be read
+if dd if=/dev/vda of=/dev/null bs=512 count=1; then
     echo -n -e "Mounting the ext4 image... " >&2
     do_or_freeze mkdir -p /mnt1
-    do_or_freeze mount -t ext4 /dev/sdb /mnt1
+    do_or_freeze mount -t ext4 /dev/vda /mnt1
     echo ok >&2
 fi
-
-cp /mnt/ld-musl-i386.so.1 /lib/ld-musl-i386.so.1
-ln -s /lib/ld-musl-i386.so.1 /lib/libc.so
 
 cat > /etc/passwd <<EOF
 root:x:0:0:root:/root:/mnt/busybox sh
@@ -91,7 +88,93 @@ int main() {
 }
 EOF
 
-exec $BUSYBOX sh -l < /dev/ttyS0 > /dev/ttyS0 2> /dev/ttyS0
+ln -s $BUSYBOX /busybox
+ln -s $BUSYBOX /bin/busybox
 
-# We don't have a working init yet, so we use busybox sh directly for now.
-# exec /mnt/init /bin/sh -c 'exec sh -l < /dev/ttyS0 > /dev/ttyS0 2> /dev/ttyS0'
+print_wtf() {
+    echo "#### OS COMP TEST GROUP START $1 ####"
+    echo "#### OS COMP TEST GROUP END $1 ####"
+}
+
+### MUSL ###
+
+mkdir /musl-tests
+cd /musl-tests
+
+ln -s $BUSYBOX ./busybox
+
+cp -r /mnt1/musl/basic .
+
+ln -s /mnt1/musl/busybox_cmd.txt .
+
+ln -s /mnt1/musl/iozone .
+
+ln -s /mnt1/musl/lua .
+ln -s /mnt1/musl/test.sh .
+
+for item in `ls /mnt1/musl/*.lua`; do
+    ln -s $item .
+done
+
+ln -s /mnt1/musl/iozone_testcode.sh .
+ln -s /mnt1/musl/lua_testcode.sh .
+ln -s /mnt1/musl/busybox_testcode.sh .
+ln -s /mnt1/musl/basic_testcode.sh .
+
+sh iozone_testcode.sh
+sh basic_testcode.sh
+# sh busybox_testcode.sh
+sh lua_testcode.sh
+
+print_wtf "busybox-musl"
+print_wtf "cyclictest-musl"
+print_wtf "iperf-musl"
+print_wtf "libcbench-musl"
+print_wtf "libctest-musl"
+print_wtf "lmbench-musl"
+print_wtf "ltp-musl"
+print_wtf "netperf-musl"
+print_wtf "scene-musl"
+print_wtf "unixbench-musl"
+
+### END MUSL ###
+
+cd /
+mkdir glibc-tests
+cd glibc-tests
+
+ln -s $BUSYBOX ./busybox
+
+cp -r /mnt1/glibc/basic .
+
+ln -s /mnt1/glibc/busybox_cmd.txt .
+
+ln -s /mnt1/glibc/iozone .
+
+ln -s /mnt1/glibc/lua .
+ln -s /mnt1/glibc/test.sh .
+
+for item in `ls /mnt1/glibc/*.lua`; do
+    ln -s $item .
+done
+
+ln -s /mnt1/glibc/iozone_testcode.sh .
+ln -s /mnt1/glibc/lua_testcode.sh .
+ln -s /mnt1/glibc/busybox_testcode.sh .
+ln -s /mnt1/glibc/basic_testcode.sh .
+
+sh iozone_testcode.sh
+# sh busybox_testcode.sh
+sh basic_testcode.sh
+sh lua_testcode.sh
+
+print_wtf "busybox-glibc"
+print_wtf "cyclictest-glibc"
+print_wtf "iperf-glibc"
+print_wtf "libcbench-glibc"
+print_wtf "libctest-glibc"
+print_wtf "lmbench-glibc"
+print_wtf "ltp-glibc"
+print_wtf "netperf-glibc"
+print_wtf "scene-glibc"
+print_wtf "unixbench-glibc"

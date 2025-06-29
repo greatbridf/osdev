@@ -10,11 +10,14 @@ all:
 		build/loongarch64-unknown-none-softfloat/release/eonix_kernel \
 		ARCH=loongarch64 MODE=release
 	
+	make -f Makefile.real build/boot-riscv64.img
+	make -f Makefile.real build/boot-loongarch64.img
+	
 	cp build/riscv64gc-unknown-none-elf/release/eonix_kernel \
 		kernel-rv
 
 	cp build/loongarch64-unknown-none-softfloat/release/eonix_kernel \
 		kernel-la
 	
-	xz -k -d disk.img.xz >/dev/null 2>&1 || true
-	cp disk.img disk-la.img
+	mv build/boot-riscv64.img disk.img
+	mv build/boot-loongarch64.img disk-la.img

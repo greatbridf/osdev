@@ -274,6 +274,7 @@ impl<E: ElfArch> Elf<E> {
                 write: true,
                 execute: false,
             },
+            false,
         )?;
 
         StackInitializer::new(&mm_list, E::STACK_BASE_ADDR, args, envs, aux_vec).init()
@@ -356,11 +357,12 @@ impl<E: ElfArch> Elf<E> {
                 vmap_start,
                 file_len,
                 Mapping::File(FileMapping::new(
-                    self.file.clone(),
+                    self.file.get_inode()?,
                     file_offset,
                     real_file_length,
                 )),
                 permission,
+                false,
             )?;
         }
 
@@ -370,6 +372,7 @@ impl<E: ElfArch> Elf<E> {
                 vmem_len - file_len,
                 Mapping::Anonymous,
                 permission,
+                false,
             )?;
         }
 

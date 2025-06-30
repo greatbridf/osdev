@@ -1,6 +1,6 @@
 # Eonix
 
-*Eonix* 是一个适用于多处理器多架构，基于无栈协程进行任务管理的宏内核操作系统，基于 *Rust* 编写，大部分灵感来源于 Linux。
+*Eonix* 是一个适用于多处理器多架构，基于rust async语法的有/无栈异步任务管理的宏内核操作系统，基于 *Rust* 编写。
 
 *Eonix* 项目的目标是创建一个高效、安全、可靠的操作系统。我们的目标是提供一个简单的内核设计，使得它易于理解和维护。同时，我们也希望 *Eonix* 能够提供足够复杂的特性，如虚拟内存管理、多进程支持、*POSIX* 兼容的文件系统模型、易于使用的设备驱动开发接口等，使其拥有较强的实用性。
 
@@ -31,7 +31,7 @@
 
 - [启动加载](doc/boot.md)
 - [内存管理](doc/memory.md)
-- [进程管理](doc/task.md)
+- [任务管理](doc/task.md)
 - [文件系统](doc/filesystem.md)
 - [设备驱动](doc/device_driver.md)
 - [多平台支持](doc/multi_arch.md)
@@ -163,11 +163,11 @@
 └── x86_64-unknown-none.json       # x86_64 裸机工具链配置
 ```
 
-# 编译 & 运行
+## 编译 & 运行
 
 （以下内容适用于 github 上的版本，gitlab 中的 Makefile 是为了测评删减过的）
 
-## 构建依赖
+### 构建依赖
 
 #### 编译
 
@@ -187,7 +187,7 @@
 - [GDB](https://www.gnu.org/software/gdb/)
 - [QEMU](https://www.qemu.org/)
 
-## 编译及运行命令
+### 编译及运行命令
 
 ```bash
 # 配置构建环境

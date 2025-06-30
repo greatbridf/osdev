@@ -36,6 +36,8 @@
 - [设备驱动](doc/device_driver.md)
 - [多平台支持](doc/multi_arch.md)
 
+初赛的汇报PPT也在仓库中，由于仓库大小限制，汇报的视频上传到了[bilibili](https://www.bilibili.com/video/BV1PwgCzME1F/)中。
+
 ## 代码树结构
 
 ```
@@ -230,3 +232,15 @@ make tmux-debug
 - `QEMU_ACCEL`: 手动指定要使用的 qemu 加速方法。
 - `DEBUG_TRAPS`: 是否要进行 trap 的调试，使 qemu 输出详细的 trap 日志。
 - `FEATURES`: 手动指定要编译的特性，使用逗号分隔。具体见 `Cargo.toml` 中的 `features` 字段。
+
+## 参考
+
+参考代码：
+* arceos[https://github.com/arceos-org/arceos]
+* asterinas[https://github.com/asterinas/asterinas]
+* linux[https://github.com/torvalds/linux]
+
+直接使用内核组件：
+* ext4-rs[https://github.com/yuoo655/ext4_rs]
+* virtio-drivers[https://github.com/rcore-os/virtio-drivers]
+* xmas-elf[https://github.com/nrc/xmas-elf]

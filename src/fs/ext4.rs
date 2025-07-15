@@ -13,7 +13,7 @@ use crate::{
             mount::{register_filesystem, Mount, MountCreator},
             s_isdir, s_isreg,
             vfs::Vfs,
-            DevId, FsContext, TimeSpec,
+            DevId, FsContext,
         },
     },
     path::Path,

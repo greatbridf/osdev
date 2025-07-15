@@ -151,22 +151,20 @@ fn get_strings(mut ptr_strings: UserPointer<'_, PtrT>) -> KResult<Vec<CString>> 
 #[eonix_macros::define_syscall(SYS_EXECVE)]
 fn execve(exec: *const u8, argv: *const PtrT, envp: *const PtrT) -> KResult<SyscallNoReturn> {
     let exec = UserString::new(exec)?;
+    let exec = exec.as_cstr().to_owned();
+
     let argv = get_strings(UserPointer::new(argv)?)?;
     let envp = get_strings(UserPointer::new(envp)?)?;
 
-    let dentry = Dentry::open(
-        &thread.fs_context,
-        Path::new(exec.as_cstr().to_bytes())?,
-        true,
-    )?;
-
+    let dentry = Dentry::open(&thread.fs_context, Path::new(exec.as_bytes())?, true)?;
     if !dentry.is_valid() {
         Err(ENOENT)?;
     }
 
     // TODO: When `execve` is called by one of the threads in a process, the other threads
     //       should be terminated and `execve` is performed in the thread group leader.
-    let load_info = ProgramLoader::parse(dentry.clone())?.load(argv, envp)?;
+    let load_info =
+        ProgramLoader::parse(&thread.fs_context, exec, dentry.clone(), argv, envp)?.load()?;
 
     if let Some(robust_list) = thread.get_robust_list() {
         let _ = Task::block_on(robust_list.wake_all());

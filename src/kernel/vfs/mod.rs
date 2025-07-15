@@ -34,13 +34,6 @@ pub fn s_islnk(mode: Mode) -> bool {
     (mode & S_IFMT) == S_IFLNK
 }
 
-#[derive(Clone, Copy, Default)]
-#[repr(C)]
-pub struct TimeSpec {
-    pub sec: u64,
-    pub nsec: u64,
-}
-
 pub struct FsContext {
     pub fsroot: Arc<Dentry>,
     pub cwd: Spin<Arc<Dentry>>,
@@ -54,12 +47,6 @@ static GLOBAL_FS_CONTEXT: LazyLock<Arc<FsContext>> = LazyLock::new(|| {
         umask: Spin::new(0o022),
     })
 });
-
-impl TimeSpec {
-    pub const fn default() -> Self {
-        Self { sec: 0, nsec: 0 }
-    }
-}
 
 impl FsContext {
     pub fn global() -> &'static Arc<Self> {

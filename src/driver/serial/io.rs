@@ -1,6 +1,6 @@
 use super::SerialRegister;
 use core::ptr::NonNull;
-use eonix_hal::mm::ArchPhysAccess;
+use eonix_hal::{fence::memory_barrier, mm::ArchPhysAccess};
 use eonix_mm::address::{PAddr, PhysAccess};
 
 #[cfg(target_arch = "x86_64")]
@@ -82,31 +82,39 @@ impl SerialIO {
     }
 }
 
-#[cfg(target_arch = "riscv64")]
+#[cfg(any(target_arch = "riscv64", target_arch = "loongarch64"))]
 pub struct SerialIO {
     base_addr: NonNull<u8>,
 }
 
-#[cfg(target_arch = "riscv64")]
+#[cfg(any(target_arch = "riscv64", target_arch = "loongarch64"))]
 unsafe impl Send for SerialIO {}
 
-#[cfg(target_arch = "riscv64")]
+#[cfg(any(target_arch = "riscv64", target_arch = "loongarch64"))]
 unsafe impl Sync for SerialIO {}
 
-#[cfg(target_arch = "riscv64")]
+#[cfg(any(target_arch = "riscv64", target_arch = "loongarch64"))]
 impl SerialRegister for NonNull<u8> {
     fn read(&self) -> u8 {
         // SAFETY: `self` is a valid pointer to the serial port register.
-        unsafe { self.as_ptr().read_volatile() }
+        let retval = unsafe { self.as_ptr().read_volatile() };
+
+        #[cfg(target_arch = "loongarch64")]
+        memory_barrier();
+
+        retval
     }
 
     fn write(&self, data: u8) {
         // SAFETY: `self` is a valid pointer to the serial port register.
-        unsafe { self.as_ptr().write_volatile(data) }
+        unsafe { self.as_ptr().write_volatile(data) };
+
+        #[cfg(target_arch = "loongarch64")]
+        memory_barrier();
     }
 }
 
-#[cfg(target_arch = "riscv64")]
+#[cfg(any(target_arch = "riscv64", target_arch = "loongarch64"))]
 impl SerialIO {
     /// Creates a new `SerialIO` instance with the given physical address.
     ///

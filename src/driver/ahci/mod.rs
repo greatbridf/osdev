@@ -168,7 +168,19 @@ impl PCIDriver for AHCIDriver {
             Err(EINVAL)?
         };
 
-        let base = PAddr::from(header.bars[PCI_REG_ABAR] as usize);
+        let bar5 = header.bars().iter().nth(PCI_REG_ABAR).ok_or(EINVAL)?.get();
+        let base = match bar5 {
+            pcie::Bar::MemoryMapped32 {
+                base: Some(base), ..
+            } => PAddr::from(base.get() as usize),
+
+            pcie::Bar::MemoryMapped64 {
+                base: Some(base), ..
+            } => PAddr::from(base.get() as usize),
+
+            _ => todo!("Unsupported BAR type"),
+        };
+
         let irqno = header.interrupt_line;
 
         // use MMIO

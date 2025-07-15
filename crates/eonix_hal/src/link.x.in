@@ -3,7 +3,7 @@ PROVIDE(_stext = ORIGIN(REGION_TEXT));
 SECTIONS {
     .text _stext :
     {
-        __kernel_start = .;
+        PROVIDE(__kernel_start = .);
         __stext = .;
 
         *(.text.entry);

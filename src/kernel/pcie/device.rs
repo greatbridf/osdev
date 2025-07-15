@@ -1,22 +1,18 @@
-use super::{CommonHeader, Header};
+use super::{
+    header::{Bar, Command},
+    CommonHeader, Header,
+};
 use crate::kernel::mem::PhysAccess as _;
-use alloc::sync::Arc;
-use core::{ops::RangeInclusive, sync::atomic::Ordering};
-use eonix_hal::fence::memory_barrier;
-use eonix_mm::address::PAddr;
-use eonix_sync::{LazyLock, Spin};
-use intrusive_collections::{intrusive_adapter, KeyAdapter, RBTree, RBTreeAtomicLink};
+use align_ext::AlignExt;
+use alloc::{collections::btree_map::BTreeMap, sync::Arc, vec::Vec};
+use core::{num::NonZero, ops::RangeInclusive};
+use eonix_mm::address::{Addr, PAddr, PRange};
+use eonix_sync::Spin;
 
-pub(super) static PCIE_DEVICES: LazyLock<Spin<RBTree<PCIDeviceAdapter>>> =
-    LazyLock::new(|| Spin::new(RBTree::new(PCIDeviceAdapter::new())));
+pub(super) static PCIE_DEVICES: Spin<BTreeMap<u32, Vec<Arc<PCIDevice>>>> =
+    Spin::new(BTreeMap::new());
 
-intrusive_adapter!(
-    pub PCIDeviceAdapter = Arc<PCIDevice<'static>> : PCIDevice { link: RBTreeAtomicLink }
-);
-
-#[allow(dead_code)]
 pub struct PCIDevice<'a> {
-    link: RBTreeAtomicLink,
     segment_group: SegmentGroup,
     config_space: ConfigSpace,
     pub header: Header<'a>,
@@ -32,14 +28,18 @@ pub struct SegmentGroup {
     base_address: PAddr,
 }
 
-#[allow(dead_code)]
 #[derive(Clone)]
 pub struct ConfigSpace {
-    bus: u8,
-    device: u8,
-    function: u8,
+    pub bus: u8,
+    pub device: u8,
+    pub function: u8,
 
-    base: PAddr,
+    pub base: PAddr,
+}
+
+pub struct PciMemoryAllocator {
+    start: u32,
+    end: u32,
 }
 
 impl SegmentGroup {
@@ -66,19 +66,29 @@ impl SegmentGroup {
             .map(move |bus| {
                 (0..32)
                     .map(move |device| {
-                        (0..8).map(move |function| ConfigSpace {
-                            bus,
-                            device,
-                            function,
-                            base: self.base_address
-                                + ((bus as usize) << 20)
-                                + ((device as usize) << 15)
-                                + ((function as usize) << 12),
+                        (0..8).map(move |function| {
+                            self.get_conf_space(bus, device, function).unwrap()
                         })
                     })
                     .flatten()
             })
             .flatten()
+    }
+
+    pub fn get_conf_space(&self, bus: u8, device: u8, function: u8) -> Option<ConfigSpace> {
+        if self.bus_range.contains(&bus) {
+            Some(ConfigSpace {
+                bus,
+                device,
+                function,
+                base: self.base_address
+                    + ((bus as usize) << 20)
+                    + ((device as usize) << 15)
+                    + ((function as usize) << 12),
+            })
+        } else {
+            None
+        }
     }
 }
 
@@ -119,36 +129,92 @@ impl PCIDevice<'static> {
         config_space: ConfigSpace,
         header: Header<'static>,
     ) -> Arc<Self> {
-        let common_header = header.common_header();
-
         Arc::new(PCIDevice {
-            link: RBTreeAtomicLink::new(),
             segment_group,
             config_space,
-            vendor_id: common_header.vendor_id,
-            device_id: common_header.device_id,
+            vendor_id: header.vendor_id,
+            device_id: header.device_id,
             header,
         })
     }
-}
 
-#[allow(dead_code)]
-impl PCIDevice<'_> {
-    pub fn enable_bus_mastering(&self) {
-        let header = self.header.common_header();
-        header.command().fetch_or(0x04, Ordering::Relaxed);
-
-        memory_barrier();
+    pub fn vendor_device(&self) -> u32 {
+        (self.vendor_id as u32) << 16 | self.device_id as u32
     }
 }
 
-impl<'a> KeyAdapter<'a> for PCIDeviceAdapter {
-    type Key = u32;
+impl PCIDevice<'_> {
+    pub fn configure_io(&self, allocator: &mut PciMemoryAllocator) {
+        self.header
+            .command()
+            .clear(Command::IO_ACCESS_ENABLE | Command::MEMORY_ACCESS_ENABLE);
 
-    fn get_key(
-        &self,
-        value: &'a <Self::PointerOps as intrusive_collections::PointerOps>::Value,
-    ) -> Self::Key {
-        ((value.vendor_id as u32) << 16) | value.device_id as u32
+        if let Header::Endpoint(header) = self.header {
+            for mut bar in header.bars().iter() {
+                match bar.get() {
+                    Bar::MemoryMapped32 { base: None, size } => bar.set(Bar::MemoryMapped32 {
+                        base: Some(
+                            allocator
+                                .allocate(size as usize)
+                                .expect("Failed to allocate BAR memory"),
+                        ),
+                        size,
+                    }),
+                    Bar::MemoryMapped64 { base: None, size } => bar.set(Bar::MemoryMapped64 {
+                        base: Some(
+                            allocator
+                                .allocate(size as usize)
+                                .map(|base| NonZero::new(base.get() as u64))
+                                .flatten()
+                                .expect("Failed to allocate BAR memory"),
+                        ),
+                        size,
+                    }),
+                    _ => {}
+                }
+            }
+        }
+
+        self.header.command().set(
+            Command::IO_ACCESS_ENABLE | Command::MEMORY_ACCESS_ENABLE | Command::BUS_MASTER_ENABLE,
+        );
+    }
+
+    pub fn config_space(&self) -> &ConfigSpace {
+        &self.config_space
+    }
+
+    pub fn segment_group(&self) -> &SegmentGroup {
+        &self.segment_group
+    }
+}
+
+impl PciMemoryAllocator {
+    pub fn new(range: PRange) -> Self {
+        let start = range.start().addr() as u32;
+        let end = range.end().addr() as u32;
+
+        Self { start, end }
+    }
+
+    pub fn allocate(&mut self, size: usize) -> Option<NonZero<u32>> {
+        let size = size.next_power_of_two().try_into().ok()?;
+        let real_start = self.start.align_up(size);
+
+        if size == 0 || size > self.end - real_start {
+            return None;
+        }
+
+        let base = self.start;
+        self.start += size;
+
+        eonix_log::println_trace!(
+            "trace_pci",
+            "PciMemoryAllocator: Allocated {} bytes at {:#x}",
+            size,
+            base
+        );
+
+        NonZero::new(base)
     }
 }

@@ -187,10 +187,9 @@ define_struct_inode! {
 
 impl FileInode {
     fn new(idata: InodeData) -> Arc<Self> {
-        let size = idata.size.load(Ordering::Relaxed) as usize;
         let inode = Arc::new_cyclic(|weak_self: &Weak<FileInode>| Self {
             idata,
-            page_cache: PageCache::new(weak_self.clone(), size),
+            page_cache: PageCache::new(weak_self.clone()),
         });
 
         inode
@@ -204,6 +203,10 @@ impl PageCacheBackend for FileInode {
 
     fn write_page(&self, page: &crate::kernel::mem::CachePage, offset: usize) -> KResult<usize> {
         todo!()
+    }
+
+    fn size(&self) -> usize {
+        self.size.load(Ordering::Relaxed) as usize
     }
 }
 

@@ -6,7 +6,7 @@ use eonix_sync::{LazyLock, Mutex};
 
 use crate::{
     fs::tmpfs::{DirectoryInode, FileInode, TmpFs},
-    kernel::{constants::ENOSPC, vfs::inode::Mode},
+    kernel::{constants::ENOSPC, timer::Instant, vfs::inode::Mode},
     prelude::KResult,
 };
 
@@ -40,9 +40,58 @@ pub struct ShmManager {
     areas: BTreeMap<u32, ShmArea>,
 }
 
+#[repr(C)]
+#[derive(Default, Clone, Copy, Debug)]
+pub struct IpcPerm {
+    key: i32,
+    uid: u32,
+    gid: u32,
+    cuid: u32,
+    cgid: u32,
+    mode: u16,
+    seq: u16,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct ShmIdDs {
+    // Ownership and permissions
+    pub shm_perm: IpcPerm,
+    // Size of segment (bytes). In our system, this must be aligned
+    pub shm_segsz: usize,
+    // Last attach time
+    pub shm_atime: usize,
+    // Last detach time
+    pub shm_dtime: usize,
+    // Creation time/time of last modification via shmctl()
+    pub shm_ctime: usize,
+    // PID of creator
+    pub shm_cpid: usize,
+    // PID of last shmat(2)/shmdt(2)
+    pub shm_lpid: usize,
+    // No. of current attaches
+    pub shm_nattch: usize,
+}
+
+impl ShmIdDs {
+    fn new(size: usize, pid: u32) -> Self {
+        Self {
+            shm_perm: IpcPerm::default(),
+            shm_segsz: size,
+            shm_atime: 0,
+            shm_dtime: 0,
+            shm_ctime: 0, // Should set instant now
+            shm_cpid: pid as usize,
+            shm_lpid: 0,
+            shm_nattch: 0,
+        }
+    }
+}
+
+#[derive(Debug)]
 pub struct ShmArea {
     pub area: Arc<FileInode>,
-    pub size: usize,
+    pub shmid_ds: ShmIdDs,
 }
 
 // A big lock here to protect the shared memory area.
@@ -60,12 +109,12 @@ impl ShmManager {
         }
     }
 
-    pub fn create_shared_area(&self, size: usize, mode: Mode) -> ShmArea {
+    pub fn create_shared_area(&self, size: usize, pid: u32, mode: Mode) -> ShmArea {
         let ino = self.tmpfs.assign_ino();
         let vfs = Arc::downgrade(&self.tmpfs);
         ShmArea {
-            area: FileInode::new(ino, vfs, mode),
-            size,
+            area: FileInode::new(ino, vfs, size, mode),
+            shmid_ds: ShmIdDs::new(size, pid),
         }
     }
 
@@ -86,7 +135,7 @@ pub fn gen_shm_id(key: usize) -> KResult<u32> {
     if key == IPC_PRIVATE {
         let shmid = NEXT_SHMID.fetch_add(1, Ordering::Relaxed);
 
-        if shmid < SHM_MAGIC {
+        if shmid >= SHM_MAGIC {
             return Err(ENOSPC);
         } else {
             return Ok(shmid);

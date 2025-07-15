@@ -1,6 +1,8 @@
 use super::SyscallNoReturn;
 use crate::io::Buffer;
-use crate::kernel::constants::{EINVAL, ENOENT, ENOTDIR, ERANGE, ESRCH};
+use crate::kernel::constants::{
+    CLOCK_MONOTONIC, CLOCK_REALTIME, CLOCK_REALTIME_COARSE, EINVAL, ENOENT, ENOTDIR, ERANGE, ESRCH,
+};
 use crate::kernel::constants::{
     ENOSYS, PR_GET_NAME, PR_SET_NAME, RLIMIT_STACK, SIG_BLOCK, SIG_SETMASK, SIG_UNBLOCK,
 };
@@ -23,6 +25,7 @@ use core::ptr::NonNull;
 use core::time::Duration;
 use eonix_hal::processor::UserTLS;
 use eonix_hal::traits::trap::RawTrapContext;
+use eonix_hal::trap::TrapContext;
 use eonix_mm::address::{Addr as _, VAddr};
 use eonix_runtime::task::Task;
 use eonix_sync::AsProof as _;
@@ -49,6 +52,37 @@ bitflags! {
 
 #[eonix_macros::define_syscall(SYS_NANOSLEEP)]
 fn nanosleep(req: *const (u32, u32), rem: *mut (u32, u32)) -> KResult<usize> {
+    let req = UserPointer::new(req)?.read()?;
+    let rem = if rem.is_null() {
+        None
+    } else {
+        Some(UserPointerMut::new(rem)?)
+    };
+
+    let duration = Duration::from_secs(req.0 as u64) + Duration::from_nanos(req.1 as u64);
+    Task::block_on(sleep(duration));
+
+    if let Some(rem) = rem {
+        rem.write((0, 0))?;
+    }
+
+    Ok(0)
+}
+
+#[eonix_macros::define_syscall(SYS_CLOCK_NANOSLEEP)]
+fn clock_nanosleep(
+    clock_id: u32,
+    flags: u32,
+    req: *const (u32, u32),
+    rem: *mut (u32, u32),
+) -> KResult<usize> {
+    if clock_id != CLOCK_REALTIME
+        && clock_id != CLOCK_REALTIME_COARSE
+        && clock_id != CLOCK_MONOTONIC
+    {
+        unimplemented!("Unsupported clock_id: {}", clock_id);
+    }
+
     let req = UserPointer::new(req)?.read()?;
     let rem = if rem.is_null() {
         None
@@ -181,6 +215,9 @@ fn execve(exec: *const u8, argv: *const PtrT, envp: *const PtrT) -> KResult<Sysc
     thread.set_name(dentry.get_name());
 
     let mut trap_ctx = thread.trap_ctx.borrow();
+    *trap_ctx = TrapContext::new();
+    trap_ctx.set_user_mode(true);
+    trap_ctx.set_interrupt_enabled(true);
     trap_ctx.set_program_counter(load_info.entry_ip.addr());
     trap_ctx.set_stack_pointer(load_info.sp.addr());
 
@@ -405,6 +442,30 @@ fn geteuid() -> KResult<u32> {
 
 #[eonix_macros::define_syscall(SYS_GETGID)]
 fn getgid() -> KResult<u32> {
+    // All users are root for now.
+    Ok(0)
+}
+
+#[eonix_macros::define_syscall(SYS_GETEGID)]
+fn getegid() -> KResult<u32> {
+    // All users are root for now.
+    Ok(0)
+}
+
+#[eonix_macros::define_syscall(SYS_GETRANDOM)]
+fn getrandom() -> KResult<u32> {
+    // All users are root for now.
+    Ok(0)
+}
+
+#[eonix_macros::define_syscall(SYS_SYNC)]
+fn sync() -> KResult<u32> {
+    // All users are root for now.
+    Ok(0)
+}
+
+#[eonix_macros::define_syscall(SYS_FSYNC)]
+fn fsync() -> KResult<u32> {
     // All users are root for now.
     Ok(0)
 }

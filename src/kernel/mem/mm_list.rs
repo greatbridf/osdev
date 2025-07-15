@@ -6,6 +6,7 @@ use super::page_alloc::GlobalPageAlloc;
 use super::paging::AllocZeroed as _;
 use super::{AsMemoryBlock, MMArea, Page};
 use crate::kernel::constants::{EEXIST, EFAULT, EINVAL, ENOMEM};
+use crate::kernel::mem::page_alloc::RawPagePtr;
 use crate::{prelude::*, sync::ArcSwap};
 use alloc::collections::btree_set::BTreeSet;
 use core::fmt;
@@ -280,6 +281,25 @@ impl MMListInner<'_> {
 
 impl Drop for MMListInner<'_> {
     fn drop(&mut self) {
+        // May buggy
+        for area in &self.areas {
+            if area.is_shared {
+                for pte in self.page_table.iter_user(area.range()) {
+                    let (pfn, _) = pte.take();
+                    let raw_page = RawPagePtr::from(pfn);
+                    if raw_page.refcount().fetch_sub(1, Ordering::Relaxed) == 1 {
+                        // Wrong here
+                        // unsafe { Page::from_raw(pfn) };
+                    }
+                }
+            } else {
+                for pte in self.page_table.iter_user(area.range()) {
+                    let (pfn, _) = pte.take();
+                    unsafe { Page::from_raw(pfn) };
+                }
+            }
+        }
+
         // TODO: Recycle all pages in the page table.
     }
 }
@@ -349,6 +369,10 @@ impl MMList {
                     list_inner
                         .page_table
                         .set_copy_on_write(&mut inner.page_table, area.range());
+                } else {
+                    list_inner
+                        .page_table
+                        .set_copied(&mut inner.page_table, area.range());
                 }
             }
         }
@@ -699,6 +723,7 @@ trait PageTableExt {
     fn set_anonymous(&self, range: VRange, permission: Permission);
     fn set_mmapped(&self, range: VRange, permission: Permission);
     fn set_copy_on_write(&self, from: &Self, range: VRange);
+    fn set_copied(&self, from: &Self, range: VRange);
 }
 
 impl PageTableExt for KernelPageTable<'_> {
@@ -720,6 +745,15 @@ impl PageTableExt for KernelPageTable<'_> {
 
         for (to, from) in to_iter.zip(from_iter) {
             to.set_copy_on_write(from);
+        }
+    }
+
+    fn set_copied(&self, from: &Self, range: VRange) {
+        let to_iter = self.iter_user(range);
+        let from_iter = from.iter_user(range);
+
+        for (to, from) in to_iter.zip(from_iter) {
+            *to = *from;
         }
     }
 }

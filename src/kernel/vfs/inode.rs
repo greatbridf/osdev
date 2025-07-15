@@ -35,6 +35,7 @@ pub type AtomicGid = AtomicU32;
 pub type Mode = u32;
 pub type AtomicMode = AtomicU32;
 
+#[derive(Debug)]
 pub struct InodeData {
     pub ino: Ino,
     pub size: AtomicISize,

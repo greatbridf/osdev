@@ -29,12 +29,6 @@ impl FromSyscallArg for UserMmapFlags {
     }
 }
 
-impl FromSyscallArg for ShmFlags {
-    fn from_arg(value: usize) -> Self {
-        ShmFlags::from_bits_truncate(value as u32)
-    }
-}
-
 /// Check whether we are doing an implemented function.
 /// If `condition` is false, return `Err(err)`.
 #[allow(unused)]
@@ -73,7 +67,11 @@ fn do_mmap2(
             Mapping::Anonymous
         } else {
             // The mode is unimportant here, since we are checking prot in mm_area.
-            let shared_area = Task::block_on(SHM_MANAGER.lock()).create_shared_area(len, 0x777);
+            let shared_area = Task::block_on(SHM_MANAGER.lock()).create_shared_area(
+                len,
+                thread.process.pid,
+                0x777,
+            );
             Mapping::File(FileMapping::new(shared_area.area.clone(), 0, len))
         }
     } else {
@@ -96,11 +94,8 @@ fn do_mmap2(
     // TODO!!!: If we are doing mmap's in 32-bit mode, we should check whether
     //          `addr` is above user reachable memory.
     let addr = if flags.contains(UserMmapFlags::MAP_FIXED) {
-        if prot.is_empty() {
-            Task::block_on(mm_list.protect(addr, len, permission)).map(|_| addr)
-        } else {
-            mm_list.mmap_fixed(addr, len, mapping, permission, is_shared)
-        }
+        Task::block_on(mm_list.unmap(addr, len));
+        mm_list.mmap_fixed(addr, len, mapping, permission, is_shared)
     } else {
         mm_list.mmap_hint(addr, len, mapping, permission, is_shared)
     };
@@ -118,7 +113,7 @@ fn mmap(
     fd: FD,
     offset: usize,
 ) -> KResult<usize> {
-    do_mmap2(thread, addr, len, prot, flags, fd, offset / PAGE_SIZE)
+    do_mmap2(thread, addr, len, prot, flags, fd, offset)
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -177,14 +172,17 @@ fn mprotect(addr: usize, len: usize, prot: UserMmapProtocol) -> KResult<()> {
 }
 
 #[eonix_macros::define_syscall(SYS_SHMGET)]
-fn shmget(key: usize, size: usize, shmflg: ShmFlags) -> KResult<u32> {
+fn shmget(key: usize, size: usize, shmflg: u32) -> KResult<u32> {
     let size = size.align_up(PAGE_SIZE);
 
     let mut shm_manager = Task::block_on(SHM_MANAGER.lock());
     let shmid = gen_shm_id(key)?;
 
+    let mode = shmflg & 0o777;
+    let shmflg = ShmFlags::from_bits_truncate(shmflg);
+
     if key == IPC_PRIVATE {
-        let new_shm = shm_manager.create_shared_area(size, shmflg.bits() & 0x777);
+        let new_shm = shm_manager.create_shared_area(size, thread.process.pid, mode);
         shm_manager.insert(shmid, new_shm);
         return Ok(shmid);
     }
@@ -198,7 +196,7 @@ fn shmget(key: usize, size: usize, shmflg: ShmFlags) -> KResult<u32> {
     }
 
     if shmflg.contains(ShmFlags::IPC_CREAT) {
-        let new_shm = shm_manager.create_shared_area(size, shmflg.bits() & 0x777);
+        let new_shm = shm_manager.create_shared_area(size, thread.process.pid, mode);
         shm_manager.insert(shmid, new_shm);
         return Ok(shmid);
     }
@@ -207,10 +205,13 @@ fn shmget(key: usize, size: usize, shmflg: ShmFlags) -> KResult<u32> {
 }
 
 #[eonix_macros::define_syscall(SYS_SHMAT)]
-fn shmat(shmid: u32, addr: usize, shmflg: ShmFlags) -> KResult<usize> {
+fn shmat(shmid: u32, addr: usize, shmflg: u32) -> KResult<usize> {
     let mm_list = &thread.process.mm_list;
     let shm_manager = Task::block_on(SHM_MANAGER.lock());
     let shm_area = shm_manager.get(shmid).ok_or(EINVAL)?;
+
+    let mode = shmflg & 0o777;
+    let shmflg = ShmFlags::from_bits_truncate(shmflg);
 
     let mut permission = Permission {
         read: true,
@@ -225,10 +226,12 @@ fn shmat(shmid: u32, addr: usize, shmflg: ShmFlags) -> KResult<usize> {
         permission.write = false;
     }
 
+    let size = shm_area.shmid_ds.shm_segsz;
+
     let mapping = Mapping::File(FileMapping {
         file: shm_area.area.clone(),
         offset: 0,
-        length: shm_area.size,
+        length: size,
     });
 
     let addr = if addr != 0 {
@@ -236,12 +239,12 @@ fn shmat(shmid: u32, addr: usize, shmflg: ShmFlags) -> KResult<usize> {
             return Err(EINVAL);
         }
         let addr = VAddr::from(addr.align_down(PAGE_SIZE));
-        mm_list.mmap_fixed(addr, shm_area.size, mapping, permission, true)
+        mm_list.mmap_fixed(addr, size, mapping, permission, true)
     } else {
-        mm_list.mmap_hint(VAddr::NULL, shm_area.size, mapping, permission, true)
+        mm_list.mmap_hint(VAddr::NULL, size, mapping, permission, true)
     }?;
 
-    thread.process.shm_areas.lock().insert(addr, shm_area.size);
+    thread.process.shm_areas.lock().insert(addr, size);
 
     Ok(addr.addr())
 }
@@ -252,7 +255,13 @@ fn shmdt(addr: usize) -> KResult<usize> {
     let mut shm_areas = thread.process.shm_areas.lock();
     let size = *shm_areas.get(&addr).ok_or(EINVAL)?;
     shm_areas.remove(&addr);
+    drop(shm_areas);
     return Task::block_on(thread.process.mm_list.unmap(addr, size)).map(|_| 0);
+}
+
+#[eonix_macros::define_syscall(SYS_SHMCTL)]
+fn shmctl(shmid: u32, op: i32, shmid_ds: usize) -> KResult<usize> {
+    Ok(0)
 }
 
 #[eonix_macros::define_syscall(SYS_MEMBARRIER)]

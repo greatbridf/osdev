@@ -1,6 +1,6 @@
 use crate::{
     kernel::{
-        constants::{CLOCK_MONOTONIC, CLOCK_REALTIME, EINVAL},
+        constants::{CLOCK_MONOTONIC, CLOCK_REALTIME, CLOCK_REALTIME_COARSE, EINVAL},
         task::Thread,
         timer::{Instant, Ticks},
         user::UserPointerMut,
@@ -78,7 +78,10 @@ fn gettimeofday(timeval: *mut TimeVal, timezone: *mut ()) -> KResult<()> {
 }
 
 fn do_clock_gettime64(_thread: &Thread, clock_id: u32, timespec: *mut TimeSpec) -> KResult<()> {
-    if clock_id != CLOCK_REALTIME && clock_id != CLOCK_MONOTONIC {
+    if clock_id != CLOCK_REALTIME
+        && clock_id != CLOCK_REALTIME_COARSE
+        && clock_id != CLOCK_MONOTONIC
+    {
         unimplemented!("Unsupported clock_id: {}", clock_id);
     }
 

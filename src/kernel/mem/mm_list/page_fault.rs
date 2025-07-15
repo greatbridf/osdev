@@ -90,7 +90,7 @@ impl MMList {
             .next()
             .expect("If we can find the mapped area, we should be able to find the PTE");
 
-        area.handle(pte, addr.floor() - area.range().start())
+        area.handle(pte, addr.floor() - area.range().start(), Some(error))
             .map_err(|_| Signal::SIGBUS)?;
 
         flush_tlb(addr.floor().addr());
@@ -160,9 +160,11 @@ pub fn handle_kernel_page_fault(
         .next()
         .expect("If we can find the mapped area, we should be able to find the PTE");
 
-    if let Err(_) = area.handle(pte, addr.floor() - area.range().start()) {
+    if let Err(_) = area.handle(pte, addr.floor() - area.range().start(), Some(error)) {
         return Some(try_page_fault_fix(fault_pc, addr));
     }
+
+    flush_tlb(addr.addr());
 
     None
 }

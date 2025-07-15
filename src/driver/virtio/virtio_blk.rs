@@ -18,7 +18,23 @@ impl BlockRequestQueue for Spin<VirtIOBlk<HAL, MmioTransport<'_>>> {
 
     fn submit(&self, req: BlockDeviceRequest) -> KResult<()> {
         match req {
-            BlockDeviceRequest::Write { .. } => todo!(),
+            BlockDeviceRequest::Write {
+                sector,
+                count,
+                buffer,
+            } => {
+                let mut dev = self.lock();
+                for ((start, len), buffer_page) in
+                    Chunks::new(sector as usize, count as usize, 8).zip(buffer.iter())
+                {
+                    let buffer = unsafe {
+                        // SAFETY: Pages in `req.buffer` are guaranteed to be exclusively owned by us.
+                        &buffer_page.as_memblk().as_bytes()[..len as usize * 512]
+                    };
+
+                    dev.write_blocks(start, buffer).map_err(|_| EIO)?;
+                }
+            }
             BlockDeviceRequest::Read {
                 sector,
                 count,

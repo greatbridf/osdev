@@ -37,6 +37,7 @@ pub trait BlockRequestQueue: Send + Sync {
     fn submit(&self, req: BlockDeviceRequest) -> KResult<()>;
 }
 
+#[derive(Clone)]
 enum BlockDeviceType {
     Disk {
         queue: Arc<dyn BlockRequestQueue>,
@@ -63,6 +64,7 @@ impl FileSystemType {
     }
 }
 
+#[derive(Clone)]
 pub struct BlockDevice {
     /// Unique device identifier, major and minor numbers
     devid: DevId,
@@ -284,6 +286,103 @@ impl BlockDevice {
         } else {
             Ok(FillResult::Partial(nfilled))
         }
+    }
+
+    /// Write some data to the block device, may involve some copy and fragmentation
+    ///
+    /// # Arguments
+    /// `offset` - offset in bytes
+    /// `data` - data to write
+    ///
+    pub fn write_some(&self, offset: usize, data: &[u8]) -> KResult<usize> {
+        let mut sector_start = offset as u64 / 512;
+        let mut first_sector_offset = offset as u64 % 512;
+        let mut remaining_data = data;
+        let mut nwritten = 0;
+
+        while !remaining_data.is_empty() {
+            let pages: &[Page];
+            let page: Option<Page>;
+            let page_vec: Option<Vec<Page>>;
+
+            // Calculate sectors needed for this write
+            let write_end = first_sector_offset + remaining_data.len() as u64;
+            let sector_count = ((write_end + 511) / 512).min(self.queue().max_request_pages());
+
+            match sector_count {
+                count if count <= 8 => {
+                    let _page = Page::alloc();
+                    page = Some(_page);
+                    pages = core::slice::from_ref(page.as_ref().unwrap());
+                }
+                count if count <= 16 => {
+                    let _pages = Page::alloc_order(1);
+                    page = Some(_pages);
+                    pages = core::slice::from_ref(page.as_ref().unwrap());
+                }
+                count => {
+                    let npages = (count + 15) / 16;
+                    let mut _page_vec = Vec::with_capacity(npages as usize);
+                    for _ in 0..npages {
+                        _page_vec.push(Page::alloc_order(1));
+                    }
+                    page_vec = Some(_page_vec);
+                    pages = page_vec.as_ref().unwrap().as_slice();
+                }
+            }
+
+            if first_sector_offset != 0 || remaining_data.len() < (sector_count * 512) as usize {
+                let read_req = BlockDeviceRequest::Read {
+                    sector: sector_start,
+                    count: sector_count,
+                    buffer: pages,
+                };
+                self.commit_request(read_req)?;
+            }
+
+            let mut data_offset = 0;
+            let mut page_offset = first_sector_offset as usize;
+
+            for page in pages.iter() {
+                // SAFETY: We own the page and can modify it
+                let page_data = unsafe {
+                    let memblk = page.as_memblk();
+                    core::slice::from_raw_parts_mut(memblk.addr().get() as *mut u8, memblk.len())
+                };
+
+                let copy_len =
+                    (remaining_data.len() - data_offset).min(page_data.len() - page_offset);
+
+                if copy_len == 0 {
+                    break;
+                }
+
+                page_data[page_offset..page_offset + copy_len]
+                    .copy_from_slice(&remaining_data[data_offset..data_offset + copy_len]);
+
+                data_offset += copy_len;
+                page_offset = 0; // Only first page has offset
+
+                if data_offset >= remaining_data.len() {
+                    break;
+                }
+            }
+
+            let write_req = BlockDeviceRequest::Write {
+                sector: sector_start,
+                count: sector_count,
+                buffer: pages,
+            };
+            self.commit_request(write_req)?;
+
+            let bytes_written = data_offset;
+            nwritten += bytes_written;
+            remaining_data = &remaining_data[bytes_written..];
+            sector_start += sector_count;
+            first_sector_offset = 0;
+        }
+
+        Ok(nwritten)
     }
 }
 

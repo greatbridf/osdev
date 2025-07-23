@@ -22,10 +22,11 @@ use alloc::{
     collections::btree_map::{BTreeMap, Entry},
     sync::Arc,
 };
+use another_ext4::{
+    Block, BlockDevice as Ext4BlockDeviceTrait, Ext4, FileType, InodeMode, PBlockId,
+};
 use eonix_runtime::task::Task;
 use eonix_sync::RwLock;
-use ext4_rs::{BlockDevice as Ext4BlockDeviceTrait, Ext4Error};
-use ext4_rs::{Errno, Ext4};
 
 pub struct Ext4BlockDevice {
     device: Arc<BlockDevice>,
@@ -38,19 +39,22 @@ impl Ext4BlockDevice {
 }
 
 impl Ext4BlockDeviceTrait for Ext4BlockDevice {
-    fn read_offset(&self, offset: usize) -> Vec<u8> {
-        let mut buffer = vec![0u8; 4096];
+    fn read_block(&self, block_id: PBlockId) -> Block {
+        let mut buffer = [0u8; 4096];
         let mut byte_buffer = ByteBuffer::new(buffer.as_mut_slice());
 
         let _ = self
             .device
-            .read_some(offset, &mut byte_buffer)
+            .read_some((block_id as usize) * 4096, &mut byte_buffer)
             .expect("Failed to read from block device");
 
-        buffer
+        Block {
+            id: block_id,
+            data: buffer,
+        }
     }
 
-    fn write_offset(&self, _offset: usize, _data: &[u8]) {
+    fn write_block(&self, block: &another_ext4::Block) {
         todo!()
     }
 }
@@ -115,7 +119,7 @@ impl Ext4Fs {
 impl Ext4Fs {
     pub fn create(device: Arc<BlockDevice>) -> KResult<(Arc<Self>, Arc<dyn Inode>)> {
         let ext4_device = Ext4BlockDevice::new(device.clone());
-        let ext4 = Ext4::open(Arc::new(ext4_device));
+        let ext4 = Ext4::load(Arc::new(ext4_device)).unwrap();
 
         let ext4fs = Arc::new(Self {
             inner: ext4,
@@ -125,28 +129,28 @@ impl Ext4Fs {
 
         let root_inode = {
             let mut icache = Task::block_on(ext4fs.icache.write());
-            let root_inode = ext4fs.inner.get_inode_ref(2);
+            let root_inode = ext4fs.inner.read_root_inode();
 
             ext4fs.get_or_insert(
                 &mut icache,
                 InodeData {
-                    ino: root_inode.inode_num as Ino,
+                    ino: root_inode.id as Ino,
                     size: AtomicU64::new(root_inode.inode.size()),
-                    nlink: AtomicNlink::new(root_inode.inode.links_count() as _),
-                    uid: AtomicU32::new(root_inode.inode.uid() as _),
-                    gid: AtomicU32::new(root_inode.inode.gid() as _),
-                    mode: AtomicU32::new(root_inode.inode.mode() as _),
+                    nlink: AtomicNlink::new(root_inode.inode.link_count() as u64),
+                    uid: AtomicU32::new(root_inode.inode.uid()),
+                    gid: AtomicU32::new(root_inode.inode.gid()),
+                    mode: AtomicU32::new(root_inode.inode.mode().bits() as u32),
                     atime: Spin::new(Instant::new(
                         root_inode.inode.atime() as _,
-                        root_inode.inode.i_atime_extra() as _,
+                        root_inode.inode.atime_extra() as _,
                     )),
                     ctime: Spin::new(Instant::new(
                         root_inode.inode.ctime() as _,
-                        root_inode.inode.i_ctime_extra() as _,
+                        root_inode.inode.ctime_extra() as _,
                     )),
                     mtime: Spin::new(Instant::new(
                         root_inode.inode.mtime() as _,
-                        root_inode.inode.i_mtime_extra() as _,
+                        root_inode.inode.mtime_extra() as _,
                     )),
                     rwsem: RwLock::new(()),
                     vfs: Arc::downgrade(&ext4fs) as _,
@@ -187,12 +191,12 @@ impl Inode for FileInode {
         let ext4fs = vfs.as_any().downcast_ref::<Ext4Fs>().unwrap();
 
         let mut temp_buf = vec![0u8; buffer.total()];
-        match ext4fs.inner.read_at(self.ino as u32, offset, &mut temp_buf) {
+        match ext4fs.inner.read(self.ino as u32, offset, &mut temp_buf) {
             Ok(bytes_read) => {
                 let _ = buffer.fill(&temp_buf[..bytes_read])?;
                 Ok(buffer.wrote())
             }
-            Err(e) => Err(e.error() as u32),
+            Err(e) => Err(e.code() as u32),
         }
     }
 }
@@ -204,13 +208,14 @@ impl Inode for DirInode {
 
         let name = dentry.get_name();
         let name = String::from_utf8_lossy(&name);
-        let lookup_result = ext4fs.inner.fuse_lookup(self.ino, &name);
+        let lookup_result = ext4fs.inner.lookup(self.ino as u32, &name);
 
-        const EXT4_ERROR_ENOENT: Ext4Error = Ext4Error::new(Errno::ENOENT);
+        // TODO: wtf
+        //const EXT4_ERROR_ENOENT: Ext4Error_ = Ext4Error_::new(ErrCode::ENOENT);
         let attr = match lookup_result {
-            Ok(attr) => attr,
-            Err(EXT4_ERROR_ENOENT) => return Ok(None),
-            Err(error) => return Err(error.error() as u32),
+            Ok(inode_id) => ext4fs.inner.getattr(inode_id).unwrap(),
+            //Err(EXT4_ERROR_ENOENT) => return Ok(None),
+            Err(error) => return Err(error.code() as u32),
         };
 
         // Fast path: if the inode is already in the cache, return it.
@@ -219,9 +224,19 @@ impl Inode for DirInode {
             return Ok(Some(inode));
         }
 
-        let extra_perm = attr.perm.bits() as u32 & 0o7000;
-        let perm = attr.perm.bits() as u32 & 0o0700;
-        let real_perm = extra_perm | perm | perm >> 3 | perm >> 6;
+        let file_type_bits = match attr.ftype {
+            FileType::RegularFile => InodeMode::FILE.bits(),
+            FileType::Directory => InodeMode::DIRECTORY.bits(),
+            FileType::CharacterDev => InodeMode::CHARDEV.bits(),
+            FileType::BlockDev => InodeMode::BLOCKDEV.bits(),
+            FileType::Fifo => InodeMode::FIFO.bits(),
+            FileType::Socket => InodeMode::SOCKET.bits(),
+            FileType::SymLink => InodeMode::SOFTLINK.bits(),
+            FileType::Unknown => 0,
+        };
+
+        let perm_bits = attr.perm.bits() & InodeMode::PERM_MASK.bits();
+        let mode = file_type_bits | perm_bits;
 
         // Create a new inode based on the attributes.
         let mut icache = Task::block_on(ext4fs.icache.write());
@@ -230,10 +245,10 @@ impl Inode for DirInode {
             InodeData {
                 ino: attr.ino as Ino,
                 size: AtomicU64::new(attr.size),
-                nlink: AtomicNlink::new(attr.nlink as _),
+                nlink: AtomicNlink::new(attr.links as _),
                 uid: AtomicU32::new(attr.uid),
                 gid: AtomicU32::new(attr.gid),
-                mode: AtomicU32::new(attr.kind.bits() as u32 | real_perm),
+                mode: AtomicU32::new(mode as u32),
                 atime: Spin::new(Instant::new(attr.atime as _, 0)),
                 ctime: Spin::new(Instant::new(attr.ctime as _, 0)),
                 mtime: Spin::new(Instant::new(attr.mtime as _, 0)),
@@ -255,18 +270,23 @@ impl Inode for DirInode {
 
         let entries = ext4fs
             .inner
-            .fuse_readdir(self.ino as u64, 0, offset as i64)
-            .map_err(|err| err.error() as u32)?;
+            .listdir(self.ino as u32)
+            .map_err(|err| err.code() as u32)?;
+
+        let entries_to_process = if offset < entries.len() {
+            &entries[offset..]
+        } else {
+            &entries[0..0]
+        };
         let mut current_offset = 0;
+        for entry in entries_to_process {
+            let name_string = entry.name();
+            let name = name_string.as_bytes();
+            let inode = entry.inode() as Ino;
 
-        for entry in entries {
-            let name_len = entry.name_len as usize;
-            let name = &entry.name[..name_len];
-
-            if callback(name, entry.inode as Ino)?.is_break() {
+            if callback(name, inode)?.is_break() {
                 break;
             }
-
             current_offset += 1;
         }
         Ok(current_offset)

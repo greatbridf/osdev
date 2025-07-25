@@ -1,14 +1,14 @@
-use core::sync::atomic::{AtomicU32, AtomicU64};
+use core::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
 use crate::{
-    io::{Buffer, ByteBuffer},
+    io::{Buffer, ByteBuffer, Stream},
     kernel::{
         block::BlockDevice,
-        constants::EIO,
+        constants::{EIO, S_IFDIR, S_IFREG},
         timer::Instant,
         vfs::{
             dentry::Dentry,
-            inode::{define_struct_inode, AtomicNlink, Ino, Inode, InodeData},
+            inode::{define_struct_inode, AtomicNlink, Ino, Inode, InodeData, Mode, WriteOffset},
             mount::{register_filesystem, Mount, MountCreator},
             s_isdir, s_isreg,
             vfs::Vfs,
@@ -20,7 +20,7 @@ use crate::{
 };
 use alloc::{
     collections::btree_map::{BTreeMap, Entry},
-    sync::Arc,
+    sync::{Arc, Weak},
 };
 use another_ext4::{
     Block, BlockDevice as Ext4BlockDeviceTrait, Ext4, FileType, InodeMode, PBlockId,
@@ -55,7 +55,9 @@ impl Ext4BlockDeviceTrait for Ext4BlockDevice {
     }
 
     fn write_block(&self, block: &another_ext4::Block) {
-        todo!()
+        let _ = self
+            .device
+            .write_some((block.id as usize) * 4096, &block.data);
     }
 }
 
@@ -83,6 +85,20 @@ impl Vfs for Ext4Fs {
 impl Ext4Fs {
     fn try_get(&self, icache: &BTreeMap<Ino, Ext4Inode>, ino: u64) -> Option<Arc<dyn Inode>> {
         icache.get(&ino).cloned().map(Ext4Inode::into_inner)
+    }
+
+    fn update_modify_inode(&self, ino: u64, size: u64, mtime: u32) {
+        let _ = self.inner.setattr(
+            ino as u32,
+            None,
+            None,
+            None,
+            Some(size),
+            None,
+            Some(mtime),
+            None,
+            None,
+        );
     }
 
     fn get_or_insert(
@@ -185,6 +201,21 @@ define_struct_inode! {
     struct DirInode;
 }
 
+impl FileInode {
+    pub fn new(ino: Ino, vfs: Weak<dyn Vfs>, mode: Mode) -> Arc<Self> {
+        Arc::new_cyclic(|_| FileInode {
+            idata: {
+                let inode_data = InodeData::new(ino, vfs);
+                inode_data
+                    .mode
+                    .store(S_IFREG | (mode & 0o777), Ordering::Relaxed);
+                inode_data.nlink.store(1, Ordering::Relaxed);
+                inode_data
+            },
+        })
+    }
+}
+
 impl Inode for FileInode {
     fn read(&self, buffer: &mut dyn Buffer, offset: usize) -> KResult<usize> {
         let vfs = self.vfs.upgrade().ok_or(EIO)?;
@@ -198,6 +229,68 @@ impl Inode for FileInode {
             }
             Err(e) => Err(e.code() as u32),
         }
+    }
+
+    fn write(&self, stream: &mut dyn Stream, offset: WriteOffset) -> KResult<usize> {
+        let _lock = Task::block_on(self.rwsem.write());
+
+        let vfs = self.vfs.upgrade().ok_or(EIO)?;
+        let ext4fs = vfs.as_any().downcast_ref::<Ext4Fs>().unwrap();
+
+        let mut temp_buf = vec![0u8; 4096];
+        let mut total_written = 0;
+
+        let offset = match offset {
+            WriteOffset::Position(offset) => offset,
+            // TODO: here need to add some operate
+            WriteOffset::End(end) => *end,
+        };
+
+        while let Some(data) = stream.poll_data(&mut temp_buf)? {
+            let written = ext4fs
+                .inner
+                .write(self.ino as u32, offset + total_written, data)
+                .unwrap();
+            total_written += written;
+            if written < data.len() {
+                break;
+            }
+        }
+
+        let mtime = Instant::now();
+        *self.mtime.lock() = mtime;
+        let new_size = (offset + total_written) as u64;
+        self.size
+            .store(offset as u64 + total_written as u64, Ordering::Relaxed);
+        ext4fs.update_modify_inode(self.ino, new_size, mtime.since_epoch().as_secs() as u32);
+
+        Ok(total_written)
+    }
+
+    // TODO
+    fn truncate(&self, length: usize) -> KResult<()> {
+        Ok(())
+    }
+}
+
+impl DirInode {
+    fn new(idata: InodeData) -> Arc<Self> {
+        let inode = Arc::new(Self { idata });
+
+        inode
+    }
+
+    fn link(&self, file: &dyn Inode) {
+        let now = Instant::now();
+
+        // SAFETY: Only `unlink` will do something based on `nlink` count
+        //         No need to synchronize here
+        file.nlink.fetch_add(1, Ordering::Relaxed);
+        *self.ctime.lock() = now;
+
+        // SAFETY: `rwsem` has done the synchronization
+        self.size.fetch_add(1, Ordering::Relaxed);
+        *self.mtime.lock() = now;
     }
 }
 
@@ -290,6 +383,59 @@ impl Inode for DirInode {
             current_offset += 1;
         }
         Ok(current_offset)
+    }
+
+    fn creat(&self, at: &Arc<Dentry>, mode: Mode) -> KResult<()> {
+        let _lock = Task::block_on(self.rwsem.write());
+
+        let vfs = self.vfs.upgrade().ok_or(EIO)?;
+        let ext4fs = vfs.as_any().downcast_ref::<Ext4Fs>().unwrap();
+
+        let name = at.get_name();
+        let name = String::from_utf8_lossy(&name);
+
+        let new_ino = ext4fs
+            .inner
+            .create(
+                self.ino as u32,
+                &name,
+                InodeMode::from_bits_retain((mode | S_IFREG) as u16),
+            )
+            .unwrap();
+
+        let file = FileInode::new(new_ino as u64, self.vfs.clone(), mode);
+        let now = Instant::now();
+
+        *self.ctime.lock() = now;
+        // SAFETY: `rwsem` has done the synchronization
+        self.size.fetch_add(1, Ordering::Relaxed);
+        *self.mtime.lock() = now;
+
+        at.save_reg(file)
+    }
+
+    fn mkdir(&self, at: &Dentry, mode: Mode) -> KResult<()> {
+        let _lock = Task::block_on(self.rwsem.write());
+
+        let vfs = self.vfs.upgrade().ok_or(EIO)?;
+        let ext4fs = vfs.as_any().downcast_ref::<Ext4Fs>().unwrap();
+
+        let name = at.get_name();
+        let name = String::from_utf8_lossy(&name);
+
+        let new_ino = ext4fs
+            .inner
+            .mkdir(
+                self.ino as u32,
+                &name,
+                InodeMode::from_bits_retain((mode | S_IFDIR) as u16),
+            )
+            .unwrap();
+
+        let newdir = DirInode::new(InodeData::new(new_ino as u64, self.vfs.clone()));
+
+        self.link(newdir.as_ref());
+        at.save_dir(newdir)
     }
 }
 

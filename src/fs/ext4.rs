@@ -4,7 +4,7 @@ use crate::{
     io::{Buffer, ByteBuffer, Stream},
     kernel::{
         block::BlockDevice,
-        constants::{EIO, EISDIR, S_IFDIR, S_IFREG},
+        constants::{EIO, S_IFDIR, S_IFREG},
         timer::Instant,
         vfs::{
             dentry::{dcache, Dentry},
@@ -26,7 +26,7 @@ use another_ext4::{
     Block, BlockDevice as Ext4BlockDeviceTrait, Ext4, FileType, InodeMode, PBlockId,
 };
 use eonix_runtime::task::Task;
-use eonix_sync::{AsProofMut, ProofMut, RwLock};
+use eonix_sync::RwLock;
 
 pub struct Ext4BlockDevice {
     device: Arc<BlockDevice>,
@@ -87,18 +87,27 @@ impl Ext4Fs {
         icache.get(&ino).cloned().map(Ext4Inode::into_inner)
     }
 
-    fn update_modify_inode(&self, ino: u64, size: u64, mtime: u32) {
+    fn modify_inode_stat(&self, ino: u32, size: Option<u64>, mtime: u32) {
+        let _ = self
+            .inner
+            .setattr(ino, None, None, None, size, None, Some(mtime), None, None);
+    }
+
+    fn create_inode_stat(&self, parent: u32, child: u32, mtime: u32) {
         let _ = self.inner.setattr(
-            ino as u32,
+            parent,
             None,
             None,
             None,
-            Some(size),
+            None,
             None,
             Some(mtime),
             None,
             None,
         );
+        let _ = self
+            .inner
+            .setattr(child, None, None, None, None, None, Some(mtime), None, None);
     }
 
     fn get_or_insert(
@@ -262,7 +271,11 @@ impl Inode for FileInode {
         let new_size = (offset + total_written) as u64;
         self.size
             .store(offset as u64 + total_written as u64, Ordering::Relaxed);
-        ext4fs.update_modify_inode(self.ino, new_size, mtime.since_epoch().as_secs() as u32);
+        ext4fs.modify_inode_stat(
+            self.ino as u32,
+            Some(new_size),
+            mtime.since_epoch().as_secs() as u32,
+        );
 
         Ok(total_written)
     }
@@ -274,54 +287,44 @@ impl Inode for FileInode {
 }
 
 impl DirInode {
-    fn new(idata: InodeData) -> Arc<Self> {
-        let inode = Arc::new(Self { idata });
-
-        inode
+    fn new(ino: Ino, vfs: Weak<dyn Vfs>, mode: Mode) -> Arc<Self> {
+        Arc::new_cyclic(|_| DirInode {
+            idata: {
+                let inode_data = InodeData::new(ino, vfs);
+                inode_data
+                    .mode
+                    .store(S_IFDIR | (mode & 0o777), Ordering::Relaxed);
+                inode_data.nlink.store(2, Ordering::Relaxed);
+                inode_data.size.store(4096, Ordering::Relaxed);
+                inode_data
+            },
+        })
     }
 
-    fn link(&self, file: &dyn Inode) {
-        let now = Instant::now();
+    fn update_time(&self, time: Instant) {
+        *self.ctime.lock() = time;
+        *self.mtime.lock() = time;
+    }
 
-        // SAFETY: Only `unlink` will do something based on `nlink` count
-        //         No need to synchronize here
-        file.nlink.fetch_add(1, Ordering::Relaxed);
-        *self.ctime.lock() = now;
+    fn update_child_time(&self, child: &dyn Inode, time: Instant) {
+        self.update_time(time);
+        *child.ctime.lock() = time;
+        *child.mtime.lock() = time;
+    }
 
-        // SAFETY: `rwsem` has done the synchronization
+    fn link_file(&self) {
+        // TODO
         self.size.fetch_add(1, Ordering::Relaxed);
-        *self.mtime.lock() = now;
     }
 
-    fn unlink(
-        &self,
-        file: &Arc<dyn Inode>,
-        decrease_size: bool,
-        _dir_lock: ProofMut<()>,
-        _file_lock: ProofMut<()>,
-    ) -> KResult<()> {
-        let now = Instant::now();
+    fn link_dir(&self) {
+        // TODO
+        self.nlink.fetch_add(1, Ordering::Relaxed);
+        self.size.fetch_add(1, Ordering::Relaxed);
+    }
 
-        // SAFETY: `file_lock` has done the synchronization
-        if file.mode.load(Ordering::Relaxed) & S_IFDIR != 0 {
-            return Err(EISDIR);
-        }
-
-        if decrease_size {
-            // SAFETY: `dir_lock` has done the synchronization
-            self.size.fetch_sub(1, Ordering::Relaxed);
-        }
-
-        *self.mtime.lock() = now;
-
-        // The last reference to the inode is held by some dentry
-        // and will be released when the dentry is released
-
-        // SAFETY: `file_lock` has done the synchronization
-        file.nlink.fetch_sub(1, Ordering::Relaxed);
-        *file.ctime.lock() = now;
-
-        Ok(())
+    fn unlink_dir(&self) {
+        self.nlink.fetch_sub(1, Ordering::Relaxed);
     }
 }
 
@@ -436,11 +439,10 @@ impl Inode for DirInode {
 
         let file = FileInode::new(new_ino as u64, self.vfs.clone(), mode);
         let now = Instant::now();
+        self.update_child_time(file.as_ref(), now);
+        self.link_file();
 
-        *self.ctime.lock() = now;
-        // SAFETY: `rwsem` has done the synchronization
-        self.size.fetch_add(1, Ordering::Relaxed);
-        *self.mtime.lock() = now;
+        ext4fs.create_inode_stat(self.ino as u32, new_ino, now.since_epoch().as_secs() as u32);
 
         at.save_reg(file)
     }
@@ -463,14 +465,18 @@ impl Inode for DirInode {
             )
             .unwrap();
 
-        let newdir = DirInode::new(InodeData::new(new_ino as u64, self.vfs.clone()));
+        let new_dir = DirInode::new(new_ino as u64, self.vfs.clone(), mode);
+        let now = Instant::now();
+        self.update_child_time(new_dir.as_ref(), now);
+        self.link_dir();
 
-        self.link(newdir.as_ref());
-        at.save_dir(newdir)
+        ext4fs.create_inode_stat(self.ino as u32, new_ino, now.since_epoch().as_secs() as u32);
+
+        at.save_dir(new_dir)
     }
 
     fn unlink(&self, at: &Arc<Dentry>) -> KResult<()> {
-        let dir_lock = Task::block_on(self.rwsem.write());
+        let _dir_lock = Task::block_on(self.rwsem.write());
 
         let vfs = self.vfs.upgrade().ok_or(EIO)?;
         let ext4fs = vfs.as_any().downcast_ref::<Ext4Fs>().unwrap();
@@ -479,15 +485,18 @@ impl Inode for DirInode {
 
         let name = at.get_name();
         let name = String::from_utf8_lossy(&name);
-        let file_lock = Task::block_on(file.rwsem.write());
+        let _file_lock = Task::block_on(file.rwsem.write());
 
         if file.is_dir() {
             let _ = ext4fs.inner.rmdir(self.ino as u32, &name);
+            self.unlink_dir();
         } else {
             let _ = ext4fs.inner.unlink(self.ino as u32, &name);
         }
+        let now = Instant::now();
+        self.update_time(now);
+        ext4fs.modify_inode_stat(self.ino as u32, None, now.since_epoch().as_secs() as u32);
 
-        self.unlink(&file, true, dir_lock.prove_mut(), file_lock.prove_mut())?;
         dcache::d_remove(at);
 
         Ok(())

@@ -4,10 +4,10 @@ use crate::{
     io::{Buffer, ByteBuffer, Stream},
     kernel::{
         block::BlockDevice,
-        constants::{EIO, S_IFDIR, S_IFREG},
+        constants::{EIO, EISDIR, S_IFDIR, S_IFREG},
         timer::Instant,
         vfs::{
-            dentry::Dentry,
+            dentry::{dcache, Dentry},
             inode::{define_struct_inode, AtomicNlink, Ino, Inode, InodeData, Mode, WriteOffset},
             mount::{register_filesystem, Mount, MountCreator},
             s_isdir, s_isreg,
@@ -26,7 +26,7 @@ use another_ext4::{
     Block, BlockDevice as Ext4BlockDeviceTrait, Ext4, FileType, InodeMode, PBlockId,
 };
 use eonix_runtime::task::Task;
-use eonix_sync::RwLock;
+use eonix_sync::{AsProofMut, ProofMut, RwLock};
 
 pub struct Ext4BlockDevice {
     device: Arc<BlockDevice>,
@@ -292,6 +292,37 @@ impl DirInode {
         self.size.fetch_add(1, Ordering::Relaxed);
         *self.mtime.lock() = now;
     }
+
+    fn unlink(
+        &self,
+        file: &Arc<dyn Inode>,
+        decrease_size: bool,
+        _dir_lock: ProofMut<()>,
+        _file_lock: ProofMut<()>,
+    ) -> KResult<()> {
+        let now = Instant::now();
+
+        // SAFETY: `file_lock` has done the synchronization
+        if file.mode.load(Ordering::Relaxed) & S_IFDIR != 0 {
+            return Err(EISDIR);
+        }
+
+        if decrease_size {
+            // SAFETY: `dir_lock` has done the synchronization
+            self.size.fetch_sub(1, Ordering::Relaxed);
+        }
+
+        *self.mtime.lock() = now;
+
+        // The last reference to the inode is held by some dentry
+        // and will be released when the dentry is released
+
+        // SAFETY: `file_lock` has done the synchronization
+        file.nlink.fetch_sub(1, Ordering::Relaxed);
+        *file.ctime.lock() = now;
+
+        Ok(())
+    }
 }
 
 impl Inode for DirInode {
@@ -436,6 +467,30 @@ impl Inode for DirInode {
 
         self.link(newdir.as_ref());
         at.save_dir(newdir)
+    }
+
+    fn unlink(&self, at: &Arc<Dentry>) -> KResult<()> {
+        let dir_lock = Task::block_on(self.rwsem.write());
+
+        let vfs = self.vfs.upgrade().ok_or(EIO)?;
+        let ext4fs = vfs.as_any().downcast_ref::<Ext4Fs>().unwrap();
+
+        let file = at.get_inode()?;
+
+        let name = at.get_name();
+        let name = String::from_utf8_lossy(&name);
+        let file_lock = Task::block_on(file.rwsem.write());
+
+        if file.is_dir() {
+            let _ = ext4fs.inner.rmdir(self.ino as u32, &name);
+        } else {
+            let _ = ext4fs.inner.unlink(self.ino as u32, &name);
+        }
+
+        self.unlink(&file, true, dir_lock.prove_mut(), file_lock.prove_mut())?;
+        dcache::d_remove(at);
+
+        Ok(())
     }
 }
 

@@ -532,16 +532,6 @@ fn ppoll(
     do_poll(thread, fds, nfds, 0)
 }
 
-fn do_pselect(
-    nfds: u32,
-    readfds: *mut FDSet,
-    writefds: *mut FDSet,
-    exceptfds: *mut FDSet,
-    timeout: *const TimeSpec,
-    sigmask: *const SigSet,
-) {
-}
-
 #[eonix_macros::define_syscall(SYS_PSELECT6)]
 fn pselect6(
     nfds: u32,
@@ -560,7 +550,9 @@ fn pselect6(
     }
 
     let timeout = UserPointerMut::new(timeout)?;
-    let timeout_value = timeout.read()?;
+    
+    // Read here to check for invalid pointers.
+    let _timeout_value = timeout.read()?;
 
     Task::block_on(sleep(Duration::from_millis(10)));
 
@@ -568,8 +560,6 @@ fn pselect6(
         tv_sec: 0,
         tv_nsec: 0,
     })?;
-
-    // println_debug!("slept for {timeout_value:?}");
 
     Ok(0)
 }

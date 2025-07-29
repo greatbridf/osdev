@@ -753,7 +753,8 @@ impl PageTableExt for KernelPageTable<'_> {
         let from_iter = from.iter_user(range);
 
         for (to, from) in to_iter.zip(from_iter) {
-            *to = *from;
+            let (pfn, attr) = from.get();
+            to.set(pfn, attr);
         }
     }
 }

@@ -434,28 +434,14 @@ fn getgid() -> KResult<u32> {
     Ok(0)
 }
 
-#[eonix_macros::define_syscall(SYS_GETEGID)]
-fn getegid() -> KResult<u32> {
-    // All users are root for now.
-    Ok(0)
-}
-
-#[eonix_macros::define_syscall(SYS_GETRANDOM)]
-fn getrandom() -> KResult<u32> {
-    // All users are root for now.
-    Ok(0)
-}
-
 #[eonix_macros::define_syscall(SYS_SYNC)]
-fn sync() -> KResult<u32> {
-    // All users are root for now.
-    Ok(0)
+fn sync() -> KResult<()> {
+    Ok(())
 }
 
 #[eonix_macros::define_syscall(SYS_FSYNC)]
-fn fsync() -> KResult<u32> {
-    // All users are root for now.
-    Ok(0)
+fn fsync() -> KResult<()> {
+    Ok(())
 }
 
 #[cfg(target_arch = "x86_64")]

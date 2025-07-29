@@ -7,7 +7,6 @@ use crate::{
 };
 use align_ext::AlignExt;
 use alloc::{collections::btree_map::BTreeMap, sync::Weak};
-use core::sync::atomic::{AtomicUsize, Ordering};
 use eonix_mm::paging::{PageAlloc, RawPage, PAGE_SIZE, PAGE_SIZE_BITS};
 use eonix_sync::Mutex;
 
@@ -78,14 +77,12 @@ impl CachePage {
 
     pub fn all(&self) -> &[u8] {
         unsafe {
-            // SAFETY: The page is exclusively owned by us, so we can safely access its data.
             self.0.as_memblk().as_bytes()
         }
     }
 
     pub fn all_mut(&mut self) -> &mut [u8] {
         unsafe {
-            // SAFETY: The page is exclusively owned by us, so we can safely access its data.
             self.0.as_memblk().as_bytes_mut()
         }
     }
@@ -118,8 +115,6 @@ impl PageCache {
     pub async fn read(&self, buffer: &mut dyn Buffer, mut offset: usize) -> KResult<usize> {
         let mut pages = self.pages.lock().await;
 
-        // println_debug!("before pagecache read, {}", buffer.available());
-
         loop {
             let page_id = offset >> PAGE_SIZE_BITS;
             let page = pages.get(&page_id);
@@ -127,12 +122,9 @@ impl PageCache {
             match page {
                 Some(page) => {
                     let inner_offset = offset % PAGE_SIZE;
-                    // println_debug!(
-                    //     "pagecache try fill data {}",
-                    //     page.valid_data()[inner_offset..].len()
-                    // );
 
-                    // Todo: still cause uncessary IO if valid_size < PAGESIZE and fill result is Done
+                    // TODO: still cause unnecessary IO if valid_size < PAGESIZE
+                    //       and fill result is Done
                     if page.valid_size() == 0
                         || buffer
                             .fill(&page.valid_data()[inner_offset..])?
@@ -146,7 +138,6 @@ impl PageCache {
                 }
                 None => {
                     let mut new_page = CachePage::new();
-                    // println_debug!("page cache try get {}", offset.align_down(PAGE_SIZE));
                     self.backend
                         .upgrade()
                         .unwrap()
@@ -155,7 +146,6 @@ impl PageCache {
                 }
             }
         }
-        // println_debug!("after page cache read{}", buffer.available());
 
         Ok(buffer.wrote())
     }
@@ -285,7 +275,7 @@ impl PageCache {
 // with this trait, "page cache" and "block cache" are unified,
 // for fs, offset is file offset (floor algin to PAGE_SIZE)
 // for blkdev, offset is block idx (floor align to PAGE_SIZE / BLK_SIZE)
-// Oh no, this would make uncessary cache
+// Oh no, this would make unnecessary cache
 pub trait PageCacheBackend {
     fn read_page(&self, page: &mut CachePage, offset: usize) -> KResult<usize>;
 

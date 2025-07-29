@@ -9,7 +9,7 @@ use alloc::sync::Arc;
 use core::{
     mem::forget,
     ptr::NonNull,
-    sync::atomic::{compiler_fence, AtomicUsize, Ordering},
+    sync::atomic::{compiler_fence, Ordering},
     task::Waker,
 };
 use eonix_hal::processor::halt;
@@ -136,9 +136,8 @@ impl Scheduler {
         unsafe { TASKS.lock().cursor_mut_from_ptr(task as *const _).remove() };
     }
 
-    fn select_cpu_for_task(&self, _task: &Task) -> usize {
-        static NEXT_CPU: AtomicUsize = AtomicUsize::new(0);
-        NEXT_CPU.fetch_add(1, Ordering::Relaxed) % 4
+    fn select_cpu_for_task(&self, task: &Task) -> usize {
+        task.cpu.load(Ordering::Relaxed) as _
     }
 
     pub fn activate(&self, task: &Arc<Task>) {

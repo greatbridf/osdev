@@ -1,6 +1,8 @@
 use super::SyscallNoReturn;
 use crate::io::Buffer;
-use crate::kernel::constants::{EINVAL, ENOENT, ENOTDIR, ERANGE, ESRCH};
+use crate::kernel::constants::{
+    CLOCK_MONOTONIC, CLOCK_REALTIME, CLOCK_REALTIME_COARSE, EINVAL, ENOENT, ENOTDIR, ERANGE, ESRCH,
+};
 use crate::kernel::constants::{
     ENOSYS, PR_GET_NAME, PR_SET_NAME, RLIMIT_STACK, SIG_BLOCK, SIG_SETMASK, SIG_UNBLOCK,
 };
@@ -49,6 +51,37 @@ bitflags! {
 
 #[eonix_macros::define_syscall(SYS_NANOSLEEP)]
 fn nanosleep(req: *const (u32, u32), rem: *mut (u32, u32)) -> KResult<usize> {
+    let req = UserPointer::new(req)?.read()?;
+    let rem = if rem.is_null() {
+        None
+    } else {
+        Some(UserPointerMut::new(rem)?)
+    };
+
+    let duration = Duration::from_secs(req.0 as u64) + Duration::from_nanos(req.1 as u64);
+    Task::block_on(sleep(duration));
+
+    if let Some(rem) = rem {
+        rem.write((0, 0))?;
+    }
+
+    Ok(0)
+}
+
+#[eonix_macros::define_syscall(SYS_CLOCK_NANOSLEEP)]
+fn clock_nanosleep(
+    clock_id: u32,
+    flags: u32,
+    req: *const (u32, u32),
+    rem: *mut (u32, u32),
+) -> KResult<usize> {
+    if clock_id != CLOCK_REALTIME
+        && clock_id != CLOCK_REALTIME_COARSE
+        && clock_id != CLOCK_MONOTONIC
+    {
+        unimplemented!("Unsupported clock_id: {}", clock_id);
+    }
+
     let req = UserPointer::new(req)?.read()?;
     let rem = if rem.is_null() {
         None
@@ -399,6 +432,16 @@ fn geteuid() -> KResult<u32> {
 fn getgid() -> KResult<u32> {
     // All users are root for now.
     Ok(0)
+}
+
+#[eonix_macros::define_syscall(SYS_SYNC)]
+fn sync() -> KResult<()> {
+    Ok(())
+}
+
+#[eonix_macros::define_syscall(SYS_FSYNC)]
+fn fsync() -> KResult<()> {
+    Ok(())
 }
 
 #[cfg(target_arch = "x86_64")]

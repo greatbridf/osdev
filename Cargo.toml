@@ -43,6 +43,9 @@ log_trace = ["trace_syscall", "trace_scheduler"]
 log_debug = []
 smp = []
 
+[profile.release]
+debug = true
+
 [profile.dev]
 panic = "abort"
 
@@ -50,7 +53,7 @@ panic = "abort"
 opt-level = 2
 
 [profile.dev.package.eonix_runtime]
-opt-level = 0
+opt-level = 2
 
 [profile.dev.package.eonix_sync]
 opt-level = 2
@@ -59,7 +62,7 @@ opt-level = 2
 opt-level = 2
 
 [profile.dev.package.eonix_hal]
-opt-level = 0
+opt-level = 2
 
 [profile.dev.package."*"]
 opt-level = "s"

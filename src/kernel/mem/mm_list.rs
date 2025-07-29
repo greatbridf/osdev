@@ -6,6 +6,7 @@ use super::page_alloc::GlobalPageAlloc;
 use super::paging::AllocZeroed as _;
 use super::{AsMemoryBlock, MMArea, Page};
 use crate::kernel::constants::{EEXIST, EFAULT, EINVAL, ENOMEM};
+use crate::kernel::mem::page_alloc::RawPagePtr;
 use crate::{prelude::*, sync::ArcSwap};
 use alloc::collections::btree_set::BTreeSet;
 use core::fmt;
@@ -256,6 +257,7 @@ impl MMListInner<'_> {
         len: usize,
         mapping: Mapping,
         permission: Permission,
+        is_shared: bool,
     ) -> KResult<()> {
         assert_eq!(at.floor(), at);
         assert_eq!(len & (PAGE_SIZE - 1), 0);
@@ -271,13 +273,33 @@ impl MMListInner<'_> {
             Mapping::File(_) => self.page_table.set_mmapped(range, permission),
         }
 
-        self.areas.insert(MMArea::new(range, mapping, permission));
+        self.areas
+            .insert(MMArea::new(range, mapping, permission, is_shared));
         Ok(())
     }
 }
 
 impl Drop for MMListInner<'_> {
     fn drop(&mut self) {
+        // May buggy
+        for area in &self.areas {
+            if area.is_shared {
+                for pte in self.page_table.iter_user(area.range()) {
+                    let (pfn, _) = pte.take();
+                    let raw_page = RawPagePtr::from(pfn);
+                    if raw_page.refcount().fetch_sub(1, Ordering::Relaxed) == 1 {
+                        // Wrong here
+                        // unsafe { Page::from_raw(pfn) };
+                    }
+                }
+            } else {
+                for pte in self.page_table.iter_user(area.range()) {
+                    let (pfn, _) = pte.take();
+                    unsafe { Page::from_raw(pfn) };
+                }
+            }
+        }
+
         // TODO: Recycle all pages in the page table.
     }
 }
@@ -343,9 +365,15 @@ impl MMList {
             let list_inner = list_inner.lock().await;
 
             for area in list_inner.areas.iter() {
-                list_inner
-                    .page_table
-                    .set_copy_on_write(&mut inner.page_table, area.range());
+                if !area.is_shared {
+                    list_inner
+                        .page_table
+                        .set_copy_on_write(&mut inner.page_table, area.range());
+                } else {
+                    list_inner
+                        .page_table
+                        .set_copied(&mut inner.page_table, area.range());
+                }
             }
         }
 
@@ -507,21 +535,22 @@ impl MMList {
         len: usize,
         mapping: Mapping,
         permission: Permission,
+        is_shared: bool,
     ) -> KResult<VAddr> {
         let inner = self.inner.borrow();
         let mut inner = Task::block_on(inner.lock());
 
         if hint == VAddr::NULL {
             let at = inner.find_available(hint, len).ok_or(ENOMEM)?;
-            inner.mmap(at, len, mapping, permission)?;
+            inner.mmap(at, len, mapping, permission, is_shared)?;
             return Ok(at);
         }
 
-        match inner.mmap(hint, len, mapping.clone(), permission) {
+        match inner.mmap(hint, len, mapping.clone(), permission, is_shared) {
             Ok(()) => Ok(hint),
             Err(EEXIST) => {
                 let at = inner.find_available(hint, len).ok_or(ENOMEM)?;
-                inner.mmap(at, len, mapping, permission)?;
+                inner.mmap(at, len, mapping, permission, is_shared)?;
                 Ok(at)
             }
             Err(err) => Err(err),
@@ -534,9 +563,10 @@ impl MMList {
         len: usize,
         mapping: Mapping,
         permission: Permission,
+        is_shared: bool,
     ) -> KResult<VAddr> {
         Task::block_on(self.inner.borrow().lock())
-            .mmap(at, len, mapping.clone(), permission)
+            .mmap(at, len, mapping.clone(), permission, is_shared)
             .map(|_| at)
     }
 
@@ -571,6 +601,7 @@ impl MMList {
                     write: true,
                     execute: false,
                 },
+                false,
             ));
         }
 
@@ -644,7 +675,7 @@ impl MMList {
                 let page_start = current.floor() + idx * 0x1000;
                 let page_end = page_start + 0x1000;
 
-                area.handle(pte, page_start - area_start)?;
+                area.handle(pte, page_start - area_start, None)?;
 
                 let start_offset;
                 if page_start < current {
@@ -692,6 +723,7 @@ trait PageTableExt {
     fn set_anonymous(&self, range: VRange, permission: Permission);
     fn set_mmapped(&self, range: VRange, permission: Permission);
     fn set_copy_on_write(&self, from: &Self, range: VRange);
+    fn set_copied(&self, from: &Self, range: VRange);
 }
 
 impl PageTableExt for KernelPageTable<'_> {
@@ -715,10 +747,22 @@ impl PageTableExt for KernelPageTable<'_> {
             to.set_copy_on_write(from);
         }
     }
+
+    fn set_copied(&self, from: &Self, range: VRange) {
+        let to_iter = self.iter_user(range);
+        let from_iter = from.iter_user(range);
+
+        for (to, from) in to_iter.zip(from_iter) {
+            let (pfn, attr) = from.get();
+            to.set(pfn, attr);
+        }
+    }
 }
 
 trait PTEExt {
+    // private anonymous
     fn set_anonymous(&mut self, execute: bool);
+    // file mapped or shared anonymous
     fn set_mapped(&mut self, execute: bool);
     fn set_copy_on_write(&mut self, from: &mut Self);
 }
@@ -742,10 +786,7 @@ where
     fn set_mapped(&mut self, execute: bool) {
         // Writable flag is set during page fault handling while executable flag is
         // preserved across page faults, so we set executable flag now.
-        let mut attr = PageAttribute::READ
-            | PageAttribute::USER
-            | PageAttribute::MAPPED
-            | PageAttribute::COPY_ON_WRITE;
+        let mut attr = PageAttribute::READ | PageAttribute::USER | PageAttribute::MAPPED;
         attr.set(PageAttribute::EXECUTE, execute);
 
         self.set(EMPTY_PAGE.clone().into_raw(), T::Attr::from(attr));

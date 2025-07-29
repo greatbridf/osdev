@@ -11,6 +11,7 @@ use crate::{
         task::Thread,
         terminal::{Terminal, TerminalIORequest},
         user::{UserPointer, UserPointerMut},
+        vfs::inode::Inode,
         CharDevice,
     },
     prelude::*,
@@ -84,6 +85,15 @@ pub enum FileType {
 pub struct File {
     flags: AtomicU32,
     file_type: FileType,
+}
+
+impl File {
+    pub fn get_inode(&self) -> KResult<Option<Arc<dyn Inode>>> {
+        match &self.file_type {
+            FileType::Inode(inode_file) => Ok(Some(inode_file.dentry.get_inode()?)),
+            _ => Ok(None),
+        }
+    }
 }
 
 pub enum SeekOption {
@@ -324,7 +334,7 @@ impl InodeFile {
         Ok(new_cursor)
     }
 
-    fn write(&self, stream: &mut dyn Stream) -> KResult<usize> {
+    fn write(&self, stream: &mut dyn Stream, offset: Option<usize>) -> KResult<usize> {
         if !self.write {
             return Err(EBADF);
         }
@@ -336,23 +346,35 @@ impl InodeFile {
 
             Ok(nwrote)
         } else {
-            let nwrote = self.dentry.write(stream, WriteOffset::Position(*cursor))?;
+            let nwrote = if let Some(offset) = offset {
+                self.dentry.write(stream, WriteOffset::Position(offset))?
+            } else {
+                let nwrote = self.dentry.write(stream, WriteOffset::Position(*cursor))?;
+                *cursor += nwrote;
+                nwrote
+            };
 
-            *cursor += nwrote;
             Ok(nwrote)
         }
     }
 
-    fn read(&self, buffer: &mut dyn Buffer) -> KResult<usize> {
+    fn read(&self, buffer: &mut dyn Buffer, offset: Option<usize>) -> KResult<usize> {
         if !self.read {
             return Err(EBADF);
         }
 
-        let mut cursor = Task::block_on(self.cursor.lock());
+        let nread = if let Some(offset) = offset {
+            let nread = self.dentry.read(buffer, offset)?;
+            nread
+        } else {
+            let mut cursor = Task::block_on(self.cursor.lock());
 
-        let nread = self.dentry.read(buffer, *cursor)?;
+            let nread = self.dentry.read(buffer, *cursor)?;
 
-        *cursor += nread;
+            *cursor += nread;
+            nread
+        };
+
         Ok(nread)
     }
 
@@ -456,9 +478,9 @@ impl TerminalFile {
 }
 
 impl FileType {
-    pub async fn read(&self, buffer: &mut dyn Buffer) -> KResult<usize> {
+    pub async fn read(&self, buffer: &mut dyn Buffer, offset: Option<usize>) -> KResult<usize> {
         match self {
-            FileType::Inode(inode) => inode.read(buffer),
+            FileType::Inode(inode) => inode.read(buffer, offset),
             FileType::PipeRead(pipe) => pipe.pipe.read(buffer).await,
             FileType::TTY(tty) => tty.read(buffer).await,
             FileType::CharDev(device) => device.read(buffer),
@@ -481,9 +503,9 @@ impl FileType {
     //     }
     // }
 
-    pub async fn write(&self, stream: &mut dyn Stream) -> KResult<usize> {
+    pub async fn write(&self, stream: &mut dyn Stream, offset: Option<usize>) -> KResult<usize> {
         match self {
-            FileType::Inode(inode) => inode.write(stream),
+            FileType::Inode(inode) => inode.write(stream, offset),
             FileType::PipeWrite(pipe) => pipe.pipe.write(stream).await,
             FileType::TTY(tty) => tty.write(stream),
             FileType::CharDev(device) => device.write(stream),
@@ -527,12 +549,16 @@ impl FileType {
             if Thread::current().signal_list.has_pending_signal() {
                 return if cur == 0 { Err(EINTR) } else { Ok(cur) };
             }
-            let nread = self.read(&mut ByteBuffer::new(&mut buffer[..len])).await?;
+            let nread = self
+                .read(&mut ByteBuffer::new(&mut buffer[..len]), None)
+                .await?;
             if nread == 0 {
                 break;
             }
 
-            let nwrote = dest_file.write(&mut buffer[..nread].into_stream()).await?;
+            let nwrote = dest_file
+                .write(&mut buffer[..nread].into_stream(), None)
+                .await?;
             nsent += nwrote;
 
             if nwrote != len {

@@ -127,7 +127,6 @@ pub unsafe extern "C" fn riscv64_start(hart_id: usize, dtb_addr: PAddr) -> ! {
 
     setup_cpu(&alloc, hart_id);
 
-    // TODO: set up interrupt, smp
     ScopedAllocator::new(&mut [0; 1024])
         .with_alloc(|mem_alloc| bootstrap_smp(mem_alloc, &real_allocator));
 

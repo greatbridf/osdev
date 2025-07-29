@@ -4,11 +4,14 @@ use crate::{
     io::{Buffer, ByteBuffer, Stream},
     kernel::{
         block::BlockDevice,
-        constants::{EIO, S_IFDIR, S_IFREG},
+        constants::{EEXIST, EINVAL, EIO, ENOSYS, S_IFDIR, S_IFREG},
         timer::Instant,
         vfs::{
             dentry::{dcache, Dentry},
-            inode::{define_struct_inode, AtomicNlink, Ino, Inode, InodeData, Mode, WriteOffset},
+            inode::{
+                define_struct_inode, AtomicNlink, Ino, Inode, InodeData, Mode, RenameData,
+                WriteOffset,
+            },
             mount::{register_filesystem, Mount, MountCreator},
             s_isdir, s_isreg,
             vfs::Vfs,
@@ -27,6 +30,7 @@ use another_ext4::{
 };
 use eonix_runtime::task::Task;
 use eonix_sync::RwLock;
+use xmas_elf::dynamic::FLAG_1_NOW;
 
 pub struct Ext4BlockDevice {
     device: Arc<BlockDevice>,
@@ -108,6 +112,20 @@ impl Ext4Fs {
         let _ = self
             .inner
             .setattr(child, None, None, None, None, None, Some(mtime), None, None);
+    }
+
+    fn chmod_stat(&self, ino: u32, new_mode: u16, ctime: u32) {
+        let _ = self.inner.setattr(
+            ino,
+            Some(InodeMode::from_bits_retain(new_mode.try_into().unwrap())),
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(ctime),
+            None,
+        );
     }
 
     fn get_or_insert(
@@ -280,6 +298,28 @@ impl Inode for FileInode {
         Ok(total_written)
     }
 
+    fn chmod(&self, mode: Mode) -> KResult<()> {
+        let _lock = Task::block_on(self.rwsem.write());
+
+        let vfs = self.vfs.upgrade().ok_or(EIO)?;
+        let ext4fs = vfs.as_any().downcast_ref::<Ext4Fs>().unwrap();
+        let old_mode = self.mode.load(Ordering::Relaxed);
+        let new_mode = (old_mode & !0o777) | (mode & 0o777);
+
+        let now = Instant::now();
+        ext4fs.chmod_stat(
+            self.ino as u32,
+            new_mode as u16,
+            now.since_epoch().as_secs() as u32,
+        );
+
+        // SAFETY: `rwsem` has done the synchronization
+        self.mode.store(new_mode, Ordering::Relaxed);
+        *self.ctime.lock() = now;
+
+        Ok(())
+    }
+
     // TODO
     fn truncate(&self, length: usize) -> KResult<()> {
         Ok(())
@@ -313,12 +353,10 @@ impl DirInode {
     }
 
     fn link_file(&self) {
-        // TODO
         self.size.fetch_add(1, Ordering::Relaxed);
     }
 
     fn link_dir(&self) {
-        // TODO
         self.nlink.fetch_add(1, Ordering::Relaxed);
         self.size.fetch_add(1, Ordering::Relaxed);
     }
@@ -498,6 +536,75 @@ impl Inode for DirInode {
         ext4fs.modify_inode_stat(self.ino as u32, None, now.since_epoch().as_secs() as u32);
 
         dcache::d_remove(at);
+
+        Ok(())
+    }
+
+    fn chmod(&self, mode: Mode) -> KResult<()> {
+        let _lock = Task::block_on(self.rwsem.write());
+
+        let vfs = self.vfs.upgrade().ok_or(EIO)?;
+        let ext4fs = vfs.as_any().downcast_ref::<Ext4Fs>().unwrap();
+        let old_mode = self.mode.load(Ordering::Relaxed);
+        let new_mode = (old_mode & !0o777) | (mode & 0o777);
+
+        let now = Instant::now();
+        ext4fs.chmod_stat(
+            self.ino as u32,
+            new_mode as u16,
+            now.since_epoch().as_secs() as u32,
+        );
+
+        // SAFETY: `rwsem` has done the synchronization
+        self.mode.store(new_mode, Ordering::Relaxed);
+        *self.ctime.lock() = now;
+
+        Ok(())
+    }
+
+    fn rename(&self, rename_data: RenameData) -> KResult<()> {
+        let RenameData {
+            old_dentry,
+            new_dentry,
+            new_parent,
+            is_exchange,
+            no_replace,
+            vfs,
+        } = rename_data;
+
+        if is_exchange {
+            println_warn!("Ext4Fs does not support exchange rename for now");
+            return Err(ENOSYS);
+        }
+
+        // TODO: may need another lock
+        let _lock = Task::block_on(self.rwsem.write());
+        let vfs = self.vfs.upgrade().ok_or(EIO)?;
+        let ext4fs = vfs.as_any().downcast_ref::<Ext4Fs>().unwrap();
+
+        let old_file = old_dentry.get_inode()?;
+        let new_file = new_dentry.get_inode();
+        if no_replace && new_file.is_ok() {
+            return Err(EEXIST);
+        }
+
+        let name = old_dentry.name();
+        let name = core::str::from_utf8(&*name).map_err(|_| EINVAL)?;
+        let new_name = new_dentry.name();
+        let new_name = core::str::from_utf8(&*new_name).map_err(|_| EINVAL)?;
+
+        ext4fs
+            .inner
+            .rename(self.ino as u32, name, new_parent.ino as u32, new_name)
+            .map_err(|err| err.code() as u32)?;
+
+        // TODO: may need more operations
+        let now = Instant::now();
+        *self.mtime.lock() = now;
+        *old_file.ctime.lock() = now;
+        self.size.fetch_sub(1, Ordering::Relaxed);
+
+        Task::block_on(dcache::d_exchange(old_dentry, new_dentry));
 
         Ok(())
     }

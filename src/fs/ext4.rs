@@ -30,7 +30,6 @@ use another_ext4::{
 };
 use eonix_runtime::task::Task;
 use eonix_sync::RwLock;
-use xmas_elf::dynamic::FLAG_1_NOW;
 
 pub struct Ext4BlockDevice {
     device: Arc<BlockDevice>,
@@ -600,9 +599,24 @@ impl Inode for DirInode {
 
         // TODO: may need more operations
         let now = Instant::now();
-        *self.mtime.lock() = now;
         *old_file.ctime.lock() = now;
-        self.size.fetch_sub(1, Ordering::Relaxed);
+        *self.mtime.lock() = now;
+
+        let same_parent = Arc::as_ptr(&new_parent) == &raw const *self;
+        if !same_parent {
+            *new_parent.mtime.lock() = now;
+            if old_file.is_dir() {
+                self.nlink.fetch_sub(1, Ordering::Relaxed);
+                new_parent.nlink.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+
+        if let Ok(replaced_file) = new_dentry.get_inode() {
+            if !no_replace {
+                *replaced_file.ctime.lock() = now;
+                replaced_file.nlink.fetch_sub(1, Ordering::Relaxed);
+            }
+        }
 
         Task::block_on(dcache::d_exchange(old_dentry, new_dentry));
 

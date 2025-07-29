@@ -3,6 +3,7 @@ use crate::prelude::*;
 use core::{cmp, mem::MaybeUninit};
 
 #[must_use]
+#[derive(Debug)]
 pub enum FillResult {
     Done(usize),
     Partial(usize),

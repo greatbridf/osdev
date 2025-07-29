@@ -1,13 +1,19 @@
 mod dir;
 mod file;
 
+use crate::io::Stream;
 use crate::kernel::constants::EIO;
+use crate::kernel::mem::AsMemoryBlock;
+use crate::kernel::vfs::inode::WriteOffset;
 use crate::{
     io::{Buffer, ByteBuffer, UninitBuffer},
     kernel::{
         block::{make_device, BlockDevice, BlockDeviceRequest},
         constants::{S_IFDIR, S_IFREG},
-        mem::paging::Page,
+        mem::{
+            paging::Page,
+            {CachePage, PageCache, PageCacheBackend},
+        },
         vfs::{
             dentry::Dentry,
             inode::{define_struct_inode, Ino, Inode, InodeData},
@@ -31,6 +37,8 @@ use eonix_sync::RwLock;
 use file::ClusterRead;
 
 type ClusterNo = u32;
+
+const SECTOR_SIZE: usize = 512;
 
 #[derive(Clone, Copy)]
 #[repr(C, packed)]
@@ -231,13 +239,16 @@ impl FatInode {
 }
 
 define_struct_inode! {
-    struct FileInode;
+    struct FileInode {
+        page_cache: PageCache,
+    }
 }
 
 impl FileInode {
     fn new(ino: Ino, weak: Weak<FatFs>, size: u32) -> Arc<Self> {
-        let inode = Arc::new(Self {
+        let inode = Arc::new_cyclic(|weak_self: &Weak<FileInode>| Self {
             idata: InodeData::new(ino, weak),
+            page_cache: PageCache::new(weak_self.clone()),
         });
 
         // Safety: We are initializing the inode
@@ -250,7 +261,15 @@ impl FileInode {
 }
 
 impl Inode for FileInode {
+    fn page_cache(&self) -> Option<&PageCache> {
+        Some(&self.page_cache)
+    }
+
     fn read(&self, buffer: &mut dyn Buffer, offset: usize) -> KResult<usize> {
+        Task::block_on(self.page_cache.read(buffer, offset))
+    }
+
+    fn read_direct(&self, buffer: &mut dyn Buffer, offset: usize) -> KResult<usize> {
         let vfs = self.vfs.upgrade().ok_or(EIO)?;
         let vfs = vfs.as_any().downcast_ref::<FatFs>().unwrap();
         let fat = Task::block_on(vfs.fat.read());
@@ -259,15 +278,56 @@ impl Inode for FileInode {
             return Ok(0);
         }
 
-        let iter = ClusterIterator::new(fat.as_ref(), self.ino as ClusterNo).read(vfs, offset);
+        let cluster_size = vfs.sectors_per_cluster as usize * SECTOR_SIZE;
+        assert!(cluster_size <= 0x1000, "Cluster size is too large");
 
-        for data in iter {
-            if buffer.fill(data?)?.should_stop() {
+        let skip_clusters = offset / cluster_size;
+        let inner_offset = offset % cluster_size;
+
+        let cluster_iter =
+            ClusterIterator::new(fat.as_ref(), self.ino as ClusterNo).skip(skip_clusters);
+
+        let buffer_page = Page::alloc();
+        for cluster in cluster_iter {
+            vfs.read_cluster(cluster, &buffer_page)?;
+
+            let data = unsafe {
+                // SAFETY: We are the only one holding this page.
+                &buffer_page.as_memblk().as_bytes()[inner_offset..]
+            };
+
+            let end = offset + data.len();
+            let real_end = core::cmp::min(end, self.size.load(Ordering::Relaxed) as usize);
+            let real_size = real_end - offset;
+
+            if buffer.fill(&data[..real_size])?.should_stop() {
                 break;
             }
         }
 
         Ok(buffer.wrote())
+    }
+
+    fn write(&self, stream: &mut dyn Stream, offset: WriteOffset) -> KResult<usize> {
+        todo!()
+    }
+
+    fn write_direct(&self, stream: &mut dyn Stream, offset: WriteOffset) -> KResult<usize> {
+        todo!()
+    }
+}
+
+impl PageCacheBackend for FileInode {
+    fn read_page(&self, page: &mut CachePage, offset: usize) -> KResult<usize> {
+        self.read_direct(page, offset)
+    }
+
+    fn write_page(&self, page: &CachePage, offset: usize) -> KResult<usize> {
+        todo!()
+    }
+
+    fn size(&self) -> usize {
+        self.size.load(Ordering::Relaxed) as usize
     }
 }
 

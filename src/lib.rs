@@ -69,8 +69,6 @@ static BSP_OK: AtomicBool = AtomicBool::new(false);
 fn kernel_init(mut data: eonix_hal::bootstrap::BootStrapData) -> ! {
     setup_memory(&mut data);
 
-    BSP_OK.store(true, Ordering::Release);
-
     #[cfg(target_arch = "riscv64")]
     {
         driver::sbi_console::init_console();
@@ -84,6 +82,8 @@ fn kernel_init(mut data: eonix_hal::bootstrap::BootStrapData) -> ! {
     Scheduler::init_local_scheduler::<KernelStack>();
 
     Scheduler::get().spawn::<KernelStack, _>(FutureRun::new(init_process(data.get_early_stack())));
+
+    BSP_OK.store(true, Ordering::Release);
 
     drop(data);
     unsafe {

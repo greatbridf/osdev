@@ -1,13 +1,15 @@
 use super::SyscallNoReturn;
 use crate::io::Buffer;
-use crate::kernel::constants::{EINVAL, ENOENT, ENOTDIR, ERANGE, ESRCH};
+use crate::kernel::constants::{
+    CLOCK_MONOTONIC, CLOCK_REALTIME, CLOCK_REALTIME_COARSE, EINVAL, ENOENT, ENOTDIR, ERANGE, ESRCH,
+};
 use crate::kernel::constants::{
     ENOSYS, PR_GET_NAME, PR_SET_NAME, RLIMIT_STACK, SIG_BLOCK, SIG_SETMASK, SIG_UNBLOCK,
 };
 use crate::kernel::mem::PageBuffer;
 use crate::kernel::task::{
     do_clone, futex_wait, futex_wake, FutexFlags, FutexOp, ProcessList, ProgramLoader,
-    RobustListHead, SignalAction, Thread, WaitType,
+    RobustListHead, SignalAction, Thread, WaitId, WaitType,
 };
 use crate::kernel::task::{parse_futexop, CloneArgs};
 use crate::kernel::timer::sleep;
@@ -27,7 +29,6 @@ use eonix_hal::trap::TrapContext;
 use eonix_mm::address::{Addr as _, VAddr};
 use eonix_runtime::task::Task;
 use eonix_sync::AsProof as _;
-use posix_types::constants::{P_ALL, P_PID};
 use posix_types::ctypes::PtrT;
 use posix_types::signal::{SigAction, SigInfo, SigSet, Signal};
 use posix_types::stat::TimeVal;
@@ -50,6 +51,37 @@ bitflags! {
 
 #[eonix_macros::define_syscall(SYS_NANOSLEEP)]
 fn nanosleep(req: *const (u32, u32), rem: *mut (u32, u32)) -> KResult<usize> {
+    let req = UserPointer::new(req)?.read()?;
+    let rem = if rem.is_null() {
+        None
+    } else {
+        Some(UserPointerMut::new(rem)?)
+    };
+
+    let duration = Duration::from_secs(req.0 as u64) + Duration::from_nanos(req.1 as u64);
+    Task::block_on(sleep(duration));
+
+    if let Some(rem) = rem {
+        rem.write((0, 0))?;
+    }
+
+    Ok(0)
+}
+
+#[eonix_macros::define_syscall(SYS_CLOCK_NANOSLEEP)]
+fn clock_nanosleep(
+    clock_id: u32,
+    flags: u32,
+    req: *const (u32, u32),
+    rem: *mut (u32, u32),
+) -> KResult<usize> {
+    if clock_id != CLOCK_REALTIME
+        && clock_id != CLOCK_REALTIME_COARSE
+        && clock_id != CLOCK_MONOTONIC
+    {
+        unimplemented!("Unsupported clock_id: {}", clock_id);
+    }
+
     let req = UserPointer::new(req)?.read()?;
     let rem = if rem.is_null() {
         None
@@ -220,16 +252,11 @@ enum WaitInfo {
 
 fn do_waitid(
     thread: &Thread,
-    id_type: u32,
-    _id: u32,
+    wait_id: WaitId,
     info: WaitInfo,
     options: u32,
     rusage: *mut RUsage,
 ) -> KResult<u32> {
-    if id_type != P_ALL {
-        unimplemented!("waitid with id_type {id_type}");
-    }
-
     if !rusage.is_null() {
         unimplemented!("waitid with rusage pointer");
     }
@@ -240,6 +267,7 @@ fn do_waitid(
     };
 
     let Some(wait_object) = Task::block_on(thread.process.wait(
+        wait_id,
         options.contains(UserWaitOptions::WNOHANG),
         options.contains(UserWaitOptions::WUNTRACED),
         options.contains(UserWaitOptions::WCONTINUED),
@@ -278,15 +306,10 @@ fn waitid(
     options: u32,
     rusage: *mut RUsage,
 ) -> KResult<u32> {
+    let wait_id = WaitId::from_type_and_id(id_type, id)?;
+
     if let Some(info) = NonNull::new(info) {
-        do_waitid(
-            thread,
-            id_type,
-            id,
-            WaitInfo::SigInfo(info),
-            options,
-            rusage,
-        )
+        do_waitid(thread, wait_id, WaitInfo::SigInfo(info), options, rusage)
     } else {
         /*
          * According to POSIX.1-2008, an application calling waitid() must
@@ -301,24 +324,21 @@ fn waitid(
 }
 
 #[eonix_macros::define_syscall(SYS_WAIT4)]
-fn wait4(waitpid: u32, arg1: *mut u32, options: u32, rusage: *mut RUsage) -> KResult<u32> {
+fn wait4(wait_id: i32, arg1: *mut u32, options: u32, rusage: *mut RUsage) -> KResult<u32> {
     let waitinfo = if let Some(status) = NonNull::new(arg1) {
         WaitInfo::Status(status)
     } else {
         WaitInfo::None
     };
 
-    let idtype = match waitpid {
-        u32::MAX => P_ALL,
-        _ => P_PID,
-    };
+    let wait_id = WaitId::from_id(wait_id, thread);
 
-    do_waitid(thread, idtype, waitpid, waitinfo, options, rusage)
+    do_waitid(thread, wait_id, waitinfo, options, rusage)
 }
 
 #[cfg(target_arch = "x86_64")]
 #[eonix_macros::define_syscall(SYS_WAITPID)]
-fn waitpid(waitpid: u32, arg1: *mut u32, options: u32) -> KResult<u32> {
+fn waitpid(waitpid: i32, arg1: *mut u32, options: u32) -> KResult<u32> {
     sys_wait4(thread, waitpid, arg1, options, core::ptr::null_mut())
 }
 
@@ -423,6 +443,16 @@ fn getgid() -> KResult<u32> {
 #[eonix_macros::define_syscall(SYS_GETGID32)]
 fn getgid32() -> KResult<u32> {
     sys_getegid(thread)
+}
+
+#[eonix_macros::define_syscall(SYS_SYNC)]
+fn sync() -> KResult<()> {
+    Ok(())
+}
+
+#[eonix_macros::define_syscall(SYS_FSYNC)]
+fn fsync() -> KResult<()> {
+    Ok(())
 }
 
 #[eonix_macros::define_syscall(SYS_GETTID)]

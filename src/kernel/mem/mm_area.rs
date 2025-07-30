@@ -2,10 +2,10 @@ use super::mm_list::EMPTY_PAGE;
 use super::paging::AllocZeroed as _;
 use super::{AsMemoryBlock, Mapping, Page, Permission};
 use crate::kernel::constants::EINVAL;
-use crate::kernel::mem::page_cache::PageCacheRawPage;
-use crate::KResult;
-use core::sync::atomic;
-use core::{borrow::Borrow, cell::UnsafeCell, cmp};
+use crate::prelude::KResult;
+use core::borrow::Borrow;
+use core::cell::UnsafeCell;
+use core::cmp;
 use eonix_mm::address::{AddrOps as _, VAddr, VRange};
 use eonix_mm::page_table::{PageAttribute, RawAttribute, PTE};
 use eonix_mm::paging::{PAGE_SIZE, PFN};
@@ -145,53 +145,55 @@ impl MMArea {
 
         let file_offset = file_mapping.offset + offset;
         let cnt_to_read = (file_mapping.length - offset).min(0x1000);
-        let raw_page = page_cache.get_page(file_offset).await?.ok_or(EINVAL)?;
 
-        // Non-write faults: we find page in pagecache and do mapping
-        // Write fault: we need to care about shared or private mapping.
-        if !write {
-            // Bss is embarrassing in pagecache!
-            // We have to assume cnt_to_read < PAGE_SIZE all bss
-            if cnt_to_read < PAGE_SIZE {
-                let new_page = Page::zeroed();
-                unsafe {
-                    let page_data = new_page.as_memblk().as_bytes_mut();
-                    page_data[..cnt_to_read]
-                        .copy_from_slice(&raw_page.as_memblk().as_bytes()[..cnt_to_read]);
-                }
-                *pfn = new_page.into_raw();
-            } else {
-                raw_page.refcount().fetch_add(1, atomic::Ordering::Relaxed);
-                *pfn = Into::<PFN>::into(raw_page);
-            }
+        page_cache
+            .with_page(file_offset, |page, cache_page| {
+                // Non-write faults: we find page in pagecache and do mapping
+                // Write fault: we need to care about shared or private mapping.
+                if !write {
+                    // Bss is embarrassing in pagecache!
+                    // We have to assume cnt_to_read < PAGE_SIZE all bss
+                    if cnt_to_read < PAGE_SIZE {
+                        let new_page = Page::zeroed();
+                        unsafe {
+                            let page_data = new_page.as_memblk().as_bytes_mut();
+                            page_data[..cnt_to_read]
+                                .copy_from_slice(&page.as_memblk().as_bytes()[..cnt_to_read]);
+                        }
+                        *pfn = new_page.into_raw();
+                    } else {
+                        *pfn = page.clone().into_raw();
+                    }
 
-            if self.permission.write {
-                if self.is_shared {
-                    // The page may will not be written,
-                    // But we simply assume page will be dirty
-                    raw_page.set_dirty();
-                    attr.insert(PageAttribute::WRITE);
+                    if self.permission.write {
+                        if self.is_shared {
+                            // The page may will not be written,
+                            // But we simply assume page will be dirty
+                            cache_page.set_dirty();
+                            attr.insert(PageAttribute::WRITE);
+                        } else {
+                            attr.insert(PageAttribute::COPY_ON_WRITE);
+                        }
+                    }
                 } else {
-                    attr.insert(PageAttribute::COPY_ON_WRITE);
-                }
-            }
-        } else {
-            if self.is_shared {
-                raw_page.refcount().fetch_add(1, atomic::Ordering::Relaxed);
-                raw_page.set_dirty();
-                *pfn = Into::<PFN>::into(raw_page);
-            } else {
-                let new_page = Page::zeroed();
-                unsafe {
-                    let page_data = new_page.as_memblk().as_bytes_mut();
-                    page_data[..cnt_to_read]
-                        .copy_from_slice(&raw_page.as_memblk().as_bytes()[..cnt_to_read]);
-                }
-                *pfn = new_page.into_raw();
-            }
+                    if self.is_shared {
+                        cache_page.set_dirty();
+                        *pfn = page.clone().into_raw();
+                    } else {
+                        let new_page = Page::zeroed();
+                        unsafe {
+                            let page_data = new_page.as_memblk().as_bytes_mut();
+                            page_data[..cnt_to_read]
+                                .copy_from_slice(&page.as_memblk().as_bytes()[..cnt_to_read]);
+                        }
+                        *pfn = new_page.into_raw();
+                    }
 
-            attr.insert(PageAttribute::WRITE);
-        }
+                    attr.insert(PageAttribute::WRITE);
+                }
+            })
+            .await?
+            .ok_or(EINVAL)?;
 
         attr.insert(PageAttribute::PRESENT);
         attr.remove(PageAttribute::MAPPED);

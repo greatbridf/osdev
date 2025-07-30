@@ -1,7 +1,7 @@
 use super::{
     config::{self, mm::*},
     console::write_str,
-    cpu::CPUID,
+    cpu::{CPUID, CPU_COUNT},
     time::set_next_timer,
     trap::TRAP_SCRATCH,
 };
@@ -202,6 +202,8 @@ fn setup_kernel_page_table(alloc: impl PageAlloc) {
 
 /// set up tp register to percpu
 fn setup_cpu(alloc: impl PageAlloc, hart_id: usize) {
+    CPU_COUNT.fetch_add(1, Ordering::Relaxed);
+
     let mut percpu_area = PercpuArea::new(|layout| {
         let page_count = layout.size().div_ceil(PAGE_SIZE);
         let page = Page::alloc_at_least_in(page_count, alloc);

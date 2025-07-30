@@ -1,4 +1,5 @@
 use super::cpu::CPUID;
+use super::cpu::CPU_COUNT;
 use crate::{
     arch::{
         cpu::CPU,
@@ -16,7 +17,7 @@ use core::{
     alloc::Allocator,
     arch::asm,
     cell::RefCell,
-    sync::atomic::{AtomicBool, AtomicUsize},
+    sync::atomic::{AtomicBool, AtomicUsize, Ordering},
 };
 use eonix_hal_traits::mm::Memory;
 use eonix_mm::{
@@ -227,6 +228,8 @@ fn setup_cpu(alloc: impl PageAlloc, hart_id: usize) {
     // enable FPU
     euen::set_fpe(true);
     euen::set_sxe(true);
+
+    CPU_COUNT.fetch_add(1, Ordering::Relaxed);
 
     let mut percpu_area = PercpuArea::new(|layout| {
         let page_count = layout.size().div_ceil(PAGE_SIZE);

@@ -1,4 +1,4 @@
-use super::access::AsMemoryBlock;
+use super::{paging::AllocZeroed, Page};
 use crate::{
     io::{Buffer, FillResult, Stream},
     kernel::mem::page_alloc::RawPagePtr,
@@ -7,7 +7,12 @@ use crate::{
 };
 use align_ext::AlignExt;
 use alloc::{collections::btree_map::BTreeMap, sync::Weak};
-use eonix_mm::paging::{PageAlloc, RawPage, PAGE_SIZE, PAGE_SIZE_BITS};
+use core::mem::ManuallyDrop;
+use eonix_hal::mm::ArchPhysAccess;
+use eonix_mm::{
+    address::{PAddr, PhysAccess},
+    paging::{PageAlloc, RawPage, PAGE_SIZE, PAGE_SIZE_BITS, PFN},
+};
 use eonix_sync::Mutex;
 
 pub struct PageCache {
@@ -58,13 +63,11 @@ impl CachePage {
     }
 
     pub fn new_zeroed() -> Self {
-        let page = GlobalPageAlloc.alloc().unwrap();
-        // SAFETY: We own the page exclusively, so we can safely zero it.
-        unsafe {
-            page.as_memblk().as_bytes_mut().fill(0);
-        }
-        page.cache_init();
-        Self(page)
+        let page = Page::zeroed();
+        let raw_page_ptr = RawPagePtr::from(page.into_raw());
+
+        raw_page_ptr.cache_init();
+        Self(raw_page_ptr)
     }
 
     pub fn valid_size(&self) -> usize {
@@ -77,13 +80,21 @@ impl CachePage {
 
     pub fn all(&self) -> &[u8] {
         unsafe {
-            self.0.as_memblk().as_bytes()
+            core::slice::from_raw_parts(
+                // SAFETY: The page is exclusively owned by us, so we can safely access its data.
+                ArchPhysAccess::as_ptr(PAddr::from(PFN::from(self.0))).as_ptr(),
+                PAGE_SIZE,
+            )
         }
     }
 
     pub fn all_mut(&mut self) -> &mut [u8] {
         unsafe {
-            self.0.as_memblk().as_bytes_mut()
+            core::slice::from_raw_parts_mut(
+                // SAFETY: The page is exclusively owned by us, so we can safely access its data.
+                ArchPhysAccess::as_ptr(PAddr::from(PFN::from(self.0))).as_ptr(),
+                PAGE_SIZE,
+            )
         }
     }
 
@@ -247,7 +258,10 @@ impl PageCache {
         Ok(())
     }
 
-    pub async fn get_page(&self, offset: usize) -> KResult<Option<RawPagePtr>> {
+    pub async fn with_page<F, O>(&self, offset: usize, func: F) -> KResult<Option<O>>
+    where
+        F: FnOnce(&Page, &CachePage) -> O,
+    {
         let offset_aligin = offset.align_down(PAGE_SIZE);
         let page_id = offset_aligin >> PAGE_SIZE_BITS;
         let size = self.backend.upgrade().unwrap().size();
@@ -258,16 +272,23 @@ impl PageCache {
 
         let mut pages = self.pages.lock().await;
 
-        if let Some(page) = pages.get(&page_id) {
-            Ok(Some(page.0))
-        } else {
-            let mut new_page = CachePage::new();
-            self.backend
-                .upgrade()
-                .unwrap()
-                .read_page(&mut new_page, offset_aligin)?;
-            pages.insert(page_id, new_page);
-            Ok(Some(new_page.0))
+        let raw_page_ptr = match pages.get(&page_id) {
+            Some(CachePage(raw_page_ptr)) => *raw_page_ptr,
+            None => {
+                let mut new_page = CachePage::new();
+                self.backend
+                    .upgrade()
+                    .unwrap()
+                    .read_page(&mut new_page, offset_aligin)?;
+                pages.insert(page_id, new_page);
+                new_page.0
+            }
+        };
+
+        unsafe {
+            let page = ManuallyDrop::new(Page::from_raw_unchecked(PFN::from(raw_page_ptr)));
+
+            Ok(Some(func(&page, &CachePage(raw_page_ptr))))
         }
     }
 }

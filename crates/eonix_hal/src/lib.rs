@@ -19,7 +19,7 @@ pub mod fpu {
 }
 
 pub mod processor {
-    pub use crate::arch::cpu::{halt, UserTLS, CPU};
+    pub use crate::arch::cpu::{halt, UserTLS, CPU, CPU_COUNT};
 }
 
 /// Re-export the arch module for use in other crates

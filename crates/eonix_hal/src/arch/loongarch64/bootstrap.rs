@@ -25,6 +25,9 @@ use eonix_mm::{
     paging::{Page, PageAccess, PageAlloc, PAGE_SIZE, PFN},
 };
 use eonix_percpu::PercpuArea;
+use loongArch64::register::ecfg;
+use loongArch64::register::ecfg::LineBasedInterrupt;
+use loongArch64::register::tcfg;
 use loongArch64::register::{euen, pgdl};
 
 #[unsafe(link_section = ".bootstrap.stack")]
@@ -264,7 +267,14 @@ fn setup_cpu(alloc: impl PageAlloc, hart_id: usize) {
         )
     }
 
-    // todo!("set_next_timer()");
+    let timer_frequency = loongArch64::time::get_timer_freq();
+
+    // 1ms periodic timer.
+    tcfg::set_init_val(timer_frequency / 1_000);
+    tcfg::set_periodic(true);
+    tcfg::set_en(true);
+
+    ecfg::set_lie(LineBasedInterrupt::all());
 }
 
 /// TODO

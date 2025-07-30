@@ -8,6 +8,7 @@ use eonix_mm::address::VAddr;
 use loongArch64::register::{
     badv,
     estat::{Estat, Exception, Interrupt, Trap},
+    ticlr,
 };
 
 #[repr(C)]
@@ -145,7 +146,7 @@ impl RawTrapContext for TrapContext {
         match self.estat.cause() {
             Trap::Interrupt(Interrupt::Timer) => TrapType::Timer {
                 callback: |handler| {
-                    todo!("set_next_timer()");
+                    ticlr::clear_timer_interrupt();
                     handler();
                 },
             },

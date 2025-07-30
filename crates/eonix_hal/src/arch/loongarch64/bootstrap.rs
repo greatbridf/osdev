@@ -269,3 +269,12 @@ fn setup_cpu(alloc: impl PageAlloc, hart_id: usize) {
 
 /// TODO
 fn bootstrap_smp(alloc: impl Allocator, page_alloc: &RefCell<BasicPageAlloc>) {}
+
+pub fn shutdown() -> ! {
+    let ged_addr = PAddr::from(0x100E001C);
+    unsafe {
+        let ged_ptr = ArchPhysAccess::as_ptr::<u8>(ged_addr);
+        ged_ptr.write_volatile(0x34);
+        loop {}
+    }
+}

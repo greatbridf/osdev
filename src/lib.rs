@@ -48,12 +48,12 @@ use kernel_init::setup_memory;
 use path::Path;
 use prelude::*;
 
-#[cfg(target_arch = "riscv64")]
+#[cfg(any(target_arch = "riscv64", target_arch = "loongarch64"))]
 fn do_panic() -> ! {
     shutdown();
 }
 
-#[cfg(not(target_arch = "riscv64"))]
+#[cfg(not(any(target_arch = "riscv64", target_arch = "loongarch64")))]
 fn do_panic() -> ! {
     // Spin forever.
     loop {

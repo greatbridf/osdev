@@ -40,6 +40,10 @@ elif [ "$ARCH" = "riscv64" ]; then
 elif [ "$ARCH" = "loongarch64" ]; then
     $SUDO cp ./user-programs/busybox.la64 build/mnt/busybox
     $SUDO cp ./user-programs/init_script_loongarch64.sh build/mnt/initsh
+elif [ "$ARCH" = "comp" ]; then
+    $SUDO cp ./user-programs/busybox.static build/mnt/busyboxr
+    $SUDO cp ./user-programs/busybox.la64 build/mnt/busyboxl
+    $SUDO cp ./user-programs/init_script_comp.sh build/mnt/initsh
 fi
 
 # Add your custom files here

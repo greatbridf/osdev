@@ -419,7 +419,7 @@ impl MountCreator for FatMountCreator {
     }
 
     fn create_mount(&self, _source: &str, _flags: u64, mp: &Arc<Dentry>) -> KResult<Mount> {
-        let (fatfs, root_inode) = FatFs::create(make_device(8, 1))?;
+        let (fatfs, root_inode) = FatFs::create(make_device(8, 17))?;
 
         Mount::new(mp, fatfs, root_inode)
     }

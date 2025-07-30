@@ -86,4 +86,70 @@ int main() {
 }
 EOF
 
+mkdir /mnt1
+mount -t ext4 /dev/vda /mnt1
+
+cp -r /mnt1/glibc/lib .
+ln -s /mnt1/musl/lib/libc.so /lib/ld-musl-riscv64-sf.so.1
+
+ln -s $BUSYBOX /busybox
+ln -s $BUSYBOX /bin/busybox
+
+mkdir /musl-tests
+cd /musl-tests
+
+ln -s $BUSYBOX ./busybox
+
+cp -r /mnt1/musl/basic .
+
+ln -s /mnt1/musl/busybox_cmd.txt .
+
+ln -s /mnt1/musl/iozone .
+
+ln -s /mnt1/musl/lua .
+ln -s /mnt1/musl/test.sh .
+
+for item in `ls /mnt1/musl/*.lua`; do
+    ln -s $item .
+done
+
+ln -s /mnt1/musl/iozone_testcode.sh .
+ln -s /mnt1/musl/lua_testcode.sh .
+ln -s /mnt1/musl/busybox_testcode.sh .
+ln -s /mnt1/musl/basic_testcode.sh .
+
+sh iozone_testcode.sh
+sh busybox_testcode.sh
+sh basic_testcode.sh
+sh lua_testcode.sh
+
+cd /
+mkdir glibc-tests
+cd glibc-tests
+
+ln -s $BUSYBOX ./busybox
+
+cp -r /mnt1/glibc/basic .
+
+ln -s /mnt1/glibc/busybox_cmd.txt .
+
+ln -s /mnt1/glibc/iozone .
+
+ln -s /mnt1/glibc/lua .
+ln -s /mnt1/glibc/test.sh .
+
+for item in `ls /mnt1/glibc/*.lua`; do
+    ln -s $item .
+done
+
+ln -s /mnt1/glibc/iozone_testcode.sh .
+ln -s /mnt1/glibc/lua_testcode.sh .
+ln -s /mnt1/glibc/busybox_testcode.sh .
+ln -s /mnt1/glibc/basic_testcode.sh .
+
+sh iozone_testcode.sh
+sh busybox_testcode.sh
+sh basic_testcode.sh
+sh lua_testcode.sh
+
 exec $BUSYBOX sh -l < /dev/ttyS0 > /dev/ttyS0 2> /dev/ttyS0

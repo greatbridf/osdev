@@ -1,7 +1,10 @@
 #!/bin/sh
 
 OS=`uname -s`
-SUDO=sudo
+
+if sudo --version > /dev/null 2>&1; then
+    SUDO=sudo
+fi
 
 if [ "$OUTPUT" = "" ]; then
     OUTPUT="build/fs-$ARCH.img"

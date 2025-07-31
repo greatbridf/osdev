@@ -11,6 +11,7 @@ use crate::{
         task::Thread,
         terminal::{Terminal, TerminalIORequest},
         user::{UserPointer, UserPointerMut},
+        vfs::inode::Ino,
         CharDevice,
     },
     prelude::*,
@@ -344,6 +345,9 @@ impl InodeFile {
     }
 
     fn read(&self, buffer: &mut dyn Buffer) -> KResult<usize> {
+        if self.size() == 0 {
+            return Ok(0);
+        }
         if !self.read {
             return Err(EBADF);
         }
@@ -353,6 +357,16 @@ impl InodeFile {
         let nread = self.dentry.read(buffer, *cursor)?;
 
         *cursor += nread;
+        Ok(nread)
+    }
+
+    // TODO: error handle
+    fn read_at(&self, buffer: &mut dyn Buffer, offset: usize) -> KResult<usize> {
+        if !self.read {
+            return Err(EBADF);
+        }
+
+        let nread = self.dentry.read(buffer, offset)?;
         Ok(nread)
     }
 
@@ -414,6 +428,14 @@ impl InodeFile {
         *cursor += nread;
         Ok(())
     }
+
+    fn size(&self) -> usize {
+        self.dentry.size()
+    }
+
+    fn truncate(&self, new_size: usize) -> KResult<()> {
+        self.dentry.truncate(new_size)
+    }
 }
 
 impl TerminalFile {
@@ -466,6 +488,13 @@ impl FileType {
         }
     }
 
+    pub fn read_at(&self, buffer: &mut dyn Buffer, offset: usize) -> KResult<usize> {
+        match self {
+            FileType::Inode(inode) => inode.read_at(buffer, offset),
+            _ => Err(EBADF),
+        }
+    }
+
     // TODO
     // /// Read from the file into the given buffers.
     // ///
@@ -495,6 +524,20 @@ impl FileType {
         match self {
             FileType::Inode(inode) => inode.seek(option),
             _ => Err(ESPIPE),
+        }
+    }
+
+    pub fn size(&self) -> KResult<usize> {
+        match self {
+            FileType::Inode(inode) => Ok(inode.size()),
+            _ => Err(EINVAL),
+        }
+    }
+
+    pub fn truncate(&self, new_size: usize) -> KResult<()> {
+        match self {
+            FileType::Inode(inode) => inode.truncate(new_size),
+            _ => Err(EINVAL),
         }
     }
 

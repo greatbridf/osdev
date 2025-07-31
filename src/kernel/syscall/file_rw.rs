@@ -21,6 +21,7 @@ use crate::{
     prelude::*,
 };
 use alloc::sync::Arc;
+use eonix_log::println;
 use eonix_runtime::task::Task;
 use posix_types::ctypes::{Long, PtrT};
 use posix_types::namei::RenameFlags;
@@ -76,6 +77,21 @@ fn read(fd: FD, buffer: *mut u8, bufsize: usize) -> KResult<usize> {
     Task::block_on(thread.files.get(fd).ok_or(EBADF)?.read(&mut buffer))
 }
 
+#[eonix_macros::define_syscall(SYS_PREAD64)]
+fn pread(fd: FD, buffer: *mut u8, bufsize: usize, offset: usize) -> KResult<usize> {
+    if thread.files.get(fd).ok_or(EBADF)?.size()? == 0 {
+        return Ok(0);
+    }
+    let mut buffer = UserBuffer::new(buffer, bufsize)?;
+    let nread = thread
+        .files
+        .get(fd)
+        .ok_or(EBADF)?
+        .read_at(&mut buffer, offset)?;
+    println!("pread offset: {}, nread: {}", offset, nread);
+    Ok(nread)
+}
+
 #[eonix_macros::define_syscall(SYS_WRITE)]
 fn write(fd: FD, buffer: *const u8, count: usize) -> KResult<usize> {
     let buffer = CheckedUserPointer::new(buffer, count)?;
@@ -91,8 +107,8 @@ fn openat(dirfd: FD, pathname: *const u8, flags: OpenFlags, mode: u32) -> KResul
 }
 
 #[eonix_macros::define_syscall(SYS_FTRUNCATE64)]
-fn truncate() -> KResult<()> {
-    Ok(())
+fn ftruncate(fd: FD, new_size: usize) -> KResult<()> {
+    thread.files.get(fd).ok_or(EBADF)?.truncate(new_size)
 }
 
 /// TODO:
@@ -148,12 +164,6 @@ fn copy_file_range(
     println!("off_in: {}", use_file_offset_in);
     println!("off_out: {}", use_file_offset_out);*/
 
-    // 检查输入文件大小
-    //let file_size = inode_in.dentry.size()?;
-    //if input_offset >= file_size as i64 {
-    //    return Ok(0);
-    //}
-
     let mut total_copied = 0usize;
     let mut remaining = len;
     let buffer_size = 4096;
@@ -178,7 +188,6 @@ fn copy_file_range(
         //println!("copy_file_range try write, offset: {}", output_offset);
         let mut stream = (&buffer[..read_bytes]).into_stream();
         let written_bytes = Task::block_on(file_out.write(&mut stream))?;
-        println!("copy_file_range write succeed");
         if written_bytes == 0 {
             break;
         }
@@ -189,7 +198,7 @@ fn copy_file_range(
         remaining -= written_bytes;
 
         if written_bytes < read_bytes {
-            break;
+            return Err(u32::MAX);
         }
     }
 
@@ -205,7 +214,6 @@ fn copy_file_range(
         //copy_to_user(off_out, &output_offset)?;
     }*/
     println!("copy_file_range succeed, len: {}", len);
-    println!();
 
     Ok(total_copied as isize)
 }

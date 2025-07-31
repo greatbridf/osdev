@@ -405,6 +405,10 @@ impl Dentry {
 }
 
 impl Dentry {
+    pub fn size(&self) -> usize {
+        self.get_inode().unwrap().size()
+    }
+
     pub fn read(&self, buffer: &mut dyn Buffer, offset: usize) -> KResult<usize> {
         let inode = self.get_inode()?;
 

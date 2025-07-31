@@ -163,3 +163,8 @@ fn times(tms: *mut TMS) -> KResult<()> {
 }
 
 pub fn keep_alive() {}
+
+#[eonix_macros::define_syscall(SYS_GETRANDOM)]
+fn get_random() -> KResult<i32> {
+    Ok(114514)
+}

@@ -56,6 +56,12 @@ impl SyscallRetVal for u32 {
     }
 }
 
+impl SyscallRetVal for i32 {
+    fn into_retval(self) -> Option<usize> {
+        Some(self as usize)
+    }
+}
+
 impl SyscallRetVal for usize {
     fn into_retval(self) -> Option<usize> {
         Some(self)

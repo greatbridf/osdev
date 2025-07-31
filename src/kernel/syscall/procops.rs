@@ -401,6 +401,12 @@ fn getgid() -> KResult<u32> {
     Ok(0)
 }
 
+#[eonix_macros::define_syscall(SYS_GETEGID)]
+fn getegid() -> KResult<u32> {
+    // All users are root for now.
+    Ok(0)
+}
+
 #[cfg(target_arch = "x86_64")]
 #[eonix_macros::define_syscall(SYS_GETGID32)]
 fn getgid32() -> KResult<u32> {

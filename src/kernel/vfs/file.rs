@@ -344,6 +344,15 @@ impl InodeFile {
         }
     }
 
+    fn write_at(&self, stream: &mut dyn Stream, offset: usize) -> KResult<usize> {
+        if !self.write {
+            return Err(EBADF);
+        }
+
+        let nwrote = self.dentry.write(stream, WriteOffset::Position(offset))?;
+        Ok(nwrote)
+    }
+
     fn read(&self, buffer: &mut dyn Buffer) -> KResult<usize> {
         if self.size() == 0 {
             return Ok(0);
@@ -362,6 +371,9 @@ impl InodeFile {
 
     // TODO: error handle
     fn read_at(&self, buffer: &mut dyn Buffer, offset: usize) -> KResult<usize> {
+        if self.size() == 0 {
+            return Ok(0);
+        }
         if !self.read {
             return Err(EBADF);
         }
@@ -516,6 +528,13 @@ impl FileType {
             FileType::PipeWrite(pipe) => pipe.pipe.write(stream).await,
             FileType::TTY(tty) => tty.write(stream),
             FileType::CharDev(device) => device.write(stream),
+            _ => Err(EBADF),
+        }
+    }
+
+    pub fn write_at(&self, stream: &mut dyn Stream, offset: usize) -> KResult<usize> {
+        match self {
+            FileType::Inode(inode) => inode.write_at(stream, offset),
             _ => Err(EBADF),
         }
     }

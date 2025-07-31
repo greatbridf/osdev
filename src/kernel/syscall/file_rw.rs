@@ -21,7 +21,6 @@ use crate::{
     prelude::*,
 };
 use alloc::sync::Arc;
-use eonix_log::println;
 use eonix_runtime::task::Task;
 use posix_types::ctypes::{Long, PtrT};
 use posix_types::namei::RenameFlags;
@@ -88,7 +87,6 @@ fn pread(fd: FD, buffer: *mut u8, bufsize: usize, offset: usize) -> KResult<usiz
         .get(fd)
         .ok_or(EBADF)?
         .read_at(&mut buffer, offset)?;
-    println!("pread offset: {}, nread: {}", offset, nread);
     Ok(nread)
 }
 
@@ -111,22 +109,15 @@ fn ftruncate(fd: FD, new_size: usize) -> KResult<()> {
     thread.files.get(fd).ok_or(EBADF)?.truncate(new_size)
 }
 
-/// TODO:
-/// truncate syscall... haowuyu
-/// off_in and off_out's not null case, kernel need access user's address
-/// check input file's size
-/// real read and write operation
-/// update information
 #[eonix_macros::define_syscall(SYS_COPY_FILE_RANGE)]
 fn copy_file_range(
     fd_in: FD,
-    off_in: *mut i64,
+    off_in: *mut usize,
     fd_out: FD,
-    off_out: *mut i64,
+    off_out: *mut usize,
     len: usize,
     _flags: u32,
 ) -> KResult<isize> {
-    println!("copy_file_range, len: {}", len);
     if len == 0 {
         return Ok(0);
     }
@@ -134,66 +125,53 @@ fn copy_file_range(
     let file_in = thread.files.get(fd_in).ok_or(EBADF)?.clone();
     let file_out = thread.files.get(fd_out).ok_or(EBADF)?.clone();
 
-    /*let (inode_in, inode_out) = match (&file_in.file_type, &file_out.file_type) {
-        (FileType::Inode(in_file), FileType::Inode(out_file)) => (in_file, out_file),
-        _ => return Err(EINVAL),
-    };*/
+    let input_offset = match off_in.is_null() {
+        true => None,
+        false => {
+            let buffer = UserBuffer::new(off_in as *mut u8, size_of::<usize>())?;
+            let offset = usize::from_le_bytes(buffer.as_slice().try_into().unwrap());
+            Some(offset)
+        }
+    };
 
-    //let mut in_cursor = Task::block_on(inode_in.cursor.lock());
-    //let mut out_cursor = Task::block_on(inode_out.cursor.lock());
-    //let mut input_offset = *in_cursor;
-    //let mut output_offset = *out_cursor;
-    //let use_file_offset_in;
-    //let use_file_offset_out;
-
-    /*if off_in.is_null() {
-        input_offset = *in_cursor;
-        use_file_offset_in = true;
-    } else {
-        //input_offset = copy_from_user(off_in)?;
-        use_file_offset_in = false;
-    }
-
-    if off_out.is_null() {
-        output_offset = *out_cursor;
-        use_file_offset_out = true;
-    } else {
-        //output_offset = copy_from_user(off_out)?;
-        use_file_offset_out = false;
-    }
-    println!("off_in: {}", use_file_offset_in);
-    println!("off_out: {}", use_file_offset_out);*/
+    let output_offset = match off_out.is_null() {
+        true => None,
+        false => {
+            let buffer = UserBuffer::new(off_out as *mut u8, size_of::<usize>())?;
+            let offset = usize::from_le_bytes(buffer.as_slice().try_into().unwrap());
+            Some(offset)
+        }
+    };
 
     let mut total_copied = 0usize;
     let mut remaining = len;
     let buffer_size = 4096;
     let mut buffer = vec![0u8; buffer_size];
 
-    while remaining > 0
-    /*&& input_offset < file_size as i64*/
-    {
+    while remaining > 0 {
         let to_read = core::cmp::min(remaining, buffer_size);
-        //(file_size as i64 - input_offset) as usize,
-
         if to_read == 0 {
             break;
         }
 
         let mut byte_buffer = ByteBuffer::new(&mut buffer[..to_read]);
-        let read_bytes = Task::block_on(file_in.read(&mut byte_buffer))?;
+        let read_bytes = match input_offset {
+            Some(offset) => file_in.read_at(&mut byte_buffer, offset + total_copied)?,
+            None => Task::block_on(file_in.read(&mut byte_buffer))?,
+        };
         if read_bytes == 0 {
             break;
         }
 
-        //println!("copy_file_range try write, offset: {}", output_offset);
         let mut stream = (&buffer[..read_bytes]).into_stream();
-        let written_bytes = Task::block_on(file_out.write(&mut stream))?;
+        let written_bytes = match output_offset {
+            Some(offset) => file_out.write_at(&mut stream, offset + total_copied)?,
+            None => Task::block_on(file_out.write(&mut stream))?,
+        };
         if written_bytes == 0 {
             break;
         }
 
-        //input_offset += written_bytes;
-        //output_offset += written_bytes;
         total_copied += written_bytes;
         remaining -= written_bytes;
 
@@ -202,18 +180,21 @@ fn copy_file_range(
         }
     }
 
-    /*if use_file_offset_in {
-        *in_cursor = input_offset;
-    } else {
-        //copy_to_user(off_in, &input_offset)?;
+    match input_offset {
+        Some(offset) => {
+            let mut buffer = UserBuffer::new(off_in as *mut u8, size_of::<usize>())?;
+            let _ = buffer.fill(&(offset + total_copied).to_le_bytes());
+        }
+        None => (),
     }
 
-    if use_file_offset_out {
-        *out_cursor = output_offset;
-    } else {
-        //copy_to_user(off_out, &output_offset)?;
-    }*/
-    println!("copy_file_range succeed, len: {}", len);
+    match output_offset {
+        Some(offset) => {
+            let mut buffer = UserBuffer::new(off_out as *mut u8, size_of::<usize>())?;
+            let _ = buffer.fill(&(offset + total_copied).to_le_bytes());
+        }
+        None => (),
+    }
 
     Ok(total_copied as isize)
 }

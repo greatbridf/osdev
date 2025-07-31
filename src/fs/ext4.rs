@@ -330,10 +330,12 @@ impl Inode for FileInode {
     fn truncate(&self, length: usize) -> KResult<()> {
         let _lock = Task::block_on(self.rwsem.write());
 
-        //let vfs = self.vfs.upgrade().ok_or(EIO)?;
-        //let ext4fs = vfs.as_any().downcast_ref::<Ext4Fs>().unwrap();
-
-        //ext4fs.inner.truncate();
+        if length == 0 {
+            let vfs = self.vfs.upgrade().ok_or(EIO)?;
+            let ext4fs = vfs.as_any().downcast_ref::<Ext4Fs>().unwrap();
+            let buffer = vec![0u8; 10];
+            let _ = ext4fs.inner.write(self.ino as u32, 0, &buffer);
+        }
 
         self.size.store(length as u64, Ordering::Relaxed);
         *self.mtime.lock() = Instant::now();

@@ -266,10 +266,14 @@ impl Inode for FileInode {
         let mut temp_buf = vec![0u8; 4096];
         let mut total_written = 0;
 
+        let mut store_new_end = None;
         let offset = match offset {
             WriteOffset::Position(offset) => offset,
             // TODO: here need to add some operate
-            WriteOffset::End(end) => *end,
+            WriteOffset::End(end) => {
+                store_new_end = Some(end);
+                self.size.load(Ordering::Relaxed) as usize
+            }
         };
 
         while let Some(data) = stream.poll_data(&mut temp_buf)? {
@@ -283,6 +287,9 @@ impl Inode for FileInode {
             }
         }
 
+        if let Some(store_end) = store_new_end {
+            *store_end = offset + total_written;
+        }
         let mtime = Instant::now();
         *self.mtime.lock() = mtime;
         let new_size = (offset + total_written) as u64;

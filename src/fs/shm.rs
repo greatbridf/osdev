@@ -6,7 +6,7 @@ use eonix_sync::{LazyLock, Mutex};
 
 use crate::{
     fs::tmpfs::{DirectoryInode, FileInode, TmpFs},
-    kernel::{constants::ENOSPC, timer::Instant, vfs::inode::Mode},
+    kernel::{constants::ENOSPC, vfs::inode::Mode},
     prelude::KResult,
 };
 

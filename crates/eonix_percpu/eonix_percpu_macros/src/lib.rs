@@ -1,5 +1,6 @@
 extern crate proc_macro;
 
+mod loongarch64;
 mod riscv64;
 mod x86_64;
 
@@ -228,6 +229,28 @@ pub fn define_percpu_shared_riscv64(
         item.into(),
         riscv64::get_percpu_pointer,
         riscv64::get_percpu_offset,
+    )
+    .into()
+}
+
+#[proc_macro_attribute]
+pub fn define_percpu_loongarch64(
+    attrs: proc_macro::TokenStream,
+    item: proc_macro::TokenStream,
+) -> proc_macro::TokenStream {
+    define_percpu_impl(attrs.into(), item.into(), loongarch64::get_percpu_pointer).into()
+}
+
+#[proc_macro_attribute]
+pub fn define_percpu_shared_loongarch64(
+    attrs: proc_macro::TokenStream,
+    item: proc_macro::TokenStream,
+) -> proc_macro::TokenStream {
+    define_percpu_shared_impl(
+        attrs.into(),
+        item.into(),
+        loongarch64::get_percpu_pointer,
+        loongarch64::get_percpu_offset,
     )
     .into()
 }

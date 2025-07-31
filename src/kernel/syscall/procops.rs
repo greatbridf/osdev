@@ -428,10 +428,21 @@ fn geteuid() -> KResult<u32> {
     do_geteuid(thread)
 }
 
-#[eonix_macros::define_syscall(SYS_GETGID)]
-fn getgid() -> KResult<u32> {
+#[eonix_macros::define_syscall(SYS_GETEGID)]
+fn getegid() -> KResult<u32> {
     // All users are root for now.
     Ok(0)
+}
+
+#[eonix_macros::define_syscall(SYS_GETGID)]
+fn getgid() -> KResult<u32> {
+    sys_getegid(thread)
+}
+
+#[cfg(target_arch = "x86_64")]
+#[eonix_macros::define_syscall(SYS_GETGID32)]
+fn getgid32() -> KResult<u32> {
+    sys_getegid(thread)
 }
 
 #[eonix_macros::define_syscall(SYS_SYNC)]
@@ -442,12 +453,6 @@ fn sync() -> KResult<()> {
 #[eonix_macros::define_syscall(SYS_FSYNC)]
 fn fsync() -> KResult<()> {
     Ok(())
-}
-
-#[cfg(target_arch = "x86_64")]
-#[eonix_macros::define_syscall(SYS_GETGID32)]
-fn getgid32() -> KResult<u32> {
-    sys_getgid(thread)
 }
 
 #[eonix_macros::define_syscall(SYS_GETTID)]
@@ -483,7 +488,7 @@ pub fn parse_user_tls(arch_tls: usize) -> KResult<UserTLS> {
         Ok(new_tls)
     }
 
-    #[cfg(target_arch = "riscv64")]
+    #[cfg(any(target_arch = "riscv64", target_arch = "loongarch64"))]
     {
         Ok(UserTLS::new(arch_tls as u64))
     }
@@ -563,6 +568,19 @@ fn tkill(tid: u32, sig: u32) -> KResult<()> {
         .try_find_thread(tid)
         .ok_or(ESRCH)?
         .raise(Signal::try_from_raw(sig)?);
+    Ok(())
+}
+
+#[eonix_macros::define_syscall(SYS_TGKILL)]
+fn tgkill(tgid: u32, tid: u32, sig: u32) -> KResult<()> {
+    let procs = Task::block_on(ProcessList::get().read());
+
+    let thread_to_kill = procs.try_find_thread(tid).ok_or(ESRCH)?;
+    if thread_to_kill.process.pid != tgid {
+        return Err(ESRCH);
+    }
+
+    thread_to_kill.raise(Signal::try_from_raw(sig)?);
     Ok(())
 }
 
@@ -732,6 +750,9 @@ fn fork() -> KResult<u32> {
     do_clone(thread, clone_args)
 }
 
+// Some old platforms including x86_32, riscv and arm have the last two arguments
+// swapped, so we need to define two versions of `clone` syscall.
+#[cfg(not(target_arch = "loongarch64"))]
 #[eonix_macros::define_syscall(SYS_CLONE)]
 fn clone(
     clone_flags: usize,
@@ -739,6 +760,20 @@ fn clone(
     parent_tidptr: usize,
     tls: usize,
     child_tidptr: usize,
+) -> KResult<u32> {
+    let clone_args = CloneArgs::for_clone(clone_flags, new_sp, child_tidptr, parent_tidptr, tls)?;
+
+    do_clone(thread, clone_args)
+}
+
+#[cfg(target_arch = "loongarch64")]
+#[eonix_macros::define_syscall(SYS_CLONE)]
+fn clone(
+    clone_flags: usize,
+    new_sp: usize,
+    parent_tidptr: usize,
+    child_tidptr: usize,
+    tls: usize,
 ) -> KResult<u32> {
     let clone_args = CloneArgs::for_clone(clone_flags, new_sp, child_tidptr, parent_tidptr, tls)?;
 

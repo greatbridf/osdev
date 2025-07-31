@@ -6,7 +6,6 @@ use crate::kernel::mem::page_cache::PageCacheRawPage;
 use crate::KResult;
 use core::sync::atomic;
 use core::{borrow::Borrow, cell::UnsafeCell, cmp};
-use eonix_hal::traits::fault::PageFaultErrorCode;
 use eonix_mm::address::{AddrOps as _, VAddr, VRange};
 use eonix_mm::page_table::{PageAttribute, RawAttribute, PTE};
 use eonix_mm::paging::{PAGE_SIZE, PFN};
@@ -132,7 +131,7 @@ impl MMArea {
         pfn: &mut PFN,
         attr: &mut PageAttribute,
         offset: usize,
-        error: PageFaultErrorCode,
+        write: bool,
     ) -> KResult<()> {
         let Mapping::File(file_mapping) = &self.mapping else {
             panic!("Anonymous mapping should not be PA_MMAP");
@@ -148,11 +147,9 @@ impl MMArea {
         let cnt_to_read = (file_mapping.length - offset).min(0x1000);
         let raw_page = page_cache.get_page(file_offset).await?.ok_or(EINVAL)?;
 
-        // Read or ifetch fault, we find page in pagecache and do mapping
-        // Write falut, we need to care about shared or private mapping.
-        if error.contains(PageFaultErrorCode::Read)
-            || error.contains(PageFaultErrorCode::InstructionFetch)
-        {
+        // Non-write faults: we find page in pagecache and do mapping
+        // Write fault: we need to care about shared or private mapping.
+        if !write {
             // Bss is embarrassing in pagecache!
             // We have to assume cnt_to_read < PAGE_SIZE all bss
             if cnt_to_read < PAGE_SIZE {
@@ -178,7 +175,7 @@ impl MMArea {
                     attr.insert(PageAttribute::COPY_ON_WRITE);
                 }
             }
-        } else if error.contains(PageFaultErrorCode::Write) {
+        } else {
             if self.is_shared {
                 raw_page.refcount().fetch_add(1, atomic::Ordering::Relaxed);
                 raw_page.set_dirty();
@@ -194,8 +191,6 @@ impl MMArea {
             }
 
             attr.insert(PageAttribute::WRITE);
-        } else {
-            unreachable!("Unexpected page fault error code: {:?}", error);
         }
 
         attr.insert(PageAttribute::PRESENT);
@@ -203,12 +198,7 @@ impl MMArea {
         Ok(())
     }
 
-    pub fn handle(
-        &self,
-        pte: &mut impl PTE,
-        offset: usize,
-        error: Option<PageFaultErrorCode>,
-    ) -> KResult<()> {
+    pub fn handle(&self, pte: &mut impl PTE, offset: usize, write: bool) -> KResult<()> {
         let mut attr = pte.get_attr().as_page_attr().expect("Not a page attribute");
         let mut pfn = pte.get_pfn();
 
@@ -217,12 +207,15 @@ impl MMArea {
         }
 
         if attr.contains(PageAttribute::MAPPED) {
-            let error =
-                error.expect("Mapped area should not be accessed without a page fault error code");
-            Task::block_on(self.handle_mmap(&mut pfn, &mut attr, offset, error))?;
+            Task::block_on(self.handle_mmap(&mut pfn, &mut attr, offset, write))?;
         }
 
-        attr.set(PageAttribute::ACCESSED, true);
+        attr.insert(PageAttribute::ACCESSED);
+
+        if write {
+            attr.insert(PageAttribute::DIRTY);
+        }
+
         pte.set(pfn, attr.into());
 
         Ok(())

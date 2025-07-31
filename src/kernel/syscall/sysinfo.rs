@@ -1,9 +1,10 @@
 use crate::{
+    io::Buffer as _,
     kernel::{
-        constants::{CLOCK_MONOTONIC, CLOCK_REALTIME, CLOCK_REALTIME_COARSE, EINVAL},
+        constants::{CLOCK_MONOTONIC, CLOCK_REALTIME, CLOCK_REALTIME_COARSE, EINTR, EINVAL},
         task::Thread,
         timer::{Instant, Ticks},
-        user::UserPointerMut,
+        user::{UserBuffer, UserPointerMut},
     },
     prelude::*,
 };
@@ -51,6 +52,9 @@ fn newuname(buffer: *mut NewUTSName) -> KResult<()> {
 
     #[cfg(target_arch = "riscv64")]
     copy_cstr_to_array(b"riscv64", &mut uname.machine);
+
+    #[cfg(target_arch = "loongarch64")]
+    copy_cstr_to_array(b"loongarch64", &mut uname.machine);
 
     copy_cstr_to_array(b"(none)", &mut uname.domainname);
 
@@ -163,6 +167,24 @@ fn times(tms: *mut TMS) -> KResult<()> {
         tms_cutime: 0,
         tms_cstime: 0,
     })
+}
+
+#[eonix_macros::define_syscall(SYS_GETRANDOM)]
+fn get_random(buf: *mut u8, len: usize, flags: u32) -> KResult<usize> {
+    if flags != 0 {
+        return Err(EINVAL);
+    }
+
+    let mut buffer = UserBuffer::new(buf, len)?;
+    for i in (0u8..=255).cycle().step_by(53) {
+        let _ = buffer.fill(&[i])?;
+
+        if Thread::current().signal_list.has_pending_signal() {
+            return Err(EINTR);
+        }
+    }
+
+    Ok(len)
 }
 
 pub fn keep_alive() {}

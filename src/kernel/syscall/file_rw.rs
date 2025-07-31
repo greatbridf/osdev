@@ -1,5 +1,5 @@
 use super::FromSyscallArg;
-use crate::io::IntoStream;
+use crate::io::{ByteBuffer, IntoStream};
 use crate::kernel::constants::{
     EBADF, EFAULT, EINVAL, ENOENT, ENOTDIR, SEEK_CUR, SEEK_END, SEEK_SET, S_IFBLK, S_IFCHR,
 };
@@ -88,6 +88,126 @@ fn write(fd: FD, buffer: *const u8, count: usize) -> KResult<usize> {
 fn openat(dirfd: FD, pathname: *const u8, flags: OpenFlags, mode: u32) -> KResult<FD> {
     let dentry = dentry_from(thread, dirfd, pathname, flags.follow_symlink())?;
     thread.files.open(&dentry, flags, mode)
+}
+
+#[eonix_macros::define_syscall(SYS_FTRUNCATE64)]
+fn truncate() -> KResult<()> {
+    Ok(())
+}
+
+/// TODO:
+/// truncate syscall... haowuyu
+/// off_in and off_out's not null case, kernel need access user's address
+/// check input file's size
+/// real read and write operation
+/// update information
+#[eonix_macros::define_syscall(SYS_COPY_FILE_RANGE)]
+fn copy_file_range(
+    fd_in: FD,
+    off_in: *mut i64,
+    fd_out: FD,
+    off_out: *mut i64,
+    len: usize,
+    _flags: u32,
+) -> KResult<isize> {
+    println!("copy_file_range, len: {}", len);
+    if len == 0 {
+        return Ok(0);
+    }
+
+    let file_in = thread.files.get(fd_in).ok_or(EBADF)?.clone();
+    let file_out = thread.files.get(fd_out).ok_or(EBADF)?.clone();
+
+    /*let (inode_in, inode_out) = match (&file_in.file_type, &file_out.file_type) {
+        (FileType::Inode(in_file), FileType::Inode(out_file)) => (in_file, out_file),
+        _ => return Err(EINVAL),
+    };*/
+
+    //let mut in_cursor = Task::block_on(inode_in.cursor.lock());
+    //let mut out_cursor = Task::block_on(inode_out.cursor.lock());
+    //let mut input_offset = *in_cursor;
+    //let mut output_offset = *out_cursor;
+    //let use_file_offset_in;
+    //let use_file_offset_out;
+
+    /*if off_in.is_null() {
+        input_offset = *in_cursor;
+        use_file_offset_in = true;
+    } else {
+        //input_offset = copy_from_user(off_in)?;
+        use_file_offset_in = false;
+    }
+
+    if off_out.is_null() {
+        output_offset = *out_cursor;
+        use_file_offset_out = true;
+    } else {
+        //output_offset = copy_from_user(off_out)?;
+        use_file_offset_out = false;
+    }
+    println!("off_in: {}", use_file_offset_in);
+    println!("off_out: {}", use_file_offset_out);*/
+
+    // 检查输入文件大小
+    //let file_size = inode_in.dentry.size()?;
+    //if input_offset >= file_size as i64 {
+    //    return Ok(0);
+    //}
+
+    let mut total_copied = 0usize;
+    let mut remaining = len;
+    let buffer_size = 4096;
+    let mut buffer = vec![0u8; buffer_size];
+
+    while remaining > 0
+    /*&& input_offset < file_size as i64*/
+    {
+        let to_read = core::cmp::min(remaining, buffer_size);
+        //(file_size as i64 - input_offset) as usize,
+
+        if to_read == 0 {
+            break;
+        }
+
+        let mut byte_buffer = ByteBuffer::new(&mut buffer[..to_read]);
+        let read_bytes = Task::block_on(file_in.read(&mut byte_buffer))?;
+        if read_bytes == 0 {
+            break;
+        }
+
+        //println!("copy_file_range try write, offset: {}", output_offset);
+        let mut stream = (&buffer[..read_bytes]).into_stream();
+        let written_bytes = Task::block_on(file_out.write(&mut stream))?;
+        println!("copy_file_range write succeed");
+        if written_bytes == 0 {
+            break;
+        }
+
+        //input_offset += written_bytes;
+        //output_offset += written_bytes;
+        total_copied += written_bytes;
+        remaining -= written_bytes;
+
+        if written_bytes < read_bytes {
+            break;
+        }
+    }
+
+    /*if use_file_offset_in {
+        *in_cursor = input_offset;
+    } else {
+        //copy_to_user(off_in, &input_offset)?;
+    }
+
+    if use_file_offset_out {
+        *out_cursor = output_offset;
+    } else {
+        //copy_to_user(off_out, &output_offset)?;
+    }*/
+    println!("copy_file_range succeed, len: {}", len);
+    println!();
+
+    Ok(total_copied as isize)
 }
 
 #[cfg(target_arch = "x86_64")]

@@ -22,7 +22,7 @@ checksum = "c1c330e503236d0b06386ae6cc42a513ef1ccc23c52b603c1b52f018564faf44"
 [[package]]
 name = "another_ext4"
 version = "0.1.0"
-source = "git+https://github.com/SMS-Derfflinger/another_ext4?branch=main#ed6d91718db721eb4a744483c289cc44a6f34bf4"
+source = "git+https://github.com/SMS-Derfflinger/another_ext4?branch=main#01a7fbaaf9135103b37cf82484f3a2cb1fa0d279"
 dependencies = [
  "bitflags",
  "log",

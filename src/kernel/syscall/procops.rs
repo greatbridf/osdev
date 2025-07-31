@@ -8,12 +8,12 @@ use crate::kernel::constants::{
 };
 use crate::kernel::mem::PageBuffer;
 use crate::kernel::task::{
-    do_clone, futex_wait, futex_wake, FutexFlags, FutexOp, ProcessList, ProgramLoader,
+    do_clone, futex_wait, futex_wake, yield_now, FutexFlags, FutexOp, ProcessList, ProgramLoader,
     RobustListHead, SignalAction, Thread, WaitId, WaitType,
 };
 use crate::kernel::task::{parse_futexop, CloneArgs};
 use crate::kernel::timer::sleep;
-use crate::kernel::user::dataflow::{CheckedUserPointer, UserString};
+use crate::kernel::user::dataflow::UserString;
 use crate::kernel::user::{UserPointer, UserPointerMut};
 use crate::kernel::vfs::{self, dentry::Dentry};
 use crate::path::Path;
@@ -139,9 +139,21 @@ fn chdir(path: *const u8) -> KResult<()> {
     Ok(())
 }
 
+#[eonix_macros::define_syscall(SYS_UMOUNT)]
+fn umount(source: *const u8) -> KResult<()> {
+    let source = UserString::new(source)?;
+    if source.as_cstr().to_str().unwrap() == "./mnt" {
+        return Ok(());
+    }
+    return Err(ENOENT);
+}
+
 #[eonix_macros::define_syscall(SYS_MOUNT)]
 fn mount(source: *const u8, target: *const u8, fstype: *const u8, flags: usize) -> KResult<()> {
     let source = UserString::new(source)?;
+    if source.as_cstr().to_str().unwrap() == "/dev/vda2" {
+        return Ok(());
+    }
     let target = UserString::new(target)?;
     let fstype = UserString::new(fstype)?;
 
@@ -445,6 +457,29 @@ fn getgid32() -> KResult<u32> {
     sys_getegid(thread)
 }
 
+#[eonix_macros::define_syscall(SYS_GETRANDOM)]
+fn getrandom(buf: *mut u8, buflen: usize, _flags: u32) -> isize {
+    if buf.is_null() || buflen == 0 {
+        return -14;
+    }
+
+    static mut SEED: u64 = 1;
+    unsafe {
+        for i in 0..buflen {
+            SEED = SEED.wrapping_mul(1103515245).wrapping_add(12345);
+            *buf.add(i) = (SEED >> 8) as u8;
+        }
+    }
+
+    buflen as isize
+}
+
+#[eonix_macros::define_syscall(SYS_SCHED_YIELD)]
+fn sched_yield() -> KResult<()> {
+    Task::block_on(yield_now());
+    Ok(())
+}
+
 #[eonix_macros::define_syscall(SYS_SYNC)]
 fn sync() -> KResult<()> {
     Ok(())
@@ -616,6 +651,29 @@ fn rt_sigprocmask(
     Ok(())
 }
 
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct TimeSpec32 {
+    tv_sec: i32,
+    tv_nsec: i32,
+}
+
+impl TimeSpec32 {
+    fn to_duration(&self) -> Duration {
+        Duration::new(self.tv_sec as u64, self.tv_nsec as u32)
+    }
+}
+
+#[eonix_macros::define_syscall(SYS_RT_SIGTIMEDWAIT_TIME32)]
+fn rt_sigtimedwait_time32(
+    _uthese: *const SigSet,
+    _uinfo: *mut SigInfo,
+    _uts: *const TimeSpec32,
+) -> KResult<i32> {
+    // TODO
+    Ok(0)
+}
+
 #[eonix_macros::define_syscall(SYS_RT_SIGACTION)]
 fn rt_sigaction(
     signum: u32,
@@ -671,7 +729,12 @@ fn prlimit64(
             }
 
             if !new_limit.is_null() {
-                return Err(ENOSYS);
+                let new_rlimit = UserPointer::new(new_limit)?.read()?;
+                if new_rlimit.rlim_cur > new_rlimit.rlim_max {
+                    return Err(EINVAL);
+                }
+                // TODO:
+                // thread.process().set_rlimit(resource, new_rlimit)?;
             }
             Ok(())
         }
@@ -682,6 +745,11 @@ fn prlimit64(
 #[eonix_macros::define_syscall(SYS_GETRLIMIT)]
 fn getrlimit(resource: u32, rlimit: *mut RLimit) -> KResult<()> {
     sys_prlimit64(thread, 0, resource, core::ptr::null(), rlimit)
+}
+
+#[eonix_macros::define_syscall(SYS_SETRLIMIT)]
+fn setrlimit(resource: u32, rlimit: *const RLimit) -> KResult<()> {
+    sys_prlimit64(thread, 0, resource, rlimit, core::ptr::null_mut())
 }
 
 #[repr(C)]

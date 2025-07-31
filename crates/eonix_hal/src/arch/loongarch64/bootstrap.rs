@@ -1,4 +1,5 @@
 use super::cpu::CPUID;
+use super::cpu::CPU_COUNT;
 use crate::{
     arch::{
         cpu::CPU,
@@ -16,7 +17,7 @@ use core::{
     alloc::Allocator,
     arch::asm,
     cell::RefCell,
-    sync::atomic::{AtomicBool, AtomicUsize},
+    sync::atomic::{AtomicBool, AtomicUsize, Ordering},
 };
 use eonix_hal_traits::mm::Memory;
 use eonix_mm::{
@@ -25,6 +26,9 @@ use eonix_mm::{
     paging::{Page, PageAccess, PageAlloc, PAGE_SIZE, PFN},
 };
 use eonix_percpu::PercpuArea;
+use loongArch64::register::ecfg;
+use loongArch64::register::ecfg::LineBasedInterrupt;
+use loongArch64::register::tcfg;
 use loongArch64::register::{euen, pgdl};
 
 #[unsafe(link_section = ".bootstrap.stack")]
@@ -225,6 +229,8 @@ fn setup_cpu(alloc: impl PageAlloc, hart_id: usize) {
     euen::set_fpe(true);
     euen::set_sxe(true);
 
+    CPU_COUNT.fetch_add(1, Ordering::Relaxed);
+
     let mut percpu_area = PercpuArea::new(|layout| {
         let page_count = layout.size().div_ceil(PAGE_SIZE);
         let page = Page::alloc_at_least_in(page_count, alloc);
@@ -264,8 +270,24 @@ fn setup_cpu(alloc: impl PageAlloc, hart_id: usize) {
         )
     }
 
-    // todo!("set_next_timer()");
+    let timer_frequency = loongArch64::time::get_timer_freq();
+
+    // 1ms periodic timer.
+    tcfg::set_init_val(timer_frequency / 1_000);
+    tcfg::set_periodic(true);
+    tcfg::set_en(true);
+
+    ecfg::set_lie(LineBasedInterrupt::all());
 }
 
 /// TODO
 fn bootstrap_smp(alloc: impl Allocator, page_alloc: &RefCell<BasicPageAlloc>) {}
+
+pub fn shutdown() -> ! {
+    let ged_addr = PAddr::from(0x100E001C);
+    unsafe {
+        let ged_ptr = ArchPhysAccess::as_ptr::<u8>(ged_addr);
+        ged_ptr.write_volatile(0x34);
+        loop {}
+    }
+}

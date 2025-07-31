@@ -1,5 +1,5 @@
-use crate::kernel::mem::{page_cache::PageCacheRawPage, MemoryBlock};
-use crate::kernel::mem::{AsMemoryBlock, PhysAccess};
+use crate::kernel::mem::page_cache::PageCacheRawPage;
+use crate::kernel::mem::PhysAccess;
 use buddy_allocator::BuddyRawPage;
 use core::{
     ptr::NonNull,
@@ -269,12 +269,5 @@ impl PageCacheRawPage for RawPagePtr {
 
     fn cache_init(&self) {
         self.as_mut().shared_data = PageType::PageCache(PageCacheInner { valid_size: 0 });
-    }
-}
-
-/// SAFETY: `RawPagePtr` is a pointer to a valid `RawPage` struct.
-impl AsMemoryBlock for RawPagePtr {
-    fn as_memblk(&self) -> MemoryBlock {
-        unsafe { MemoryBlock::new(self.real_ptr::<()>().addr(), PAGE_SIZE) }
     }
 }

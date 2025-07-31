@@ -26,7 +26,10 @@ use core::{
     hint::spin_loop,
     sync::atomic::{AtomicBool, Ordering},
 };
-use eonix_hal::{processor::CPU, traits::trap::IrqState, trap::disable_irqs_save};
+use eonix_hal::{
+    arch_exported::bootstrap::shutdown, processor::CPU, traits::trap::IrqState,
+    trap::disable_irqs_save,
+};
 use eonix_mm::address::PRange;
 use eonix_runtime::{run::FutureRun, scheduler::Scheduler, task::Task};
 use kernel::{
@@ -45,6 +48,19 @@ use kernel_init::setup_memory;
 use path::Path;
 use prelude::*;
 
+#[cfg(any(target_arch = "riscv64", target_arch = "loongarch64"))]
+fn do_panic() -> ! {
+    shutdown();
+}
+
+#[cfg(not(any(target_arch = "riscv64", target_arch = "loongarch64")))]
+fn do_panic() -> ! {
+    // Spin forever.
+    loop {
+        spin_loop();
+    }
+}
+
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
     if let Some(location) = info.location() {
@@ -60,7 +76,7 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
     println_fatal!();
     println_fatal!("{}", info.message());
 
-    loop {}
+    do_panic()
 }
 
 static BSP_OK: AtomicBool = AtomicBool::new(false);

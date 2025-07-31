@@ -1,7 +1,10 @@
 use super::trap::setup_trap;
+use core::sync::atomic::AtomicUsize;
 use core::{arch::asm, pin::Pin, ptr::NonNull};
 use eonix_preempt::PreemptGuard;
 use eonix_sync_base::LazyLock;
+
+pub static CPU_COUNT: AtomicUsize = AtomicUsize::new(0);
 
 #[eonix_percpu::define_percpu]
 pub static CPUID: usize = 0;

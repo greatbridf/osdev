@@ -10,32 +10,49 @@ on:
   workflow_dispatch:
 
 jobs:
-  run-build:
+  build-and-run-test:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [riscv64, loongarch64]
+        include:
+          - arch: riscv64
+            target: riscv64gc-unknown-none-elf
+          - arch: loongarch64
+            target: loongarch64-unknown-none-softfloat
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      
+
       - name: Setup rust nightly
         run: rustup component add rust-src llvm-tools
 
       - name: Configure
         run: ./configure
 
-      - name: Build for riscv64 targets
-        run: make build ARCH=riscv64 MODE=release
+      - name: Run build for ${{ matrix.arch }} targets
+        run: |
+          make build ARCH=${{ matrix.arch }} MODE=release
+          zstd -k build/boot-${{ matrix.arch }}.img
 
-      - name: Upload riscv64 build artifacts
+      - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: kernel-riscv64
-          path: build/riscv64gc-unknown-none-elf/release/eonix_kernel
+          name: eonix-kernel-and-image-${{ matrix.arch }}
+          path: |
+            build/${{ matrix.target }}/release/eonix_kernel
+            build/boot-${{ matrix.arch }}.img.zst
 
-      - name: Build for loongarch64 targets
-        run: make build ARCH=loongarch64 MODE=release
+      - name: Test run for ${{ matrix.arch }}
+        run: sh script/test.sh
+        env:
+          ARCH: ${{ matrix.arch }}
+        timeout-minutes: 2
+        continue-on-error: true
 
-      - name: Upload loongarch64 build artifacts
+      - name: Upload run log
         uses: actions/upload-artifact@v4
         with:
-          name: kernel-loongarch64
-          path: build/loongarch64gc-unknown-none-elf/release/eonix_kernel
+          name: test-${{ matrix.arch }}.log
+          path: build/test-*.log

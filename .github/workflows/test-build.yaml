@@ -28,6 +28,9 @@ jobs:
       - name: Setup rust nightly
         run: rustup component add rust-src llvm-tools
 
+      - name: Setup QEMU
+        run: sudo apt-get install -y qemu-system-${{ matrix.arch }}
+
       - name: Configure
         run: ./configure
 

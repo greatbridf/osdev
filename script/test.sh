@@ -8,6 +8,6 @@ if [ "$ARCH" = "" ]; then
 fi
 
 printf "ls\necho \"$SUCCESS_MSG\"\npoweroff\n" \
-    | make test-run ARCH=$ARCH MODE=release \
+    | make test-run ARCH=$ARCH MODE=release QEMU=qemu-system-$ARCH \
     | tee build/test-$$.log \
     | grep "$SUCCESS_MSG" > /dev/null && echo TEST\ $$\ WITH\ ARCH=$ARCH\ PASSED

@@ -21,13 +21,17 @@ KERNEL_SOURCES := $(shell find src macros crates -name '*.rs' -type f)
 KERNEL_CARGO_MANIFESTS += $(shell find src macros crates -name Cargo.toml -type f)
 KERNEL_DEPS := $(KERNEL_SOURCES) $(KERNEL_CARGO_MANIFESTS)
 
-QEMU_ARGS ?= -no-reboot -no-shutdown
+QEMU_ARGS ?= -no-reboot
 CARGO_FLAGS := --profile $(PROFILE) --features $(FEATURES)$(if $(SMP),$(COMMA)smp,)
 
 ifeq ($(HOST),darwin)
 QEMU_ACCEL ?= -accel tcg
 else ifeq ($(HOST),linux)
+
+ifeq ($(shell ls /dev/kvm),/dev/kvm)
 QEMU_ACCEL ?= -accel kvm
+endif
+
 endif
 
 QEMU_ARGS += $(QEMU_ACCEL)
@@ -121,6 +125,10 @@ run: build build/kernel.sym
 .PHONY: srun
 srun: build build/kernel.sym
 	$(QEMU) $(QEMU_ARGS) -display none -S -s -serial mon:stdio
+
+.PHONY: test-run
+test-run: build
+	$(QEMU) $(QEMU_ARGS) -display none -serial stdio
 
 .PHONY: clean
 clean:

@@ -29,7 +29,8 @@ jobs:
         run: rustup component add rust-src llvm-tools
 
       - name: Setup QEMU
-        run: sudo apt-get install -y qemu-system-${{ matrix.arch }}
+        run: |
+          sudo apt-get install -y qemu-system-${{ matrix.arch }} qemu-kvm
 
       - name: Configure
         run: ./configure
@@ -48,9 +49,13 @@ jobs:
             build/boot-${{ matrix.arch }}.img.zst
 
       - name: Test run for ${{ matrix.arch }}
-        run: sh script/test.sh
+        run: |
+          echo "Fixing permissions for /dev/kvm..."
+          sudo adduser $USER kvm
+          sh script/test.sh
         env:
           ARCH: ${{ matrix.arch }}
+          QEMU_ACCEL: ''
         timeout-minutes: 2
         continue-on-error: true
 

@@ -27,7 +27,11 @@ CARGO_FLAGS := --profile $(PROFILE) --features $(FEATURES)$(if $(SMP),$(COMMA)sm
 ifeq ($(HOST),darwin)
 QEMU_ACCEL ?= -accel tcg
 else ifeq ($(HOST),linux)
+
+ifeq ($(shell ls /dev/kvm),/dev/kvm)
 QEMU_ACCEL ?= -accel kvm
+endif
+
 endif
 
 QEMU_ARGS += $(QEMU_ACCEL)

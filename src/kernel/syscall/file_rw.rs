@@ -4,6 +4,7 @@ use crate::kernel::constants::{
     EBADF, EFAULT, EINVAL, ENOENT, ENOTDIR, SEEK_CUR, SEEK_END, SEEK_SET, S_IFBLK, S_IFCHR,
 };
 use crate::kernel::task::Thread;
+use crate::kernel::vfs::file::File;
 use crate::kernel::vfs::filearray::FD;
 use crate::{
     io::{Buffer, BufferFill},
@@ -109,117 +110,23 @@ fn ftruncate(fd: FD, new_size: usize) -> KResult<()> {
     thread.files.get(fd).ok_or(EBADF)?.truncate(new_size)
 }
 
-#[eonix_macros::define_syscall(SYS_COPY_FILE_RANGE)]
-fn copy_file_range(
-    fd_in: FD,
-    off_in: *mut usize,
-    fd_out: FD,
-    off_out: *mut usize,
-    len: usize,
-    _flags: u32,
-) -> KResult<isize> {
-    if len == 0 {
-        return Ok(0);
-    }
-
-    let file_in = thread.files.get(fd_in).ok_or(EBADF)?.clone();
-    let file_out = thread.files.get(fd_out).ok_or(EBADF)?.clone();
-
-    let (input_offset, input_buffer) =  match off_in.is_null() {
-        true => (None, None),
-        false => {
-            let buffer = UserBuffer::new(off_in as *mut u8, size_of::<usize>())?;
-            let offset = usize::from_le_bytes(buffer.as_slice().try_into().unwrap());
-            (Some(offset), Some(buffer))
-        }
-    };
-
-    let (output_offset, output_buffer) = match off_out.is_null() {
-        true => (None, None),
-        false => {
-            let buffer = UserBuffer::new(off_out as *mut u8, size_of::<usize>())?;
-            let offset = usize::from_le_bytes(buffer.as_slice().try_into().unwrap());
-            (Some(offset), Some(buffer))
-        }
-    };
-
-    let mut total_copied = 0usize;
-    let mut remaining = len;
-    let buffer_size = 4096;
-    let mut buffer = vec![0u8; buffer_size];
-
-    while remaining > 0 {
-        let to_read = core::cmp::min(remaining, buffer_size);
-        if to_read == 0 {
-            break;
-        }
-
-        let mut byte_buffer = ByteBuffer::new(&mut buffer[..to_read]);
-        let read_bytes = match input_offset {
-            Some(offset) => file_in.read_at(&mut byte_buffer, offset + total_copied)?,
-            None => Task::block_on(file_in.read(&mut byte_buffer))?,
-        };
-        if read_bytes == 0 {
-            break;
-        }
-
-        let mut stream = (&buffer[..read_bytes]).into_stream();
-        let written_bytes = match output_offset {
-            Some(offset) => file_out.write_at(&mut stream, offset + total_copied)?,
-            None => Task::block_on(file_out.write(&mut stream))?,
-        };
-        if written_bytes == 0 {
-            break;
-        }
-
-        total_copied += written_bytes;
-        remaining -= written_bytes;
-
-        if written_bytes < read_bytes {
-            return Err(u32::MAX);
-        }
-    }
-
-    match (input_offset, input_buffer) {
-        (Some(offset), Some(mut buffer)) => {
-            let _ = buffer.fill(&(offset + total_copied).to_le_bytes());
-        }
-        _ => (),
-    }
-
-    match (output_offset, output_buffer) {
-        (Some(offset), Some(mut buffer)) => {
-            let _ = buffer.fill(&(offset + total_copied).to_le_bytes());
-        }
-        _ => (),
-    }
-
-    Ok(total_copied as isize)
-}
-
-#[eonix_macros::define_syscall(SYS_SPLICE)]
-fn splice(
-    fd_in: FD,
+fn do_copy_or_splice(
+    file_in: Arc<File>,
     off_in: *mut isize,
-    fd_out: FD,
+    file_out: Arc<File>,
     off_out: *mut isize,
     len: usize,
-    _flags: u32,
+    is_splice: bool,
 ) -> KResult<isize> {
-    let file_in = thread.files.get(fd_in).ok_or(EBADF)?.clone();
-    let file_out = thread.files.get(fd_out).ok_or(EBADF)?.clone();
-
     let (input_offset, input_buffer) = match off_in.is_null() {
         true => (None, None),
         false => {
             let buffer = UserBuffer::new(off_in as *mut u8, size_of::<isize>())?;
             let offset = isize::from_le_bytes(buffer.as_slice().try_into().unwrap());
             if offset > file_in.size()?.try_into().unwrap() {
-                println!("offset > size");
                 return Ok(0);
             }
             if offset < 0 {
-                println!("offset < 0");
                 return Ok(-1);
             }
             (Some(offset), Some(buffer))
@@ -274,7 +181,7 @@ fn splice(
             return Ok(-1);
         }
 
-        if input_offset.is_none() {
+        if is_splice && input_offset.is_none() {
             break;
         }
     }
@@ -294,6 +201,44 @@ fn splice(
     }
 
     Ok(total_copied as isize)
+}
+
+#[eonix_macros::define_syscall(SYS_COPY_FILE_RANGE)]
+fn copy_file_range(
+    fd_in: FD,
+    off_in: *mut isize,
+    fd_out: FD,
+    off_out: *mut isize,
+    len: usize,
+    _flags: u32,
+) -> KResult<isize> {
+    if len == 0 {
+        return Ok(0);
+    }
+
+    let file_in = thread.files.get(fd_in).ok_or(EBADF)?.clone();
+    let file_out = thread.files.get(fd_out).ok_or(EBADF)?.clone();
+
+    do_copy_or_splice(file_in, off_in, file_out, off_out, len, false)
+}
+
+#[eonix_macros::define_syscall(SYS_SPLICE)]
+fn splice(
+    fd_in: FD,
+    off_in: *mut isize,
+    fd_out: FD,
+    off_out: *mut isize,
+    len: usize,
+    _flags: u32,
+) -> KResult<isize> {
+    if len == 0 {
+        return Ok(0);
+    }
+
+    let file_in = thread.files.get(fd_in).ok_or(EBADF)?.clone();
+    let file_out = thread.files.get(fd_out).ok_or(EBADF)?.clone();
+
+    do_copy_or_splice(file_in, off_in, file_out, off_out, len, true)
 }
 
 #[cfg(target_arch = "x86_64")]

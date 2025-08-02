@@ -125,21 +125,21 @@ fn copy_file_range(
     let file_in = thread.files.get(fd_in).ok_or(EBADF)?.clone();
     let file_out = thread.files.get(fd_out).ok_or(EBADF)?.clone();
 
-    let input_offset = match off_in.is_null() {
-        true => None,
+    let (input_offset, input_buffer) =  match off_in.is_null() {
+        true => (None, None),
         false => {
             let buffer = UserBuffer::new(off_in as *mut u8, size_of::<usize>())?;
             let offset = usize::from_le_bytes(buffer.as_slice().try_into().unwrap());
-            Some(offset)
+            (Some(offset), Some(buffer))
         }
     };
 
-    let output_offset = match off_out.is_null() {
-        true => None,
+    let (output_offset, output_buffer) = match off_out.is_null() {
+        true => (None, None),
         false => {
             let buffer = UserBuffer::new(off_out as *mut u8, size_of::<usize>())?;
             let offset = usize::from_le_bytes(buffer.as_slice().try_into().unwrap());
-            Some(offset)
+            (Some(offset), Some(buffer))
         }
     };
 
@@ -180,20 +180,18 @@ fn copy_file_range(
         }
     }
 
-    match input_offset {
-        Some(offset) => {
-            let mut buffer = UserBuffer::new(off_in as *mut u8, size_of::<usize>())?;
+    match (input_offset, input_buffer) {
+        (Some(offset), Some(mut buffer)) => {
             let _ = buffer.fill(&(offset + total_copied).to_le_bytes());
         }
-        None => (),
+        _ => (),
     }
 
-    match output_offset {
-        Some(offset) => {
-            let mut buffer = UserBuffer::new(off_out as *mut u8, size_of::<usize>())?;
+    match (output_offset, output_buffer) {
+        (Some(offset), Some(mut buffer)) => {
             let _ = buffer.fill(&(offset + total_copied).to_le_bytes());
         }
-        None => (),
+        _ => (),
     }
 
     Ok(total_copied as isize)

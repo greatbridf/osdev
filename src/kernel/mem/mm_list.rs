@@ -281,25 +281,6 @@ impl MMListInner<'_> {
 
 impl Drop for MMListInner<'_> {
     fn drop(&mut self) {
-        // May buggy
-        for area in &self.areas {
-            if area.is_shared {
-                for pte in self.page_table.iter_user(area.range()) {
-                    let (pfn, _) = pte.take();
-                    let raw_page = RawPagePtr::from(pfn);
-                    if raw_page.refcount().fetch_sub(1, Ordering::Relaxed) == 1 {
-                        // Wrong here
-                        // unsafe { Page::from_raw(pfn) };
-                    }
-                }
-            } else {
-                for pte in self.page_table.iter_user(area.range()) {
-                    let (pfn, _) = pte.take();
-                    unsafe { Page::from_raw(pfn) };
-                }
-            }
-        }
-
         // TODO: Recycle all pages in the page table.
     }
 }

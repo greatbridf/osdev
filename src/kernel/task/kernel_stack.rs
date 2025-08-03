@@ -28,12 +28,24 @@ impl KernelStack {
 }
 
 impl Stack for KernelStack {
-    fn new() -> Self {
-        Self::new()
+    fn new() -> Option<Self> {
+        Some(Self::new())
     }
 
     fn get_bottom(&self) -> NonNull<()> {
         // SAFETY: The stack is allocated and `bottom` is non-zero.
         unsafe { NonNull::new_unchecked(self.bottom.get() as *mut _) }
+    }
+}
+
+pub struct NoStack;
+
+impl Stack for NoStack {
+    fn new() -> Option<Self> {
+        None
+    }
+
+    fn get_bottom(&self) -> NonNull<()> {
+        panic!("Should not get_bottom of NoStack")
     }
 }

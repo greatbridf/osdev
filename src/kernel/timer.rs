@@ -8,6 +8,7 @@ use core::{
     time::Duration,
 };
 use eonix_hal::processor::CPU;
+use eonix_runtime::task::Task;
 use eonix_sync::{Spin, SpinIrq as _};
 use posix_types::stat::{StatXTimestamp, TimeSpec, TimeVal};
 
@@ -198,6 +199,10 @@ pub fn timer_interrupt() {
 pub fn should_reschedule() -> bool {
     #[eonix_percpu::define_percpu]
     static PREV_SCHED_TICK: usize = 0;
+
+    if !Task::current().is_stackful() {
+        return false;
+    }
 
     let prev_tick = PREV_SCHED_TICK.get();
     let current_tick = Ticks::now().0;

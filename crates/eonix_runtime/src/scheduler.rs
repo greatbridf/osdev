@@ -85,7 +85,7 @@ impl Scheduler {
     where
         S: Stack,
     {
-        let stack = S::new();
+        let stack = S::new().expect("Local scheduler should have real stack");
 
         unsafe {
             eonix_preempt::disable();
@@ -104,8 +104,8 @@ impl Scheduler {
     /// # Safety
     /// This function must not be called inside of the scheulder context.
     ///
-    /// The caller must ensure that `preempt::count` == 1.
-    pub unsafe fn go_from_scheduler(to: &ExecutionContext) {
+    /// The caller must ensure that `preempt::count` == 1 and to stackful task.
+    pub(crate) unsafe fn go_from_scheduler(to: &ExecutionContext) {
         // SAFETY: Preemption is disabled.
         unsafe { LOCAL_SCHEDULER_CONTEXT.as_ref() }.switch_to(to);
     }
@@ -113,8 +113,8 @@ impl Scheduler {
     /// # Safety
     /// This function must not be called inside of the scheulder context.
     ///
-    /// The caller must ensure that `preempt::count` == 1.
-    pub unsafe fn goto_scheduler(from: &ExecutionContext) {
+    /// The caller must ensure that `preempt::count` == 1 and from stackful task.
+    pub(crate) unsafe fn goto_scheduler(from: &ExecutionContext) {
         // SAFETY: Preemption is disabled.
         from.switch_to(unsafe { LOCAL_SCHEDULER_CONTEXT.as_ref() });
     }
@@ -200,7 +200,12 @@ impl Scheduler {
         // Is it safe to believe that `current()` will never change across calls?
         unsafe {
             // SAFETY: Preemption is disabled.
-            Scheduler::goto_scheduler(&Task::current().execution_context);
+            Scheduler::goto_scheduler(
+                Task::current()
+                    .execution_context
+                    .as_ref()
+                    .expect("Only Stackful Task call schedule"),
+            );
         }
         eonix_preempt::enable();
     }

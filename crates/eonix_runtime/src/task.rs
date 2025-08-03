@@ -3,7 +3,10 @@ mod task_state;
 
 use crate::{
     context::ExecutionContext,
-    executor::{ExecuteStatus, Executor, ExecutorBuilder, OutputHandle, Stack},
+    executor::{
+        ExecuteStatus, Executor, OutputHandle, Stack, StackfulExecutorBuilder,
+        StacklessExecutorBuilder,
+    },
     run::{Contexted, Run},
     scheduler::Scheduler,
 };
@@ -65,14 +68,18 @@ pub struct Task {
     /// Task state.
     pub(crate) state: TaskState,
     /// Task execution context.
-    pub(crate) execution_context: ExecutionContext,
+    pub(crate) execution_context: Option<ExecutionContext>,
     /// Executor object.
-    executor: AtomicUniqueRefCell<Option<Pin<Box<dyn Executor>>>>,
+    pub(crate) executor: AtomicUniqueRefCell<Option<Pin<Box<dyn Executor>>>>,
     /// Link in the global task list.
     link_task_list: RBTreeAtomicLink,
 }
 
 impl Task {
+    pub fn is_stackful(&self) -> bool {
+        self.execution_context.is_some()
+    }
+
     pub fn new<S, R>(runnable: R) -> TaskHandle<R::Output>
     where
         S: Stack + 'static,
@@ -81,10 +88,13 @@ impl Task {
     {
         static ID: AtomicU32 = AtomicU32::new(0);
 
-        let (executor, execution_context, output) = ExecutorBuilder::new()
-            .stack(S::new())
-            .runnable(runnable)
-            .build();
+        let (executor, execution_context, output) = match S::new() {
+            Some(stack) => StackfulExecutorBuilder::new()
+                .stack(stack)
+                .runnable(runnable)
+                .build(),
+            None => StacklessExecutorBuilder::new().runnable(runnable).build(),
+        };
 
         let task = Arc::new(Self {
             id: TaskId(ID.fetch_add(1, Ordering::Relaxed)),
@@ -140,6 +150,7 @@ impl Task {
         eonix_preempt::enable();
     }
 
+    /// Should we not leak park and park_preempt_disabled to outside ?
     pub fn park() {
         eonix_preempt::disable();
         Self::park_preempt_disabled();
@@ -148,6 +159,8 @@ impl Task {
     /// Park the current task with `preempt::count() == 1`.
     pub fn park_preempt_disabled() {
         let task = Task::current();
+
+        assert!(task.is_stackful());
 
         let old_state = task.state.swap(TaskState::PARKING);
         assert_eq!(
@@ -161,15 +174,21 @@ impl Task {
             task.state.swap(TaskState::RUNNING);
         } else {
             unsafe {
-                // SAFETY: Preemption is disabled.
-                Scheduler::goto_scheduler(&Task::current().execution_context)
-            };
+                Scheduler::goto_scheduler(
+                    Task::current()
+                        .execution_context
+                        .as_ref()
+                        .expect("Stackful Task should have execute context"),
+                )
+            }
+
             assert!(task.unparked.swap(false, Ordering::Acquire));
         }
 
         eonix_preempt::enable();
     }
 
+    /// Totally delete this function
     pub fn block_on<F>(future: F) -> F::Output
     where
         F: Future,

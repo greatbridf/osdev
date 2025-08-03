@@ -234,6 +234,7 @@ impl SignalList {
                         assert!(old_waker.is_none(), "We should not have a waker here");
                     }
 
+                    // Should use async here
                     Task::park_preempt_disabled();
 
                     if let Some(parent) = thread.process.parent.load() {

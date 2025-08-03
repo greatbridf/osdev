@@ -2,8 +2,8 @@ use crate::{
     kernel::{
         syscall::procops::parse_user_tls,
         task::{
-            alloc_pid, new_thread_runnable, KernelStack, ProcessBuilder, ProcessList, Thread,
-            ThreadBuilder,
+            alloc_pid, new_thread_runnable, KernelStack, NoStack, ProcessBuilder, ProcessList,
+            Thread, ThreadBuilder,
         },
         user::UserPointerMut,
     },
@@ -166,7 +166,10 @@ pub fn do_clone(thread: &Thread, clone_args: CloneArgs) -> KResult<u32> {
         UserPointerMut::new(parent_tid_ptr as *mut u32)?.write(new_pid)?
     }
 
-    Scheduler::get().spawn::<KernelStack, _>(new_thread_runnable(new_thread));
+    // For test
+    Scheduler::get().spawn::<NoStack, _>(new_thread_runnable(new_thread));
+
+    // Scheduler::get().spawn::<KernelStack, _>(new_thread_runnable(new_thread));
 
     Ok(new_pid)
 }

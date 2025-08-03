@@ -15,6 +15,7 @@ pub const SIG_SETMASK: u32 = 2;
 
 pub const CLOCK_REALTIME: u32 = 0;
 pub const CLOCK_MONOTONIC: u32 = 1;
+pub const CLOCK_REALTIME_COARSE: u32 = 5;
 
 pub const EPERM: u32 = 1;
 pub const ENOENT: u32 = 2;
@@ -35,6 +36,7 @@ pub const ENOTDIR: u32 = 20;
 pub const EISDIR: u32 = 21;
 pub const EINVAL: u32 = 22;
 pub const ENOTTY: u32 = 25;
+pub const ENOSPC: u32 = 28;
 pub const ESPIPE: u32 = 29;
 // pub const EROFS: u32 = 30;
 pub const EPIPE: u32 = 32;

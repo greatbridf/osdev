@@ -3,7 +3,7 @@ use super::{
     trap::{setup_trap, TRAP_SCRATCH},
 };
 use crate::arch::fdt::{FdtExt, FDT};
-use core::{arch::asm, pin::Pin, ptr::NonNull};
+use core::{arch::asm, pin::Pin, ptr::NonNull, sync::atomic::AtomicUsize};
 use eonix_preempt::PreemptGuard;
 use eonix_sync_base::LazyLock;
 use riscv::register::{
@@ -11,6 +11,8 @@ use riscv::register::{
     mhartid, sscratch, sstatus,
 };
 use sbi::PhysicalAddress;
+
+pub static CPU_COUNT: AtomicUsize = AtomicUsize::new(0);
 
 #[eonix_percpu::define_percpu]
 pub static CPUID: usize = 0;

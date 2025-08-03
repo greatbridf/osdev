@@ -1,7 +1,7 @@
 use super::{
     config::{self, mm::*},
     console::write_str,
-    cpu::CPUID,
+    cpu::{CPUID, CPU_COUNT},
     time::set_next_timer,
     trap::TRAP_SCRATCH,
 };
@@ -127,7 +127,6 @@ pub unsafe extern "C" fn riscv64_start(hart_id: usize, dtb_addr: PAddr) -> ! {
 
     setup_cpu(&alloc, hart_id);
 
-    // TODO: set up interrupt, smp
     ScopedAllocator::new(&mut [0; 1024])
         .with_alloc(|mem_alloc| bootstrap_smp(mem_alloc, &real_allocator));
 
@@ -203,6 +202,8 @@ fn setup_kernel_page_table(alloc: impl PageAlloc) {
 
 /// set up tp register to percpu
 fn setup_cpu(alloc: impl PageAlloc, hart_id: usize) {
+    CPU_COUNT.fetch_add(1, Ordering::Relaxed);
+
     let mut percpu_area = PercpuArea::new(|layout| {
         let page_count = layout.size().div_ceil(PAGE_SIZE);
         let page = Page::alloc_at_least_in(page_count, alloc);
@@ -393,4 +394,8 @@ pub fn early_console_write(s: &str) {
 
 pub fn early_console_putchar(ch: u8) {
     console_putchar(ch);
+}
+
+pub fn shutdown() -> ! {
+    sbi::legacy::shutdown();
 }

@@ -15,6 +15,7 @@ use alloc::{
     sync::{Arc, Weak},
 };
 use core::sync::atomic::{AtomicU32, Ordering};
+use eonix_mm::address::VAddr;
 use eonix_runtime::task::Task;
 use eonix_sync::{
     AsProof as _, AsProofMut as _, Locked, Proof, ProofMut, RwLockReadGuard, SpinGuard,
@@ -49,6 +50,8 @@ pub struct Process {
     pub mm_list: MMList,
 
     pub exit_signal: Option<Signal>,
+
+    pub shm_areas: Spin<BTreeMap<VAddr, usize>>,
 
     /// Parent process
     ///
@@ -258,6 +261,7 @@ impl ProcessBuilder {
             pid: self.pid.expect("should set pid before building"),
             wait_list: WaitList::new(),
             mm_list,
+            shm_areas: Spin::new(BTreeMap::new()),
             exit_signal: self.exit_signal,
             parent: RCUPointer::empty(),
             pgroup: RCUPointer::empty(),

@@ -1,6 +1,12 @@
 #!/bin/sh
 DEFAULT_ARCH="x86_64"
 
+if [ "$OUT" = "" ]; then
+    OUT="Makefile"
+fi
+
+printf "Configuring for %s...\n" "$OUT"
+
 event() {
     printf "$1... "
 }
@@ -119,10 +125,10 @@ else
     echo "$IMG"
 fi
 
-cp Makefile.src Makefile
-sed -i '' -e "s|##DEFAULT_ARCH##|$DEFAULT_ARCH|" Makefile > /dev/null 2>&1
-sed -i '' -e "s|##GDB##|$GDB|" Makefile > /dev/null 2>&1
-sed -i '' -e "s|##QEMU##|$QEMU|" Makefile > /dev/null 2>&1
-sed -i '' -e "s|##FDISK##|$FDISK|" Makefile > /dev/null 2>&1
-sed -i '' -e "s|##IMAGE##|$IMG|" Makefile > /dev/null 2>&1
+cp Makefile.src "$OUT"
+sed -i '' -e "s|##DEFAULT_ARCH##|$DEFAULT_ARCH|" "$OUT" > /dev/null 2>&1
+sed -i '' -e "s|##GDB##|$GDB|" "$OUT" > /dev/null 2>&1
+sed -i '' -e "s|##QEMU##|$QEMU|" "$OUT" > /dev/null 2>&1
+sed -i '' -e "s|##FDISK##|$FDISK|" "$OUT" > /dev/null 2>&1
+sed -i '' -e "s|##IMAGE##|$IMG|" "$OUT" > /dev/null 2>&1
 exit 0

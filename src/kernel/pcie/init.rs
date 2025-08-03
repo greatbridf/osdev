@@ -2,8 +2,11 @@ use super::{
     device::{PCIDevice, SegmentGroup, PCIE_DEVICES},
     error::PciError,
 };
-use crate::kernel::mem::PhysAccess as _;
+use crate::kernel::{mem::PhysAccess as _, pcie::device::PciMemoryAllocator};
 use acpi::{AcpiHandler, PhysicalMapping};
+use alloc::collections::btree_map::Entry;
+use alloc::vec;
+use eonix_log::println_trace;
 use eonix_mm::address::PAddr;
 
 #[derive(Clone)]
@@ -30,11 +33,14 @@ pub fn init_pcie() -> Result<(), PciError> {
     #[cfg(target_arch = "x86_64")]
     {
         use acpi::{AcpiTables, PciConfigRegions};
+        use eonix_mm::address::PAddr;
 
         let acpi_tables = unsafe {
             // SAFETY: Our impl should be correct.
             AcpiTables::search_for_rsdp_bios(AcpiHandlerImpl)?
         };
+
+        let mut allocator = PciMemoryAllocator::new(PRange::from(PAddr::from(0)));
 
         let conf_regions = PciConfigRegions::new(&acpi_tables)?;
         for region in conf_regions.iter() {
@@ -44,19 +50,57 @@ pub fn init_pcie() -> Result<(), PciError> {
                 if let Some(header) = config_space.header() {
                     let pci_device = PCIDevice::new(segment_group.clone(), config_space, header);
 
-                    PCIE_DEVICES.lock().insert(pci_device);
+                    pci_device.configure_io(&mut allocator);
+
+                    match PCIE_DEVICES.lock().entry(pci_device.vendor_device()) {
+                        Entry::Vacant(vacant_entry) => {
+                            vacant_entry.insert(vec![pci_device]);
+                        }
+                        Entry::Occupied(mut occupied_entry) => {
+                            occupied_entry.get_mut().push(pci_device);
+                        }
+                    }
                 }
             }
         }
     }
 
-    #[cfg(target_arch = "riscv64")]
+    #[cfg(any(target_arch = "riscv64", target_arch = "loongarch64"))]
     {
-        use crate::kernel::constants::{EINVAL, ENOENT};
+        use crate::kernel::constants::{EINVAL, EIO, ENOENT};
         use eonix_hal::arch_exported::fdt::FDT;
         use eonix_mm::address::PRange;
 
-        let pcie_node = FDT.find_node("/soc/pci").ok_or(ENOENT)?;
+        let pcie_node = FDT
+            .find_compatible(&["pci-host-ecam-generic"])
+            .ok_or(ENOENT)?;
+
+        let mmio_range = {
+            let ranges = pcie_node.property("ranges").ok_or(EIO)?;
+            ranges
+                .value
+                .chunks(28)
+                .map(|entry| {
+                    let pci_address = u64::from_be_bytes(entry[4..12].try_into().unwrap());
+                    let cpu_address = u64::from_be_bytes(entry[12..20].try_into().unwrap());
+                    let size = u64::from_be_bytes(entry[20..28].try_into().unwrap());
+
+                    println_trace!(
+                        "trace_pci",
+                        "PCIe range: PCI address = {:#x}, CPU address = {:#x}, size = {:#x}",
+                        pci_address,
+                        cpu_address,
+                        size
+                    );
+
+                    PRange::from(PAddr::from(cpu_address as usize)).grow(size as usize)
+                })
+                .max_by(|lhs, rhs| lhs.len().cmp(&rhs.len()))
+                .expect("No valid PCIe range found")
+        };
+
+        let mut allocator = PciMemoryAllocator::new(mmio_range);
+
         let bus_range = pcie_node.property("bus-range").ok_or(ENOENT)?;
         let reg = pcie_node.reg().ok_or(EINVAL)?.next().ok_or(EINVAL)?;
 
@@ -81,8 +125,16 @@ pub fn init_pcie() -> Result<(), PciError> {
         for config_space in segment_group.iter() {
             if let Some(header) = config_space.header() {
                 let pci_device = PCIDevice::new(segment_group.clone(), config_space, header);
+                pci_device.configure_io(&mut allocator);
 
-                PCIE_DEVICES.lock().insert(pci_device);
+                match PCIE_DEVICES.lock().entry(pci_device.vendor_device()) {
+                    Entry::Vacant(vacant_entry) => {
+                        vacant_entry.insert(vec![pci_device]);
+                    }
+                    Entry::Occupied(mut occupied_entry) => {
+                        occupied_entry.get_mut().push(pci_device);
+                    }
+                }
             }
         }
     }

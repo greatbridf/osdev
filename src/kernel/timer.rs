@@ -18,7 +18,7 @@ static SLEEPERS_LIST: Spin<BinaryHeap<Reverse<Sleepers>>> = Spin::new(BinaryHeap
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
 pub struct Ticks(usize);
 
-#[derive(Default, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy)]
 pub struct Instant {
     secs_since_epoch: u64,
     nsecs_within: u32,

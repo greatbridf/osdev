@@ -1,5 +1,6 @@
 use core::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
+use crate::kernel::mem::{PageCache, PageCacheBackend};
 use crate::{
     io::{Buffer, ByteBuffer, Stream},
     kernel::{
@@ -21,9 +22,10 @@ use crate::{
     path::Path,
     prelude::*,
 };
+use alloc::sync::Weak;
 use alloc::{
     collections::btree_map::{BTreeMap, Entry},
-    sync::{Arc, Weak},
+    sync::Arc,
 };
 use another_ext4::{
     Block, BlockDevice as Ext4BlockDeviceTrait, Ext4, FileType, InodeMode, PBlockId,
@@ -138,7 +140,7 @@ impl Ext4Fs {
                 let mode = *idata.mode.get_mut();
                 if s_isreg(mode) {
                     vacant
-                        .insert(Ext4Inode::File(Arc::new(FileInode { idata })))
+                        .insert(Ext4Inode::File(FileInode::with_idata(idata)))
                         .clone()
                         .into_inner()
                 } else if s_isdir(mode) {
@@ -149,7 +151,7 @@ impl Ext4Fs {
                 } else {
                     println_warn!("ext4: Unsupported inode type: {mode:#o}");
                     vacant
-                        .insert(Ext4Inode::File(Arc::new(FileInode { idata })))
+                        .insert(Ext4Inode::File(FileInode::with_idata(idata)))
                         .clone()
                         .into_inner()
                 }
@@ -220,7 +222,9 @@ impl Ext4Inode {
 }
 
 define_struct_inode! {
-    struct FileInode;
+    struct FileInode {
+        page_cache: PageCache,
+    }
 }
 
 define_struct_inode! {
@@ -228,8 +232,17 @@ define_struct_inode! {
 }
 
 impl FileInode {
+    fn with_idata(idata: InodeData) -> Arc<Self> {
+        let inode = Arc::new_cyclic(|weak_self: &Weak<FileInode>| Self {
+            idata,
+            page_cache: PageCache::new(weak_self.clone()),
+        });
+
+        inode
+    }
+
     pub fn new(ino: Ino, vfs: Weak<dyn Vfs>, mode: Mode) -> Arc<Self> {
-        Arc::new_cyclic(|_| FileInode {
+        Arc::new_cyclic(|weak_self: &Weak<FileInode>| Self {
             idata: {
                 let inode_data = InodeData::new(ino, vfs);
                 inode_data
@@ -238,12 +251,35 @@ impl FileInode {
                 inode_data.nlink.store(1, Ordering::Relaxed);
                 inode_data
             },
+            page_cache: PageCache::new(weak_self.clone()),
         })
     }
 }
 
+impl PageCacheBackend for FileInode {
+    fn read_page(&self, page: &mut crate::kernel::mem::CachePage, offset: usize) -> KResult<usize> {
+        self.read_direct(page, offset)
+    }
+
+    fn write_page(&self, page: &crate::kernel::mem::CachePage, offset: usize) -> KResult<usize> {
+        todo!()
+    }
+
+    fn size(&self) -> usize {
+        self.size.load(Ordering::Relaxed) as usize
+    }
+}
+
 impl Inode for FileInode {
+    fn page_cache(&self) -> Option<&PageCache> {
+        Some(&self.page_cache)
+    }
+
     fn read(&self, buffer: &mut dyn Buffer, offset: usize) -> KResult<usize> {
+        Task::block_on(self.page_cache.read(buffer, offset))
+    }
+
+    fn read_direct(&self, buffer: &mut dyn Buffer, offset: usize) -> KResult<usize> {
         let vfs = self.vfs.upgrade().ok_or(EIO)?;
         let ext4fs = vfs.as_any().downcast_ref::<Ext4Fs>().unwrap();
 

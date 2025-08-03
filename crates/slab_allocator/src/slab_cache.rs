@@ -89,7 +89,7 @@ where
     Allocator: PageAlloc<RawPage = Raw>,
 {
     pub(crate) const fn new_in(object_size: u32) -> Self {
-        // avoid uncessary branch in alloc and dealloc
+        // avoid unnecessary branch in alloc and dealloc
         assert!(object_size <= PAGE_SIZE as u32 / 2);
 
         Self {

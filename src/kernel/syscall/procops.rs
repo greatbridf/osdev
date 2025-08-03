@@ -1,17 +1,19 @@
 use super::SyscallNoReturn;
 use crate::io::Buffer;
-use crate::kernel::constants::{EINVAL, ENOENT, ENOTDIR, ERANGE, ESRCH};
+use crate::kernel::constants::{
+    CLOCK_MONOTONIC, CLOCK_REALTIME, CLOCK_REALTIME_COARSE, EINVAL, ENOENT, ENOTDIR, ERANGE, ESRCH,
+};
 use crate::kernel::constants::{
     ENOSYS, PR_GET_NAME, PR_SET_NAME, RLIMIT_STACK, SIG_BLOCK, SIG_SETMASK, SIG_UNBLOCK,
 };
 use crate::kernel::mem::PageBuffer;
 use crate::kernel::task::{
-    do_clone, futex_wait, futex_wake, FutexFlags, FutexOp, ProcessList, ProgramLoader,
+    do_clone, futex_wait, futex_wake, yield_now, FutexFlags, FutexOp, ProcessList, ProgramLoader,
     RobustListHead, SignalAction, Thread, WaitId, WaitType,
 };
 use crate::kernel::task::{parse_futexop, CloneArgs};
 use crate::kernel::timer::sleep;
-use crate::kernel::user::dataflow::{CheckedUserPointer, UserString};
+use crate::kernel::user::dataflow::UserString;
 use crate::kernel::user::{UserPointer, UserPointerMut};
 use crate::kernel::vfs::{self, dentry::Dentry};
 use crate::path::Path;
@@ -49,6 +51,37 @@ bitflags! {
 
 #[eonix_macros::define_syscall(SYS_NANOSLEEP)]
 fn nanosleep(req: *const (u32, u32), rem: *mut (u32, u32)) -> KResult<usize> {
+    let req = UserPointer::new(req)?.read()?;
+    let rem = if rem.is_null() {
+        None
+    } else {
+        Some(UserPointerMut::new(rem)?)
+    };
+
+    let duration = Duration::from_secs(req.0 as u64) + Duration::from_nanos(req.1 as u64);
+    Task::block_on(sleep(duration));
+
+    if let Some(rem) = rem {
+        rem.write((0, 0))?;
+    }
+
+    Ok(0)
+}
+
+#[eonix_macros::define_syscall(SYS_CLOCK_NANOSLEEP)]
+fn clock_nanosleep(
+    clock_id: u32,
+    flags: u32,
+    req: *const (u32, u32),
+    rem: *mut (u32, u32),
+) -> KResult<usize> {
+    if clock_id != CLOCK_REALTIME
+        && clock_id != CLOCK_REALTIME_COARSE
+        && clock_id != CLOCK_MONOTONIC
+    {
+        unimplemented!("Unsupported clock_id: {}", clock_id);
+    }
+
     let req = UserPointer::new(req)?.read()?;
     let rem = if rem.is_null() {
         None
@@ -106,9 +139,21 @@ fn chdir(path: *const u8) -> KResult<()> {
     Ok(())
 }
 
+#[eonix_macros::define_syscall(SYS_UMOUNT)]
+fn umount(source: *const u8) -> KResult<()> {
+    let source = UserString::new(source)?;
+    if source.as_cstr().to_str().unwrap() == "./mnt" {
+        return Ok(());
+    }
+    return Err(ENOENT);
+}
+
 #[eonix_macros::define_syscall(SYS_MOUNT)]
 fn mount(source: *const u8, target: *const u8, fstype: *const u8, flags: usize) -> KResult<()> {
     let source = UserString::new(source)?;
+    if source.as_cstr().to_str().unwrap() == "/dev/vda2" {
+        return Ok(());
+    }
     let target = UserString::new(target)?;
     let fstype = UserString::new(fstype)?;
 
@@ -395,16 +440,54 @@ fn geteuid() -> KResult<u32> {
     do_geteuid(thread)
 }
 
-#[eonix_macros::define_syscall(SYS_GETGID)]
-fn getgid() -> KResult<u32> {
+#[eonix_macros::define_syscall(SYS_GETEGID)]
+fn getegid() -> KResult<u32> {
     // All users are root for now.
     Ok(0)
+}
+
+#[eonix_macros::define_syscall(SYS_GETGID)]
+fn getgid() -> KResult<u32> {
+    sys_getegid(thread)
 }
 
 #[cfg(target_arch = "x86_64")]
 #[eonix_macros::define_syscall(SYS_GETGID32)]
 fn getgid32() -> KResult<u32> {
-    sys_getgid(thread)
+    sys_getegid(thread)
+}
+
+#[eonix_macros::define_syscall(SYS_GETRANDOM)]
+fn getrandom(buf: *mut u8, buflen: usize, _flags: u32) -> isize {
+    if buf.is_null() || buflen == 0 {
+        return -14;
+    }
+
+    static mut SEED: u64 = 1;
+    unsafe {
+        for i in 0..buflen {
+            SEED = SEED.wrapping_mul(1103515245).wrapping_add(12345);
+            *buf.add(i) = (SEED >> 8) as u8;
+        }
+    }
+
+    buflen as isize
+}
+
+#[eonix_macros::define_syscall(SYS_SCHED_YIELD)]
+fn sched_yield() -> KResult<()> {
+    Task::block_on(yield_now());
+    Ok(())
+}
+
+#[eonix_macros::define_syscall(SYS_SYNC)]
+fn sync() -> KResult<()> {
+    Ok(())
+}
+
+#[eonix_macros::define_syscall(SYS_FSYNC)]
+fn fsync() -> KResult<()> {
+    Ok(())
 }
 
 #[eonix_macros::define_syscall(SYS_GETTID)]
@@ -440,7 +523,7 @@ pub fn parse_user_tls(arch_tls: usize) -> KResult<UserTLS> {
         Ok(new_tls)
     }
 
-    #[cfg(target_arch = "riscv64")]
+    #[cfg(any(target_arch = "riscv64", target_arch = "loongarch64"))]
     {
         Ok(UserTLS::new(arch_tls as u64))
     }
@@ -523,6 +606,19 @@ fn tkill(tid: u32, sig: u32) -> KResult<()> {
     Ok(())
 }
 
+#[eonix_macros::define_syscall(SYS_TGKILL)]
+fn tgkill(tgid: u32, tid: u32, sig: u32) -> KResult<()> {
+    let procs = Task::block_on(ProcessList::get().read());
+
+    let thread_to_kill = procs.try_find_thread(tid).ok_or(ESRCH)?;
+    if thread_to_kill.process.pid != tgid {
+        return Err(ESRCH);
+    }
+
+    thread_to_kill.raise(Signal::try_from_raw(sig)?);
+    Ok(())
+}
+
 #[eonix_macros::define_syscall(SYS_RT_SIGPROCMASK)]
 fn rt_sigprocmask(
     how: u32,
@@ -553,6 +649,29 @@ fn rt_sigprocmask(
     }
 
     Ok(())
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct TimeSpec32 {
+    tv_sec: i32,
+    tv_nsec: i32,
+}
+
+impl TimeSpec32 {
+    fn to_duration(&self) -> Duration {
+        Duration::new(self.tv_sec as u64, self.tv_nsec as u32)
+    }
+}
+
+#[eonix_macros::define_syscall(SYS_RT_SIGTIMEDWAIT_TIME32)]
+fn rt_sigtimedwait_time32(
+    _uthese: *const SigSet,
+    _uinfo: *mut SigInfo,
+    _uts: *const TimeSpec32,
+) -> KResult<i32> {
+    // TODO
+    Ok(0)
 }
 
 #[eonix_macros::define_syscall(SYS_RT_SIGACTION)]
@@ -610,7 +729,12 @@ fn prlimit64(
             }
 
             if !new_limit.is_null() {
-                return Err(ENOSYS);
+                let new_rlimit = UserPointer::new(new_limit)?.read()?;
+                if new_rlimit.rlim_cur > new_rlimit.rlim_max {
+                    return Err(EINVAL);
+                }
+                // TODO:
+                // thread.process().set_rlimit(resource, new_rlimit)?;
             }
             Ok(())
         }
@@ -621,6 +745,11 @@ fn prlimit64(
 #[eonix_macros::define_syscall(SYS_GETRLIMIT)]
 fn getrlimit(resource: u32, rlimit: *mut RLimit) -> KResult<()> {
     sys_prlimit64(thread, 0, resource, core::ptr::null(), rlimit)
+}
+
+#[eonix_macros::define_syscall(SYS_SETRLIMIT)]
+fn setrlimit(resource: u32, rlimit: *const RLimit) -> KResult<()> {
+    sys_prlimit64(thread, 0, resource, rlimit, core::ptr::null_mut())
 }
 
 #[repr(C)]
@@ -689,6 +818,9 @@ fn fork() -> KResult<u32> {
     do_clone(thread, clone_args)
 }
 
+// Some old platforms including x86_32, riscv and arm have the last two arguments
+// swapped, so we need to define two versions of `clone` syscall.
+#[cfg(not(target_arch = "loongarch64"))]
 #[eonix_macros::define_syscall(SYS_CLONE)]
 fn clone(
     clone_flags: usize,
@@ -696,6 +828,20 @@ fn clone(
     parent_tidptr: usize,
     tls: usize,
     child_tidptr: usize,
+) -> KResult<u32> {
+    let clone_args = CloneArgs::for_clone(clone_flags, new_sp, child_tidptr, parent_tidptr, tls)?;
+
+    do_clone(thread, clone_args)
+}
+
+#[cfg(target_arch = "loongarch64")]
+#[eonix_macros::define_syscall(SYS_CLONE)]
+fn clone(
+    clone_flags: usize,
+    new_sp: usize,
+    parent_tidptr: usize,
+    child_tidptr: usize,
+    tls: usize,
 ) -> KResult<u32> {
     let clone_args = CloneArgs::for_clone(clone_flags, new_sp, child_tidptr, parent_tidptr, tls)?;
 

@@ -1,18 +1,22 @@
 use super::mm_list::EMPTY_PAGE;
 use super::paging::AllocZeroed as _;
 use super::{AsMemoryBlock, Mapping, Page, Permission};
-use crate::io::ByteBuffer;
-use crate::KResult;
-use core::{borrow::Borrow, cell::UnsafeCell, cmp::Ordering};
+use crate::kernel::constants::EINVAL;
+use crate::prelude::KResult;
+use core::borrow::Borrow;
+use core::cell::UnsafeCell;
+use core::cmp;
 use eonix_mm::address::{AddrOps as _, VAddr, VRange};
 use eonix_mm::page_table::{PageAttribute, RawAttribute, PTE};
-use eonix_mm::paging::PFN;
+use eonix_mm::paging::{PAGE_SIZE, PFN};
+use eonix_runtime::task::Task;
 
 #[derive(Debug)]
 pub struct MMArea {
     range: UnsafeCell<VRange>,
     pub(super) mapping: Mapping,
     pub(super) permission: Permission,
+    pub is_shared: bool,
 }
 
 impl Clone for MMArea {
@@ -21,16 +25,18 @@ impl Clone for MMArea {
             range: UnsafeCell::new(self.range()),
             mapping: self.mapping.clone(),
             permission: self.permission,
+            is_shared: self.is_shared,
         }
     }
 }
 
 impl MMArea {
-    pub fn new(range: VRange, mapping: Mapping, permission: Permission) -> Self {
+    pub fn new(range: VRange, mapping: Mapping, permission: Permission, is_shared: bool) -> Self {
         Self {
             range: range.into(),
             mapping,
             permission,
+            is_shared,
         }
     }
 
@@ -56,9 +62,9 @@ impl MMArea {
         assert!(at.is_page_aligned());
 
         match self.range_borrow().cmp(&VRange::from(at)) {
-            Ordering::Less => (Some(self), None),
-            Ordering::Greater => (None, Some(self)),
-            Ordering::Equal => {
+            cmp::Ordering::Less => (Some(self), None),
+            cmp::Ordering::Greater => (None, Some(self)),
+            cmp::Ordering::Equal => {
                 let diff = at - self.range_borrow().start();
                 if diff == 0 {
                     return (None, Some(self));
@@ -71,6 +77,7 @@ impl MMArea {
                         Mapping::Anonymous => Mapping::Anonymous,
                         Mapping::File(mapping) => Mapping::File(mapping.offset(diff)),
                     },
+                    is_shared: self.is_shared,
                 };
 
                 let new_range = self.range_borrow().shrink(self.range_borrow().end() - at);
@@ -119,43 +126,81 @@ impl MMArea {
 
     /// # Arguments
     /// * `offset`: The offset from the start of the mapping, aligned to 4KB boundary.
-    pub fn handle_mmap(
+    pub async fn handle_mmap(
         &self,
         pfn: &mut PFN,
         attr: &mut PageAttribute,
         offset: usize,
+        write: bool,
     ) -> KResult<()> {
-        // TODO: Implement shared mapping
-        let Mapping::File(mapping) = &self.mapping else {
+        let Mapping::File(file_mapping) = &self.mapping else {
             panic!("Anonymous mapping should not be PA_MMAP");
         };
 
-        assert!(offset < mapping.length, "Offset out of range");
-        unsafe {
-            Page::with_raw(*pfn, |page| {
-                // SAFETY: `page` is marked as mapped, so others trying to read or write to
-                //         it will be blocked and enter the page fault handler, where they will
-                //         be blocked by the mutex held by us.
-                let page_data = page.as_memblk().as_bytes_mut();
+        assert!(offset < file_mapping.length, "Offset out of range");
 
-                let cnt_to_read = (mapping.length - offset).min(0x1000);
-                let cnt_read = mapping.file.read(
-                    &mut ByteBuffer::new(&mut page_data[..cnt_to_read]),
-                    mapping.offset + offset,
-                )?;
+        let Some(page_cache) = file_mapping.file.page_cache() else {
+            panic!("Mapping file should have pagecache");
+        };
 
-                page_data[cnt_read..].fill(0);
+        let file_offset = file_mapping.offset + offset;
+        let cnt_to_read = (file_mapping.length - offset).min(0x1000);
 
-                KResult::Ok(())
-            })?;
-        }
+        page_cache
+            .with_page(file_offset, |page, cache_page| {
+                // Non-write faults: we find page in pagecache and do mapping
+                // Write fault: we need to care about shared or private mapping.
+                if !write {
+                    // Bss is embarrassing in pagecache!
+                    // We have to assume cnt_to_read < PAGE_SIZE all bss
+                    if cnt_to_read < PAGE_SIZE {
+                        let new_page = Page::zeroed();
+                        unsafe {
+                            let page_data = new_page.as_memblk().as_bytes_mut();
+                            page_data[..cnt_to_read]
+                                .copy_from_slice(&page.as_memblk().as_bytes()[..cnt_to_read]);
+                        }
+                        *pfn = new_page.into_raw();
+                    } else {
+                        *pfn = page.clone().into_raw();
+                    }
+
+                    if self.permission.write {
+                        if self.is_shared {
+                            // The page may will not be written,
+                            // But we simply assume page will be dirty
+                            cache_page.set_dirty();
+                            attr.insert(PageAttribute::WRITE);
+                        } else {
+                            attr.insert(PageAttribute::COPY_ON_WRITE);
+                        }
+                    }
+                } else {
+                    if self.is_shared {
+                        cache_page.set_dirty();
+                        *pfn = page.clone().into_raw();
+                    } else {
+                        let new_page = Page::zeroed();
+                        unsafe {
+                            let page_data = new_page.as_memblk().as_bytes_mut();
+                            page_data[..cnt_to_read]
+                                .copy_from_slice(&page.as_memblk().as_bytes()[..cnt_to_read]);
+                        }
+                        *pfn = new_page.into_raw();
+                    }
+
+                    attr.insert(PageAttribute::WRITE);
+                }
+            })
+            .await?
+            .ok_or(EINVAL)?;
 
         attr.insert(PageAttribute::PRESENT);
         attr.remove(PageAttribute::MAPPED);
         Ok(())
     }
 
-    pub fn handle(&self, pte: &mut impl PTE, offset: usize) -> KResult<()> {
+    pub fn handle(&self, pte: &mut impl PTE, offset: usize, write: bool) -> KResult<()> {
         let mut attr = pte.get_attr().as_page_attr().expect("Not a page attribute");
         let mut pfn = pte.get_pfn();
 
@@ -164,10 +209,15 @@ impl MMArea {
         }
 
         if attr.contains(PageAttribute::MAPPED) {
-            self.handle_mmap(&mut pfn, &mut attr, offset)?;
+            Task::block_on(self.handle_mmap(&mut pfn, &mut attr, offset, write))?;
         }
 
-        attr.set(PageAttribute::ACCESSED, true);
+        attr.insert(PageAttribute::ACCESSED);
+
+        if write {
+            attr.insert(PageAttribute::DIRTY);
+        }
+
         pte.set(pfn, attr.into());
 
         Ok(())

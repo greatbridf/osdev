@@ -9,6 +9,9 @@ cfg_if::cfg_if! {
     } else if #[cfg(target_arch = "riscv64")] {
         pub mod riscv64;
         pub use riscv64::*;
+    } else if #[cfg(target_arch = "loongarch64")] {
+        pub mod loongarch64;
+        pub use loongarch64::*;
     } else {
         compile_error!("Unsupported architecture");
     }

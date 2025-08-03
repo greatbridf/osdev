@@ -33,13 +33,24 @@ unsafe extern "C" fn vdso_sigreturn() {
 #[unsafe(naked)]
 #[unsafe(link_section = ".vdso.rt_sigreturn")]
 unsafe extern "C" fn vdso_rt_sigreturn() {
-    #[cfg(not(any(target_arch = "x86_64", target_arch = "riscv64")))]
+    #[cfg(not(any(
+        target_arch = "x86_64",
+        target_arch = "riscv64",
+        target_arch = "loongarch64"
+    )))]
     compile_error!("rt_sigreturn is not implemented for this architecture");
 
     #[cfg(target_arch = "riscv64")]
     naked_asm!(
         "li a7, {sys_rt_sigreturn}",
         "ecall",
+        sys_rt_sigreturn = const posix_types::syscall_no::SYS_RT_SIGRETURN,
+    );
+
+    #[cfg(target_arch = "loongarch64")]
+    naked_asm!(
+        "li.d $a7, {sys_rt_sigreturn}",
+        "syscall 0",
         sys_rt_sigreturn = const posix_types::syscall_no::SYS_RT_SIGRETURN,
     );
 
@@ -150,7 +161,11 @@ impl SignalAction {
         let return_address = if let Some(restorer) = restorer {
             restorer.addr().addr()
         } else {
-            #[cfg(not(any(target_arch = "x86_64", target_arch = "riscv64")))]
+            #[cfg(not(any(
+                target_arch = "x86_64",
+                target_arch = "riscv64",
+                target_arch = "loongarch64"
+            )))]
             compile_error!("`vdso_sigreturn` is not implemented for this architecture");
 
             #[cfg(target_arch = "x86_64")]
@@ -166,7 +181,7 @@ impl SignalAction {
                 }
             }
 
-            #[cfg(target_arch = "riscv64")]
+            #[cfg(any(target_arch = "riscv64", target_arch = "loongarch64"))]
             {
                 static VDSO_RT_SIGRETURN_ADDR: &'static unsafe extern "C" fn() =
                     &(vdso_rt_sigreturn as unsafe extern "C" fn());

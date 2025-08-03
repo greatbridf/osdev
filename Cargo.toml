@@ -32,34 +32,38 @@ align_ext = "0.1.0"
 xmas-elf = "0.10.0"
 another_ext4 = { git = "https://github.com/SMS-Derfflinger/another_ext4", branch = "main" }
 
-[target.'cfg(target_arch = "riscv64")'.dependencies]
+[target.'cfg(any(target_arch = "riscv64", target_arch = "loongarch64"))'.dependencies]
 virtio-drivers = { version = "0.11.0" }
 
 [features]
 default = []
+trace_pci = []
 trace_syscall = []
 trace_scheduler = []
-log_trace = ["trace_syscall", "trace_scheduler"]
+log_trace = ["trace_pci", "trace_syscall", "trace_scheduler"]
 log_debug = []
 smp = []
+
+[profile.release]
+debug = true
 
 [profile.dev]
 panic = "abort"
 
 [profile.dev.package.eonix_preempt]
-opt-level = 2
+opt-level = "s"
 
 [profile.dev.package.eonix_runtime]
-opt-level = 0
+opt-level = "s"
 
 [profile.dev.package.eonix_sync]
-opt-level = 2
+opt-level = "s"
 
 [profile.dev.package.intrusive_list]
-opt-level = 2
+opt-level = "s"
 
 [profile.dev.package.eonix_hal]
-opt-level = 0
+opt-level = "s"
 
 [profile.dev.package."*"]
 opt-level = "s"

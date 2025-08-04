@@ -1,6 +1,6 @@
 use core::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
-use crate::kernel::mem::{PageCache, PageCacheBackend};
+use crate::kernel::mem::{CachePage, CachePageStream, PageCache, PageCacheBackend};
 use crate::{
     io::{Buffer, ByteBuffer, Stream},
     kernel::{
@@ -83,7 +83,7 @@ impl Vfs for Ext4Fs {
     }
 
     fn is_read_only(&self) -> bool {
-        true
+        false
     }
 }
 
@@ -257,12 +257,12 @@ impl FileInode {
 }
 
 impl PageCacheBackend for FileInode {
-    fn read_page(&self, page: &mut crate::kernel::mem::CachePage, offset: usize) -> KResult<usize> {
+    fn read_page(&self, page: &mut CachePage, offset: usize) -> KResult<usize> {
         self.read_direct(page, offset)
     }
 
-    fn write_page(&self, page: &crate::kernel::mem::CachePage, offset: usize) -> KResult<usize> {
-        todo!()
+    fn write_page(&self, page: &mut CachePageStream, offset: usize) -> KResult<usize> {
+        self.write_direct(page, offset)
     }
 
     fn size(&self) -> usize {
@@ -296,12 +296,6 @@ impl Inode for FileInode {
     fn write(&self, stream: &mut dyn Stream, offset: WriteOffset) -> KResult<usize> {
         let _lock = Task::block_on(self.rwsem.write());
 
-        let vfs = self.vfs.upgrade().ok_or(EIO)?;
-        let ext4fs = vfs.as_any().downcast_ref::<Ext4Fs>().unwrap();
-
-        let mut temp_buf = vec![0u8; 4096];
-        let mut total_written = 0;
-
         let mut store_new_end = None;
         let offset = match offset {
             WriteOffset::Position(offset) => offset,
@@ -311,6 +305,31 @@ impl Inode for FileInode {
                 self.size.load(Ordering::Relaxed) as usize
             }
         };
+
+        let total_written = Task::block_on(self.page_cache.write(stream, offset))?;
+        let cursor_end = offset + total_written;
+        if let Some(store_end) = store_new_end {
+            *store_end = cursor_end;
+        }
+
+        let mtime = Instant::now();
+        *self.mtime.lock() = mtime;
+        self.size.store(cursor_end as u64, Ordering::Relaxed);
+
+        // TODO: change this with some update strategy such as LRU
+        let _ = Task::block_on(self.page_cache.fsync());
+
+        Ok(total_written)
+    }
+
+    fn write_direct(&self, stream: &mut dyn Stream, offset: usize) -> KResult<usize> {
+        //let _lock = Task::block_on(self.rwsem.write());
+
+        let vfs = self.vfs.upgrade().ok_or(EIO)?;
+        let ext4fs = vfs.as_any().downcast_ref::<Ext4Fs>().unwrap();
+
+        let mut temp_buf = vec![0u8; 4096];
+        let mut total_written = 0;
 
         while let Some(data) = stream.poll_data(&mut temp_buf)? {
             let written = ext4fs
@@ -323,18 +342,10 @@ impl Inode for FileInode {
             }
         }
 
-        if let Some(store_end) = store_new_end {
-            *store_end = offset + total_written;
-        }
-        let mtime = Instant::now();
-        *self.mtime.lock() = mtime;
-        let new_size = (offset + total_written) as u64;
-        self.size
-            .store(offset as u64 + total_written as u64, Ordering::Relaxed);
         ext4fs.modify_inode_stat(
             self.ino as u32,
-            Some(new_size),
-            mtime.since_epoch().as_secs() as u32,
+            Some(self.size() as u64),
+            self.mtime.lock().since_epoch().as_secs() as u32,
         );
 
         Ok(total_written)

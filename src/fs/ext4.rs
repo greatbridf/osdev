@@ -397,6 +397,7 @@ impl Inode for FileInode {
             let ext4fs = vfs.as_any().downcast_ref::<Ext4Fs>().unwrap();
             let buffer = vec![0u8; 10];
             let _ = ext4fs.inner.write(self.ino as u32, 0, &buffer);
+            let _ = Task::block_on(self.page_cache.resize(0));
         }
 
         self.size.store(length as u64, Ordering::Relaxed);

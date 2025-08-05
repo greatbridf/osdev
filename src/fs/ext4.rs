@@ -1,6 +1,7 @@
 use core::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
 use crate::kernel::mem::{CachePage, CachePageStream, PageCache, PageCacheBackend};
+use crate::kernel::timer::Ticks;
 use crate::{
     io::{Buffer, ByteBuffer, Stream},
     kernel::{
@@ -223,6 +224,7 @@ impl Ext4Inode {
 
 define_struct_inode! {
     struct FileInode {
+        last_sync: AtomicU64,
         page_cache: PageCache,
     }
 }
@@ -235,6 +237,7 @@ impl FileInode {
     fn with_idata(idata: InodeData) -> Arc<Self> {
         let inode = Arc::new_cyclic(|weak_self: &Weak<FileInode>| Self {
             idata,
+            last_sync: AtomicU64::new(0),
             page_cache: PageCache::new(weak_self.clone()),
         });
 
@@ -251,8 +254,21 @@ impl FileInode {
                 inode_data.nlink.store(1, Ordering::Relaxed);
                 inode_data
             },
+            last_sync: AtomicU64::new(0),
             page_cache: PageCache::new(weak_self.clone()),
         })
+    }
+
+    fn sync_if_needed(&self) {
+        let now = Ticks::now().in_secs();
+        let last = self.last_sync.load(Ordering::Relaxed);
+
+        // TODO: this is a temporary implement,
+        // consider change this with some update strategy such as LRU future
+        if now - last > 10 {
+            self.last_sync.store(now, Ordering::Relaxed);
+            let _ = Task::block_on(self.page_cache.fsync());
+        }
     }
 }
 
@@ -316,8 +332,7 @@ impl Inode for FileInode {
         *self.mtime.lock() = mtime;
         self.size.store(cursor_end as u64, Ordering::Relaxed);
 
-        // TODO: change this with some update strategy such as LRU
-        let _ = Task::block_on(self.page_cache.fsync());
+        self.sync_if_needed();
 
         Ok(total_written)
     }

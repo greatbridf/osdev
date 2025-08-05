@@ -12,6 +12,7 @@ use crate::{
         terminal::{Terminal, TerminalIORequest},
         user::{UserPointer, UserPointerMut},
         vfs::inode::Ino,
+        vfs::inode::Inode,
         CharDevice,
     },
     prelude::*,
@@ -85,6 +86,15 @@ pub enum FileType {
 pub struct File {
     flags: AtomicU32,
     file_type: FileType,
+}
+
+impl File {
+    pub fn get_inode(&self) -> KResult<Option<Arc<dyn Inode>>> {
+        match &self.file_type {
+            FileType::Inode(inode_file) => Ok(Some(inode_file.dentry.get_inode()?)),
+            _ => Ok(None),
+        }
+    }
 }
 
 pub enum SeekOption {
@@ -362,7 +372,6 @@ impl InodeFile {
         }
 
         let mut cursor = Task::block_on(self.cursor.lock());
-
         let nread = self.dentry.read(buffer, *cursor)?;
 
         *cursor += nread;

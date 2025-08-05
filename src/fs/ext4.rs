@@ -1,5 +1,7 @@
 use core::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
+use crate::kernel::mem::{CachePage, CachePageStream, PageCache, PageCacheBackend};
+use crate::kernel::timer::Ticks;
 use crate::{
     io::{Buffer, ByteBuffer, Stream},
     kernel::{
@@ -21,9 +23,10 @@ use crate::{
     path::Path,
     prelude::*,
 };
+use alloc::sync::Weak;
 use alloc::{
     collections::btree_map::{BTreeMap, Entry},
-    sync::{Arc, Weak},
+    sync::Arc,
 };
 use another_ext4::{
     Block, BlockDevice as Ext4BlockDeviceTrait, Ext4, FileType, InodeMode, PBlockId,
@@ -81,7 +84,7 @@ impl Vfs for Ext4Fs {
     }
 
     fn is_read_only(&self) -> bool {
-        true
+        false
     }
 }
 
@@ -138,7 +141,7 @@ impl Ext4Fs {
                 let mode = *idata.mode.get_mut();
                 if s_isreg(mode) {
                     vacant
-                        .insert(Ext4Inode::File(Arc::new(FileInode { idata })))
+                        .insert(Ext4Inode::File(FileInode::with_idata(idata)))
                         .clone()
                         .into_inner()
                 } else if s_isdir(mode) {
@@ -149,7 +152,7 @@ impl Ext4Fs {
                 } else {
                     println_warn!("ext4: Unsupported inode type: {mode:#o}");
                     vacant
-                        .insert(Ext4Inode::File(Arc::new(FileInode { idata })))
+                        .insert(Ext4Inode::File(FileInode::with_idata(idata)))
                         .clone()
                         .into_inner()
                 }
@@ -220,7 +223,10 @@ impl Ext4Inode {
 }
 
 define_struct_inode! {
-    struct FileInode;
+    struct FileInode {
+        last_sync: AtomicU64,
+        page_cache: PageCache,
+    }
 }
 
 define_struct_inode! {
@@ -228,8 +234,18 @@ define_struct_inode! {
 }
 
 impl FileInode {
+    fn with_idata(idata: InodeData) -> Arc<Self> {
+        let inode = Arc::new_cyclic(|weak_self: &Weak<FileInode>| Self {
+            idata,
+            last_sync: AtomicU64::new(0),
+            page_cache: PageCache::new(weak_self.clone()),
+        });
+
+        inode
+    }
+
     pub fn new(ino: Ino, vfs: Weak<dyn Vfs>, mode: Mode) -> Arc<Self> {
-        Arc::new_cyclic(|_| FileInode {
+        Arc::new_cyclic(|weak_self: &Weak<FileInode>| Self {
             idata: {
                 let inode_data = InodeData::new(ino, vfs);
                 inode_data
@@ -238,12 +254,48 @@ impl FileInode {
                 inode_data.nlink.store(1, Ordering::Relaxed);
                 inode_data
             },
+            last_sync: AtomicU64::new(0),
+            page_cache: PageCache::new(weak_self.clone()),
         })
+    }
+
+    fn sync_if_needed(&self) {
+        let now = Ticks::now().in_secs();
+        let last = self.last_sync.load(Ordering::Relaxed);
+
+        // TODO: this is a temporary implement,
+        // consider change this with some update strategy such as LRU future
+        if now - last > 10 {
+            self.last_sync.store(now, Ordering::Relaxed);
+            let _ = Task::block_on(self.page_cache.fsync());
+        }
+    }
+}
+
+impl PageCacheBackend for FileInode {
+    fn read_page(&self, page: &mut CachePage, offset: usize) -> KResult<usize> {
+        self.read_direct(page, offset)
+    }
+
+    fn write_page(&self, page: &mut CachePageStream, offset: usize) -> KResult<usize> {
+        self.write_direct(page, offset)
+    }
+
+    fn size(&self) -> usize {
+        self.size.load(Ordering::Relaxed) as usize
     }
 }
 
 impl Inode for FileInode {
+    fn page_cache(&self) -> Option<&PageCache> {
+        Some(&self.page_cache)
+    }
+
     fn read(&self, buffer: &mut dyn Buffer, offset: usize) -> KResult<usize> {
+        Task::block_on(self.page_cache.read(buffer, offset))
+    }
+
+    fn read_direct(&self, buffer: &mut dyn Buffer, offset: usize) -> KResult<usize> {
         let vfs = self.vfs.upgrade().ok_or(EIO)?;
         let ext4fs = vfs.as_any().downcast_ref::<Ext4Fs>().unwrap();
 
@@ -260,12 +312,6 @@ impl Inode for FileInode {
     fn write(&self, stream: &mut dyn Stream, offset: WriteOffset) -> KResult<usize> {
         let _lock = Task::block_on(self.rwsem.write());
 
-        let vfs = self.vfs.upgrade().ok_or(EIO)?;
-        let ext4fs = vfs.as_any().downcast_ref::<Ext4Fs>().unwrap();
-
-        let mut temp_buf = vec![0u8; 4096];
-        let mut total_written = 0;
-
         let mut store_new_end = None;
         let offset = match offset {
             WriteOffset::Position(offset) => offset,
@@ -275,6 +321,30 @@ impl Inode for FileInode {
                 self.size.load(Ordering::Relaxed) as usize
             }
         };
+
+        let total_written = Task::block_on(self.page_cache.write(stream, offset))?;
+        let cursor_end = offset + total_written;
+        if let Some(store_end) = store_new_end {
+            *store_end = cursor_end;
+        }
+
+        let mtime = Instant::now();
+        *self.mtime.lock() = mtime;
+        self.size.store(cursor_end as u64, Ordering::Relaxed);
+
+        self.sync_if_needed();
+
+        Ok(total_written)
+    }
+
+    fn write_direct(&self, stream: &mut dyn Stream, offset: usize) -> KResult<usize> {
+        //let _lock = Task::block_on(self.rwsem.write());
+
+        let vfs = self.vfs.upgrade().ok_or(EIO)?;
+        let ext4fs = vfs.as_any().downcast_ref::<Ext4Fs>().unwrap();
+
+        let mut temp_buf = vec![0u8; 4096];
+        let mut total_written = 0;
 
         while let Some(data) = stream.poll_data(&mut temp_buf)? {
             let written = ext4fs
@@ -287,18 +357,10 @@ impl Inode for FileInode {
             }
         }
 
-        if let Some(store_end) = store_new_end {
-            *store_end = offset + total_written;
-        }
-        let mtime = Instant::now();
-        *self.mtime.lock() = mtime;
-        let new_size = (offset + total_written) as u64;
-        self.size
-            .store(offset as u64 + total_written as u64, Ordering::Relaxed);
         ext4fs.modify_inode_stat(
             self.ino as u32,
-            Some(new_size),
-            mtime.since_epoch().as_secs() as u32,
+            Some(self.file_size() as u64),
+            self.mtime.lock().since_epoch().as_secs() as u32,
         );
 
         Ok(total_written)

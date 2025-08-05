@@ -1,9 +1,12 @@
+use core::time::Duration;
+
 use super::FromSyscallArg;
 use crate::io::{ByteBuffer, IntoStream};
 use crate::kernel::constants::{
-    EBADF, EFAULT, EINVAL, ENOENT, ENOTDIR, SEEK_CUR, SEEK_END, SEEK_SET, S_IFBLK, S_IFCHR,
+    EBADF, EFAULT, EINVAL, ENOENT, ENOSYS, ENOTDIR, SEEK_CUR, SEEK_END, SEEK_SET, S_IFBLK, S_IFCHR,
 };
 use crate::kernel::task::Thread;
+use crate::kernel::timer::sleep;
 use crate::kernel::vfs::file::File;
 use crate::kernel::vfs::filearray::FD;
 use crate::{
@@ -26,7 +29,8 @@ use eonix_runtime::task::Task;
 use posix_types::ctypes::{Long, PtrT};
 use posix_types::namei::RenameFlags;
 use posix_types::open::{AtFlags, OpenFlags};
-use posix_types::signal::SigSet;
+use posix_types::poll::FDSet;
+use posix_types::signal::{SigSet, Signal};
 use posix_types::stat::Stat;
 use posix_types::stat::{StatX, TimeSpec};
 use posix_types::syscall_no::*;
@@ -97,6 +101,18 @@ fn write(fd: FD, buffer: *const u8, count: usize) -> KResult<usize> {
     let mut stream = buffer.into_stream();
 
     Task::block_on(thread.files.get(fd).ok_or(EBADF)?.write(&mut stream))
+}
+
+#[eonix_macros::define_syscall(SYS_PWRITE64)]
+fn pwrite64(fd: FD, buffer: *const u8, count: usize, offset: usize) -> KResult<usize> {
+    let buffer = CheckedUserPointer::new(buffer, count)?;
+    let mut stream = buffer.into_stream();
+
+    thread
+        .files
+        .get(fd)
+        .ok_or(EBADF)?
+        .write_at(&mut stream, offset)
 }
 
 #[eonix_macros::define_syscall(SYS_OPENAT)]
@@ -380,6 +396,12 @@ fn mkdir(pathname: *const u8, mode: u32) -> KResult<()> {
     sys_mkdirat(thread, FD::AT_FDCWD, pathname, mode)
 }
 
+#[eonix_macros::define_syscall(SYS_FTRUNCATE64)]
+fn truncate64(fd: FD, length: usize) -> KResult<()> {
+    let file = thread.files.get(fd).ok_or(EBADF)?;
+    file.as_path().ok_or(EBADF)?.truncate(length)
+}
+
 #[cfg(target_arch = "x86_64")]
 #[eonix_macros::define_syscall(SYS_TRUNCATE)]
 fn truncate(pathname: *const u8, length: usize) -> KResult<()> {
@@ -644,6 +666,38 @@ fn ppoll(
 ) -> KResult<u32> {
     // TODO: Implement ppoll with signal mask and timeout
     do_poll(thread, fds, nfds, 0)
+}
+
+#[eonix_macros::define_syscall(SYS_PSELECT6)]
+fn pselect6(
+    nfds: u32,
+    _readfds: *mut FDSet,
+    _writefds: *mut FDSet,
+    _exceptfds: *mut FDSet,
+    timeout: *mut TimeSpec,
+    _sigmask: *const (),
+) -> KResult<usize> {
+    // According to [pthread6(2)](https://linux.die.net/man/2/pselect6):
+    // Some code calls select() with all three sets empty, nfds zero, and
+    // a non-NULL timeout as a fairly portable way to sleep with subsecond precision.
+    if nfds != 0 {
+        thread.raise(Signal::SIGSYS);
+        return Err(ENOSYS);
+    }
+
+    let timeout = UserPointerMut::new(timeout)?;
+
+    // Read here to check for invalid pointers.
+    let _timeout_value = timeout.read()?;
+
+    Task::block_on(sleep(Duration::from_millis(10)));
+
+    timeout.write(TimeSpec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    })?;
+
+    Ok(0)
 }
 
 #[cfg(target_arch = "x86_64")]

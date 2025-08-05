@@ -1,0 +1,66 @@
+name: Test Build
+
+on:
+  push:
+    branches-ignore:
+      - comp-and-judge
+  pull_request:
+    branches-ignore:
+      - comp-and-judge
+  workflow_dispatch:
+
+jobs:
+  build-and-run-test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [riscv64, loongarch64]
+        include:
+          - arch: riscv64
+            target: riscv64gc-unknown-none-elf
+          - arch: loongarch64
+            target: loongarch64-unknown-none-softfloat
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup rust nightly
+        run: rustup component add rust-src llvm-tools
+
+      - name: Setup QEMU
+        run: |
+          sudo apt-get install -y qemu-system-${{ matrix.arch }} qemu-kvm
+
+      - name: Configure
+        run: ./configure
+
+      - name: Run build for ${{ matrix.arch }} targets
+        run: |
+          make build ARCH=${{ matrix.arch }} MODE=release
+          zstd -k build/boot-${{ matrix.arch }}.img
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: eonix-kernel-and-image-${{ matrix.arch }}
+          path: |
+            build/${{ matrix.target }}/release/eonix_kernel
+            build/boot-${{ matrix.arch }}.img.zst
+
+      - name: Test run for ${{ matrix.arch }}
+        run: |
+          echo "Fixing permissions for /dev/kvm..."
+          sudo adduser $USER kvm
+          sh script/test.sh
+        env:
+          ARCH: ${{ matrix.arch }}
+          QEMU_ACCEL: ''
+        timeout-minutes: 2
+        continue-on-error: true
+
+      - name: Upload run log
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-${{ matrix.arch }}.log
+          path: build/test-*.log

@@ -26,7 +26,10 @@ use core::{
     hint::spin_loop,
     sync::atomic::{AtomicBool, Ordering},
 };
-use eonix_hal::{processor::CPU, traits::trap::IrqState, trap::disable_irqs_save};
+use eonix_hal::{
+    arch_exported::bootstrap::shutdown, processor::CPU, traits::trap::IrqState,
+    trap::disable_irqs_save,
+};
 use eonix_mm::address::PRange;
 use eonix_runtime::{run::FutureRun, scheduler::Scheduler, task::Task};
 use kernel::{
@@ -45,6 +48,19 @@ use kernel_init::setup_memory;
 use path::Path;
 use prelude::*;
 
+#[cfg(any(target_arch = "riscv64", target_arch = "loongarch64"))]
+fn do_panic() -> ! {
+    shutdown();
+}
+
+#[cfg(not(any(target_arch = "riscv64", target_arch = "loongarch64")))]
+fn do_panic() -> ! {
+    // Spin forever.
+    loop {
+        spin_loop();
+    }
+}
+
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
     if let Some(location) = info.location() {
@@ -60,7 +76,7 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
     println_fatal!();
     println_fatal!("{}", info.message());
 
-    loop {}
+    do_panic()
 }
 
 static BSP_OK: AtomicBool = AtomicBool::new(false);
@@ -73,8 +89,6 @@ fn kernel_init(mut data: eonix_hal::bootstrap::BootStrapData) -> ! {
     {
         driver::sbi_console::init_console();
     }
-
-    kernel::pcie::init_pcie().expect("Unable to initialize PCIe bus");
 
     // To satisfy the `Scheduler` "preempt count == 0" assertion.
     eonix_preempt::disable();
@@ -123,6 +137,8 @@ async fn init_process(early_kstack: PRange) {
         irq_ctx.restore();
     }
 
+    kernel::pcie::init_pcie().expect("Unable to initialize PCIe bus");
+
     CharDevice::init().unwrap();
 
     #[cfg(target_arch = "x86_64")]
@@ -140,6 +156,14 @@ async fn init_process(early_kstack: PRange) {
         driver::e1000e::register_e1000e_driver();
         driver::ahci::register_ahci_driver();
         driver::goldfish_rtc::probe();
+    }
+
+    #[cfg(target_arch = "loongarch64")]
+    {
+        driver::serial::init().unwrap();
+        driver::virtio::init_virtio_devices();
+        driver::e1000e::register_e1000e_driver();
+        driver::ahci::register_ahci_driver();
     }
 
     fs::tmpfs::init();

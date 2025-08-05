@@ -1,17 +1,18 @@
+use crate::kernel::mem::page_cache::PageCacheRawPage;
+use crate::kernel::mem::PhysAccess;
 use buddy_allocator::BuddyRawPage;
 use core::{
     ptr::NonNull,
     sync::atomic::{AtomicU32, AtomicUsize, Ordering},
 };
+use eonix_hal::mm::ArchPhysAccess;
+use eonix_mm::paging::PAGE_SIZE;
 use eonix_mm::{
-    address::{PAddr, VAddr},
-    paging::{RawPage as RawPageTrait, PAGE_SIZE, PFN},
+    address::{PAddr, PhysAccess as _},
+    paging::{RawPage as RawPageTrait, PFN},
 };
 use intrusive_list::{container_of, Link};
 use slab_allocator::SlabRawPage;
-
-use crate::kernel::mem::access::RawPageAccess;
-use crate::kernel::mem::PhysAccess;
 
 const PAGE_ARRAY: NonNull<RawPage> =
     unsafe { NonNull::new_unchecked(0xffffff8040000000 as *mut _) };
@@ -32,17 +33,30 @@ impl SlabPageInner {
     }
 }
 
+struct PageCacheInner {
+    valid_size: usize,
+}
+
 pub struct BuddyPageInner {}
 
 enum PageType {
     Buddy(BuddyPageInner),
     Slab(SlabPageInner),
+    PageCache(PageCacheInner),
 }
 
 impl PageType {
     fn slab_data(&mut self) -> &mut SlabPageInner {
         if let PageType::Slab(slab_data) = self {
             return slab_data;
+        } else {
+            unreachable!()
+        }
+    }
+
+    fn page_cache_data(&mut self) -> &mut PageCacheInner {
+        if let PageType::PageCache(cache_data) = self {
+            return cache_data;
         } else {
             unreachable!()
         }
@@ -70,8 +84,8 @@ impl PageFlags {
     pub const PRESENT: u32 = 1 << 0;
     // pub const LOCKED: u32 = 1 << 1;
     pub const BUDDY: u32 = 1 << 2;
-    // pub const SLAB: u32 = 1 << 3;
-    // pub const DIRTY: u32 = 1 << 4;
+    pub const SLAB: u32 = 1 << 3;
+    pub const DIRTY: u32 = 1 << 4;
     pub const FREE: u32 = 1 << 5;
     pub const LOCAL: u32 = 1 << 6;
 
@@ -206,8 +220,17 @@ impl SlabRawPage for RawPagePtr {
     }
 
     fn in_which(ptr: *mut u8) -> RawPagePtr {
-        let vaddr = VAddr::from(ptr as usize & !(PAGE_SIZE - 1));
-        unsafe { vaddr.as_raw_page() }
+        unsafe {
+            // SAFETY: The pointer is allocated from the slab allocator,
+            //         which can't be null.
+            let ptr = NonNull::new_unchecked(ptr);
+
+            // SAFETY: The pointer is valid.
+            let paddr = ArchPhysAccess::from_ptr(ptr);
+            let pfn = PFN::from(paddr);
+
+            RawPagePtr::from(pfn)
+        }
     }
 
     fn allocated_count(&self) -> &mut u32 {
@@ -224,5 +247,27 @@ impl SlabRawPage for RawPagePtr {
 
     fn slab_init(&self, first_free: Option<NonNull<usize>>) {
         self.as_mut().shared_data = PageType::Slab(SlabPageInner::new(first_free));
+    }
+}
+
+impl PageCacheRawPage for RawPagePtr {
+    fn valid_size(&self) -> &mut usize {
+        &mut self.as_mut().shared_data.page_cache_data().valid_size
+    }
+
+    fn is_dirty(&self) -> bool {
+        self.flags().has(PageFlags::DIRTY)
+    }
+
+    fn clear_dirty(&self) {
+        self.flags().clear(PageFlags::DIRTY);
+    }
+
+    fn set_dirty(&self) {
+        self.flags().set(PageFlags::DIRTY);
+    }
+
+    fn cache_init(&self) {
+        self.as_mut().shared_data = PageType::PageCache(PageCacheInner { valid_size: 0 });
     }
 }

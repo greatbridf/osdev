@@ -33,7 +33,9 @@ pub fn setup_memory(data: &mut BootStrapData) {
         let attr = PageAttribute::PRESENT
             | PageAttribute::WRITE
             | PageAttribute::READ
-            | PageAttribute::GLOBAL;
+            | PageAttribute::GLOBAL
+            | PageAttribute::ACCESSED
+            | PageAttribute::DIRTY;
 
         let page = GenericPage::alloc_in(&alloc);
         pte.set(page.into_raw(), attr.into());

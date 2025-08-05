@@ -1,9 +1,10 @@
 use crate::{
+    io::Buffer as _,
     kernel::{
-        constants::{CLOCK_MONOTONIC, CLOCK_REALTIME, EINVAL},
+        constants::{CLOCK_MONOTONIC, CLOCK_REALTIME, CLOCK_REALTIME_COARSE, EINTR, EINVAL},
         task::Thread,
         timer::{Instant, Ticks},
-        user::UserPointerMut,
+        user::{UserBuffer, UserPointerMut},
     },
     prelude::*,
 };
@@ -52,6 +53,9 @@ fn newuname(buffer: *mut NewUTSName) -> KResult<()> {
     #[cfg(target_arch = "riscv64")]
     copy_cstr_to_array(b"riscv64", &mut uname.machine);
 
+    #[cfg(target_arch = "loongarch64")]
+    copy_cstr_to_array(b"loongarch64", &mut uname.machine);
+
     copy_cstr_to_array(b"(none)", &mut uname.domainname);
 
     buffer.write(uname)
@@ -78,18 +82,26 @@ fn gettimeofday(timeval: *mut TimeVal, timezone: *mut ()) -> KResult<()> {
 }
 
 fn do_clock_gettime64(_thread: &Thread, clock_id: u32, timespec: *mut TimeSpec) -> KResult<()> {
-    if clock_id != CLOCK_REALTIME && clock_id != CLOCK_MONOTONIC {
-        unimplemented!("Unsupported clock_id: {}", clock_id);
-    }
-
     let timespec = UserPointerMut::new(timespec)?;
-    let now = Instant::now();
-    let since_epoch = now.since_epoch();
 
-    timespec.write(TimeSpec {
-        tv_sec: since_epoch.as_secs(),
-        tv_nsec: since_epoch.subsec_nanos(),
-    })
+    match clock_id {
+        CLOCK_REALTIME | CLOCK_REALTIME_COARSE => {
+            let now = Instant::now();
+            let since_epoch = now.since_epoch();
+            timespec.write(TimeSpec {
+                tv_sec: since_epoch.as_secs(),
+                tv_nsec: since_epoch.subsec_nanos(),
+            })
+        }
+        CLOCK_MONOTONIC => {
+            let uptime_secs = Ticks::since_boot().as_secs();
+            timespec.write(TimeSpec {
+                tv_sec: uptime_secs,
+                tv_nsec: 0,
+            })
+        }
+        clock_id => unimplemented!("Unsupported clock_id: {}", clock_id),
+    }
 }
 
 #[cfg(not(target_arch = "x86_64"))]
@@ -162,9 +174,22 @@ fn times(tms: *mut TMS) -> KResult<()> {
     })
 }
 
-pub fn keep_alive() {}
-
 #[eonix_macros::define_syscall(SYS_GETRANDOM)]
-fn get_random() -> KResult<i32> {
-    Ok(114514)
+fn get_random(buf: *mut u8, len: usize, flags: u32) -> KResult<usize> {
+    if flags != 0 {
+        return Err(EINVAL);
+    }
+
+    let mut buffer = UserBuffer::new(buf, len)?;
+    for i in (0u8..=255).cycle().step_by(53) {
+        let _ = buffer.fill(&[i])?;
+
+        if Thread::current().signal_list.has_pending_signal() {
+            return Err(EINTR);
+        }
+    }
+
+    Ok(len)
 }
+
+pub fn keep_alive() {}

@@ -4,32 +4,29 @@ use core::sync::atomic::{AtomicU32, Ordering};
 pub struct TaskState(AtomicU32);
 
 impl TaskState {
-    pub const RUNNING: u32 = 0;
-    pub const PARKING: u32 = 1;
+    pub const READY: u32 = 0;
+    pub const RUNNING: u32 = 1;
     pub const PARKED: u32 = 2;
+    pub const DEAD: u32 = 1 << 31;
 
     pub(crate) const fn new(state: u32) -> Self {
         Self(AtomicU32::new(state))
     }
 
     pub(crate) fn swap(&self, state: u32) -> u32 {
-        self.0.swap(state, Ordering::AcqRel)
+        self.0.swap(state, Ordering::SeqCst)
     }
 
-    pub(crate) fn try_park(&self) -> bool {
-        match self.0.compare_exchange(
-            TaskState::PARKING,
-            TaskState::PARKED,
-            Ordering::AcqRel,
-            Ordering::Acquire,
-        ) {
-            Ok(_) => true,
-            Err(TaskState::RUNNING) => false,
-            Err(_) => unreachable!("Invalid task state while trying to park."),
-        }
+    pub(crate) fn set(&self, state: u32) {
+        self.0.store(state, Ordering::SeqCst);
     }
 
-    pub(crate) fn is_running(&self) -> bool {
-        self.0.load(Ordering::Acquire) == Self::RUNNING
+    pub(crate) fn get(&self) -> u32 {
+        self.0.load(Ordering::SeqCst)
+    }
+
+    pub(crate) fn cmpxchg(&self, current: u32, new: u32) -> Result<u32, u32> {
+        self.0
+            .compare_exchange(current, new, Ordering::SeqCst, Ordering::SeqCst)
     }
 }

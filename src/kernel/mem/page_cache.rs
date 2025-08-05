@@ -125,27 +125,32 @@ impl PageCache {
 
     pub async fn read(&self, buffer: &mut dyn Buffer, mut offset: usize) -> KResult<usize> {
         let mut pages = self.pages.lock().await;
+        let size = self.backend.upgrade().unwrap().size();
 
         loop {
+            if offset >= size {
+                break;
+            }
             let page_id = offset >> PAGE_SIZE_BITS;
             let page = pages.get(&page_id);
 
             match page {
                 Some(page) => {
                     let inner_offset = offset % PAGE_SIZE;
+                    let available_in_file = size.saturating_sub(offset);
 
                     // TODO: still cause unnecessary IO if valid_size < PAGESIZE
                     //       and fill result is Done
-                    if page.valid_size() == 0
-                        || buffer
-                            .fill(&page.valid_data()[inner_offset..])?
-                            .should_stop()
+                    let page_data = &page.valid_data()[inner_offset..];
+                    let read_size = page_data.len().min(available_in_file);
+
+                    if read_size == 0
+                        || buffer.fill(&page_data[..read_size])?.should_stop()
                         || buffer.available() == 0
                     {
                         break;
                     }
-
-                    offset += PAGE_SIZE - inner_offset;
+                    offset += read_size;
                 }
                 None => {
                     let mut new_page = CachePage::new();
@@ -217,7 +222,7 @@ impl PageCache {
                 self.backend
                     .upgrade()
                     .unwrap()
-                    .write_page(page, page_id << PAGE_SIZE_BITS)?;
+                    .write_page(&mut CachePageStream::new(*page), page_id << PAGE_SIZE_BITS)?;
                 page.clear_dirty();
             }
         }
@@ -293,6 +298,51 @@ impl PageCache {
     }
 }
 
+pub struct CachePageStream {
+    page: CachePage,
+    cur: usize,
+}
+
+impl CachePageStream {
+    pub fn new(page: CachePage) -> Self {
+        Self { page, cur: 0 }
+    }
+
+    pub fn remaining(&self) -> usize {
+        self.page.valid_size().saturating_sub(self.cur)
+    }
+
+    pub fn is_drained(&self) -> bool {
+        self.cur >= self.page.valid_size()
+    }
+}
+
+impl Stream for CachePageStream {
+    fn poll_data<'a>(&mut self, buf: &'a mut [u8]) -> KResult<Option<&'a mut [u8]>> {
+        if self.cur >= self.page.valid_size() {
+            return Ok(None);
+        }
+
+        let page_data = &self.page.all()[self.cur..self.page.valid_size()];
+        let to_read = buf.len().min(page_data.len());
+
+        buf[..to_read].copy_from_slice(&page_data[..to_read]);
+        self.cur += to_read;
+
+        Ok(Some(&mut buf[..to_read]))
+    }
+
+    fn ignore(&mut self, len: usize) -> KResult<Option<usize>> {
+        if self.cur >= self.page.valid_size() {
+            return Ok(None);
+        }
+
+        let to_ignore = len.min(self.page.valid_size() - self.cur);
+        self.cur += to_ignore;
+        Ok(Some(to_ignore))
+    }
+}
+
 // with this trait, "page cache" and "block cache" are unified,
 // for fs, offset is file offset (floor algin to PAGE_SIZE)
 // for blkdev, offset is block idx (floor align to PAGE_SIZE / BLK_SIZE)
@@ -300,7 +350,7 @@ impl PageCache {
 pub trait PageCacheBackend {
     fn read_page(&self, page: &mut CachePage, offset: usize) -> KResult<usize>;
 
-    fn write_page(&self, page: &CachePage, offset: usize) -> KResult<usize>;
+    fn write_page(&self, page: &mut CachePageStream, offset: usize) -> KResult<usize>;
 
     fn size(&self) -> usize;
 }

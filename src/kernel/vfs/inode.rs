@@ -136,7 +136,7 @@ pub trait Inode: Send + Sync + InodeInner + Any {
         Err(if self.is_dir() { EISDIR } else { EINVAL })
     }
 
-    fn write_direct(&self, stream: &mut dyn Stream, offset: WriteOffset) -> KResult<usize> {
+    fn write_direct(&self, stream: &mut dyn Stream, offset: usize) -> KResult<usize> {
         Err(if self.is_dir() { EISDIR } else { EINVAL })
     }
 

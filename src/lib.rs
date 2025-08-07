@@ -28,15 +28,16 @@ use core::{
 };
 use eonix_hal::{
     arch_exported::bootstrap::shutdown,
+    context::TaskContext,
     processor::{halt, CPU, CPU_COUNT},
-    traits::trap::IrqState,
+    traits::{context::RawTaskContext, trap::IrqState},
     trap::disable_irqs_save,
 };
 use eonix_mm::address::PRange;
-use eonix_runtime::scheduler::RUNTIME;
+use eonix_runtime::{executor::Stack, scheduler::RUNTIME};
 use kernel::{
     mem::GlobalPageAlloc,
-    task::{ProcessBuilder, ProcessList, ProgramLoader, ThreadBuilder},
+    task::{KernelStack, ProcessBuilder, ProcessList, ProgramLoader, ThreadBuilder},
     vfs::{
         dentry::Dentry,
         mount::{do_mount, MS_NOATIME, MS_NODEV, MS_NOSUID, MS_RDONLY},
@@ -115,8 +116,21 @@ fn kernel_init(mut data: eonix_hal::bootstrap::BootStrapData) -> ! {
 
     drop(data);
 
-    RUNTIME.enter();
-    shutdown_system();
+    let mut ctx = TaskContext::new();
+    let stack_bottom = {
+        let stack = KernelStack::new();
+        let bottom = stack.get_bottom().addr().get();
+        core::mem::forget(stack);
+
+        bottom
+    };
+    ctx.set_interrupt_enabled(true);
+    ctx.set_program_counter(standard_main as usize);
+    ctx.set_stack_pointer(stack_bottom);
+
+    unsafe {
+        TaskContext::switch_to_noreturn(&mut ctx);
+    }
 }
 
 #[eonix_hal::ap_main]
@@ -128,6 +142,24 @@ fn kernel_ap_main(_stack_range: PRange) -> ! {
 
     println_debug!("AP{} started", CPU::local().cpuid());
 
+    let mut ctx = TaskContext::new();
+    let stack_bottom = {
+        let stack = KernelStack::new();
+        let bottom = stack.get_bottom().addr().get();
+        core::mem::forget(stack);
+
+        bottom
+    };
+    ctx.set_interrupt_enabled(true);
+    ctx.set_program_counter(standard_main as usize);
+    ctx.set_stack_pointer(stack_bottom);
+
+    unsafe {
+        TaskContext::switch_to_noreturn(&mut ctx);
+    }
+}
+
+fn standard_main() -> ! {
     RUNTIME.enter();
     shutdown_system();
 }

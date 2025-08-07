@@ -10,6 +10,7 @@ use core::{
     task::{Context, Poll, Waker},
 };
 use eonix_hal::processor::halt;
+use eonix_log::println_trace;
 use eonix_sync::{LazyLock, Spin, SpinIrq as _};
 use intrusive_collections::RBTree;
 use pointers::BorrowedArc;
@@ -99,7 +100,10 @@ impl Runtime {
     }
 
     fn remove_and_enqueue_current(&self, rq: &mut impl DerefMut<Target = dyn ReadyQueue>) {
-        let Some(current) = self.current() else {
+        let Some(current) = CURRENT_TASK
+            .swap(None)
+            .map(|cur| unsafe { Arc::from_raw(cur.as_ptr()) })
+        else {
             return;
         };
 
@@ -111,18 +115,23 @@ impl Runtime {
             }
         }) {
             Ok(TaskState::READY_RUNNING) => {
-                let current = unsafe {
-                    Arc::from_raw(
-                        CURRENT_TASK
-                            .swap(None)
-                            .expect("Current task should be present")
-                            .as_ptr(),
-                    )
-                };
+                println_trace!(
+                    "trace_scheduler",
+                    "Re-enqueueing task {:?} (CPU{})",
+                    current.id,
+                    eonix_hal::processor::CPU::local().cpuid(),
+                );
 
                 rq.put(current);
             }
-            Ok(_) => {}
+            Ok(_) => {
+                println_trace!(
+                    "trace_scheduler",
+                    "Current task {:?} (CPU{}) is blocked, not re-enqueueing",
+                    current.id,
+                    eonix_hal::processor::CPU::local().cpuid(),
+                );
+            }
             _ => unreachable!(),
         }
     }
@@ -174,6 +183,13 @@ impl Runtime {
                 continue;
             };
 
+            println_trace!(
+                "trace_scheduler",
+                "Switching to task {:?} (CPU{})",
+                next.id,
+                eonix_hal::processor::CPU::local().cpuid(),
+            );
+
             let old_state = next.state.swap(TaskState::RUNNING);
             assert_eq!(
                 old_state,
@@ -193,6 +209,12 @@ impl Runtime {
                 assert!(
                     old_state & TaskState::RUNNING != 0,
                     "Current task should be at least in RUNNING state"
+                );
+
+                println_trace!(
+                    "trace_scheduler",
+                    "Task {:?} finished execution, removing...",
+                    Task::current().id,
                 );
 
                 self.remove_task(&Task::current());

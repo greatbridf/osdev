@@ -1,5 +1,5 @@
 use super::mem::handle_kernel_page_fault;
-use super::timer::{should_reschedule, timer_interrupt};
+use super::timer::timer_interrupt;
 use crate::kernel::constants::EINVAL;
 use crate::prelude::*;
 use alloc::sync::Arc;
@@ -7,7 +7,6 @@ use eonix_hal::traits::fault::Fault;
 use eonix_hal::traits::trap::{RawTrapContext, TrapType};
 use eonix_hal::trap::TrapContext;
 use eonix_mm::address::{Addr as _, VAddr};
-use eonix_runtime::scheduler::Scheduler;
 use eonix_sync::SpinIrq as _;
 
 static IRQ_HANDLERS: Spin<[Vec<Arc<dyn Fn() + Send + Sync>>; 16]> =
@@ -51,15 +50,7 @@ pub fn interrupt_handler(trap_ctx: &mut TrapContext) {
         TrapType::Syscall { no, .. } => unreachable!("Syscall {} in kernel space.", no),
         TrapType::Fault(fault) => default_fault_handler(fault, trap_ctx),
         TrapType::Irq { callback } => callback(default_irq_handler),
-        TrapType::Timer { callback } => {
-            callback(timer_interrupt);
-
-            if eonix_preempt::count() == 0 && should_reschedule() {
-                // To make scheduler satisfied.
-                eonix_preempt::disable();
-                Scheduler::schedule();
-            }
-        }
+        TrapType::Timer { callback } => callback(timer_interrupt),
     }
 }
 

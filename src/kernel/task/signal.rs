@@ -9,7 +9,7 @@ use core::{cmp::Reverse, task::Waker};
 use eonix_hal::fpu::FpuState;
 use eonix_hal::traits::trap::RawTrapContext;
 use eonix_hal::trap::TrapContext;
-use eonix_runtime::task::Task;
+use eonix_runtime::scheduler::Runtime;
 use eonix_sync::AsProof as _;
 use intrusive_collections::UnsafeRef;
 use posix_types::signal::{SigSet, Signal};
@@ -226,15 +226,12 @@ impl SignalList {
 
                     // `SIGSTOP` can only be waken up by `SIGCONT` or `SIGKILL`.
                     // SAFETY: Preempt disabled above.
-                    {
+                    Runtime::block_till_woken(|waker| {
                         let mut inner = self.inner.lock();
-                        let waker = Waker::from(Task::current().clone());
-
-                        let old_waker = inner.stop_waker.replace(waker);
+                        let old_waker = inner.stop_waker.replace(waker.clone());
                         assert!(old_waker.is_none(), "We should not have a waker here");
-                    }
-
-                    Task::park_preempt_disabled();
+                    })
+                    .await;
 
                     if let Some(parent) = thread.process.parent.load() {
                         parent.notify(

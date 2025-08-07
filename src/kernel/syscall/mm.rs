@@ -1,6 +1,6 @@
 use super::FromSyscallArg;
 use crate::fs::shm::{gen_shm_id, ShmFlags, IPC_PRIVATE, SHM_MANAGER};
-use crate::kernel::constants::{EBADF, EEXIST, EINVAL, ENOENT, ENOMEM};
+use crate::kernel::constants::{EBADF, EEXIST, EINVAL, ENOENT};
 use crate::kernel::mem::FileMapping;
 use crate::kernel::task::Thread;
 use crate::kernel::vfs::filearray::FD;

@@ -23,9 +23,7 @@ pub use stack::Stack;
 pub struct Executor(Option<Pin<Box<dyn TypeErasedExecutor>>>);
 
 trait TypeErasedExecutor: Send {
-    /// # Returns
-    /// Whether the executor has finished.
-    fn run(self: Pin<&mut Self>, cx: &mut Context<'_>) -> bool;
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()>;
 }
 
 struct RealExecutor<'a, F>
@@ -43,9 +41,9 @@ where
     F: Future + Send,
     F::Output: Send,
 {
-    fn run(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> bool {
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
         if self.output_handle.as_ptr().is_null() {
-            return true;
+            return Poll::Ready(());
         }
 
         let future = unsafe {
@@ -53,21 +51,16 @@ where
             self.as_mut().map_unchecked_mut(|me| &mut me.future)
         };
 
-        match future.poll(cx) {
-            Poll::Ready(output) => {
-                if let Some(output_handle) = self.output_handle.upgrade() {
-                    output_handle.lock().commit_output(output);
+        future.poll(cx).map(|output| {
+            if let Some(output_handle) = self.output_handle.upgrade() {
+                output_handle.lock().commit_output(output);
 
-                    unsafe {
-                        // SAFETY: `output_handle` is Unpin.
-                        self.get_unchecked_mut().output_handle = Weak::new();
-                    }
+                unsafe {
+                    // SAFETY: `output_handle` is Unpin.
+                    self.get_unchecked_mut().output_handle = Weak::new();
                 }
-
-                true
             }
-            Poll::Pending => false,
-        }
+        })
     }
 }
 
@@ -79,7 +72,6 @@ impl Executor {
     {
         let output_handle = OutputHandle::new();
 
-        // TODO: accept futures with non 'static lifetimes.
         (
             Executor(Some(Box::pin(RealExecutor {
                 future,
@@ -90,16 +82,13 @@ impl Executor {
         )
     }
 
-    pub fn run(&mut self, cx: &mut Context<'_>) -> bool {
+    pub fn poll(&mut self, cx: &mut Context<'_>) -> Poll<()> {
         if let Some(executor) = self.0.as_mut() {
-            let finished = executor.as_mut().run(cx);
-            if finished {
+            executor.as_mut().poll(cx).map(|_| {
                 self.0.take();
-            }
-
-            finished
+            })
         } else {
-            true
+            Poll::Ready(())
         }
     }
 }

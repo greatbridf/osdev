@@ -623,12 +623,12 @@ impl Terminal {
                 ptr.write(window_size)
             }
             TerminalIORequest::GetTermios(ptr) => {
-                let termios = Task::block_on(self.inner.lock()).termio.get_user();
+                let termios = self.inner.lock().await.termio.get_user();
                 ptr.write(termios)
             }
             TerminalIORequest::SetTermios(ptr) => {
                 let user_termios = ptr.read()?;
-                let mut inner = Task::block_on(self.inner.lock());
+                let mut inner = self.inner.lock().await;
 
                 // TODO: We ignore unknown bits for now.
                 inner.termio.iflag = TermioIFlags::from_bits_truncate(user_termios.iflag as u16);
@@ -644,13 +644,13 @@ impl Terminal {
     }
 
     /// Assign the `session` to this terminal. Drop the previous session if `forced` is true.
-    pub fn set_session(&self, session: &Arc<Session>, forced: bool) -> KResult<()> {
-        let mut inner = Task::block_on(self.inner.lock());
+    pub async fn set_session(&self, session: &Arc<Session>, forced: bool) -> KResult<()> {
+        let mut inner = self.inner.lock().await;
         if let Some(session) = inner.session.upgrade() {
             if !forced {
                 Err(EPERM)
             } else {
-                Task::block_on(session.drop_control_terminal());
+                session.drop_control_terminal().await;
                 inner.session = Arc::downgrade(&session);
                 Ok(())
             }
@@ -661,12 +661,12 @@ impl Terminal {
         }
     }
 
-    pub fn drop_session(&self) {
-        Task::block_on(self.inner.lock()).session = Weak::new();
+    pub async fn drop_session(&self) {
+        self.inner.lock().await.session = Weak::new();
     }
 
-    pub fn session(&self) -> Option<Arc<Session>> {
-        Task::block_on(self.inner.lock()).session.upgrade()
+    pub async fn session(&self) -> Option<Arc<Session>> {
+        self.inner.lock().await.session.upgrade()
     }
 }
 

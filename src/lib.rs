@@ -24,19 +24,19 @@ use crate::kernel::task::alloc_pid;
 use alloc::{ffi::CString, sync::Arc};
 use core::{
     hint::spin_loop,
-    sync::atomic::{AtomicBool, Ordering},
+    sync::atomic::{AtomicBool, AtomicUsize, Ordering},
 };
 use eonix_hal::{
-    arch_exported::bootstrap::shutdown, processor::CPU, traits::trap::IrqState,
+    arch_exported::bootstrap::shutdown,
+    processor::{halt, CPU, CPU_COUNT},
+    traits::trap::IrqState,
     trap::disable_irqs_save,
 };
 use eonix_mm::address::PRange;
-use eonix_runtime::{run::FutureRun, scheduler::Scheduler, task::Task};
+use eonix_runtime::scheduler::RUNTIME;
 use kernel::{
     mem::GlobalPageAlloc,
-    task::{
-        new_thread_runnable, KernelStack, ProcessBuilder, ProcessList, ProgramLoader, ThreadBuilder,
-    },
+    task::{ProcessBuilder, ProcessList, ProgramLoader, ThreadBuilder},
     vfs::{
         dentry::Dentry,
         mount::{do_mount, MS_NOATIME, MS_NODEV, MS_NOSUID, MS_RDONLY},
@@ -80,6 +80,25 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
 }
 
 static BSP_OK: AtomicBool = AtomicBool::new(false);
+static CPU_SHUTTING_DOWN: AtomicUsize = AtomicUsize::new(0);
+
+fn shutdown_system() -> ! {
+    let cpu_count = CPU_COUNT.load(Ordering::Relaxed);
+
+    if CPU_SHUTTING_DOWN.fetch_add(1, Ordering::AcqRel) + 1 == cpu_count {
+        println_info!("All CPUs are shutting down. Gracefully powering off...");
+        shutdown();
+    } else {
+        println_info!(
+            "CPU {} is shutting down. Waiting for other CPUs...",
+            CPU::local().cpuid()
+        );
+
+        loop {
+            halt();
+        }
+    }
+}
 
 #[eonix_hal::main]
 fn kernel_init(mut data: eonix_hal::bootstrap::BootStrapData) -> ! {
@@ -90,22 +109,14 @@ fn kernel_init(mut data: eonix_hal::bootstrap::BootStrapData) -> ! {
         driver::sbi_console::init_console();
     }
 
-    // To satisfy the `Scheduler` "preempt count == 0" assertion.
-    eonix_preempt::disable();
-
-    // We need root dentry to be present in constructor of `FsContext`.
-    // So call `init_vfs` first, then `init_multitasking`.
-    Scheduler::init_local_scheduler::<KernelStack>();
-
-    Scheduler::get().spawn::<KernelStack, _>(FutureRun::new(init_process(data.get_early_stack())));
-
     BSP_OK.store(true, Ordering::Release);
 
+    RUNTIME.spawn(init_process(data.get_early_stack()));
+
     drop(data);
-    unsafe {
-        // SAFETY: `preempt::count()` == 1.
-        Scheduler::goto_scheduler_noreturn()
-    }
+
+    RUNTIME.enter();
+    shutdown_system();
 }
 
 #[eonix_hal::ap_main]
@@ -115,16 +126,10 @@ fn kernel_ap_main(_stack_range: PRange) -> ! {
         spin_loop();
     }
 
-    Scheduler::init_local_scheduler::<KernelStack>();
     println_debug!("AP{} started", CPU::local().cpuid());
 
-    eonix_preempt::disable();
-
-    // TODO!!!!!: Free the stack after having switched to idle task.
-    unsafe {
-        // SAFETY: `preempt::count()` == 1.
-        Scheduler::goto_scheduler_noreturn()
-    }
+    RUNTIME.enter();
+    shutdown_system();
 }
 
 async fn init_process(early_kstack: PRange) {
@@ -223,7 +228,7 @@ async fn init_process(early_kstack: PRange) {
         .name(Arc::from(&b"busybox"[..]))
         .entry(load_info.entry_ip, load_info.sp);
 
-    let mut process_list = Task::block_on(ProcessList::get().write());
+    let mut process_list = ProcessList::get().write().await;
     let (thread, process) = ProcessBuilder::new()
         .pid(alloc_pid())
         .mm_list(load_info.mm_list)
@@ -235,5 +240,5 @@ async fn init_process(early_kstack: PRange) {
     // TODO!!!: Remove this.
     thread.files.open_console();
 
-    Scheduler::get().spawn::<KernelStack, _>(new_thread_runnable(thread));
+    RUNTIME.spawn(thread.run());
 }

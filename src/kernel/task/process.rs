@@ -350,7 +350,11 @@ impl Process {
         trace_continue: bool,
     ) -> KResult<Option<WaitObject>> {
         let wait_object = {
-            let mut waits = self.wait_list.entry(wait_id, trace_stop, trace_continue);
+            let mut waits = self
+                .wait_list
+                .entry(wait_id, trace_stop, trace_continue)
+                .await;
+
             loop {
                 if let Some(object) = waits.get() {
                     break object;
@@ -377,7 +381,7 @@ impl Process {
             Ok(Some(wait_object))
         } else {
             let mut procs = ProcessList::get().write().await;
-            procs.remove_process(wait_object.pid);
+            procs.remove_process(wait_object.pid).await;
             assert!(self
                 .inner
                 .access_mut(procs.prove_mut())
@@ -572,9 +576,9 @@ impl WaitList {
     /// # Safety
     /// Locks `ProcessList` and `WaitList` at the same time. When `wait` is called,
     /// releases the lock on `ProcessList` and `WaitList` and waits on `cv_wait_procs`.
-    pub fn entry(&self, wait_id: WaitId, want_stop: bool, want_continue: bool) -> Entry {
+    pub async fn entry(&self, wait_id: WaitId, want_stop: bool, want_continue: bool) -> Entry {
         Entry {
-            process_list: Task::block_on(ProcessList::get().read()),
+            process_list: ProcessList::get().read().await,
             wait_procs: self.wait_procs.lock(),
             cv: &self.cv_wait_procs,
             want_stop,

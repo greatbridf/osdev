@@ -1,14 +1,13 @@
 use crate::{
     executor::OutputHandle,
-    ready_queue::{cpu_rq, local_rq, ReadyQueue},
+    ready_queue::{local_rq, ReadyQueue},
     task::{Task, TaskAdapter, TaskHandle, TaskState},
 };
-use alloc::sync::Arc;
+use alloc::{sync::Arc, task::Wake};
 use core::{
     ops::{Deref, DerefMut},
     ptr::NonNull,
-    sync::atomic::Ordering,
-    task::Waker,
+    task::{Context, Poll, Waker},
 };
 use eonix_hal::processor::halt;
 use eonix_sync::{LazyLock, Spin, SpinIrq as _};
@@ -64,35 +63,6 @@ where
 }
 
 impl Runtime {
-    fn select_cpu_for_task(&self, task: &Task) -> usize {
-        task.cpu.load(Ordering::Relaxed) as _
-    }
-
-    pub fn activate(&self, task: &Arc<Task>) {
-        // Only one cpu can be activating the task at a time.
-        // TODO: Add some checks.
-
-        if task.on_rq.swap(true, Ordering::Acquire) {
-            // Lock the rq and check whether the task is on the rq again.
-            let cpuid = task.cpu.load(Ordering::Acquire);
-            let mut rq = cpu_rq(cpuid as _).lock_irq();
-
-            if !task.on_rq.load(Ordering::Acquire) {
-                // Task has just got off the rq. Put it back.
-                rq.put(task.clone());
-            } else {
-                // Task is already on the rq. Do nothing.
-                return;
-            }
-        } else {
-            // Task not on some rq. Select one and put it here.
-            let cpu = self.select_cpu_for_task(&task);
-            let mut rq = cpu_rq(cpu).lock_irq();
-            task.cpu.store(cpu as _, Ordering::Release);
-            rq.put(task.clone());
-        }
-    }
-
     pub fn spawn<F>(&self, future: F) -> JoinHandle<F::Output>
     where
         F: Future + Send + 'static,
@@ -104,36 +74,11 @@ impl Runtime {
         } = Task::new(future);
 
         self.add_task(task.clone());
-        self.activate(&task);
+        task.wake_by_ref();
 
         JoinHandle(output_handle)
     }
 
-    // /// Go to idle task. Call this with `preempt_count == 1`.
-    // /// The preempt count will be decremented by this function.
-    // ///
-    // /// # Safety
-    // /// We might never return from here.
-    // /// Drop all variables that take ownership of some resource before calling this function.
-    // pub fn schedule() {
-    //     assert_preempt_count_eq!(1, "Scheduler::schedule");
-
-    //     // Make sure all works are done before scheduling.
-    //     compiler_fence(Ordering::SeqCst);
-
-    //     // TODO!!!!!: Use of reference here needs further consideration.
-    //     //
-    //     // Since we might never return to here, we can't take ownership of `current()`.
-    //     // Is it safe to believe that `current()` will never change across calls?
-    //     unsafe {
-    //         // SAFETY: Preemption is disabled.
-    //         Scheduler::goto_scheduler(&Task::current().execution_context);
-    //     }
-    //     eonix_preempt::enable();
-    // }
-}
-
-impl Runtime {
     fn add_task(&self, task: Arc<Task>) {
         TASKS.lock_irq().insert(task);
     }
@@ -158,12 +103,18 @@ impl Runtime {
             return;
         };
 
-        match current.state.cmpxchg(TaskState::RUNNING, TaskState::READY) {
-            Ok(_) => {
+        match current.state.update(|state| match state {
+            TaskState::READY_RUNNING => Some(TaskState::READY),
+            TaskState::RUNNING => Some(TaskState::BLOCKED),
+            _ => {
+                unreachable!("Current task should be at least in RUNNING state, but got {state:?}")
+            }
+        }) {
+            Ok(TaskState::READY_RUNNING) => {
                 let current = unsafe {
                     Arc::from_raw(
                         CURRENT_TASK
-                            .get()
+                            .swap(None)
                             .expect("Current task should be present")
                             .as_ptr(),
                     )
@@ -171,13 +122,39 @@ impl Runtime {
 
                 rq.put(current);
             }
-            Err(old) => {
-                assert_eq!(
-                    old,
-                    TaskState::PARKED,
-                    "Current task should be in PARKED state"
-                );
+            Ok(_) => {}
+            _ => unreachable!(),
+        }
+    }
+
+    pub fn block_till_woken(set_waker: impl FnOnce(&Waker)) -> impl Future<Output = ()> {
+        struct BlockTillWoken<F: FnOnce(&Waker)> {
+            set_waker: Option<F>,
+            slept: bool,
+        }
+
+        impl<F: FnOnce(&Waker)> Future for BlockTillWoken<F> {
+            type Output = ();
+
+            fn poll(self: core::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
+                if self.slept {
+                    Poll::Ready(())
+                } else {
+                    let (set_waker, slept) = unsafe {
+                        let me = self.get_unchecked_mut();
+                        (me.set_waker.take().unwrap(), &mut me.slept)
+                    };
+
+                    set_waker(cx.waker());
+                    *slept = true;
+                    Poll::Pending
+                }
             }
+        }
+
+        BlockTillWoken {
+            set_waker: Some(set_waker),
+            slept: false,
         }
     }
 
@@ -204,15 +181,23 @@ impl Runtime {
                 "Next task should be in READY state"
             );
 
-            CURRENT_TASK.set(NonNull::new(Arc::into_raw(next) as *mut _));
+            unsafe {
+                CURRENT_TASK.set(Some(NonNull::new_unchecked(Arc::into_raw(next) as *mut _)));
+            }
+
             drop(rq);
 
             // TODO: MAYBE we can move the release of finished tasks to some worker thread.
-            if Task::current().run() {
-                Task::current().state.set(TaskState::DEAD);
-                CURRENT_TASK.set(None);
+            if Task::current().poll().is_ready() {
+                let old_state = Task::current().state.swap(TaskState::DEAD);
+                assert!(
+                    old_state & TaskState::RUNNING != 0,
+                    "Current task should be at least in RUNNING state"
+                );
 
                 self.remove_task(&Task::current());
+
+                CURRENT_TASK.set(None);
             }
         }
     }

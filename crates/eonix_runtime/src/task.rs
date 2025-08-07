@@ -10,7 +10,7 @@ use atomic_unique_refcell::AtomicUniqueRefCell;
 use core::{
     ops::DerefMut,
     sync::atomic::{AtomicU32, Ordering},
-    task::{Context, Waker},
+    task::{Context, Poll, Waker},
 };
 use eonix_hal::processor::CPU;
 use eonix_sync::{Spin, SpinIrq};
@@ -59,7 +59,7 @@ impl Task {
         let task = Arc::new(Self {
             id: TaskId(ID.fetch_add(1, Ordering::Relaxed)),
             cpu: AtomicU32::new(CPU::local().cpuid() as u32),
-            state: TaskState::new(TaskState::RUNNING),
+            state: TaskState::new(TaskState::BLOCKED),
             executor: AtomicUniqueRefCell::new(executor),
             link_task_list: RBTreeAtomicLink::new(),
             link_ready_queue: LinkedListAtomicLink::new(),
@@ -71,30 +71,34 @@ impl Task {
         }
     }
 
-    /// # Returns
-    /// Whether the task has finished.
-    pub fn run(self: &Arc<Self>) -> bool {
+    pub fn poll(self: &Arc<Self>) -> Poll<()> {
         let mut executor_borrow = self.executor.borrow();
         let waker = Waker::from(self.clone());
         let mut cx = Context::from_waker(&waker);
 
-        executor_borrow.run(&mut cx)
+        executor_borrow.poll(&mut cx)
     }
 
     /// Get the stabilized lock for the task's run queue.
-    fn rq(&self) -> Option<impl DerefMut<Target = dyn ReadyQueue> + 'static> {
+    pub fn rq(&self) -> impl DerefMut<Target = dyn ReadyQueue> + 'static {
         loop {
             let cpu = self.cpu.load(Ordering::Relaxed);
             let rq = cpu_rq(cpu as usize).lock_irq();
 
-            if cpu == self.cpu.load(Ordering::Acquire) {
-                if self.link_ready_queue.is_linked() {
-                    return Some(rq);
-                } else {
-                    return None;
-                }
+            // We stabilize the task cpu with the cpu rq here for now.
+            if cpu != self.cpu.load(Ordering::Acquire) {
+                continue;
             }
+
+            return rq;
         }
+    }
+
+    pub fn block_on<F>(future: F) -> F::Output
+    where
+        F: Future,
+    {
+        todo!()
     }
 }
 
@@ -104,20 +108,18 @@ impl Wake for Task {
     }
 
     fn wake_by_ref(self: &Arc<Self>) {
-        if self
-            .state
-            .cmpxchg(TaskState::PARKED, TaskState::READY)
-            .is_err()
-        {
+        let Ok(old) = self.state.update(|state| match state {
+            TaskState::BLOCKED => Some(TaskState::READY),
+            TaskState::RUNNING => Some(TaskState::READY | TaskState::RUNNING),
+            TaskState::READY | TaskState::READY_RUNNING => None,
+            state => unreachable!("Waking a {state:?} task"),
+        }) else {
             return;
-        }
+        };
 
-        if let Some(mut rq) = self.rq() {
-            if self.state.get() != TaskState::PARKED {
-                return;
-            }
-
-            rq.put(self.clone());
+        if old == TaskState::BLOCKED {
+            // If the task was blocked, we need to put it back to the ready queue.
+            self.rq().put(self.clone());
         }
     }
 }

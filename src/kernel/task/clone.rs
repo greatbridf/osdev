@@ -1,10 +1,7 @@
 use crate::{
     kernel::{
         syscall::procops::parse_user_tls,
-        task::{
-            alloc_pid, new_thread_runnable, KernelStack, ProcessBuilder, ProcessList, Thread,
-            ThreadBuilder,
-        },
+        task::{alloc_pid, ProcessBuilder, ProcessList, Thread, ThreadBuilder},
         user::UserPointerMut,
     },
     KResult,
@@ -12,7 +9,7 @@ use crate::{
 use bitflags::bitflags;
 use core::num::NonZero;
 use eonix_hal::processor::UserTLS;
-use eonix_runtime::{scheduler::Scheduler, task::Task};
+use eonix_runtime::{scheduler::RUNTIME, task::Task};
 use eonix_sync::AsProof;
 use posix_types::signal::Signal;
 
@@ -166,7 +163,7 @@ pub fn do_clone(thread: &Thread, clone_args: CloneArgs) -> KResult<u32> {
         UserPointerMut::new(parent_tid_ptr as *mut u32)?.write(new_pid)?
     }
 
-    Scheduler::get().spawn::<KernelStack, _>(new_thread_runnable(new_thread));
+    RUNTIME.spawn(new_thread.run());
 
     Ok(new_pid)
 }

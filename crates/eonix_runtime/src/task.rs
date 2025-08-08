@@ -93,13 +93,6 @@ impl Task {
             return rq;
         }
     }
-
-    pub fn block_on<F>(future: F) -> F::Output
-    where
-        F: Future,
-    {
-        todo!()
-    }
 }
 
 impl Wake for Task {

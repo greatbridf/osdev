@@ -1,3 +1,4 @@
+use super::{block_on, stackful};
 use crate::{
     kernel::{
         syscall::procops::parse_user_tls,
@@ -9,7 +10,7 @@ use crate::{
 use bitflags::bitflags;
 use core::num::NonZero;
 use eonix_hal::processor::UserTLS;
-use eonix_runtime::{scheduler::RUNTIME, task::Task};
+use eonix_runtime::scheduler::RUNTIME;
 use eonix_sync::AsProof;
 use posix_types::signal::Signal;
 
@@ -131,7 +132,7 @@ impl CloneArgs {
 }
 
 pub fn do_clone(thread: &Thread, clone_args: CloneArgs) -> KResult<u32> {
-    let mut procs = Task::block_on(ProcessList::get().write());
+    let mut procs = block_on(ProcessList::get().write());
 
     let thread_builder = ThreadBuilder::new().clone_from(&thread, &clone_args)?;
     let current_process = thread.process.clone();
@@ -163,7 +164,7 @@ pub fn do_clone(thread: &Thread, clone_args: CloneArgs) -> KResult<u32> {
         UserPointerMut::new(parent_tid_ptr as *mut u32)?.write(new_pid)?
     }
 
-    RUNTIME.spawn(new_thread.run());
+    RUNTIME.spawn(stackful(new_thread.run()));
 
     Ok(new_pid)
 }

@@ -5,6 +5,7 @@ use crate::kernel::constants::{
     STATX_MODE, STATX_MTIME, STATX_NLINK, STATX_SIZE, STATX_TYPE, STATX_UID, S_IFDIR, S_IFMT,
 };
 use crate::kernel::mem::PageCache;
+use crate::kernel::task::block_on;
 use crate::kernel::timer::Instant;
 use crate::{io::Buffer, prelude::*};
 use alloc::sync::{Arc, Weak};
@@ -14,7 +15,6 @@ use core::{
     ptr::addr_of_mut,
     sync::atomic::{AtomicU32, AtomicU64, Ordering},
 };
-use eonix_runtime::task::Task;
 use eonix_sync::RwLock;
 use posix_types::stat::StatX;
 
@@ -280,7 +280,7 @@ pub trait Inode: Send + Sync + InodeInner + Any {
         f(
             uninit_mut.as_mut_ptr(),
             // SAFETY: `idata` is initialized and we will never move the lock.
-            &Task::block_on(unsafe { idata.assume_init_ref() }.rwsem.read()),
+            &block_on(unsafe { idata.assume_init_ref() }.rwsem.read()),
         );
 
         // Safety: `uninit` is initialized

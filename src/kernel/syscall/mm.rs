@@ -2,7 +2,7 @@ use super::FromSyscallArg;
 use crate::fs::shm::{gen_shm_id, ShmFlags, IPC_PRIVATE, SHM_MANAGER};
 use crate::kernel::constants::{EBADF, EEXIST, EINVAL, ENOENT};
 use crate::kernel::mem::FileMapping;
-use crate::kernel::task::Thread;
+use crate::kernel::task::{block_on, Thread};
 use crate::kernel::vfs::filearray::FD;
 use crate::{
     kernel::{
@@ -14,7 +14,6 @@ use crate::{
 use align_ext::AlignExt;
 use eonix_mm::address::{Addr as _, AddrOps as _, VAddr};
 use eonix_mm::paging::PAGE_SIZE;
-use eonix_runtime::task::Task;
 use posix_types::syscall_no::*;
 
 impl FromSyscallArg for UserMmapProtocol {
@@ -67,11 +66,8 @@ fn do_mmap2(
             Mapping::Anonymous
         } else {
             // The mode is unimportant here, since we are checking prot in mm_area.
-            let shared_area = Task::block_on(SHM_MANAGER.lock()).create_shared_area(
-                len,
-                thread.process.pid,
-                0x777,
-            );
+            let shared_area =
+                block_on(SHM_MANAGER.lock()).create_shared_area(len, thread.process.pid, 0x777);
             Mapping::File(FileMapping::new(shared_area.area.clone(), 0, len))
         }
     } else {
@@ -94,7 +90,7 @@ fn do_mmap2(
     // TODO!!!: If we are doing mmap's in 32-bit mode, we should check whether
     //          `addr` is above user reachable memory.
     let addr = if flags.contains(UserMmapFlags::MAP_FIXED) {
-        Task::block_on(mm_list.unmap(addr, len));
+        block_on(mm_list.unmap(addr, len));
         mm_list.mmap_fixed(addr, len, mapping, permission, is_shared)
     } else {
         mm_list.mmap_hint(addr, len, mapping, permission, is_shared)
@@ -137,7 +133,7 @@ fn munmap(addr: usize, len: usize) -> KResult<usize> {
     }
 
     let len = len.align_up(PAGE_SIZE);
-    Task::block_on(thread.process.mm_list.unmap(addr, len)).map(|_| 0)
+    block_on(thread.process.mm_list.unmap(addr, len)).map(|_| 0)
 }
 
 #[eonix_macros::define_syscall(SYS_BRK)]
@@ -160,7 +156,7 @@ fn mprotect(addr: usize, len: usize, prot: UserMmapProtocol) -> KResult<()> {
 
     let len = len.align_up(PAGE_SIZE);
 
-    Task::block_on(thread.process.mm_list.protect(
+    block_on(thread.process.mm_list.protect(
         addr,
         len,
         Permission {
@@ -175,7 +171,7 @@ fn mprotect(addr: usize, len: usize, prot: UserMmapProtocol) -> KResult<()> {
 fn shmget(key: usize, size: usize, shmflg: u32) -> KResult<u32> {
     let size = size.align_up(PAGE_SIZE);
 
-    let mut shm_manager = Task::block_on(SHM_MANAGER.lock());
+    let mut shm_manager = block_on(SHM_MANAGER.lock());
     let shmid = gen_shm_id(key)?;
 
     let mode = shmflg & 0o777;
@@ -207,7 +203,7 @@ fn shmget(key: usize, size: usize, shmflg: u32) -> KResult<u32> {
 #[eonix_macros::define_syscall(SYS_SHMAT)]
 fn shmat(shmid: u32, addr: usize, shmflg: u32) -> KResult<usize> {
     let mm_list = &thread.process.mm_list;
-    let shm_manager = Task::block_on(SHM_MANAGER.lock());
+    let shm_manager = block_on(SHM_MANAGER.lock());
     let shm_area = shm_manager.get(shmid).ok_or(EINVAL)?;
 
     let mode = shmflg & 0o777;
@@ -256,7 +252,7 @@ fn shmdt(addr: usize) -> KResult<usize> {
     let size = *shm_areas.get(&addr).ok_or(EINVAL)?;
     shm_areas.remove(&addr);
     drop(shm_areas);
-    return Task::block_on(thread.process.mm_list.unmap(addr, size)).map(|_| 0);
+    return block_on(thread.process.mm_list.unmap(addr, size)).map(|_| 0);
 }
 
 #[eonix_macros::define_syscall(SYS_SHMCTL)]

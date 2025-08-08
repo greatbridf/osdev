@@ -29,7 +29,7 @@ use itertools::{
 };
 use posix_types::open::{FDFlags, OpenFlags};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct FD(u32);
 
 #[derive(Clone)]
@@ -321,6 +321,15 @@ impl FileArrayInner {
 
 impl FD {
     pub const AT_FDCWD: FD = FD(-100i32 as u32);
+}
+
+impl core::fmt::Debug for FD {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            &Self::AT_FDCWD => f.write_str("FD(AT_FDCWD)"),
+            FD(no) => f.debug_tuple("FD").field(&no).finish(),
+        }
+    }
 }
 
 impl FromSyscallArg for FD {

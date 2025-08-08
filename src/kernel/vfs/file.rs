@@ -8,7 +8,7 @@ use crate::{
     kernel::{
         constants::{TCGETS, TCSETS, TIOCGPGRP, TIOCGWINSZ, TIOCSPGRP},
         mem::{paging::Page, AsMemoryBlock as _},
-        task::Thread,
+        task::{block_on, Thread},
         terminal::{Terminal, TerminalIORequest},
         user::{UserPointer, UserPointerMut},
         vfs::inode::Inode,
@@ -29,7 +29,6 @@ use core::{
     ops::{ControlFlow, Deref},
     sync::atomic::{AtomicU32, Ordering},
 };
-use eonix_runtime::task::Task;
 use eonix_sync::Mutex;
 use posix_types::{open::OpenFlags, signal::Signal, stat::StatX};
 
@@ -159,7 +158,7 @@ impl Pipe {
     }
 
     fn close_read(&self) {
-        let mut inner = Task::block_on(self.inner.lock());
+        let mut inner = block_on(self.inner.lock());
         if inner.read_closed {
             return;
         }
@@ -169,7 +168,7 @@ impl Pipe {
     }
 
     fn close_write(&self) {
-        let mut inner = Task::block_on(self.inner.lock());
+        let mut inner = block_on(self.inner.lock());
         if inner.write_closed {
             return;
         }
@@ -318,7 +317,7 @@ impl InodeFile {
     }
 
     fn seek(&self, option: SeekOption) -> KResult<usize> {
-        let mut cursor = Task::block_on(self.cursor.lock());
+        let mut cursor = block_on(self.cursor.lock());
 
         let new_cursor = match option {
             SeekOption::Current(off) => cursor.checked_add_signed(off).ok_or(EOVERFLOW)?,
@@ -339,7 +338,7 @@ impl InodeFile {
             return Err(EBADF);
         }
 
-        let mut cursor = Task::block_on(self.cursor.lock());
+        let mut cursor = block_on(self.cursor.lock());
 
         if self.append {
             let nwrote = self.dentry.write(stream, WriteOffset::End(&mut cursor))?;
@@ -367,7 +366,7 @@ impl InodeFile {
             let nread = self.dentry.read(buffer, offset)?;
             nread
         } else {
-            let mut cursor = Task::block_on(self.cursor.lock());
+            let mut cursor = block_on(self.cursor.lock());
 
             let nread = self.dentry.read(buffer, *cursor)?;
 
@@ -379,7 +378,7 @@ impl InodeFile {
     }
 
     fn getdents64(&self, buffer: &mut dyn Buffer) -> KResult<()> {
-        let mut cursor = Task::block_on(self.cursor.lock());
+        let mut cursor = block_on(self.cursor.lock());
 
         let nread = self.dentry.readdir(*cursor, |filename, ino| {
             // Filename length + 1 for padding '\0'
@@ -409,7 +408,7 @@ impl InodeFile {
     }
 
     fn getdents(&self, buffer: &mut dyn Buffer) -> KResult<()> {
-        let mut cursor = Task::block_on(self.cursor.lock());
+        let mut cursor = block_on(self.cursor.lock());
 
         let nread = self.dentry.readdir(*cursor, |filename, ino| {
             // + 1 for filename length padding '\0', + 1 for d_type.
@@ -466,7 +465,7 @@ impl TerminalFile {
     }
 
     fn ioctl(&self, request: usize, arg3: usize) -> KResult<()> {
-        Task::block_on(self.terminal.ioctl(match request as u32 {
+        block_on(self.terminal.ioctl(match request as u32 {
             TCGETS => TerminalIORequest::GetTermios(UserPointerMut::new_vaddr(arg3)?),
             TCSETS => TerminalIORequest::SetTermios(UserPointer::new_vaddr(arg3)?),
             TIOCGPGRP => TerminalIORequest::GetProcessGroup(UserPointerMut::new_vaddr(arg3)?),

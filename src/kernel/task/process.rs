@@ -1,3 +1,4 @@
+use super::block_on;
 use super::{
     process_group::ProcessGroupBuilder, signal::RaiseResult, thread::ThreadBuilder, ProcessGroup,
     ProcessList, Session, Thread,
@@ -17,7 +18,6 @@ use alloc::{
 };
 use core::sync::atomic::{AtomicU32, Ordering};
 use eonix_mm::address::VAddr;
-use eonix_runtime::task::Task;
 use eonix_sync::{
     AsProof as _, AsProofMut as _, Locked, Proof, ProofMut, RwLockReadGuard, SpinGuard,
     UnlockableGuard as _, UnlockedGuard as _,
@@ -134,7 +134,7 @@ impl WaitId {
         } else if id == -1 {
             WaitId::Any
         } else if id == 0 {
-            let procs = Task::block_on(ProcessList::get().read());
+            let procs = block_on(ProcessList::get().read());
             WaitId::Pgid(thread.process.pgroup(procs.prove()).pgid)
         } else {
             WaitId::Pid(id.cast_unsigned())
@@ -208,9 +208,9 @@ impl ProcessBuilder {
 
     pub fn clone_from(mut self, process: Arc<Process>, clone_args: &CloneArgs) -> Self {
         let mm_list = if clone_args.flags.contains(CloneFlags::CLONE_VM) {
-            Task::block_on(process.mm_list.new_shared())
+            block_on(process.mm_list.new_shared())
         } else {
-            Task::block_on(process.mm_list.new_cloned())
+            block_on(process.mm_list.new_cloned())
         };
 
         if let Some(exit_signal) = clone_args.exit_signal {
@@ -396,7 +396,7 @@ impl Process {
 
     /// Create a new session for the process.
     pub fn setsid(self: &Arc<Self>) -> KResult<u32> {
-        let mut process_list = Task::block_on(ProcessList::get().write());
+        let mut process_list = block_on(ProcessList::get().write());
         // If there exists a session that has the same sid as our pid, we can't create a new
         // session. The standard says that we should create a new process group and be the
         // only process in the new process group and session.
@@ -474,7 +474,7 @@ impl Process {
     /// This function should be called on the process that issued the syscall in order to do
     /// permission checks.
     pub fn setpgid(self: &Arc<Self>, pid: u32, pgid: u32) -> KResult<()> {
-        let mut procs = Task::block_on(ProcessList::get().write());
+        let mut procs = block_on(ProcessList::get().write());
         // We may set pgid of either the calling process or a child process.
         if pid == self.pid {
             self.do_setpgid(pgid, &mut procs)
@@ -609,7 +609,7 @@ impl Entry<'_, '_, '_> {
                 WaitId::Any => true,
                 WaitId::Pid(pid) => item.pid == pid,
                 WaitId::Pgid(pgid) => {
-                    let procs = Task::block_on(ProcessList::get().read());
+                    let procs = block_on(ProcessList::get().read());
                     if let Some(process) = procs.try_find_process(item.pid) {
                         return process.pgroup(procs.prove()).pgid == pgid;
                     }

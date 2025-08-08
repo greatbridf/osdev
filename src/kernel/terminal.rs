@@ -1,5 +1,5 @@
 use super::{
-    task::{ProcessList, Session, Thread},
+    task::{block_on, ProcessList, Session, Thread},
     user::{UserPointer, UserPointerMut},
 };
 use crate::kernel::constants::{EINTR, ENOTTY, EPERM};
@@ -10,7 +10,6 @@ use alloc::{
 };
 use bitflags::bitflags;
 use eonix_log::ConsoleWrite;
-use eonix_runtime::task::Task;
 use eonix_sync::{AsProof as _, Mutex};
 use posix_types::signal::Signal;
 
@@ -449,7 +448,7 @@ impl Terminal {
 
     fn signal(&self, inner: &mut TerminalInner, signal: Signal) {
         if let Some(session) = inner.session.upgrade() {
-            Task::block_on(session.raise_foreground(signal));
+            block_on(session.raise_foreground(signal));
         }
         if !inner.termio.noflsh() {
             self.clear_read_buffer(inner);

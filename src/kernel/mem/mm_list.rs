@@ -7,6 +7,7 @@ use super::paging::AllocZeroed as _;
 use super::{AsMemoryBlock, MMArea, Page};
 use crate::kernel::constants::{EEXIST, EFAULT, EINVAL, ENOMEM};
 use crate::kernel::mem::page_alloc::RawPagePtr;
+use crate::kernel::task::block_on;
 use crate::{prelude::*, sync::ArcSwap};
 use alloc::collections::btree_set::BTreeSet;
 use core::fmt;
@@ -23,7 +24,6 @@ use eonix_mm::{
     page_table::{PageTable, RawAttribute, PTE},
     paging::PAGE_SIZE,
 };
-use eonix_runtime::task::Task;
 use eonix_sync::{LazyLock, Mutex};
 
 pub use mapping::{FileMapping, Mapping};
@@ -507,7 +507,7 @@ impl MMList {
         const VDSO_SIZE: usize = 0x1000;
 
         let inner = self.inner.borrow();
-        let inner = Task::block_on(inner.lock());
+        let inner = block_on(inner.lock());
 
         let mut pte_iter = inner
             .page_table
@@ -538,7 +538,7 @@ impl MMList {
         is_shared: bool,
     ) -> KResult<VAddr> {
         let inner = self.inner.borrow();
-        let mut inner = Task::block_on(inner.lock());
+        let mut inner = block_on(inner.lock());
 
         if hint == VAddr::NULL {
             let at = inner.find_available(hint, len).ok_or(ENOMEM)?;
@@ -565,14 +565,14 @@ impl MMList {
         permission: Permission,
         is_shared: bool,
     ) -> KResult<VAddr> {
-        Task::block_on(self.inner.borrow().lock())
+        block_on(self.inner.borrow().lock())
             .mmap(at, len, mapping.clone(), permission, is_shared)
             .map(|_| at)
     }
 
     pub fn set_break(&self, pos: Option<VAddr>) -> VAddr {
         let inner = self.inner.borrow();
-        let mut inner = Task::block_on(inner.lock());
+        let mut inner = block_on(inner.lock());
 
         // SAFETY: `set_break` is only called in syscalls, where program break should be valid.
         assert!(inner.break_start.is_some() && inner.break_pos.is_some());
@@ -631,7 +631,7 @@ impl MMList {
     /// This should be called only **once** for every thread.
     pub fn register_break(&self, start: VAddr) {
         let inner = self.inner.borrow();
-        let mut inner = Task::block_on(inner.lock());
+        let mut inner = block_on(inner.lock());
         assert!(inner.break_start.is_none() && inner.break_pos.is_none());
 
         inner.break_start = Some(start.into());
@@ -651,7 +651,7 @@ impl MMList {
         }
 
         let inner = self.inner.borrow();
-        let inner = Task::block_on(inner.lock());
+        let inner = block_on(inner.lock());
 
         let mut offset = 0;
         let mut remaining = len;

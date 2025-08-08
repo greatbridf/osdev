@@ -1,6 +1,7 @@
 use crate::io::Stream;
 use crate::kernel::constants::{EEXIST, EINVAL, EIO, EISDIR, ENOENT, ENOSYS, ENOTDIR};
 use crate::kernel::mem::{CachePage, PageCache, PageCacheBackend};
+use crate::kernel::task::block_on;
 use crate::kernel::timer::Instant;
 use crate::kernel::vfs::inode::InodeData;
 use crate::kernel::vfs::inode::RenameData;
@@ -21,7 +22,6 @@ use alloc::sync::{Arc, Weak};
 use core::fmt::Debug;
 use core::{ops::ControlFlow, sync::atomic::Ordering};
 use eonix_mm::paging::PAGE_SIZE;
-use eonix_runtime::task::Task;
 use eonix_sync::{AsProof as _, AsProofMut as _, Locked, Mutex, ProofMut};
 use itertools::Itertools;
 
@@ -138,7 +138,7 @@ impl Inode for DirectoryInode {
         offset: usize,
         callback: &mut dyn FnMut(&[u8], Ino) -> KResult<ControlFlow<(), ()>>,
     ) -> KResult<usize> {
-        let lock = Task::block_on(self.rwsem.read());
+        let lock = block_on(self.rwsem.read());
         self.entries
             .access(lock.prove())
             .iter()
@@ -153,7 +153,7 @@ impl Inode for DirectoryInode {
         let vfs = acquire(&self.vfs)?;
         let vfs = astmp(&vfs);
 
-        let rwsem = Task::block_on(self.rwsem.write());
+        let rwsem = block_on(self.rwsem.write());
 
         let ino = vfs.assign_ino();
         let file = FileInode::new(ino, self.vfs.clone(), 0, mode);
@@ -170,7 +170,7 @@ impl Inode for DirectoryInode {
         let vfs = acquire(&self.vfs)?;
         let vfs = astmp(&vfs);
 
-        let rwsem = Task::block_on(self.rwsem.write());
+        let rwsem = block_on(self.rwsem.write());
 
         let ino = vfs.assign_ino();
         let file = NodeInode::new(
@@ -188,7 +188,7 @@ impl Inode for DirectoryInode {
         let vfs = acquire(&self.vfs)?;
         let vfs = astmp(&vfs);
 
-        let rwsem = Task::block_on(self.rwsem.write());
+        let rwsem = block_on(self.rwsem.write());
 
         let ino = vfs.assign_ino();
         let file = SymlinkInode::new(ino, self.vfs.clone(), target.into());
@@ -201,7 +201,7 @@ impl Inode for DirectoryInode {
         let vfs = acquire(&self.vfs)?;
         let vfs = astmp(&vfs);
 
-        let rwsem = Task::block_on(self.rwsem.write());
+        let rwsem = block_on(self.rwsem.write());
 
         let ino = vfs.assign_ino();
         let newdir = DirectoryInode::new(ino, self.vfs.clone(), mode);
@@ -213,11 +213,11 @@ impl Inode for DirectoryInode {
     fn unlink(&self, at: &Arc<Dentry>) -> KResult<()> {
         let _vfs = acquire(&self.vfs)?;
 
-        let dir_lock = Task::block_on(self.rwsem.write());
+        let dir_lock = block_on(self.rwsem.write());
 
         let file = at.get_inode()?;
         let filename = at.get_name();
-        let file_lock = Task::block_on(file.rwsem.write());
+        let file_lock = block_on(file.rwsem.write());
 
         let entries = self.entries.access_mut(dir_lock.prove_mut());
 
@@ -240,7 +240,7 @@ impl Inode for DirectoryInode {
 
     fn chmod(&self, mode: Mode) -> KResult<()> {
         let _vfs = acquire(&self.vfs)?;
-        let _lock = Task::block_on(self.rwsem.write());
+        let _lock = block_on(self.rwsem.write());
 
         // SAFETY: `rwsem` has done the synchronization
         let old = self.mode.load(Ordering::Relaxed);
@@ -271,7 +271,7 @@ impl Inode for DirectoryInode {
             .downcast_ref::<TmpFs>()
             .expect("vfs must be a TmpFs");
 
-        let _rename_lock = Task::block_on(vfs.rename_lock.lock());
+        let _rename_lock = block_on(vfs.rename_lock.lock());
 
         let old_file = old_dentry.get_inode()?;
         let new_file = new_dentry.get_inode();
@@ -284,7 +284,7 @@ impl Inode for DirectoryInode {
         if same_parent {
             // Same directory rename
             // Remove from old location and add to new location
-            let parent_lock = Task::block_on(self.rwsem.write());
+            let parent_lock = block_on(self.rwsem.write());
             let entries = self.entries.access_mut(parent_lock.prove_mut());
 
             fn rename_old(
@@ -328,7 +328,7 @@ impl Inode for DirectoryInode {
             if let Some(new_idx) = new_entry_idx {
                 // Replace existing file (i.e. rename the old and unlink the new)
                 let new_file = new_file.unwrap();
-                let _new_file_lock = Task::block_on(new_file.rwsem.write());
+                let _new_file_lock = block_on(new_file.rwsem.write());
 
                 // SAFETY: `new_file_lock` has done the synchronization
                 if new_file.mode.load(Ordering::Relaxed) & S_IFDIR != 0 {
@@ -364,8 +364,8 @@ impl Inode for DirectoryInode {
                 .downcast_ref::<DirectoryInode>()
                 .expect("new parent must be a DirectoryInode");
 
-            let old_parent_lock = Task::block_on(self.rwsem.write());
-            let new_parent_lock = Task::block_on(new_parent_inode.rwsem.write());
+            let old_parent_lock = block_on(self.rwsem.write());
+            let new_parent_lock = block_on(new_parent_inode.rwsem.write());
 
             let old_ino = old_file.ino;
             let new_ino = new_file.as_ref().ok().map(|f| f.ino);
@@ -391,7 +391,7 @@ impl Inode for DirectoryInode {
             if has_new {
                 // Replace existing file (i.e. move the old and unlink the new)
                 let new_file = new_file.unwrap();
-                let new_file_lock = Task::block_on(new_file.rwsem.write());
+                let new_file_lock = block_on(new_file.rwsem.write());
 
                 if old_file.mode.load(Ordering::Relaxed) & S_IFDIR != 0
                     && new_file.mode.load(Ordering::Relaxed) & S_IFDIR == 0
@@ -424,7 +424,7 @@ impl Inode for DirectoryInode {
             *old_file.ctime.lock() = now;
         }
 
-        Task::block_on(dcache::d_exchange(old_dentry, new_dentry));
+        block_on(dcache::d_exchange(old_dentry, new_dentry));
 
         Ok(())
     }
@@ -511,13 +511,13 @@ impl Inode for FileInode {
     }
 
     fn read(&self, buffer: &mut dyn Buffer, offset: usize) -> KResult<usize> {
-        let lock = Task::block_on(self.rwsem.write());
-        Task::block_on(self.pages.read(buffer, offset))
+        let _lock = block_on(self.rwsem.write());
+        block_on(self.pages.read(buffer, offset))
     }
 
     fn write(&self, stream: &mut dyn Stream, offset: WriteOffset) -> KResult<usize> {
         // TODO: We don't need that strong guarantee, find some way to avoid locks
-        let lock = Task::block_on(self.rwsem.write());
+        let _lock = block_on(self.rwsem.write());
 
         let mut store_new_end = None;
         let offset = match offset {
@@ -530,7 +530,7 @@ impl Inode for FileInode {
             }
         };
 
-        let wrote = Task::block_on(self.pages.write(stream, offset))?;
+        let wrote = block_on(self.pages.write(stream, offset))?;
         let cursor_end = offset + wrote;
 
         if let Some(store_end) = store_new_end {
@@ -545,8 +545,8 @@ impl Inode for FileInode {
     }
 
     fn truncate(&self, length: usize) -> KResult<()> {
-        let lock = Task::block_on(self.rwsem.write());
-        Task::block_on(self.pages.resize(length))?;
+        let _lock = block_on(self.rwsem.write());
+        block_on(self.pages.resize(length))?;
         self.size.store(length as u64, Ordering::Relaxed);
         *self.mtime.lock() = Instant::now();
         Ok(())
@@ -554,7 +554,7 @@ impl Inode for FileInode {
 
     fn chmod(&self, mode: Mode) -> KResult<()> {
         let _vfs = acquire(&self.vfs)?;
-        let _lock = Task::block_on(self.rwsem.write());
+        let _lock = block_on(self.rwsem.write());
 
         // SAFETY: `rwsem` has done the synchronization
         let old = self.mode.load(Ordering::Relaxed);

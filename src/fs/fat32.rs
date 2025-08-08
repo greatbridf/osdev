@@ -4,6 +4,7 @@ mod file;
 use crate::io::Stream;
 use crate::kernel::constants::EIO;
 use crate::kernel::mem::AsMemoryBlock;
+use crate::kernel::task::block_on;
 use crate::kernel::vfs::inode::WriteOffset;
 use crate::{
     io::{Buffer, ByteBuffer, UninitBuffer},
@@ -32,7 +33,6 @@ use alloc::{
 };
 use core::{ops::ControlFlow, sync::atomic::Ordering};
 use dir::Dirs as _;
-use eonix_runtime::task::Task;
 use eonix_sync::RwLock;
 use file::ClusterRead;
 
@@ -266,13 +266,13 @@ impl Inode for FileInode {
     }
 
     fn read(&self, buffer: &mut dyn Buffer, offset: usize) -> KResult<usize> {
-        Task::block_on(self.page_cache.read(buffer, offset))
+        block_on(self.page_cache.read(buffer, offset))
     }
 
     fn read_direct(&self, buffer: &mut dyn Buffer, offset: usize) -> KResult<usize> {
         let vfs = self.vfs.upgrade().ok_or(EIO)?;
         let vfs = vfs.as_any().downcast_ref::<FatFs>().unwrap();
-        let fat = Task::block_on(vfs.fat.read());
+        let fat = block_on(vfs.fat.read());
 
         if self.size.load(Ordering::Relaxed) as usize == 0 {
             return Ok(0);
@@ -354,7 +354,7 @@ impl Inode for DirInode {
     fn lookup(&self, dentry: &Arc<Dentry>) -> KResult<Option<Arc<dyn Inode>>> {
         let vfs = self.vfs.upgrade().ok_or(EIO)?;
         let vfs = vfs.as_any().downcast_ref::<FatFs>().unwrap();
-        let fat = Task::block_on(vfs.fat.read());
+        let fat = block_on(vfs.fat.read());
 
         let mut entries = ClusterIterator::new(fat.as_ref(), self.ino as ClusterNo)
             .read(vfs, 0)
@@ -385,7 +385,7 @@ impl Inode for DirInode {
     ) -> KResult<usize> {
         let vfs = self.vfs.upgrade().ok_or(EIO)?;
         let vfs = vfs.as_any().downcast_ref::<FatFs>().unwrap();
-        let fat = Task::block_on(vfs.fat.read());
+        let fat = block_on(vfs.fat.read());
 
         let cluster_iter = ClusterIterator::new(fat.as_ref(), self.ino as ClusterNo)
             .read(vfs, offset)

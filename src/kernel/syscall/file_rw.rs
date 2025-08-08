@@ -1,11 +1,9 @@
-use core::time::Duration;
-
 use super::FromSyscallArg;
 use crate::io::IntoStream;
 use crate::kernel::constants::{
     EBADF, EFAULT, EINVAL, ENOENT, ENOSYS, ENOTDIR, SEEK_CUR, SEEK_END, SEEK_SET, S_IFBLK, S_IFCHR,
 };
-use crate::kernel::task::Thread;
+use crate::kernel::task::{block_on, Thread};
 use crate::kernel::timer::sleep;
 use crate::kernel::vfs::filearray::FD;
 use crate::{
@@ -24,7 +22,7 @@ use crate::{
     prelude::*,
 };
 use alloc::sync::Arc;
-use eonix_runtime::task::Task;
+use core::time::Duration;
 use posix_types::ctypes::{Long, PtrT};
 use posix_types::namei::RenameFlags;
 use posix_types::open::{AtFlags, OpenFlags};
@@ -77,14 +75,14 @@ fn dentry_from(
 fn read(fd: FD, buffer: *mut u8, bufsize: usize) -> KResult<usize> {
     let mut buffer = UserBuffer::new(buffer, bufsize)?;
 
-    Task::block_on(thread.files.get(fd).ok_or(EBADF)?.read(&mut buffer, None))
+    block_on(thread.files.get(fd).ok_or(EBADF)?.read(&mut buffer, None))
 }
 
 #[eonix_macros::define_syscall(SYS_PREAD64)]
 fn pread64(fd: FD, buffer: *mut u8, bufsize: usize, offset: usize) -> KResult<usize> {
     let mut buffer = UserBuffer::new(buffer, bufsize)?;
 
-    Task::block_on(
+    block_on(
         thread
             .files
             .get(fd)
@@ -98,7 +96,7 @@ fn write(fd: FD, buffer: *const u8, count: usize) -> KResult<usize> {
     let buffer = CheckedUserPointer::new(buffer, count)?;
     let mut stream = buffer.into_stream();
 
-    Task::block_on(thread.files.get(fd).ok_or(EBADF)?.write(&mut stream, None))
+    block_on(thread.files.get(fd).ok_or(EBADF)?.write(&mut stream, None))
 }
 
 #[eonix_macros::define_syscall(SYS_PWRITE64)]
@@ -106,7 +104,7 @@ fn pwrite64(fd: FD, buffer: *const u8, count: usize, offset: usize) -> KResult<u
     let buffer = CheckedUserPointer::new(buffer, count)?;
     let mut stream = buffer.into_stream();
 
-    Task::block_on(
+    block_on(
         thread
             .files
             .get(fd)
@@ -390,7 +388,7 @@ fn readv(fd: FD, iov_user: *const IoVec, iovcnt: u32) -> KResult<usize> {
     let mut tot = 0usize;
     for mut buffer in iov_buffers.into_iter() {
         // TODO!!!: `readv`
-        let nread = Task::block_on(file.read(&mut buffer, None))?;
+        let nread = block_on(file.read(&mut buffer, None))?;
         tot += nread;
 
         if nread != buffer.total() {
@@ -426,7 +424,7 @@ fn writev(fd: FD, iov_user: *const IoVec, iovcnt: u32) -> KResult<usize> {
 
     let mut tot = 0usize;
     for mut stream in iov_streams.into_iter() {
-        let nread = Task::block_on(file.write(&mut stream, None))?;
+        let nread = block_on(file.write(&mut stream, None))?;
         tot += nread;
 
         if nread == 0 || !stream.is_drained() {
@@ -477,7 +475,7 @@ fn sendfile64(out_fd: FD, in_fd: FD, offset: *mut u8, count: usize) -> KResult<u
         unimplemented!("sendfile64 with offset");
     }
 
-    Task::block_on(in_file.sendfile(&out_file, count))
+    block_on(in_file.sendfile(&out_file, count))
 }
 
 #[eonix_macros::define_syscall(SYS_IOCTL)]
@@ -513,7 +511,7 @@ fn do_poll(thread: &Thread, fds: *mut UserPollFd, nfds: u32, _timeout: u32) -> K
             let mut fd = fds.read()?;
 
             let file = thread.files.get(fd.fd).ok_or(EBADF)?;
-            fd.revents = Task::block_on(file.poll(PollEvent::from_bits_retain(fd.events)))?.bits();
+            fd.revents = block_on(file.poll(PollEvent::from_bits_retain(fd.events)))?.bits();
 
             fds.write(fd)?;
             Ok(1)
@@ -550,11 +548,11 @@ fn pselect6(
     }
 
     let timeout = UserPointerMut::new(timeout)?;
-    
+
     // Read here to check for invalid pointers.
     let _timeout_value = timeout.read()?;
 
-    Task::block_on(sleep(Duration::from_millis(10)));
+    block_on(sleep(Duration::from_millis(10)));
 
     timeout.write(TimeSpec {
         tv_sec: 0,

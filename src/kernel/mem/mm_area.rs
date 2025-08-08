@@ -2,6 +2,7 @@ use super::mm_list::EMPTY_PAGE;
 use super::paging::AllocZeroed as _;
 use super::{AsMemoryBlock, Mapping, Page, Permission};
 use crate::kernel::constants::EINVAL;
+use crate::kernel::task::block_on;
 use crate::prelude::KResult;
 use core::borrow::Borrow;
 use core::cell::UnsafeCell;
@@ -9,7 +10,6 @@ use core::cmp;
 use eonix_mm::address::{AddrOps as _, VAddr, VRange};
 use eonix_mm::page_table::{PageAttribute, RawAttribute, PTE};
 use eonix_mm::paging::{PAGE_SIZE, PFN};
-use eonix_runtime::task::Task;
 
 #[derive(Debug)]
 pub struct MMArea {
@@ -209,7 +209,7 @@ impl MMArea {
         }
 
         if attr.contains(PageAttribute::MAPPED) {
-            Task::block_on(self.handle_mmap(&mut pfn, &mut attr, offset, write))?;
+            block_on(self.handle_mmap(&mut pfn, &mut attr, offset, write))?;
         }
 
         attr.insert(PageAttribute::ACCESSED);

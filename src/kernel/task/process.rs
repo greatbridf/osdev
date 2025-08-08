@@ -4,10 +4,11 @@ use super::{
 };
 use crate::kernel::constants::{ECHILD, EINTR, EINVAL, EPERM, ESRCH};
 use crate::kernel::task::{CloneArgs, CloneFlags};
+use crate::rcu::call_rcu;
 use crate::{
     kernel::mem::MMList,
     prelude::*,
-    rcu::{rcu_sync, RCUPointer, RCUReadGuard},
+    rcu::{RCUPointer, RCUReadGuard},
     sync::CondVar,
 };
 use alloc::{
@@ -408,12 +409,14 @@ impl Process {
             .session(session.clone())
             .build(&mut process_list);
 
-        {
-            let _old_session = unsafe { self.session.swap(Some(session.clone())) }.unwrap();
-            let old_pgroup = unsafe { self.pgroup.swap(Some(pgroup.clone())) }.unwrap();
-            old_pgroup.remove_member(self.pid, process_list.prove_mut());
-            Task::block_on(rcu_sync());
-        }
+        let old_session = unsafe { self.session.swap(Some(session.clone())) }.unwrap();
+        let old_pgroup = unsafe { self.pgroup.swap(Some(pgroup.clone())) }.unwrap();
+        old_pgroup.remove_member(self.pid, process_list.prove_mut());
+
+        call_rcu(move || {
+            drop(old_session);
+            drop(old_pgroup);
+        });
 
         Ok(pgroup.pgid)
     }
@@ -459,10 +462,9 @@ impl Process {
         };
 
         pgroup.remove_member(self.pid, procs.prove_mut());
-        {
-            let _old_pgroup = unsafe { self.pgroup.swap(Some(new_pgroup)) }.unwrap();
-            Task::block_on(rcu_sync());
-        }
+
+        let old_pgroup = unsafe { self.pgroup.swap(Some(new_pgroup)) }.unwrap();
+        call_rcu(move || drop(old_pgroup));
 
         Ok(())
     }

@@ -224,7 +224,15 @@ impl RawTrapContext for TrapContext {
     fn set_user_mode(&mut self, user: bool) {
         match user {
             true => self.sstatus.set_spp(SPP::User),
-            false => self.sstatus.set_spp(SPP::Supervisor),
+            false => {
+                unsafe {
+                    core::arch::asm!(
+                        "mv {}, tp",
+                        out(reg) self.regs.tp,
+                    );
+                };
+                self.sstatus.set_spp(SPP::Supervisor);
+            }
         }
     }
 

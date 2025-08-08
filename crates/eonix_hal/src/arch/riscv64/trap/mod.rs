@@ -283,8 +283,14 @@ impl TrapReturn for TrapContext {
 
     unsafe fn trap_return(&mut self) {
         let irq_states = disable_irqs_save();
+
         let old_handler =
             core::mem::replace(&mut TRAP_SCRATCH.as_mut().handler, captured_trap_handler);
+
+        let old_trap_context = core::mem::replace(
+            &mut TRAP_SCRATCH.as_mut().trap_context,
+            Some(NonNull::from(&mut *self)),
+        );
 
         let mut to_ctx = TaskContext::new();
         to_ctx.set_program_counter(captured_trap_return as usize);
@@ -296,6 +302,8 @@ impl TrapReturn for TrapContext {
         }
 
         TRAP_SCRATCH.as_mut().handler = old_handler;
+        TRAP_SCRATCH.as_mut().trap_context = old_trap_context;
+
         irq_states.restore();
     }
 }

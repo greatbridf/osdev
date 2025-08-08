@@ -59,11 +59,7 @@ impl CPU {
         sscratch::write(TRAP_SCRATCH.as_ptr() as usize);
     }
 
-    pub unsafe fn load_interrupt_stack(self: Pin<&mut Self>, sp: u64) {
-        TRAP_SCRATCH
-            .as_mut()
-            .set_trap_context(NonNull::new(sp as *mut _).unwrap());
-    }
+    pub unsafe fn load_interrupt_stack(self: Pin<&mut Self>, sp: u64) {}
 
     pub fn set_tls32(self: Pin<&mut Self>, _user_tls: &UserTLS) {
         // nothing

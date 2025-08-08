@@ -429,14 +429,6 @@ impl Thread {
                     me.load_thread_area32();
                 }
 
-                unsafe {
-                    let trap_ctx_ptr: *const TrapContext = &raw const *me.trap_ctx.borrow();
-                    // SAFETY:
-                    CPU::local()
-                        .as_mut()
-                        .load_interrupt_stack(trap_ctx_ptr as u64);
-                }
-
                 let irq_state = disable_irqs_save();
 
                 let result = future.as_mut().poll(cx);

@@ -1,6 +1,6 @@
 use super::{
     signal::{RaiseResult, SignalList},
-    Process, ProcessList, WaitType,
+    stackful, Process, ProcessList, WaitType,
 };
 use crate::{
     kernel::{
@@ -16,11 +16,11 @@ use crate::{
 use alloc::sync::Arc;
 use atomic_unique_refcell::AtomicUniqueRefCell;
 use core::{
-    future::Future,
+    future::{poll_fn, Future},
     pin::Pin,
     ptr::NonNull,
     sync::atomic::{AtomicBool, Ordering},
-    task::{Context, Poll, Waker},
+    task::{Context, Poll},
 };
 use eonix_hal::{
     fpu::FpuState,
@@ -28,23 +28,17 @@ use eonix_hal::{
     traits::{
         fault::Fault,
         fpu::RawFpuState as _,
-        trap::{IrqState as _, RawTrapContext, TrapReturn, TrapType},
+        trap::{RawTrapContext, TrapReturn, TrapType},
     },
-    trap::{disable_irqs_save, TrapContext},
+    trap::TrapContext,
 };
 use eonix_mm::address::{Addr as _, VAddr};
-use eonix_runtime::run::{Contexted, Run, RunState};
 use eonix_sync::AsProofMut as _;
 use pointers::BorrowedArc;
 use posix_types::signal::Signal;
 
 #[eonix_percpu::define_percpu]
 static CURRENT_THREAD: Option<NonNull<Thread>> = None;
-
-pub struct ThreadRunnable<F: Future> {
-    thread: Arc<Thread>,
-    future: F,
-}
 
 pub struct ThreadBuilder {
     tid: Option<u32>,
@@ -397,6 +391,7 @@ impl Thread {
                     self.signal_list.raise(Signal::SIGILL);
                 }
                 TrapType::Fault(Fault::Unknown(_)) => unimplemented!("Unhandled fault"),
+                TrapType::Breakpoint => unimplemented!("Breakpoint in user space"),
                 TrapType::Irq { callback } => callback(default_irq_handler),
                 TrapType::Timer { callback } => {
                     callback(timer_interrupt);
@@ -421,28 +416,39 @@ impl Thread {
         }
     }
 
-    pub async fn run(self: Arc<Thread>) {
-        struct ContextedRun<'a, F: Future>(F, &'a Thread);
+    async fn contexted<F>(&self, future: F) -> F::Output
+    where
+        F: Future,
+    {
+        let mut future = core::pin::pin!(future);
 
-        impl<F: Future> Future for ContextedRun<'_, F> {
-            type Output = F::Output;
+        core::future::poll_fn(|cx| {
+            self.process.mm_list.activate();
 
-            fn poll(mut self: Pin<&mut Self>, ctx: &mut Context<'_>) -> Poll<Self::Output> {
-                let irq_state = disable_irqs_save();
-                let (future, _) = unsafe {
-                    // SAFETY: We construct a pinned future and `&Thread` is `Unpin`.
-                    let me = self.as_mut().get_unchecked_mut();
-                    (Pin::new_unchecked(&mut me.0), me.1)
-                };
+            CURRENT_THREAD.set(NonNull::new(&raw const *self as *mut _));
 
-                let retval = future.poll(ctx);
+            unsafe {
+                eonix_preempt::disable();
 
-                irq_state.restore();
-                retval
+                // SAFETY: Preemption is disabled.
+                self.load_thread_area32();
+
+                eonix_preempt::enable();
             }
-        }
 
-        ContextedRun(self.real_run(), &self).await
+            let result = future.as_mut().poll(cx);
+
+            self.process.mm_list.deactivate();
+
+            CURRENT_THREAD.set(None);
+
+            result
+        })
+        .await
+    }
+
+    pub fn run(self: Arc<Thread>) -> impl Future<Output = ()> + Send + 'static {
+        async move { self.contexted(stackful(self.real_run())).await }
     }
 }
 
@@ -468,56 +474,13 @@ pub async fn yield_now() {
     Yield { yielded: false }.await;
 }
 
-pub fn new_thread_runnable(
-    thread: Arc<Thread>,
-) -> ThreadRunnable<impl Future<Output = impl Send + 'static> + Send + 'static> {
-    ThreadRunnable {
-        thread: thread.clone(),
-        future: thread.run(),
-    }
-}
-
-impl<F: Future> Contexted for ThreadRunnable<F> {
-    fn load_running_context(&self) {
-        self.thread.process.mm_list.activate();
-
-        let raw_ptr: *const Thread = &raw const *self.thread;
-        CURRENT_THREAD.set(NonNull::new(raw_ptr as *mut _));
-
-        unsafe {
-            // SAFETY: Preemption is disabled.
-            self.thread.load_thread_area32();
+pub fn wait_for_wakeups() -> impl Future<Output = ()> {
+    let mut waited = false;
+    poll_fn(move |_| match waited {
+        true => Poll::Ready(()),
+        false => {
+            waited = true;
+            Poll::Pending
         }
-
-        unsafe {
-            let trap_ctx_ptr: *const TrapContext = &raw const *self.thread.trap_ctx.borrow();
-            // SAFETY:
-            CPU::local()
-                .as_mut()
-                .load_interrupt_stack(trap_ctx_ptr as u64);
-        }
-    }
-
-    fn restore_running_context(&self) {
-        self.thread.process.mm_list.deactivate();
-
-        CURRENT_THREAD.set(None);
-    }
-}
-
-impl<F: Future> Run for ThreadRunnable<F> {
-    type Output = F::Output;
-
-    fn run(mut self: Pin<&mut Self>, waker: &Waker) -> RunState<Self::Output> {
-        let mut ctx = Context::from_waker(waker);
-
-        match unsafe {
-            self.as_mut()
-                .map_unchecked_mut(|me| &mut me.future)
-                .poll(&mut ctx)
-        } {
-            Poll::Ready(output) => RunState::Finished(output),
-            Poll::Pending => RunState::Running,
-        }
-    }
+    })
 }

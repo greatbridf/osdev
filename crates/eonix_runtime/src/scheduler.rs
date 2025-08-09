@@ -1,20 +1,16 @@
 use crate::{
-    context::ExecutionContext,
-    executor::{ExecuteStatus, OutputHandle, Stack},
-    ready_queue::{cpu_rq, local_rq},
-    run::{Contexted, Run},
-    task::{Task, TaskAdapter, TaskHandle},
+    executor::OutputHandle,
+    ready_queue::{local_rq, ReadyQueue},
+    task::{Task, TaskAdapter, TaskHandle, TaskState},
 };
-use alloc::sync::Arc;
+use alloc::{sync::Arc, task::Wake};
 use core::{
-    mem::forget,
+    ops::{Deref, DerefMut},
     ptr::NonNull,
-    sync::atomic::{compiler_fence, Ordering},
-    task::Waker,
+    task::{Context, Poll, Waker},
 };
 use eonix_hal::processor::halt;
 use eonix_log::println_trace;
-use eonix_preempt::assert_preempt_count_eq;
 use eonix_sync::{LazyLock, Spin, SpinIrq as _};
 use intrusive_collections::RBTree;
 use pointers::BorrowedArc;
@@ -22,13 +18,12 @@ use pointers::BorrowedArc;
 #[eonix_percpu::define_percpu]
 static CURRENT_TASK: Option<NonNull<Task>> = None;
 
-#[eonix_percpu::define_percpu]
-static LOCAL_SCHEDULER_CONTEXT: ExecutionContext = ExecutionContext::new();
-
 static TASKS: LazyLock<Spin<RBTree<TaskAdapter>>> =
     LazyLock::new(|| Spin::new(RBTree::new(TaskAdapter::new())));
 
-pub struct Scheduler;
+pub static RUNTIME: Runtime = Runtime();
+
+pub struct Runtime();
 
 pub struct JoinHandle<Output>(Arc<Spin<OutputHandle<Output>>>)
 where
@@ -68,209 +63,164 @@ where
     }
 }
 
-impl Scheduler {
-    /// `Scheduler` might be used in various places. Do not hold it for a long time.
-    ///
-    /// # Safety
-    /// The locked returned by this function should be locked with `lock_irq` to prevent from
-    /// rescheduling during access to the scheduler. Disabling preemption will do the same.
-    ///
-    /// Drop the lock before calling `schedule`.
-    pub fn get() -> &'static Self {
-        static GLOBAL_SCHEDULER: Scheduler = Scheduler;
-        &GLOBAL_SCHEDULER
-    }
-
-    pub fn init_local_scheduler<S>()
+impl Runtime {
+    pub fn spawn<F>(&self, future: F) -> JoinHandle<F::Output>
     where
-        S: Stack,
-    {
-        let stack = S::new();
-
-        unsafe {
-            eonix_preempt::disable();
-            // SAFETY: Preemption is disabled.
-            let context: &mut ExecutionContext = LOCAL_SCHEDULER_CONTEXT.as_mut();
-            context.set_ip(local_scheduler as _);
-            context.set_sp(stack.get_bottom().addr().get() as usize);
-            context.set_interrupt(true);
-            eonix_preempt::enable();
-        }
-
-        // We don't need to keep the stack around.
-        forget(stack);
-    }
-
-    /// # Safety
-    /// This function must not be called inside of the scheulder context.
-    ///
-    /// The caller must ensure that `preempt::count` == 1.
-    pub unsafe fn go_from_scheduler(to: &ExecutionContext) {
-        // SAFETY: Preemption is disabled.
-        unsafe { LOCAL_SCHEDULER_CONTEXT.as_ref() }.switch_to(to);
-    }
-
-    /// # Safety
-    /// This function must not be called inside of the scheulder context.
-    ///
-    /// The caller must ensure that `preempt::count` == 1.
-    pub unsafe fn goto_scheduler(from: &ExecutionContext) {
-        // SAFETY: Preemption is disabled.
-        from.switch_to(unsafe { LOCAL_SCHEDULER_CONTEXT.as_ref() });
-    }
-
-    /// # Safety
-    /// This function must not be called inside of the scheulder context.
-    ///
-    /// The caller must ensure that `preempt::count` == 1.
-    pub unsafe fn goto_scheduler_noreturn() -> ! {
-        // SAFETY: Preemption is disabled.
-        unsafe { LOCAL_SCHEDULER_CONTEXT.as_ref().switch_noreturn() }
-    }
-
-    fn add_task(task: Arc<Task>) {
-        TASKS.lock().insert(task);
-    }
-
-    fn remove_task(task: &Task) {
-        unsafe { TASKS.lock().cursor_mut_from_ptr(task as *const _).remove() };
-    }
-
-    fn select_cpu_for_task(&self, task: &Task) -> usize {
-        task.cpu.load(Ordering::Relaxed) as _
-    }
-
-    pub fn activate(&self, task: &Arc<Task>) {
-        // Only one cpu can be activating the task at a time.
-        // TODO: Add some checks.
-
-        if task.on_rq.swap(true, Ordering::Acquire) {
-            // Lock the rq and check whether the task is on the rq again.
-            let cpuid = task.cpu.load(Ordering::Acquire);
-            let mut rq = cpu_rq(cpuid as _).lock_irq();
-
-            if !task.on_rq.load(Ordering::Acquire) {
-                // Task has just got off the rq. Put it back.
-                rq.put(task.clone());
-            } else {
-                // Task is already on the rq. Do nothing.
-                return;
-            }
-        } else {
-            // Task not on some rq. Select one and put it here.
-            let cpu = self.select_cpu_for_task(&task);
-            let mut rq = cpu_rq(cpu).lock_irq();
-            task.cpu.store(cpu as _, Ordering::Release);
-            rq.put(task.clone());
-        }
-    }
-
-    pub fn spawn<S, R>(&self, runnable: R) -> JoinHandle<R::Output>
-    where
-        S: Stack + 'static,
-        R: Run + Contexted + Send + 'static,
-        R::Output: Send + 'static,
+        F: Future + Send + 'static,
+        F::Output: Send + 'static,
     {
         let TaskHandle {
             task,
             output_handle,
-        } = Task::new::<S, _>(runnable);
+        } = Task::new(future);
 
-        Self::add_task(task.clone());
-        self.activate(&task);
+        self.add_task(task.clone());
+        task.wake_by_ref();
 
         JoinHandle(output_handle)
     }
 
-    /// Go to idle task. Call this with `preempt_count == 1`.
-    /// The preempt count will be decremented by this function.
-    ///
-    /// # Safety
-    /// We might never return from here.
-    /// Drop all variables that take ownership of some resource before calling this function.
-    pub fn schedule() {
-        assert_preempt_count_eq!(1, "Scheduler::schedule");
-
-        // Make sure all works are done before scheduling.
-        compiler_fence(Ordering::SeqCst);
-
-        // TODO!!!!!: Use of reference here needs further consideration.
-        //
-        // Since we might never return to here, we can't take ownership of `current()`.
-        // Is it safe to believe that `current()` will never change across calls?
-        unsafe {
-            // SAFETY: Preemption is disabled.
-            Scheduler::goto_scheduler(&Task::current().execution_context);
-        }
-        eonix_preempt::enable();
+    fn add_task(&self, task: Arc<Task>) {
+        TASKS.lock_irq().insert(task);
     }
-}
 
-extern "C" fn local_scheduler() -> ! {
-    loop {
-        assert_preempt_count_eq!(1, "Scheduler::idle_task");
-        let mut rq = local_rq().lock_irq();
+    fn remove_task(&self, task: &impl Deref<Target = Arc<Task>>) {
+        unsafe {
+            TASKS
+                .lock_irq()
+                .cursor_mut_from_ptr(Arc::as_ptr(task))
+                .remove();
+        }
+    }
 
-        let previous_task = CURRENT_TASK
+    fn current(&self) -> Option<BorrowedArc<Task>> {
+        CURRENT_TASK
             .get()
-            .map(|ptr| unsafe { Arc::from_raw(ptr.as_ptr()) });
-        let next_task = rq.get();
+            .map(|ptr| unsafe { BorrowedArc::from_raw(ptr) })
+    }
 
-        match (previous_task, next_task) {
-            (None, None) => {
-                // Nothing to do, halt the cpu and rerun the loop.
+    fn remove_and_enqueue_current(&self, rq: &mut impl DerefMut<Target = dyn ReadyQueue>) {
+        let Some(current) = CURRENT_TASK
+            .swap(None)
+            .map(|cur| unsafe { Arc::from_raw(cur.as_ptr()) })
+        else {
+            return;
+        };
+
+        match current.state.update(|state| match state {
+            TaskState::READY_RUNNING => Some(TaskState::READY),
+            TaskState::RUNNING => Some(TaskState::BLOCKED),
+            _ => {
+                unreachable!("Current task should be at least in RUNNING state, but got {state:?}")
+            }
+        }) {
+            Ok(TaskState::READY_RUNNING) => {
+                println_trace!(
+                    "trace_scheduler",
+                    "Re-enqueueing task {:?} (CPU{})",
+                    current.id,
+                    eonix_hal::processor::CPU::local().cpuid(),
+                );
+
+                rq.put(current);
+            }
+            Ok(_) => {
+                println_trace!(
+                    "trace_scheduler",
+                    "Current task {:?} (CPU{}) is blocked, not re-enqueueing",
+                    current.id,
+                    eonix_hal::processor::CPU::local().cpuid(),
+                );
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    pub fn block_till_woken(set_waker: impl FnOnce(&Waker)) -> impl Future<Output = ()> {
+        struct BlockTillWoken<F: FnOnce(&Waker)> {
+            set_waker: Option<F>,
+            slept: bool,
+        }
+
+        impl<F: FnOnce(&Waker)> Future for BlockTillWoken<F> {
+            type Output = ();
+
+            fn poll(self: core::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
+                if self.slept {
+                    Poll::Ready(())
+                } else {
+                    let (set_waker, slept) = unsafe {
+                        let me = self.get_unchecked_mut();
+                        (me.set_waker.take().unwrap(), &mut me.slept)
+                    };
+
+                    set_waker(cx.waker());
+                    *slept = true;
+                    Poll::Pending
+                }
+            }
+        }
+
+        BlockTillWoken {
+            set_waker: Some(set_waker),
+            slept: false,
+        }
+    }
+
+    /// Enter the runtime with an "init" future and run till its completion.
+    ///
+    /// The "init" future has the highest priority and when it completes,
+    /// the runtime will exit immediately and yield its output.
+    pub fn enter(&self) {
+        loop {
+            let mut rq = local_rq().lock_irq();
+
+            self.remove_and_enqueue_current(&mut rq);
+
+            let Some(next) = rq.get() else {
                 drop(rq);
                 halt();
                 continue;
+            };
+
+            println_trace!(
+                "trace_scheduler",
+                "Switching to task {:?} (CPU{})",
+                next.id,
+                eonix_hal::processor::CPU::local().cpuid(),
+            );
+
+            let old_state = next.state.swap(TaskState::RUNNING);
+            assert_eq!(
+                old_state,
+                TaskState::READY,
+                "Next task should be in READY state"
+            );
+
+            unsafe {
+                CURRENT_TASK.set(Some(NonNull::new_unchecked(Arc::into_raw(next) as *mut _)));
             }
-            (None, Some(next)) => {
-                CURRENT_TASK.set(NonNull::new(Arc::into_raw(next) as *mut _));
-            }
-            (Some(previous), None) => {
-                if previous.state.is_running() {
-                    // Previous thread is `Running`, return to the current running thread.
-                    println_trace!(
-                        "trace_scheduler",
-                        "Returning to task id({}) without doing context switch",
-                        previous.id
-                    );
-                    CURRENT_TASK.set(NonNull::new(Arc::into_raw(previous) as *mut _));
-                } else {
-                    // Nothing to do, halt the cpu and rerun the loop.
-                    CURRENT_TASK.set(NonNull::new(Arc::into_raw(previous) as *mut _));
-                    drop(rq);
-                    halt();
-                    continue;
-                }
-            }
-            (Some(previous), Some(next)) => {
-                println_trace!(
-                    "trace_scheduler",
-                    "Switching from task id({}) to task id({})",
-                    previous.id,
-                    next.id
+
+            drop(rq);
+
+            // TODO: MAYBE we can move the release of finished tasks to some worker thread.
+            if Task::current().poll().is_ready() {
+                let old_state = Task::current().state.swap(TaskState::DEAD);
+                assert!(
+                    old_state & TaskState::RUNNING != 0,
+                    "Current task should be at least in RUNNING state"
                 );
 
-                debug_assert_ne!(previous.id, next.id, "Switching to the same task");
+                println_trace!(
+                    "trace_scheduler",
+                    "Task {:?} finished execution, removing...",
+                    Task::current().id,
+                );
 
-                if previous.state.is_running() || !previous.state.try_park() {
-                    rq.put(previous);
-                } else {
-                    previous.on_rq.store(false, Ordering::Release);
-                }
+                self.remove_task(&Task::current());
 
-                CURRENT_TASK.set(NonNull::new(Arc::into_raw(next) as *mut _));
+                CURRENT_TASK.set(None);
             }
-        }
-
-        drop(rq);
-        // TODO: We can move the release of finished tasks to some worker thread.
-        if let ExecuteStatus::Finished = Task::current().run() {
-            let current = CURRENT_TASK
-                .swap(None)
-                .map(|ptr| unsafe { Arc::from_raw(ptr.as_ptr()) })
-                .expect("Current task should be present");
-            Scheduler::remove_task(&current);
         }
     }
 }

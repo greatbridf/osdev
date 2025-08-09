@@ -1,13 +1,15 @@
+use super::block_on;
 use super::{
     process_group::ProcessGroupBuilder, signal::RaiseResult, thread::ThreadBuilder, ProcessGroup,
     ProcessList, Session, Thread,
 };
 use crate::kernel::constants::{ECHILD, EINTR, EINVAL, EPERM, ESRCH};
 use crate::kernel::task::{CloneArgs, CloneFlags};
+use crate::rcu::call_rcu;
 use crate::{
     kernel::mem::MMList,
     prelude::*,
-    rcu::{rcu_sync, RCUPointer, RCUReadGuard},
+    rcu::{RCUPointer, RCUReadGuard},
     sync::CondVar,
 };
 use alloc::{
@@ -16,7 +18,6 @@ use alloc::{
 };
 use core::sync::atomic::{AtomicU32, Ordering};
 use eonix_mm::address::VAddr;
-use eonix_runtime::task::Task;
 use eonix_sync::{
     AsProof as _, AsProofMut as _, Locked, Proof, ProofMut, RwLockReadGuard, SpinGuard,
     UnlockableGuard as _, UnlockedGuard as _,
@@ -133,7 +134,7 @@ impl WaitId {
         } else if id == -1 {
             WaitId::Any
         } else if id == 0 {
-            let procs = Task::block_on(ProcessList::get().read());
+            let procs = block_on(ProcessList::get().read());
             WaitId::Pgid(thread.process.pgroup(procs.prove()).pgid)
         } else {
             WaitId::Pid(id.cast_unsigned())
@@ -207,9 +208,9 @@ impl ProcessBuilder {
 
     pub fn clone_from(mut self, process: Arc<Process>, clone_args: &CloneArgs) -> Self {
         let mm_list = if clone_args.flags.contains(CloneFlags::CLONE_VM) {
-            Task::block_on(process.mm_list.new_shared())
+            block_on(process.mm_list.new_shared())
         } else {
-            Task::block_on(process.mm_list.new_cloned())
+            block_on(process.mm_list.new_cloned())
         };
 
         if let Some(exit_signal) = clone_args.exit_signal {
@@ -350,7 +351,11 @@ impl Process {
         trace_continue: bool,
     ) -> KResult<Option<WaitObject>> {
         let wait_object = {
-            let mut waits = self.wait_list.entry(wait_id, trace_stop, trace_continue);
+            let mut waits = self
+                .wait_list
+                .entry(wait_id, trace_stop, trace_continue)
+                .await;
+
             loop {
                 if let Some(object) = waits.get() {
                     break object;
@@ -377,7 +382,7 @@ impl Process {
             Ok(Some(wait_object))
         } else {
             let mut procs = ProcessList::get().write().await;
-            procs.remove_process(wait_object.pid);
+            procs.remove_process(wait_object.pid).await;
             assert!(self
                 .inner
                 .access_mut(procs.prove_mut())
@@ -391,7 +396,7 @@ impl Process {
 
     /// Create a new session for the process.
     pub fn setsid(self: &Arc<Self>) -> KResult<u32> {
-        let mut process_list = Task::block_on(ProcessList::get().write());
+        let mut process_list = block_on(ProcessList::get().write());
         // If there exists a session that has the same sid as our pid, we can't create a new
         // session. The standard says that we should create a new process group and be the
         // only process in the new process group and session.
@@ -404,12 +409,14 @@ impl Process {
             .session(session.clone())
             .build(&mut process_list);
 
-        {
-            let _old_session = unsafe { self.session.swap(Some(session.clone())) }.unwrap();
-            let old_pgroup = unsafe { self.pgroup.swap(Some(pgroup.clone())) }.unwrap();
-            old_pgroup.remove_member(self.pid, process_list.prove_mut());
-            Task::block_on(rcu_sync());
-        }
+        let old_session = unsafe { self.session.swap(Some(session.clone())) }.unwrap();
+        let old_pgroup = unsafe { self.pgroup.swap(Some(pgroup.clone())) }.unwrap();
+        old_pgroup.remove_member(self.pid, process_list.prove_mut());
+
+        call_rcu(move || {
+            drop(old_session);
+            drop(old_pgroup);
+        });
 
         Ok(pgroup.pgid)
     }
@@ -455,10 +462,9 @@ impl Process {
         };
 
         pgroup.remove_member(self.pid, procs.prove_mut());
-        {
-            let _old_pgroup = unsafe { self.pgroup.swap(Some(new_pgroup)) }.unwrap();
-            Task::block_on(rcu_sync());
-        }
+
+        let old_pgroup = unsafe { self.pgroup.swap(Some(new_pgroup)) }.unwrap();
+        call_rcu(move || drop(old_pgroup));
 
         Ok(())
     }
@@ -468,7 +474,7 @@ impl Process {
     /// This function should be called on the process that issued the syscall in order to do
     /// permission checks.
     pub fn setpgid(self: &Arc<Self>, pid: u32, pgid: u32) -> KResult<()> {
-        let mut procs = Task::block_on(ProcessList::get().write());
+        let mut procs = block_on(ProcessList::get().write());
         // We may set pgid of either the calling process or a child process.
         if pid == self.pid {
             self.do_setpgid(pgid, &mut procs)
@@ -572,9 +578,9 @@ impl WaitList {
     /// # Safety
     /// Locks `ProcessList` and `WaitList` at the same time. When `wait` is called,
     /// releases the lock on `ProcessList` and `WaitList` and waits on `cv_wait_procs`.
-    pub fn entry(&self, wait_id: WaitId, want_stop: bool, want_continue: bool) -> Entry {
+    pub async fn entry(&self, wait_id: WaitId, want_stop: bool, want_continue: bool) -> Entry {
         Entry {
-            process_list: Task::block_on(ProcessList::get().read()),
+            process_list: ProcessList::get().read().await,
             wait_procs: self.wait_procs.lock(),
             cv: &self.cv_wait_procs,
             want_stop,
@@ -603,7 +609,7 @@ impl Entry<'_, '_, '_> {
                 WaitId::Any => true,
                 WaitId::Pid(pid) => item.pid == pid,
                 WaitId::Pgid(pgid) => {
-                    let procs = Task::block_on(ProcessList::get().read());
+                    let procs = block_on(ProcessList::get().read());
                     if let Some(process) = procs.try_find_process(item.pid) {
                         return process.pgroup(procs.prove()).pgid == pgid;
                     }

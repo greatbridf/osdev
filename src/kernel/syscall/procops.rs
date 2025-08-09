@@ -8,8 +8,8 @@ use crate::kernel::constants::{
 };
 use crate::kernel::mem::PageBuffer;
 use crate::kernel::task::{
-    do_clone, futex_wait, futex_wake, yield_now, FutexFlags, FutexOp, ProcessList, ProgramLoader,
-    RobustListHead, SignalAction, Thread, WaitId, WaitType,
+    block_on, do_clone, futex_wait, futex_wake, yield_now, FutexFlags, FutexOp, ProcessList,
+    ProgramLoader, RobustListHead, SignalAction, Thread, WaitId, WaitType,
 };
 use crate::kernel::task::{parse_futexop, CloneArgs};
 use crate::kernel::timer::sleep;
@@ -27,7 +27,6 @@ use eonix_hal::processor::UserTLS;
 use eonix_hal::traits::trap::RawTrapContext;
 use eonix_hal::trap::TrapContext;
 use eonix_mm::address::{Addr as _, VAddr};
-use eonix_runtime::task::Task;
 use eonix_sync::AsProof as _;
 use posix_types::ctypes::PtrT;
 use posix_types::signal::{SigAction, SigInfo, SigSet, Signal};
@@ -59,7 +58,7 @@ fn nanosleep(req: *const (u32, u32), rem: *mut (u32, u32)) -> KResult<usize> {
     };
 
     let duration = Duration::from_secs(req.0 as u64) + Duration::from_nanos(req.1 as u64);
-    Task::block_on(sleep(duration));
+    block_on(sleep(duration));
 
     if let Some(rem) = rem {
         rem.write((0, 0))?;
@@ -90,7 +89,7 @@ fn clock_nanosleep(
     };
 
     let duration = Duration::from_secs(req.0 as u64) + Duration::from_nanos(req.1 as u64);
-    Task::block_on(sleep(duration));
+    block_on(sleep(duration));
 
     if let Some(rem) = rem {
         rem.write((0, 0))?;
@@ -212,7 +211,7 @@ fn execve(exec: *const u8, argv: *const PtrT, envp: *const PtrT) -> KResult<Sysc
         ProgramLoader::parse(&thread.fs_context, exec, dentry.clone(), argv, envp)?.load()?;
 
     if let Some(robust_list) = thread.get_robust_list() {
-        let _ = Task::block_on(robust_list.wake_all());
+        let _ = block_on(robust_list.wake_all());
         thread.set_robust_list(None);
     }
 
@@ -239,8 +238,8 @@ fn execve(exec: *const u8, argv: *const PtrT, envp: *const PtrT) -> KResult<Sysc
 #[eonix_macros::define_syscall(SYS_EXIT)]
 fn exit(status: u32) -> SyscallNoReturn {
     unsafe {
-        let mut procs = Task::block_on(ProcessList::get().write());
-        Task::block_on(procs.do_exit(&thread, WaitType::Exited(status), false));
+        let mut procs = block_on(ProcessList::get().write());
+        block_on(procs.do_exit(&thread, WaitType::Exited(status), false));
     }
 
     SyscallNoReturn
@@ -249,8 +248,8 @@ fn exit(status: u32) -> SyscallNoReturn {
 #[eonix_macros::define_syscall(SYS_EXIT_GROUP)]
 fn exit_group(status: u32) -> SyscallNoReturn {
     unsafe {
-        let mut procs = Task::block_on(ProcessList::get().write());
-        Task::block_on(procs.do_exit(&thread, WaitType::Exited(status), true));
+        let mut procs = block_on(ProcessList::get().write());
+        block_on(procs.do_exit(&thread, WaitType::Exited(status), true));
     }
 
     SyscallNoReturn
@@ -278,7 +277,7 @@ fn do_waitid(
         Some(options) => options,
     };
 
-    let Some(wait_object) = Task::block_on(thread.process.wait(
+    let Some(wait_object) = block_on(thread.process.wait(
         wait_id,
         options.contains(UserWaitOptions::WNOHANG),
         options.contains(UserWaitOptions::WUNTRACED),
@@ -377,7 +376,7 @@ fn getsid(pid: u32) -> KResult<u32> {
     if pid == 0 {
         Ok(thread.process.session_rcu().sid)
     } else {
-        let procs = Task::block_on(ProcessList::get().read());
+        let procs = block_on(ProcessList::get().read());
         procs
             .try_find_process(pid)
             .map(|proc| proc.session(procs.prove()).sid)
@@ -390,7 +389,7 @@ fn getpgid(pid: u32) -> KResult<u32> {
     if pid == 0 {
         Ok(thread.process.pgroup_rcu().pgid)
     } else {
-        let procs = Task::block_on(ProcessList::get().read());
+        let procs = block_on(ProcessList::get().read());
         procs
             .try_find_process(pid)
             .map(|proc| proc.pgroup(procs.prove()).pgid)
@@ -476,7 +475,7 @@ fn getrandom(buf: *mut u8, buflen: usize, _flags: u32) -> isize {
 
 #[eonix_macros::define_syscall(SYS_SCHED_YIELD)]
 fn sched_yield() -> KResult<()> {
-    Task::block_on(yield_now());
+    block_on(yield_now());
     Ok(())
 }
 
@@ -572,7 +571,7 @@ fn prctl(option: u32, arg2: usize) -> KResult<()> {
 
 #[eonix_macros::define_syscall(SYS_KILL)]
 fn kill(pid: i32, sig: u32) -> KResult<()> {
-    let procs = Task::block_on(ProcessList::get().read());
+    let procs = block_on(ProcessList::get().read());
     match pid {
         // Send signal to every process for which the calling process has
         // permission to send signals.
@@ -599,7 +598,7 @@ fn kill(pid: i32, sig: u32) -> KResult<()> {
 
 #[eonix_macros::define_syscall(SYS_TKILL)]
 fn tkill(tid: u32, sig: u32) -> KResult<()> {
-    Task::block_on(ProcessList::get().read())
+    block_on(ProcessList::get().read())
         .try_find_thread(tid)
         .ok_or(ESRCH)?
         .raise(Signal::try_from_raw(sig)?);
@@ -608,7 +607,7 @@ fn tkill(tid: u32, sig: u32) -> KResult<()> {
 
 #[eonix_macros::define_syscall(SYS_TGKILL)]
 fn tgkill(tgid: u32, tid: u32, sig: u32) -> KResult<()> {
-    let procs = Task::block_on(ProcessList::get().read());
+    let procs = block_on(ProcessList::get().read());
 
     let thread_to_kill = procs.try_find_thread(tid).ok_or(ESRCH)?;
     if thread_to_kill.process.pid != tgid {
@@ -867,11 +866,11 @@ fn futex(
 
     match futex_op {
         FutexOp::FUTEX_WAIT => {
-            Task::block_on(futex_wait(uaddr, pid, val as u32, None))?;
+            block_on(futex_wait(uaddr, pid, val as u32, None))?;
             return Ok(0);
         }
         FutexOp::FUTEX_WAKE => {
-            return Task::block_on(futex_wake(uaddr, pid, val as u32));
+            return block_on(futex_wake(uaddr, pid, val as u32));
         }
         FutexOp::FUTEX_REQUEUE => {
             todo!()
@@ -906,7 +905,7 @@ fn rt_sigreturn() -> KResult<SyscallNoReturn> {
                 "`rt_sigreturn` failed in thread {} with error {err}!",
                 thread.tid
             );
-            Task::block_on(thread.force_kill(Signal::SIGSEGV));
+            block_on(thread.force_kill(Signal::SIGSEGV));
         })?;
 
     Ok(SyscallNoReturn)
@@ -927,7 +926,7 @@ fn sigreturn() -> KResult<SyscallNoReturn> {
                 "`sigreturn` failed in thread {} with error {err}!",
                 thread.tid
             );
-            Task::block_on(thread.force_kill(Signal::SIGSEGV));
+            block_on(thread.force_kill(Signal::SIGSEGV));
         })?;
 
     Ok(SyscallNoReturn)

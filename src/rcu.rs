@@ -1,11 +1,11 @@
-use crate::prelude::*;
+use crate::{kernel::task::block_on, prelude::*};
 use alloc::sync::Arc;
 use core::{
     ops::Deref,
     ptr::NonNull,
     sync::atomic::{AtomicPtr, Ordering},
 };
-use eonix_runtime::task::Task;
+use eonix_runtime::scheduler::RUNTIME;
 use eonix_sync::{Mutex, RwLock, RwLockReadGuard};
 use pointers::BorrowedArc;
 
@@ -21,7 +21,7 @@ impl<'data, T> RCUReadGuard<'data, BorrowedArc<'data, T>> {
     fn lock(value: BorrowedArc<'data, T>) -> Self {
         Self {
             value,
-            _guard: Task::block_on(GLOBAL_RCU_SEM.read()),
+            _guard: block_on(GLOBAL_RCU_SEM.read()),
             _phantom: PhantomData,
         }
     }
@@ -46,6 +46,14 @@ impl<'data, T: 'data> Deref for RCUReadGuard<'data, T> {
 pub async fn rcu_sync() {
     // Lock the global RCU semaphore to ensure that all readers are done.
     let _ = GLOBAL_RCU_SEM.write().await;
+}
+
+pub fn call_rcu(func: impl FnOnce() + Send + 'static) {
+    RUNTIME.spawn(async move {
+        // Wait for all readers to finish.
+        rcu_sync().await;
+        func();
+    });
 }
 
 pub trait RCUNode<MySelf> {
@@ -154,7 +162,7 @@ impl<T: RCUNode<T>> RCUList<T> {
     }
 
     pub fn iter(&self) -> RCUIterator<T> {
-        let _lck = Task::block_on(self.reader_lock.read());
+        let _lck = block_on(self.reader_lock.read());
 
         RCUIterator {
             // SAFETY: We have a read lock, so the node is still alive.
@@ -264,7 +272,10 @@ impl<T> Drop for RCUPointer<T> {
         if let Some(arc) = unsafe { self.swap(None) } {
             // We only wait if there are other references.
             if Arc::strong_count(&arc) == 1 {
-                Task::block_on(rcu_sync());
+                call_rcu(move || {
+                    let _ = arc;
+                    todo!();
+                });
             }
         }
     }

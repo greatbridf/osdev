@@ -39,7 +39,7 @@ virtio-drivers = { version = "0.11.0" }
 default = []
 trace_pci = []
 trace_syscall = []
-trace_scheduler = []
+trace_scheduler = ["eonix_runtime/trace_scheduler"]
 log_trace = ["trace_pci", "trace_syscall", "trace_scheduler"]
 log_debug = []
 smp = []

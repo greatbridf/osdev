@@ -1,10 +1,9 @@
 use super::{MMList, VAddr};
-use crate::kernel::task::Thread;
+use crate::kernel::task::{block_on, Thread};
 use eonix_hal::mm::flush_tlb;
 use eonix_hal::traits::fault::PageFaultErrorCode;
 use eonix_mm::address::{Addr as _, AddrOps as _, VRange};
 use eonix_mm::paging::PAGE_SIZE;
-use eonix_runtime::task::Task;
 use posix_types::signal::Signal;
 
 #[repr(C)]
@@ -149,7 +148,7 @@ pub fn handle_kernel_page_fault(
 
     let mms = &Thread::current().process.mm_list;
     let inner = mms.inner.borrow();
-    let inner = Task::block_on(inner.lock());
+    let inner = block_on(inner.lock());
 
     let area = match inner.areas.get(&VRange::from(addr)) {
         Some(area) => area,

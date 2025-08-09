@@ -1,4 +1,4 @@
-use crate::processor::CPU;
+use crate::{arch::trap::CSR_KERNEL_TP, processor::CPU};
 use core::{arch::asm, mem::offset_of};
 use eonix_hal_traits::{
     fault::{Fault, PageFaultErrorCode},
@@ -226,7 +226,17 @@ impl RawTrapContext for TrapContext {
     fn set_user_mode(&mut self, user: bool) {
         match user {
             true => self.prmd |= 0x3,
-            false => self.prmd &= !0x3,
+            false => {
+                unsafe {
+                    asm!(
+                        "csrrd {tp}, {CSR_KERNEL_TP}",
+                        tp = out(reg) self.regs.tp,
+                        CSR_KERNEL_TP = const CSR_KERNEL_TP,
+                        options(nomem, nostack, preserves_flags),
+                    )
+                }
+                self.prmd &= !0x3;
+            }
         }
     }
 

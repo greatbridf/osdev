@@ -136,7 +136,11 @@ where
                     assert_preempt_enabled!("Blocking in stackful futures is not allowed.");
 
                     unsafe {
+                        #[cfg(target_arch = "riscv64")]
                         core::arch::asm!("ebreak");
+
+                        #[cfg(target_arch = "loongarch64")]
+                        core::arch::asm!("break 1");
                     }
                 }
             }
@@ -147,7 +151,11 @@ where
         }
 
         unsafe {
+            #[cfg(target_arch = "riscv64")]
             core::arch::asm!("ebreak");
+
+            #[cfg(target_arch = "loongarch64")]
+            core::arch::asm!("break 1");
         }
 
         unreachable!()
@@ -184,7 +192,11 @@ where
                         wait_for_wakeups().await;
                     }
 
+                    #[cfg(target_arch = "riscv64")]
                     trap_ctx.set_program_counter(trap_ctx.get_program_counter() + 2);
+
+                    #[cfg(target_arch = "loongarch64")]
+                    trap_ctx.set_program_counter(trap_ctx.get_program_counter() + 4);
                 } else {
                     default_fault_handler(fault, &mut trap_ctx)
                 }

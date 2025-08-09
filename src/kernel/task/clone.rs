@@ -1,4 +1,4 @@
-use super::{block_on, stackful};
+use super::block_on;
 use crate::{
     kernel::{
         syscall::procops::parse_user_tls,
@@ -164,7 +164,7 @@ pub fn do_clone(thread: &Thread, clone_args: CloneArgs) -> KResult<u32> {
         UserPointerMut::new(parent_tid_ptr as *mut u32)?.write(new_pid)?
     }
 
-    RUNTIME.spawn(stackful(new_thread.run()));
+    RUNTIME.spawn(new_thread.run());
 
     Ok(new_pid)
 }

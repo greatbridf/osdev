@@ -79,29 +79,68 @@ pub async fn stackful<F>(mut future: F) -> F::Output
 where
     F: core::future::Future,
 {
-    use core::cell::UnsafeCell;
-    use eonix_hal::traits::fault::Fault;
-    use eonix_hal::traits::trap::RawTrapContext;
-    use eonix_hal::traits::trap::TrapReturn;
-    use eonix_hal::trap::TrapContext;
-    use eonix_log::println_debug;
-    use eonix_runtime::executor::Stack;
-
     use crate::kernel::{
         interrupt::{default_fault_handler, default_irq_handler},
         timer::{should_reschedule, timer_interrupt},
     };
+    use alloc::sync::Arc;
+    use alloc::task::Wake;
+    use core::cell::UnsafeCell;
+    use core::future::Future;
+    use core::pin::Pin;
+    use core::ptr::NonNull;
+    use core::sync::atomic::AtomicBool;
+    use core::sync::atomic::Ordering;
+    use core::task::Context;
+    use core::task::Poll;
+    use core::task::Waker;
+    use eonix_hal::traits::fault::Fault;
+    use eonix_hal::traits::trap::RawTrapContext;
+    use eonix_hal::traits::trap::TrapReturn;
+    use eonix_hal::traits::trap::TrapType;
+    use eonix_hal::trap::TrapContext;
+    use eonix_preempt::assert_preempt_enabled;
+    use eonix_runtime::executor::Stack;
+    use thread::wait_for_wakeups;
 
     let stack = KernelStack::new();
 
-    fn execute<F>(
-        future: core::pin::Pin<&mut F>,
-        output_ptr: core::ptr::NonNull<Option<F::Output>>,
-    ) -> !
+    fn execute<F>(mut future: Pin<&mut F>, output_ptr: NonNull<Option<F::Output>>) -> !
     where
-        F: core::future::Future,
+        F: Future,
     {
-        let output = do_block_on(future);
+        struct WokenUp(AtomicBool);
+
+        impl Wake for WokenUp {
+            fn wake(self: Arc<Self>) {
+                self.wake_by_ref();
+            }
+
+            fn wake_by_ref(self: &Arc<Self>) {
+                self.0.swap(true, Ordering::AcqRel);
+            }
+        }
+
+        let woken_up = Arc::new(WokenUp(AtomicBool::new(false)));
+        let waker = Waker::from(woken_up.clone());
+        let mut cx = Context::from_waker(&waker);
+
+        let output = loop {
+            match future.as_mut().poll(&mut cx) {
+                Poll::Ready(output) => break output,
+                Poll::Pending => {
+                    if woken_up.0.swap(false, Ordering::Acquire) {
+                        continue;
+                    }
+
+                    assert_preempt_enabled!("Blocking in stackful futures is not allowed.");
+
+                    unsafe {
+                        core::arch::asm!("ebreak");
+                    }
+                }
+            }
+        };
 
         unsafe {
             output_ptr.write(Some(output));
@@ -115,7 +154,7 @@ where
     }
 
     let sp = stack.get_bottom();
-    let output = UnsafeCell::new(None);
+    let mut output = UnsafeCell::new(None);
 
     let mut trap_ctx = TrapContext::new();
 
@@ -135,21 +174,26 @@ where
         }
 
         match trap_ctx.trap_type() {
-            eonix_hal::traits::trap::TrapType::Syscall { .. } => {}
-            eonix_hal::traits::trap::TrapType::Fault(fault) => {
+            TrapType::Syscall { .. } => {}
+            TrapType::Fault(fault) => {
                 // Breakpoint
                 if let Fault::Unknown(3) = &fault {
-                    println_debug!("Breakpoint hit, returning output");
-                    break output.into_inner().unwrap();
-                }
+                    if let Some(output) = output.get_mut().take() {
+                        break output;
+                    } else {
+                        wait_for_wakeups().await;
+                    }
 
-                default_fault_handler(fault, &mut trap_ctx)
+                    trap_ctx.set_program_counter(trap_ctx.get_program_counter() + 2);
+                } else {
+                    default_fault_handler(fault, &mut trap_ctx)
+                }
             }
-            eonix_hal::traits::trap::TrapType::Irq { callback } => callback(default_irq_handler),
-            eonix_hal::traits::trap::TrapType::Timer { callback } => {
+            TrapType::Irq { callback } => callback(default_irq_handler),
+            TrapType::Timer { callback } => {
                 callback(timer_interrupt);
 
-                if should_reschedule() {
+                if eonix_preempt::count() == 0 && should_reschedule() {
                     yield_now().await;
                 }
             }

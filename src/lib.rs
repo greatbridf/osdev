@@ -37,7 +37,7 @@ use eonix_mm::address::PRange;
 use eonix_runtime::{executor::Stack, scheduler::RUNTIME};
 use kernel::{
     mem::GlobalPageAlloc,
-    task::{stackful, KernelStack, ProcessBuilder, ProcessList, ProgramLoader, ThreadBuilder},
+    task::{KernelStack, ProcessBuilder, ProcessList, ProgramLoader, ThreadBuilder},
     vfs::{
         dentry::Dentry,
         mount::{do_mount, MS_NOATIME, MS_NODEV, MS_NOSUID, MS_RDONLY},
@@ -272,5 +272,5 @@ async fn init_process(early_kstack: PRange) {
     // TODO!!!: Remove this.
     thread.files.open_console();
 
-    RUNTIME.spawn(stackful(thread.run()));
+    RUNTIME.spawn(thread.run());
 }

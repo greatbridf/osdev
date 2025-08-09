@@ -1,6 +1,6 @@
 use super::{
     signal::{RaiseResult, SignalList},
-    Process, ProcessList, WaitType,
+    stackful, Process, ProcessList, WaitType,
 };
 use crate::{
     kernel::{
@@ -16,8 +16,8 @@ use crate::{
 use alloc::sync::Arc;
 use atomic_unique_refcell::AtomicUniqueRefCell;
 use core::{
-    future::Future,
-    pin::{pin, Pin},
+    future::{poll_fn, Future},
+    pin::Pin,
     ptr::NonNull,
     sync::atomic::{AtomicBool, Ordering},
     task::{Context, Poll},
@@ -28,9 +28,9 @@ use eonix_hal::{
     traits::{
         fault::Fault,
         fpu::RawFpuState as _,
-        trap::{IrqState as _, RawTrapContext, TrapReturn, TrapType},
+        trap::{RawTrapContext, TrapReturn, TrapType},
     },
-    trap::{disable_irqs_save, TrapContext},
+    trap::TrapContext,
 };
 use eonix_mm::address::{Addr as _, VAddr};
 use eonix_sync::AsProofMut as _;
@@ -415,36 +415,39 @@ impl Thread {
         }
     }
 
+    async fn contexted<F>(&self, future: F) -> F::Output
+    where
+        F: Future,
+    {
+        let mut future = core::pin::pin!(future);
+
+        core::future::poll_fn(|cx| {
+            self.process.mm_list.activate();
+
+            CURRENT_THREAD.set(NonNull::new(&raw const *self as *mut _));
+
+            unsafe {
+                eonix_preempt::disable();
+
+                // SAFETY: Preemption is disabled.
+                self.load_thread_area32();
+
+                eonix_preempt::enable();
+            }
+
+            let result = future.as_mut().poll(cx);
+
+            self.process.mm_list.deactivate();
+
+            CURRENT_THREAD.set(None);
+
+            result
+        })
+        .await
+    }
+
     pub fn run(self: Arc<Thread>) -> impl Future<Output = ()> + Send + 'static {
-        async fn real_run_with_context(me: &Arc<Thread>) {
-            let mut future = pin!(me.real_run());
-
-            core::future::poll_fn(|cx| {
-                me.process.mm_list.activate();
-
-                CURRENT_THREAD.set(NonNull::new(Arc::as_ptr(me) as *mut _));
-
-                unsafe {
-                    // SAFETY: Preemption is disabled.
-                    me.load_thread_area32();
-                }
-
-                let irq_state = disable_irqs_save();
-
-                let result = future.as_mut().poll(cx);
-
-                irq_state.restore();
-
-                me.process.mm_list.deactivate();
-
-                CURRENT_THREAD.set(None);
-
-                result
-            })
-            .await
-        }
-
-        async move { real_run_with_context(&self).await }
+        async move { self.contexted(stackful(self.real_run())).await }
     }
 }
 
@@ -468,4 +471,15 @@ pub async fn yield_now() {
     }
 
     Yield { yielded: false }.await;
+}
+
+pub fn wait_for_wakeups() -> impl Future<Output = ()> {
+    let mut waited = false;
+    poll_fn(move |_| match waited {
+        true => Poll::Ready(()),
+        false => {
+            waited = true;
+            Poll::Pending
+        }
+    })
 }

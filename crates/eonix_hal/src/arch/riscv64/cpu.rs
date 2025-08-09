@@ -1,9 +1,13 @@
 use super::{
     interrupt::InterruptControl,
-    trap::{setup_trap, TRAP_SCRATCH},
+    trap::{setup_trap, TrapContext},
 };
 use crate::arch::fdt::{FdtExt, FDT};
-use core::{arch::asm, pin::Pin, ptr::NonNull, sync::atomic::AtomicUsize};
+use core::{
+    arch::asm, cell::UnsafeCell, mem::MaybeUninit, pin::Pin, ptr::NonNull,
+    sync::atomic::AtomicUsize,
+};
+use eonix_hal_traits::trap::RawTrapContext;
 use eonix_preempt::PreemptGuard;
 use eonix_sync_base::LazyLock;
 use riscv::register::{
@@ -16,6 +20,9 @@ pub static CPU_COUNT: AtomicUsize = AtomicUsize::new(0);
 
 #[eonix_percpu::define_percpu]
 pub static CPUID: usize = 0;
+
+#[eonix_percpu::define_percpu]
+static DEFAULT_TRAP_CONTEXT: MaybeUninit<TrapContext> = MaybeUninit::uninit();
 
 #[eonix_percpu::define_percpu]
 static LOCAL_CPU: LazyLock<CPU> = LazyLock::new(|| CPU::new(CPUID.get()));
@@ -56,7 +63,7 @@ impl CPU {
         interrupt.init();
 
         sstatus::set_sum();
-        sscratch::write(TRAP_SCRATCH.as_ptr() as usize);
+        sscratch::write(DEFAULT_TRAP_CONTEXT.as_ptr() as usize);
     }
 
     pub unsafe fn load_interrupt_stack(self: Pin<&mut Self>, sp: u64) {}

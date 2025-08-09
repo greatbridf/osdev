@@ -3,7 +3,6 @@ use super::{
     console::write_str,
     cpu::{CPUID, CPU_COUNT},
     time::set_next_timer,
-    trap::TRAP_SCRATCH,
 };
 use crate::{
     arch::{
@@ -234,13 +233,6 @@ fn setup_cpu(alloc: impl PageAlloc, hart_id: usize) {
     }
 
     percpu_area.register(cpu.cpuid());
-
-    unsafe {
-        // SAFETY: Interrupts are disabled.
-        TRAP_SCRATCH
-            .as_mut()
-            .set_kernel_tp(PercpuArea::get_for(cpu.cpuid()).unwrap().cast());
-    }
 }
 
 fn get_ap_start_addr() -> usize {

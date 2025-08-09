@@ -173,6 +173,7 @@ impl RawTrapContext for TrapContext {
                 | Exception::MemoryAccessAddressError
                 | Exception::PagePrivilegeIllegal,
             ) => TrapType::Fault(Fault::BadAccess),
+            Trap::Exception(Exception::Breakpoint) => TrapType::Breakpoint,
             Trap::Exception(Exception::InstructionNotExist) => TrapType::Fault(Fault::InvalidOp),
             Trap::Exception(Exception::Syscall) => TrapType::Syscall {
                 no: self.syscall_no(),

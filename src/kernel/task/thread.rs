@@ -391,6 +391,7 @@ impl Thread {
                     self.signal_list.raise(Signal::SIGILL);
                 }
                 TrapType::Fault(Fault::Unknown(_)) => unimplemented!("Unhandled fault"),
+                TrapType::Breakpoint => unimplemented!("Breakpoint in user space"),
                 TrapType::Irq { callback } => callback(default_irq_handler),
                 TrapType::Timer { callback } => {
                     callback(timer_interrupt);

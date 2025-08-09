@@ -166,6 +166,7 @@ impl RawTrapContext for TrapContext {
             }
             Trap::Exception(e) => {
                 match Exception::from_number(e).unwrap() {
+                    Exception::Breakpoint => TrapType::Breakpoint,
                     Exception::InstructionMisaligned
                     | Exception::LoadMisaligned
                     | Exception::InstructionFault

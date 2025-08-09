@@ -94,7 +94,6 @@ where
     use core::task::Context;
     use core::task::Poll;
     use core::task::Waker;
-    use eonix_hal::traits::fault::Fault;
     use eonix_hal::traits::trap::RawTrapContext;
     use eonix_hal::traits::trap::TrapReturn;
     use eonix_hal::traits::trap::TrapType;
@@ -183,24 +182,7 @@ where
 
         match trap_ctx.trap_type() {
             TrapType::Syscall { .. } => {}
-            TrapType::Fault(fault) => {
-                // Breakpoint
-                if let Fault::Unknown(3) = &fault {
-                    if let Some(output) = output.get_mut().take() {
-                        break output;
-                    } else {
-                        wait_for_wakeups().await;
-                    }
-
-                    #[cfg(target_arch = "riscv64")]
-                    trap_ctx.set_program_counter(trap_ctx.get_program_counter() + 2);
-
-                    #[cfg(target_arch = "loongarch64")]
-                    trap_ctx.set_program_counter(trap_ctx.get_program_counter() + 4);
-                } else {
-                    default_fault_handler(fault, &mut trap_ctx)
-                }
-            }
+            TrapType::Fault(fault) => default_fault_handler(fault, &mut trap_ctx),
             TrapType::Irq { callback } => callback(default_irq_handler),
             TrapType::Timer { callback } => {
                 callback(timer_interrupt);
@@ -208,6 +190,19 @@ where
                 if eonix_preempt::count() == 0 && should_reschedule() {
                     yield_now().await;
                 }
+            }
+            TrapType::Breakpoint => {
+                if let Some(output) = output.get_mut().take() {
+                    break output;
+                } else {
+                    wait_for_wakeups().await;
+                }
+
+                #[cfg(target_arch = "riscv64")]
+                trap_ctx.set_program_counter(trap_ctx.get_program_counter() + 2);
+
+                #[cfg(target_arch = "loongarch64")]
+                trap_ctx.set_program_counter(trap_ctx.get_program_counter() + 4);
             }
         }
     }

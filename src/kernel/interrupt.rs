@@ -48,6 +48,7 @@ pub fn default_fault_handler(fault_type: Fault, trap_ctx: &mut TrapContext) {
 pub fn interrupt_handler(trap_ctx: &mut TrapContext) {
     match trap_ctx.trap_type() {
         TrapType::Syscall { no, .. } => unreachable!("Syscall {} in kernel space.", no),
+        TrapType::Breakpoint => unreachable!("Breakpoint in kernel space."),
         TrapType::Fault(fault) => default_fault_handler(fault, trap_ctx),
         TrapType::Irq { callback } => callback(default_irq_handler),
         TrapType::Timer { callback } => callback(timer_interrupt),

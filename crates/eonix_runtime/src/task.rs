@@ -93,6 +93,10 @@ impl Task {
             return rq;
         }
     }
+
+    pub fn is_ready(&self) -> bool {
+        self.state.is_ready()
+    }
 }
 
 impl Wake for Task {

@@ -22,4 +22,8 @@ impl TaskState {
         self.0
             .fetch_update(Ordering::SeqCst, Ordering::SeqCst, func)
     }
+
+    pub(crate) fn is_ready(&self) -> bool {
+        self.0.load(Ordering::SeqCst) & Self::READY == Self::READY
+    }
 }

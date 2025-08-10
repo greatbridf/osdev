@@ -10,6 +10,7 @@ mod signal;
 mod thread;
 
 pub use clone::{do_clone, CloneArgs, CloneFlags};
+use eonix_runtime::task::Task;
 pub use futex::{futex_wait, futex_wake, parse_futexop, FutexFlags, FutexOp, RobustListHead};
 pub use kernel_stack::KernelStack;
 pub use loader::ProgramLoader;
@@ -18,7 +19,7 @@ pub use process_group::ProcessGroup;
 pub use process_list::ProcessList;
 pub use session::Session;
 pub use signal::SignalAction;
-pub use thread::{yield_now, Thread, ThreadBuilder};
+pub use thread::{yield_now, Thread, ThreadAlloc, ThreadBuilder};
 
 fn do_block_on<F>(mut future: core::pin::Pin<&mut F>) -> F::Output
 where
@@ -83,14 +84,10 @@ where
         interrupt::{default_fault_handler, default_irq_handler},
         timer::{should_reschedule, timer_interrupt},
     };
-    use alloc::sync::Arc;
-    use alloc::task::Wake;
     use core::cell::UnsafeCell;
     use core::future::Future;
     use core::pin::Pin;
     use core::ptr::NonNull;
-    use core::sync::atomic::AtomicBool;
-    use core::sync::atomic::Ordering;
     use core::task::Context;
     use core::task::Poll;
     use core::task::Waker;
@@ -108,27 +105,14 @@ where
     where
         F: Future,
     {
-        struct WokenUp(AtomicBool);
-
-        impl Wake for WokenUp {
-            fn wake(self: Arc<Self>) {
-                self.wake_by_ref();
-            }
-
-            fn wake_by_ref(self: &Arc<Self>) {
-                self.0.swap(true, Ordering::AcqRel);
-            }
-        }
-
-        let woken_up = Arc::new(WokenUp(AtomicBool::new(false)));
-        let waker = Waker::from(woken_up.clone());
+        let waker = Waker::from(Task::current().clone());
         let mut cx = Context::from_waker(&waker);
 
         let output = loop {
             match future.as_mut().poll(&mut cx) {
                 Poll::Ready(output) => break output,
                 Poll::Pending => {
-                    if woken_up.0.swap(false, Ordering::Acquire) {
+                    if Task::current().is_ready() {
                         continue;
                     }
 

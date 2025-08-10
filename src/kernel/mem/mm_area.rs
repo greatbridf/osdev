@@ -2,7 +2,6 @@ use super::mm_list::EMPTY_PAGE;
 use super::paging::AllocZeroed as _;
 use super::{AsMemoryBlock, Mapping, Page, Permission};
 use crate::kernel::constants::EINVAL;
-use crate::kernel::task::block_on;
 use crate::prelude::KResult;
 use core::borrow::Borrow;
 use core::cell::UnsafeCell;
@@ -18,6 +17,9 @@ pub struct MMArea {
     pub(super) permission: Permission,
     pub is_shared: bool,
 }
+
+unsafe impl Send for MMArea {}
+unsafe impl Sync for MMArea {}
 
 impl Clone for MMArea {
     fn clone(&self) -> Self {
@@ -200,7 +202,7 @@ impl MMArea {
         Ok(())
     }
 
-    pub fn handle(&self, pte: &mut impl PTE, offset: usize, write: bool) -> KResult<()> {
+    pub async fn handle(&self, pte: &mut impl PTE, offset: usize, write: bool) -> KResult<()> {
         let mut attr = pte.get_attr().as_page_attr().expect("Not a page attribute");
         let mut pfn = pte.get_pfn();
 
@@ -209,7 +211,7 @@ impl MMArea {
         }
 
         if attr.contains(PageAttribute::MAPPED) {
-            block_on(self.handle_mmap(&mut pfn, &mut attr, offset, write))?;
+            self.handle_mmap(&mut pfn, &mut attr, offset, write).await?;
         }
 
         attr.insert(PageAttribute::ACCESSED);

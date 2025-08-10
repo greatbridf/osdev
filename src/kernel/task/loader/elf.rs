@@ -215,20 +215,20 @@ impl<E: ElfArch> Elf<E> {
         })
     }
 
-    fn load(&self, args: Vec<CString>, envs: Vec<CString>) -> KResult<LoadInfo> {
+    async fn load(&self, args: Vec<CString>, envs: Vec<CString>) -> KResult<LoadInfo> {
         let mm_list = MMList::new();
 
         // Load Segments
-        let (elf_base, data_segment_end) = self.load_segments(&mm_list)?;
+        let (elf_base, data_segment_end) = self.load_segments(&mm_list).await?;
 
         // Load ldso (if any)
-        let ldso_load_info = self.load_ldso(&mm_list)?;
+        let ldso_load_info = self.load_ldso(&mm_list).await?;
 
         // Load vdso
-        self.load_vdso(&mm_list)?;
+        self.load_vdso(&mm_list).await?;
 
         // Heap
-        mm_list.register_break(data_segment_end + 0x10000);
+        mm_list.register_break(data_segment_end + 0x10000).await;
 
         let aux_vec = self.init_aux_vec(
             elf_base,
@@ -238,7 +238,9 @@ impl<E: ElfArch> Elf<E> {
         )?;
 
         // Map stack
-        let sp = self.create_and_init_stack(&mm_list, args, envs, aux_vec)?;
+        let sp = self
+            .create_and_init_stack(&mm_list, args, envs, aux_vec)
+            .await?;
 
         let entry_ip = if let Some(ldso_load_info) = ldso_load_info {
             // Normal shared object(DYN)
@@ -258,26 +260,30 @@ impl<E: ElfArch> Elf<E> {
         })
     }
 
-    fn create_and_init_stack(
+    async fn create_and_init_stack(
         &self,
         mm_list: &MMList,
         args: Vec<CString>,
         envs: Vec<CString>,
         aux_vec: AuxVec<E::Ea>,
     ) -> KResult<VAddr> {
-        mm_list.mmap_fixed(
-            VAddr::from(E::STACK_BASE_ADDR - INIT_STACK_SIZE),
-            INIT_STACK_SIZE,
-            Mapping::Anonymous,
-            Permission {
-                read: true,
-                write: true,
-                execute: false,
-            },
-            false,
-        )?;
+        mm_list
+            .mmap_fixed(
+                VAddr::from(E::STACK_BASE_ADDR - INIT_STACK_SIZE),
+                INIT_STACK_SIZE,
+                Mapping::Anonymous,
+                Permission {
+                    read: true,
+                    write: true,
+                    execute: false,
+                },
+                false,
+            )
+            .await?;
 
-        StackInitializer::new(&mm_list, E::STACK_BASE_ADDR, args, envs, aux_vec).init()
+        StackInitializer::new(&mm_list, E::STACK_BASE_ADDR, args, envs, aux_vec)
+            .init()
+            .await
     }
 
     fn init_aux_vec(&self, elf_base: VAddr, ldso_base: Option<VAddr>) -> KResult<AuxVec<E::Ea>> {
@@ -309,7 +315,7 @@ impl<E: ElfArch> Elf<E> {
         Ok(aux_vec)
     }
 
-    fn load_segments(&self, mm_list: &MMList) -> KResult<(VAddr, VAddr)> {
+    async fn load_segments(&self, mm_list: &MMList) -> KResult<(VAddr, VAddr)> {
         let base: VAddr = if self.is_shared_object() { E::DYN_BASE_ADDR } else { 0 }.into();
 
         let mut segments_end = VAddr::NULL;
@@ -318,7 +324,7 @@ impl<E: ElfArch> Elf<E> {
             let type_ = program_header.type_().map_err(|_| ENOEXEC)?;
 
             if type_ == program::Type::Load {
-                let segment_end = self.load_segment(program_header, mm_list, base)?;
+                let segment_end = self.load_segment(program_header, mm_list, base).await?;
 
                 if segment_end > segments_end {
                     segments_end = segment_end;
@@ -329,7 +335,7 @@ impl<E: ElfArch> Elf<E> {
         Ok((base, segments_end))
     }
 
-    fn load_segment(
+    async fn load_segment(
         &self,
         program_header: &E::Ph,
         mm_list: &MMList,
@@ -353,33 +359,37 @@ impl<E: ElfArch> Elf<E> {
         if file_len != 0 {
             let real_file_length = load_vaddr_end - vmap_start;
 
-            mm_list.mmap_fixed(
-                vmap_start,
-                file_len,
-                Mapping::File(FileMapping::new(
-                    self.file.get_inode()?,
-                    file_offset,
-                    real_file_length,
-                )),
-                permission,
-                false,
-            )?;
+            mm_list
+                .mmap_fixed(
+                    vmap_start,
+                    file_len,
+                    Mapping::File(FileMapping::new(
+                        self.file.get_inode()?,
+                        file_offset,
+                        real_file_length,
+                    )),
+                    permission,
+                    false,
+                )
+                .await?;
         }
 
         if vmem_len > file_len {
-            mm_list.mmap_fixed(
-                vmap_start + file_len,
-                vmem_len - file_len,
-                Mapping::Anonymous,
-                permission,
-                false,
-            )?;
+            mm_list
+                .mmap_fixed(
+                    vmap_start + file_len,
+                    vmem_len - file_len,
+                    Mapping::Anonymous,
+                    permission,
+                    false,
+                )
+                .await?;
         }
 
         Ok(vmap_start + vmem_len)
     }
 
-    fn load_ldso(&self, mm_list: &MMList) -> KResult<Option<LdsoLoadInfo>> {
+    async fn load_ldso(&self, mm_list: &MMList) -> KResult<Option<LdsoLoadInfo>> {
         let ldso_path = self.ldso_path()?;
 
         if let Some(ldso_path) = ldso_path {
@@ -393,7 +403,7 @@ impl<E: ElfArch> Elf<E> {
                 let type_ = program_header.type_().map_err(|_| ENOEXEC)?;
 
                 if type_ == program::Type::Load {
-                    ldso_elf.load_segment(program_header, mm_list, base)?;
+                    ldso_elf.load_segment(program_header, mm_list, base).await?;
                 }
             }
 
@@ -406,8 +416,8 @@ impl<E: ElfArch> Elf<E> {
         Ok(None)
     }
 
-    fn load_vdso(&self, mm_list: &MMList) -> KResult<()> {
-        mm_list.map_vdso()
+    async fn load_vdso(&self, mm_list: &MMList) -> KResult<()> {
+        mm_list.map_vdso().await
     }
 
     fn ldso_path(&self) -> KResult<Option<String>> {
@@ -449,10 +459,10 @@ impl ELF {
         }
     }
 
-    pub fn load(&self, args: Vec<CString>, envs: Vec<CString>) -> KResult<LoadInfo> {
+    pub async fn load(&self, args: Vec<CString>, envs: Vec<CString>) -> KResult<LoadInfo> {
         match &self {
-            ELF::Elf32(elf32) => elf32.load(args, envs),
-            ELF::Elf64(elf64) => elf64.load(args, envs),
+            ELF::Elf32(elf32) => elf32.load(args, envs).await,
+            ELF::Elf64(elf64) => elf64.load(args, envs).await,
         }
     }
 }
@@ -483,21 +493,21 @@ impl<'a, T: ElfAddr + Clone + Copy> StackInitializer<'a, T> {
     }
 
     // return sp after stack init
-    fn init(mut self) -> KResult<VAddr> {
-        let env_pointers = self.push_envs()?;
-        let arg_pointers = self.push_args()?;
+    async fn init(mut self) -> KResult<VAddr> {
+        let env_pointers = self.push_envs().await?;
+        let arg_pointers = self.push_args().await?;
 
         self.stack_alignment();
-        self.push_aux_vec()?;
-        self.push_pointers(env_pointers)?;
-        self.push_pointers(arg_pointers)?;
-        self.push_argc(T::from_usize(self.args.len()))?;
+        self.push_aux_vec().await?;
+        self.push_pointers(env_pointers).await?;
+        self.push_pointers(arg_pointers).await?;
+        self.push_argc(T::from_usize(self.args.len())).await?;
 
         assert_eq!(self.sp.align_down(16), self.sp);
         Ok(VAddr::from(self.sp))
     }
 
-    fn push_envs(&mut self) -> KResult<Vec<T>> {
+    async fn push_envs(&mut self) -> KResult<Vec<T>> {
         let mut addrs = Vec::with_capacity(self.envs.len());
         for string in self.envs.iter().rev() {
             let len = string.as_bytes_with_nul().len();
@@ -505,14 +515,15 @@ impl<'a, T: ElfAddr + Clone + Copy> StackInitializer<'a, T> {
             self.mm_list
                 .access_mut(VAddr::from(self.sp), len, |offset, data| {
                     data.copy_from_slice(&string.as_bytes_with_nul()[offset..offset + data.len()])
-                })?;
+                })
+                .await?;
             addrs.push(T::from_usize(self.sp));
         }
         addrs.reverse();
         Ok(addrs)
     }
 
-    fn push_args(&mut self) -> KResult<Vec<T>> {
+    async fn push_args(&mut self) -> KResult<Vec<T>> {
         let mut addrs = Vec::with_capacity(self.args.len());
         for string in self.args.iter().rev() {
             let len = string.as_bytes_with_nul().len();
@@ -520,7 +531,8 @@ impl<'a, T: ElfAddr + Clone + Copy> StackInitializer<'a, T> {
             self.mm_list
                 .access_mut(VAddr::from(self.sp), len, |offset, data| {
                     data.copy_from_slice(&string.as_bytes_with_nul()[offset..offset + data.len()])
-                })?;
+                })
+                .await?;
             addrs.push(T::from_usize(self.sp));
         }
         addrs.reverse();
@@ -538,27 +550,29 @@ impl<'a, T: ElfAddr + Clone + Copy> StackInitializer<'a, T> {
         self.sp = align_sp + all_size;
     }
 
-    fn push_pointers(&mut self, mut pointers: Vec<T>) -> KResult<()> {
+    async fn push_pointers(&mut self, mut pointers: Vec<T>) -> KResult<()> {
         pointers.push(T::from_usize(0));
         self.sp -= pointers.len() * size_of::<T>();
 
-        self.mm_list.access_mut(
-            VAddr::from(self.sp),
-            pointers.len() * size_of::<T>(),
-            |offset, data| {
-                data.copy_from_slice(unsafe {
-                    core::slice::from_raw_parts(
-                        pointers.as_ptr().byte_add(offset) as *const u8,
-                        data.len(),
-                    )
-                })
-            },
-        )?;
+        self.mm_list
+            .access_mut(
+                VAddr::from(self.sp),
+                pointers.len() * size_of::<T>(),
+                |offset, data| {
+                    data.copy_from_slice(unsafe {
+                        core::slice::from_raw_parts(
+                            pointers.as_ptr().byte_add(offset) as *const u8,
+                            data.len(),
+                        )
+                    })
+                },
+            )
+            .await?;
 
         Ok(())
     }
 
-    fn push_argc(&mut self, val: T) -> KResult<()> {
+    async fn push_argc(&mut self, val: T) -> KResult<()> {
         self.sp -= size_of::<T>();
 
         self.mm_list
@@ -566,12 +580,13 @@ impl<'a, T: ElfAddr + Clone + Copy> StackInitializer<'a, T> {
                 data.copy_from_slice(unsafe {
                     core::slice::from_raw_parts(&val as *const _ as *const u8, data.len())
                 })
-            })?;
+            })
+            .await?;
 
         Ok(())
     }
 
-    fn push_aux_vec(&mut self) -> KResult<()> {
+    async fn push_aux_vec(&mut self) -> KResult<()> {
         let mut longs: Vec<T> = vec![];
 
         // Write Auxiliary vectors
@@ -593,18 +608,20 @@ impl<'a, T: ElfAddr + Clone + Copy> StackInitializer<'a, T> {
 
         self.sp -= longs.len() * size_of::<T>();
 
-        self.mm_list.access_mut(
-            VAddr::from(self.sp),
-            longs.len() * size_of::<T>(),
-            |offset, data| {
-                data.copy_from_slice(unsafe {
-                    core::slice::from_raw_parts(
-                        longs.as_ptr().byte_add(offset) as *const u8,
-                        data.len(),
-                    )
-                })
-            },
-        )?;
+        self.mm_list
+            .access_mut(
+                VAddr::from(self.sp),
+                longs.len() * size_of::<T>(),
+                |offset, data| {
+                    data.copy_from_slice(unsafe {
+                        core::slice::from_raw_parts(
+                            longs.as_ptr().byte_add(offset) as *const u8,
+                            data.len(),
+                        )
+                    })
+                },
+            )
+            .await?;
 
         Ok(())
     }

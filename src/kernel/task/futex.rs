@@ -9,6 +9,7 @@ use intrusive_collections::{intrusive_adapter, KeyAdapter, RBTree, RBTreeAtomicL
 use crate::{
     kernel::{
         constants::{EAGAIN, EINVAL},
+        syscall::User,
         user::UserPointer,
     },
     prelude::KResult,
@@ -174,7 +175,7 @@ pub async fn futex_wait(
         let (_, futex_bucket_ref) = FUTEX_TABLE.get_bucket(&futex_key);
         let mut futex_bucket = futex_bucket_ref.lock().await;
 
-        let val = UserPointer::new(uaddr as *const u32)?.read()?;
+        let val = UserPointer::new(User::<u32>::with_addr(uaddr))?.read()?;
 
         if val != expected_val {
             return Err(EAGAIN);
@@ -238,20 +239,20 @@ async fn futex_requeue(
     pid: Option<u32>,
     wake_count: u32,
     requeue_uaddr: usize,
-    requeue_count: u32,
+    _requeue_count: u32,
 ) -> KResult<usize> {
     let futex_key = FutexKey::new(uaddr, pid);
     let futex_requeue_key = FutexKey::new(requeue_uaddr, pid);
 
-    let (bucket_idx0, bucket_ref0) = FUTEX_TABLE.get_bucket(&futex_key);
-    let (bucket_idx1, bucket_ref1) = FUTEX_TABLE.get_bucket(&futex_requeue_key);
+    let (bucket_idx0, _bucket_ref0) = FUTEX_TABLE.get_bucket(&futex_key);
+    let (bucket_idx1, _bucket_ref1) = FUTEX_TABLE.get_bucket(&futex_requeue_key);
 
     if bucket_idx0 == bucket_idx1 {
         // If the keys are the same, we can just wake up the waiters.
         return futex_wake(uaddr, pid, wake_count).await;
     }
 
-    let (futex_bucket, futex_requeue_bucket) =
+    let (_futex_bucket, _futex_requeue_bucket) =
         double_lock_bucket(futex_key, futex_requeue_key).await;
 
     todo!()
@@ -299,7 +300,7 @@ impl RobustListHead {
             futex_wake(futex_addr, None, usize::MAX as u32).await?;
 
             // Move to the next entry in the robust list.
-            let robust_list = UserPointer::new(entry_ptr as *const RobustList)?.read()?;
+            let robust_list = UserPointer::new(User::<RobustList>::with_addr(entry_ptr))?.read()?;
 
             entry_ptr = robust_list.next;
 

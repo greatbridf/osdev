@@ -1,4 +1,5 @@
 use super::mem::handle_kernel_page_fault;
+use super::task::block_on;
 use super::timer::timer_interrupt;
 use crate::kernel::constants::EINVAL;
 use crate::prelude::*;
@@ -36,7 +37,7 @@ pub fn default_fault_handler(fault_type: Fault, trap_ctx: &mut TrapContext) {
         } => {
             let fault_pc = VAddr::from(trap_ctx.get_program_counter());
 
-            if let Some(new_pc) = handle_kernel_page_fault(fault_pc, vaddr, error_code) {
+            if let Some(new_pc) = block_on(handle_kernel_page_fault(fault_pc, vaddr, error_code)) {
                 trap_ctx.set_program_counter(new_pc.addr());
             }
         }

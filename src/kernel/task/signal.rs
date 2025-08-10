@@ -293,15 +293,15 @@ impl SignalList {
         let old_fpu_state_vaddr = old_trap_ctx_vaddr + size_of::<TrapContext>();
         let old_mask_vaddr = old_fpu_state_vaddr + size_of::<FpuState>();
 
-        *trap_ctx = UserPointer::<TrapContext>::new_vaddr(old_trap_ctx_vaddr)?.read()?;
+        *trap_ctx = UserPointer::<TrapContext>::with_addr(old_trap_ctx_vaddr)?.read()?;
 
         // Make sure that at least we won't crash the kernel.
         if !trap_ctx.is_user_mode() || !trap_ctx.is_interrupt_enabled() {
             return Err(EFAULT)?;
         }
 
-        *fpu_state = UserPointer::<FpuState>::new_vaddr(old_fpu_state_vaddr)?.read()?;
-        self.inner.lock().mask = UserPointer::<SigSet>::new_vaddr(old_mask_vaddr)?.read()?;
+        *fpu_state = UserPointer::<FpuState>::with_addr(old_fpu_state_vaddr)?.read()?;
+        self.inner.lock().mask = UserPointer::<SigSet>::with_addr(old_mask_vaddr)?.read()?;
 
         Ok(())
     }

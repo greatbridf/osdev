@@ -466,11 +466,11 @@ impl TerminalFile {
 
     fn ioctl(&self, request: usize, arg3: usize) -> KResult<()> {
         block_on(self.terminal.ioctl(match request as u32 {
-            TCGETS => TerminalIORequest::GetTermios(UserPointerMut::new_vaddr(arg3)?),
-            TCSETS => TerminalIORequest::SetTermios(UserPointer::new_vaddr(arg3)?),
-            TIOCGPGRP => TerminalIORequest::GetProcessGroup(UserPointerMut::new_vaddr(arg3)?),
-            TIOCSPGRP => TerminalIORequest::SetProcessGroup(UserPointer::new_vaddr(arg3)?),
-            TIOCGWINSZ => TerminalIORequest::GetWindowSize(UserPointerMut::new_vaddr(arg3)?),
+            TCGETS => TerminalIORequest::GetTermios(UserPointerMut::with_addr(arg3)?),
+            TCSETS => TerminalIORequest::SetTermios(UserPointer::with_addr(arg3)?),
+            TIOCGPGRP => TerminalIORequest::GetProcessGroup(UserPointerMut::with_addr(arg3)?),
+            TIOCSPGRP => TerminalIORequest::SetProcessGroup(UserPointer::with_addr(arg3)?),
+            TIOCGWINSZ => TerminalIORequest::GetWindowSize(UserPointerMut::with_addr(arg3)?),
             _ => return Err(EINVAL),
         }))
     }

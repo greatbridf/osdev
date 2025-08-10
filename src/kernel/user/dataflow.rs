@@ -1,17 +1,20 @@
 use crate::{
-    io::{IntoStream, Stream},
-    kernel::constants::{EFAULT, EINVAL},
-};
-use core::{arch::asm, ffi::CStr, marker::PhantomData};
-use eonix_preempt::assert_preempt_enabled;
-
-use crate::{
     io::{Buffer, FillResult},
     prelude::*,
 };
+use crate::{
+    io::{IntoStream, Stream},
+    kernel::{
+        constants::{EFAULT, EINVAL},
+        syscall::{User, UserMut},
+    },
+};
+use core::{arch::asm, ffi::CStr, marker::PhantomData};
+use eonix_mm::address::Addr;
+use eonix_preempt::assert_preempt_enabled;
 
 pub struct CheckedUserPointer<'a> {
-    ptr: *const u8,
+    ptr: User<u8>,
     len: usize,
     _phantom: PhantomData<&'a ()>,
 }
@@ -27,7 +30,12 @@ pub struct UserString<'a> {
     len: usize,
 }
 
-pub struct UserPointer<'a, T: Copy, const CONST: bool> {
+pub struct UserPointer<'a, T: Copy> {
+    pointer: CheckedUserPointer<'a>,
+    _phantom: PhantomData<T>,
+}
+
+pub struct UserPointerMut<'a, T: Copy> {
     pointer: CheckedUserPointer<'a>,
     _phantom: PhantomData<T>,
 }
@@ -37,9 +45,9 @@ pub struct UserStream<'a> {
     cur: usize,
 }
 
-impl<T: Copy, const CONST: bool> UserPointer<'_, T, CONST> {
-    pub fn new(ptr: *const T) -> KResult<Self> {
-        let pointer = CheckedUserPointer::new(ptr as *const u8, core::mem::size_of::<T>())?;
+impl<T: Copy> UserPointer<'_, T> {
+    pub fn new(ptr: User<T>) -> KResult<Self> {
+        let pointer = CheckedUserPointer::new(ptr.cast(), core::mem::size_of::<T>())?;
 
         Ok(Self {
             pointer,
@@ -47,8 +55,8 @@ impl<T: Copy, const CONST: bool> UserPointer<'_, T, CONST> {
         })
     }
 
-    pub fn new_vaddr(vaddr: usize) -> KResult<Self> {
-        Self::new(vaddr as *mut T)
+    pub fn with_addr(vaddr: usize) -> KResult<Self> {
+        Self::new(User::with_addr(vaddr))
     }
 
     /// # Might Sleep
@@ -60,22 +68,48 @@ impl<T: Copy, const CONST: bool> UserPointer<'_, T, CONST> {
     }
 
     pub fn offset(&self, offset: isize) -> KResult<Self> {
-        let new_vaddr = self.pointer.ptr as isize + offset * size_of::<T>() as isize;
-        Self::new_vaddr(new_vaddr as usize)
+        let new_ptr = self.pointer.ptr.offset(offset * size_of::<T>() as isize);
+        Self::new(new_ptr.cast())
     }
 }
 
-impl<'a, T: Copy> UserPointer<'a, T, false> {
+impl<'a, T: Copy> UserPointerMut<'a, T> {
+    pub fn new(ptr: UserMut<T>) -> KResult<Self> {
+        let pointer = CheckedUserPointer::new(ptr.cast().as_const(), core::mem::size_of::<T>())?;
+
+        Ok(Self {
+            pointer,
+            _phantom: PhantomData,
+        })
+    }
+
+    pub fn with_addr(vaddr: usize) -> KResult<Self> {
+        Self::new(UserMut::with_addr(vaddr))
+    }
+
+    /// # Might Sleep
+    pub fn read(&self) -> KResult<T> {
+        let mut value = core::mem::MaybeUninit::<T>::uninit();
+        self.pointer
+            .read(value.as_mut_ptr() as *mut (), core::mem::size_of::<T>())?;
+        Ok(unsafe { value.assume_init() })
+    }
+
+    pub fn offset(&self, offset: isize) -> KResult<Self> {
+        let new_ptr = self.pointer.ptr.offset(offset * size_of::<T>() as isize);
+        Self::new(unsafe { new_ptr.cast().as_mut() })
+    }
+
     pub fn write(&self, value: T) -> KResult<()> {
         self.pointer
-            .write(&value as *const T as *mut (), core::mem::size_of::<T>())
+            .write(&raw const value as *mut (), core::mem::size_of::<T>())
     }
 }
 
 impl CheckedUserPointer<'_> {
-    pub fn new(ptr: *const u8, len: usize) -> KResult<Self> {
+    pub fn new(ptr: User<u8>, len: usize) -> KResult<Self> {
         const USER_MAX_ADDR: usize = 0x7ff_fff_fff_fff;
-        let end = (ptr as usize).checked_add(len);
+        let end = ptr.addr().checked_add(len);
         if ptr.is_null() || end.ok_or(EFAULT)? > USER_MAX_ADDR {
             Err(EFAULT)
         } else {
@@ -89,17 +123,8 @@ impl CheckedUserPointer<'_> {
 
     pub fn forward(&mut self, offset: usize) {
         assert!(offset <= self.len);
-        self.ptr = self.ptr.wrapping_offset(offset as isize);
+        self.ptr = self.ptr.offset(offset as isize);
         self.len -= offset;
-    }
-
-    pub fn get_const<T>(&self) -> *const T {
-        self.ptr as *const T
-    }
-
-    pub fn as_slice(&self) -> &[u8] {
-        // SAFETY: the pointer's validity is checked in `new`
-        unsafe { core::slice::from_raw_parts(self.ptr, self.len) }
     }
 
     /// # Might Sleep
@@ -126,7 +151,7 @@ impl CheckedUserPointer<'_> {
                 ".quad 0x3",     // type: load
                 ".popsection",
                 inout("rcx") total => error_bytes,
-                inout("rsi") self.ptr => _,
+                inout("rsi") self.ptr.addr() => _,
                 inout("rdi") buffer => _,
             );
 
@@ -148,7 +173,7 @@ impl CheckedUserPointer<'_> {
                 ".8byte 0x3",     // type: load
                 ".popsection",
                 inout("a0") total => error_bytes,
-                inout("a1") self.ptr => _,
+                inout("a1") self.ptr.addr() => _,
                 inout("a2") buffer => _,
                 out("t0") _,
             );
@@ -171,7 +196,7 @@ impl CheckedUserPointer<'_> {
                 ".8byte 0x3",     // type: load
                 ".popsection",
                 inout("$a0") total => error_bytes,
-                inout("$a1") self.ptr => _,
+                inout("$a1") self.ptr.addr() => _,
                 inout("$a2") buffer => _,
                 out("$t0") _,
             );
@@ -210,7 +235,7 @@ impl CheckedUserPointer<'_> {
                 ".popsection",
                 inout("rcx") total => error_bytes,
                 inout("rsi") data => _,
-                inout("rdi") self.ptr => _,
+                inout("rdi") self.ptr.addr() => _,
             );
 
             #[cfg(target_arch = "riscv64")]
@@ -232,7 +257,7 @@ impl CheckedUserPointer<'_> {
                 ".popsection",
                 inout("a0") total => error_bytes,
                 inout("a1") data => _,
-                inout("a2") self.ptr => _,
+                inout("a2") self.ptr.addr() => _,
                 out("t0") _,
             );
 
@@ -255,7 +280,7 @@ impl CheckedUserPointer<'_> {
                 ".popsection",
                 inout("$a0") total => error_bytes,
                 inout("$a1") data => _,
-                inout("$a2") self.ptr => _,
+                inout("$a2") self.ptr.addr() => _,
                 out("$t0") _,
             );
         };
@@ -293,7 +318,7 @@ impl CheckedUserPointer<'_> {
                 ".popsection",
                 in("rax") 0,
                 inout("rcx") self.len => error_bytes,
-                inout("rdi") self.ptr => _,
+                inout("rdi") self.ptr.addr() => _,
                 options(att_syntax)
             );
 
@@ -313,7 +338,7 @@ impl CheckedUserPointer<'_> {
                 ".8byte 0x1", // type: store
                 ".popsection",
                 inout("a0") self.len => error_bytes,
-                inout("a1") self.ptr => _,
+                inout("a1") self.ptr.addr() => _,
             );
 
             #[cfg(target_arch = "loongarch64")]
@@ -332,7 +357,7 @@ impl CheckedUserPointer<'_> {
                 ".8byte 0x1", // type: store
                 ".popsection",
                 inout("$a0") self.len => error_bytes,
-                inout("$a1") self.ptr => _,
+                inout("$a1") self.ptr.addr() => _,
             );
         };
 
@@ -345,8 +370,8 @@ impl CheckedUserPointer<'_> {
 }
 
 impl UserBuffer<'_> {
-    pub fn new(ptr: *mut u8, size: usize) -> KResult<Self> {
-        let ptr = CheckedUserPointer::new(ptr, size)?;
+    pub fn new(ptr: UserMut<u8>, size: usize) -> KResult<Self> {
+        let ptr = CheckedUserPointer::new(ptr.as_const(), size)?;
 
         Ok(Self { ptr, size, cur: 0 })
     }
@@ -388,7 +413,7 @@ impl<'lt> Buffer for UserBuffer<'lt> {
 
 impl<'lt> UserString<'lt> {
     /// # Might Sleep
-    pub fn new(ptr: *const u8) -> KResult<Self> {
+    pub fn new(ptr: User<u8>) -> KResult<Self> {
         assert_preempt_enabled!("UserString::new");
 
         const MAX_LEN: usize = 4096;
@@ -416,7 +441,7 @@ impl<'lt> UserString<'lt> {
                 ".popsection",
                 out("al") _,
                 inout("rcx") MAX_LEN => result,
-                ptr = inout(reg) ptr.ptr => _,
+                ptr = inout(reg) ptr.ptr.addr() => _,
                 options(att_syntax),
             );
 
@@ -439,7 +464,7 @@ impl<'lt> UserString<'lt> {
                 ".popsection",
                 out("t0") _,
                 inout("a0") MAX_LEN => result,
-                inout("a1") ptr.ptr => _,
+                inout("a1") ptr.ptr.addr() => _,
             );
 
             #[cfg(target_arch = "loongarch64")]
@@ -461,7 +486,7 @@ impl<'lt> UserString<'lt> {
                 ".popsection",
                 out("$t0") _,
                 inout("$a0") MAX_LEN => result,
-                inout("$a1") ptr.ptr => _,
+                inout("$a1") ptr.ptr.addr() => _,
             );
         };
 
@@ -478,7 +503,7 @@ impl<'lt> UserString<'lt> {
     pub fn as_cstr(&self) -> &'lt CStr {
         unsafe {
             CStr::from_bytes_with_nul_unchecked(core::slice::from_raw_parts(
-                self.ptr.get_const(),
+                self.ptr.ptr.addr() as *const u8,
                 self.len + 1,
             ))
         }

@@ -1,5 +1,6 @@
 #![no_std]
 #![no_main]
+#![feature(allocator_api)]
 #![feature(c_size_t)]
 #![feature(concat_idents)]
 #![feature(arbitrary_self_types)]
@@ -253,6 +254,7 @@ async fn init_process(early_kstack: PRange) {
         ProgramLoader::parse(fs_context, init_name, init.clone(), argv, envp)
             .expect("Failed to parse init program")
             .load()
+            .await
             .expect("Failed to load init program")
     };
 

@@ -7,7 +7,6 @@ use super::paging::AllocZeroed as _;
 use super::{AsMemoryBlock, MMArea, Page};
 use crate::kernel::constants::{EEXIST, EFAULT, EINVAL, ENOMEM};
 use crate::kernel::mem::page_alloc::RawPagePtr;
-use crate::kernel::task::block_on;
 use crate::{prelude::*, sync::ArcSwap};
 use alloc::collections::btree_set::BTreeSet;
 use core::fmt;
@@ -488,7 +487,7 @@ impl MMList {
         Ok(())
     }
 
-    pub fn map_vdso(&self) -> KResult<()> {
+    pub async fn map_vdso(&self) -> KResult<()> {
         unsafe extern "C" {
             fn VDSO_PADDR();
         }
@@ -507,7 +506,7 @@ impl MMList {
         const VDSO_SIZE: usize = 0x1000;
 
         let inner = self.inner.borrow();
-        let inner = block_on(inner.lock());
+        let inner = inner.lock().await;
 
         let mut pte_iter = inner
             .page_table
@@ -529,7 +528,7 @@ impl MMList {
         Ok(())
     }
 
-    pub fn mmap_hint(
+    pub async fn mmap_hint(
         &self,
         hint: VAddr,
         len: usize,
@@ -538,7 +537,7 @@ impl MMList {
         is_shared: bool,
     ) -> KResult<VAddr> {
         let inner = self.inner.borrow();
-        let mut inner = block_on(inner.lock());
+        let mut inner = inner.lock().await;
 
         if hint == VAddr::NULL {
             let at = inner.find_available(hint, len).ok_or(ENOMEM)?;
@@ -557,7 +556,7 @@ impl MMList {
         }
     }
 
-    pub fn mmap_fixed(
+    pub async fn mmap_fixed(
         &self,
         at: VAddr,
         len: usize,
@@ -565,14 +564,17 @@ impl MMList {
         permission: Permission,
         is_shared: bool,
     ) -> KResult<VAddr> {
-        block_on(self.inner.borrow().lock())
+        self.inner
+            .borrow()
+            .lock()
+            .await
             .mmap(at, len, mapping.clone(), permission, is_shared)
             .map(|_| at)
     }
 
-    pub fn set_break(&self, pos: Option<VAddr>) -> VAddr {
+    pub async fn set_break(&self, pos: Option<VAddr>) -> VAddr {
         let inner = self.inner.borrow();
-        let mut inner = block_on(inner.lock());
+        let mut inner = inner.lock().await;
 
         // SAFETY: `set_break` is only called in syscalls, where program break should be valid.
         assert!(inner.break_start.is_some() && inner.break_pos.is_some());
@@ -629,9 +631,9 @@ impl MMList {
     }
 
     /// This should be called only **once** for every thread.
-    pub fn register_break(&self, start: VAddr) {
+    pub async fn register_break(&self, start: VAddr) {
         let inner = self.inner.borrow();
-        let mut inner = block_on(inner.lock());
+        let mut inner = inner.lock().await;
         assert!(inner.break_start.is_none() && inner.break_pos.is_none());
 
         inner.break_start = Some(start.into());
@@ -640,7 +642,7 @@ impl MMList {
 
     /// Access the memory area with the given function.
     /// The function will be called with the offset of the area and the slice of the area.
-    pub fn access_mut<F>(&self, start: VAddr, len: usize, func: F) -> KResult<()>
+    pub async fn access_mut<F>(&self, start: VAddr, len: usize, func: F) -> KResult<()>
     where
         F: Fn(usize, &mut [u8]),
     {
@@ -651,7 +653,7 @@ impl MMList {
         }
 
         let inner = self.inner.borrow();
-        let inner = block_on(inner.lock());
+        let inner = inner.lock().await;
 
         let mut offset = 0;
         let mut remaining = len;
@@ -676,7 +678,7 @@ impl MMList {
                 let page_end = page_start + 0x1000;
 
                 // Prepare for the worst case that we might write to the page...
-                area.handle(pte, page_start - area_start, true)?;
+                area.handle(pte, page_start - area_start, true).await?;
 
                 let start_offset;
                 if page_start < current {

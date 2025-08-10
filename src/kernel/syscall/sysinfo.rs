@@ -2,6 +2,7 @@ use crate::{
     io::Buffer as _,
     kernel::{
         constants::{CLOCK_MONOTONIC, CLOCK_REALTIME, CLOCK_REALTIME_COARSE, EINTR, EINVAL},
+        syscall::UserMut,
         task::Thread,
         timer::{Instant, Ticks},
         user::{UserBuffer, UserPointerMut},
@@ -30,7 +31,7 @@ fn copy_cstr_to_array(cstr: &[u8], array: &mut [u8]) {
 }
 
 #[eonix_macros::define_syscall(SYS_NEWUNAME)]
-fn newuname(buffer: *mut NewUTSName) -> KResult<()> {
+async fn newuname(buffer: UserMut<NewUTSName>) -> KResult<()> {
     let buffer = UserPointerMut::new(buffer)?;
     let mut uname = NewUTSName {
         sysname: [0; 65],
@@ -62,7 +63,7 @@ fn newuname(buffer: *mut NewUTSName) -> KResult<()> {
 }
 
 #[eonix_macros::define_syscall(SYS_GETTIMEOFDAY)]
-fn gettimeofday(timeval: *mut TimeVal, timezone: *mut ()) -> KResult<()> {
+async fn gettimeofday(timeval: UserMut<TimeVal>, timezone: UserMut<()>) -> KResult<()> {
     if !timezone.is_null() {
         return Err(EINVAL);
     }
@@ -81,7 +82,7 @@ fn gettimeofday(timeval: *mut TimeVal, timezone: *mut ()) -> KResult<()> {
     Ok(())
 }
 
-fn do_clock_gettime64(_thread: &Thread, clock_id: u32, timespec: *mut TimeSpec) -> KResult<()> {
+fn do_clock_gettime64(_thread: &Thread, clock_id: u32, timespec: UserMut<TimeSpec>) -> KResult<()> {
     let timespec = UserPointerMut::new(timespec)?;
 
     match clock_id {
@@ -106,13 +107,13 @@ fn do_clock_gettime64(_thread: &Thread, clock_id: u32, timespec: *mut TimeSpec) 
 
 #[cfg(not(target_arch = "x86_64"))]
 #[eonix_macros::define_syscall(SYS_CLOCK_GETTIME)]
-fn clock_gettime(clock_id: u32, timespec: *mut TimeSpec) -> KResult<()> {
+async fn clock_gettime(clock_id: u32, timespec: UserMut<TimeSpec>) -> KResult<()> {
     do_clock_gettime64(thread, clock_id, timespec)
 }
 
 #[cfg(target_arch = "x86_64")]
 #[eonix_macros::define_syscall(SYS_CLOCK_GETTIME64)]
-fn clock_gettime64(clock_id: u32, timespec: *mut TimeSpec) -> KResult<()> {
+async fn clock_gettime64(clock_id: u32, timespec: UserMut<TimeSpec>) -> KResult<()> {
     do_clock_gettime64(thread, clock_id, timespec)
 }
 
@@ -135,7 +136,7 @@ struct Sysinfo {
 }
 
 #[eonix_macros::define_syscall(SYS_SYSINFO)]
-fn sysinfo(info: *mut Sysinfo) -> KResult<()> {
+async fn sysinfo(info: UserMut<Sysinfo>) -> KResult<()> {
     let info = UserPointerMut::new(info)?;
     info.write(Sysinfo {
         uptime: Ticks::since_boot().as_secs() as u32,
@@ -164,7 +165,7 @@ struct TMS {
 }
 
 #[eonix_macros::define_syscall(SYS_TIMES)]
-fn times(tms: *mut TMS) -> KResult<()> {
+async fn times(tms: UserMut<TMS>) -> KResult<()> {
     let tms = UserPointerMut::new(tms)?;
     tms.write(TMS {
         tms_utime: 0,
@@ -175,7 +176,7 @@ fn times(tms: *mut TMS) -> KResult<()> {
 }
 
 #[eonix_macros::define_syscall(SYS_GETRANDOM)]
-fn get_random(buf: *mut u8, len: usize, flags: u32) -> KResult<usize> {
+async fn get_random(buf: UserMut<u8>, len: usize, flags: u32) -> KResult<usize> {
     if flags != 0 {
         return Err(EINVAL);
     }

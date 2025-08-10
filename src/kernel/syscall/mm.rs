@@ -2,7 +2,7 @@ use super::FromSyscallArg;
 use crate::fs::shm::{gen_shm_id, ShmFlags, IPC_PRIVATE, SHM_MANAGER};
 use crate::kernel::constants::{EBADF, EEXIST, EINVAL, ENOENT};
 use crate::kernel::mem::FileMapping;
-use crate::kernel::task::{block_on, Thread};
+use crate::kernel::task::Thread;
 use crate::kernel::vfs::filearray::FD;
 use crate::{
     kernel::{
@@ -39,7 +39,7 @@ fn check_impl(condition: bool, err: u32) -> KResult<()> {
     }
 }
 
-fn do_mmap2(
+async fn do_mmap2(
     thread: &Thread,
     addr: usize,
     len: usize,
@@ -67,7 +67,10 @@ fn do_mmap2(
         } else {
             // The mode is unimportant here, since we are checking prot in mm_area.
             let shared_area =
-                block_on(SHM_MANAGER.lock()).create_shared_area(len, thread.process.pid, 0x777);
+                SHM_MANAGER
+                    .lock()
+                    .await
+                    .create_shared_area(len, thread.process.pid, 0x777);
             Mapping::File(FileMapping::new(shared_area.area.clone(), 0, len))
         }
     } else {
@@ -90,10 +93,14 @@ fn do_mmap2(
     // TODO!!!: If we are doing mmap's in 32-bit mode, we should check whether
     //          `addr` is above user reachable memory.
     let addr = if flags.contains(UserMmapFlags::MAP_FIXED) {
-        block_on(mm_list.unmap(addr, len));
-        mm_list.mmap_fixed(addr, len, mapping, permission, is_shared)
+        mm_list.unmap(addr, len).await?;
+        mm_list
+            .mmap_fixed(addr, len, mapping, permission, is_shared)
+            .await
     } else {
-        mm_list.mmap_hint(addr, len, mapping, permission, is_shared)
+        mm_list
+            .mmap_hint(addr, len, mapping, permission, is_shared)
+            .await
     };
 
     addr.map(|addr| addr.addr())
@@ -101,7 +108,7 @@ fn do_mmap2(
 
 #[cfg(any(target_arch = "riscv64", target_arch = "loongarch64"))]
 #[eonix_macros::define_syscall(SYS_MMAP)]
-fn mmap(
+async fn mmap(
     addr: usize,
     len: usize,
     prot: UserMmapProtocol,
@@ -109,12 +116,12 @@ fn mmap(
     fd: FD,
     offset: usize,
 ) -> KResult<usize> {
-    do_mmap2(thread, addr, len, prot, flags, fd, offset)
+    do_mmap2(thread, addr, len, prot, flags, fd, offset).await
 }
 
 #[cfg(target_arch = "x86_64")]
 #[eonix_macros::define_syscall(SYS_MMAP2)]
-fn mmap2(
+async fn mmap2(
     addr: usize,
     len: usize,
     prot: UserMmapProtocol,
@@ -122,33 +129,33 @@ fn mmap2(
     fd: FD,
     pgoffset: usize,
 ) -> KResult<usize> {
-    do_mmap2(thread, addr, len, prot, flags, fd, pgoffset)
+    do_mmap2(thread, addr, len, prot, flags, fd, pgoffset).await
 }
 
 #[eonix_macros::define_syscall(SYS_MUNMAP)]
-fn munmap(addr: usize, len: usize) -> KResult<usize> {
+async fn munmap(addr: usize, len: usize) -> KResult<()> {
     let addr = VAddr::from(addr);
     if !addr.is_page_aligned() || len == 0 {
         return Err(EINVAL);
     }
 
     let len = len.align_up(PAGE_SIZE);
-    block_on(thread.process.mm_list.unmap(addr, len)).map(|_| 0)
+    thread.process.mm_list.unmap(addr, len).await
 }
 
 #[eonix_macros::define_syscall(SYS_BRK)]
-fn brk(addr: usize) -> KResult<usize> {
+async fn brk(addr: usize) -> KResult<usize> {
     let vaddr = if addr == 0 { None } else { Some(VAddr::from(addr)) };
-    Ok(thread.process.mm_list.set_break(vaddr).addr())
+    Ok(thread.process.mm_list.set_break(vaddr).await.addr())
 }
 
 #[eonix_macros::define_syscall(SYS_MADVISE)]
-fn madvise(_addr: usize, _len: usize, _advice: u32) -> KResult<()> {
+async fn madvise(_addr: usize, _len: usize, _advice: u32) -> KResult<()> {
     Ok(())
 }
 
 #[eonix_macros::define_syscall(SYS_MPROTECT)]
-fn mprotect(addr: usize, len: usize, prot: UserMmapProtocol) -> KResult<()> {
+async fn mprotect(addr: usize, len: usize, prot: UserMmapProtocol) -> KResult<()> {
     let addr = VAddr::from(addr);
     if !addr.is_page_aligned() || len == 0 {
         return Err(EINVAL);
@@ -156,22 +163,26 @@ fn mprotect(addr: usize, len: usize, prot: UserMmapProtocol) -> KResult<()> {
 
     let len = len.align_up(PAGE_SIZE);
 
-    block_on(thread.process.mm_list.protect(
-        addr,
-        len,
-        Permission {
-            read: prot.contains(UserMmapProtocol::PROT_READ),
-            write: prot.contains(UserMmapProtocol::PROT_WRITE),
-            execute: prot.contains(UserMmapProtocol::PROT_EXEC),
-        },
-    ))
+    thread
+        .process
+        .mm_list
+        .protect(
+            addr,
+            len,
+            Permission {
+                read: prot.contains(UserMmapProtocol::PROT_READ),
+                write: prot.contains(UserMmapProtocol::PROT_WRITE),
+                execute: prot.contains(UserMmapProtocol::PROT_EXEC),
+            },
+        )
+        .await
 }
 
 #[eonix_macros::define_syscall(SYS_SHMGET)]
-fn shmget(key: usize, size: usize, shmflg: u32) -> KResult<u32> {
+async fn shmget(key: usize, size: usize, shmflg: u32) -> KResult<u32> {
     let size = size.align_up(PAGE_SIZE);
 
-    let mut shm_manager = block_on(SHM_MANAGER.lock());
+    let mut shm_manager = SHM_MANAGER.lock().await;
     let shmid = gen_shm_id(key)?;
 
     let mode = shmflg & 0o777;
@@ -197,16 +208,17 @@ fn shmget(key: usize, size: usize, shmflg: u32) -> KResult<u32> {
         return Ok(shmid);
     }
 
-    return Err(ENOENT);
+    Err(ENOENT)
 }
 
 #[eonix_macros::define_syscall(SYS_SHMAT)]
-fn shmat(shmid: u32, addr: usize, shmflg: u32) -> KResult<usize> {
+async fn shmat(shmid: u32, addr: usize, shmflg: u32) -> KResult<usize> {
     let mm_list = &thread.process.mm_list;
-    let shm_manager = block_on(SHM_MANAGER.lock());
+    let shm_manager = SHM_MANAGER.lock().await;
     let shm_area = shm_manager.get(shmid).ok_or(EINVAL)?;
 
-    let mode = shmflg & 0o777;
+    // Why is this not used?
+    let _mode = shmflg & 0o777;
     let shmflg = ShmFlags::from_bits_truncate(shmflg);
 
     let mut permission = Permission {
@@ -235,9 +247,13 @@ fn shmat(shmid: u32, addr: usize, shmflg: u32) -> KResult<usize> {
             return Err(EINVAL);
         }
         let addr = VAddr::from(addr.align_down(PAGE_SIZE));
-        mm_list.mmap_fixed(addr, size, mapping, permission, true)
+        mm_list
+            .mmap_fixed(addr, size, mapping, permission, true)
+            .await
     } else {
-        mm_list.mmap_hint(VAddr::NULL, size, mapping, permission, true)
+        mm_list
+            .mmap_hint(VAddr::NULL, size, mapping, permission, true)
+            .await
     }?;
 
     thread.process.shm_areas.lock().insert(addr, size);
@@ -246,22 +262,29 @@ fn shmat(shmid: u32, addr: usize, shmflg: u32) -> KResult<usize> {
 }
 
 #[eonix_macros::define_syscall(SYS_SHMDT)]
-fn shmdt(addr: usize) -> KResult<usize> {
+async fn shmdt(addr: usize) -> KResult<()> {
     let addr = VAddr::from(addr);
-    let mut shm_areas = thread.process.shm_areas.lock();
-    let size = *shm_areas.get(&addr).ok_or(EINVAL)?;
-    shm_areas.remove(&addr);
-    drop(shm_areas);
-    return block_on(thread.process.mm_list.unmap(addr, size)).map(|_| 0);
+
+    let size = {
+        let mut shm_areas = thread.process.shm_areas.lock();
+        let size = *shm_areas.get(&addr).ok_or(EINVAL)?;
+        shm_areas.remove(&addr);
+
+        size
+    };
+
+    thread.process.mm_list.unmap(addr, size).await
 }
 
 #[eonix_macros::define_syscall(SYS_SHMCTL)]
-fn shmctl(shmid: u32, op: i32, shmid_ds: usize) -> KResult<usize> {
+async fn shmctl(_shmid: u32, _op: i32, _shmid_ds: usize) -> KResult<usize> {
+    // TODO
     Ok(0)
 }
 
 #[eonix_macros::define_syscall(SYS_MEMBARRIER)]
-fn membarrier(_cmd: usize, _flags: usize) -> KResult<()> {
+async fn membarrier(_cmd: usize, _flags: usize) -> KResult<()> {
+    // TODO
     Ok(())
 }
 

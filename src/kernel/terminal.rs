@@ -1,5 +1,5 @@
 use super::{
-    task::{block_on, ProcessList, Session, Thread},
+    task::{ProcessList, Session, Thread},
     user::{UserPointer, UserPointerMut},
 };
 use crate::kernel::constants::{EINTR, ENOTTY, EPERM};
@@ -446,18 +446,18 @@ impl Terminal {
         }
     }
 
-    fn signal(&self, inner: &mut TerminalInner, signal: Signal) {
+    async fn signal(&self, inner: &mut TerminalInner, signal: Signal) {
         if let Some(session) = inner.session.upgrade() {
-            block_on(session.raise_foreground(signal));
+            session.raise_foreground(signal).await;
         }
         if !inner.termio.noflsh() {
             self.clear_read_buffer(inner);
         }
     }
 
-    fn echo_and_signal(&self, inner: &mut TerminalInner, ch: u8, signal: Signal) {
+    async fn echo_and_signal(&self, inner: &mut TerminalInner, ch: u8, signal: Signal) {
         self.echo_char(inner, ch);
-        self.signal(inner, signal);
+        self.signal(inner, signal).await;
     }
 
     fn do_commit_char(&self, inner: &mut TerminalInner, ch: u8) {
@@ -481,13 +481,13 @@ impl Terminal {
             match ch {
                 0xff => {}
                 ch if ch == inner.termio.vintr() => {
-                    return self.echo_and_signal(&mut inner, ch, Signal::SIGINT)
+                    return self.echo_and_signal(&mut inner, ch, Signal::SIGINT).await
                 }
                 ch if ch == inner.termio.vquit() => {
-                    return self.echo_and_signal(&mut inner, ch, Signal::SIGQUIT)
+                    return self.echo_and_signal(&mut inner, ch, Signal::SIGQUIT).await
                 }
                 ch if ch == inner.termio.vsusp() => {
-                    return self.echo_and_signal(&mut inner, ch, Signal::SIGTSTP)
+                    return self.echo_and_signal(&mut inner, ch, Signal::SIGTSTP).await
                 }
                 _ => {}
             }

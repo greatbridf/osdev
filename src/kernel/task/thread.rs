@@ -5,7 +5,7 @@ use super::{
 use crate::{
     kernel::{
         interrupt::default_irq_handler,
-        syscall::{syscall_handlers, SyscallHandler},
+        syscall::{syscall_handlers, SyscallHandler, User, UserMut},
         task::{clone::CloneArgs, futex::RobustListHead, CloneFlags},
         timer::{should_reschedule, timer_interrupt},
         user::{UserPointer, UserPointerMut},
@@ -13,7 +13,7 @@ use crate::{
     },
     prelude::*,
 };
-use alloc::sync::Arc;
+use alloc::{alloc::Allocator, sync::Arc};
 use atomic_unique_refcell::AtomicUniqueRefCell;
 use core::{
     future::{poll_fn, Future},
@@ -36,9 +36,13 @@ use eonix_mm::address::{Addr as _, VAddr};
 use eonix_sync::AsProofMut as _;
 use pointers::BorrowedArc;
 use posix_types::signal::Signal;
+use stalloc::UnsafeStalloc;
 
 #[eonix_percpu::define_percpu]
 static CURRENT_THREAD: Option<NonNull<Thread>> = None;
+
+#[derive(Clone, Copy)]
+pub struct ThreadAlloc<'a>(pub &'a UnsafeStalloc<255, 32>);
 
 pub struct ThreadBuilder {
     tid: Option<u32>,
@@ -48,8 +52,8 @@ pub struct ThreadBuilder {
     fs_context: Option<Arc<FsContext>>,
     signal_list: Option<SignalList>,
     tls: Option<UserTLS>,
-    set_child_tid: Option<usize>,
-    clear_child_tid: Option<usize>,
+    set_child_tid: Option<UserMut<u32>>,
+    clear_child_tid: Option<UserMut<u32>>,
 
     trap_ctx: Option<TrapContext>,
     fpu_state: Option<FpuState>,
@@ -65,11 +69,11 @@ struct ThreadInner {
 
     /// User pointer
     /// Store child thread's tid when child thread returns to user space.
-    set_child_tid: Option<usize>,
+    set_child_tid: Option<UserMut<u32>>,
 
-    clear_child_tid: Option<usize>,
+    clear_child_tid: Option<UserMut<u32>>,
 
-    robust_list_address: Option<VAddr>,
+    robust_list_address: Option<User<RobustListHead>>,
 }
 
 pub struct Thread {
@@ -141,12 +145,12 @@ impl ThreadBuilder {
         self
     }
 
-    pub fn set_child_tid(mut self, set_child_tid: Option<usize>) -> Self {
+    pub fn set_child_tid(mut self, set_child_tid: Option<UserMut<u32>>) -> Self {
         self.set_child_tid = set_child_tid;
         self
     }
 
-    pub fn clear_child_tid(mut self, clear_child_tid: Option<usize>) -> Self {
+    pub fn clear_child_tid(mut self, clear_child_tid: Option<UserMut<u32>>) -> Self {
         self.clear_child_tid = clear_child_tid;
         self
     }
@@ -285,13 +289,13 @@ impl Thread {
         Ok(())
     }
 
-    pub fn set_robust_list(&self, robust_list_address: Option<VAddr>) {
+    pub fn set_robust_list(&self, robust_list_address: Option<User<RobustListHead>>) {
         self.inner.lock().robust_list_address = robust_list_address;
     }
 
     pub fn get_robust_list(&self) -> Option<RobustListHead> {
         let addr = self.inner.lock().robust_list_address?;
-        let user_pointer = UserPointer::new(addr.addr() as *const RobustListHead).ok()?;
+        let user_pointer = UserPointer::new(addr).ok()?;
 
         user_pointer.read().ok()
     }
@@ -304,25 +308,30 @@ impl Thread {
         self.inner.lock().name.clone()
     }
 
-    pub fn clear_child_tid(&self, clear_child_tid: Option<usize>) {
+    pub fn clear_child_tid(&self, clear_child_tid: Option<UserMut<u32>>) {
         self.inner.lock().clear_child_tid = clear_child_tid;
     }
 
-    pub fn get_set_ctid(&self) -> Option<usize> {
+    pub fn get_set_ctid(&self) -> Option<UserMut<u32>> {
         self.inner.lock().set_child_tid
     }
 
-    pub fn get_clear_ctid(&self) -> Option<usize> {
+    pub fn get_clear_ctid(&self) -> Option<UserMut<u32>> {
         self.inner.lock().clear_child_tid
     }
 
-    pub fn handle_syscall(&self, no: usize, args: [usize; 6]) -> Option<usize> {
+    pub async fn handle_syscall(
+        &self,
+        thd_alloc: ThreadAlloc<'_>,
+        no: usize,
+        args: [usize; 6],
+    ) -> Option<usize> {
         match syscall_handlers().get(no) {
             Some(Some(SyscallHandler {
                 handler,
                 name: _name,
                 ..
-            })) => handler(self, args),
+            })) => handler(self, thd_alloc, args).await,
             _ => {
                 println_warn!("Syscall {no}({no:#x}) isn't implemented.");
                 self.raise(Signal::SIGSYS);
@@ -347,11 +356,17 @@ impl Thread {
 
     async fn real_run(&self) {
         if let Some(set_ctid) = self.get_set_ctid() {
-            UserPointerMut::new(set_ctid as *mut u32)
+            UserPointerMut::new(set_ctid)
                 .expect("set_child_tid pointer is invalid")
                 .write(self.tid)
                 .expect("set_child_tid write failed");
         }
+
+        let stack_alloc = unsafe {
+            // SAFETY: The allocator will only be used within the context of this thread.
+            UnsafeStalloc::new()
+        };
+        let thd_alloc = ThreadAlloc(&stack_alloc);
 
         while !self.is_dead() {
             if self.signal_list.has_pending_signal() {
@@ -401,7 +416,7 @@ impl Thread {
                     }
                 }
                 TrapType::Syscall { no, args } => {
-                    if let Some(retval) = self.handle_syscall(no, args) {
+                    if let Some(retval) = self.handle_syscall(thd_alloc, no, args).await {
                         let mut trap_ctx = self.trap_ctx.borrow();
                         trap_ctx.set_user_return_value(retval);
 
@@ -449,6 +464,19 @@ impl Thread {
 
     pub fn run(self: Arc<Thread>) -> impl Future<Output = ()> + Send + 'static {
         async move { self.contexted(stackful(self.real_run())).await }
+    }
+}
+
+unsafe impl Allocator for ThreadAlloc<'_> {
+    fn allocate(
+        &self,
+        layout: core::alloc::Layout,
+    ) -> Result<NonNull<[u8]>, alloc::alloc::AllocError> {
+        self.0.allocate(layout)
+    }
+
+    unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: core::alloc::Layout) {
+        self.0.deallocate(ptr, layout);
     }
 }
 

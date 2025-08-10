@@ -9,6 +9,7 @@ use alloc::{
     collections::btree_map::BTreeMap,
     sync::{Arc, Weak},
 };
+use eonix_mm::address::Addr;
 use eonix_sync::{AsProof as _, AsProofMut as _, RwLock};
 
 pub struct ProcessList {
@@ -134,11 +135,9 @@ impl ProcessList {
         }
 
         if let Some(clear_ctid) = thread.get_clear_ctid() {
-            let _ = UserPointerMut::new(clear_ctid as *mut u32)
-                .unwrap()
-                .write(0u32);
+            let _ = UserPointerMut::new(clear_ctid).unwrap().write(0u32);
 
-            let _ = futex_wake(clear_ctid, None, 1).await;
+            let _ = futex_wake(clear_ctid.addr(), None, 1).await;
         }
 
         if let Some(robust_list) = thread.get_robust_list() {

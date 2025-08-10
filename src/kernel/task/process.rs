@@ -1,4 +1,3 @@
-use super::block_on;
 use super::{
     process_group::ProcessGroupBuilder, signal::RaiseResult, thread::ThreadBuilder, ProcessGroup,
     ProcessList, Session, Thread,
@@ -109,6 +108,7 @@ pub struct DrainExited<'waitlist> {
     wait_procs: SpinGuard<'waitlist, VecDeque<WaitObject>>,
 }
 
+#[derive(Debug, Clone, Copy)]
 pub enum WaitId {
     Any,
     Pid(u32),
@@ -121,23 +121,17 @@ impl WaitId {
             P_ALL => Ok(WaitId::Any),
             P_PID => Ok(WaitId::Pid(id)),
             P_PGID => Ok(WaitId::Pgid(id)),
-            P_PIDFD => {
-                panic!("PDIFD type is unsupported")
-            }
+            P_PIDFD => panic!("P_PIDFD type is not supported"),
             _ => Err(EINVAL),
         }
     }
 
     pub fn from_id(id: i32, thread: &Thread) -> Self {
-        if id < -1 {
-            WaitId::Pgid((-id).cast_unsigned())
-        } else if id == -1 {
-            WaitId::Any
-        } else if id == 0 {
-            let procs = block_on(ProcessList::get().read());
-            WaitId::Pgid(thread.process.pgroup(procs.prove()).pgid)
-        } else {
-            WaitId::Pid(id.cast_unsigned())
+        match id {
+            ..-1 => WaitId::Pgid((-id).cast_unsigned()),
+            -1 => WaitId::Any,
+            0 => WaitId::Pgid(thread.process.pgroup_rcu().pgid),
+            _ => WaitId::Pid(id.cast_unsigned()),
         }
     }
 }
@@ -206,11 +200,11 @@ impl ProcessBuilder {
         }
     }
 
-    pub fn clone_from(mut self, process: Arc<Process>, clone_args: &CloneArgs) -> Self {
+    pub async fn clone_from(mut self, process: Arc<Process>, clone_args: &CloneArgs) -> Self {
         let mm_list = if clone_args.flags.contains(CloneFlags::CLONE_VM) {
-            block_on(process.mm_list.new_shared())
+            process.mm_list.new_shared().await
         } else {
-            block_on(process.mm_list.new_cloned())
+            process.mm_list.new_cloned().await
         };
 
         if let Some(exit_signal) = clone_args.exit_signal {
@@ -351,12 +345,18 @@ impl Process {
         trace_continue: bool,
     ) -> KResult<Option<WaitObject>> {
         let wait_object = {
-            let mut waits = self
-                .wait_list
-                .entry(wait_id, trace_stop, trace_continue)
-                .await;
+            let mut unlocked_waits = None;
 
             loop {
+                let mut waits = match unlocked_waits {
+                    Some(wait) => wait.await?,
+                    None => {
+                        self.wait_list
+                            .entry(wait_id, trace_stop, trace_continue)
+                            .await
+                    }
+                };
+
                 if let Some(object) = waits.get() {
                     break object;
                 }
@@ -374,7 +374,7 @@ impl Process {
                     return Ok(None);
                 }
 
-                waits = waits.wait(no_block).await?;
+                unlocked_waits = Some(waits.wait(no_block));
             }
         };
 
@@ -395,8 +395,8 @@ impl Process {
     }
 
     /// Create a new session for the process.
-    pub fn setsid(self: &Arc<Self>) -> KResult<u32> {
-        let mut process_list = block_on(ProcessList::get().write());
+    pub async fn setsid(self: &Arc<Self>) -> KResult<u32> {
+        let mut process_list = ProcessList::get().write().await;
         // If there exists a session that has the same sid as our pid, we can't create a new
         // session. The standard says that we should create a new process group and be the
         // only process in the new process group and session.
@@ -473,8 +473,8 @@ impl Process {
     ///
     /// This function should be called on the process that issued the syscall in order to do
     /// permission checks.
-    pub fn setpgid(self: &Arc<Self>, pid: u32, pgid: u32) -> KResult<()> {
-        let mut procs = block_on(ProcessList::get().write());
+    pub async fn setpgid(self: &Arc<Self>, pid: u32, pgid: u32) -> KResult<()> {
+        let mut procs = ProcessList::get().write().await;
         // We may set pgid of either the calling process or a child process.
         if pid == self.pid {
             self.do_setpgid(pgid, &mut procs)
@@ -609,9 +609,8 @@ impl Entry<'_, '_, '_> {
                 WaitId::Any => true,
                 WaitId::Pid(pid) => item.pid == pid,
                 WaitId::Pgid(pgid) => {
-                    let procs = block_on(ProcessList::get().read());
-                    if let Some(process) = procs.try_find_process(item.pid) {
-                        return process.pgroup(procs.prove()).pgid == pgid;
+                    if let Some(process) = self.process_list.try_find_process(item.pid) {
+                        return process.pgroup(self.process_list.prove()).pgid == pgid;
                     }
                     false
                 }
@@ -625,7 +624,7 @@ impl Entry<'_, '_, '_> {
         }
     }
 
-    pub fn wait(self, no_block: bool) -> impl core::future::Future<Output = KResult<Self>> {
+    pub fn wait(self, no_block: bool) -> impl core::future::Future<Output = KResult<Self>> + Send {
         let wait_procs = self.wait_procs.unlock();
 
         async move {

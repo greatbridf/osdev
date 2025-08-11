@@ -8,7 +8,7 @@ use crate::{
     kernel::{
         constants::{TCGETS, TCSETS, TIOCGPGRP, TIOCGWINSZ, TIOCSPGRP},
         mem::{paging::Page, AsMemoryBlock as _},
-        task::{block_on, Thread},
+        task::Thread,
         terminal::{Terminal, TerminalIORequest},
         user::{UserPointer, UserPointerMut},
         vfs::inode::Inode,
@@ -157,8 +157,8 @@ impl Pipe {
         )
     }
 
-    fn close_read(&self) {
-        let mut inner = block_on(self.inner.lock());
+    async fn close_read(&self) {
+        let mut inner = self.inner.lock().await;
         if inner.read_closed {
             return;
         }
@@ -167,8 +167,8 @@ impl Pipe {
         self.cv_write.notify_all();
     }
 
-    fn close_write(&self) {
-        let mut inner = block_on(self.inner.lock());
+    async fn close_write(&self) {
+        let mut inner = self.inner.lock().await;
         if inner.write_closed {
             return;
         }
@@ -316,8 +316,8 @@ impl InodeFile {
         })
     }
 
-    fn seek(&self, option: SeekOption) -> KResult<usize> {
-        let mut cursor = block_on(self.cursor.lock());
+    async fn seek(&self, option: SeekOption) -> KResult<usize> {
+        let mut cursor = self.cursor.lock().await;
 
         let new_cursor = match option {
             SeekOption::Current(off) => cursor.checked_add_signed(off).ok_or(EOVERFLOW)?,
@@ -333,12 +333,12 @@ impl InodeFile {
         Ok(new_cursor)
     }
 
-    fn write(&self, stream: &mut dyn Stream, offset: Option<usize>) -> KResult<usize> {
+    async fn write(&self, stream: &mut dyn Stream, offset: Option<usize>) -> KResult<usize> {
         if !self.write {
             return Err(EBADF);
         }
 
-        let mut cursor = block_on(self.cursor.lock());
+        let mut cursor = self.cursor.lock().await;
 
         if self.append {
             let nwrote = self.dentry.write(stream, WriteOffset::End(&mut cursor))?;
@@ -357,7 +357,7 @@ impl InodeFile {
         }
     }
 
-    fn read(&self, buffer: &mut dyn Buffer, offset: Option<usize>) -> KResult<usize> {
+    async fn read(&self, buffer: &mut dyn Buffer, offset: Option<usize>) -> KResult<usize> {
         if !self.read {
             return Err(EBADF);
         }
@@ -366,7 +366,7 @@ impl InodeFile {
             let nread = self.dentry.read(buffer, offset)?;
             nread
         } else {
-            let mut cursor = block_on(self.cursor.lock());
+            let mut cursor = self.cursor.lock().await;
 
             let nread = self.dentry.read(buffer, *cursor)?;
 
@@ -377,8 +377,8 @@ impl InodeFile {
         Ok(nread)
     }
 
-    fn getdents64(&self, buffer: &mut dyn Buffer) -> KResult<()> {
-        let mut cursor = block_on(self.cursor.lock());
+    async fn getdents64(&self, buffer: &mut dyn Buffer) -> KResult<()> {
+        let mut cursor = self.cursor.lock().await;
 
         let nread = self.dentry.readdir(*cursor, |filename, ino| {
             // Filename length + 1 for padding '\0'
@@ -407,8 +407,8 @@ impl InodeFile {
         Ok(())
     }
 
-    fn getdents(&self, buffer: &mut dyn Buffer) -> KResult<()> {
-        let mut cursor = block_on(self.cursor.lock());
+    async fn getdents(&self, buffer: &mut dyn Buffer) -> KResult<()> {
+        let mut cursor = self.cursor.lock().await;
 
         let nread = self.dentry.readdir(*cursor, |filename, ino| {
             // + 1 for filename length padding '\0', + 1 for d_type.
@@ -464,22 +464,24 @@ impl TerminalFile {
         self.terminal.poll_in().await.map(|_| PollEvent::Readable)
     }
 
-    fn ioctl(&self, request: usize, arg3: usize) -> KResult<()> {
-        block_on(self.terminal.ioctl(match request as u32 {
-            TCGETS => TerminalIORequest::GetTermios(UserPointerMut::with_addr(arg3)?),
-            TCSETS => TerminalIORequest::SetTermios(UserPointer::with_addr(arg3)?),
-            TIOCGPGRP => TerminalIORequest::GetProcessGroup(UserPointerMut::with_addr(arg3)?),
-            TIOCSPGRP => TerminalIORequest::SetProcessGroup(UserPointer::with_addr(arg3)?),
-            TIOCGWINSZ => TerminalIORequest::GetWindowSize(UserPointerMut::with_addr(arg3)?),
-            _ => return Err(EINVAL),
-        }))
+    async fn ioctl(&self, request: usize, arg3: usize) -> KResult<()> {
+        self.terminal
+            .ioctl(match request as u32 {
+                TCGETS => TerminalIORequest::GetTermios(UserPointerMut::with_addr(arg3)?),
+                TCSETS => TerminalIORequest::SetTermios(UserPointer::with_addr(arg3)?),
+                TIOCGPGRP => TerminalIORequest::GetProcessGroup(UserPointerMut::with_addr(arg3)?),
+                TIOCSPGRP => TerminalIORequest::SetProcessGroup(UserPointer::with_addr(arg3)?),
+                TIOCGWINSZ => TerminalIORequest::GetWindowSize(UserPointerMut::with_addr(arg3)?),
+                _ => return Err(EINVAL),
+            })
+            .await
     }
 }
 
 impl FileType {
     pub async fn read(&self, buffer: &mut dyn Buffer, offset: Option<usize>) -> KResult<usize> {
         match self {
-            FileType::Inode(inode) => inode.read(buffer, offset),
+            FileType::Inode(inode) => inode.read(buffer, offset).await,
             FileType::PipeRead(pipe) => pipe.pipe.read(buffer).await,
             FileType::TTY(tty) => tty.read(buffer).await,
             FileType::CharDev(device) => device.read(buffer),
@@ -504,7 +506,7 @@ impl FileType {
 
     pub async fn write(&self, stream: &mut dyn Stream, offset: Option<usize>) -> KResult<usize> {
         match self {
-            FileType::Inode(inode) => inode.write(stream, offset),
+            FileType::Inode(inode) => inode.write(stream, offset).await,
             FileType::PipeWrite(pipe) => pipe.pipe.write(stream).await,
             FileType::TTY(tty) => tty.write(stream),
             FileType::CharDev(device) => device.write(stream),
@@ -512,23 +514,23 @@ impl FileType {
         }
     }
 
-    pub fn seek(&self, option: SeekOption) -> KResult<usize> {
+    pub async fn seek(&self, option: SeekOption) -> KResult<usize> {
         match self {
-            FileType::Inode(inode) => inode.seek(option),
+            FileType::Inode(inode) => inode.seek(option).await,
             _ => Err(ESPIPE),
         }
     }
 
-    pub fn getdents(&self, buffer: &mut dyn Buffer) -> KResult<()> {
+    pub async fn getdents(&self, buffer: &mut dyn Buffer) -> KResult<()> {
         match self {
-            FileType::Inode(inode) => inode.getdents(buffer),
+            FileType::Inode(inode) => inode.getdents(buffer).await,
             _ => Err(ENOTDIR),
         }
     }
 
-    pub fn getdents64(&self, buffer: &mut dyn Buffer) -> KResult<()> {
+    pub async fn getdents64(&self, buffer: &mut dyn Buffer) -> KResult<()> {
         match self {
-            FileType::Inode(inode) => inode.getdents64(buffer),
+            FileType::Inode(inode) => inode.getdents64(buffer).await,
             _ => Err(ENOTDIR),
         }
     }
@@ -568,9 +570,9 @@ impl FileType {
         Ok(nsent)
     }
 
-    pub fn ioctl(&self, request: usize, arg3: usize) -> KResult<usize> {
+    pub async fn ioctl(&self, request: usize, arg3: usize) -> KResult<usize> {
         match self {
-            FileType::TTY(tty) => tty.ioctl(request, arg3).map(|_| 0),
+            FileType::TTY(tty) => tty.ioctl(request, arg3).await.map(|_| 0),
             _ => Err(ENOTTY),
         }
     }

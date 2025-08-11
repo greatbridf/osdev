@@ -42,7 +42,7 @@ use stalloc::UnsafeStalloc;
 static CURRENT_THREAD: Option<NonNull<Thread>> = None;
 
 #[derive(Clone, Copy)]
-pub struct ThreadAlloc<'a>(pub &'a UnsafeStalloc<255, 32>);
+pub struct ThreadAlloc<'a>(pub &'a UnsafeStalloc<1023, 32>);
 
 pub struct ThreadBuilder {
     tid: Option<u32>,

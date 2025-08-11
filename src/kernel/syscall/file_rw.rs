@@ -179,7 +179,12 @@ async fn getdents(fd: FD, buffer: UserMut<u8>, bufsize: usize) -> KResult<usize>
 async fn getdents64(fd: FD, buffer: UserMut<u8>, bufsize: usize) -> KResult<usize> {
     let mut buffer = UserBuffer::new(buffer, bufsize)?;
 
-    thread.files.get(fd).ok_or(EBADF)?.getdents64(&mut buffer)?;
+    thread
+        .files
+        .get(fd)
+        .ok_or(EBADF)?
+        .getdents64(&mut buffer)
+        .await?;
     Ok(buffer.wrote())
 }
 
@@ -344,9 +349,9 @@ async fn do_lseek(thread: &Thread, fd: FD, offset: u64, whence: u32) -> KResult<
     let file = thread.files.get(fd).ok_or(EBADF)?;
 
     Ok(match whence {
-        SEEK_SET => file.seek(SeekOption::Set(offset as usize))?,
-        SEEK_CUR => file.seek(SeekOption::Current(offset as isize))?,
-        SEEK_END => file.seek(SeekOption::End(offset as isize))?,
+        SEEK_SET => file.seek(SeekOption::Set(offset as usize)).await?,
+        SEEK_CUR => file.seek(SeekOption::Current(offset as isize)).await?,
+        SEEK_END => file.seek(SeekOption::End(offset as isize)).await?,
         _ => return Err(EINVAL),
     } as u64)
 }
@@ -500,7 +505,7 @@ async fn sendfile64(out_fd: FD, in_fd: FD, offset: UserMut<u8>, count: usize) ->
 async fn ioctl(fd: FD, request: usize, arg3: usize) -> KResult<usize> {
     let file = thread.files.get(fd).ok_or(EBADF)?;
 
-    file.ioctl(request, arg3)
+    file.ioctl(request, arg3).await
 }
 
 #[eonix_macros::define_syscall(SYS_FCNTL64)]

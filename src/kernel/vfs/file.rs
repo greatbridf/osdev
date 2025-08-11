@@ -14,6 +14,7 @@ use crate::{
         vfs::inode::Inode,
         CharDevice,
     },
+    net::socket::Socket,
     prelude::*,
     sync::CondVar,
 };
@@ -80,6 +81,7 @@ pub enum FileType {
     PipeWrite(PipeWriteEnd),
     TTY(TerminalFile),
     CharDev(Arc<CharDevice>),
+    Socket(Arc<dyn Socket>),
 }
 
 pub struct File {
@@ -91,6 +93,13 @@ impl File {
     pub fn get_inode(&self) -> KResult<Option<Arc<dyn Inode>>> {
         match &self.file_type {
             FileType::Inode(inode_file) => Ok(Some(inode_file.dentry.get_inode()?)),
+            _ => Ok(None),
+        }
+    }
+
+    pub fn get_socket(&self) -> KResult<Option<Arc<dyn Socket>>> {
+        match &self.file_type {
+            FileType::Socket(socket) => Ok(Some(socket.clone())),
             _ => Ok(None),
         }
     }
@@ -484,6 +493,7 @@ impl FileType {
             FileType::PipeRead(pipe) => pipe.pipe.read(buffer).await,
             FileType::TTY(tty) => tty.read(buffer).await,
             FileType::CharDev(device) => device.read(buffer),
+            FileType::Socket(socket) => socket.recv(buffer).await,
             _ => Err(EBADF),
         }
     }
@@ -509,6 +519,7 @@ impl FileType {
             FileType::PipeWrite(pipe) => pipe.pipe.write(stream).await,
             FileType::TTY(tty) => tty.write(stream),
             FileType::CharDev(device) => device.write(stream),
+            FileType::Socket(socket) => socket.send(stream).await,
             _ => Err(EBADF),
         }
     }

@@ -1,4 +1,6 @@
+mod hal;
 mod virtio_blk;
+mod virtio_net;
 
 #[cfg(not(any(target_arch = "riscv64", target_arch = "loongarch64")))]
 compile_error!("VirtIO drivers are only supported on RISC-V and LoongArch64 architecture");

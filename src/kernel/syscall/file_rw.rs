@@ -362,9 +362,9 @@ fn llseek(fd: FD, offset_high: u32, offset_low: u32, result: *mut u64, whence: u
 
 #[repr(C)]
 #[derive(Clone, Copy)]
-struct IoVec {
-    base: PtrT,
-    len: Long,
+pub struct IoVec {
+    pub base: PtrT,
+    pub len: Long,
 }
 
 #[eonix_macros::define_syscall(SYS_READV)]
@@ -550,7 +550,7 @@ fn pselect6(
     }
 
     let timeout = UserPointerMut::new(timeout)?;
-    
+
     // Read here to check for invalid pointers.
     let _timeout_value = timeout.read()?;
 

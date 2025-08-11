@@ -16,6 +16,8 @@ pub struct CheckedUserPointer<'a> {
     _phantom: PhantomData<&'a ()>,
 }
 
+unsafe impl<'a> Send for CheckedUserPointer<'a> {}
+
 pub struct UserBuffer<'a> {
     ptr: CheckedUserPointer<'a>,
     size: usize,

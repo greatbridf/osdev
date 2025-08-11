@@ -109,6 +109,10 @@ impl Instant {
     pub fn since_epoch(&self) -> Duration {
         Duration::new(self.secs_since_epoch, self.nsecs_within)
     }
+
+    pub fn to_millis(&self) -> u64 {
+        (self.secs_since_epoch * 1_000) + (self.nsecs_within / 1_000_000) as u64
+    }
 }
 
 impl From<Instant> for TimeSpec {

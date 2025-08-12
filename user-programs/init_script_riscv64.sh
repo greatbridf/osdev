@@ -1,5 +1,7 @@
 #!/mnt/busybox sh
 
+set -x
+
 BUSYBOX=/mnt/busybox
 
 freeze() {
@@ -93,6 +95,26 @@ int main() {
     return 0;
 }
 EOF
+
+cp -r /mnt1/glibc/lib /
+mkdir tmp
+cat /proc/meminfo > meminfo
+mount -t tmpfs virtual-proc proc
+
+mv meminfo proc
+
+for i in $(seq 400 600); do
+    mkdir proc/$i
+    touch proc/$i/oom_score_adj
+done
+
+mkdir proc/self
+touch proc/self/oom_score_adj
+
+mkdir proc/1
+touch proc/1/oom_score_adj
+
+echo "run /mnt1/glibc/ltp/testcases/bin/dup01 to trigger the bug..." > /dev/ttyS0
 
 exec $BUSYBOX sh -l < /dev/ttyS0 > /dev/ttyS0 2> /dev/ttyS0
 

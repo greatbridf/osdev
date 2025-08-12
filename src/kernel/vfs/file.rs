@@ -364,9 +364,6 @@ impl InodeFile {
     }
 
     fn read(&self, buffer: &mut dyn Buffer) -> KResult<usize> {
-        if self.size() == 0 {
-            return Ok(0);
-        }
         if !self.read {
             return Err(EBADF);
         }

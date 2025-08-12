@@ -457,23 +457,6 @@ fn getgid32() -> KResult<u32> {
     sys_getegid(thread)
 }
 
-#[eonix_macros::define_syscall(SYS_GETRANDOM)]
-fn getrandom(buf: *mut u8, buflen: usize, _flags: u32) -> isize {
-    if buf.is_null() || buflen == 0 {
-        return -14;
-    }
-
-    static mut SEED: u64 = 1;
-    unsafe {
-        for i in 0..buflen {
-            SEED = SEED.wrapping_mul(1103515245).wrapping_add(12345);
-            *buf.add(i) = (SEED >> 8) as u8;
-        }
-    }
-
-    buflen as isize
-}
-
 #[eonix_macros::define_syscall(SYS_SCHED_YIELD)]
 fn sched_yield() -> KResult<()> {
     Task::block_on(yield_now());
@@ -937,6 +920,11 @@ fn sigreturn() -> KResult<SyscallNoReturn> {
 #[eonix_macros::define_syscall(SYS_ARCH_PRCTL)]
 fn arch_prctl(option: u32, addr: u32) -> KResult<u32> {
     sys_arch_prctl(thread, option, addr)
+}
+
+#[eonix_macros::define_syscall(SYS_SCHED_GETAFFINITY)]
+fn sched_getaffinity() -> KResult<u32> {
+    Ok(0)
 }
 
 pub fn keep_alive() {}

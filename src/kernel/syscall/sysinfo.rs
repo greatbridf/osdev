@@ -1,13 +1,12 @@
 use crate::{
-    io::Buffer as _,
-    kernel::{
-        constants::{CLOCK_MONOTONIC, CLOCK_REALTIME, CLOCK_REALTIME_COARSE, EINTR, EINVAL},
+    fs::procfs::populate_root, io::Buffer as _, kernel::{
+        constants::{CLOCK_MONOTONIC, CLOCK_REALTIME, CLOCK_REALTIME_COARSE, EINTR, EINVAL, EIO},
         task::Thread,
         timer::{Instant, Ticks},
         user::{UserBuffer, UserPointerMut},
-    },
-    prelude::*,
+    }, prelude::*
 };
+use alloc::sync::Arc;
 use posix_types::{
     stat::{TimeSpec, TimeVal},
     syscall_no::*,
@@ -175,13 +174,13 @@ fn times(tms: *mut TMS) -> KResult<()> {
 }
 
 #[eonix_macros::define_syscall(SYS_GETRANDOM)]
-fn get_random(buf: *mut u8, len: usize, flags: u32) -> KResult<usize> {
-    if flags != 0 {
-        return Err(EINVAL);
-    }
+fn getrandom(buf: *mut u8, len: usize, _flags: u32) -> KResult<usize> {
+    // if flags != 0 {
+    //     return Err(EINVAL);
+    // }
 
     let mut buffer = UserBuffer::new(buf, len)?;
-    for i in (0u8..=255).cycle().step_by(53) {
+    for i in (0u8..=255).cycle().step_by(53).take(len) {
         let _ = buffer.fill(&[i])?;
 
         if Thread::current().signal_list.has_pending_signal() {
@@ -192,4 +191,15 @@ fn get_random(buf: *mut u8, len: usize, flags: u32) -> KResult<usize> {
     Ok(len)
 }
 
-pub fn keep_alive() {}
+pub fn keep_alive() {
+    populate_root(Arc::from(&b"meminfo"[..]), |buffer| {
+        writeln!(buffer.get_writer(), "MemTotal:        1059632 kB").map_err(|_| EIO)?;
+        writeln!(buffer.get_writer(), "MemFree:           98244 kB").map_err(|_| EIO)?;
+        writeln!(buffer.get_writer(), "MemAvailable:     476060 kB").map_err(|_| EIO)?;
+        writeln!(buffer.get_writer(), "Buffers:          135068 kB").map_err(|_| EIO)?;
+        writeln!(buffer.get_writer(), "Cached:           327852 kB").map_err(|_| EIO)?;
+        writeln!(buffer.get_writer(), "SwapCached:          244 kB").map_err(|_| EIO)?;
+
+        Ok(())
+    }).unwrap();
+}

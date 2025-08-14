@@ -1,11 +1,14 @@
 use crate::driver::virtio::hal::HAL;
-use crate::net::device::{Mac, NetDev, NetDevError};
+use crate::net::device::{Mac, NetDev, NetDevError, RxBuffer};
+use alloc::boxed::Box;
 use smoltcp::phy::{DeviceCapabilities, Medium};
 
-use virtio_drivers::device::net::{RxBuffer, TxBuffer};
-use virtio_drivers::{device::net::VirtIONet, transport::Transport};
+use virtio_drivers::{
+    device::net::{self, VirtIONet},
+    transport::Transport,
+};
 
-static VIRTIO_NET_NAME: &'static str = "virtio_net";
+pub static VIRTIO_NET_NAME: &'static str = "virtio_net";
 
 impl<T, const QUEUE_SIZE: usize> NetDev for VirtIONet<HAL, T, QUEUE_SIZE>
 where
@@ -35,12 +38,21 @@ where
         self.can_send()
     }
 
-    fn recv(&mut self) -> Result<RxBuffer, NetDevError> {
-        self.receive().map_err(|_| NetDevError::Unknown)
+    fn recv(&mut self) -> Result<Box<dyn RxBuffer>, NetDevError> {
+        self.receive().map_or_else(
+            |_| Err(NetDevError::Unknown),
+            |rx_buffer| Ok(Box::new(rx_buffer) as _),
+        )
     }
 
     fn send(&mut self, data: &[u8]) -> Result<(), NetDevError> {
-        self.send(TxBuffer::from(data))
+        self.send(net::TxBuffer::from(data))
             .map_err(|_| NetDevError::Unknown)
+    }
+}
+
+impl RxBuffer for net::RxBuffer {
+    fn packet(&self) -> &[u8] {
+        self.packet()
     }
 }

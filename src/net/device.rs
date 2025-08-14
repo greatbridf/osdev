@@ -1,41 +1,33 @@
-use alloc::{
-    collections::btree_map::{BTreeMap, Entry},
-    sync::Arc,
-    vec,
-};
+pub mod loopback;
 
+use crate::prelude::KResult;
+use alloc::{boxed::Box, sync::Arc, vec, vec::Vec};
 use eonix_sync::Spin;
 
-use smoltcp::phy::DeviceCapabilities;
-pub use virtio_drivers::device::net::RxBuffer;
-
-use crate::{kernel::constants::EFAULT, prelude::KResult};
+pub use smoltcp::phy::DeviceCapabilities;
 
 pub type NetDevice = Arc<Spin<dyn NetDev>>;
 pub type Mac = [u8; 6];
 
-pub static NETDEVS: Spin<BTreeMap<&str, NetDevice>> = Spin::new(BTreeMap::new());
+pub static NETDEVS: Spin<Vec<NetDevice>> = Spin::new(Vec::new());
 
 pub fn register_netdev(netdev: impl NetDev + 'static) -> KResult<NetDevice> {
-    match NETDEVS.lock().entry(netdev.name()) {
-        Entry::Vacant(entry) => {
-            let netdev = Arc::new(Spin::new(netdev));
-            entry.insert(netdev.clone());
-            Ok(netdev)
-        }
-        Entry::Occupied(_) => Err(EFAULT),
-    }
-}
+    let netdev = Arc::new(Spin::new(netdev));
 
-pub fn get_netdev(name: &str) -> Option<NetDevice> {
-    NETDEVS.lock().get(name).map(|netdev| netdev.clone())
+    let mut netdevs = NETDEVS.lock();
+    netdevs.push(netdev.clone());
+    drop(netdevs);
+
+    Ok(netdev)
 }
 
 #[derive(Debug, Clone, Copy)]
 pub enum NetDevError {
-    // NotReady,
-    // Busy,
     Unknown,
+}
+
+pub trait RxBuffer {
+    fn packet(&self) -> &[u8];
 }
 
 pub trait NetDev: Send {
@@ -46,10 +38,8 @@ pub trait NetDev: Send {
     fn can_receive(&self) -> bool;
     fn can_send(&self) -> bool;
 
-    fn recv(&mut self) -> Result<RxBuffer, NetDevError>;
+    fn recv(&mut self) -> Result<Box<dyn RxBuffer>, NetDevError>;
     fn send(&mut self, data: &[u8]) -> Result<(), NetDevError>;
-
-    // fn poll(&mut self);
 }
 
 impl smoltcp::phy::Device for dyn NetDev {
@@ -83,12 +73,12 @@ impl smoltcp::phy::Device for dyn NetDev {
         }
     }
 
-    fn capabilities(&self) -> smoltcp::phy::DeviceCapabilities {
+    fn capabilities(&self) -> DeviceCapabilities {
         self.caps()
     }
 }
 
-pub struct RxToken(RxBuffer);
+pub struct RxToken(Box<dyn RxBuffer>);
 
 impl smoltcp::phy::RxToken for RxToken {
     fn consume<R, F>(self, f: F) -> R

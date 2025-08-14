@@ -119,8 +119,12 @@ fn accept(sockfd: FD, sockaddr_ptr: *mut CSockAddr, addrlen_ptr: *mut u32) -> KR
         .get_socket()?
         .ok_or(ENOTSOCK)?;
 
-    let (accepted_socket, remote_addr) = Task::block_on(socket.accept())?;
-    write_socket_addr(sockaddr_ptr, addrlen_ptr, remote_addr)?;
+    let accepted_socket = Task::block_on(socket.accept())?;
+    write_socket_addr(
+        sockaddr_ptr,
+        addrlen_ptr,
+        accepted_socket.remote_addr().unwrap(),
+    )?;
     thread.files.socket(accepted_socket)
 }
 

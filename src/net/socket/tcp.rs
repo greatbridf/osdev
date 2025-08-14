@@ -7,7 +7,7 @@ use alloc::boxed::Box;
 use alloc::sync::Arc;
 use async_trait::async_trait;
 use eonix_runtime::task::Task;
-use eonix_sync::Mutex;
+use eonix_sync::RwLock;
 use smoltcp::socket::tcp;
 use smoltcp::{iface::SocketHandle, wire::IpEndpoint};
 
@@ -18,45 +18,59 @@ use crate::net::socket::{BoundSocket, Socket};
 use crate::prelude::KResult;
 
 pub struct TcpSocket {
-    bound_socket: Mutex<Option<BoundSocket>>,
+    bound_socket: RwLock<Option<BoundSocket>>,
+    local_addr: RwLock<Option<SocketAddr>>,
+    remote_addr: RwLock<Option<SocketAddr>>,
     is_nonblock: bool,
 }
 
 impl TcpSocket {
     pub fn new(is_nonblock: bool) -> Arc<Self> {
         Arc::new(Self {
-            bound_socket: Mutex::new(None),
+            bound_socket: RwLock::new(None),
+            local_addr: RwLock::new(None),
+            remote_addr: RwLock::new(None),
             is_nonblock,
         })
     }
 
-    fn iface(&self) -> Option<NetIface> {
-        Task::block_on(self.bound_socket.lock())
-            .as_ref()
-            .map(|bound_socket| bound_socket.iface())
+    // Get single bound iface and socket handle
+    fn iface_and_handle(&self) -> Option<(NetIface, SocketHandle)> {
+        Task::block_on(self.bound_socket.read())
+            .as_ref()?
+            .as_single_bound()
+            .map(|bound_socket| (bound_socket.iface(), bound_socket.handle()))
     }
 
-    pub fn handle(&self) -> Option<SocketHandle> {
-        Task::block_on(self.bound_socket.lock())
-            .as_ref()
-            .map(|bound_socket| bound_socket.handle())
-    }
-
-    pub fn local_addr(&self) -> Option<SocketAddr> {
-        Task::block_on(self.bound_socket.lock())
-            .as_ref()
-            .map(|bound_socket| bound_socket.socket_addr())
-    }
-
-    fn try_accept(&self, waker: &Waker) -> Option<KResult<(Arc<TcpSocket>, SocketAddr)>> {
-        let iface = self.iface().unwrap();
-
+    fn single_listen(
+        iface: NetIface,
+        socket_handle: SocketHandle,
+        local_addr: SocketAddr,
+        backlog: usize,
+    ) -> KResult<()> {
         let mut iface_guard = Task::block_on(iface.lock());
 
         let socket = iface_guard
             .iface_and_sockets()
             .1
-            .get_mut::<tcp::Socket>(self.handle().unwrap());
+            .get_mut::<tcp::Socket>(socket_handle);
+
+        socket
+            .listen(IpEndpoint::from(local_addr), Some(backlog))
+            .map_err(|_| EINVAL)
+    }
+
+    fn try_single_accept(
+        iface: NetIface,
+        socket_handle: SocketHandle,
+        waker: &Waker,
+    ) -> KResult<Option<Arc<TcpSocket>>> {
+        let mut iface_guard = Task::block_on(iface.lock());
+
+        let socket = iface_guard
+            .iface_and_sockets()
+            .1
+            .get_mut::<tcp::Socket>(socket_handle);
 
         if socket.may_accept() {
             match socket.accept() {
@@ -65,38 +79,62 @@ impl TcpSocket {
                     let remote_addr = SocketAddr::from(new_socket.remote_endpoint().unwrap());
                     let handle = iface_guard.iface_and_sockets().1.add(new_socket);
                     let accept_socket = Arc::new(TcpSocket {
-                        bound_socket: Mutex::new(Some(BoundSocket::new_accept(
+                        bound_socket: RwLock::new(Some(BoundSocket::new_single(
                             iface.clone(),
                             handle,
-                            socket_addr,
-                        ))),
+                        )?)),
+                        local_addr: RwLock::new(Some(socket_addr)),
+                        remote_addr: RwLock::new(Some(remote_addr)),
                         is_nonblock: false,
                     });
-                    Some(Ok((accept_socket, remote_addr)))
+                    Ok(Some(accept_socket))
                 }
                 Ok(None) => {
                     socket.register_recv_waker(waker);
-                    None
+                    Ok(None)
                 }
-                Err(_) => Some(Err(EINVAL)),
+                Err(_) => Err(EINVAL),
             }
         } else {
-            Some(Err(EINVAL))
+            Err(EINVAL)
         }
     }
 
-    fn try_recv(&self, buf: &mut dyn Buffer, waker: &Waker) -> Option<KResult<usize>> {
-        let iface = self.iface().unwrap();
+    fn try_accept(&self, waker: &Waker) -> KResult<Option<Arc<TcpSocket>>> {
+        let bound_socket_guard = Task::block_on(self.bound_socket.read());
+
+        match bound_socket_guard.as_ref().unwrap() {
+            BoundSocket::BoundSingle(single) => {
+                Self::try_single_accept(single.iface(), single.handle(), waker)
+            }
+            BoundSocket::BoundAll(all) => {
+                for (bound_socket, _) in &all.sockets {
+                    let res = Self::try_single_accept(
+                        bound_socket.iface(),
+                        bound_socket.handle(),
+                        waker,
+                    )?;
+                    if res.is_some() {
+                        return Ok(res);
+                    }
+                }
+                Ok(None)
+            }
+        }
+    }
+
+    fn try_recv(&self, buf: &mut dyn Buffer, waker: &Waker) -> KResult<Option<usize>> {
+        let (iface, handle) = self.iface_and_handle().unwrap();
 
         let mut iface_guard = Task::block_on(iface.lock());
 
         let socket = iface_guard
             .iface_and_sockets()
             .1
-            .get_mut::<tcp::Socket>(self.handle().unwrap());
+            .get_mut::<tcp::Socket>(handle);
 
         if !socket.may_recv() {
-            Some(Err(ENOTCONN))
+            Err(ENOTCONN)
         } else if socket.can_recv() {
             let len = socket
                 .recv(|rx_data| {
@@ -104,25 +142,25 @@ impl TcpSocket {
                     (buf.wrote(), buf.wrote())
                 })
                 .unwrap(); // unwrap() is safe due to the source code logic
-            Some(Ok(len))
+            Ok(Some(len))
         } else {
             socket.register_recv_waker(waker);
-            None
+            Ok(None)
         }
     }
 
-    fn try_send(&self, stream: &mut dyn Stream, waker: &Waker) -> Option<KResult<usize>> {
-        let iface = self.iface().unwrap();
+    fn try_send(&self, stream: &mut dyn Stream, waker: &Waker) -> KResult<Option<usize>> {
+        let (iface, handle) = self.iface_and_handle().unwrap();
 
         let mut iface_guard = Task::block_on(iface.lock());
 
         let socket = iface_guard
             .iface_and_sockets()
             .1
-            .get_mut::<tcp::Socket>(self.handle().unwrap());
+            .get_mut::<tcp::Socket>(handle);
 
         if !socket.may_send() {
-            Some(Err(ENOTCONN))
+            Err(ENOTCONN)
         } else if socket.can_send() {
             let result = socket
                 .send(|tx_data| {
@@ -133,90 +171,114 @@ impl TcpSocket {
                 })
                 .unwrap(); // unwrap() is safe due to the source code logic
 
-            Some(result)
+            result.map(|len| Some(len))
         } else {
             socket.register_send_waker(waker);
-            None
+            Ok(None)
         }
     }
 
-    fn check_connect(&self, waker: &Waker) -> Option<KResult<()>> {
-        let iface = self.iface().unwrap();
+    fn check_connect(&self, waker: &Waker) -> KResult<Option<()>> {
+        let (iface, handle) = self.iface_and_handle().unwrap();
 
         let mut iface_guard = Task::block_on(iface.lock());
 
         let socket = iface_guard
             .iface_and_sockets()
             .1
-            .get_mut::<tcp::Socket>(self.handle().unwrap());
+            .get_mut::<tcp::Socket>(handle);
 
         if socket.state() == tcp::State::Established {
-            Some(Ok(()))
+            Ok(Some(()))
         } else if !socket.is_active() {
-            Some(Err(ECONNREFUSED))
+            Err(ECONNREFUSED)
         } else {
             socket.register_recv_waker(waker);
-            None
+            Ok(None)
         }
     }
 }
 
 #[async_trait]
 impl Socket for TcpSocket {
+    fn local_addr(&self) -> Option<SocketAddr> {
+        Task::block_on(self.local_addr.read()).clone()
+    }
+
+    fn remote_addr(&self) -> Option<SocketAddr> {
+        Task::block_on(self.remote_addr.read()).clone()
+    }
+
     fn bind(&self, socket_addr: SocketAddr) -> KResult<()> {
-        let mut bound_socket_guard = Task::block_on(self.bound_socket.lock());
+        let mut bound_socket_guard = Task::block_on(self.bound_socket.write());
 
         if bound_socket_guard.is_some() {
             return Err(EINVAL);
         }
 
-        let bind_iface = get_relate_iface(socket_addr.ip()).ok_or(EADDRNOTAVAIL)?;
+        if socket_addr.ip().is_unspecified() {
+            *bound_socket_guard = Some(BoundSocket::new_bind_all(socket_addr.port())?);
+            *Task::block_on(self.local_addr.write()) = Some(socket_addr);
+        } else {
+            let bind_iface = get_relate_iface(socket_addr.ip()).ok_or(EADDRNOTAVAIL)?;
 
-        *bound_socket_guard = Some(BoundSocket::new_bind(bind_iface, Some(socket_addr.port()))?);
+            let (bound_socket, local_addr) =
+                BoundSocket::new_bind_single(bind_iface, socket_addr.port())?;
+
+            *bound_socket_guard = Some(bound_socket);
+            *Task::block_on(self.local_addr.write()) = Some(local_addr);
+        }
+        drop(bound_socket_guard);
 
         Ok(())
     }
 
     fn listen(&self, backlog: usize) -> KResult<()> {
-        let mut bound_socket_guard = Task::block_on(self.bound_socket.lock());
+        let mut bound_socket_guard = Task::block_on(self.bound_socket.write());
 
         if bound_socket_guard.is_none() {
-            let bind_iface = get_ephemeral_iface(None);
-            *bound_socket_guard = Some(BoundSocket::new_bind(bind_iface.unwrap(), None)?);
+            // FIXME: should get a available port and bind to all iface
+            // need a way to get that port simply
+            // *bound_socket_guard = Some(BoundSocket::new_bind_all(available_port)?);
         }
 
         drop(bound_socket_guard);
 
-        let iface = self.iface().unwrap();
-        let mut iface_guard = Task::block_on(iface.lock());
+        let bound_socket_guard = Task::block_on(self.bound_socket.read());
 
-        let socket = iface_guard
-            .iface_and_sockets()
-            .1
-            .get_mut::<tcp::Socket>(self.handle().unwrap());
-
-        socket
-            .listen(IpEndpoint::from(self.local_addr().unwrap()), Some(backlog))
-            .map_err(|_| EINVAL)?;
-
-        Ok(())
+        match bound_socket_guard.as_ref().unwrap() {
+            BoundSocket::BoundAll(all) => {
+                for (item, socket_addr) in &all.sockets {
+                    let (iface, handle) = (item.iface(), item.handle());
+                    Self::single_listen(iface, handle, *socket_addr, backlog)?;
+                }
+                Ok(())
+            }
+            BoundSocket::BoundSingle(single) => {
+                let (iface, handle) = (single.iface(), single.handle());
+                let local_addr = self.local_addr().unwrap();
+                Self::single_listen(iface, handle, local_addr, backlog)
+            }
+        }
     }
 
     async fn connect(&self, remote_addr: SocketAddr) -> KResult<()> {
-        let mut bound_socket_guard = self.bound_socket.lock().await;
+        let mut bound_socket_guard = self.bound_socket.write().await;
 
         if bound_socket_guard.is_none() {
             let bind_iface = get_ephemeral_iface(Some(remote_addr.ip()));
-            *bound_socket_guard = Some(BoundSocket::new_bind(bind_iface.unwrap(), None)?);
+            let (bound_socket, local_addr) = BoundSocket::new_bind_single(bind_iface.unwrap(), 0)?;
+            *bound_socket_guard = Some(bound_socket);
+            *Task::block_on(self.local_addr.write()) = Some(local_addr);
         }
 
         drop(bound_socket_guard);
 
-        let iface = self.iface().unwrap();
-        let mut iface_guard = iface.lock().await;
+        let (iface, handle) = self.iface_and_handle().unwrap();
 
+        let mut iface_guard = iface.lock().await;
         let (iface_inner, sockets) = iface_guard.iface_and_sockets();
-        let socket = sockets.get_mut::<tcp::Socket>(self.handle().unwrap());
+        let socket = sockets.get_mut::<tcp::Socket>(handle);
 
         socket
             .connect(
@@ -242,9 +304,10 @@ impl Socket for TcpSocket {
             fn poll(self: Pin<&mut Self>, cx: &mut core::task::Context<'_>) -> Poll<Self::Output> {
                 let this = self.get_mut();
                 match this.socket.check_connect(cx.waker()) {
-                    Some(result) => Poll::Ready(result),
-                    None if this.socket.is_nonblock => Poll::Ready(Err(EAGAIN)),
-                    None => Poll::Pending,
+                    Ok(Some(_)) => Poll::Ready(Ok(())),
+                    Ok(None) if this.socket.is_nonblock => Poll::Ready(Err(EAGAIN)),
+                    Ok(None) => Poll::Pending,
+                    Err(err) => Poll::Ready(Err(err)),
                 }
             }
         }
@@ -252,22 +315,21 @@ impl Socket for TcpSocket {
         ConnectFuture { socket: self }.await
     }
 
-    async fn accept(&self) -> KResult<(Arc<dyn Socket>, SocketAddr)> {
+    async fn accept(&self) -> KResult<Arc<dyn Socket>> {
         struct AcceptFuture<'a> {
             socket: &'a TcpSocket,
         }
 
         impl<'a> Future for AcceptFuture<'a> {
-            type Output = KResult<(Arc<dyn Socket>, SocketAddr)>;
+            type Output = KResult<Arc<dyn Socket>>;
 
             fn poll(self: Pin<&mut Self>, cx: &mut core::task::Context<'_>) -> Poll<Self::Output> {
                 let this = self.get_mut();
                 match this.socket.try_accept(cx.waker()) {
-                    Some(result) => Poll::Ready(
-                        result.map(|(tcp_socket, remote_addr)| (tcp_socket as _, remote_addr)),
-                    ),
-                    None if this.socket.is_nonblock => Poll::Ready(Err(EAGAIN)),
-                    None => Poll::Pending,
+                    Ok(Some(res)) => Poll::Ready(Ok(res)),
+                    Ok(None) if this.socket.is_nonblock => Poll::Ready(Err(EAGAIN)),
+                    Ok(None) => Poll::Pending,
+                    Err(err) => Poll::Ready(Err(err)),
                 }
             }
         }
@@ -287,10 +349,19 @@ impl Socket for TcpSocket {
             fn poll(self: Pin<&mut Self>, cx: &mut core::task::Context<'_>) -> Poll<Self::Output> {
                 let this = self.get_mut();
                 match this.socket.try_recv(this.buffer, cx.waker()) {
-                    Some(result) => Poll::Ready(result),
-                    None if this.socket.is_nonblock => Poll::Ready(Err(EAGAIN)),
-                    None => Poll::Pending,
+                    Ok(Some(res)) => Poll::Ready(Ok(res)),
+                    Ok(None) if this.socket.is_nonblock => Poll::Ready(Err(EAGAIN)),
+                    Ok(None) => Poll::Pending,
+                    Err(err) => Poll::Ready(Err(err)),
                 }
+
+                // let ret = this.socket.try_recv(this.buffer, cx.waker());
+                // match ret {
+                //     Ok(Some(res)) => Poll::Ready(Ok(res)),
+                //     Ok(None) if this.socket.is_nonblock => Poll::Ready(Err(EAGAIN)),
+                //     Ok(None) => Poll::Pending,
+                //     Err(err) => Poll::Ready(Err(err)),
+                // }
             }
         }
 
@@ -313,9 +384,10 @@ impl Socket for TcpSocket {
             fn poll(self: Pin<&mut Self>, cx: &mut core::task::Context<'_>) -> Poll<Self::Output> {
                 let this = self.get_mut();
                 match this.socket.try_send(this.stream, cx.waker()) {
-                    Some(result) => Poll::Ready(result),
-                    None if this.socket.is_nonblock => Poll::Ready(Err(EAGAIN)),
-                    None => Poll::Pending,
+                    Ok(Some(res)) => Poll::Ready(Ok(res)),
+                    Ok(None) if this.socket.is_nonblock => Poll::Ready(Err(EAGAIN)),
+                    Ok(None) => Poll::Pending,
+                    Err(err) => Poll::Ready(Err(err)),
                 }
             }
         }
@@ -325,5 +397,22 @@ impl Socket for TcpSocket {
             stream,
         }
         .await
+    }
+}
+
+impl Drop for TcpSocket {
+    fn drop(&mut self) {
+        let (iface, handle) = self.iface_and_handle().unwrap();
+
+        let mut iface_guard = Task::block_on(iface.lock());
+
+        let socket = iface_guard
+            .iface_and_sockets()
+            .1
+            .get_mut::<tcp::Socket>(handle);
+
+        socket.close();
+
+        drop(iface_guard);
     }
 }

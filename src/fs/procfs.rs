@@ -1,10 +1,10 @@
 use crate::kernel::constants::{EACCES, ENOTDIR};
 use crate::kernel::task::block_on;
 use crate::kernel::timer::Instant;
+use crate::kernel::vfs::inode::{AtomicMode, Mode};
 use crate::{
     io::Buffer,
     kernel::{
-        constants::{S_IFDIR, S_IFREG},
         mem::paging::PageBuffer,
         vfs::{
             dentry::Dentry,
@@ -69,12 +69,12 @@ define_struct_inode! {
 
 impl FileInode {
     pub fn new(ino: Ino, vfs: Weak<ProcFs>, file: Box<dyn ProcFsFile>) -> Arc<Self> {
-        let mut mode = S_IFREG;
+        let mut mode = Mode::REG;
         if file.can_read() {
-            mode |= 0o444;
+            mode.set_perm(0o444);
         }
         if file.can_write() {
-            mode |= 0o200;
+            mode.set_perm(0o222);
         }
 
         let mut inode = Self {
@@ -82,7 +82,7 @@ impl FileInode {
             file,
         };
 
-        inode.idata.mode.store(mode, Ordering::Relaxed);
+        inode.idata.mode.store(mode);
         inode.idata.nlink.store(1, Ordering::Relaxed);
         *inode.ctime.get_mut() = Instant::now();
         *inode.mtime.get_mut() = Instant::now();
@@ -123,7 +123,7 @@ impl DirInode {
     pub fn new(ino: Ino, vfs: Weak<ProcFs>) -> Arc<Self> {
         Self::new_locked(ino, vfs, |inode, rwsem| unsafe {
             addr_of_mut_field!(inode, entries).write(Locked::new(vec![], rwsem));
-            addr_of_mut_field!(&mut *inode, mode).write((S_IFDIR | 0o755).into());
+            addr_of_mut_field!(&mut *inode, mode).write(AtomicMode::from(Mode::DIR.perm(0o755)));
             addr_of_mut_field!(&mut *inode, nlink).write(1.into());
             addr_of_mut_field!(&mut *inode, ctime).write(Spin::new(Instant::now()));
             addr_of_mut_field!(&mut *inode, mtime).write(Spin::new(Instant::now()));

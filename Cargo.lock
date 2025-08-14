@@ -146,7 +146,7 @@ dependencies = [
  "eonix_runtime",
  "eonix_sync",
  "ext4_rs",
- "intrusive-collections",
+ "intrusive-collections 0.9.8",
  "intrusive_list",
  "itertools",
  "pointers",
@@ -213,7 +213,7 @@ dependencies = [
  "eonix_percpu",
  "eonix_preempt",
  "eonix_sync",
- "intrusive-collections",
+ "intrusive-collections 0.9.7",
  "pointers",
 ]
 
@@ -246,7 +246,7 @@ dependencies = [
  "eonix_preempt",
  "eonix_spin",
  "eonix_sync_base",
- "intrusive-collections",
+ "intrusive-collections 0.9.7",
 ]
 
 [[package]]
@@ -270,6 +270,14 @@ name = "intrusive-collections"
 version = "0.9.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "189d0897e4cbe8c75efedf3502c18c887b05046e59d28404d4d8e46cbc4d1e86"
+dependencies = [
+ "memoffset",
+]
+
+[[package]]
+name = "intrusive-collections"
+version = "0.9.8"
+source = "git+https://github.com/greatbridf/intrusive-rs#0e2d88bffc9df606566fba2d61d1217182b06975"
 dependencies = [
  "memoffset",
 ]

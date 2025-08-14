@@ -4,6 +4,7 @@ use crate::kernel::constants::{EBADF, EEXIST, EINVAL, ENOENT};
 use crate::kernel::mem::FileMapping;
 use crate::kernel::task::Thread;
 use crate::kernel::vfs::filearray::FD;
+use crate::kernel::vfs::inode::Mode;
 use crate::{
     kernel::{
         constants::{UserMmapFlags, UserMmapProtocol},
@@ -66,11 +67,11 @@ async fn do_mmap2(
             Mapping::Anonymous
         } else {
             // The mode is unimportant here, since we are checking prot in mm_area.
-            let shared_area =
-                SHM_MANAGER
-                    .lock()
-                    .await
-                    .create_shared_area(len, thread.process.pid, 0x777);
+            let shared_area = SHM_MANAGER.lock().await.create_shared_area(
+                len,
+                thread.process.pid,
+                Mode::REG.perm(0o777),
+            );
             Mapping::File(FileMapping::new(shared_area.area.clone(), 0, len))
         }
     } else {
@@ -185,7 +186,7 @@ async fn shmget(key: usize, size: usize, shmflg: u32) -> KResult<u32> {
     let mut shm_manager = SHM_MANAGER.lock().await;
     let shmid = gen_shm_id(key)?;
 
-    let mode = shmflg & 0o777;
+    let mode = Mode::REG.perm(shmflg);
     let shmflg = ShmFlags::from_bits_truncate(shmflg);
 
     if key == IPC_PRIVATE {

@@ -2,6 +2,7 @@ use core::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
 use crate::kernel::mem::{PageCache, PageCacheBackend};
 use crate::kernel::task::block_on;
+use crate::kernel::vfs::inode::{AtomicMode, Mode};
 use crate::{
     io::{Buffer, ByteBuffer},
     kernel::{
@@ -12,7 +13,6 @@ use crate::{
             dentry::Dentry,
             inode::{define_struct_inode, AtomicNlink, Ino, Inode, InodeData},
             mount::{register_filesystem, Mount, MountCreator},
-            s_isdir, s_isreg,
             vfs::Vfs,
             DevId, FsContext,
         },
@@ -86,30 +86,27 @@ impl Ext4Fs {
     fn get_or_insert(
         &self,
         icache: &mut BTreeMap<Ino, Ext4Inode>,
-        mut idata: InodeData,
+        idata: InodeData,
     ) -> Arc<dyn Inode> {
         match icache.entry(idata.ino) {
             Entry::Occupied(occupied) => occupied.get().clone().into_inner(),
-            Entry::Vacant(vacant) => {
-                let mode = *idata.mode.get_mut();
-                if s_isreg(mode) {
-                    vacant
-                        .insert(Ext4Inode::File(FileInode::new(idata)))
-                        .clone()
-                        .into_inner()
-                } else if s_isdir(mode) {
-                    vacant
-                        .insert(Ext4Inode::Dir(Arc::new(DirInode { idata })))
-                        .clone()
-                        .into_inner()
-                } else {
-                    println_warn!("ext4: Unsupported inode type: {mode:#o}");
+            Entry::Vacant(vacant) => match idata.mode.load().format() {
+                Mode::REG => vacant
+                    .insert(Ext4Inode::File(FileInode::new(idata)))
+                    .clone()
+                    .into_inner(),
+                Mode::DIR => vacant
+                    .insert(Ext4Inode::Dir(Arc::new(DirInode { idata })))
+                    .clone()
+                    .into_inner(),
+                mode => {
+                    println_warn!("ext4: Unsupported inode type: {:#o}", mode.format_bits());
                     vacant
                         .insert(Ext4Inode::File(FileInode::new(idata)))
                         .clone()
                         .into_inner()
                 }
-            }
+            },
         }
     }
 }
@@ -137,7 +134,7 @@ impl Ext4Fs {
                     nlink: AtomicNlink::new(root_inode.inode.links_count() as _),
                     uid: AtomicU32::new(root_inode.inode.uid() as _),
                     gid: AtomicU32::new(root_inode.inode.gid() as _),
-                    mode: AtomicU32::new(root_inode.inode.mode() as _),
+                    mode: AtomicMode::new(root_inode.inode.mode() as _),
                     atime: Spin::new(Instant::new(
                         root_inode.inode.atime() as _,
                         root_inode.inode.i_atime_extra() as _,
@@ -201,7 +198,7 @@ impl PageCacheBackend for FileInode {
         self.read_direct(page, offset)
     }
 
-    fn write_page(&self, page: &crate::kernel::mem::CachePage, offset: usize) -> KResult<usize> {
+    fn write_page(&self, _page: &crate::kernel::mem::CachePage, _offset: usize) -> KResult<usize> {
         todo!()
     }
 
@@ -269,7 +266,7 @@ impl Inode for DirInode {
                 nlink: AtomicNlink::new(attr.nlink as _),
                 uid: AtomicU32::new(attr.uid),
                 gid: AtomicU32::new(attr.gid),
-                mode: AtomicU32::new(attr.kind.bits() as u32 | real_perm),
+                mode: AtomicMode::new(attr.kind.bits() as u32 | real_perm),
                 atime: Spin::new(Instant::new(attr.atime as _, 0)),
                 ctime: Spin::new(Instant::new(attr.ctime as _, 0)),
                 mtime: Spin::new(Instant::new(attr.mtime as _, 0)),

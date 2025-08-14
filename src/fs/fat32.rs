@@ -5,12 +5,11 @@ use crate::io::Stream;
 use crate::kernel::constants::EIO;
 use crate::kernel::mem::AsMemoryBlock;
 use crate::kernel::task::block_on;
-use crate::kernel::vfs::inode::WriteOffset;
+use crate::kernel::vfs::inode::{Mode, WriteOffset};
 use crate::{
     io::{Buffer, ByteBuffer, UninitBuffer},
     kernel::{
         block::{make_device, BlockDevice, BlockDeviceRequest},
-        constants::{S_IFDIR, S_IFREG},
         mem::{
             paging::Page,
             {CachePage, PageCache, PageCacheBackend},
@@ -253,7 +252,7 @@ impl FileInode {
 
         // Safety: We are initializing the inode
         inode.nlink.store(1, Ordering::Relaxed);
-        inode.mode.store(S_IFREG | 0o777, Ordering::Relaxed);
+        inode.mode.store(Mode::REG.perm(0o777));
         inode.size.store(size as u64, Ordering::Relaxed);
 
         inode
@@ -343,7 +342,7 @@ impl DirInode {
 
         // Safety: We are initializing the inode
         inode.nlink.store(2, Ordering::Relaxed);
-        inode.mode.store(S_IFDIR | 0o777, Ordering::Relaxed);
+        inode.mode.store(Mode::DIR.perm(0o777));
         inode.size.store(size as u64, Ordering::Relaxed);
 
         inode

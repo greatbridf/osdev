@@ -25,7 +25,7 @@ posix_types = { path = "./crates/posix_types" }
 slab_allocator = { path = "./crates/slab_allocator" }
 
 bitflags = "2.6.0"
-intrusive-collections = "0.9.7"
+intrusive-collections = { version = "0.9.8", git = "https://github.com/greatbridf/intrusive-rs" }
 itertools = { version = "0.13.0", default-features = false }
 acpi = "5.2.0"
 align_ext = "0.1.0"

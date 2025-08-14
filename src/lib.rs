@@ -41,6 +41,7 @@ use kernel::{
     task::{KernelStack, ProcessBuilder, ProcessList, ProgramLoader, ThreadBuilder},
     vfs::{
         dentry::Dentry,
+        inode::Mode,
         mount::{do_mount, MS_NOATIME, MS_NODEV, MS_NOSUID, MS_RDONLY},
         FsContext,
     },
@@ -214,7 +215,7 @@ async fn init_process(early_kstack: PRange) {
         let fs_context = FsContext::global();
         let mnt_dir = Dentry::open(fs_context, Path::new(b"/mnt/").unwrap(), true).unwrap();
 
-        mnt_dir.mkdir(0o755).unwrap();
+        mnt_dir.mkdir(Mode::new(0o755)).unwrap();
 
         do_mount(
             &mnt_dir,

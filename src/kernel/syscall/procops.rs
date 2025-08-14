@@ -16,6 +16,7 @@ use crate::kernel::task::{parse_futexop, CloneArgs};
 use crate::kernel::timer::sleep;
 use crate::kernel::user::UserString;
 use crate::kernel::user::{UserPointer, UserPointerMut};
+use crate::kernel::vfs::inode::Mode;
 use crate::kernel::vfs::{self, dentry::Dentry};
 use crate::path::Path;
 use crate::{kernel::user::UserBuffer, prelude::*};
@@ -99,12 +100,10 @@ async fn clock_nanosleep(
 }
 
 #[eonix_macros::define_syscall(SYS_UMASK)]
-async fn umask(mask: u32) -> KResult<u32> {
+async fn umask(mask: Mode) -> KResult<Mode> {
     let mut umask = thread.fs_context.umask.lock();
 
-    let old = *umask;
-    *umask = mask & 0o777;
-    Ok(old)
+    Ok(core::mem::replace(&mut *umask, mask.non_format()))
 }
 
 #[eonix_macros::define_syscall(SYS_GETCWD)]
@@ -221,7 +220,7 @@ async fn execve(exec: User<u8>, argv: User<PtrT>, envp: User<PtrT>) -> KResult<S
         thread.process.mm_list.replace(Some(load_info.mm_list));
     }
 
-    thread.files.on_exec();
+    thread.files.on_exec().await;
     thread.signal_list.clear_non_ignore();
     thread.set_name(dentry.get_name());
 

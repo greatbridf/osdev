@@ -1,10 +1,12 @@
-use super::{dentry::Dentry, s_isblk, s_ischr, vfs::Vfs, DevId};
+use super::{dentry::Dentry, vfs::Vfs, DevId};
 use crate::io::Stream;
 use crate::kernel::constants::{
     EINVAL, EISDIR, ENOTDIR, EPERM, STATX_ATIME, STATX_BLOCKS, STATX_CTIME, STATX_GID, STATX_INO,
-    STATX_MODE, STATX_MTIME, STATX_NLINK, STATX_SIZE, STATX_TYPE, STATX_UID, S_IFDIR, S_IFMT,
+    STATX_MODE, STATX_MTIME, STATX_NLINK, STATX_SIZE, STATX_TYPE, STATX_UID, S_IFBLK, S_IFCHR,
+    S_IFDIR, S_IFLNK, S_IFMT, S_IFREG,
 };
 use crate::kernel::mem::PageCache;
+use crate::kernel::syscall::{FromSyscallArg, SyscallRetVal};
 use crate::kernel::task::block_on;
 use crate::kernel::timer::Instant;
 use crate::{io::Buffer, prelude::*};
@@ -32,8 +34,11 @@ pub type AtomicUid = AtomicU32;
 #[allow(dead_code)]
 pub type Gid = u32;
 pub type AtomicGid = AtomicU32;
-pub type Mode = u32;
-pub type AtomicMode = AtomicU32;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct Mode(u32);
+
+pub struct AtomicMode(AtomicU32);
 
 #[derive(Debug)]
 pub struct InodeData {
@@ -97,7 +102,7 @@ pub struct RenameData<'a, 'b> {
 #[allow(unused_variables)]
 pub trait Inode: Send + Sync + InodeInner + Any {
     fn is_dir(&self) -> bool {
-        self.mode.load(Ordering::SeqCst) & S_IFDIR != 0
+        self.mode.load().is_dir()
     }
 
     fn lookup(&self, dentry: &Arc<Dentry>) -> KResult<Option<Arc<dyn Inode>>> {
@@ -181,7 +186,7 @@ pub trait Inode: Send + Sync + InodeInner + Any {
         let vfs = self.vfs.upgrade().expect("Vfs is dropped");
 
         let size = self.size.load(Ordering::Relaxed);
-        let mode = self.mode.load(Ordering::Relaxed);
+        let mode = self.mode.load();
 
         if mask & STATX_NLINK != 0 {
             stat.stx_nlink = self.nlink.load(Ordering::Acquire) as _;
@@ -213,13 +218,13 @@ pub trait Inode: Send + Sync + InodeInner + Any {
 
         stat.stx_mode = 0;
         if mask & STATX_MODE != 0 {
-            stat.stx_mode |= (mode & !S_IFMT) as u16;
+            stat.stx_mode |= mode.non_format_bits() as u16;
             stat.stx_mask |= STATX_MODE;
         }
 
         if mask & STATX_TYPE != 0 {
-            stat.stx_mode |= (mode & S_IFMT) as u16;
-            if s_isblk(mode) || s_ischr(mode) {
+            stat.stx_mode |= mode.format_bits() as u16;
+            if mode.is_blk() || mode.is_chr() {
                 let devid = self.devid();
                 stat.stx_rdev_major = (devid? >> 8) & 0xff;
                 stat.stx_rdev_minor = devid? & 0xff;
@@ -354,3 +359,136 @@ macro_rules! define_struct_inode {
 }
 
 pub(crate) use define_struct_inode;
+
+impl Mode {
+    pub const REG: Self = Self(S_IFREG);
+    pub const DIR: Self = Self(S_IFDIR);
+    pub const LNK: Self = Self(S_IFLNK);
+    pub const BLK: Self = Self(S_IFBLK);
+    pub const CHR: Self = Self(S_IFCHR);
+
+    pub const fn new(bits: u32) -> Self {
+        Self(bits)
+    }
+
+    pub const fn is_blk(&self) -> bool {
+        (self.0 & S_IFMT) == S_IFBLK
+    }
+
+    pub const fn is_chr(&self) -> bool {
+        (self.0 & S_IFMT) == S_IFCHR
+    }
+
+    pub const fn is_reg(&self) -> bool {
+        (self.0 & S_IFMT) == S_IFREG
+    }
+
+    pub const fn is_dir(&self) -> bool {
+        (self.0 & S_IFMT) == S_IFDIR
+    }
+
+    pub const fn is_lnk(&self) -> bool {
+        (self.0 & S_IFMT) == S_IFLNK
+    }
+
+    pub const fn bits(&self) -> u32 {
+        self.0
+    }
+
+    pub const fn format_bits(&self) -> u32 {
+        self.0 & S_IFMT
+    }
+
+    pub const fn format(&self) -> Self {
+        Self::new(self.format_bits())
+    }
+
+    pub const fn non_format_bits(&self) -> u32 {
+        self.0 & !S_IFMT
+    }
+
+    pub const fn non_format(&self) -> Self {
+        Self::new(self.non_format_bits())
+    }
+
+    pub const fn perm(self, perm: u32) -> Self {
+        Self::new((self.0 & !0o777) | (perm & 0o777))
+    }
+
+    pub const fn set_perm(&mut self, perm: u32) {
+        *self = self.perm(perm);
+    }
+
+    pub const fn mask_perm(&mut self, perm_mask: u32) {
+        let perm_mask = perm_mask & 0o777;
+        let self_perm = self.non_format_bits() & 0o777;
+
+        *self = self.perm(self_perm & perm_mask);
+    }
+}
+
+impl AtomicMode {
+    pub const fn new(bits: u32) -> Self {
+        Self(AtomicU32::new(bits))
+    }
+
+    pub const fn from(mode: Mode) -> Self {
+        Self::new(mode.0)
+    }
+
+    pub fn load(&self) -> Mode {
+        Mode(self.0.load(Ordering::Relaxed))
+    }
+
+    pub fn store(&self, mode: Mode) {
+        self.0.store(mode.0, Ordering::Relaxed);
+    }
+}
+
+impl core::fmt::Debug for AtomicMode {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("AtomicMode")
+            .field("bits", &self.load().0)
+            .finish()
+    }
+}
+
+impl core::fmt::Debug for Mode {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let format_name = match self.format() {
+            Mode::REG => "REG",
+            Mode::DIR => "DIR",
+            Mode::LNK => "LNK",
+            Mode::BLK => "BLK",
+            Mode::CHR => "CHR",
+            _ => "UNK",
+        };
+
+        match self.non_format_bits() & !0o777 {
+            0 => write!(
+                f,
+                "Mode({format_name}, {perm:#o})",
+                perm = self.non_format_bits()
+            )?,
+            rem => write!(
+                f,
+                "Mode({format_name}, {perm:#o}, rem={rem:#x})",
+                perm = self.non_format_bits() & 0o777
+            )?,
+        }
+
+        Ok(())
+    }
+}
+
+impl FromSyscallArg for Mode {
+    fn from_arg(value: usize) -> Self {
+        Mode::new(value as u32)
+    }
+}
+
+impl SyscallRetVal for Mode {
+    fn into_retval(self) -> Option<usize> {
+        Some(self.bits() as usize)
+    }
+}

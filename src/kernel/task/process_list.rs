@@ -148,7 +148,7 @@ impl ProcessList {
         if thread.tid == process.pid {
             assert_eq!(thread.tid, process.pid);
 
-            thread.files.close_all();
+            thread.files.close_all().await;
 
             // If we are the session leader, we should drop the control terminal.
             if process.session(self.prove()).sid == process.pid {

@@ -3,16 +3,14 @@ use crate::kernel::constants::{EEXIST, EINVAL, EIO, EISDIR, ENOENT, ENOSYS, ENOT
 use crate::kernel::mem::{CachePage, PageCache, PageCacheBackend};
 use crate::kernel::task::block_on;
 use crate::kernel::timer::Instant;
-use crate::kernel::vfs::inode::InodeData;
 use crate::kernel::vfs::inode::RenameData;
+use crate::kernel::vfs::inode::{AtomicMode, InodeData};
 use crate::{
     io::Buffer,
-    kernel::constants::{S_IFBLK, S_IFCHR, S_IFDIR, S_IFLNK, S_IFREG},
     kernel::vfs::{
         dentry::{dcache, Dentry},
         inode::{define_struct_inode, AtomicIno, Ino, Inode, Mode, WriteOffset},
         mount::{register_filesystem, Mount, MountCreator, MS_RDONLY},
-        s_isblk, s_ischr,
         vfs::Vfs,
         DevId,
     },
@@ -46,7 +44,7 @@ impl NodeInode {
         Self::new_locked(ino, vfs, |inode, _| unsafe {
             addr_of_mut_field!(inode, devid).write(devid);
 
-            addr_of_mut_field!(&mut *inode, mode).write(mode.into());
+            addr_of_mut_field!(&mut *inode, mode).write(AtomicMode::from(mode));
             addr_of_mut_field!(&mut *inode, nlink).write(1.into());
             addr_of_mut_field!(&mut *inode, ctime).write(Spin::new(Instant::now()));
             addr_of_mut_field!(&mut *inode, mtime).write(Spin::new(Instant::now()));
@@ -74,7 +72,8 @@ impl DirectoryInode {
                 .write(Locked::new(vec![(Arc::from(b".".as_slice()), ino)], rwsem));
 
             addr_of_mut_field!(&mut *inode, size).write(1.into());
-            addr_of_mut_field!(&mut *inode, mode).write((S_IFDIR | (mode & 0o777)).into());
+            addr_of_mut_field!(&mut *inode, mode)
+                .write(AtomicMode::from(Mode::DIR.perm(mode.non_format_bits())));
             addr_of_mut_field!(&mut *inode, nlink).write(1.into()); // link from `.` to itself
             addr_of_mut_field!(&mut *inode, ctime).write(Spin::new(Instant::now()));
             addr_of_mut_field!(&mut *inode, mtime).write(Spin::new(Instant::now()));
@@ -108,7 +107,7 @@ impl DirectoryInode {
         _file_lock: ProofMut<()>,
     ) -> KResult<()> {
         // SAFETY: `file_lock` has done the synchronization
-        if file.mode.load(Ordering::Relaxed) & S_IFDIR != 0 {
+        if file.mode.load().is_dir() {
             return Err(EISDIR);
         }
 
@@ -163,7 +162,7 @@ impl Inode for DirectoryInode {
     }
 
     fn mknod(&self, at: &Dentry, mode: Mode, dev: DevId) -> KResult<()> {
-        if !s_ischr(mode) && !s_isblk(mode) {
+        if !mode.is_chr() && !mode.is_blk() {
             return Err(EINVAL);
         }
 
@@ -173,12 +172,7 @@ impl Inode for DirectoryInode {
         let rwsem = block_on(self.rwsem.write());
 
         let ino = vfs.assign_ino();
-        let file = NodeInode::new(
-            ino,
-            self.vfs.clone(),
-            mode & (0o777 | S_IFBLK | S_IFCHR),
-            dev,
-        );
+        let file = NodeInode::new(ino, self.vfs.clone(), mode, dev);
 
         self.link(at.get_name(), file.as_ref(), rwsem.prove_mut());
         at.save_reg(file)
@@ -243,9 +237,8 @@ impl Inode for DirectoryInode {
         let _lock = block_on(self.rwsem.write());
 
         // SAFETY: `rwsem` has done the synchronization
-        let old = self.mode.load(Ordering::Relaxed);
-        self.mode
-            .store((old & !0o777) | (mode & 0o777), Ordering::Relaxed);
+        let old = self.mode.load();
+        self.mode.store(old.perm(mode.non_format_bits()));
         *self.ctime.lock() = Instant::now();
 
         Ok(())
@@ -331,12 +324,10 @@ impl Inode for DirectoryInode {
                 let _new_file_lock = block_on(new_file.rwsem.write());
 
                 // SAFETY: `new_file_lock` has done the synchronization
-                if new_file.mode.load(Ordering::Relaxed) & S_IFDIR != 0 {
-                    return Err(EISDIR);
-                } else {
-                    if old_file.mode.load(Ordering::Relaxed) & S_IFDIR != 0 {
-                        return Err(ENOTDIR);
-                    }
+                match (new_file.mode.load(), old_file.mode.load()) {
+                    (Mode::DIR, _) => return Err(EISDIR),
+                    (_, Mode::DIR) => return Err(ENOTDIR),
+                    _ => {}
                 }
 
                 entries.remove(new_idx);
@@ -393,10 +384,10 @@ impl Inode for DirectoryInode {
                 let new_file = new_file.unwrap();
                 let new_file_lock = block_on(new_file.rwsem.write());
 
-                if old_file.mode.load(Ordering::Relaxed) & S_IFDIR != 0
-                    && new_file.mode.load(Ordering::Relaxed) & S_IFDIR == 0
-                {
-                    return Err(ENOTDIR);
+                match (old_file.mode.load(), new_file.mode.load()) {
+                    (Mode::DIR, Mode::DIR) => {}
+                    (Mode::DIR, _) => return Err(ENOTDIR),
+                    (_, _) => {}
                 }
 
                 // Unlink the old file that was replaced
@@ -442,7 +433,7 @@ impl SymlinkInode {
             let len = target.len();
             addr_of_mut_field!(inode, target).write(target);
 
-            addr_of_mut_field!(&mut *inode, mode).write((S_IFLNK | 0o777).into());
+            addr_of_mut_field!(&mut *inode, mode).write(AtomicMode::from(Mode::LNK.perm(0o777)));
             addr_of_mut_field!(&mut *inode, size).write((len as u64).into());
             addr_of_mut_field!(&mut *inode, ctime).write(Spin::new(Instant::now()));
             addr_of_mut_field!(&mut *inode, mtime).write(Spin::new(Instant::now()));
@@ -482,9 +473,7 @@ impl FileInode {
             pages: PageCache::new(weak_self.clone()),
         });
 
-        inode
-            .mode
-            .store(S_IFREG | (mode & 0o777), Ordering::Relaxed);
+        inode.mode.store(Mode::REG.perm(mode.non_format_bits()));
         inode.nlink.store(1, Ordering::Relaxed);
         inode.size.store(size as u64, Ordering::Relaxed);
         inode
@@ -557,9 +546,8 @@ impl Inode for FileInode {
         let _lock = block_on(self.rwsem.write());
 
         // SAFETY: `rwsem` has done the synchronization
-        let old = self.mode.load(Ordering::Relaxed);
-        self.mode
-            .store((old & !0o777) | (mode & 0o777), Ordering::Relaxed);
+        let old = self.mode.load();
+        self.mode.store(old.perm(mode.non_format_bits()));
         *self.ctime.lock() = Instant::now();
 
         Ok(())
@@ -600,7 +588,7 @@ impl TmpFs {
         });
 
         let weak = Arc::downgrade(&tmpfs);
-        let root_dir = DirectoryInode::new(0, weak, 0o755);
+        let root_dir = DirectoryInode::new(0, weak, Mode::new(0o755));
 
         Ok((tmpfs, root_dir))
     }

@@ -4,10 +4,7 @@ use super::{
     constants::{EEXIST, EIO},
     task::{block_on, ProcessList, Thread},
     terminal::Terminal,
-    vfs::{
-        file::{File, FileType, TerminalFile},
-        DevId,
-    },
+    vfs::{DevId, File, FileType, TerminalFile},
 };
 use crate::{
     io::{Buffer, Stream, StreamRead},
@@ -71,7 +68,7 @@ impl CharDevice {
         }
     }
 
-    pub fn open(self: &Arc<Self>, flags: OpenFlags) -> KResult<Arc<File>> {
+    pub fn open(self: &Arc<Self>, flags: OpenFlags) -> KResult<File> {
         Ok(match &self.device {
             CharDeviceType::Terminal(terminal) => {
                 let procs = block_on(ProcessList::get().read());

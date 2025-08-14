@@ -263,13 +263,19 @@ impl<T> Deref for UserMut<T> {
 
 impl<T> core::fmt::Debug for User<T> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "User({:#x?})", self.0.addr())
+        match self.0 {
+            VAddr::NULL => write!(f, "User(NULL)"),
+            _ => write!(f, "User({:#018x?})", self.0.addr()),
+        }
     }
 }
 
 impl<T> core::fmt::Debug for UserMut<T> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "UserMut({:#x?})", self.0.addr())
+        match self.0 {
+            VAddr::NULL => write!(f, "UserMut(NULL)"),
+            _ => write!(f, "UserMut({:#018x?})", self.0.addr()),
+        }
     }
 }
 

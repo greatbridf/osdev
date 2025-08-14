@@ -1,9 +1,9 @@
 use super::{Dentry, Inode};
 use crate::kernel::constants::ENOENT;
 use crate::kernel::task::block_on;
+use crate::kernel::vfs::inode::Mode;
 use crate::rcu::RCUPointer;
 use crate::{
-    kernel::vfs::{s_isdir, s_islnk},
     prelude::*,
     rcu::{RCUIterator, RCUList},
 };
@@ -57,9 +57,9 @@ pub fn d_try_revalidate(dentry: &Arc<Dentry>) {
 ///
 /// Dentry flags will be determined by the inode's mode.
 pub fn d_save(dentry: &Arc<Dentry>, inode: Arc<dyn Inode>) -> KResult<()> {
-    match inode.mode.load(Ordering::Acquire) {
-        mode if s_isdir(mode) => dentry.save_dir(inode),
-        mode if s_islnk(mode) => dentry.save_symlink(inode),
+    match inode.mode.load().format() {
+        Mode::DIR => dentry.save_dir(inode),
+        Mode::LNK => dentry.save_symlink(inode),
         _ => dentry.save_reg(inode),
     }
 }

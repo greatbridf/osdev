@@ -1,20 +1,19 @@
 use super::{FromSyscallArg, User};
 use crate::io::IntoStream;
 use crate::kernel::constants::{
-    EBADF, EFAULT, EINVAL, ENOENT, ENOSYS, ENOTDIR, SEEK_CUR, SEEK_END, SEEK_SET, S_IFBLK, S_IFCHR,
+    EBADF, EFAULT, EINVAL, ENOENT, ENOSYS, ENOTDIR, SEEK_CUR, SEEK_END, SEEK_SET,
 };
 use crate::kernel::syscall::UserMut;
 use crate::kernel::task::Thread;
 use crate::kernel::timer::sleep;
 use crate::kernel::vfs::filearray::FD;
+use crate::kernel::vfs::inode::Mode;
+use crate::kernel::vfs::{PollEvent, SeekOption};
 use crate::{
     io::{Buffer, BufferFill},
     kernel::{
         user::{CheckedUserPointer, UserBuffer, UserPointer, UserPointerMut, UserString},
-        vfs::{
-            dentry::Dentry,
-            file::{PollEvent, SeekOption},
-        },
+        vfs::dentry::Dentry,
     },
     path::Path,
     prelude::*,
@@ -120,8 +119,12 @@ async fn pwrite64(fd: FD, buffer: User<u8>, count: usize, offset: usize) -> KRes
 }
 
 #[eonix_macros::define_syscall(SYS_OPENAT)]
-async fn openat(dirfd: FD, pathname: User<u8>, flags: OpenFlags, mode: u32) -> KResult<FD> {
+async fn openat(dirfd: FD, pathname: User<u8>, flags: OpenFlags, mut mode: Mode) -> KResult<FD> {
     let dentry = dentry_from(thread, dirfd, pathname, flags.follow_symlink())?;
+
+    let umask = *thread.fs_context.umask.lock();
+    mode.mask_perm(!umask.non_format_bits());
+
     thread.files.open(&dentry, flags, mode)
 }
 
@@ -133,7 +136,7 @@ async fn open(path: User<u8>, flags: OpenFlags, mode: u32) -> KResult<FD> {
 
 #[eonix_macros::define_syscall(SYS_CLOSE)]
 async fn close(fd: FD) -> KResult<()> {
-    thread.files.close(fd)
+    thread.files.close(fd).await
 }
 
 #[eonix_macros::define_syscall(SYS_DUP)]
@@ -149,7 +152,7 @@ async fn dup2(old_fd: FD, new_fd: FD) -> KResult<FD> {
 
 #[eonix_macros::define_syscall(SYS_DUP3)]
 async fn dup3(old_fd: FD, new_fd: FD, flags: OpenFlags) -> KResult<FD> {
-    thread.files.dup_to(old_fd, new_fd, flags)
+    thread.files.dup_to(old_fd, new_fd, flags).await
 }
 
 #[eonix_macros::define_syscall(SYS_PIPE2)]
@@ -254,9 +257,9 @@ async fn statx(
 }
 
 #[eonix_macros::define_syscall(SYS_MKDIRAT)]
-async fn mkdirat(dirfd: FD, pathname: User<u8>, mode: u32) -> KResult<()> {
+async fn mkdirat(dirfd: FD, pathname: User<u8>, mut mode: Mode) -> KResult<()> {
     let umask = *thread.fs_context.umask.lock();
-    let mode = mode & !umask & 0o777;
+    mode.mask_perm(!umask.non_format_bits());
 
     let dentry = dentry_from(thread, dirfd, pathname, true)?;
     dentry.mkdir(mode)
@@ -311,11 +314,15 @@ async fn symlink(target: User<u8>, linkpath: User<u8>) -> KResult<()> {
 }
 
 #[eonix_macros::define_syscall(SYS_MKNODAT)]
-async fn mknodat(dirfd: FD, pathname: User<u8>, mode: u32, dev: u32) -> KResult<()> {
+async fn mknodat(dirfd: FD, pathname: User<u8>, mut mode: Mode, dev: u32) -> KResult<()> {
+    if !mode.is_blk() && !mode.is_chr() {
+        return Err(EINVAL);
+    }
+
     let dentry = dentry_from(thread, dirfd, pathname, true)?;
 
     let umask = *thread.fs_context.umask.lock();
-    let mode = mode & ((!umask & 0o777) | (S_IFBLK | S_IFCHR));
+    mode.mask_perm(!umask.non_format_bits());
 
     dentry.mknod(mode, dev)
 }
@@ -616,7 +623,7 @@ async fn fchownat(
 }
 
 #[eonix_macros::define_syscall(SYS_FCHMODAT)]
-async fn fchmodat(dirfd: FD, pathname: User<u8>, mode: u32, flags: AtFlags) -> KResult<()> {
+async fn fchmodat(dirfd: FD, pathname: User<u8>, mode: Mode, flags: AtFlags) -> KResult<()> {
     let dentry = if flags.at_empty_path() {
         let file = thread.files.get(dirfd).ok_or(EBADF)?;
         file.as_path().ok_or(EBADF)?.clone()
@@ -632,7 +639,7 @@ async fn fchmodat(dirfd: FD, pathname: User<u8>, mode: u32, flags: AtFlags) -> K
 }
 
 #[eonix_macros::define_syscall(SYS_FCHMOD)]
-async fn chmod(pathname: User<u8>, mode: u32) -> KResult<()> {
+async fn chmod(pathname: User<u8>, mode: Mode) -> KResult<()> {
     sys_fchmodat(thread, FD::AT_FDCWD, pathname, mode, AtFlags::empty()).await
 }
 

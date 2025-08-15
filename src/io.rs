@@ -50,6 +50,7 @@ pub trait Buffer: Send {
 }
 
 pub trait Stream: Send {
+    fn total(&self) -> usize;
     fn poll_data<'a>(&mut self, buf: &'a mut [u8]) -> KResult<Option<&'a mut [u8]>>;
     fn ignore(&mut self, len: usize) -> KResult<Option<usize>>;
 }
@@ -282,6 +283,10 @@ impl<'a> ByteStream<'a> {
 }
 
 impl<'a> Stream for ByteStream<'a> {
+    fn total(&self) -> usize {
+        self.data.len()
+    }
+
     fn poll_data<'b>(&mut self, buf: &'b mut [u8]) -> KResult<Option<&'b mut [u8]>> {
         if self.cur >= self.data.len() {
             return Ok(None);

@@ -14,7 +14,7 @@ use crate::{
         vfs::inode::Inode,
         CharDevice,
     },
-    net::socket::Socket,
+    net::socket::{SendMetadata, Socket},
     prelude::*,
     sync::CondVar,
 };
@@ -493,7 +493,7 @@ impl FileType {
             FileType::PipeRead(pipe) => pipe.pipe.read(buffer).await,
             FileType::TTY(tty) => tty.read(buffer).await,
             FileType::CharDev(device) => device.read(buffer),
-            FileType::Socket(socket) => socket.recv(buffer).await,
+            FileType::Socket(socket) => socket.recv(buffer).await.map(|res| res.0),
             _ => Err(EBADF),
         }
     }
@@ -519,7 +519,7 @@ impl FileType {
             FileType::PipeWrite(pipe) => pipe.pipe.write(stream).await,
             FileType::TTY(tty) => tty.write(stream),
             FileType::CharDev(device) => device.write(stream),
-            FileType::Socket(socket) => socket.send(stream).await,
+            FileType::Socket(socket) => socket.send(stream, SendMetadata::default()).await,
             _ => Err(EBADF),
         }
     }

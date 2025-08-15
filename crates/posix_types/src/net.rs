@@ -209,7 +209,7 @@ pub struct MsgHdr {
     /// Pointer to socket address structure
     pub msg_name: usize,
     /// Size of socket address
-    pub msg_namelen: i32,
+    pub msg_namelen: u32,
     /// Scatter/Gather iov array
     pub msg_iov: usize,
     /// The # of elements in msg_iov

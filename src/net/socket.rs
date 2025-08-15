@@ -11,6 +11,23 @@ use eonix_runtime::task::Task;
 use smoltcp::iface::SocketHandle;
 
 pub mod tcp;
+pub mod udp;
+
+#[derive(Clone, Copy, Debug)]
+pub enum SocketType {
+    Tcp,
+    Udp,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SendMetadata {
+    pub remote_addr: Option<SocketAddr>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RecvMetadata {
+    pub remote_addr: SocketAddr,
+}
 
 #[async_trait]
 pub trait Socket: Sync + Send {
@@ -34,9 +51,9 @@ pub trait Socket: Sync + Send {
 
     fn remote_addr(&self) -> Option<SocketAddr>;
 
-    async fn recv(&self, buffer: &mut dyn Buffer) -> KResult<usize>;
+    async fn recv(&self, buffer: &mut dyn Buffer) -> KResult<(usize, RecvMetadata)>;
 
-    async fn send(&self, stream: &mut dyn Stream) -> KResult<usize>;
+    async fn send(&self, stream: &mut dyn Stream, send_meta: SendMetadata) -> KResult<usize>;
 }
 
 pub enum BoundSocket {
@@ -45,12 +62,19 @@ pub enum BoundSocket {
 }
 
 impl BoundSocket {
-    fn new_bind_all(bind_port: u16) -> KResult<Self> {
-        Ok(BoundSocket::BoundAll(BoundAll::new_bind(bind_port)?))
+    fn new_bind_all(bind_port: u16, socket_type: SocketType) -> KResult<Self> {
+        Ok(BoundSocket::BoundAll(BoundAll::new_bind(
+            bind_port,
+            socket_type,
+        )?))
     }
 
-    fn new_bind_single(iface: NetIface, bind_port: u16) -> KResult<(Self, SocketAddr)> {
-        let (single, sock_addr) = BoundSingle::new_bind(iface, bind_port)?;
+    fn new_bind_single(
+        iface: NetIface,
+        bind_port: u16,
+        socket_type: SocketType,
+    ) -> KResult<(Self, SocketAddr)> {
+        let (single, sock_addr) = BoundSingle::new_bind(iface, bind_port, socket_type)?;
         Ok((BoundSocket::BoundSingle(single), sock_addr))
     }
 
@@ -80,16 +104,16 @@ impl BoundSocket {
 struct BoundAll {
     port: u16,
     // FIXME: need support IFACES dyn change
-    sockets: Vec<(BoundSingle, SocketAddr)>,
+    sockets: Vec<BoundSingle>,
 }
 
 impl BoundAll {
-    fn new_bind(bind_port: u16) -> KResult<Self> {
+    fn new_bind(bind_port: u16, socket_type: SocketType) -> KResult<Self> {
         let ifaces_guard = Task::block_on(IFACES.lock());
 
         let mut sockets = Vec::new();
         for iface in ifaces_guard.values() {
-            sockets.push(BoundSingle::new_bind(iface.clone(), bind_port)?);
+            sockets.push(BoundSingle::new_bind(iface.clone(), bind_port, socket_type)?.0);
         }
 
         Ok(Self {
@@ -112,11 +136,15 @@ impl BoundSingle {
         }
     }
 
-    fn new_bind(iface: NetIface, bind_port: u16) -> KResult<(Self, SocketAddr)> {
+    fn new_bind(
+        iface: NetIface,
+        bind_port: u16,
+        socket_type: SocketType,
+    ) -> KResult<(Self, SocketAddr)> {
         let (socket_addr, socket_handle) = {
             let mut iface_guard = Task::block_on(iface.lock());
 
-            iface_guard.bind_tcp_socket(bind_port)?
+            iface_guard.bind_socket(bind_port, socket_type)?
         };
 
         Ok((

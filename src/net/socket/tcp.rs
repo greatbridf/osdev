@@ -9,12 +9,13 @@ use async_trait::async_trait;
 use eonix_runtime::task::Task;
 use eonix_sync::RwLock;
 use smoltcp::socket::tcp;
+use smoltcp::wire::IpListenEndpoint;
 use smoltcp::{iface::SocketHandle, wire::IpEndpoint};
 
 use crate::io::{Buffer, Stream};
 use crate::kernel::constants::{EADDRNOTAVAIL, EAGAIN, ECONNREFUSED, EINVAL, EISCONN, ENOTCONN};
 use crate::net::iface::{get_ephemeral_iface, get_relate_iface, NetIface};
-use crate::net::socket::{BoundSocket, Socket};
+use crate::net::socket::{BoundSocket, RecvMetadata, SendMetadata, Socket, SocketType};
 use crate::prelude::KResult;
 
 pub struct TcpSocket {
@@ -42,12 +43,15 @@ impl TcpSocket {
             .map(|bound_socket| (bound_socket.iface(), bound_socket.handle()))
     }
 
-    fn single_listen(
+    fn listen_impl<T>(
         iface: NetIface,
         socket_handle: SocketHandle,
-        local_addr: SocketAddr,
+        local_endpoint: T,
         backlog: usize,
-    ) -> KResult<()> {
+    ) -> KResult<()>
+    where
+        T: Into<IpListenEndpoint>,
+    {
         let mut iface_guard = Task::block_on(iface.lock());
 
         let socket = iface_guard
@@ -56,11 +60,11 @@ impl TcpSocket {
             .get_mut::<tcp::Socket>(socket_handle);
 
         socket
-            .listen(IpEndpoint::from(local_addr), Some(backlog))
+            .listen(local_endpoint, Some(backlog))
             .map_err(|_| EINVAL)
     }
 
-    fn try_single_accept(
+    fn accept_impl(
         iface: NetIface,
         socket_handle: SocketHandle,
         waker: &Waker,
@@ -105,15 +109,12 @@ impl TcpSocket {
 
         match bound_socket_guard.as_ref().unwrap() {
             BoundSocket::BoundSingle(single) => {
-                Self::try_single_accept(single.iface(), single.handle(), waker)
+                Self::accept_impl(single.iface(), single.handle(), waker)
             }
             BoundSocket::BoundAll(all) => {
-                for (bound_socket, _) in &all.sockets {
-                    let res = Self::try_single_accept(
-                        bound_socket.iface(),
-                        bound_socket.handle(),
-                        waker,
-                    )?;
+                for bound_socket in &all.sockets {
+                    let res =
+                        Self::accept_impl(bound_socket.iface(), bound_socket.handle(), waker)?;
                     if res.is_some() {
                         return Ok(res);
                     }
@@ -123,7 +124,11 @@ impl TcpSocket {
         }
     }
 
-    fn try_recv(&self, buf: &mut dyn Buffer, waker: &Waker) -> KResult<Option<usize>> {
+    fn try_recv(
+        &self,
+        buf: &mut dyn Buffer,
+        waker: &Waker,
+    ) -> KResult<Option<(usize, RecvMetadata)>> {
         let (iface, handle) = self.iface_and_handle().unwrap();
 
         let mut iface_guard = Task::block_on(iface.lock());
@@ -142,7 +147,12 @@ impl TcpSocket {
                     (buf.wrote(), buf.wrote())
                 })
                 .unwrap(); // unwrap() is safe due to the source code logic
-            Ok(Some(len))
+            Ok(Some((
+                len,
+                RecvMetadata {
+                    remote_addr: self.remote_addr().unwrap(),
+                },
+            )))
         } else {
             socket.register_recv_waker(waker);
             Ok(None)
@@ -217,13 +227,16 @@ impl Socket for TcpSocket {
         }
 
         if socket_addr.ip().is_unspecified() {
-            *bound_socket_guard = Some(BoundSocket::new_bind_all(socket_addr.port())?);
+            *bound_socket_guard = Some(BoundSocket::new_bind_all(
+                socket_addr.port(),
+                SocketType::Tcp,
+            )?);
             *Task::block_on(self.local_addr.write()) = Some(socket_addr);
         } else {
             let bind_iface = get_relate_iface(socket_addr.ip()).ok_or(EADDRNOTAVAIL)?;
 
             let (bound_socket, local_addr) =
-                BoundSocket::new_bind_single(bind_iface, socket_addr.port())?;
+                BoundSocket::new_bind_single(bind_iface, socket_addr.port(), SocketType::Tcp)?;
 
             *bound_socket_guard = Some(bound_socket);
             *Task::block_on(self.local_addr.write()) = Some(local_addr);
@@ -244,20 +257,21 @@ impl Socket for TcpSocket {
 
         drop(bound_socket_guard);
 
+        let local_addr = self.local_addr().unwrap();
+
         let bound_socket_guard = Task::block_on(self.bound_socket.read());
 
         match bound_socket_guard.as_ref().unwrap() {
             BoundSocket::BoundAll(all) => {
-                for (item, socket_addr) in &all.sockets {
+                for item in &all.sockets {
                     let (iface, handle) = (item.iface(), item.handle());
-                    Self::single_listen(iface, handle, *socket_addr, backlog)?;
+                    Self::listen_impl(iface, handle, local_addr.port(), backlog)?;
                 }
                 Ok(())
             }
             BoundSocket::BoundSingle(single) => {
                 let (iface, handle) = (single.iface(), single.handle());
-                let local_addr = self.local_addr().unwrap();
-                Self::single_listen(iface, handle, local_addr, backlog)
+                Self::listen_impl(iface, handle, local_addr, backlog)
             }
         }
     }
@@ -267,7 +281,8 @@ impl Socket for TcpSocket {
 
         if bound_socket_guard.is_none() {
             let bind_iface = get_ephemeral_iface(Some(remote_addr.ip()));
-            let (bound_socket, local_addr) = BoundSocket::new_bind_single(bind_iface.unwrap(), 0)?;
+            let (bound_socket, local_addr) =
+                BoundSocket::new_bind_single(bind_iface.unwrap(), 0, SocketType::Tcp)?;
             *bound_socket_guard = Some(bound_socket);
             *Task::block_on(self.local_addr.write()) = Some(local_addr);
         }
@@ -293,6 +308,8 @@ impl Socket for TcpSocket {
             })?;
 
         drop(iface_guard);
+
+        *Task::block_on(self.remote_addr.write()) = Some(remote_addr);
 
         struct ConnectFuture<'a> {
             socket: &'a TcpSocket,
@@ -337,14 +354,14 @@ impl Socket for TcpSocket {
         AcceptFuture { socket: self }.await
     }
 
-    async fn recv(&self, buffer: &mut dyn Buffer) -> KResult<usize> {
+    async fn recv(&self, buffer: &mut dyn Buffer) -> KResult<(usize, RecvMetadata)> {
         struct RecvFuture<'a> {
             socket: &'a TcpSocket,
             buffer: &'a mut dyn Buffer,
         }
 
         impl<'a> Future for RecvFuture<'a> {
-            type Output = KResult<usize>;
+            type Output = KResult<(usize, RecvMetadata)>;
 
             fn poll(self: Pin<&mut Self>, cx: &mut core::task::Context<'_>) -> Poll<Self::Output> {
                 let this = self.get_mut();
@@ -354,14 +371,6 @@ impl Socket for TcpSocket {
                     Ok(None) => Poll::Pending,
                     Err(err) => Poll::Ready(Err(err)),
                 }
-
-                // let ret = this.socket.try_recv(this.buffer, cx.waker());
-                // match ret {
-                //     Ok(Some(res)) => Poll::Ready(Ok(res)),
-                //     Ok(None) if this.socket.is_nonblock => Poll::Ready(Err(EAGAIN)),
-                //     Ok(None) => Poll::Pending,
-                //     Err(err) => Poll::Ready(Err(err)),
-                // }
             }
         }
 
@@ -372,7 +381,7 @@ impl Socket for TcpSocket {
         .await
     }
 
-    async fn send(&self, stream: &mut dyn Stream) -> KResult<usize> {
+    async fn send(&self, stream: &mut dyn Stream, _send_meta: SendMetadata) -> KResult<usize> {
         struct SendFuture<'a> {
             socket: &'a TcpSocket,
             stream: &'a mut dyn Stream,

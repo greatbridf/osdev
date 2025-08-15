@@ -502,6 +502,10 @@ impl UserStream<'_> {
 }
 
 impl Stream for UserStream<'_> {
+    fn total(&self) -> usize {
+        self.len()
+    }
+
     fn poll_data<'a>(&mut self, buf: &'a mut [u8]) -> KResult<Option<&'a mut [u8]>> {
         assert_preempt_enabled!("UserStream::poll_data");
 

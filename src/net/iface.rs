@@ -4,6 +4,7 @@ use crate::driver::virtio::VIRTIO_NET_NAME;
 use crate::kernel::constants::EADDRINUSE;
 use crate::kernel::timer::Instant;
 use crate::net::device::NetDevice;
+use crate::net::socket::SocketType;
 use crate::prelude::KResult;
 
 use alloc::collections::btree_map::BTreeMap;
@@ -15,7 +16,7 @@ use eonix_sync::Mutex;
 use smoltcp::phy::Medium;
 use smoltcp::{
     iface::{Config, Interface, SocketHandle, SocketSet},
-    socket::tcp,
+    socket::{tcp, udp},
     wire::{self, EthernetAddress, Ipv4Cidr},
 };
 
@@ -35,6 +36,11 @@ unsafe impl Send for Iface {}
 
 const IP_LOCAL_PORT_START: u16 = 32768;
 const IP_LOCAL_PORT_END: u16 = 60999;
+
+const TCP_RX_BUF_LEN: usize = 65536;
+const TCP_TX_BUF_LEN: usize = 65536;
+const UDP_RX_BUF_LEN: usize = 65536;
+const UDP_TX_BUF_LEN: usize = 65536;
 
 impl Iface {
     pub fn new(device: NetDevice, ip_cidr: Ipv4Cidr, gateway: Option<Ipv4Addr>) -> Self {
@@ -70,10 +76,23 @@ impl Iface {
     }
 
     fn new_tcp_socket(&mut self) -> SocketHandle {
-        let rx_buffer = tcp::SocketBuffer::new(vec![0; 1024]);
-        let tx_buffer = tcp::SocketBuffer::new(vec![0; 1024]);
+        let rx_buffer = tcp::SocketBuffer::new(vec![0; TCP_RX_BUF_LEN]);
+        let tx_buffer = tcp::SocketBuffer::new(vec![0; TCP_TX_BUF_LEN]);
 
         self.sockets.add(tcp::Socket::new(rx_buffer, tx_buffer))
+    }
+
+    fn new_udp_socket(&mut self) -> SocketHandle {
+        let rx_buffer = udp::PacketBuffer::new(
+            vec![udp::PacketMetadata::EMPTY, udp::PacketMetadata::EMPTY],
+            vec![0; UDP_RX_BUF_LEN],
+        );
+        let tx_buffer = udp::PacketBuffer::new(
+            vec![udp::PacketMetadata::EMPTY, udp::PacketMetadata::EMPTY],
+            vec![0; UDP_TX_BUF_LEN],
+        );
+
+        self.sockets.add(udp::Socket::new(rx_buffer, tx_buffer))
     }
 
     // pub fn remove_tcp_socket(&mut self, socket: &TcpSocket) {
@@ -85,7 +104,11 @@ impl Iface {
     //     }
     // }
 
-    pub fn bind_tcp_socket(&mut self, bind_port: u16) -> KResult<(SocketAddr, SocketHandle)> {
+    pub fn bind_socket(
+        &mut self,
+        bind_port: u16,
+        socket_type: SocketType,
+    ) -> KResult<(SocketAddr, SocketHandle)> {
         if self.used_ports.contains(&bind_port) {
             return Err(EADDRINUSE);
         }
@@ -101,7 +124,10 @@ impl Iface {
             port,
         );
 
-        let socket_handle = self.new_tcp_socket();
+        let socket_handle = match socket_type {
+            SocketType::Tcp => self.new_tcp_socket(),
+            SocketType::Udp => self.new_udp_socket(),
+        };
 
         Ok((socket_addr, socket_handle))
     }
@@ -115,6 +141,10 @@ impl Iface {
             }
         }
         None
+    }
+
+    pub fn ipv4_addr(&self) -> Option<Ipv4Addr> {
+        self.iface_inner.ipv4_addr()
     }
 
     pub fn poll(&mut self) {

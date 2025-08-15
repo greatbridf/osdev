@@ -12,6 +12,8 @@ use crate::kernel::user::UserPointer;
 use crate::kernel::user::UserPointerMut;
 use crate::kernel::vfs::filearray::FD;
 use crate::net::socket::tcp::TcpSocket;
+use crate::net::socket::udp::UdpSocket;
+use crate::net::socket::SendMetadata;
 use crate::prelude::*;
 use bytes::Buf;
 use eonix_runtime::task::Task;
@@ -24,6 +26,7 @@ use posix_types::syscall_no::*;
 
 fn read_socket_addr(addr_ptr: *const CSockAddr, addrlen: usize) -> KResult<SocketAddr> {
     if addrlen > ADDR_MAX_LEN || addrlen < 2 {
+        // println_debug!("here");
         return Err(EINVAL);
     }
 
@@ -72,12 +75,13 @@ fn socket(domain: u32, type_: u32, protocol: u32) -> KResult<FD> {
 
     let socket = match (domain, sock_type) {
         (SockDomain::AF_INET, SockType::SOCK_STREAM) => match protocol {
-            Protocol::IPPROTO_IP | Protocol::IPPROTO_TCP => TcpSocket::new(is_nonblock),
+            Protocol::IPPROTO_IP | Protocol::IPPROTO_TCP => TcpSocket::new(is_nonblock) as _,
             _ => return Err(EAFNOSUPPORT),
         },
-        (SockDomain::AF_INET, SockType::SOCK_DGRAM) => {
-            panic!("unsupported udp now")
-        }
+        (SockDomain::AF_INET, SockType::SOCK_DGRAM) => match protocol {
+            Protocol::IPPROTO_IP | Protocol::IPPROTO_UDP => UdpSocket::new(is_nonblock) as _,
+            _ => return Err(EAFNOSUPPORT),
+        },
         _ => panic!("unsupported socket"),
     };
 
@@ -143,7 +147,7 @@ fn connect(sockfd: FD, sockaddr_ptr: *const CSockAddr, addrlen: u32) -> KResult<
 }
 
 #[eonix_macros::define_syscall(SYS_RECVMSG)]
-fn recvmsg(sockfd: FD, msghdr: *mut MsgHdr, flags: u32) -> KResult<usize> {
+fn recvmsg(sockfd: FD, msghdr_ptr: *mut MsgHdr, flags: u32) -> KResult<usize> {
     let socket = thread
         .files
         .get(sockfd)
@@ -151,7 +155,7 @@ fn recvmsg(sockfd: FD, msghdr: *mut MsgHdr, flags: u32) -> KResult<usize> {
         .get_socket()?
         .ok_or(ENOTSOCK)?;
 
-    let msghdr = UserPointer::new(msghdr)?.read()?;
+    let msghdr = UserPointer::new(msghdr_ptr)?.read()?;
 
     let mut iov_user = UserPointer::new(msghdr.msg_iov as *mut IoVec)?;
     let iov_buffers = (0..msghdr.msg_iovlen)
@@ -169,17 +173,31 @@ fn recvmsg(sockfd: FD, msghdr: *mut MsgHdr, flags: u32) -> KResult<usize> {
         })
         .collect::<KResult<Vec<_>>>()?;
 
+    let mut recv_metadata = None;
     let mut tot = 0usize;
     for mut buffer in iov_buffers.into_iter() {
-        let nread = Task::block_on(socket.recv(&mut buffer))?;
-        tot += nread;
+        let (nread, recv_meta) = Task::block_on(socket.recv(&mut buffer))?;
 
+        if recv_metadata.is_none() {
+            recv_metadata = Some(recv_meta);
+        } else {
+            assert_eq!(recv_metadata, Some(recv_meta));
+        }
+
+        tot += nread;
         if nread != buffer.total() {
             break;
         }
     }
 
-    // FIXME: should write some data to msghdr
+    if msghdr.msg_name != 0 {
+        let addrlen_ptr = unsafe { msghdr_ptr.byte_add(core::mem::size_of::<usize>()) as *mut u32 };
+        write_socket_addr(
+            msghdr.msg_name as _,
+            addrlen_ptr,
+            recv_metadata.unwrap().remote_addr,
+        )?;
+    }
 
     Ok(tot)
 }
@@ -200,9 +218,11 @@ fn recvfrom(
         .get_socket()?
         .ok_or(ENOTSOCK)?;
 
-    let ret = Task::block_on(socket.recv(&mut UserBuffer::new(buf, len)?))?;
+    let (ret, recv_meta) = Task::block_on(socket.recv(&mut UserBuffer::new(buf, len)?))?;
 
-    // FIXME: should write some data to srcaddr and addrlen
+    if srcaddr_ptr as usize != 0 {
+        write_socket_addr(srcaddr_ptr, addrlen_ptr, recv_meta.remote_addr)?;
+    }
 
     Ok(ret)
 }
@@ -237,11 +257,18 @@ fn sendmsg(sockfd: FD, msghdr: *const MsgHdr, flags: u32) -> KResult<usize> {
         })
         .collect::<KResult<Vec<_>>>()?;
 
-    // FIXME: Ignore lot of message in msghdr
+    let remote_addr = if msghdr.msg_namelen == 0 {
+        None
+    } else {
+        Some(read_socket_addr(
+            msghdr.msg_name as _,
+            msghdr.msg_namelen as usize,
+        )?)
+    };
 
     let mut tot = 0usize;
     for mut stream in iov_streams.into_iter() {
-        let nread = Task::block_on(socket.send(&mut stream))?;
+        let nread = Task::block_on(socket.send(&mut stream, SendMetadata { remote_addr }))?;
         tot += nread;
 
         if nread == 0 || !stream.is_drained() {
@@ -268,10 +295,14 @@ fn sendto(
         .get_socket()?
         .ok_or(ENOTSOCK)?;
 
-    // FIXME: because tcp need to connect first, ignore to read dstaddr
+    let remote_addr = if addrlen == 0 {
+        None
+    } else {
+        Some(read_socket_addr(dstaddr_ptr, addrlen as usize)?)
+    };
 
     let mut user_stream = CheckedUserPointer::new(buf, len).map(|ptr| ptr.into_stream())?;
-    Task::block_on(socket.send(&mut user_stream))
+    Task::block_on(socket.send(&mut user_stream, SendMetadata { remote_addr }))
 }
 
 pub fn keep_alive() {}

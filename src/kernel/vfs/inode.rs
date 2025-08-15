@@ -96,6 +96,10 @@ pub struct RenameData<'a, 'b> {
 
 #[allow(unused_variables)]
 pub trait Inode: Send + Sync + InodeInner + Any {
+    fn file_size(&self) -> usize {
+        self.size.load(Ordering::Relaxed) as usize
+    }
+
     fn is_dir(&self) -> bool {
         self.mode.load(Ordering::SeqCst) & S_IFDIR != 0
     }
@@ -136,7 +140,7 @@ pub trait Inode: Send + Sync + InodeInner + Any {
         Err(if self.is_dir() { EISDIR } else { EINVAL })
     }
 
-    fn write_direct(&self, stream: &mut dyn Stream, offset: WriteOffset) -> KResult<usize> {
+    fn write_direct(&self, stream: &mut dyn Stream, offset: usize) -> KResult<usize> {
         Err(if self.is_dir() { EISDIR } else { EINVAL })
     }
 

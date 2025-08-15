@@ -1,6 +1,6 @@
 use crate::io::Stream;
 use crate::kernel::constants::{EEXIST, EINVAL, EIO, EISDIR, ENOENT, ENOSYS, ENOTDIR};
-use crate::kernel::mem::{CachePage, PageCache, PageCacheBackend};
+use crate::kernel::mem::{CachePage, CachePageStream, PageCache, PageCacheBackend};
 use crate::kernel::timer::Instant;
 use crate::kernel::vfs::inode::InodeData;
 use crate::kernel::vfs::inode::RenameData;
@@ -496,7 +496,7 @@ impl PageCacheBackend for FileInode {
         Ok(PAGE_SIZE)
     }
 
-    fn write_page(&self, _page: &CachePage, _offset: usize) -> KResult<usize> {
+    fn write_page(&self, _page: &mut CachePageStream, _offset: usize) -> KResult<usize> {
         Ok(PAGE_SIZE)
     }
 
@@ -511,13 +511,13 @@ impl Inode for FileInode {
     }
 
     fn read(&self, buffer: &mut dyn Buffer, offset: usize) -> KResult<usize> {
-        let lock = Task::block_on(self.rwsem.write());
+        let _lock = Task::block_on(self.rwsem.write());
         Task::block_on(self.pages.read(buffer, offset))
     }
 
     fn write(&self, stream: &mut dyn Stream, offset: WriteOffset) -> KResult<usize> {
         // TODO: We don't need that strong guarantee, find some way to avoid locks
-        let lock = Task::block_on(self.rwsem.write());
+        let _lock = Task::block_on(self.rwsem.write());
 
         let mut store_new_end = None;
         let offset = match offset {
@@ -545,7 +545,7 @@ impl Inode for FileInode {
     }
 
     fn truncate(&self, length: usize) -> KResult<()> {
-        let lock = Task::block_on(self.rwsem.write());
+        let _lock = Task::block_on(self.rwsem.write());
         Task::block_on(self.pages.resize(length))?;
         self.size.store(length as u64, Ordering::Relaxed);
         *self.mtime.lock() = Instant::now();

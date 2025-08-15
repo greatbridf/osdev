@@ -11,6 +11,7 @@ use crate::{
         task::Thread,
         terminal::{Terminal, TerminalIORequest},
         user::{UserPointer, UserPointerMut},
+        vfs::inode::Ino,
         vfs::inode::Inode,
         CharDevice,
     },
@@ -334,7 +335,7 @@ impl InodeFile {
         Ok(new_cursor)
     }
 
-    fn write(&self, stream: &mut dyn Stream, offset: Option<usize>) -> KResult<usize> {
+    fn write(&self, stream: &mut dyn Stream) -> KResult<usize> {
         if !self.write {
             return Err(EBADF);
         }
@@ -346,35 +347,47 @@ impl InodeFile {
 
             Ok(nwrote)
         } else {
-            let nwrote = if let Some(offset) = offset {
-                self.dentry.write(stream, WriteOffset::Position(offset))?
-            } else {
-                let nwrote = self.dentry.write(stream, WriteOffset::Position(*cursor))?;
-                *cursor += nwrote;
-                nwrote
-            };
+            let nwrote = self.dentry.write(stream, WriteOffset::Position(*cursor))?;
 
+            *cursor += nwrote;
             Ok(nwrote)
         }
     }
 
-    fn read(&self, buffer: &mut dyn Buffer, offset: Option<usize>) -> KResult<usize> {
+    fn write_at(&self, stream: &mut dyn Stream, offset: usize) -> KResult<usize> {
+        if !self.write {
+            return Err(EBADF);
+        }
+
+        let nwrote = self.dentry.write(stream, WriteOffset::Position(offset))?;
+        Ok(nwrote)
+    }
+
+    fn read(&self, buffer: &mut dyn Buffer) -> KResult<usize> {
+        if self.size() == 0 {
+            return Ok(0);
+        }
         if !self.read {
             return Err(EBADF);
         }
 
-        let nread = if let Some(offset) = offset {
-            let nread = self.dentry.read(buffer, offset)?;
-            nread
-        } else {
-            let mut cursor = Task::block_on(self.cursor.lock());
+        let mut cursor = Task::block_on(self.cursor.lock());
+        let nread = self.dentry.read(buffer, *cursor)?;
 
-            let nread = self.dentry.read(buffer, *cursor)?;
+        *cursor += nread;
+        Ok(nread)
+    }
 
-            *cursor += nread;
-            nread
-        };
+    // TODO: error handle
+    fn read_at(&self, buffer: &mut dyn Buffer, offset: usize) -> KResult<usize> {
+        if self.size() == 0 {
+            return Ok(0);
+        }
+        if !self.read {
+            return Err(EBADF);
+        }
 
+        let nread = self.dentry.read(buffer, offset)?;
         Ok(nread)
     }
 
@@ -436,6 +449,14 @@ impl InodeFile {
         *cursor += nread;
         Ok(())
     }
+
+    fn size(&self) -> usize {
+        self.dentry.size()
+    }
+
+    fn truncate(&self, new_size: usize) -> KResult<()> {
+        self.dentry.truncate(new_size)
+    }
 }
 
 impl TerminalFile {
@@ -478,12 +499,19 @@ impl TerminalFile {
 }
 
 impl FileType {
-    pub async fn read(&self, buffer: &mut dyn Buffer, offset: Option<usize>) -> KResult<usize> {
+    pub async fn read(&self, buffer: &mut dyn Buffer) -> KResult<usize> {
         match self {
-            FileType::Inode(inode) => inode.read(buffer, offset),
+            FileType::Inode(inode) => inode.read(buffer),
             FileType::PipeRead(pipe) => pipe.pipe.read(buffer).await,
             FileType::TTY(tty) => tty.read(buffer).await,
             FileType::CharDev(device) => device.read(buffer),
+            _ => Err(EBADF),
+        }
+    }
+
+    pub fn read_at(&self, buffer: &mut dyn Buffer, offset: usize) -> KResult<usize> {
+        match self {
+            FileType::Inode(inode) => inode.read_at(buffer, offset),
             _ => Err(EBADF),
         }
     }
@@ -503,12 +531,19 @@ impl FileType {
     //     }
     // }
 
-    pub async fn write(&self, stream: &mut dyn Stream, offset: Option<usize>) -> KResult<usize> {
+    pub async fn write(&self, stream: &mut dyn Stream) -> KResult<usize> {
         match self {
-            FileType::Inode(inode) => inode.write(stream, offset),
+            FileType::Inode(inode) => inode.write(stream),
             FileType::PipeWrite(pipe) => pipe.pipe.write(stream).await,
             FileType::TTY(tty) => tty.write(stream),
             FileType::CharDev(device) => device.write(stream),
+            _ => Err(EBADF),
+        }
+    }
+
+    pub fn write_at(&self, stream: &mut dyn Stream, offset: usize) -> KResult<usize> {
+        match self {
+            FileType::Inode(inode) => inode.write_at(stream, offset),
             _ => Err(EBADF),
         }
     }
@@ -517,6 +552,20 @@ impl FileType {
         match self {
             FileType::Inode(inode) => inode.seek(option),
             _ => Err(ESPIPE),
+        }
+    }
+
+    pub fn size(&self) -> KResult<usize> {
+        match self {
+            FileType::Inode(inode) => Ok(inode.size()),
+            _ => Err(EINVAL),
+        }
+    }
+
+    pub fn truncate(&self, new_size: usize) -> KResult<()> {
+        match self {
+            FileType::Inode(inode) => inode.truncate(new_size),
+            _ => Err(EINVAL),
         }
     }
 
@@ -549,16 +598,12 @@ impl FileType {
             if Thread::current().signal_list.has_pending_signal() {
                 return if cur == 0 { Err(EINTR) } else { Ok(cur) };
             }
-            let nread = self
-                .read(&mut ByteBuffer::new(&mut buffer[..len]), None)
-                .await?;
+            let nread = self.read(&mut ByteBuffer::new(&mut buffer[..len])).await?;
             if nread == 0 {
                 break;
             }
 
-            let nwrote = dest_file
-                .write(&mut buffer[..nread].into_stream(), None)
-                .await?;
+            let nwrote = dest_file.write(&mut buffer[..nread].into_stream()).await?;
             nsent += nwrote;
 
             if nwrote != len {

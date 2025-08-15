@@ -3,7 +3,7 @@ mod file;
 
 use crate::io::Stream;
 use crate::kernel::constants::EIO;
-use crate::kernel::mem::AsMemoryBlock;
+use crate::kernel::mem::{AsMemoryBlock, CachePageStream};
 use crate::kernel::vfs::inode::WriteOffset;
 use crate::{
     io::{Buffer, ByteBuffer, UninitBuffer},
@@ -308,11 +308,11 @@ impl Inode for FileInode {
         Ok(buffer.wrote())
     }
 
-    fn write(&self, stream: &mut dyn Stream, offset: WriteOffset) -> KResult<usize> {
+    fn write(&self, _stream: &mut dyn Stream, _offset: WriteOffset) -> KResult<usize> {
         todo!()
     }
 
-    fn write_direct(&self, stream: &mut dyn Stream, offset: WriteOffset) -> KResult<usize> {
+    fn write_direct(&self, _stream: &mut dyn Stream, _offset: usize) -> KResult<usize> {
         todo!()
     }
 }
@@ -322,7 +322,7 @@ impl PageCacheBackend for FileInode {
         self.read_direct(page, offset)
     }
 
-    fn write_page(&self, page: &CachePage, offset: usize) -> KResult<usize> {
+    fn write_page(&self, _page: &mut CachePageStream, _offset: usize) -> KResult<usize> {
         todo!()
     }
 

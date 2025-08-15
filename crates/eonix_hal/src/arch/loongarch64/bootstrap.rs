@@ -42,9 +42,9 @@ struct PageTable([u64; 512]);
 #[unsafe(link_section = ".bootstrap.page_table.1")]
 static BOOT_PAGE_TABLE: PageTable = {
     let mut arr = [0; 512];
-    arr[0] = 0 | 0x11d3; // G | W | P | H | Cached | D | V
-    arr[510] = 0 | 0x11d3; // G | W | P | H | Cached | D | V
-    arr[511] = 0x8000_2000 | (1 << 60); // PT1, PT
+    arr[0] = 0x8000_2000 | (1 << 60);
+    arr[510] = 0x8000_2000 | (1 << 60);
+    arr[511] = 0x8000_3000 | (1 << 60);
 
     PageTable(arr)
 };
@@ -52,6 +52,19 @@ static BOOT_PAGE_TABLE: PageTable = {
 #[unsafe(link_section = ".bootstrap.page_table.2")]
 #[used]
 static PT1: PageTable = {
+    let mut arr: [u64; 512] = [0; 512];
+    let mut i: usize = 0;
+    while i < 512 {
+        arr[i] = (i as u64 * 0x4000_0000) | 0x11d3;
+        i += 1;
+    }
+
+    PageTable(arr)
+};
+
+#[unsafe(link_section = ".bootstrap.page_table.3")]
+#[used]
+static PT2: PageTable = {
     let mut arr = [0; 512];
     arr[510] = 0x8000_0000 | 0x11d3; // G | W | P | H | Cached | D | V
 

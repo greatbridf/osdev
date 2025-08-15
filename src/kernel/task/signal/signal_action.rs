@@ -3,6 +3,7 @@ use crate::{
     io::BufferFill as _,
     kernel::{
         constants::{EFAULT, EINVAL},
+        syscall::UserMut,
         user::UserBuffer,
     },
 };
@@ -152,7 +153,7 @@ impl SignalAction {
         let saved_data_addr = (current_sp - SAVED_DATA_SIZE).floor_to(16);
 
         let mut saved_data_buffer =
-            UserBuffer::new(saved_data_addr.addr() as *mut u8, SAVED_DATA_SIZE)?;
+            UserBuffer::new(UserMut::new(saved_data_addr), SAVED_DATA_SIZE)?;
 
         saved_data_buffer.copy(trap_ctx)?.ok_or(EFAULT)?;
         saved_data_buffer.copy(fpu_state)?.ok_or(EFAULT)?;
@@ -200,7 +201,7 @@ impl SignalAction {
             Some(return_address),
             &[Long::new_val(signal.into_raw() as _).get()],
             |vaddr, data| -> Result<(), u32> {
-                let mut buffer = UserBuffer::new(vaddr.addr() as *mut u8, data.len())?;
+                let mut buffer = UserBuffer::new(UserMut::new(vaddr), data.len())?;
                 for ch in data.iter() {
                     buffer.copy(&ch)?.ok_or(EFAULT)?;
                 }

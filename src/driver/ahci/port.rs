@@ -9,11 +9,11 @@ use crate::kernel::block::{BlockDeviceRequest, BlockRequestQueue};
 use crate::kernel::constants::{EINVAL, EIO};
 use crate::kernel::mem::paging::Page;
 use crate::kernel::mem::AsMemoryBlock as _;
+use crate::kernel::task::block_on;
 use crate::prelude::*;
 use alloc::collections::vec_deque::VecDeque;
 use core::pin::pin;
 use eonix_mm::address::{Addr as _, PAddr};
-use eonix_runtime::task::Task;
 use eonix_sync::{SpinIrq as _, WaitList};
 
 /// An `AdapterPort` is an HBA device in AHCI mode.
@@ -156,7 +156,7 @@ impl AdapterPort<'_> {
             wait.as_mut().add_to_wait_list();
             drop(free_list);
 
-            Task::block_on(wait);
+            block_on(wait);
         }
     }
 
@@ -222,7 +222,7 @@ impl AdapterPort<'_> {
 
         self.stats.inc_cmd_sent();
 
-        if let Err(_) = Task::block_on(slot.wait_finish()) {
+        if let Err(_) = block_on(slot.wait_finish()) {
             self.stats.inc_cmd_error();
             return Err(EIO);
         };

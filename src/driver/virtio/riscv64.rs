@@ -1,23 +1,17 @@
 use super::virtio_blk::HAL;
 use crate::kernel::{
     block::{make_device, BlockDevice},
-    mem::{AsMemoryBlock, MemoryBlock, Page},
+    task::block_on,
 };
 use alloc::{sync::Arc, vec::Vec};
-use core::num::NonZero;
 use eonix_hal::arch_exported::fdt::FDT;
 use eonix_hal::mm::ArchPhysAccess;
 use eonix_log::{println_info, println_warn};
-use eonix_mm::{
-    address::{Addr, PAddr, PhysAccess},
-    paging::PFN,
-};
-use eonix_runtime::task::Task;
+use eonix_mm::address::{PAddr, PhysAccess};
 use eonix_sync::Spin;
 use virtio_drivers::{
     device::blk::VirtIOBlk,
     transport::{mmio::MmioTransport, Transport},
-    Hal,
 };
 
 pub fn init() {
@@ -55,7 +49,7 @@ pub fn init() {
                     )
                     .expect("Failed to register VirtIO Block device");
 
-                    Task::block_on(block_device.partprobe())
+                    block_on(block_device.partprobe())
                         .expect("Failed to probe partitions for VirtIO Block device");
 
                     disk_id += 1;

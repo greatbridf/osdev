@@ -1,6 +1,7 @@
 use core::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
 use crate::kernel::mem::{PageCache, PageCacheBackend};
+use crate::kernel::task::block_on;
 use crate::{
     io::{Buffer, ByteBuffer},
     kernel::{
@@ -24,7 +25,6 @@ use alloc::{
     collections::btree_map::{BTreeMap, Entry},
     sync::Arc,
 };
-use eonix_runtime::task::Task;
 use eonix_sync::RwLock;
 use ext4_rs::{BlockDevice as Ext4BlockDeviceTrait, Ext4Error};
 use ext4_rs::{Errno, Ext4};
@@ -126,7 +126,7 @@ impl Ext4Fs {
         });
 
         let root_inode = {
-            let mut icache = Task::block_on(ext4fs.icache.write());
+            let mut icache = block_on(ext4fs.icache.write());
             let root_inode = ext4fs.inner.get_inode_ref(2);
 
             ext4fs.get_or_insert(
@@ -216,7 +216,7 @@ impl Inode for FileInode {
     }
 
     fn read(&self, buffer: &mut dyn Buffer, offset: usize) -> KResult<usize> {
-        Task::block_on(self.page_cache.read(buffer, offset))
+        block_on(self.page_cache.read(buffer, offset))
     }
 
     fn read_direct(&self, buffer: &mut dyn Buffer, offset: usize) -> KResult<usize> {
@@ -251,8 +251,7 @@ impl Inode for DirInode {
         };
 
         // Fast path: if the inode is already in the cache, return it.
-        if let Some(inode) = ext4fs.try_get(&Task::block_on(ext4fs.icache.read()), attr.ino as u64)
-        {
+        if let Some(inode) = ext4fs.try_get(&block_on(ext4fs.icache.read()), attr.ino as u64) {
             return Ok(Some(inode));
         }
 
@@ -261,7 +260,7 @@ impl Inode for DirInode {
         let real_perm = extra_perm | perm | perm >> 3 | perm >> 6;
 
         // Create a new inode based on the attributes.
-        let mut icache = Task::block_on(ext4fs.icache.write());
+        let mut icache = block_on(ext4fs.icache.write());
         let inode = ext4fs.get_or_insert(
             &mut icache,
             InodeData {

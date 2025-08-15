@@ -1,5 +1,6 @@
 use super::{Dentry, Inode};
 use crate::kernel::constants::ENOENT;
+use crate::kernel::task::block_on;
 use crate::rcu::RCUPointer;
 use crate::{
     kernel::vfs::{s_isdir, s_islnk},
@@ -8,7 +9,6 @@ use crate::{
 };
 use alloc::sync::Arc;
 use core::sync::atomic::Ordering;
-use eonix_runtime::task::Task;
 use eonix_sync::Mutex;
 
 const DCACHE_HASH_BITS: u32 = 8;
@@ -42,7 +42,7 @@ pub fn d_find_fast(dentry: &Dentry) -> Option<Arc<Dentry>> {
 ///
 /// Silently fail without any side effects
 pub fn d_try_revalidate(dentry: &Arc<Dentry>) {
-    let _lock = Task::block_on(D_EXCHANGE_LOCK.lock());
+    let _lock = block_on(D_EXCHANGE_LOCK.lock());
 
     (|| -> KResult<()> {
         let parent = dentry.parent().get_inode()?;

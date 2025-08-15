@@ -48,21 +48,6 @@ enum BlockDeviceType {
     },
 }
 
-#[derive(Debug, Clone)]
-pub enum FileSystemType {
-    Ext4,
-    Fat32,
-}
-
-impl FileSystemType {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            FileSystemType::Ext4 => "ext4",
-            FileSystemType::Fat32 => "fat32",
-        }
-    }
-}
-
 pub struct BlockDevice {
     /// Unique device identifier, major and minor numbers
     devid: DevId,

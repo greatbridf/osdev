@@ -87,14 +87,14 @@ impl Session {
     ) -> KResult<()> {
         let mut job_control = self.job_control.write().await;
         if let Some(_) = job_control.control_terminal.as_ref() {
-            if let Some(session) = terminal.session().as_ref() {
+            if let Some(session) = terminal.session().await.as_ref() {
                 if session.sid == self.sid {
                     return Ok(());
                 }
             }
             return Err(EPERM);
         }
-        terminal.set_session(self, forced)?;
+        terminal.set_session(self, forced).await?;
         job_control.control_terminal = Some(terminal.clone());
         job_control.foreground = Arc::downgrade(&Thread::current().process.pgroup(procs));
         Ok(())

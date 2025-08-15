@@ -3,14 +3,14 @@ mod io;
 use crate::{
     kernel::{
         block::make_device, console::set_console, constants::EIO, interrupt::register_irq_handler,
-        task::KernelStack, CharDevice, CharDeviceType, Terminal, TerminalDevice,
+        CharDevice, CharDeviceType, Terminal, TerminalDevice,
     },
     prelude::*,
 };
 use alloc::{collections::vec_deque::VecDeque, format, sync::Arc};
 use bitflags::bitflags;
 use core::pin::pin;
-use eonix_runtime::{run::FutureRun, scheduler::Scheduler};
+use eonix_runtime::scheduler::RUNTIME;
 use eonix_sync::{SpinIrq as _, WaitList};
 use io::SerialIO;
 
@@ -161,7 +161,7 @@ impl Serial {
             })?;
         }
 
-        Scheduler::get().spawn::<KernelStack, _>(FutureRun::new(Self::worker(port.clone())));
+        RUNTIME.spawn(Self::worker(port.clone()));
 
         let _ = set_console(terminal.clone());
         eonix_log::set_console(terminal.clone());

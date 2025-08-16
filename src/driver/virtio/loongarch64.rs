@@ -1,4 +1,4 @@
-use super::virtio_blk::HAL;
+use crate::driver::virtio::hal::HAL;
 use crate::kernel::{
     block::{make_device, BlockDevice},
     constants::EIO,

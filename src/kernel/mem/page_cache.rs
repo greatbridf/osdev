@@ -26,6 +26,8 @@ unsafe impl Sync for PageCache {}
 #[derive(Clone, Copy)]
 pub struct CachePage(RawPagePtr);
 
+unsafe impl Send for CachePage {}
+
 impl Buffer for CachePage {
     fn total(&self) -> usize {
         PAGE_SIZE

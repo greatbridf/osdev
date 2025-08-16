@@ -1,7 +1,7 @@
 use bitflags::bitflags;
 
 bitflags! {
-    #[derive(Debug, Clone, Copy)]
+    #[derive(Debug, Clone, Copy, Default)]
     pub struct OpenFlags: u32 {
         /// Open for writing only
         const O_WRONLY = 0x1;
@@ -25,13 +25,13 @@ bitflags! {
         const O_CLOEXEC = 0x80000;
     }
 
-    #[derive(Debug, Clone, Copy)]
+    #[derive(Debug, Clone, Copy, Default)]
     pub struct FDFlags: u32 {
         /// Close on exec
         const FD_CLOEXEC = 0x1;
     }
 
-    #[derive(Debug, Clone, Copy)]
+    #[derive(Debug, Clone, Copy, Default)]
     pub struct AtFlags: u32 {
         /// Do not follow symbolic links
         const AT_SYMLINK_NOFOLLOW = 0x100;

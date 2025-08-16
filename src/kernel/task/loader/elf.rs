@@ -124,7 +124,7 @@ impl_elf_addr!(u32);
 impl_elf_addr!(u64);
 
 pub trait ElfArch {
-    type Ea: ElfAddr + Clone + Copy;
+    type Ea: ElfAddr + Clone + Copy + Send;
     type Ph: ProgramHeader + Clone + Copy + Default;
 
     const DYN_BASE_ADDR: usize;

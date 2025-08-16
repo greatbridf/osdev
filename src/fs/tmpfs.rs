@@ -1,6 +1,6 @@
 use crate::io::Stream;
 use crate::kernel::constants::{EEXIST, EINVAL, EIO, EISDIR, ENOENT, ENOSYS, ENOTDIR};
-use crate::kernel::mem::{CachePage, PageCache, PageCacheBackend};
+use crate::kernel::mem::{CachePage, CachePageStream, PageCache, PageCacheBackend};
 use crate::kernel::task::block_on;
 use crate::kernel::timer::Instant;
 use crate::kernel::vfs::inode::RenameData;
@@ -485,7 +485,7 @@ impl PageCacheBackend for FileInode {
         Ok(PAGE_SIZE)
     }
 
-    fn write_page(&self, _page: &CachePage, _offset: usize) -> KResult<usize> {
+    fn write_page(&self, _page: &mut CachePageStream, _offset: usize) -> KResult<usize> {
         Ok(PAGE_SIZE)
     }
 

@@ -1,17 +1,20 @@
 use core::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
-use crate::kernel::mem::{PageCache, PageCacheBackend};
+use crate::kernel::mem::{CachePage, CachePageStream, PageCache, PageCacheBackend};
 use crate::kernel::task::block_on;
+use crate::kernel::timer::Ticks;
 use crate::kernel::vfs::inode::{AtomicMode, Mode};
 use crate::{
-    io::{Buffer, ByteBuffer},
+    io::{Buffer, ByteBuffer, Stream},
     kernel::{
         block::BlockDevice,
-        constants::EIO,
+        constants::{EEXIST, EINVAL, EIO, ENOSYS},
         timer::Instant,
         vfs::{
-            dentry::Dentry,
-            inode::{define_struct_inode, AtomicNlink, Ino, Inode, InodeData},
+            dentry::{dcache, Dentry},
+            inode::{
+                define_struct_inode, AtomicNlink, Ino, Inode, InodeData, RenameData, WriteOffset,
+            },
             mount::{register_filesystem, Mount, MountCreator},
             vfs::Vfs,
             DevId, FsContext,
@@ -25,9 +28,10 @@ use alloc::{
     collections::btree_map::{BTreeMap, Entry},
     sync::Arc,
 };
+use another_ext4::{
+    Block, BlockDevice as Ext4BlockDeviceTrait, Ext4, FileType, InodeMode, PBlockId,
+};
 use eonix_sync::RwLock;
-use ext4_rs::{BlockDevice as Ext4BlockDeviceTrait, Ext4Error};
-use ext4_rs::{Errno, Ext4};
 
 pub struct Ext4BlockDevice {
     device: Arc<BlockDevice>,
@@ -40,20 +44,25 @@ impl Ext4BlockDevice {
 }
 
 impl Ext4BlockDeviceTrait for Ext4BlockDevice {
-    fn read_offset(&self, offset: usize) -> Vec<u8> {
-        let mut buffer = vec![0u8; 4096];
+    fn read_block(&self, block_id: PBlockId) -> Block {
+        let mut buffer = [0u8; 4096];
         let mut byte_buffer = ByteBuffer::new(buffer.as_mut_slice());
 
         let _ = self
             .device
-            .read_some(offset, &mut byte_buffer)
+            .read_some((block_id as usize) * 4096, &mut byte_buffer)
             .expect("Failed to read from block device");
 
-        buffer
+        Block {
+            id: block_id,
+            data: buffer,
+        }
     }
 
-    fn write_offset(&self, _offset: usize, _data: &[u8]) {
-        todo!()
+    fn write_block(&self, block: &another_ext4::Block) {
+        let _ = self
+            .device
+            .write_some((block.id as usize) * 4096, &block.data);
     }
 }
 
@@ -74,13 +83,50 @@ impl Vfs for Ext4Fs {
     }
 
     fn is_read_only(&self) -> bool {
-        true
+        false
     }
 }
 
 impl Ext4Fs {
     fn try_get(&self, icache: &BTreeMap<Ino, Ext4Inode>, ino: u64) -> Option<Arc<dyn Inode>> {
         icache.get(&ino).cloned().map(Ext4Inode::into_inner)
+    }
+
+    fn modify_inode_stat(&self, ino: u32, size: Option<u64>, mtime: u32) {
+        let _ = self
+            .inner
+            .setattr(ino, None, None, None, size, None, Some(mtime), None, None);
+    }
+
+    fn create_inode_stat(&self, parent: u32, child: u32, mtime: u32) {
+        let _ = self.inner.setattr(
+            parent,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(mtime),
+            None,
+            None,
+        );
+        let _ = self
+            .inner
+            .setattr(child, None, None, None, None, None, Some(mtime), None, None);
+    }
+
+    fn chmod_stat(&self, ino: u32, new_mode: u16, ctime: u32) {
+        let _ = self.inner.setattr(
+            ino,
+            Some(InodeMode::from_bits_retain(new_mode.try_into().unwrap())),
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(ctime),
+            None,
+        );
     }
 
     fn get_or_insert(
@@ -92,7 +138,7 @@ impl Ext4Fs {
             Entry::Occupied(occupied) => occupied.get().clone().into_inner(),
             Entry::Vacant(vacant) => match idata.mode.load().format() {
                 Mode::REG => vacant
-                    .insert(Ext4Inode::File(FileInode::new(idata)))
+                    .insert(Ext4Inode::File(FileInode::with_idata(idata)))
                     .clone()
                     .into_inner(),
                 Mode::DIR => vacant
@@ -102,7 +148,7 @@ impl Ext4Fs {
                 mode => {
                     println_warn!("ext4: Unsupported inode type: {:#o}", mode.format_bits());
                     vacant
-                        .insert(Ext4Inode::File(FileInode::new(idata)))
+                        .insert(Ext4Inode::File(FileInode::with_idata(idata)))
                         .clone()
                         .into_inner()
                 }
@@ -114,7 +160,7 @@ impl Ext4Fs {
 impl Ext4Fs {
     pub fn create(device: Arc<BlockDevice>) -> KResult<(Arc<Self>, Arc<dyn Inode>)> {
         let ext4_device = Ext4BlockDevice::new(device.clone());
-        let ext4 = Ext4::open(Arc::new(ext4_device));
+        let ext4 = Ext4::load(Arc::new(ext4_device)).unwrap();
 
         let ext4fs = Arc::new(Self {
             inner: ext4,
@@ -124,28 +170,28 @@ impl Ext4Fs {
 
         let root_inode = {
             let mut icache = block_on(ext4fs.icache.write());
-            let root_inode = ext4fs.inner.get_inode_ref(2);
+            let root_inode = ext4fs.inner.read_root_inode();
 
             ext4fs.get_or_insert(
                 &mut icache,
                 InodeData {
-                    ino: root_inode.inode_num as Ino,
+                    ino: root_inode.id as Ino,
                     size: AtomicU64::new(root_inode.inode.size()),
-                    nlink: AtomicNlink::new(root_inode.inode.links_count() as _),
+                    nlink: AtomicNlink::new(root_inode.inode.link_count() as _),
                     uid: AtomicU32::new(root_inode.inode.uid() as _),
                     gid: AtomicU32::new(root_inode.inode.gid() as _),
-                    mode: AtomicMode::new(root_inode.inode.mode() as _),
+                    mode: AtomicMode::new(root_inode.inode.mode().bits() as _),
                     atime: Spin::new(Instant::new(
                         root_inode.inode.atime() as _,
-                        root_inode.inode.i_atime_extra() as _,
+                        root_inode.inode.atime_extra() as _,
                     )),
                     ctime: Spin::new(Instant::new(
                         root_inode.inode.ctime() as _,
-                        root_inode.inode.i_ctime_extra() as _,
+                        root_inode.inode.ctime_extra() as _,
                     )),
                     mtime: Spin::new(Instant::new(
                         root_inode.inode.mtime() as _,
-                        root_inode.inode.i_mtime_extra() as _,
+                        root_inode.inode.mtime_extra() as _,
                     )),
                     rwsem: RwLock::new(()),
                     vfs: Arc::downgrade(&ext4fs) as _,
@@ -174,6 +220,7 @@ impl Ext4Inode {
 
 define_struct_inode! {
     struct FileInode {
+        last_sync: AtomicU64,
         page_cache: PageCache,
     }
 }
@@ -183,23 +230,49 @@ define_struct_inode! {
 }
 
 impl FileInode {
-    fn new(idata: InodeData) -> Arc<Self> {
+    fn with_idata(idata: InodeData) -> Arc<Self> {
         let inode = Arc::new_cyclic(|weak_self: &Weak<FileInode>| Self {
             idata,
+            last_sync: AtomicU64::new(0),
             page_cache: PageCache::new(weak_self.clone()),
         });
 
         inode
     }
+
+    pub fn new(ino: Ino, vfs: Weak<dyn Vfs>, mode: Mode) -> Arc<Self> {
+        Arc::new_cyclic(|weak_self: &Weak<FileInode>| Self {
+            idata: {
+                let inode_data = InodeData::new(ino, vfs);
+                inode_data.mode.store(Mode::REG.perm(mode.bits()));
+                inode_data.nlink.store(1, Ordering::Relaxed);
+                inode_data
+            },
+            last_sync: AtomicU64::new(0),
+            page_cache: PageCache::new(weak_self.clone()),
+        })
+    }
+
+    fn sync_if_needed(&self) {
+        let now = Ticks::now().in_secs();
+        let last = self.last_sync.load(Ordering::Relaxed);
+
+        // TODO: this is a temporary implement,
+        // consider change this with some update strategy such as LRU future
+        if now - last > 10 {
+            self.last_sync.store(now, Ordering::Relaxed);
+            let _ = block_on(self.page_cache.fsync());
+        }
+    }
 }
 
 impl PageCacheBackend for FileInode {
-    fn read_page(&self, page: &mut crate::kernel::mem::CachePage, offset: usize) -> KResult<usize> {
+    fn read_page(&self, page: &mut CachePage, offset: usize) -> KResult<usize> {
         self.read_direct(page, offset)
     }
 
-    fn write_page(&self, _page: &crate::kernel::mem::CachePage, _offset: usize) -> KResult<usize> {
-        todo!()
+    fn write_page(&self, page: &mut CachePageStream, offset: usize) -> KResult<usize> {
+        self.write_direct(page, offset)
     }
 
     fn size(&self) -> usize {
@@ -221,13 +294,135 @@ impl Inode for FileInode {
         let ext4fs = vfs.as_any().downcast_ref::<Ext4Fs>().unwrap();
 
         let mut temp_buf = vec![0u8; buffer.total()];
-        match ext4fs.inner.read_at(self.ino as u32, offset, &mut temp_buf) {
+        match ext4fs.inner.read(self.ino as u32, offset, &mut temp_buf) {
             Ok(bytes_read) => {
                 let _ = buffer.fill(&temp_buf[..bytes_read])?;
                 Ok(buffer.wrote())
             }
-            Err(e) => Err(e.error() as u32),
+            Err(e) => Err(e.code() as u32),
         }
+    }
+
+    fn write(&self, stream: &mut dyn Stream, offset: WriteOffset) -> KResult<usize> {
+        let _lock = block_on(self.rwsem.write());
+
+        let mut store_new_end = None;
+        let offset = match offset {
+            WriteOffset::Position(offset) => offset,
+            // TODO: here need to add some operate
+            WriteOffset::End(end) => {
+                store_new_end = Some(end);
+                self.size.load(Ordering::Relaxed) as usize
+            }
+        };
+
+        let total_written = block_on(self.page_cache.write(stream, offset))?;
+        let cursor_end = offset + total_written;
+        if let Some(store_end) = store_new_end {
+            *store_end = cursor_end;
+        }
+
+        let mtime = Instant::now();
+        *self.mtime.lock() = mtime;
+        self.size.store(cursor_end as u64, Ordering::Relaxed);
+
+        self.sync_if_needed();
+
+        Ok(total_written)
+    }
+
+    fn write_direct(&self, stream: &mut dyn Stream, offset: usize) -> KResult<usize> {
+        //let _lock = Task::block_on(self.rwsem.write());
+
+        let vfs = self.vfs.upgrade().ok_or(EIO)?;
+        let ext4fs = vfs.as_any().downcast_ref::<Ext4Fs>().unwrap();
+
+        let mut temp_buf = vec![0u8; 4096];
+        let mut total_written = 0;
+
+        while let Some(data) = stream.poll_data(&mut temp_buf)? {
+            let written = ext4fs
+                .inner
+                .write(self.ino as u32, offset + total_written, data)
+                .unwrap();
+            total_written += written;
+            if written < data.len() {
+                break;
+            }
+        }
+
+        ext4fs.modify_inode_stat(
+            self.ino as u32,
+            Some(self.size() as u64),
+            self.mtime.lock().since_epoch().as_secs() as u32,
+        );
+
+        Ok(total_written)
+    }
+
+    fn chmod(&self, mode: Mode) -> KResult<()> {
+        let _lock = block_on(self.rwsem.write());
+
+        let vfs = self.vfs.upgrade().ok_or(EIO)?;
+        let ext4fs = vfs.as_any().downcast_ref::<Ext4Fs>().unwrap();
+        let old_mode = self.mode.load();
+        let new_mode = old_mode.perm(mode.bits());
+
+        let now = Instant::now();
+        ext4fs.chmod_stat(
+            self.ino as u32,
+            new_mode.bits() as u16,
+            now.since_epoch().as_secs() as u32,
+        );
+
+        // SAFETY: `rwsem` has done the synchronization
+        self.mode.store(new_mode);
+        *self.ctime.lock() = now;
+
+        Ok(())
+    }
+
+    // TODO
+    fn truncate(&self, _length: usize) -> KResult<()> {
+        Ok(())
+    }
+}
+
+impl DirInode {
+    fn new(ino: Ino, vfs: Weak<dyn Vfs>, mode: Mode) -> Arc<Self> {
+        Arc::new_cyclic(|_| DirInode {
+            idata: {
+                let inode_data = InodeData::new(ino, vfs);
+                inode_data.mode.store(Mode::DIR.perm(mode.bits()));
+                inode_data.nlink.store(2, Ordering::Relaxed);
+                inode_data.size.store(4096, Ordering::Relaxed);
+                inode_data
+            },
+        })
+    }
+
+    fn update_time(&self, time: Instant) {
+        *self.ctime.lock() = time;
+        *self.mtime.lock() = time;
+    }
+
+    fn update_child_time(&self, child: &dyn Inode, time: Instant) {
+        self.update_time(time);
+        *child.ctime.lock() = time;
+        *child.mtime.lock() = time;
+    }
+
+    fn link_file(&self) {
+        self.size.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn link_dir(&self) {
+        self.nlink.fetch_add(1, Ordering::Relaxed);
+        self.size.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn unlink_dir(&self) {
+        self.nlink.fetch_sub(1, Ordering::Relaxed);
     }
 }
 
@@ -238,13 +433,14 @@ impl Inode for DirInode {
 
         let name = dentry.get_name();
         let name = String::from_utf8_lossy(&name);
-        let lookup_result = ext4fs.inner.fuse_lookup(self.ino, &name);
+        let lookup_result = ext4fs.inner.lookup(self.ino as u32, &name);
 
-        const EXT4_ERROR_ENOENT: Ext4Error = Ext4Error::new(Errno::ENOENT);
+        // TODO: wtf
+        //const EXT4_ERROR_ENOENT: Ext4Error_ = Ext4Error_::new(ErrCode::ENOENT);
         let attr = match lookup_result {
-            Ok(attr) => attr,
-            Err(EXT4_ERROR_ENOENT) => return Ok(None),
-            Err(error) => return Err(error.error() as u32),
+            Ok(inode_id) => ext4fs.inner.getattr(inode_id).unwrap(),
+            //Err(EXT4_ERROR_ENOENT) => return Ok(None),
+            Err(error) => return Err(error.code() as u32),
         };
 
         // Fast path: if the inode is already in the cache, return it.
@@ -252,9 +448,19 @@ impl Inode for DirInode {
             return Ok(Some(inode));
         }
 
-        let extra_perm = attr.perm.bits() as u32 & 0o7000;
-        let perm = attr.perm.bits() as u32 & 0o0700;
-        let real_perm = extra_perm | perm | perm >> 3 | perm >> 6;
+        let file_type_bits = match attr.ftype {
+            FileType::RegularFile => InodeMode::FILE.bits(),
+            FileType::Directory => InodeMode::DIRECTORY.bits(),
+            FileType::CharacterDev => InodeMode::CHARDEV.bits(),
+            FileType::BlockDev => InodeMode::BLOCKDEV.bits(),
+            FileType::Fifo => InodeMode::FIFO.bits(),
+            FileType::Socket => InodeMode::SOCKET.bits(),
+            FileType::SymLink => InodeMode::SOFTLINK.bits(),
+            FileType::Unknown => 0,
+        };
+
+        let perm_bits = attr.perm.bits() & InodeMode::PERM_MASK.bits();
+        let mode = file_type_bits | perm_bits;
 
         // Create a new inode based on the attributes.
         let mut icache = block_on(ext4fs.icache.write());
@@ -263,10 +469,10 @@ impl Inode for DirInode {
             InodeData {
                 ino: attr.ino as Ino,
                 size: AtomicU64::new(attr.size),
-                nlink: AtomicNlink::new(attr.nlink as _),
+                nlink: AtomicNlink::new(attr.links as _),
                 uid: AtomicU32::new(attr.uid),
                 gid: AtomicU32::new(attr.gid),
-                mode: AtomicMode::new(attr.kind.bits() as u32 | real_perm),
+                mode: AtomicMode::new(mode as _),
                 atime: Spin::new(Instant::new(attr.atime as _, 0)),
                 ctime: Spin::new(Instant::new(attr.ctime as _, 0)),
                 mtime: Spin::new(Instant::new(attr.mtime as _, 0)),
@@ -288,21 +494,205 @@ impl Inode for DirInode {
 
         let entries = ext4fs
             .inner
-            .fuse_readdir(self.ino as u64, 0, offset as i64)
-            .map_err(|err| err.error() as u32)?;
+            .listdir(self.ino as u32)
+            .map_err(|err| err.code() as u32)?;
+
+        let entries_to_process = if offset < entries.len() {
+            &entries[offset..]
+        } else {
+            &entries[0..0]
+        };
         let mut current_offset = 0;
+        for entry in entries_to_process {
+            let name_string = entry.name();
+            let name = name_string.as_bytes();
+            let inode = entry.inode() as Ino;
 
-        for entry in entries {
-            let name_len = entry.name_len as usize;
-            let name = &entry.name[..name_len];
-
-            if callback(name, entry.inode as Ino)?.is_break() {
+            if callback(name, inode)?.is_break() {
                 break;
             }
-
             current_offset += 1;
         }
         Ok(current_offset)
+    }
+
+    fn creat(&self, at: &Arc<Dentry>, mode: Mode) -> KResult<()> {
+        let _lock = block_on(self.rwsem.write());
+
+        let vfs = self.vfs.upgrade().ok_or(EIO)?;
+        let ext4fs = vfs.as_any().downcast_ref::<Ext4Fs>().unwrap();
+
+        let name = at.get_name();
+        let name = String::from_utf8_lossy(&name);
+
+        let new_ino = ext4fs
+            .inner
+            .create(
+                self.ino as u32,
+                &name,
+                InodeMode::from_bits_retain(Mode::REG.perm(mode.bits()).bits() as u16),
+            )
+            .unwrap();
+
+        let file = FileInode::new(new_ino as u64, self.vfs.clone(), mode);
+        let now = Instant::now();
+        self.update_child_time(file.as_ref(), now);
+        self.link_file();
+
+        ext4fs.create_inode_stat(self.ino as u32, new_ino, now.since_epoch().as_secs() as u32);
+
+        at.save_reg(file)
+    }
+
+    fn mkdir(&self, at: &Dentry, mode: Mode) -> KResult<()> {
+        let _lock = block_on(self.rwsem.write());
+
+        let vfs = self.vfs.upgrade().ok_or(EIO)?;
+        let ext4fs = vfs.as_any().downcast_ref::<Ext4Fs>().unwrap();
+
+        let name = at.get_name();
+        let name = String::from_utf8_lossy(&name);
+
+        let new_ino = ext4fs
+            .inner
+            .mkdir(
+                self.ino as u32,
+                &name,
+                InodeMode::from(Mode::DIR.perm(mode.bits())),
+            )
+            .unwrap();
+
+        let new_dir = DirInode::new(new_ino as u64, self.vfs.clone(), mode);
+        let now = Instant::now();
+        self.update_child_time(new_dir.as_ref(), now);
+        self.link_dir();
+
+        ext4fs.create_inode_stat(self.ino as u32, new_ino, now.since_epoch().as_secs() as u32);
+
+        at.save_dir(new_dir)
+    }
+
+    fn unlink(&self, at: &Arc<Dentry>) -> KResult<()> {
+        let _dir_lock = block_on(self.rwsem.write());
+
+        let vfs = self.vfs.upgrade().ok_or(EIO)?;
+        let ext4fs = vfs.as_any().downcast_ref::<Ext4Fs>().unwrap();
+
+        let file = at.get_inode()?;
+
+        let name = at.get_name();
+        let name = String::from_utf8_lossy(&name);
+        let _file_lock = block_on(file.rwsem.write());
+
+        if file.is_dir() {
+            let _ = ext4fs.inner.rmdir(self.ino as u32, &name);
+            self.unlink_dir();
+        } else {
+            let _ = ext4fs.inner.unlink(self.ino as u32, &name);
+        }
+        let now = Instant::now();
+        self.update_time(now);
+        ext4fs.modify_inode_stat(self.ino as u32, None, now.since_epoch().as_secs() as u32);
+
+        dcache::d_remove(at);
+
+        Ok(())
+    }
+
+    fn chmod(&self, mode: Mode) -> KResult<()> {
+        let _lock = block_on(self.rwsem.write());
+
+        let vfs = self.vfs.upgrade().ok_or(EIO)?;
+        let ext4fs = vfs.as_any().downcast_ref::<Ext4Fs>().unwrap();
+        let old_mode = self.mode.load();
+        let new_mode = old_mode.perm(mode.bits());
+
+        let now = Instant::now();
+        ext4fs.chmod_stat(
+            self.ino as u32,
+            new_mode.non_format_bits() as _,
+            now.since_epoch().as_secs() as u32,
+        );
+
+        // SAFETY: `rwsem` has done the synchronization
+        self.mode.store(new_mode);
+        *self.ctime.lock() = now;
+
+        Ok(())
+    }
+
+    fn rename(&self, rename_data: RenameData) -> KResult<()> {
+        let RenameData {
+            old_dentry,
+            new_dentry,
+            new_parent,
+            is_exchange,
+            no_replace,
+            ..
+        } = rename_data;
+
+        if is_exchange {
+            println_warn!("Ext4Fs does not support exchange rename for now");
+            return Err(ENOSYS);
+        }
+
+        // TODO: may need another lock
+        let _lock = block_on(self.rwsem.write());
+        let vfs = self.vfs.upgrade().ok_or(EIO)?;
+        let ext4fs = vfs.as_any().downcast_ref::<Ext4Fs>().unwrap();
+
+        let old_file = old_dentry.get_inode()?;
+        let new_file = new_dentry.get_inode();
+        if no_replace && new_file.is_ok() {
+            return Err(EEXIST);
+        }
+
+        let name = old_dentry.name();
+        let name = core::str::from_utf8(&*name).map_err(|_| EINVAL)?;
+        let new_name = new_dentry.name();
+        let new_name = core::str::from_utf8(&*new_name).map_err(|_| EINVAL)?;
+
+        ext4fs
+            .inner
+            .rename(self.ino as u32, name, new_parent.ino as u32, new_name)
+            .map_err(|err| err.code() as u32)?;
+
+        // TODO: may need more operations
+        let now = Instant::now();
+        *old_file.ctime.lock() = now;
+        *self.mtime.lock() = now;
+
+        let same_parent = Arc::as_ptr(&new_parent) == &raw const *self;
+        if !same_parent {
+            *new_parent.mtime.lock() = now;
+            if old_file.is_dir() {
+                self.nlink.fetch_sub(1, Ordering::Relaxed);
+                new_parent.nlink.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+
+        if let Ok(replaced_file) = new_dentry.get_inode() {
+            if !no_replace {
+                *replaced_file.ctime.lock() = now;
+                replaced_file.nlink.fetch_sub(1, Ordering::Relaxed);
+            }
+        }
+
+        block_on(dcache::d_exchange(old_dentry, new_dentry));
+
+        Ok(())
+    }
+}
+
+impl From<Mode> for InodeMode {
+    fn from(value: Mode) -> Self {
+        InodeMode::from_bits_retain(value.bits() as u16)
+    }
+}
+
+impl From<InodeMode> for Mode {
+    fn from(value: InodeMode) -> Self {
+        Mode::new(value.bits() as u32)
     }
 }
 

@@ -194,9 +194,15 @@ impl<'lt, T: RCUNode<T>> Iterator for RCUIterator<'lt, T> {
     }
 }
 
-pub struct RCUPointer<T>(AtomicPtr<T>);
+pub struct RCUPointer<T>(AtomicPtr<T>)
+where
+    T: Send + Sync + 'static;
 
-impl<T: core::fmt::Debug> core::fmt::Debug for RCUPointer<T> {
+impl<T> core::fmt::Debug for RCUPointer<T>
+where
+    T: core::fmt::Debug,
+    T: Send + Sync + 'static,
+{
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match NonNull::new(self.0.load(Ordering::Acquire)) {
             Some(pointer) => {
@@ -209,7 +215,10 @@ impl<T: core::fmt::Debug> core::fmt::Debug for RCUPointer<T> {
     }
 }
 
-impl<T> RCUPointer<T> {
+impl<T> RCUPointer<T>
+where
+    T: Send + Sync + 'static,
+{
     pub const fn empty() -> Self {
         Self(AtomicPtr::new(core::ptr::null_mut()))
     }
@@ -266,16 +275,16 @@ impl<T> RCUPointer<T> {
     }
 }
 
-impl<T> Drop for RCUPointer<T> {
+impl<T> Drop for RCUPointer<T>
+where
+    T: Send + Sync + 'static,
+{
     fn drop(&mut self) {
         // SAFETY: We call `rcu_sync()` to ensure that all readers are done.
         if let Some(arc) = unsafe { self.swap(None) } {
             // We only wait if there are other references.
             if Arc::strong_count(&arc) == 1 {
-                call_rcu(move || {
-                    let _ = arc;
-                    todo!();
-                });
+                call_rcu(move || drop(arc));
             }
         }
     }

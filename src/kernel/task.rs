@@ -10,7 +10,6 @@ mod signal;
 mod thread;
 
 pub use clone::{do_clone, CloneArgs, CloneFlags};
-use eonix_runtime::task::Task;
 pub use futex::{futex_wait, futex_wake, parse_futexop, FutexFlags, FutexOp, RobustListHead};
 pub use kernel_stack::KernelStack;
 pub use loader::ProgramLoader;
@@ -84,10 +83,14 @@ where
         interrupt::{default_fault_handler, default_irq_handler},
         timer::{should_reschedule, timer_interrupt},
     };
+    use alloc::sync::Arc;
+    use alloc::task::Wake;
     use core::cell::UnsafeCell;
     use core::future::Future;
     use core::pin::Pin;
     use core::ptr::NonNull;
+    use core::sync::atomic::AtomicBool;
+    use core::sync::atomic::Ordering;
     use core::task::Context;
     use core::task::Poll;
     use core::task::Waker;
@@ -97,6 +100,7 @@ where
     use eonix_hal::trap::TrapContext;
     use eonix_preempt::assert_preempt_enabled;
     use eonix_runtime::executor::Stack;
+    use eonix_runtime::task::Task;
     use thread::wait_for_wakeups;
 
     let stack = KernelStack::new();
@@ -105,18 +109,46 @@ where
     where
         F: Future,
     {
-        let waker = Waker::from(Task::current().clone());
+        struct WakeSaver {
+            task: Arc<Task>,
+            woken: AtomicBool,
+        }
+
+        impl Wake for WakeSaver {
+            fn wake_by_ref(self: &Arc<Self>) {
+                // SAFETY: If we read true below in the loop, we must have been
+                //         woken up and acquired our waker's work by the runtime.
+                self.woken.store(true, Ordering::Relaxed);
+                self.task.wake_by_ref();
+            }
+
+            fn wake(self: Arc<Self>) {
+                self.wake_by_ref();
+            }
+        }
+
+        let wake_saver = Arc::new(WakeSaver {
+            task: Task::current().clone(),
+            woken: AtomicBool::new(false),
+        });
+        let waker = Waker::from(wake_saver.clone());
         let mut cx = Context::from_waker(&waker);
 
         let output = loop {
             match future.as_mut().poll(&mut cx) {
                 Poll::Ready(output) => break output,
                 Poll::Pending => {
+                    assert_preempt_enabled!("Blocking in stackful futures is not allowed.");
+
                     if Task::current().is_ready() {
                         continue;
                     }
 
-                    assert_preempt_enabled!("Blocking in stackful futures is not allowed.");
+                    // SAFETY: The runtime must have ensured that we can see the
+                    //         work done by the waker.
+                    if wake_saver.woken.swap(false, Ordering::Relaxed) {
+                        continue;
+                    }
 
                     unsafe {
                         #[cfg(target_arch = "riscv64")]
@@ -128,6 +160,10 @@ where
                 }
             }
         };
+
+        drop(cx);
+        drop(waker);
+        drop(wake_saver);
 
         unsafe {
             output_ptr.write(Some(output));

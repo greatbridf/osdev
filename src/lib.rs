@@ -9,6 +9,9 @@
 
 extern crate alloc;
 
+#[cfg(any(target_arch = "riscv64", target_arch = "x86_64"))]
+extern crate unwinding;
+
 mod driver;
 mod fs;
 mod hash;
@@ -16,6 +19,8 @@ mod io;
 mod kernel;
 mod kernel_init;
 mod net;
+#[cfg(any(target_arch = "riscv64", target_arch = "x86_64"))]
+mod panic;
 mod path;
 mod prelude;
 mod rcu;
@@ -53,6 +58,9 @@ use prelude::*;
 
 #[cfg(any(target_arch = "riscv64", target_arch = "loongarch64"))]
 fn do_panic() -> ! {
+    #[cfg(target_arch = "riscv64")]
+    panic::stack_trace();
+
     shutdown();
 }
 

@@ -18,6 +18,15 @@ SECTIONS {
         __srodata = .;
 
         *(.rodata .rodata.*);
+        
+        . = ALIGN(8);
+
+        PROVIDE(__eh_frame = .);
+        PROVIDE(__executable_start = __stext);
+
+        KEEP(*(.eh_frame_hdr));
+        KEEP(*(.eh_frame));
+        KEEP(*(.eh_frame.*));
 
     } > REGION_RODATA AT> LINK_REGION_RODATA
 
@@ -30,6 +39,11 @@ SECTIONS {
         *(.data .data.*);
         *(.got .got.plt);
 
+    } > REGION_DATA AT> LINK_REGION_DATA
+
+    .data.after :
+    {
+        __data_after = .;
     } > REGION_DATA AT> LINK_REGION_DATA
 
     __edata = .;
@@ -45,16 +59,7 @@ SECTIONS {
 
     __ebss = .;
 
-    .eh_frame : ALIGN(16)
-    {
-        __seh_frame = .;
-
-        KEEP(*(.eh_frame .eh_frame*));
-
-    } > REGION_EHFRAME AT> LINK_REGION_EHFRAME
-
     . = ALIGN(0x1000);
-    __eeh_frame = .;
 }
 
 SECTIONS {

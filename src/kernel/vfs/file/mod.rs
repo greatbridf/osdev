@@ -146,6 +146,20 @@ impl FileType {
             _ => unimplemented!("Poll event not supported."),
         }
     }
+
+    pub fn size(&self) -> usize {
+        match self {
+            FileType::Inode(inode_file) => inode_file.size(),
+            _ => panic!("Only InodeFile have size."),
+        }
+    }
+
+    pub fn truncate(&self, new_size: usize) -> KResult<()> {
+        match self {
+            FileType::Inode(inode_file) => inode_file.truncate(new_size),
+            _ => panic!("Only InodeFile can truncate."),
+        }
+    }
 }
 
 impl File {

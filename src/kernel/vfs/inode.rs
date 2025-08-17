@@ -101,6 +101,10 @@ pub struct RenameData<'a, 'b> {
 
 #[allow(unused_variables)]
 pub trait Inode: Send + Sync + InodeInner + Any {
+    fn file_size(&self) -> usize {
+        self.size.load(Ordering::Relaxed) as usize
+    }
+
     fn is_dir(&self) -> bool {
         self.mode.load().is_dir()
     }

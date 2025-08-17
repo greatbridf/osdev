@@ -106,6 +106,14 @@ impl InodeFile {
 
         Ok(nread)
     }
+
+    pub fn size(&self) -> usize {
+        self.dentry.size()
+    }
+
+    pub fn truncate(&self, new_size: usize) -> KResult<()> {
+        self.dentry.truncate(new_size)
+    }
 }
 
 impl File {

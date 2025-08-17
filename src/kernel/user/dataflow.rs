@@ -379,6 +379,12 @@ impl UserBuffer<'_> {
     fn remaining(&self) -> usize {
         self.size - self.cur
     }
+
+    /// this is for comp test
+    pub fn as_slice(&self) -> &[u8] {
+        // SAFETY: the pointer's validity is checked in `new`
+        unsafe { core::slice::from_raw_parts(self.ptr.ptr.addr() as *const u8, self.ptr.len) }
+    }
 }
 
 impl<'lt> Buffer for UserBuffer<'lt> {

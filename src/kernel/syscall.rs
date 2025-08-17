@@ -79,6 +79,12 @@ impl SyscallRetVal for u32 {
     }
 }
 
+impl SyscallRetVal for i32 {
+    fn into_retval(self) -> Option<usize> {
+        Some(self as usize)
+    }
+}
+
 impl SyscallRetVal for usize {
     fn into_retval(self) -> Option<usize> {
         Some(self)
@@ -86,12 +92,6 @@ impl SyscallRetVal for usize {
 }
 
 impl SyscallRetVal for isize {
-    fn into_retval(self) -> Option<usize> {
-        Some(self as usize)
-    }
-}
-
-impl SyscallRetVal for i32 {
     fn into_retval(self) -> Option<usize> {
         Some(self as usize)
     }
@@ -144,6 +144,12 @@ impl FromSyscallArg for i32 {
 impl FromSyscallArg for usize {
     fn from_arg(value: usize) -> usize {
         value
+    }
+}
+
+impl FromSyscallArg for isize {
+    fn from_arg(value: usize) -> isize {
+        value as isize
     }
 }
 

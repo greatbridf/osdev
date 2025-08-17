@@ -353,7 +353,7 @@ impl Inode for FileInode {
 
         ext4fs.modify_inode_stat(
             self.ino as u32,
-            Some(self.size() as u64),
+            Some(self.file_size() as u64),
             self.mtime.lock().since_epoch().as_secs() as u32,
         );
 
@@ -383,7 +383,19 @@ impl Inode for FileInode {
     }
 
     // TODO
-    fn truncate(&self, _length: usize) -> KResult<()> {
+    fn truncate(&self, length: usize) -> KResult<()> {
+        let _lock = block_on(self.rwsem.write());
+
+        if length == 0 {
+            let vfs = self.vfs.upgrade().ok_or(EIO)?;
+            let ext4fs = vfs.as_any().downcast_ref::<Ext4Fs>().unwrap();
+            let buffer = vec![0u8; 10];
+            let _ = ext4fs.inner.write(self.ino as u32, 0, &buffer);
+            let _ = block_on(self.page_cache.resize(0));
+        }
+
+        self.size.store(length as u64, Ordering::Relaxed);
+        *self.mtime.lock() = Instant::now();
         Ok(())
     }
 }

@@ -6,6 +6,7 @@
 #![feature(arbitrary_self_types)]
 #![feature(get_mut_unchecked)]
 #![feature(macro_metavar_expr)]
+#![feature(ip_from)]
 
 extern crate alloc;
 
@@ -192,7 +193,7 @@ async fn init_process(early_kstack: PRange) {
     {
         // We might want the serial initialized as soon as possible.
         driver::serial::init().unwrap();
-        driver::e1000e::register_e1000e_driver();
+        // driver::e1000e::register_e1000e_driver();
         driver::ahci::register_ahci_driver();
     }
 
@@ -200,7 +201,7 @@ async fn init_process(early_kstack: PRange) {
     {
         driver::serial::init().unwrap();
         driver::virtio::init_virtio_devices();
-        driver::e1000e::register_e1000e_driver();
+        // driver::e1000e::register_e1000e_driver();
         driver::ahci::register_ahci_driver();
         driver::goldfish_rtc::probe();
     }
@@ -209,9 +210,11 @@ async fn init_process(early_kstack: PRange) {
     {
         driver::serial::init().unwrap();
         driver::virtio::init_virtio_devices();
-        driver::e1000e::register_e1000e_driver();
+        // driver::e1000e::register_e1000e_driver();
         driver::ahci::register_ahci_driver();
     }
+
+    net::init().expect("Failed to initialize network");
 
     fs::tmpfs::init();
     fs::procfs::init();

@@ -1,10 +1,10 @@
 use super::{FromSyscallArg, User};
 use crate::io::{ByteBuffer, IntoStream};
 use crate::kernel::constants::{
-    EBADF, EFAULT, EINVAL, ENOENT, ENOSYS, ENOTDIR, SEEK_CUR, SEEK_END, SEEK_SET,
+    EBADF, EFAULT, EINVAL, ENOENT, ENOTDIR, SEEK_CUR, SEEK_END, SEEK_SET,
 };
 use crate::kernel::syscall::UserMut;
-use crate::kernel::task::Thread;
+use crate::kernel::task::{block_on, Thread};
 use crate::kernel::timer::sleep;
 use crate::kernel::vfs::filearray::FD;
 use crate::kernel::vfs::inode::Mode;
@@ -25,7 +25,7 @@ use posix_types::ctypes::{Long, PtrT};
 use posix_types::namei::RenameFlags;
 use posix_types::open::{AtFlags, OpenFlags};
 use posix_types::poll::FDSet;
-use posix_types::signal::{SigSet, Signal};
+use posix_types::signal::SigSet;
 use posix_types::stat::Stat;
 use posix_types::stat::{StatX, TimeSpec};
 use posix_types::syscall_no::*;
@@ -535,9 +535,9 @@ fn llseek(
 
 #[repr(C)]
 #[derive(Clone, Copy)]
-struct IoVec {
-    base: PtrT,
-    len: Long,
+pub struct IoVec {
+    pub base: PtrT,
+    pub len: Long,
 }
 
 #[eonix_macros::define_syscall(SYS_READV)]
@@ -718,8 +718,8 @@ async fn ppoll(
 #[eonix_macros::define_syscall(SYS_PSELECT6)]
 async fn pselect6(
     nfds: u32,
-    _readfds: UserMut<FDSet>,
-    _writefds: UserMut<FDSet>,
+    readfds: UserMut<FDSet>,
+    writefds: UserMut<FDSet>,
     _exceptfds: UserMut<FDSet>,
     timeout: UserMut<TimeSpec>,
     _sigmask: User<()>,
@@ -727,24 +727,111 @@ async fn pselect6(
     // According to [pthread6(2)](https://linux.die.net/man/2/pselect6):
     // Some code calls select() with all three sets empty, nfds zero, and
     // a non-NULL timeout as a fairly portable way to sleep with subsecond precision.
-    if nfds != 0 {
-        thread.raise(Signal::SIGSYS);
-        return Err(ENOSYS);
+    if nfds == 0 {
+        let timeout = UserPointerMut::new(timeout)?;
+
+        // Read here to check for invalid pointers.
+        let _timeout_value = timeout.read()?;
+
+        sleep(Duration::from_millis(10)).await;
+
+        timeout.write(TimeSpec {
+            tv_sec: 0,
+            tv_nsec: 0,
+        })?;
+
+        return Ok(0);
     }
 
-    let timeout = UserPointerMut::new(timeout)?;
+    let _time_out = if timeout.is_null() {
+        None
+    } else {
+        let timeout = UserPointer::new(timeout.as_const())?.read()?;
+        if timeout.tv_nsec == 0 && timeout.tv_sec == 0 {
+            return Ok(0);
+        }
 
-    // Read here to check for invalid pointers.
-    let _timeout_value = timeout.read()?;
+        Some(timeout)
+    };
 
-    sleep(Duration::from_millis(10)).await;
+    let mut read_fds = if readfds.is_null() {
+        None
+    } else {
+        Some(UserPointer::new(readfds.as_const())?.read()?)
+    };
+    let mut write_fds = if writefds.is_null() {
+        None
+    } else {
+        Some(UserPointer::new(writefds.as_const())?.read()?)
+    };
 
-    timeout.write(TimeSpec {
-        tv_sec: 0,
-        tv_nsec: 0,
-    })?;
+    let poll_fds = {
+        let mut poll_fds = Vec::with_capacity(nfds as usize);
+        for fd in 0..nfds {
+            let events = {
+                let readable = read_fds.as_ref().is_some_and(|fds| fds.is_set(fd));
+                let writable = write_fds.as_ref().is_some_and(|fds| fds.is_set(fd));
+                let mut events = PollEvent::empty();
 
-    Ok(0)
+                if readable {
+                    events |= PollEvent::Readable;
+                }
+                if writable {
+                    events |= PollEvent::Writable;
+                }
+                events
+            };
+
+            if !events.is_empty() {
+                poll_fds.push((fd, events));
+            }
+        }
+        poll_fds
+    };
+
+    if let Some(fds) = &mut read_fds {
+        fds.clear();
+    }
+    if let Some(fds) = &mut write_fds {
+        fds.clear();
+    }
+
+    let mut tot = 0;
+
+    loop {
+        for (fd, events) in &poll_fds {
+            let res = block_on(thread.files.get(FD::from(*fd)).ok_or(EBADF)?.poll(events.clone()))?;
+
+            if res.contains(PollEvent::Readable) {
+                if let Some(fds) = &mut read_fds {
+                    fds.set(*fd);
+                    tot += 1;
+                }
+            }
+            if res.contains(PollEvent::Writable) {
+                if let Some(fds) = &mut write_fds {
+                    fds.set(*fd);
+                    tot += 1;
+                }
+            }
+        }
+
+        if tot > 0 {
+            break;
+        }
+
+        // Since we already have a background iface poll task, simply sleep for a while
+        block_on(sleep(Duration::from_millis(100)));
+    }
+
+    if let Some(fds) = read_fds {
+        UserPointerMut::new(readfds)?.write(fds)?;
+    }
+    if let Some(fds) = write_fds {
+        UserPointerMut::new(writefds)?.write(fds)?;
+    }
+
+    Ok(tot)
 }
 
 #[cfg(target_arch = "x86_64")]

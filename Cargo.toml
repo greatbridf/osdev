@@ -24,6 +24,8 @@ pointers = { path = "./crates/pointers" }
 posix_types = { path = "./crates/posix_types" }
 slab_allocator = { path = "./crates/slab_allocator" }
 
+async-trait = "0.1.80"
+bytes = { version = "1.10.0", default-features = false }
 bitflags = "2.6.0"
 intrusive-collections = { version = "0.9.8", git = "https://github.com/greatbridf/intrusive-rs" }
 itertools = { version = "0.13.0", default-features = false }
@@ -34,6 +36,26 @@ another_ext4 = { git = "https://github.com/SMS-Derfflinger/another_ext4", branch
 stalloc = { version = "0.6.1", default-features = false, features = [
     "allocator-api",
 ] }
+
+[dependencies.smoltcp]
+git = "https://github.com/Shao-ZW/smoltcp.git"
+rev = "f14baaf"
+default-features = false
+features = [
+    "alloc",
+    "medium-ethernet",
+    "medium-ip",
+    "proto-ipv4",
+    "proto-ipv6",
+    "socket-raw",
+    "socket-icmp",
+    "socket-udp",
+    "socket-tcp",
+    "socket-dns",
+    "proto-ipv4-fragmentation",
+    "async",
+    "reassembly-buffer-count-16",
+]
 
 [target.'cfg(any(target_arch = "riscv64", target_arch = "loongarch64"))'.dependencies]
 virtio-drivers = { version = "0.11.0" }

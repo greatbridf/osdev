@@ -19,6 +19,8 @@ pub struct CheckedUserPointer<'a> {
     _phantom: PhantomData<&'a ()>,
 }
 
+unsafe impl<'a> Send for CheckedUserPointer<'a> {}
+
 pub struct UserBuffer<'a> {
     ptr: CheckedUserPointer<'a>,
     size: usize,
@@ -531,6 +533,10 @@ impl UserStream<'_> {
 }
 
 impl Stream for UserStream<'_> {
+    fn total(&self) -> usize {
+        self.len()
+    }
+
     fn poll_data<'a>(&mut self, buf: &'a mut [u8]) -> KResult<Option<&'a mut [u8]>> {
         assert_preempt_enabled!("UserStream::poll_data");
 

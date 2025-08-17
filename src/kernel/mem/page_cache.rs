@@ -343,6 +343,10 @@ impl Stream for CachePageStream {
         self.cur += to_ignore;
         Ok(Some(to_ignore))
     }
+    
+    fn total(&self) -> usize {
+        todo!()
+    }
 }
 
 // with this trait, "page cache" and "block cache" are unified,

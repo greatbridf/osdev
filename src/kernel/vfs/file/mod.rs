@@ -11,6 +11,7 @@ use crate::{
         CharDevice,
     },
     prelude::KResult,
+    net::socket::{SendMetadata, Socket},
 };
 use alloc::sync::Arc;
 use bitflags::bitflags;
@@ -31,6 +32,7 @@ pub enum FileType {
     PipeWrite(PipeWriteEnd),
     Terminal(TerminalFile),
     CharDev(Arc<CharDevice>),
+    Socket(Arc<dyn Socket>),
 }
 
 struct FileData {
@@ -49,6 +51,7 @@ pub enum SeekOption {
 }
 
 bitflags! {
+    #[derive(Clone, Copy, Debug)]
     pub struct PollEvent: u16 {
         const Readable = 0x0001;
         const Writable = 0x0002;
@@ -62,6 +65,7 @@ impl FileType {
             FileType::PipeRead(pipe) => pipe.read(buffer).await,
             FileType::Terminal(tty) => tty.read(buffer).await,
             FileType::CharDev(device) => device.read(buffer),
+            FileType::Socket(socket) => socket.recv(buffer).await.map(|res| res.0),
             _ => Err(EBADF),
         }
     }
@@ -87,6 +91,7 @@ impl FileType {
             FileType::PipeWrite(pipe) => pipe.write(stream).await,
             FileType::Terminal(tty) => tty.write(stream),
             FileType::CharDev(device) => device.write(stream),
+            FileType::Socket(socket) => socket.send(stream, SendMetadata::default()).await,
             _ => Err(EBADF),
         }
     }
@@ -143,6 +148,7 @@ impl FileType {
             FileType::Terminal(tty) => tty.poll(event).await,
             FileType::PipeRead(pipe) => pipe.poll(event).await,
             FileType::PipeWrite(pipe) => pipe.poll(event).await,
+            FileType::Socket(socket) => socket.poll(event),
             _ => unimplemented!("Poll event not supported."),
         }
     }
@@ -221,6 +227,13 @@ impl File {
             FileType::PipeRead(pipe) => pipe.close().await,
             FileType::PipeWrite(pipe) => pipe.close().await,
             _ => {}
+        }
+    }
+    
+    pub fn get_socket(&self) -> KResult<Option<Arc<dyn Socket>>> {
+        match &self.0.file_type {
+            FileType::Socket(socket) => Ok(Some(socket.clone())),
+            _ => Ok(None),
         }
     }
 }

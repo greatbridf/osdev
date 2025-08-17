@@ -3,15 +3,19 @@ use super::{
     inode::Mode,
     Spin, TerminalFile,
 };
-use crate::kernel::{
-    constants::{
-        EBADF, EISDIR, ENOTDIR, F_DUPFD, F_DUPFD_CLOEXEC, F_GETFD, F_GETFL, F_SETFD, F_SETFL,
-    },
-    syscall::{FromSyscallArg, SyscallRetVal},
-};
 use crate::{
+    kernel::vfs::file::FileType,
     kernel::{console::get_console, constants::ENXIO, vfs::dentry::Dentry, CharDevice},
     prelude::*,
+};
+use crate::{
+    kernel::{
+        constants::{
+            EBADF, EISDIR, ENOTDIR, F_DUPFD, F_DUPFD_CLOEXEC, F_GETFD, F_GETFL, F_SETFD, F_SETFL,
+        },
+        syscall::{FromSyscallArg, SyscallRetVal},
+    },
+    net::socket::Socket,
 };
 use alloc::sync::Arc;
 use intrusive_collections::{
@@ -25,6 +29,12 @@ use posix_types::open::{FDFlags, OpenFlags};
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct FD(u32);
+
+impl From<u32> for FD {
+    fn from(fd: u32) -> Self {
+        FD(fd)
+    }
+}
 
 #[derive(Clone)]
 struct OpenFile {
@@ -278,6 +288,19 @@ impl FileArray {
         inner.do_insert(write_fd, fdflag, write_end);
 
         Ok((read_fd, write_fd))
+    }
+
+    pub fn socket(&self, socket: Arc<dyn Socket>) -> KResult<FD> {
+        let mut inner = self.inner.lock();
+        let (files, fd_alloc) = inner.split_borrow();
+
+        let sockfd = fd_alloc.next_fd(files);
+        inner.do_insert(
+            sockfd,
+            FDFlags::default(),
+            File::new(OpenFlags::default(), FileType::Socket(socket)),
+        );
+        Ok(sockfd)
     }
 
     pub fn open(&self, dentry: &Arc<Dentry>, flags: OpenFlags, mode: Mode) -> KResult<FD> {

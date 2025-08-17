@@ -9,7 +9,7 @@ use alloc::{
     collections::btree_map::BTreeMap,
     sync::{Arc, Weak},
 };
-use eonix_runtime::task::Task;
+use eonix_mm::address::Addr;
 use eonix_sync::{AsProof as _, AsProofMut as _, RwLock};
 
 pub struct ProcessList {
@@ -54,7 +54,7 @@ impl ProcessList {
         self.threads.insert(thread.tid, thread.clone());
     }
 
-    pub fn remove_process(&mut self, pid: u32) {
+    pub async fn remove_process(&mut self, pid: u32) {
         // Thread group leader has the same tid as the pid.
         if let Some(thread) = self.threads.remove(&pid) {
             self.processes.remove(&pid);
@@ -64,7 +64,7 @@ impl ProcessList {
             let pgroup = unsafe { thread.process.pgroup.swap(None) }.unwrap();
             let _parent = unsafe { thread.process.parent.swap(None) }.unwrap();
             pgroup.remove_member(pid, self.prove_mut());
-            Task::block_on(rcu_sync());
+            rcu_sync().await;
 
             if Arc::strong_count(&pgroup) == 1 {
                 self.pgroups.remove(&pgroup.pgid);
@@ -135,11 +135,9 @@ impl ProcessList {
         }
 
         if let Some(clear_ctid) = thread.get_clear_ctid() {
-            let _ = UserPointerMut::new(clear_ctid as *mut u32)
-                .unwrap()
-                .write(0u32);
+            let _ = UserPointerMut::new(clear_ctid).unwrap().write(0u32);
 
-            let _ = futex_wake(clear_ctid, None, 1).await;
+            let _ = futex_wake(clear_ctid.addr(), None, 1).await;
         }
 
         if let Some(robust_list) = thread.get_robust_list() {
@@ -150,14 +148,13 @@ impl ProcessList {
         if thread.tid == process.pid {
             assert_eq!(thread.tid, process.pid);
 
-            thread.files.close_all();
+            thread.files.close_all().await;
 
             // If we are the session leader, we should drop the control terminal.
             if process.session(self.prove()).sid == process.pid {
-                if let Some(terminal) =
-                    Task::block_on(process.session(self.prove()).drop_control_terminal())
+                if let Some(terminal) = process.session(self.prove()).drop_control_terminal().await
                 {
-                    terminal.drop_session();
+                    terminal.drop_session().await;
                 }
             }
 

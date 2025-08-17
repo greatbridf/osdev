@@ -1,5 +1,10 @@
+use super::task::ThreadAlloc;
 use crate::kernel::task::Thread;
+use alloc::boxed::Box;
+use core::{future::Future, marker::PhantomData, ops::Deref, pin::Pin};
+use eonix_mm::address::{Addr, VAddr};
 use eonix_sync::LazyLock;
+use posix_types::ctypes::PtrT;
 
 pub mod file_rw;
 pub mod mm;
@@ -12,15 +17,33 @@ const MAX_SYSCALL_NO: usize = 512;
 #[derive(Debug, Clone, Copy)]
 pub struct SyscallNoReturn;
 
+#[derive(Clone, Copy)]
+pub struct User<T>(VAddr, PhantomData<T>);
+
+#[derive(Clone, Copy)]
+pub struct UserMut<T>(VAddr, PhantomData<T>);
+
 #[repr(C)]
 pub(self) struct RawSyscallHandler {
     no: usize,
-    handler: fn(&Thread, [usize; 6]) -> Option<usize>,
+    handler: for<'thd, 'alloc> fn(
+        &'thd Thread,
+        ThreadAlloc<'alloc>,
+        [usize; 6],
+    ) -> Pin<
+        Box<dyn Future<Output = Option<usize>> + Send + 'thd, ThreadAlloc<'alloc>>,
+    >,
     name: &'static str,
 }
 
 pub struct SyscallHandler {
-    pub handler: fn(&Thread, [usize; 6]) -> Option<usize>,
+    pub handler: for<'thd, 'alloc> fn(
+        &'thd Thread,
+        ThreadAlloc<'alloc>,
+        [usize; 6],
+    ) -> Pin<
+        Box<dyn Future<Output = Option<usize>> + Send + 'thd, ThreadAlloc<'alloc>>,
+    >,
     pub name: &'static str,
 }
 
@@ -80,6 +103,18 @@ impl SyscallRetVal for SyscallNoReturn {
     }
 }
 
+impl<T> SyscallRetVal for User<T> {
+    fn into_retval(self) -> Option<usize> {
+        Some(self.0.addr())
+    }
+}
+
+impl<T> SyscallRetVal for UserMut<T> {
+    fn into_retval(self) -> Option<usize> {
+        Some(self.0.addr())
+    }
+}
+
 #[cfg(not(target_arch = "x86_64"))]
 impl SyscallRetVal for u64 {
     fn into_retval(self) -> Option<usize> {
@@ -112,15 +147,135 @@ impl FromSyscallArg for usize {
     }
 }
 
-impl<T> FromSyscallArg for *const T {
-    fn from_arg(value: usize) -> *const T {
-        value as *const T
+impl FromSyscallArg for PtrT {
+    fn from_arg(value: usize) -> Self {
+        PtrT::new(value).expect("Invalid user pointer value")
     }
 }
 
-impl<T> FromSyscallArg for *mut T {
-    fn from_arg(value: usize) -> *mut T {
-        value as *mut T
+impl<T> FromSyscallArg for User<T> {
+    fn from_arg(value: usize) -> User<T> {
+        User(VAddr::from(value), PhantomData)
+    }
+}
+
+impl<T> FromSyscallArg for UserMut<T> {
+    fn from_arg(value: usize) -> UserMut<T> {
+        UserMut(VAddr::from(value), PhantomData)
+    }
+}
+
+impl<T> User<T> {
+    pub const fn new(addr: VAddr) -> Self {
+        Self(addr, PhantomData)
+    }
+
+    pub const fn with_addr(addr: usize) -> Self {
+        Self::new(VAddr::from(addr))
+    }
+
+    pub const fn null() -> Self {
+        Self(VAddr::NULL, PhantomData)
+    }
+
+    pub fn is_null(&self) -> bool {
+        self.0.addr() == 0
+    }
+
+    pub const fn cast<U>(self) -> User<U> {
+        User(self.0, PhantomData)
+    }
+
+    pub fn offset(self, off: isize) -> Self {
+        Self(
+            VAddr::from(
+                self.0
+                    .addr()
+                    .checked_add_signed(off)
+                    .expect("offset overflow"),
+            ),
+            PhantomData,
+        )
+    }
+
+    pub const unsafe fn as_mut(self) -> UserMut<T> {
+        UserMut(self.0, PhantomData)
+    }
+}
+
+impl<T> UserMut<T> {
+    pub const fn new(addr: VAddr) -> Self {
+        Self(addr, PhantomData)
+    }
+
+    pub const fn with_addr(addr: usize) -> Self {
+        Self::new(VAddr::from(addr))
+    }
+
+    pub const fn null() -> Self {
+        Self(VAddr::NULL, PhantomData)
+    }
+
+    pub fn is_null(&self) -> bool {
+        self.0.addr() == 0
+    }
+
+    pub const fn cast<U>(self) -> UserMut<U> {
+        UserMut(self.0, PhantomData)
+    }
+
+    pub fn offset(self, off: isize) -> Self {
+        Self(
+            VAddr::from(
+                self.0
+                    .addr()
+                    .checked_add_signed(off)
+                    .expect("offset overflow"),
+            ),
+            PhantomData,
+        )
+    }
+
+    pub const fn as_const(self) -> User<T> {
+        User(self.0, PhantomData)
+    }
+
+    pub const fn vaddr(&self) -> VAddr {
+        self.0
+    }
+}
+
+impl<T> Deref for User<T> {
+    type Target = VAddr;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<T> Deref for UserMut<T> {
+    type Target = VAddr;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<T> core::fmt::Debug for User<T> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self.0 {
+            VAddr::NULL => write!(f, "User(NULL)"),
+            _ => write!(f, "User({:#018x?})", self.0.addr()),
+        }
+    }
+}
+
+impl<T> core::fmt::Debug for UserMut<T> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self.0 {
+            VAddr::NULL => write!(f, "UserMut(NULL)"),
+            _ => write!(f, "UserMut({:#018x?})", self.0.addr()),
+        }
     }
 }
 

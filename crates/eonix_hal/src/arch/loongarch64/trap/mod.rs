@@ -278,11 +278,18 @@ impl TrapReturn for TrapContext {
         to_ctx.set_interrupt_enabled(false);
 
         unsafe {
+            let mut old_trap_ctx: usize;
+            let mut old_task_ctx: usize;
+
             asm!(
+                "csrrd {old_trap_ctx}, {CSR_CAPTURED_TRAP_CONTEXT_ADDR}",
+                "csrrd {old_task_ctx}, {CSR_CAPTURER_TASK_CONTEXT_ADDR}",
                 "csrwr {captured_trap_context}, {CSR_CAPTURED_TRAP_CONTEXT_ADDR}",
                 "csrwr {capturer_task_context}, {CSR_CAPTURER_TASK_CONTEXT_ADDR}",
                 captured_trap_context = inout(reg) &raw mut *self => _,
                 capturer_task_context = inout(reg) &raw mut capturer_ctx => _,
+                old_trap_ctx = out(reg) old_trap_ctx,
+                old_task_ctx = out(reg) old_task_ctx,
                 CSR_CAPTURED_TRAP_CONTEXT_ADDR = const CSR_CAPTURED_TRAP_CONTEXT_ADDR,
                 CSR_CAPTURER_TASK_CONTEXT_ADDR = const CSR_CAPTURER_TASK_CONTEXT_ADDR,
                 options(nomem, nostack, preserves_flags),
@@ -291,8 +298,10 @@ impl TrapReturn for TrapContext {
             TaskContext::switch(&mut capturer_ctx, &mut to_ctx);
 
             asm!(
-                "csrwr $zero, {CSR_CAPTURED_TRAP_CONTEXT_ADDR}",
-                "csrwr $zero, {CSR_CAPTURER_TASK_CONTEXT_ADDR}",
+                "csrwr {old_trap_ctx}, {CSR_CAPTURED_TRAP_CONTEXT_ADDR}",
+                "csrwr {old_task_ctx}, {CSR_CAPTURER_TASK_CONTEXT_ADDR}",
+                old_trap_ctx = inout(reg) old_trap_ctx,
+                old_task_ctx = inout(reg) old_task_ctx,
                 CSR_CAPTURED_TRAP_CONTEXT_ADDR = const CSR_CAPTURED_TRAP_CONTEXT_ADDR,
                 CSR_CAPTURER_TASK_CONTEXT_ADDR = const CSR_CAPTURER_TASK_CONTEXT_ADDR,
                 options(nomem, nostack, preserves_flags),

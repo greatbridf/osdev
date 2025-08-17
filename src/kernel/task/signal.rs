@@ -9,7 +9,7 @@ use core::{cmp::Reverse, task::Waker};
 use eonix_hal::fpu::FpuState;
 use eonix_hal::traits::trap::RawTrapContext;
 use eonix_hal::trap::TrapContext;
-use eonix_runtime::task::Task;
+use eonix_runtime::scheduler::Runtime;
 use eonix_sync::AsProof as _;
 use intrusive_collections::UnsafeRef;
 use posix_types::signal::{SigSet, Signal};
@@ -226,15 +226,12 @@ impl SignalList {
 
                     // `SIGSTOP` can only be waken up by `SIGCONT` or `SIGKILL`.
                     // SAFETY: Preempt disabled above.
-                    {
+                    Runtime::block_till_woken(|waker| {
                         let mut inner = self.inner.lock();
-                        let waker = Waker::from(Task::current().clone());
-
-                        let old_waker = inner.stop_waker.replace(waker);
+                        let old_waker = inner.stop_waker.replace(waker.clone());
                         assert!(old_waker.is_none(), "We should not have a waker here");
-                    }
-
-                    Task::park_preempt_disabled();
+                    })
+                    .await;
 
                     if let Some(parent) = thread.process.parent.load() {
                         parent.notify(
@@ -296,15 +293,15 @@ impl SignalList {
         let old_fpu_state_vaddr = old_trap_ctx_vaddr + size_of::<TrapContext>();
         let old_mask_vaddr = old_fpu_state_vaddr + size_of::<FpuState>();
 
-        *trap_ctx = UserPointer::<TrapContext>::new_vaddr(old_trap_ctx_vaddr)?.read()?;
+        *trap_ctx = UserPointer::<TrapContext>::with_addr(old_trap_ctx_vaddr)?.read()?;
 
         // Make sure that at least we won't crash the kernel.
         if !trap_ctx.is_user_mode() || !trap_ctx.is_interrupt_enabled() {
             return Err(EFAULT)?;
         }
 
-        *fpu_state = UserPointer::<FpuState>::new_vaddr(old_fpu_state_vaddr)?.read()?;
-        self.inner.lock().mask = UserPointer::<SigSet>::new_vaddr(old_mask_vaddr)?.read()?;
+        *fpu_state = UserPointer::<FpuState>::with_addr(old_fpu_state_vaddr)?.read()?;
+        self.inner.lock().mask = UserPointer::<SigSet>::with_addr(old_mask_vaddr)?.read()?;
 
         Ok(())
     }

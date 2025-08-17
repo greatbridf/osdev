@@ -1,6 +1,7 @@
 [build]
 target = "riscv64gc-unknown-none-elf"
 target-dir = 'build'
+rustflags = ["-C", "force-unwind-tables"]
 
 [unstable]
 build-std-features = ['compiler-builtins-mem']

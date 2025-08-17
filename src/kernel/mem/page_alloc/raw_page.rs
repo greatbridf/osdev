@@ -6,7 +6,6 @@ use core::{
     sync::atomic::{AtomicU32, AtomicUsize, Ordering},
 };
 use eonix_hal::mm::ArchPhysAccess;
-use eonix_mm::paging::PAGE_SIZE;
 use eonix_mm::{
     address::{PAddr, PhysAccess as _},
     paging::{RawPage as RawPageTrait, PFN},

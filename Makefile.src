@@ -22,7 +22,15 @@ KERNEL_CARGO_MANIFESTS += $(shell find src macros crates -name Cargo.toml -type 
 KERNEL_DEPS := $(KERNEL_SOURCES) $(KERNEL_CARGO_MANIFESTS)
 
 QEMU_ARGS ?= -no-reboot
-CARGO_FLAGS := --profile $(PROFILE) --features $(FEATURES)$(if $(SMP),$(COMMA)smp,)
+CARGO_FLAGS := --profile $(PROFILE)
+
+ifneq ($(SMP),)
+CARGO_FLAGS += --features smp
+endif
+
+ifneq ($(FEATURES),)
+CARGO_FLAGS += --features $(FEATURES)
+endif
 
 ifeq ($(HOST),darwin)
 QEMU_ACCEL ?= -accel tcg

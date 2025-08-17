@@ -87,6 +87,8 @@ impl PagingMode for PagingMode48 {
 
 pub type ArchPagingMode = PagingMode48;
 
+unsafe impl Send for RawPageTable48<'_> {}
+
 impl<'a> RawPageTable<'a> for RawPageTable48<'a> {
     type Entry = PTE64;
 

@@ -3,13 +3,13 @@ mod file;
 
 use crate::io::Stream;
 use crate::kernel::constants::EIO;
-use crate::kernel::mem::AsMemoryBlock;
-use crate::kernel::vfs::inode::WriteOffset;
+use crate::kernel::mem::{AsMemoryBlock, CachePageStream};
+use crate::kernel::task::block_on;
+use crate::kernel::vfs::inode::{Mode, WriteOffset};
 use crate::{
     io::{Buffer, ByteBuffer, UninitBuffer},
     kernel::{
         block::{make_device, BlockDevice, BlockDeviceRequest},
-        constants::{S_IFDIR, S_IFREG},
         mem::{
             paging::Page,
             {CachePage, PageCache, PageCacheBackend},
@@ -32,7 +32,6 @@ use alloc::{
 };
 use core::{ops::ControlFlow, sync::atomic::Ordering};
 use dir::Dirs as _;
-use eonix_runtime::task::Task;
 use eonix_sync::RwLock;
 use file::ClusterRead;
 
@@ -253,7 +252,7 @@ impl FileInode {
 
         // Safety: We are initializing the inode
         inode.nlink.store(1, Ordering::Relaxed);
-        inode.mode.store(S_IFREG | 0o777, Ordering::Relaxed);
+        inode.mode.store(Mode::REG.perm(0o777));
         inode.size.store(size as u64, Ordering::Relaxed);
 
         inode
@@ -266,13 +265,13 @@ impl Inode for FileInode {
     }
 
     fn read(&self, buffer: &mut dyn Buffer, offset: usize) -> KResult<usize> {
-        Task::block_on(self.page_cache.read(buffer, offset))
+        block_on(self.page_cache.read(buffer, offset))
     }
 
     fn read_direct(&self, buffer: &mut dyn Buffer, offset: usize) -> KResult<usize> {
         let vfs = self.vfs.upgrade().ok_or(EIO)?;
         let vfs = vfs.as_any().downcast_ref::<FatFs>().unwrap();
-        let fat = Task::block_on(vfs.fat.read());
+        let fat = block_on(vfs.fat.read());
 
         if self.size.load(Ordering::Relaxed) as usize == 0 {
             return Ok(0);
@@ -308,11 +307,11 @@ impl Inode for FileInode {
         Ok(buffer.wrote())
     }
 
-    fn write(&self, stream: &mut dyn Stream, offset: WriteOffset) -> KResult<usize> {
+    fn write(&self, _stream: &mut dyn Stream, _offset: WriteOffset) -> KResult<usize> {
         todo!()
     }
 
-    fn write_direct(&self, stream: &mut dyn Stream, offset: WriteOffset) -> KResult<usize> {
+    fn write_direct(&self, _stream: &mut dyn Stream, _offset: usize) -> KResult<usize> {
         todo!()
     }
 }
@@ -322,7 +321,7 @@ impl PageCacheBackend for FileInode {
         self.read_direct(page, offset)
     }
 
-    fn write_page(&self, page: &CachePage, offset: usize) -> KResult<usize> {
+    fn write_page(&self, _page: &mut CachePageStream, _offset: usize) -> KResult<usize> {
         todo!()
     }
 
@@ -343,7 +342,7 @@ impl DirInode {
 
         // Safety: We are initializing the inode
         inode.nlink.store(2, Ordering::Relaxed);
-        inode.mode.store(S_IFDIR | 0o777, Ordering::Relaxed);
+        inode.mode.store(Mode::DIR.perm(0o777));
         inode.size.store(size as u64, Ordering::Relaxed);
 
         inode
@@ -354,7 +353,7 @@ impl Inode for DirInode {
     fn lookup(&self, dentry: &Arc<Dentry>) -> KResult<Option<Arc<dyn Inode>>> {
         let vfs = self.vfs.upgrade().ok_or(EIO)?;
         let vfs = vfs.as_any().downcast_ref::<FatFs>().unwrap();
-        let fat = Task::block_on(vfs.fat.read());
+        let fat = block_on(vfs.fat.read());
 
         let mut entries = ClusterIterator::new(fat.as_ref(), self.ino as ClusterNo)
             .read(vfs, 0)
@@ -385,7 +384,7 @@ impl Inode for DirInode {
     ) -> KResult<usize> {
         let vfs = self.vfs.upgrade().ok_or(EIO)?;
         let vfs = vfs.as_any().downcast_ref::<FatFs>().unwrap();
-        let fat = Task::block_on(vfs.fat.read());
+        let fat = block_on(vfs.fat.read());
 
         let cluster_iter = ClusterIterator::new(fat.as_ref(), self.ino as ClusterNo)
             .read(vfs, offset)

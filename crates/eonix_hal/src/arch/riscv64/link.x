@@ -43,7 +43,6 @@ SECTIONS {
 
     KIMAGE_PAGES = (__edata - _stext + 0x1000 - 1) / 0x1000;
     KIMAGE_32K_COUNT = (KIMAGE_PAGES + 8 - 1) / 8;
-    __kernel_end = .;
 
     BSS_LENGTH = ABSOLUTE(__ebss - __sbss);
 }
@@ -89,4 +88,6 @@ SECTIONS {
 
     VDSO_PADDR = LOADADDR(.vdso);
 }
-INSERT AFTER .data;
+INSERT BEFORE .data.after;
+
+__kernel_end = __edata;

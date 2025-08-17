@@ -2,7 +2,7 @@ pub mod dcache;
 
 use super::{
     inode::{Ino, Inode, Mode, RenameData, WriteOffset},
-    s_isblk, s_ischr, s_isdir, s_isreg, DevId, FsContext,
+    DevId, FsContext,
 };
 use crate::{
     hash::KernelHasher,
@@ -250,7 +250,7 @@ impl Dentry {
             }
 
             let parent = self.parent().get_inode()?;
-            parent.creat(self, mode as u32)
+            parent.creat(self, mode)
         }
     }
 }
@@ -409,14 +409,14 @@ impl Dentry {
         let inode = self.get_inode()?;
 
         // Safety: Changing mode alone will have no effect on the file's contents
-        match inode.mode.load(Ordering::Relaxed) {
-            mode if s_isdir(mode) => Err(EISDIR),
-            mode if s_isreg(mode) => inode.read(buffer, offset),
-            mode if s_isblk(mode) => {
+        match inode.mode.load().format() {
+            Mode::DIR => Err(EISDIR),
+            Mode::REG => inode.read(buffer, offset),
+            Mode::BLK => {
                 let device = BlockDevice::get(inode.devid()?)?;
                 Ok(device.read_some(offset, buffer)?.allow_partial())
             }
-            mode if s_ischr(mode) => {
+            Mode::CHR => {
                 let device = CharDevice::get(inode.devid()?).ok_or(EPERM)?;
                 device.read(buffer)
             }
@@ -427,11 +427,11 @@ impl Dentry {
     pub fn write(&self, stream: &mut dyn Stream, offset: WriteOffset) -> KResult<usize> {
         let inode = self.get_inode()?;
         // Safety: Changing mode alone will have no effect on the file's contents
-        match inode.mode.load(Ordering::Relaxed) {
-            mode if s_isdir(mode) => Err(EISDIR),
-            mode if s_isreg(mode) => inode.write(stream, offset),
-            mode if s_isblk(mode) => Err(EINVAL), // TODO
-            mode if s_ischr(mode) => CharDevice::get(inode.devid()?).ok_or(EPERM)?.write(stream),
+        match inode.mode.load().format() {
+            Mode::DIR => Err(EISDIR),
+            Mode::REG => inode.write(stream, offset),
+            Mode::BLK => Err(EINVAL), // TODO
+            Mode::CHR => CharDevice::get(inode.devid()?).ok_or(EPERM)?.write(stream),
             _ => Err(EINVAL),
         }
     }

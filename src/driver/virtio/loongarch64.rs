@@ -3,13 +3,13 @@ use crate::kernel::{
     block::{make_device, BlockDevice},
     constants::EIO,
     pcie::{self, PCIDevice, PCIDriver, PciError, SegmentGroup},
+    task::block_on,
 };
 use alloc::sync::Arc;
 use core::sync::atomic::{AtomicUsize, Ordering};
 use eonix_hal::{fence::memory_barrier, mm::ArchPhysAccess};
 use eonix_log::println_warn;
 use eonix_mm::address::PhysAccess;
-use eonix_runtime::task::Task;
 use eonix_sync::Spin;
 use virtio_drivers::{
     device::blk::VirtIOBlk,
@@ -134,7 +134,7 @@ impl PCIDriver for VirtIODriver {
             Arc::new(Spin::new(virtio_block)),
         )?;
 
-        Task::block_on(block_device.partprobe()).map_err(|err| {
+        block_on(block_device.partprobe()).map_err(|err| {
             println_warn!(
                 "Failed to probe partitions for VirtIO Block device: {}",
                 err

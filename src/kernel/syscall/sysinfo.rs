@@ -1,7 +1,10 @@
 use crate::{
     io::Buffer as _,
     kernel::{
-        constants::{CLOCK_MONOTONIC, CLOCK_REALTIME, CLOCK_REALTIME_COARSE, EINTR, EINVAL},
+        constants::{
+            CLOCK_MONOTONIC, CLOCK_PROCESS_CPUTIME_ID, CLOCK_REALTIME, CLOCK_REALTIME_COARSE,
+            EINTR, EINVAL,
+        },
         task::Thread,
         timer::{Instant, Ticks},
         user::{UserBuffer, UserPointerMut},
@@ -95,6 +98,13 @@ fn do_clock_gettime64(_thread: &Thread, clock_id: u32, timespec: *mut TimeSpec) 
         }
         CLOCK_MONOTONIC => {
             let uptime_secs = Ticks::since_boot().as_secs();
+            timespec.write(TimeSpec {
+                tv_sec: uptime_secs,
+                tv_nsec: 0,
+            })
+        }
+        CLOCK_PROCESS_CPUTIME_ID => {
+            let uptime_secs = Ticks::since_boot().as_secs() / 10;
             timespec.write(TimeSpec {
                 tv_sec: uptime_secs,
                 tv_nsec: 0,

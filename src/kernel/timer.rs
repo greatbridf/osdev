@@ -8,6 +8,7 @@ use core::{
     time::Duration,
 };
 use eonix_hal::processor::CPU;
+use eonix_log::println_debug;
 use eonix_sync::{Spin, SpinIrq as _};
 use posix_types::stat::{StatXTimestamp, TimeSpec, TimeVal};
 
@@ -181,6 +182,12 @@ pub fn timer_interrupt() {
             return;
         };
 
+        // println_debug!(
+        //     "time interrupt {:?} {:?} {:?}",
+        //     current_tick,
+        //     wakeup_tick,
+        //     sleepers_to_wakeup.wakers.borrow().len()
+        // );
         for waker in sleepers_to_wakeup.wakers.into_inner() {
             waker.wake();
         }
@@ -216,6 +223,7 @@ pub fn should_reschedule() -> bool {
 
 pub async fn sleep(duration: Duration) {
     let wakeup_tick = Ticks::now() + Ticks(duration.as_millis() as usize);
+    // println_debug!("sleep wakeup_tick{:?}", wakeup_tick);
 
     core::future::poll_fn(|ctx| {
         if Ticks::now() >= wakeup_tick {

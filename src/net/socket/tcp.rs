@@ -14,6 +14,7 @@ use smoltcp::{iface::SocketHandle, wire::IpEndpoint};
 
 use crate::io::{Buffer, Stream};
 use crate::kernel::constants::{EADDRNOTAVAIL, EAGAIN, ECONNREFUSED, EINVAL, EISCONN, ENOTCONN};
+use crate::kernel::vfs::file::PollEvent;
 use crate::net::iface::{get_ephemeral_iface, get_relate_iface, NetIface};
 use crate::net::socket::{BoundSocket, RecvMetadata, SendMetadata, Socket, SocketType};
 use crate::prelude::KResult;
@@ -205,6 +206,46 @@ impl TcpSocket {
         } else {
             socket.register_recv_waker(waker);
             Ok(None)
+        }
+    }
+
+    fn poll_impl(
+        iface: NetIface,
+        socket_handle: SocketHandle,
+        events: PollEvent,
+    ) -> KResult<PollEvent> {
+        let mut iface_guard = Task::block_on(iface.lock());
+        let socket = iface_guard
+            .iface_and_sockets()
+            .1
+            .get_mut::<tcp::Socket>(socket_handle);
+
+        match socket.state() {
+            tcp::State::Established => {
+                let mut poll_state = PollEvent::empty();
+                if events.contains(PollEvent::Readable) {
+                    if !socket.may_recv() || socket.can_recv() {
+                        poll_state |= PollEvent::Readable;
+                    }
+                }
+
+                if events.contains(PollEvent::Writable) {
+                    if !socket.may_send() || socket.can_send() {
+                        poll_state |= PollEvent::Writable;
+                    }
+                }
+                Ok(poll_state)
+            }
+            tcp::State::Listen => {
+                let mut poll_state = PollEvent::empty();
+                if events.contains(PollEvent::Readable) {
+                    if socket.can_accept() {
+                        poll_state |= PollEvent::Readable;
+                    }
+                }
+                Ok(poll_state)
+            }
+            _ => Ok(events),
         }
     }
 }
@@ -407,21 +448,58 @@ impl Socket for TcpSocket {
         }
         .await
     }
+
+    fn poll(&self, events: PollEvent) -> KResult<PollEvent> {
+        let bound_socket_guard = Task::block_on(self.bound_socket.read());
+
+        match bound_socket_guard.as_ref().unwrap() {
+            BoundSocket::BoundSingle(single) => {
+                Self::poll_impl(single.iface(), single.handle(), events)
+            }
+            BoundSocket::BoundAll(all) => {
+                let mut poll_state = PollEvent::empty();
+                for bound_socket in &all.sockets {
+                    poll_state |=
+                        Self::poll_impl(bound_socket.iface(), bound_socket.handle(), events)?
+                }
+                Ok(poll_state)
+            }
+        }
+    }
 }
 
 impl Drop for TcpSocket {
     fn drop(&mut self) {
-        let (iface, handle) = self.iface_and_handle().unwrap();
+        let bound_socket_guard = Task::block_on(self.bound_socket.read());
 
-        let mut iface_guard = Task::block_on(iface.lock());
+        if bound_socket_guard.is_none() {
+            return;
+        }
 
-        let socket = iface_guard
-            .iface_and_sockets()
-            .1
-            .get_mut::<tcp::Socket>(handle);
+        let port = self.local_addr().unwrap().port();
 
-        socket.close();
+        match bound_socket_guard.as_ref().unwrap() {
+            BoundSocket::BoundAll(all) => {
+                for item in &all.sockets {
+                    close_impl(item.iface(), item.handle(), port);
+                }
+            }
+            BoundSocket::BoundSingle(single) => close_impl(single.iface(), single.handle(), port),
+        }
 
-        drop(iface_guard);
+        fn close_impl(iface: NetIface, handle: SocketHandle, port: u16) {
+            let mut iface_guard = Task::block_on(iface.lock());
+
+            let socket = iface_guard
+                .iface_and_sockets()
+                .1
+                .get_mut::<tcp::Socket>(handle);
+
+            socket.close();
+
+            iface_guard.poll();
+
+            iface_guard.remove_socket(handle, port, SocketType::Tcp);
+        }
     }
 }

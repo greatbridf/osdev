@@ -39,6 +39,12 @@ use posix_types::open::{FDFlags, OpenFlags};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct FD(u32);
 
+impl From<u32> for FD {
+    fn from(fd: u32) -> Self {
+        FD(fd)
+    }
+}
+
 #[derive(Clone)]
 struct OpenFile {
     flags: FDFlags,

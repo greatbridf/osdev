@@ -112,6 +112,7 @@ pub enum SeekOption {
 }
 
 bitflags! {
+    #[derive(Clone, Copy, Debug)]
     pub struct PollEvent: u16 {
         const Readable = 0x0001;
         const Writable = 0x0002;
@@ -593,6 +594,7 @@ impl FileType {
             FileType::TTY(tty) => tty.poll(event).await,
             FileType::PipeRead(PipeReadEnd { pipe })
             | FileType::PipeWrite(PipeWriteEnd { pipe }) => pipe.poll(event).await,
+            FileType::Socket(socket) => socket.poll(event),
             _ => unimplemented!("Poll event not supported."),
         }
     }

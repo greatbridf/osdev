@@ -1,8 +1,9 @@
 use crate::{
-    driver::virtio::hal::HAL,
+    driver::virtio::{hal::HAL, VIRTIO_NET_NAME},
     kernel::block::{make_device, BlockDevice},
     net,
 };
+
 use alloc::{sync::Arc, vec::Vec};
 use eonix_hal::arch_exported::fdt::FDT;
 use eonix_hal::mm::ArchPhysAccess;
@@ -61,7 +62,8 @@ pub fn init() {
                     let net_device =
                         VirtIONet::<HAL, _, NET_QUEUE_SIZE>::new(transport, NET_BUF_LEN)
                             .expect("Failed to initialize VirtIO Net device");
-                    net::register_netdev(net_device).expect("Failed to register VirtIO Net device");
+                    net::register_netdev(VIRTIO_NET_NAME, net_device)
+                        .expect("Failed to register VirtIO Net device");
                 }
                 virtio_drivers::transport::DeviceType::Console => {
                     println_info!(

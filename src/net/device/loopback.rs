@@ -1,5 +1,5 @@
+use alloc::collections::VecDeque;
 use alloc::vec::Vec;
-use alloc::{boxed::Box, collections::VecDeque};
 use smoltcp::phy::{ChecksumCapabilities, DeviceCapabilities, Medium};
 
 use crate::net::device::{Mac, NetDev, NetDevError, RxBuffer};
@@ -44,21 +44,19 @@ impl NetDev for Loopback {
         caps
     }
 
-    fn recv(&mut self) -> Result<Box<dyn RxBuffer>, NetDevError> {
+    fn recv(&mut self) -> Result<RxBuffer, NetDevError> {
         self.queue
             .pop_back()
-            .map(|rx_buffer| Box::new(rx_buffer) as _)
+            .map(|rx_buffer| RxBuffer::LoopBackBuffer(rx_buffer))
             .ok_or(NetDevError::Unknown)
+    }
+
+    fn recycle_rx_buffer(&mut self, _rx_buffer: RxBuffer) -> Result<(), NetDevError> {
+        Ok(())
     }
 
     fn send(&mut self, data: &[u8]) -> Result<(), NetDevError> {
         self.queue.push_back(Vec::from(data));
         Ok(())
-    }
-}
-
-impl RxBuffer for Vec<u8> {
-    fn packet(&self) -> &[u8] {
-        self.as_slice()
     }
 }

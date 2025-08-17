@@ -545,7 +545,7 @@ dependencies = [
 [[package]]
 name = "smoltcp"
 version = "0.12.0"
-source = "git+https://github.com/Shao-ZW/smoltcp.git?rev=023817e#023817ec11c96d87d83256d3df9f10015828d9d0"
+source = "git+https://github.com/Shao-ZW/smoltcp.git?rev=f14baaf#f14baaf5f8dbeff90ddbae9b3371f7b3fab730a6"
 dependencies = [
  "bitflags 1.3.2",
  "byteorder",

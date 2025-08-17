@@ -26,7 +26,6 @@ use posix_types::syscall_no::*;
 
 fn read_socket_addr(addr_ptr: *const CSockAddr, addrlen: usize) -> KResult<SocketAddr> {
     if addrlen > ADDR_MAX_LEN || addrlen < 2 {
-        // println_debug!("here");
         return Err(EINVAL);
     }
 
@@ -82,10 +81,75 @@ fn socket(domain: u32, type_: u32, protocol: u32) -> KResult<FD> {
             Protocol::IPPROTO_IP | Protocol::IPPROTO_UDP => UdpSocket::new(is_nonblock) as _,
             _ => return Err(EAFNOSUPPORT),
         },
-        _ => panic!("unsupported socket"),
+        _ => return Err(EAFNOSUPPORT),
     };
 
     thread.files.socket(socket)
+}
+
+#[eonix_macros::define_syscall(SYS_SETSOCKOPT)]
+fn set_sockopt(fd: FD, level: u32, optname: u32, optval: *const u8, optlen: u32) -> KResult<()> {
+    Ok(())
+}
+
+#[eonix_macros::define_syscall(SYS_GETSOCKOPT)]
+fn get_sockopt(fd: FD, level: u32, optname: u32, optval: *mut u8, optlen: *mut u32) -> KResult<()> {
+    const SOL_SOCKET: u32 = 1;
+    const SQL_TCP: u32 = 6;
+
+    const SNDBUF: u32 = 7;
+    const RCVBUF: u32 = 8;
+
+    const TCP_MAXSEG: u32 = 2;
+
+    const MAX_SEGMENT_SIZE: u32 = 1460;
+
+    if level == SOL_SOCKET {
+        if optname == SNDBUF || optname == RCVBUF {
+            UserPointerMut::new(optval as *mut u32)?.write(65536)?;
+            UserPointerMut::new(optlen as *mut u32)?.write(size_of::<u32>() as u32)?;
+        }
+    } else if level == SQL_TCP {
+        if optname == TCP_MAXSEG {
+            UserPointerMut::new(optval as *mut u32)?.write(MAX_SEGMENT_SIZE)?;
+            UserPointerMut::new(optlen as *mut u32)?.write(size_of::<u32>() as u32)?;
+        }
+    }
+
+    Ok(())
+}
+
+#[eonix_macros::define_syscall(SYS_GETSOCKNAME)]
+fn get_socktname(sockfd: FD, sockaddr_ptr: *mut CSockAddr, addrlen_ptr: *mut u32) -> KResult<()> {
+    let socket = thread
+        .files
+        .get(sockfd)
+        .ok_or(EBADF)?
+        .get_socket()?
+        .ok_or(ENOTSOCK)?;
+
+    let local_addr = socket.local_addr().unwrap();
+    if sockaddr_ptr as usize != 0 {
+        write_socket_addr(sockaddr_ptr, addrlen_ptr, local_addr)?;
+    }
+
+    Ok(())
+}
+
+#[eonix_macros::define_syscall(SYS_GETPEERNAME)]
+fn get_peername(sockfd: FD, sockaddr_ptr: *mut CSockAddr, addrlen_ptr: *mut u32) -> KResult<()> {
+    let socket = thread
+        .files
+        .get(sockfd)
+        .ok_or(EBADF)?
+        .get_socket()?
+        .ok_or(ENOTSOCK)?;
+
+    let remote_addr = socket.remote_addr().unwrap();
+    if sockaddr_ptr as usize != 0 {
+        write_socket_addr(sockaddr_ptr, addrlen_ptr, remote_addr)?;
+    }
+    Ok(())
 }
 
 #[eonix_macros::define_syscall(SYS_BIND)]
@@ -99,7 +163,8 @@ fn bind(sockfd: FD, sockaddr_ptr: *const CSockAddr, addrlen: u32) -> KResult<()>
 
     let socket_addr = read_socket_addr(sockaddr_ptr, addrlen as usize)?;
 
-    socket.bind(socket_addr)
+    let res = socket.bind(socket_addr);
+    res
 }
 
 #[eonix_macros::define_syscall(SYS_LISTEN)]
@@ -111,7 +176,8 @@ fn listen(sockfd: FD, backlog: u32) -> KResult<()> {
         .get_socket()?
         .ok_or(ENOTSOCK)?;
 
-    socket.listen(backlog as usize)
+    let res = socket.listen(backlog as usize);
+    res
 }
 
 #[eonix_macros::define_syscall(SYS_ACCEPT)]
@@ -129,7 +195,8 @@ fn accept(sockfd: FD, sockaddr_ptr: *mut CSockAddr, addrlen_ptr: *mut u32) -> KR
         addrlen_ptr,
         accepted_socket.remote_addr().unwrap(),
     )?;
-    thread.files.socket(accepted_socket)
+    let res = thread.files.socket(accepted_socket);
+    res
 }
 
 #[eonix_macros::define_syscall(SYS_CONNECT)]
@@ -143,7 +210,8 @@ fn connect(sockfd: FD, sockaddr_ptr: *const CSockAddr, addrlen: u32) -> KResult<
 
     let remote_addr = read_socket_addr(sockaddr_ptr, addrlen as usize)?;
 
-    Task::block_on(socket.connect(remote_addr))
+    let res = Task::block_on(socket.connect(remote_addr));
+    res
 }
 
 #[eonix_macros::define_syscall(SYS_RECVMSG)]

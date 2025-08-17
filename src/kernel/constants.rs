@@ -15,6 +15,7 @@ pub const SIG_SETMASK: u32 = 2;
 
 pub const CLOCK_REALTIME: u32 = 0;
 pub const CLOCK_MONOTONIC: u32 = 1;
+pub const CLOCK_PROCESS_CPUTIME_ID: u32 = 2;
 pub const CLOCK_REALTIME_COARSE: u32 = 5;
 
 pub const EPERM: u32 = 1;

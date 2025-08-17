@@ -1,6 +1,6 @@
 use crate::driver::virtio::hal::HAL;
 use crate::net::device::{Mac, NetDev, NetDevError, RxBuffer};
-use alloc::boxed::Box;
+use eonix_log::println_debug;
 use smoltcp::phy::{DeviceCapabilities, Medium};
 
 use virtio_drivers::{
@@ -38,21 +38,20 @@ where
         self.can_send()
     }
 
-    fn recv(&mut self) -> Result<Box<dyn RxBuffer>, NetDevError> {
+    fn recv(&mut self) -> Result<RxBuffer, NetDevError> {
         self.receive().map_or_else(
             |_| Err(NetDevError::Unknown),
-            |rx_buffer| Ok(Box::new(rx_buffer) as _),
+            |rx_buffer| Ok(RxBuffer::VirtIOBuffer(rx_buffer)),
         )
+    }
+
+    fn recycle_rx_buffer(&mut self, rx_buffer: RxBuffer) -> Result<(), NetDevError> {
+        self.recycle_rx_buffer(rx_buffer.into_virtio_buffer().unwrap())
+            .map_err(|_| NetDevError::Unknown)
     }
 
     fn send(&mut self, data: &[u8]) -> Result<(), NetDevError> {
         self.send(net::TxBuffer::from(data))
             .map_err(|_| NetDevError::Unknown)
-    }
-}
-
-impl RxBuffer for net::RxBuffer {
-    fn packet(&self) -> &[u8] {
-        self.packet()
     }
 }

@@ -28,7 +28,7 @@ pub struct Iface {
     device: NetDevice,
     iface_inner: Interface,
     // Should distinguish TCP/UDP ports
-    used_ports: BTreeSet<u16>,
+    used_ports: BTreeSet<(SocketType, u16)>,
     sockets: SocketSet<'static>,
 }
 
@@ -45,7 +45,7 @@ const UDP_TX_BUF_LEN: usize = 65536;
 impl Iface {
     pub fn new(device: NetDevice, ip_cidr: Ipv4Cidr, gateway: Option<Ipv4Addr>) -> Self {
         let iface_inner = {
-            let mut device = device.lock();
+            let mut device = Task::block_on(device.lock());
             let config = match device.caps().medium {
                 Medium::Ethernet => Config::new(wire::HardwareAddress::Ethernet(EthernetAddress(
                     device.mac_addr(),
@@ -83,39 +83,33 @@ impl Iface {
     }
 
     fn new_udp_socket(&mut self) -> SocketHandle {
-        let rx_buffer = udp::PacketBuffer::new(
-            vec![udp::PacketMetadata::EMPTY, udp::PacketMetadata::EMPTY],
-            vec![0; UDP_RX_BUF_LEN],
-        );
-        let tx_buffer = udp::PacketBuffer::new(
-            vec![udp::PacketMetadata::EMPTY, udp::PacketMetadata::EMPTY],
-            vec![0; UDP_TX_BUF_LEN],
-        );
+        let rx_buffer =
+            udp::PacketBuffer::new(vec![udp::PacketMetadata::EMPTY; 8], vec![0; UDP_RX_BUF_LEN]);
+        let tx_buffer =
+            udp::PacketBuffer::new(vec![udp::PacketMetadata::EMPTY; 8], vec![0; UDP_TX_BUF_LEN]);
 
         self.sockets.add(udp::Socket::new(rx_buffer, tx_buffer))
     }
 
-    // pub fn remove_tcp_socket(&mut self, socket: &TcpSocket) {
-    //     self.sockets
-    //         .remove(socket.handle().expect("Should have a socket handle"));
-
-    //     if let Some(socket_addr) = socket.local_addr() {
-    //         self.used_ports.remove(&socket_addr.port());
-    //     }
-    // }
+    pub fn remove_socket(&mut self, handle: SocketHandle, port: u16, socket_type: SocketType) {
+        self.sockets.remove(handle);
+        // FIXME: may many sockets use on port
+        self.used_ports.remove(&(socket_type, port));
+    }
 
     pub fn bind_socket(
         &mut self,
         bind_port: u16,
         socket_type: SocketType,
     ) -> KResult<(SocketAddr, SocketHandle)> {
-        if self.used_ports.contains(&bind_port) {
+        if self.used_ports.contains(&(socket_type, bind_port)) {
             return Err(EADDRINUSE);
         }
 
         let port = if bind_port == 0 {
-            self.alloc_port().ok_or(EADDRINUSE)?
+            self.alloc_port(socket_type).ok_or(EADDRINUSE)?
         } else {
+            self.used_ports.insert((socket_type, bind_port));
             bind_port
         };
 
@@ -132,11 +126,11 @@ impl Iface {
         Ok((socket_addr, socket_handle))
     }
 
-    fn alloc_port(&mut self) -> Option<u16> {
+    fn alloc_port(&mut self, socket_type: SocketType) -> Option<u16> {
         // FIXME: more efficient way to allocate ports
         for port in IP_LOCAL_PORT_START..=IP_LOCAL_PORT_END {
-            if !self.used_ports.contains(&port) {
-                self.used_ports.insert(port);
+            if !self.used_ports.contains(&(socket_type, port)) {
+                self.used_ports.insert((socket_type, port));
                 return Some(port);
             }
         }
@@ -148,7 +142,7 @@ impl Iface {
     }
 
     pub fn poll(&mut self) {
-        let mut device = self.device.lock();
+        let mut device = Task::block_on(self.device.lock());
         let timestamp = smoltcp::time::Instant::from_millis(Instant::now().to_millis() as i64);
 
         self.iface_inner

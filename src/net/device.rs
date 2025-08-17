@@ -1,24 +1,36 @@
 pub mod loopback;
 
 use crate::prelude::KResult;
-use alloc::{boxed::Box, sync::Arc, vec, vec::Vec};
-use eonix_sync::Spin;
+use alloc::{
+    collections::{btree_map::BTreeMap, vec_deque::VecDeque},
+    sync::Arc,
+    vec,
+    vec::Vec,
+};
+use eonix_log::println_debug;
+use eonix_runtime::task::Task;
+use eonix_sync::Mutex;
 
 pub use smoltcp::phy::DeviceCapabilities;
 
-pub type NetDevice = Arc<Spin<dyn NetDev>>;
+pub type NetDevice = Arc<Mutex<dyn NetDev>>;
 pub type Mac = [u8; 6];
 
-pub static NETDEVS: Spin<Vec<NetDevice>> = Spin::new(Vec::new());
+pub static NETDEVS: Mutex<BTreeMap<&'static str, NetDevice>> = Mutex::new(BTreeMap::new());
 
-pub fn register_netdev(netdev: impl NetDev + 'static) -> KResult<NetDevice> {
-    let netdev = Arc::new(Spin::new(netdev));
+pub fn register_netdev(name: &'static str, netdev: impl NetDev + 'static) -> KResult<()> {
+    let netdev = Arc::new(Mutex::new(netdev));
 
-    let mut netdevs = NETDEVS.lock();
-    netdevs.push(netdev.clone());
+    let mut netdevs = Task::block_on(NETDEVS.lock());
+    netdevs.insert(name, netdev);
     drop(netdevs);
 
-    Ok(netdev)
+    Ok(())
+}
+
+pub fn get_netdev(name: &'static str) -> Option<NetDevice> {
+    let netdevs = Task::block_on(NETDEVS.lock());
+    netdevs.get(name).cloned()
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -26,8 +38,25 @@ pub enum NetDevError {
     Unknown,
 }
 
-pub trait RxBuffer {
-    fn packet(&self) -> &[u8];
+pub enum RxBuffer {
+    VirtIOBuffer(virtio_drivers::device::net::RxBuffer),
+    LoopBackBuffer(Vec<u8>),
+}
+
+impl RxBuffer {
+    fn packet(&self) -> &[u8] {
+        match self {
+            RxBuffer::VirtIOBuffer(rx_buffer) => rx_buffer.packet(),
+            RxBuffer::LoopBackBuffer(rx_buffer) => rx_buffer.as_slice(),
+        }
+    }
+
+    pub fn into_virtio_buffer(self) -> Option<virtio_drivers::device::net::RxBuffer> {
+        match self {
+            RxBuffer::VirtIOBuffer(rx_buffer) => Some(rx_buffer),
+            _ => None,
+        }
+    }
 }
 
 pub trait NetDev: Send {
@@ -38,7 +67,8 @@ pub trait NetDev: Send {
     fn can_receive(&self) -> bool;
     fn can_send(&self) -> bool;
 
-    fn recv(&mut self) -> Result<Box<dyn RxBuffer>, NetDevError>;
+    fn recv(&mut self) -> Result<RxBuffer, NetDevError>;
+    fn recycle_rx_buffer(&mut self, rx_buffer: RxBuffer) -> Result<(), NetDevError>;
     fn send(&mut self, data: &[u8]) -> Result<(), NetDevError>;
 }
 
@@ -78,14 +108,18 @@ impl smoltcp::phy::Device for dyn NetDev {
     }
 }
 
-pub struct RxToken(Box<dyn RxBuffer>);
+pub static USED_RX_BUFFERS: Mutex<VecDeque<RxBuffer>> = Mutex::new(VecDeque::new());
+
+pub struct RxToken(RxBuffer);
 
 impl smoltcp::phy::RxToken for RxToken {
     fn consume<R, F>(self, f: F) -> R
     where
         F: FnOnce(&[u8]) -> R,
     {
-        f(self.0.packet())
+        let res = f(self.0.packet());
+        Task::block_on(USED_RX_BUFFERS.lock()).push_back(self.0);
+        res
     }
 }
 

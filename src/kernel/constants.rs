@@ -15,6 +15,7 @@ pub const SIG_SETMASK: u32 = 2;
 
 pub const CLOCK_REALTIME: u32 = 0;
 pub const CLOCK_MONOTONIC: u32 = 1;
+pub const CLOCK_PROCESS_CPUTIME_ID: u32 = 2;
 pub const CLOCK_REALTIME_COARSE: u32 = 5;
 
 pub const EPERM: u32 = 1;
@@ -44,6 +45,14 @@ pub const ERANGE: u32 = 34;
 pub const ENOSYS: u32 = 38;
 pub const ELOOP: u32 = 40;
 pub const EOVERFLOW: u32 = 75;
+pub const ENOTSOCK: u32 = 88;
+pub const EAFNOSUPPORT: u32 = 97;
+pub const EADDRINUSE: u32 = 98;
+pub const EADDRNOTAVAIL: u32 = 99;
+pub const ECONNRESET: u32 = 104;
+pub const EISCONN: u32 = 106;
+pub const ENOTCONN: u32 = 107;
+pub const ECONNREFUSED: u32 = 111;
 
 // pub const S_IFIFO: u32 = 0o010000;
 pub const S_IFCHR: u32 = 0o020000;

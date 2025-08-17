@@ -1,23 +1,19 @@
-use super::virtio_blk::HAL;
-use crate::kernel::{
-    block::{make_device, BlockDevice},
-    mem::{AsMemoryBlock, MemoryBlock, Page},
+use crate::{
+    driver::virtio::{hal::HAL, VIRTIO_NET_NAME},
+    kernel::block::{make_device, BlockDevice},
+    net,
 };
+
 use alloc::{sync::Arc, vec::Vec};
-use core::num::NonZero;
 use eonix_hal::arch_exported::fdt::FDT;
 use eonix_hal::mm::ArchPhysAccess;
 use eonix_log::{println_info, println_warn};
-use eonix_mm::{
-    address::{Addr, PAddr, PhysAccess},
-    paging::PFN,
-};
+use eonix_mm::address::{PAddr, PhysAccess};
 use eonix_runtime::task::Task;
 use eonix_sync::Spin;
 use virtio_drivers::{
-    device::blk::VirtIOBlk,
+    device::{blk::VirtIOBlk, net::VirtIONet},
     transport::{mmio::MmioTransport, Transport},
-    Hal,
 };
 
 pub fn init() {
@@ -61,11 +57,13 @@ pub fn init() {
                     disk_id += 1;
                 }
                 virtio_drivers::transport::DeviceType::Network => {
-                    println_info!(
-                        "Initializing Virtio Network device at {:?} with size {:#x}",
-                        base,
-                        size
-                    );
+                    const NET_QUEUE_SIZE: usize = 64;
+                    const NET_BUF_LEN: usize = 2048;
+                    let net_device =
+                        VirtIONet::<HAL, _, NET_QUEUE_SIZE>::new(transport, NET_BUF_LEN)
+                            .expect("Failed to initialize VirtIO Net device");
+                    net::register_netdev(VIRTIO_NET_NAME, net_device)
+                        .expect("Failed to register VirtIO Net device");
                 }
                 virtio_drivers::transport::DeviceType::Console => {
                     println_info!(

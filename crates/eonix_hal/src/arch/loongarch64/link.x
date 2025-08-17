@@ -9,6 +9,7 @@ SECTIONS {
         . = ORIGIN(RAM) + 0x1000;
         KEEP(*(.bootstrap.page_table.1));
         KEEP(*(.bootstrap.page_table.2));
+        KEEP(*(.bootstrap.page_table.3));
 
         . = ALIGN(16);
         KEEP(*(.bootstrap.stack));

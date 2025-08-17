@@ -18,11 +18,15 @@ do_or_freeze() {
     freeze $@
 }
 
+do_or_freeze $BUSYBOX mkdir -p /tmp
+
 do_or_freeze $BUSYBOX mkdir -p /dev
 
 do_or_freeze $BUSYBOX mknod -m 666 /dev/console c 5 1
 do_or_freeze $BUSYBOX mknod -m 666 /dev/null c 1 3
 do_or_freeze $BUSYBOX mknod -m 666 /dev/zero c 1 5
+do_or_freeze $BUSYBOX mknod -m 666 /dev/random c 1 8
+do_or_freeze $BUSYBOX mknod -m 666 /dev/urandom c 1 9
 do_or_freeze $BUSYBOX mknod -m 666 /dev/sda b 8 0
 do_or_freeze $BUSYBOX mknod -m 666 /dev/sda1 b 8 1
 do_or_freeze $BUSYBOX mknod -m 666 /dev/sdb b 8 16

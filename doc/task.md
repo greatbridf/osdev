@@ -1,16 +1,14 @@
 # 任务管理
 
-Eonix内核的任务管理系统采用了模块化的分层设计，将任务调度的运行时层（`Task`）与POSIX规范中的线程与进程资源抽象分离，构建了一个灵活、高效的多任务管理框架。这种分层设计使各模块职责更加清晰，同时提供了较高的灵活性，能够支持不同类型的运行时与调度策略。
+在决赛阶段，我们对初赛时未完全完成的任务管理模块进行了完善。我们的运行时现在以无栈协程为打底，同时可以兼顾无栈协程以及有栈协程，做到了 "Pay for and only for what you need, and nothing else" 的零成本抽象思想。Eonix内核的任务管理系统采用了模块化的分层设计，将任务调度的运行时层（`Task`）、有栈与无栈的区分（是否使用 `stackful` 进行包装）以及POSIX规范中的线程与进程资源抽象分离，构建了一个灵活、高效的多任务管理框架。这种分层设计使各模块职责更加清晰，同时提供了较高的灵活性，能够支持不同类型的运行时与调度策略。
 
 ## 核心设计概述
 
 任务管理是内核调度和进程间通信的基础，其核心组件分为两个层次：
 
 ### 运行时层
-- **任务（Task）**：调度的基本单位，代表一个可调度的执行单元
-- **执行器（Executor）**：负责具体任务的执行，管理任务的生命周期
-- **调度器（Scheduler）**：管理所有任务，负责任务的调度和切换
-- **执行上下文（ExecutionContext）**：保存任务执行状态，支持上下文切换
+- **任务（Task）**：调度的基本单位，代表一个无栈打底（我们可以在其上实现有栈的任务，具体见下），可调度的执行单元
+- **运行时（Runtime）**：管理所有任务，负责任务的调度和切换
 - **就绪队列（ReadyQueue）**：管理就绪的任务，供调度器使用
 
 ### POSIX资源抽象层
@@ -21,105 +19,84 @@ Eonix内核的任务管理系统采用了模块化的分层设计，将任务调
 
 ## 任务模型
 
-任务是Eonix内核调度的基本单位，由`Task`结构体表示，每个任务包含独立的执行上下文、状态信息和执行器。任务支持协作式调度，通过 `park` 和 `unpark` 方法进行任务的暂停和恢复。
+### 无栈
+
+任务是Eonix内核调度的基本单位，由`Task`结构体表示，每个任务包含状态信息和对应的 Future 对象。每一个任务天生就是无栈的，
+所以我们的运行时在实现的时候可以非常简单与纯粹，不需要考虑到复杂的同步、抢占等问题，每个 CPU 只需要一个栈，一个 Runtime
+进行任务的调度。如果你不需要跑有栈的任务，这就是你全部需要的资源开销。因此这些任务非常轻量化，例如我们可以实现 call_rcu
+来将 RCU 对象的释放推迟。这个函数可以直接将这个对象扔到一个 async 闭包中，等待 RCU 读者都释放后再执行。
+
+无栈任务的创建也非常简单，只需要在 `Runtime` 对象上调用 `spawn` 方法，传入你要跑的 `Future` 即可。
+
+```rust
+async foo() {
+    let join_handle = RUNTIME.spawn(async {
+        println_info!("We are in the task!");
+        sleep(3).await;
+
+        42
+    });
+
+    assert_eq!(join_handle.await, 42);
+}
+```
+
+无栈任务遵守协作式多任务的规范，所有人在需要等待时使用 `await` 让出控制权，并且保存 `Waker` 以便准备好时唤醒。如果你
+需要做一些计算密集型的任务，你可以将这些任务拆分到专门的有栈的、按时间片抢占的任务中，或者是使用有栈的 Worker 来运行
+你的任务。我们将在下方介绍。
+
+### 有栈
+
+有栈任务是在无栈任务的基础上，将对应的 `Future` 对象通过 `stackful` 这个函数进行包装后得到的 `Future`。它在
+`Runtime` 看来，以及调度时与正常的无栈任务没有 **任何** 的区别。在内部，我们会为每一个有栈的任务分配一个栈，并将这个
+`Future` 对象保存到栈上。我们使用 `TrapContext` 的 `captured_trap_return` 这个功能来实现有栈的任务，捕获时钟
+中断来实现时间片的抢占。如果想将一个计算密集型的任务转变成有栈、可抢占的任务，或者是将一个现有的，很难 async 化的任务
+适配到我们的内核中，我们只需要创建一个正常的 `Future`，然后将其包在 `stackful` 的里面......
+
+```rust
+RUNTIME.spawn(stackful(async { // 这里使用 stackful 函数将 Future 包装成有栈的任务
+    for generation in 0..2147483647 {
+        let result = some_computation_heavy_work(generation);
+        println_info!("Generation {}: Result = {}", generation, result);
+    }
+}));
+```
+
+我们对于上面的抽象得到的好处非常明显：
+
+如果我们想要一个轻量级的任务，我们可以使用无栈协程，保证不要在非 await 的地方进行阻塞调用，我们就可以获益于 Rust 的无
+栈协程带来的高性能，以及方便的使用方法。由于每个任务在切换的过程其实只是 `poll` 函数的调用，而任务内存的分配我们通过
+高性能的 Slab 和 Buddy 分配器，做到了极低的开销。我们没有为我们不需要的功能买单（有栈任务的栈资源，以及上下文切换的
+开销），同时对于我们需要的部分，我们也将开销做到了最小。
+
+如果我们确实需要抢占，或者是需要更复杂的调度策略，我们可以使用有栈的任务。但是我们的抽象设计仍然保证了我们不会比传统的
+任务调度方案更劣，甚至会更好：
+1. 有栈任务的上下文切换开销与传统线程相同。
+2. 有栈任务与传统线程相同，需要栈空间。但是我们将 Future 对象也相应地放到了栈上，从而实现了更高效的内存使用。
+3. 我们的调度策略仍然是基于协作式多任务的，不会因为使用有栈任务而引入额外的抢占开销。
+4. 我们在实现过程当中将有栈任务的资源放到了 Future 对象中，从而保证了当任务结束时，资源一定会得到释放。减少了设计的复杂度。
+
+更具体地了解我们的实现，可以参考 crates/eonix_runtime/src/scheduler.rs、 crates/eonix_runtime/src/task.rs
+和src/kernel/task.rs。
 
 ### 任务的基本结构
 
 每个任务由`Task`结构体表示，包含以下关键组件：
 ```rust
 pub struct Task {
-    pub id: TaskId,                // 唯一标识符
-    pub(crate) on_rq: AtomicBool, // 是否在就绪队列中
-    pub(crate) unparked: AtomicBool, // 是否被唤醒
-    pub(crate) cpu: AtomicU32,    // 亲和性CPU
-    pub(crate) state: TaskState,  // 任务状态
-    pub(crate) execution_context: ExecutionContext, // 执行上下文
-    executor: AtomicUniqueRefCell<Option<Pin<Box<dyn Executor>>>>, // 执行器
-    link_task_list: RBTreeAtomicLink, // 全局任务列表链接
+    /// 任务的唯一标识符
+    pub id: TaskId,
+    /// 任务所归属的 CPU
+    pub(crate) cpu: AtomicU32,
+    /// 状态
+    pub(crate) state: TaskState,
+    /// 任务的 Executor，一个类型擦除的 Future
+    executor: AtomicUniqueRefCell<Executor>,
+    /// 在全局任务链表中的 Link
+    link_task_list: RBTreeAtomicLink,
+    /// 在就绪队列中的 Link
+    link_ready_queue: LinkedListAtomicLink,
 }
-```
-
-### 任务的生命周期
-
-任务创建通过 `Task::new` 方法实现，接受一个实现了 `Run` trait 的可运行对象和一个栈类型。任务创建后会获得一个 `TaskHandle`，可用于控制任务和获取任务结果。
-
-任务的状态变化遵循以下流程：
-1. 初始状态为 `RUNNING`，表示任务可以执行
-2. 当任务调用 `park` 方法时，状态变为 `PARKING`
-3. 如果任务没有被唤醒，则进入调度器
-4. 调度器可能将任务状态变为 `PARKED`，表示任务已被挂起
-5. 当任务被 `unpark` 唤醒时，状态返回 `RUNNING`，任务重新可被调度
-
-任务执行通过 `run` 方法进行，当执行完成后返回 `ExecuteStatus::Finished` 状态。
-
-## 执行器和调度器
-
-### 执行器
-
-执行器是负责具体任务执行的组件，由 `Executor` trait 定义：
-
-```rust
-pub trait Executor: Send {
-    fn progress(&self) -> ExecuteStatus;
-}
-```
-
-执行器通过 `progress` 方法推进任务的执行，并管理任务的输出和完成状态。`ExecutorBuilder` 提供了灵活的任务和栈配置方式，支持不同类型任务的创建。
-
-### 调度器
-
-调度器是任务管理的核心，负责任务的调度决策。调度器通过全局单例 `Scheduler` 实现，主要功能包括：
-
-1. **任务切换**：通过 `schedule` 方法选择下一个要执行的任务，并进行上下文切换
-2. **任务激活**：通过 `activate` 方法将任务添加到就绪队列中，使其可被调度
-3. **任务跟踪**：通过全局任务列表 `TASKS` 和每CPU变量 `CURRENT_TASK` 跟踪所有任务和当前执行的任务
-
-### 就绪队列
-
-就绪队列是调度器的重要组成部分，使用 `ReadyQueue` 结构体管理每个CPU上就绪的任务：
-
-```rust
-pub struct ReadyQueue {
-    queue: SpinIrq<VecDeque<Arc<Task>>>,
-}
-```
-
-就绪队列支持任务的入队、出队和调度操作，确保任务能够高效地被选择执行。每个CPU核心维护一个独立的就绪队列，通过 `cpu_rq` 和 `local_rq` 函数访问。
-
-## 上下文管理
-
-执行上下文是任务调度和切换的关键，通过 `ExecutionContext` 结构体表示：
-
-```rust
-#[derive(Debug)]
-pub struct ExecutionContext(UnsafeCell<TaskContext>);
-```
-
-上下文包含任务的寄存器状态，如程序计数器（IP）、栈指针（SP）和中断状态等。TaskContext 具体结构根据不同架构有不同的实现，但都提供了统一的接口。
-
-### 上下文切换
-
-上下文切换通过以下方式实现：
-
-1. **`switch_to`方法**：在两个上下文间切换，保存当前状态并加载目标状态
-   ```rust
-   pub fn switch_to(&self, to: &Self) {
-       let Self(from_ctx) = self;
-       let Self(to_ctx) = to;
-       unsafe {
-           TaskContext::switch(&mut *from_ctx.get(), &mut *to_ctx.get());
-       }
-   }
-   ```
-
-2. **`switch_noreturn`方法**：实现不返回的上下文切换，用于任务退出场景
-3. **`call1`方法**：支持带参数的函数调用，常用于任务初始化
-
-每个CPU还维护一个局部调度器上下文 `LOCAL_SCHEDULER_CONTEXT`，用于在任务挂起时返回到调度器：
-
-```rust
-#[eonix_percpu::define_percpu]
-static LOCAL_SCHEDULER_CONTEXT: ExecutionContext = ExecutionContext::new();
 ```
 
 ## 信号管理
@@ -323,54 +300,6 @@ pub struct Process {
 - 运行时层可以独立演化，而不影响POSIX语义的实现
 - 更容易支持不同类型的线程模型，如内核线程、用户线程等
 
-## 异步支持与阻塞操作
-
-Eonix任务系统充分利用Rust语言的异步编程模型，提供了高效的异步执行和阻塞操作支持。
-
-### 异步Future执行
-
-Task实现了`block_on`方法，可以在当前任务上阻塞执行一个`Future`对象：
-
-```rust
-pub fn block_on<F>(future: F) -> F::Output
-where
-    F: Future,
-{
-    let waker = Waker::from(Task::current().clone());
-    let mut context = Context::from_waker(&waker);
-    let mut future = pin!(future);
-
-    loop {
-        if let Poll::Ready(output) = future.as_mut().poll(&mut context) {
-            break output;
-        }
-        Task::park();
-    }
-}
-```
-
-### 任务等待与唤醒机制
-
-Task实现了`Wake` trait，使其可以作为异步唤醒器使用：
-
-```rust
-impl Wake for Task {
-    fn wake(self: Arc<Self>) {
-        self.wake_by_ref();
-    }
-
-    fn wake_by_ref(self: &Arc<Self>) {
-        self.unpark();
-    }
-}
-```
-
-`JoinHandle`提供了等待任务完成并获取结果的方法，通过`join`方法阻塞当前任务直到目标任务完成并返回其结果。
-
-当任务需要等待某些事件时，可以调用`Task::park`方法暂停自己，并在事件发生时通过`unpark`方法唤醒。这种机制结合异步编程模型，为Eonix提供了高效的I/O和事件处理能力。
-
-## 关键特性与技术亮点
-
 ### 抢占式调度
 
 Eonix内核实现了基于时间片的抢占式调度机制。在时钟中断处理中，系统会调用 `should_reschedule()` 函数检查当前任务的时间片是否已经用尽：
@@ -423,13 +352,6 @@ Eonix内核采用了创新的分层设计来管理任务：
 2. **灵活性**：用户态进程可以使用不同的运行时实现，如基于Task的标准运行时或无栈协程的运行时
 3. **可靠性**：模块间接口明确，降低了错误发生的可能性
 
-### 多核支持
-
-Eonix内核原生支持多核处理器，通过对称多处理（SMP）架构实现：
-- 每个CPU核心有独立的调度器上下文（`LOCAL_SCHEDULER_CONTEXT`）
-- 每个CPU有独立的就绪队列（`ReadyQueue`）
-- 全局任务列表（`TASKS`）协调各个CPU之间的任务分配
-
 ### POSIX兼容性
 
 Eonix内核的任务管理模块支持POSIX标准中的核心概念：
@@ -441,12 +363,6 @@ Eonix内核的任务管理模块支持POSIX标准中的核心概念：
 ## 待优化事项
 
 虽然Eonix内核已经实现了完善的任务管理系统，但以下几个方面仍有优化空间：
-
-### 运行时与POSIX层接口优化
-
-当前的分层设计虽然解耦了不同层次的职责，但有些接口可能存在冗余或不一致，需要进一步精简和统一。主要包括：
-- Thread与Task之间的转换接口可以更加优化
-- 信号处理机制在两层之间的交互可以进一步简化
 
 ### 多核负载均衡
 
@@ -467,87 +383,3 @@ Eonix内核的任务管理模块支持POSIX标准中的核心概念：
   │           └── [tid]/  # 线程信息
   └── sched          # 调度器统计信息
 ```
-
-### 无栈协程支持
-
-我们希望在内核中加入无栈协程的支持，以提供更高效的异步编程模型。无栈协程可以减少上下文切换的开销，并允许更灵活的任务调度。
-
-#### 无栈协程的优势
-
-无栈协程（Stackless Coroutine）相比传统的有栈协程（如Eonix当前的Task模型）具有以下显著优势：
-
-1. **内存效率**：无栈协程不需要为每个协程分配独立的栈空间，大幅降低内存占用，特别适合高并发场景
-2. **切换开销低**：无需保存和恢复完整的栈和寄存器上下文，切换开销远低于有栈协程和线程
-3. **更好的编译时优化**：编译器可以对无栈协程进行更彻底的优化，包括内联和状态机优化
-4. **更易于调试**：无栈协程的状态更加明确，更容易追踪和调试
-
-#### 实现方案
-
-在Eonix内核中实现无栈协程支持，我们计划采用以下方案：
-
-1. **基于Rust的生成器特性**：利用Rust语言对异步编程和生成器的原生支持，通过`async`/`await`语法构建无栈协程
-   ```rust
-   // 无栈协程示例
-   async fn example_coroutine() -> Result<(), Error> {
-       // 异步操作，不会阻塞内核
-       let data = read_disk_async().await?;
-       process_data(data).await?;
-       Ok(())
-   }
-   ```
-
-2. **Future执行器优化**：开发专门的内核Future执行器，高效管理和调度异步任务
-   ```rust
-   pub struct KernelExecutor {
-       task_queue: LinkedList<Pin<Box<dyn Future<Output = ()>>>>, // 使用一个侵入式链表
-       // 其他字段...
-   }
-   
-   impl KernelExecutor {
-       pub fn spawn<F>(&mut self, future: F) 
-       where F: Future<Output = ()> + 'static {
-           self.task_queue.push_back(Box::pin(future));
-       }
-       
-       pub fn run(&mut self) {
-           // 执行调度逻辑...
-       }
-   }
-   ```
-
-3. **与现有任务模型集成**：保持与现有Task模型的兼容性，允许两种模式共存
-   - 通过适配层使无栈协程可以在当前的调度器上运行
-   - 允许现有代码逐步迁移到无栈协程模型
-
-#### 与现有任务管理系统的集成
-
-Eonix的分层设计为集成无栈协程提供了良好基础。我们计划：
-
-1. 在运行时层（`eonix_runtime`）增加对无栈协程的支持：
-   - 实现`Future`特性的执行器
-   - 提供与协程状态相关的唤醒与调度接口
-
-2. 在POSIX抽象层保持现有的线程、进程抽象不变，但内部实现可利用无栈协程：
-   - 系统调用可以返回`Future`而非直接阻塞
-   - I/O操作可以异步化，提高并发性能
-
-3. 提供统一的API适配层，使异步代码和同步代码可以无缝协作：
-   ```rust
-   // 在同步环境中执行异步代码
-   fn sync_operation() {
-       runtime::block_on(async_operation())
-   }
-   
-   // 在异步环境中执行同步代码
-   async fn run_blocking<F, R>(f: F) -> R
-   where F: FnOnce() -> R + Send + 'static,
-         R: Send + 'static {
-       // 在单独的线程中执行阻塞操作
-   }
-   ```
-
-#### 实现挑战与解决方案
-
-由于Eonix内核中有大量现有的阻塞API，迁移到无栈协程模型主要面临需要将所有阻塞操作改造为异步模式，需要大量的接口重构工作的挑战。Eonix 经过我们的改造，其架构已经具备集成无栈协程的能力。我们的分层设计使运行时层和资源抽象层解耦，为引入无栈协程奠定了基础。但由于需要对所有阻塞相关接口进行修改，这是一项工作量巨大的任务，我们暂时没有完全实现。我们只要写一个简单的无栈协程调度器，将 Future 对象放入其中即可。这样即可实现比如真正的 IOWorker （而不是目前基于Task的状态）。
-
-我们计划在未来的版本中逐步引入无栈协程支持，首先从非关键路径开始，如目前已经几乎完全完成的设备驱动，以及部分完成的文件系统操作，然后逐步扩展到核心子系统，最终实现全面的异步编程支持，以进一步提升系统的性能、并发能力和资源利用率。

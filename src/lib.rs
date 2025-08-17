@@ -230,29 +230,17 @@ async fn init_process(early_kstack: PRange) {
 
         do_mount(
             &mnt_dir,
-            "/dev/sda",
+            "/dev/vdb1",
             "/mnt",
             "fat32",
             MS_RDONLY | MS_NOATIME | MS_NODEV | MS_NOSUID,
         )
         .unwrap();
 
-        let init_names = [&b"/init"[..], &b"/sbin/init"[..], &b"/mnt/initsh"[..]];
+        let init_name = CString::new(b"/mnt/initsh").unwrap();
 
-        let mut init_name = None;
-        let mut init = None;
-        for name in init_names {
-            if let Ok(dentry) = Dentry::open(fs_context, Path::new(name).unwrap(), true) {
-                if dentry.is_valid() {
-                    init_name = Some(CString::new(name).unwrap());
-                    init = Some(dentry);
-                    break;
-                }
-            }
-        }
-
-        let init = init.expect("No init binary found in the system.");
-        let init_name = init_name.unwrap();
+        let init =
+            Dentry::open(fs_context, Path::new(init_name.as_bytes()).unwrap(), true).unwrap();
 
         let argv = vec![init_name.clone()];
 

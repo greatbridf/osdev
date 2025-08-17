@@ -1,3 +1,5 @@
+use core::sync::atomic::{AtomicU8, Ordering};
+
 use super::{
     block::make_device,
     console::get_console,
@@ -119,6 +121,24 @@ impl VirtualCharDevice for ZeroDevice {
     }
 }
 
+struct RandomDevice(AtomicU8);
+
+impl VirtualCharDevice for RandomDevice {
+    fn read(&self, buffer: &mut dyn Buffer) -> KResult<usize> {
+        // TODO: Copy from empty page.
+        let mut data = self.0.load(Ordering::Relaxed);
+        while let false = buffer.fill(&[data])?.should_stop() {
+            data = (data as usize * 91 + 114514) as u8;
+        }
+        self.0.store(data, Ordering::Relaxed);
+        Ok(buffer.wrote())
+    }
+
+    fn write(&self, stream: &mut dyn Stream) -> KResult<usize> {
+        stream.ignore_all()
+    }
+}
+
 struct ConsoleDevice;
 impl VirtualCharDevice for ConsoleDevice {
     fn read(&self, buffer: &mut dyn Buffer) -> KResult<usize> {
@@ -147,6 +167,18 @@ impl CharDevice {
             make_device(1, 5),
             Arc::from("zero"),
             CharDeviceType::Virtual(Box::new(ZeroDevice)),
+        )?;
+
+        Self::register(
+            make_device(1, 8),
+            Arc::from("random"),
+            CharDeviceType::Virtual(Box::new(RandomDevice(AtomicU8::new(114)))),
+        )?;
+
+        Self::register(
+            make_device(1, 9),
+            Arc::from("urandom"),
+            CharDeviceType::Virtual(Box::new(RandomDevice(AtomicU8::new(91)))),
         )?;
 
         Self::register(

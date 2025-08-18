@@ -51,6 +51,9 @@ if dd if=/dev/vda of=/dev/null bs=512 count=1; then
     echo -n -e "Mounting the ext4 image... " >&2
     do_or_freeze mkdir -p /mnt1
     do_or_freeze mount -t ext4 /dev/vda /mnt1
+    mkdir -p test/usr/bin
+    ln -s /mnt1/glibc/usr/bin/git ./test/usr/bin
+    ln -s /mnt1/musl/README.md ./test
     echo ok >&2
 fi
 
@@ -92,103 +95,4 @@ int main() {
 }
 EOF
 
-cp -r /mnt1/glibc/lib .
-ln -s /mnt1/musl/lib/libc.so /lib/ld-musl-riscv64-sf.so.1
-
-ln -s $BUSYBOX /busybox
-ln -s $BUSYBOX /bin/busybox
-
-print_wtf() {
-    echo "#### OS COMP TEST GROUP START $1 ####"
-    echo "#### OS COMP TEST GROUP END $1 ####"
-}
-
-### MUSL ###
-
-mkdir /musl-tests
-cd /musl-tests
-
-ln -s $BUSYBOX ./busybox
-
-cp -r /mnt1/musl/basic .
-
-ln -s /mnt1/musl/busybox_cmd.txt .
-
-ln -s /mnt1/musl/iozone .
-
-ln -s /mnt1/musl/lua .
-ln -s /mnt1/musl/test.sh .
-ln -s /mnt/libctest-static.sh .
-ln -s /mnt/libctest-dynamic.sh .
-
-for item in `ls /mnt1/musl/*.lua`; do
-    ln -s $item .
-done
-
-for item in `ls /mnt1/musl/*.exe`; do
-    ln -s $item .
-done
-
-ln -s /mnt1/musl/iozone_testcode.sh .
-ln -s /mnt1/musl/lua_testcode.sh .
-ln -s /mnt1/musl/busybox_testcode.sh .
-ln -s /mnt1/musl/basic_testcode.sh .
-
-#echo "all: $(sh libctest-static.sh 2>&1 | grep -c 'Pass') Pass"
-#echo "all: $(sh libctest-dynamic.sh 2>&1 | grep -c 'Pass') Pass"
-sh libctest-static.sh
-sh libctest-dynamic.sh
-sh iozone_testcode.sh
-sh busybox_testcode.sh
-sh basic_testcode.sh
-sh lua_testcode.sh
-
-print_wtf "cyclictest-musl"
-print_wtf "iperf-musl"
-print_wtf "libcbench-musl"
-print_wtf "lmbench-musl"
-print_wtf "ltp-musl"
-print_wtf "netperf-musl"
-print_wtf "scene-musl"
-print_wtf "unixbench-musl"
-
-### END MUSL ###
-
-cd /
-mkdir glibc-tests
-cd glibc-tests
-
-ln -s $BUSYBOX ./busybox
-
-cp -r /mnt1/glibc/basic .
-
-ln -s /mnt1/glibc/busybox_cmd.txt .
-
-ln -s /mnt1/glibc/iozone .
-
-ln -s /mnt1/glibc/lua .
-ln -s /mnt1/glibc/test.sh .
-
-for item in `ls /mnt1/glibc/*.lua`; do
-    ln -s $item .
-done
-
-ln -s /mnt1/glibc/iozone_testcode.sh .
-ln -s /mnt1/glibc/lua_testcode.sh .
-ln -s /mnt1/glibc/busybox_testcode.sh .
-ln -s /mnt1/glibc/basic_testcode.sh .
-
-sh iozone_testcode.sh
-sh busybox_testcode.sh
-sh basic_testcode.sh
-sh lua_testcode.sh
-
-print_wtf "cyclictest-glibc"
-print_wtf "iperf-glibc"
-print_wtf "libcbench-glibc"
-print_wtf "libctest-glibc"
-print_wtf "lmbench-glibc"
-print_wtf "ltp-glibc"
-print_wtf "netperf-glibc"
-print_wtf "scene-glibc"
-print_wtf "unixbench-glibc"
+exec $BUSYBOX sh -l < /dev/ttyS0 > /dev/ttyS0 2> /dev/ttyS0

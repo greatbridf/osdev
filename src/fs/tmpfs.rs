@@ -311,7 +311,7 @@ impl Inode for DirectoryInode {
                         }
                     });
 
-            let (old_entry_idx, new_entry_idx) = match indices {
+            let (mut old_entry_idx, new_entry_idx) = match indices {
                 [None, ..] => return Err(ENOENT),
                 [Some(old_idx), new_idx] => (old_idx, new_idx),
             };
@@ -319,6 +319,9 @@ impl Inode for DirectoryInode {
             let now = Instant::now();
 
             if let Some(new_idx) = new_entry_idx {
+                if old_entry_idx > new_idx {
+                    old_entry_idx -= 1;
+                }
                 // Replace existing file (i.e. rename the old and unlink the new)
                 let new_file = new_file.unwrap();
                 let _new_file_lock = block_on(new_file.rwsem.write());
@@ -345,6 +348,9 @@ impl Inode for DirectoryInode {
 
             rename_old(&mut entries[old_entry_idx], &old_file, new_dentry, now);
             *self.mtime.lock() = now;
+            block_on(dcache::d_exchange(old_dentry, new_dentry));
+            dcache::d_remove(new_dentry);
+            return Ok(());
         } else {
             // Cross-directory rename - handle similar to same directory case
 

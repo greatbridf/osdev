@@ -852,13 +852,8 @@ async fn fchownat(
 }
 
 #[eonix_macros::define_syscall(SYS_FCHMODAT)]
-async fn fchmodat(dirfd: FD, pathname: User<u8>, mode: Mode, flags: AtFlags) -> KResult<()> {
-    let dentry = if flags.at_empty_path() {
-        let file = thread.files.get(dirfd).ok_or(EBADF)?;
-        file.as_path().ok_or(EBADF)?.clone()
-    } else {
-        dentry_from(thread, dirfd, pathname, !flags.no_follow())?
-    };
+async fn fchmodat(dirfd: FD, pathname: User<u8>, mode: Mode) -> KResult<()> {
+    let dentry = dentry_from(thread, dirfd, pathname, true)?;
 
     if !dentry.is_valid() {
         return Err(ENOENT);
@@ -869,7 +864,7 @@ async fn fchmodat(dirfd: FD, pathname: User<u8>, mode: Mode, flags: AtFlags) -> 
 
 #[eonix_macros::define_syscall(SYS_FCHMOD)]
 async fn chmod(pathname: User<u8>, mode: Mode) -> KResult<()> {
-    sys_fchmodat(thread, FD::AT_FDCWD, pathname, mode, AtFlags::empty()).await
+    sys_fchmodat(thread, FD::AT_FDCWD, pathname, mode).await
 }
 
 #[eonix_macros::define_syscall(SYS_UTIMENSAT)]
@@ -921,6 +916,11 @@ async fn renameat2(
     let new_dentry = dentry_from(thread, new_dirfd, new_pathname, false)?;
 
     old_dentry.rename(&new_dentry, flags)
+}
+
+#[eonix_macros::define_syscall(SYS_MSYNC)]
+async fn msync(/* fill the actual args here */) {
+    // TODO
 }
 
 #[cfg(target_arch = "x86_64")]

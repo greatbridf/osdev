@@ -1,5 +1,7 @@
 #!/mnt/busybox sh
 
+set -x
+
 BUSYBOX=/mnt/busybox
 
 freeze() {
@@ -94,5 +96,11 @@ int main() {
     return 0;
 }
 EOF
+
+cp -r /mnt1/glibc/lib /
+
+ln -s /mnt1/glibc/ltp/testcases/bin/dup01 trigger
+
+echo "run ./trigger to trigger the bug..." > /dev/ttyS0
 
 exec $BUSYBOX sh -l < /dev/ttyS0 > /dev/ttyS0 2> /dev/ttyS0

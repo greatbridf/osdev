@@ -178,7 +178,9 @@ pub trait Inode: Send + Sync + InodeInner + Any {
     }
 
     fn chown(&self, uid: u32, gid: u32) -> KResult<()> {
-        Err(EPERM)
+        // TODO: temporary impl
+        // Err(EPERM)
+        Ok(())
     }
 
     fn page_cache(&self) -> Option<&PageCache> {

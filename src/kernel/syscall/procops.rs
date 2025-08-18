@@ -925,4 +925,9 @@ async fn arch_prctl(option: u32, addr: u32) -> KResult<u32> {
     sys_arch_prctl(thread, option, addr).await
 }
 
+#[eonix_macros::define_syscall(SYS_SCHED_GETAFFINITY)]
+async fn sched_getaffinity() -> KResult<u32> {
+    Ok(0)
+}
+
 pub fn keep_alive() {}

@@ -187,12 +187,8 @@ async fn times(tms: UserMut<TMS>) -> KResult<()> {
 
 #[eonix_macros::define_syscall(SYS_GETRANDOM)]
 async fn get_random(buf: UserMut<u8>, len: usize, flags: u32) -> KResult<usize> {
-    if flags != 0 {
-        return Err(EINVAL);
-    }
-
     let mut buffer = UserBuffer::new(buf, len)?;
-    for i in (0u8..=255).cycle().step_by(53) {
+    for i in (0u8..=255).cycle().step_by(53).take(len) {
         let _ = buffer.fill(&[i])?;
 
         if Thread::current().signal_list.has_pending_signal() {

@@ -213,29 +213,16 @@ pub fn init() -> KResult<()> {
 
     #[cfg(target_arch = "riscv64")]
     {
-        use eonix_hal::arch_exported::fdt::FDT;
-        use eonix_mm::address::PAddr;
+        use eonix_hal::platform::UART_BASE;
+        use eonix_hal::platform::UART_IRQ;
 
-        if let Some(uart) = FDT.find_compatible(&["ns16550a", "ns16550"]) {
-            let regs = uart.reg().unwrap();
-            let base_address = regs
-                .map(|reg| PAddr::from(reg.starting_address as usize))
-                .next()
-                .expect("UART base address not found");
+        let port = unsafe {
+            // SAFETY: The base address is provided by the FDT and should be valid.
+            SerialIO::new(UART_BASE)
+        };
 
-            let port = unsafe {
-                // SAFETY: The base address is provided by the FDT and should be valid.
-                SerialIO::new(base_address)
-            };
-
-            let serial = Serial::new(0, port)?;
-            serial.register_as_char_device(
-                uart.interrupts()
-                    .expect("UART device should have `interrupts` property")
-                    .next()
-                    .expect("UART device should have an interrupt pin"),
-            )?;
-        }
+        let serial = Serial::new(0, port)?;
+        serial.register_as_char_device(UART_IRQ)?;
     }
 
     #[cfg(target_arch = "loongarch64")]

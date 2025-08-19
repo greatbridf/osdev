@@ -3,9 +3,8 @@ use crate::kernel::{
     timer::Instant,
 };
 use core::ptr::NonNull;
-use eonix_hal::{arch_exported::fdt::FDT, mm::ArchPhysAccess};
-use eonix_log::println_warn;
-use eonix_mm::address::{PAddr, PhysAccess};
+use eonix_hal::{mm::ArchPhysAccess, platform::RTC_BASE};
+use eonix_mm::address::PhysAccess;
 
 #[cfg(not(target_arch = "riscv64"))]
 compile_error!("Goldfish RTC driver is only supported on RISC-V architecture");
@@ -33,20 +32,9 @@ impl RealTimeClock for GoldfishRtc {
 }
 
 pub fn probe() {
-    let Some(rtc) = FDT.find_compatible(&["google,goldfish-rtc"]) else {
-        println_warn!("Goldfish RTC not found in FDT");
-        return;
-    };
-
-    let mut regs = rtc.reg().expect("Goldfish RTC reg not found");
-    let base = regs
-        .next()
-        .map(|r| PAddr::from(r.starting_address as usize))
-        .expect("Goldfish RTC base address not found");
-
     let goldfish_rtc = GoldfishRtc {
-        time_low: unsafe { ArchPhysAccess::as_ptr(base) },
-        time_high: unsafe { ArchPhysAccess::as_ptr(base + 4) },
+        time_low: unsafe { ArchPhysAccess::as_ptr(RTC_BASE) },
+        time_high: unsafe { ArchPhysAccess::as_ptr(RTC_BASE + 4) },
     };
 
     register_rtc(goldfish_rtc);

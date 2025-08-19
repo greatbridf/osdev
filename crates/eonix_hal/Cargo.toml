@@ -27,3 +27,6 @@ bitflags = "2.6.0"
 [target.'cfg(target_arch = "loongarch64")'.dependencies]
 loongArch64 = "0.2.5"
 fdt = "0.1"
+
+[features]
+platform-riscv64-qemu-virt = []

@@ -2,7 +2,6 @@ use super::{
     interrupt::InterruptControl,
     trap::{setup_trap, TrapContext},
 };
-use crate::arch::fdt::{FdtExt, FDT};
 use core::{
     arch::asm, cell::UnsafeCell, mem::MaybeUninit, pin::Pin, ptr::NonNull,
     sync::atomic::AtomicUsize,

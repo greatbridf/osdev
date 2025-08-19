@@ -8,11 +8,10 @@ use crate::{
 };
 use driver::virtio::hal::HAL;
 
-use alloc::{sync::Arc, vec::Vec};
-use eonix_hal::arch_exported::fdt::FDT;
-use eonix_hal::mm::ArchPhysAccess;
+use alloc::sync::Arc;
+use eonix_hal::{mm::ArchPhysAccess, platform::virtio_devs};
 use eonix_log::{println_info, println_warn};
-use eonix_mm::address::{PAddr, PhysAccess};
+use eonix_mm::address::PhysAccess;
 use eonix_sync::Spin;
 use virtio_drivers::{
     device::{blk::VirtIOBlk, net::VirtIONet},
@@ -21,21 +20,8 @@ use virtio_drivers::{
 
 pub fn init() {
     let mut disk_id = 0;
-    let mut virtio_devices: Vec<_> = FDT
-        .all_nodes()
-        .filter(|node| {
-            node.compatible()
-                .is_some_and(|compatible| compatible.all().any(|s| s == "virtio,mmio"))
-        })
-        .filter_map(|node| node.reg())
-        .flatten()
-        .collect();
-    virtio_devices.sort_by_key(|reg| reg.starting_address);
 
-    for reg in virtio_devices {
-        let base = PAddr::from(reg.starting_address as usize);
-        let size = reg.size.expect("Virtio device must have a size");
-
+    for (base, size) in virtio_devs() {
         let base = unsafe {
             // SAFETY: We get the base address from the FDT, which is guaranteed to be valid.
             ArchPhysAccess::as_ptr(base)

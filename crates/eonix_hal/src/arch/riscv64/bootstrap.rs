@@ -7,11 +7,11 @@ use super::{
 use crate::{
     arch::{
         cpu::CPU,
-        fdt::{init_dtb_and_fdt, FdtExt, FDT},
         mm::{ArchPhysAccess, FreeRam, PageAttribute64, GLOBAL_PAGE_TABLE},
     },
     bootstrap::BootStrapData,
     mm::{ArchMemory, ArchPagingMode, BasicPageAlloc, BasicPageAllocRef, ScopedAllocator},
+    platform::harts,
 };
 use core::{
     alloc::Allocator,
@@ -108,21 +108,15 @@ unsafe extern "C" fn _start(hart_id: usize, dtb_addr: usize) -> ! {
     )
 }
 
-pub unsafe extern "C" fn riscv64_start(hart_id: usize, dtb_addr: PAddr) -> ! {
-    let fdt = Fdt::from_ptr(ArchPhysAccess::as_ptr(dtb_addr).as_ptr())
-        .expect("Failed to parse DTB from static memory.");
-
+pub unsafe extern "C" fn riscv64_start(hart_id: usize) -> ! {
     let real_allocator = RefCell::new(BasicPageAlloc::new());
     let alloc = BasicPageAllocRef::new(&real_allocator);
 
-    for range in fdt.present_ram().free_ram() {
+    for range in ArchMemory::free_ram() {
         real_allocator.borrow_mut().add_range(range);
     }
 
     setup_kernel_page_table(&alloc);
-    unsafe {
-        init_dtb_and_fdt(dtb_addr);
-    }
 
     setup_cpu(&alloc, hart_id);
 
@@ -248,7 +242,7 @@ fn bootstrap_smp(alloc: impl Allocator, page_alloc: &RefCell<BasicPageAlloc>) {
     let local_hart_id = CPU::local().cpuid();
     let mut ap_count = 0;
 
-    for hart_id in FDT.harts().filter(|&id| id != local_hart_id) {
+    for hart_id in harts().filter(|&id| id != local_hart_id) {
         let stack_range = {
             let page_alloc = BasicPageAllocRef::new(&page_alloc);
             let ap_stack = Page::alloc_order_in(4, page_alloc);

@@ -69,13 +69,14 @@ unwinding = { version = "0.2.8", default-features = false, features = [
 ] }
 
 [features]
-default = []
+default = ["platform-riscv64-qemu-virt"]
 trace_pci = []
 trace_syscall = []
 trace_scheduler = ["eonix_runtime/trace_scheduler"]
 log_trace = ["trace_pci", "trace_syscall", "trace_scheduler"]
 log_debug = []
 smp = []
+platform-riscv64-qemu-virt = ["eonix_hal/platform-riscv64-qemu-virt"]
 
 [profile.release]
 debug = true

@@ -454,6 +454,21 @@ async fn symlinkat(target: User<u8>, dirfd: FD, linkpath: User<u8>) -> KResult<(
     dentry.symlink(target.as_cstr().to_bytes())
 }
 
+#[eonix_macros::define_syscall(SYS_LINKAT)]
+async fn linkat(
+    old_dirfd: FD,
+    old_pathname: User<u8>,
+    new_dirfd: FD,
+    new_pathname: User<u8>,
+    _flags: i32,
+) -> KResult<()> {
+    let old_dentry = dentry_from(thread, old_dirfd, old_pathname, false)?;
+    let new_dentry = dentry_from(thread, new_dirfd, new_pathname, false)?;
+    let old_inode = old_dentry.get_inode().unwrap();
+
+    new_dentry.linkat(old_inode)
+}
+
 #[cfg(target_arch = "x86_64")]
 #[eonix_macros::define_syscall(SYS_SYMLINK)]
 async fn symlink(target: User<u8>, linkpath: User<u8>) -> KResult<()> {
@@ -795,7 +810,13 @@ async fn pselect6(
 
     loop {
         for (fd, events) in &poll_fds {
-            let res = block_on(thread.files.get(FD::from(*fd)).ok_or(EBADF)?.poll(events.clone()))?;
+            let res = block_on(
+                thread
+                    .files
+                    .get(FD::from(*fd))
+                    .ok_or(EBADF)?
+                    .poll(events.clone()),
+            )?;
 
             if res.contains(PollEvent::Readable) {
                 if let Some(fds) = &mut read_fds {

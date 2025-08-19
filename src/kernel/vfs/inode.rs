@@ -117,6 +117,10 @@ pub trait Inode: Send + Sync + InodeInner + Any {
         Err(if !self.is_dir() { ENOTDIR } else { EPERM })
     }
 
+    fn linkat(&self, at: &Arc<Dentry>, inode: Arc<dyn Inode>) -> KResult<()> {
+        Err(if !self.is_dir() { ENOTDIR } else { EPERM })
+    }
+
     fn mkdir(&self, at: &Dentry, mode: Mode) -> KResult<()> {
         Err(if !self.is_dir() { ENOTDIR } else { EPERM })
     }

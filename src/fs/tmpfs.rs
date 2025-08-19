@@ -3,7 +3,7 @@ use crate::kernel::constants::{EEXIST, EINVAL, EIO, EISDIR, ENOENT, ENOSYS, ENOT
 use crate::kernel::mem::{CachePage, CachePageStream, PageCache, PageCacheBackend};
 use crate::kernel::task::block_on;
 use crate::kernel::timer::Instant;
-use crate::kernel::vfs::inode::RenameData;
+use crate::kernel::vfs::inode::{self, RenameData};
 use crate::kernel::vfs::inode::{AtomicMode, InodeData};
 use crate::{
     io::Buffer,
@@ -159,6 +159,12 @@ impl Inode for DirectoryInode {
 
         self.link(at.get_name(), file.as_ref(), rwsem.prove_mut());
         at.save_reg(file)
+    }
+
+    fn linkat(&self, at: &Arc<Dentry>, inode: Arc<dyn Inode>) -> KResult<()> {
+        let rwsem = block_on(self.rwsem.write());
+        self.link(at.get_name(), inode.as_ref(), rwsem.prove_mut());
+        at.save_reg(inode)
     }
 
     fn mknod(&self, at: &Dentry, mode: Mode, dev: DevId) -> KResult<()> {

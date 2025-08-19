@@ -483,6 +483,15 @@ impl Dentry {
         }
     }
 
+    pub fn linkat(self: &Arc<Self>, inode: Arc<dyn Inode>) -> KResult<()> {
+        if self.get_inode().is_ok() {
+            Err(EEXIST)
+        } else {
+            let dir = self.parent().get_inode()?;
+            dir.linkat(self, inode)
+        }
+    }
+
     pub fn readlink(&self, buffer: &mut dyn Buffer) -> KResult<usize> {
         self.get_inode()?.readlink(buffer)
     }

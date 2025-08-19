@@ -369,6 +369,7 @@ impl MMList {
                         .page_table
                         .set_copy_on_write(&mut inner.page_table, area.range());
                 } else {
+                    // may buggy here
                     list_inner
                         .page_table
                         .set_copied(&mut inner.page_table, area.range());
@@ -573,12 +574,11 @@ impl MMList {
     }
 
     pub async fn set_break(&self, pos: Option<VAddr>) -> VAddr {
-        let inner = self.inner.borrow();
-        let mut inner = inner.lock().await;
+        let inner_ = self.inner.borrow();
+        let mut inner = inner_.lock().await;
 
         // SAFETY: `set_break` is only called in syscalls, where program break should be valid.
         assert!(inner.break_start.is_some() && inner.break_pos.is_some());
-        let break_start = inner.break_start.unwrap();
         let current_break = inner.break_pos.unwrap();
         let pos = match pos {
             None => return current_break,
@@ -594,9 +594,16 @@ impl MMList {
             return current_break;
         }
 
-        if !inner.areas.contains(&break_start) {
-            inner.areas.insert(MMArea::new(
-                break_start,
+        inner.break_pos = Some(pos);
+
+        drop(inner);
+
+        let len = pos - current_break;
+
+        let _ = self
+            .mmap_fixed(
+                current_break,
+                len,
                 Mapping::Anonymous,
                 Permission {
                     read: true,
@@ -604,29 +611,10 @@ impl MMList {
                     execute: false,
                 },
                 false,
-            ));
-        }
+            )
+            .await
+            .unwrap();
 
-        let program_break = inner
-            .areas
-            .get(&break_start)
-            .expect("Program break area should be valid");
-
-        let len = pos - current_break;
-        let range_to_grow = VRange::from(program_break.range().end()).grow(len);
-
-        program_break.grow(len);
-
-        inner.page_table.set_anonymous(
-            range_to_grow,
-            Permission {
-                read: true,
-                write: true,
-                execute: false,
-            },
-        );
-
-        inner.break_pos = Some(pos);
         pos
     }
 
@@ -757,7 +745,10 @@ impl PageTableExt for KernelPageTable<'_> {
 
         for (to, from) in to_iter.zip(from_iter) {
             let (pfn, attr) = from.get();
-            to.set(pfn, attr);
+            to.set(
+                unsafe { Page::with_raw(pfn, |page| page.clone()) }.into_raw(),
+                attr,
+            );
         }
     }
 }

@@ -294,6 +294,7 @@ impl Socket for TcpSocket {
             // FIXME: should get a available port and bind to all iface
             // need a way to get that port simply
             // *bound_socket_guard = Some(BoundSocket::new_bind_all(available_port)?);
+            unimplemented!()
         }
 
         drop(bound_socket_guard);

@@ -15,7 +15,7 @@ use posix_types::signal::Signal;
 
 const BUFFER_SIZE: usize = 4096;
 
-const NCCS: usize = 32;
+const NCCS: usize = 19;
 
 // taken from linux kernel code
 

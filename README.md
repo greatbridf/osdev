@@ -7,20 +7,17 @@
 ## 自初赛以来的进展
 
 - 完善对 ext4 文件系统和 page cache 的支持
-- 重构当前的 task runtime，计划使用统一的有栈/无栈协程 runtime 取代目前的实现，默认使用无堆栈协程作为基本调度单元，在确实需要有栈的执行环境的情况下，也提供 `stackful()` 接口运行基于时间片的抢占式基础上运行的任务
+- 重构当前的 task runtime，计划使用统一的有栈/无栈协程 runtime 取代目前的实现，默认使用无堆栈协程作为基本调度单元，在确实需要有栈的执行环境的情况下，也提供 `stackful()` 接口运行基于时间片的抢占式基础上运行的任务，具体可以看文档中的[任务管理](doc/task.md)
 - 适配内核中所有的异步函数
 - 完善对网络协议栈的支持
-- 完善对初赛测试用例的ltp的适配
 - 可以通过决赛的线上测试用例的85分
-
-以上内容尚未同步到 gitlab，具体可以查看 [GitHub](https://github.com/greatbridf/osdev.git) 仓库中 master 分支的提交、issues 和 PRs
 
 ## 项目特性
 
 - [x] 多处理器支持
 - [x] 多架构支持（x86_64, riscv64, Loongarch64）
 - [x] 内存管理
-- [x] 基于无栈协程的任务管理
+- [x] 基于有栈/无栈协程的任务管理
 - [x] *POSIX* 兼容性，兼容 *Linux* 系统调用接口
 - [x] 静态 ELF 加载器
 - [x] TTY 及任务控制接口（正在进一步实现）
@@ -36,7 +33,7 @@
 
 ![测试](doc/images/image.png)
 
-## 初赛文档
+## 文档
 
 本项目开发时代码仓库在 [GitHub](https://github.com/greatbridf/osdev.git)。
 
@@ -46,6 +43,7 @@
 - [文件系统](doc/filesystem.md)
 - [设备驱动](doc/device_driver.md)
 - [多平台支持](doc/multi_arch.md)
+- [网络栈](doc/net.md)
 
 初赛的汇报PPT也在仓库中，由于仓库大小限制，汇报的视频上传到了[bilibili](https://www.bilibili.com/video/BV1PwgCzME1F/)中。
 
@@ -253,5 +251,8 @@ make tmux-debug
 
 直接使用内核组件：
 * ext4-rs[https://github.com/yuoo655/ext4_rs]
+* another_ext4[https://github.com/PKTH-Jx/another_ext4.git]
 * virtio-drivers[https://github.com/rcore-os/virtio-drivers]
 * xmas-elf[https://github.com/nrc/xmas-elf]
+* intrusive-rs[https://github.com/Amanieu/intrusive-rs.git]
+* smoltcp[https://github.com/smoltcp-rs/smoltcp]

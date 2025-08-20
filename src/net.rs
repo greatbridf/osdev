@@ -78,7 +78,12 @@ pub async fn ifaces_poll() {
         drop(ifaces);
 
         // Ugly since i have no time to redesign rx_recycle
-        let virio_netdev = get_netdev(VIRTIO_NET_NAME).unwrap();
+        let virio_netdev = if let Some(dev) = get_netdev(VIRTIO_NET_NAME) {
+            dev
+        } else {
+            get_netdev(LOOPBACK_NAME).unwrap()
+        };
+
         let mut virio_netdev_guard = virio_netdev.lock().await;
         let mut used_rx_buffers = USED_RX_BUFFERS.lock().await;
 

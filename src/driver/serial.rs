@@ -3,13 +3,13 @@ mod io;
 use crate::{
     kernel::{
         block::make_device, console::set_console, constants::EIO, interrupt::register_irq_handler,
-        CharDevice, CharDeviceType, Terminal, TerminalDevice,
+        timer::sleep, CharDevice, CharDeviceType, Terminal, TerminalDevice,
     },
     prelude::*,
 };
 use alloc::{collections::vec_deque::VecDeque, format, sync::Arc};
 use bitflags::bitflags;
-use core::pin::pin;
+use core::{pin::pin, time::Duration};
 use eonix_runtime::scheduler::RUNTIME;
 use eonix_sync::{SpinIrq as _, WaitList};
 use io::SerialIO;
@@ -102,7 +102,11 @@ impl Serial {
             };
 
             if should_wait {
+                #[cfg(not(target_arch = "loongarch64"))]
                 port.wait_for_interrupt().await;
+
+                #[cfg(target_arch = "loongarch64")]
+                sleep(Duration::from_millis(100)).await;
             }
         }
     }

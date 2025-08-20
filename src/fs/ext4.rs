@@ -145,6 +145,10 @@ impl Ext4Fs {
                     .insert(Ext4Inode::Dir(Arc::new(DirInode { idata })))
                     .clone()
                     .into_inner(),
+                Mode::LNK => vacant
+                    .insert(Ext4Inode::SymLink(Arc::new(SymlinkInode { idata })))
+                    .clone()
+                    .into_inner(),
                 mode => {
                     println_warn!("ext4: Unsupported inode type: {:#o}", mode.format_bits());
                     vacant
@@ -207,6 +211,7 @@ impl Ext4Fs {
 enum Ext4Inode {
     File(Arc<FileInode>),
     Dir(Arc<DirInode>),
+    SymLink(Arc<SymlinkInode>),
 }
 
 impl Ext4Inode {
@@ -214,6 +219,7 @@ impl Ext4Inode {
         match self {
             Ext4Inode::File(inode) => inode,
             Ext4Inode::Dir(inode) => inode,
+            Ext4Inode::SymLink(inode) => inode,
         }
     }
 }
@@ -227,6 +233,48 @@ define_struct_inode! {
 
 define_struct_inode! {
     struct DirInode;
+}
+
+define_struct_inode! {
+    struct SymlinkInode;
+}
+
+impl Inode for SymlinkInode {
+    fn readlink(&self, buffer: &mut dyn Buffer) -> KResult<usize> {
+        let vfs = self.vfs.upgrade().ok_or(EIO)?;
+        let ext4fs = vfs.as_any().downcast_ref::<Ext4Fs>().unwrap();
+
+        let mut temp_buf = vec![0u8; buffer.total()];
+        match ext4fs.inner.getattr(self.ino as u32) {
+            Ok(attr) => {
+                if attr.size > 60 {
+                    match ext4fs.inner.read(self.ino as u32, 0, &mut temp_buf) {
+                        Ok(bytes_read) => {
+                            let _ = buffer.fill(&temp_buf[..bytes_read])?;
+                            Ok(buffer.wrote())
+                        }
+                        Err(e) => Err(e.code() as u32),
+                    }
+                } else {
+                    match ext4fs
+                        .inner
+                        .read_inode_block(self.ino as u32, &mut temp_buf)
+                    {
+                        Ok(bytes_read) => {
+                            let _ = buffer.fill(&temp_buf[..bytes_read])?;
+                            Ok(buffer.wrote())
+                        }
+                        Err(e) => Err(e.code() as u32),
+                    }
+                }
+            }
+            Err(e) => Err(e.code() as u32),
+        }
+    }
+
+    fn chmod(&self, _: Mode) -> KResult<()> {
+        Ok(())
+    }
 }
 
 impl FileInode {

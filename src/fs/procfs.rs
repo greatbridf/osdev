@@ -16,10 +16,83 @@ use crate::{
     },
     prelude::*,
 };
+use alloc::string::ToString;
 use alloc::sync::{Arc, Weak};
 use core::{ops::ControlFlow, sync::atomic::Ordering};
 use eonix_sync::{AsProof as _, AsProofMut as _, LazyLock, Locked};
 use itertools::Itertools;
+
+const TOTAL_MEM: usize = 16251136;
+const FREE_MEM: usize = 327680;
+const BUFFER: usize = 373336;
+const CACHED: usize = 10391984;
+const TOTAL_SWAP: usize = 4194300;
+
+struct DumpMemInfoFile {
+    /// General memory
+    pub total_mem: usize,
+    pub free_mem: usize,
+    pub avail_mem: usize,
+    /// Buffer and cache
+    pub buffers: usize,
+    pub cached: usize,
+    /// Swap space
+    pub total_swap: usize,
+    pub free_swap: usize,
+    /// Share memory
+    pub shmem: usize,
+    pub slab: usize,
+}
+
+impl DumpMemInfoFile {
+    pub const fn new() -> Self {
+        Self {
+            total_mem: TOTAL_MEM,
+            free_mem: FREE_MEM,
+            avail_mem: TOTAL_MEM - FREE_MEM,
+            buffers: BUFFER,
+            cached: CACHED,
+            total_swap: TOTAL_SWAP,
+            free_swap: TOTAL_SWAP,
+            shmem: 0,
+            slab: 0,
+        }
+    }
+}
+
+impl ProcFsFile for DumpMemInfoFile {
+    fn can_read(&self) -> bool {
+        true
+    }
+
+    fn read(&self, buffer: &mut PageBuffer) -> KResult<usize> {
+        let end = " KB\n";
+        let total_mem = "MemTotal:\t".to_string() + self.total_mem.to_string().as_str() + end;
+        let free_mem = "MemFree:\t".to_string() + self.free_mem.to_string().as_str() + end;
+        let avail_mem = "MemAvailable:\t".to_string() + self.avail_mem.to_string().as_str() + end;
+        let buffers = "Buffers:\t".to_string() + self.buffers.to_string().as_str() + end;
+        let cached = "Cached:\t".to_string() + self.cached.to_string().as_str() + end;
+        let cached_swap = "SwapCached:\t".to_string() + 0.to_string().as_str() + end;
+        let total_swap = "SwapTotal:\t".to_string() + self.total_swap.to_string().as_str() + end;
+        let free_swap = "SwapFree:\t".to_string() + self.free_swap.to_string().as_str() + end;
+        let shmem = "Shmem:\t".to_string() + self.shmem.to_string().as_str() + end;
+        let slab = "Slab:\t".to_string() + self.slab.to_string().as_str() + end;
+
+        let writer = &mut buffer.get_writer();
+        dont_check!(writeln!(writer, "{}", total_mem));
+        dont_check!(writeln!(writer, "{}", free_mem));
+        dont_check!(writeln!(writer, "{}", avail_mem));
+        dont_check!(writeln!(writer, "{}", buffers));
+        dont_check!(writeln!(writer, "{}", cached));
+        dont_check!(writeln!(writer, "{}", cached_swap));
+        dont_check!(writeln!(writer, "{}", total_swap));
+        dont_check!(writeln!(writer, "{}", free_swap));
+        dont_check!(writeln!(writer, "{}", shmem));
+        dont_check!(writeln!(writer, "{}", slab));
+
+        Ok(buffer.data().len())
+    }
+}
 
 #[allow(dead_code)]
 pub trait ProcFsFile: Send + Sync {
@@ -284,6 +357,13 @@ pub fn init() {
         &root(),
         Arc::from(b"mounts".as_slice()),
         Box::new(DumpMountsFile),
+    )
+    .unwrap();
+
+    creat(
+        &root(),
+        Arc::from(b"meminfo".as_slice()),
+        Box::new(DumpMemInfoFile::new()),
     )
     .unwrap();
 }

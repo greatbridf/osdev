@@ -1,7 +1,9 @@
 use crate::{
     io::{Buffer, Stream},
     kernel::{
-        constants::{EADDRINUSE, EINVAL}, task::block_on, vfs::PollEvent
+        constants::{EADDRINUSE, EINVAL, EOPNOTSUPP},
+        task::block_on,
+        vfs::PollEvent,
     },
     net::iface::{NetIface, IFACES},
     prelude::KResult,
@@ -33,19 +35,19 @@ pub struct RecvMetadata {
 #[async_trait]
 pub trait Socket: Sync + Send {
     fn bind(&self, _socket_addr: SocketAddr) -> KResult<()> {
-        Err(EINVAL)
+        Err(EOPNOTSUPP)
     }
 
     fn listen(&self, _backlog: usize) -> KResult<()> {
-        Err(EINVAL)
+        Err(EOPNOTSUPP)
     }
 
     async fn connect(&self, _remote_addr: SocketAddr) -> KResult<()> {
-        Err(EINVAL)
+        Err(EOPNOTSUPP)
     }
 
     async fn accept(&self) -> KResult<Arc<dyn Socket>> {
-        Err(EINVAL)
+        Err(EOPNOTSUPP)
     }
 
     fn local_addr(&self) -> Option<SocketAddr>;
@@ -56,7 +58,7 @@ pub trait Socket: Sync + Send {
 
     async fn send(&self, stream: &mut dyn Stream, send_meta: SendMetadata) -> KResult<usize>;
 
-    fn poll(&self, events: PollEvent) -> KResult<PollEvent>;
+    async fn poll(&self, events: PollEvent) -> KResult<PollEvent>;
 }
 
 #[derive(Clone)]

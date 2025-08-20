@@ -4,8 +4,16 @@ use super::{
     Spin, TerminalFile,
 };
 use crate::{
-    kernel::vfs::file::FileType,
-    kernel::{console::get_console, constants::ENXIO, vfs::dentry::Dentry, CharDevice},
+    hash::KernelHasher,
+    kernel::{
+        console::get_console,
+        constants::ENXIO,
+        vfs::{
+            dentry::Dentry,
+            file::{EventFile, FileType},
+        },
+        CharDevice,
+    },
     prelude::*,
 };
 use crate::{
@@ -301,6 +309,18 @@ impl FileArray {
             File::new(OpenFlags::default(), FileType::Socket(socket)),
         );
         Ok(sockfd)
+    }
+
+    pub fn event_file(&self, event_file: EventFile) -> KResult<FD> {
+        let mut inner = self.inner.lock();
+        let (files, fd_alloc) = inner.split_borrow();
+        let event_fd = fd_alloc.next_fd(files);
+        inner.do_insert(
+            event_fd,
+            FDFlags::default(),
+            File::new(OpenFlags::default(), FileType::Event(Arc::new(event_file))),
+        );
+        Ok(event_fd)
     }
 
     pub fn open(&self, dentry: &Arc<Dentry>, flags: OpenFlags, mode: Mode) -> KResult<FD> {

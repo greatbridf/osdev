@@ -1,3 +1,4 @@
+mod event_file;
 mod inode_file;
 mod pipe;
 mod terminal_file;
@@ -10,8 +11,8 @@ use crate::{
         task::Thread,
         CharDevice,
     },
-    prelude::KResult,
     net::socket::{SendMetadata, Socket},
+    prelude::KResult,
 };
 use alloc::sync::Arc;
 use bitflags::bitflags;
@@ -19,9 +20,11 @@ use core::{
     ops::Deref,
     sync::atomic::{AtomicI32, AtomicU32, Ordering},
 };
+use eonix_sync::Mutex;
 use pipe::{PipeReadEnd, PipeWriteEnd};
 use posix_types::open::OpenFlags;
 
+pub use event_file::EventFile;
 pub use inode_file::InodeFile;
 pub use pipe::Pipe;
 pub use terminal_file::TerminalFile;
@@ -33,6 +36,7 @@ pub enum FileType {
     Terminal(TerminalFile),
     CharDev(Arc<CharDevice>),
     Socket(Arc<dyn Socket>),
+    Event(Arc<EventFile>),
 }
 
 struct FileData {
@@ -66,6 +70,7 @@ impl FileType {
             FileType::Terminal(tty) => tty.read(buffer).await,
             FileType::CharDev(device) => device.read(buffer),
             FileType::Socket(socket) => socket.recv(buffer).await.map(|res| res.0),
+            FileType::Event(event_file) => event_file.read(buffer).await,
             _ => Err(EBADF),
         }
     }
@@ -92,6 +97,7 @@ impl FileType {
             FileType::Terminal(tty) => tty.write(stream),
             FileType::CharDev(device) => device.write(stream),
             FileType::Socket(socket) => socket.send(stream, SendMetadata::default()).await,
+            FileType::Event(event_file) => event_file.write(stream).await,
             _ => Err(EBADF),
         }
     }
@@ -148,7 +154,7 @@ impl FileType {
             FileType::Terminal(tty) => tty.poll(event).await,
             FileType::PipeRead(pipe) => pipe.poll(event).await,
             FileType::PipeWrite(pipe) => pipe.poll(event).await,
-            FileType::Socket(socket) => socket.poll(event),
+            FileType::Socket(socket) => socket.poll(event).await,
             _ => unimplemented!("Poll event not supported."),
         }
     }
@@ -229,7 +235,7 @@ impl File {
             _ => {}
         }
     }
-    
+
     pub fn get_socket(&self) -> KResult<Option<Arc<dyn Socket>>> {
         match &self.0.file_type {
             FileType::Socket(socket) => Ok(Some(socket.clone())),

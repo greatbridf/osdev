@@ -1,5 +1,7 @@
 use bitflags::bitflags;
 
+pub const MAX_NAME_LENGTH: u32 = 255;
+
 pub const TCGETS: u32 = 0x5401;
 pub const TCSETS: u32 = 0x5402;
 pub const TIOCGPGRP: u32 = 0x540f;
@@ -42,10 +44,12 @@ pub const ESPIPE: u32 = 29;
 // pub const EROFS: u32 = 30;
 pub const EPIPE: u32 = 32;
 pub const ERANGE: u32 = 34;
+pub const ENAMETOOLONG: u32 = 36;
 pub const ENOSYS: u32 = 38;
 pub const ELOOP: u32 = 40;
 pub const EOVERFLOW: u32 = 75;
 pub const ENOTSOCK: u32 = 88;
+pub const EOPNOTSUPP: u32 = 95;
 pub const EAFNOSUPPORT: u32 = 97;
 pub const EADDRINUSE: u32 = 98;
 pub const EADDRNOTAVAIL: u32 = 99;
@@ -64,6 +68,7 @@ pub const S_IFLNK: u32 = 0o120000;
 pub const S_IFMT: u32 = 0o170000;
 
 pub const RLIMIT_STACK: u32 = 0x3;
+pub const RLIMIT_CORE: u32 = 0x4;
 
 pub const SEEK_SET: u32 = 0;
 pub const SEEK_CUR: u32 = 1;

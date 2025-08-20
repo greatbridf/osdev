@@ -107,9 +107,9 @@ impl DirectoryInode {
         _file_lock: ProofMut<()>,
     ) -> KResult<()> {
         // SAFETY: `file_lock` has done the synchronization
-        if file.mode.load().is_dir() {
-            return Err(EISDIR);
-        }
+        // if file.mode.load().is_dir() {
+        //     return Err(EISDIR);
+        // }
 
         entries.retain(|(name, ino)| *ino != file.ino || name.as_ref() != filename);
 

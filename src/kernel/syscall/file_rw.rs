@@ -8,6 +8,7 @@ use crate::kernel::task::Thread;
 use crate::kernel::timer::sleep;
 use crate::kernel::vfs::filearray::FD;
 use crate::kernel::vfs::inode::Mode;
+use crate::kernel::vfs::EventFile;
 use crate::kernel::vfs::File;
 use crate::kernel::vfs::{PollEvent, SeekOption};
 use crate::{
@@ -1021,6 +1022,15 @@ async fn msync(/* fill the actual args here */) {
 #[eonix_macros::define_syscall(SYS_FALLOCATE)]
 async fn falllocate(/* fill the actual args here */) -> KResult<()> {
     Ok(())
+}
+
+#[eonix_macros::define_syscall(SYS_EVENTFD2)]
+async fn eventfd2(init_val: u64, flags: u32) -> KResult<FD> {
+    const IS_NONBLOCK: u32 = 1 << 11;
+
+    thread
+        .files
+        .event_file(EventFile::new(init_val, flags & IS_NONBLOCK != 0))
 }
 
 #[cfg(target_arch = "x86_64")]

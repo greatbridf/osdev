@@ -11,7 +11,7 @@ pub mod inode;
 pub mod mount;
 pub mod vfs;
 
-pub use file::{File, FileType, PollEvent, SeekOption, TerminalFile};
+pub use file::{EventFile, File, FileType, PollEvent, SeekOption, TerminalFile};
 
 pub type DevId = u32;
 

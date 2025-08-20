@@ -1,5 +1,11 @@
-use crate::{kernel::constants::ENOENT, prelude::*};
-use core::fmt::{self, Debug, Formatter};
+use crate::{
+    kernel::constants::{ENAMETOOLONG, ENOENT, MAX_NAME_LENGTH},
+    prelude::*,
+};
+use core::{
+    char::MAX,
+    fmt::{self, Debug, Formatter},
+};
 
 pub struct Path<'lt> {
     all: &'lt [u8],
@@ -14,6 +20,8 @@ impl<'lt> Path<'lt> {
     pub fn new(all: &'lt [u8]) -> KResult<Self> {
         if all.is_empty() {
             Err(ENOENT)
+        } else if all.len() > MAX_NAME_LENGTH as usize {
+            Err(ENAMETOOLONG)
         } else {
             Ok(Self { all })
         }

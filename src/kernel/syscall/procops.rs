@@ -1,7 +1,8 @@
 use super::SyscallNoReturn;
 use crate::io::Buffer;
 use crate::kernel::constants::{
-    CLOCK_MONOTONIC, CLOCK_REALTIME, CLOCK_REALTIME_COARSE, EBADF, EINVAL, ENOENT, ENOTDIR, ERANGE, ESRCH
+    CLOCK_MONOTONIC, CLOCK_REALTIME, CLOCK_REALTIME_COARSE, EBADF, EINTR, EINVAL, ENOENT, ENOTDIR,
+    ERANGE, ESRCH,
 };
 use crate::kernel::constants::{
     ENOSYS, PR_GET_NAME, PR_SET_NAME, RLIMIT_STACK, SIG_BLOCK, SIG_SETMASK, SIG_UNBLOCK,
@@ -678,8 +679,8 @@ async fn rt_sigtimedwait_time32(
     _uinfo: UserMut<SigInfo>,
     _uts: User<TimeSpec32>,
 ) -> KResult<i32> {
-    // TODO
-    Ok(0)
+    sleep(Duration::from_millis(100)).await;
+    Err(EINTR)
 }
 
 #[eonix_macros::define_syscall(SYS_RT_SIGACTION)]

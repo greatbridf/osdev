@@ -129,11 +129,6 @@ impl ProcessList {
             // todo!()
         }
 
-        if thread.tid != process.pid {
-            self.threads.remove(&thread.tid);
-            inner.threads.remove(&thread.tid).unwrap();
-        }
-
         if let Some(clear_ctid) = thread.get_clear_ctid() {
             let _ = UserPointerMut::new(clear_ctid).unwrap().write(0u32);
 
@@ -145,9 +140,7 @@ impl ProcessList {
         }
 
         // main thread exit
-        if thread.tid == process.pid {
-            assert_eq!(thread.tid, process.pid);
-
+        if inner.threads.len() == 1 {
             thread.files.close_all().await;
 
             // If we are the session leader, we should drop the control terminal.
@@ -194,5 +187,7 @@ impl ProcessList {
                 self.prove(),
             );
         }
+
+        inner.threads.remove(&thread.tid);
     }
 }

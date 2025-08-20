@@ -1037,4 +1037,7 @@ async fn rename(old_pathname: User<u8>, new_pathname: User<u8>) -> KResult<()> {
     .await
 }
 
+#[eonix_macros::define_syscall(SYS_LISTXATTR)]
+async fn listxattr() {}
+
 pub fn keep_alive() {}

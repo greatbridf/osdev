@@ -62,9 +62,12 @@ impl MMList {
         );
 
         let inner = self.inner.borrow();
-        let inner = inner.lock().await;
+        let locked = inner.locked.lock().await;
 
-        let area = inner.areas.get(&VRange::from(addr)).ok_or(Signal::SIGBUS)?;
+        let area = locked
+            .areas
+            .get(&VRange::from(addr))
+            .ok_or(Signal::SIGBUS)?;
 
         // Check user access permission.
         if error.contains(PageFaultErrorCode::Read) && !area.permission.read {
@@ -149,9 +152,9 @@ pub async fn handle_kernel_page_fault(
 
     let mms = &Thread::current().process.mm_list;
     let inner = mms.inner.borrow();
-    let inner = inner.lock().await;
+    let locked = inner.locked.lock().await;
 
-    let area = match inner.areas.get(&VRange::from(addr)) {
+    let area = match locked.areas.get(&VRange::from(addr)) {
         Some(area) => area,
         None => {
             return Some(try_page_fault_fix(fault_pc, addr));

@@ -15,7 +15,7 @@ use eonix_hal::mm::{
     flush_tlb_all, get_root_page_table_pfn, set_root_page_table_pfn, ArchPagingMode,
     ArchPhysAccess, GLOBAL_PAGE_TABLE,
 };
-use eonix_mm::address::{Addr as _, PAddr};
+use eonix_mm::address::PAddr;
 use eonix_mm::page_table::PageAttribute;
 use eonix_mm::paging::PFN;
 use eonix_mm::{
@@ -37,25 +37,35 @@ pub struct Permission {
     pub execute: bool,
 }
 
-pub type KernelPageTable<'a> = PageTable<'a, ArchPagingMode, GlobalPageAlloc, ArchPhysAccess>;
+type KernelPageTable<'a> = PageTable<'a, ArchPagingMode, GlobalPageAlloc, ArchPhysAccess>;
 
-struct MMListInner<'a> {
+struct MMListLocked {
     areas: BTreeSet<MMArea>,
-    page_table: KernelPageTable<'a>,
     break_start: Option<VRange>,
     break_pos: Option<VAddr>,
 }
 
-pub struct MMList {
-    inner: ArcSwap<Mutex<MMListInner<'static>>>,
+struct MMListInner {
     user_count: AtomicUsize,
-    /// Only used in kernel space to switch page tables on context switch.
-    root_page_table: AtomicUsize,
+    page_table: KernelPageTable<'static>,
+
+    locked: Mutex<MMListLocked>,
 }
 
-impl MMListInner<'_> {
+pub struct MMList {
+    inner: ArcSwap<MMListInner>,
+}
+
+trait AreasList {
+    fn overlapping_addr(&self, addr: VAddr) -> Option<&MMArea>;
+    fn check_overlapping_addr(&self, addr: VAddr) -> bool;
+    fn overlapping_range(&self, range: VRange) -> impl DoubleEndedIterator<Item = &MMArea> + '_;
+    fn check_overlapping_range(&self, range: VRange) -> bool;
+}
+
+impl AreasList for BTreeSet<MMArea> {
     fn overlapping_addr(&self, addr: VAddr) -> Option<&MMArea> {
-        self.areas.get(&VRange::from(addr))
+        self.get(&VRange::from(addr))
     }
 
     fn check_overlapping_addr(&self, addr: VAddr) -> bool {
@@ -63,13 +73,15 @@ impl MMListInner<'_> {
     }
 
     fn overlapping_range(&self, range: VRange) -> impl DoubleEndedIterator<Item = &MMArea> + '_ {
-        self.areas.range(range.into_bounds())
+        self.range(range.into_bounds())
     }
 
     fn check_overlapping_range(&self, range: VRange) -> bool {
         range.is_user() && self.overlapping_range(range).next().is_none()
     }
+}
 
+impl MMListLocked {
     fn random_start(&self) -> VAddr {
         VAddr::from(0x1234000)
     }
@@ -90,7 +102,7 @@ impl MMListInner<'_> {
                 return None;
             }
 
-            match self.overlapping_range(range).next_back() {
+            match self.areas.overlapping_range(range).next_back() {
                 None => return Some(range.start()),
                 Some(area) => {
                     range = VRange::from(area.range().end().ceil()).grow(len);
@@ -98,8 +110,10 @@ impl MMListInner<'_> {
             }
         }
     }
+}
 
-    fn unmap(&mut self, start: VAddr, len: usize) -> KResult<Vec<Page>> {
+impl MMListInner {
+    async fn unmap(&self, start: VAddr, len: usize) -> KResult<Vec<Page>> {
         assert_eq!(start.floor(), start);
         let end = (start + len).ceil();
         let range_to_unmap = VRange::new(start, end);
@@ -114,7 +128,9 @@ impl MMListInner<'_> {
 
         // TODO: Write back dirty pages.
 
-        self.areas.retain(|area| {
+        let mut locked = self.locked.lock().await;
+
+        locked.areas.retain(|area| {
             let Some((left, mid, right)) = area.range().mask_with_checked(&range_to_unmap) else {
                 return true;
             };
@@ -165,16 +181,16 @@ impl MMListInner<'_> {
         });
 
         if let Some(front) = left_remaining {
-            self.areas.insert(front);
+            locked.areas.insert(front);
         }
         if let Some(back) = right_remaining {
-            self.areas.insert(back);
+            locked.areas.insert(back);
         }
 
         Ok(pages_to_free)
     }
 
-    fn protect(&mut self, start: VAddr, len: usize, permission: Permission) -> KResult<()> {
+    async fn protect(&self, start: VAddr, len: usize, permission: Permission) -> KResult<()> {
         assert_eq!(start.floor(), start);
         assert!(len != 0);
 
@@ -184,11 +200,13 @@ impl MMListInner<'_> {
             return Err(EINVAL);
         }
 
+        let mut locked = self.locked.lock().await;
+
         let mut found = false;
-        let old_areas = core::mem::take(&mut self.areas);
+        let old_areas = core::mem::take(&mut locked.areas);
         for mut area in old_areas {
             let Some((left, mid, right)) = area.range().mask_with_checked(&range_to_protect) else {
-                self.areas.insert(area);
+                locked.areas.insert(area);
                 continue;
             };
 
@@ -199,7 +217,7 @@ impl MMListInner<'_> {
                     unreachable!("`left.end()` is within the area");
                 };
 
-                self.areas.insert(left);
+                locked.areas.insert(left);
                 area = right;
             }
 
@@ -208,7 +226,7 @@ impl MMListInner<'_> {
                     unreachable!("`right.start()` is within the area");
                 };
 
-                self.areas.insert(right);
+                locked.areas.insert(right);
                 area = left;
             }
 
@@ -240,7 +258,7 @@ impl MMListInner<'_> {
             }
 
             area.permission = permission;
-            self.areas.insert(area);
+            locked.areas.insert(area);
         }
 
         if !found {
@@ -250,8 +268,8 @@ impl MMListInner<'_> {
         Ok(())
     }
 
-    fn mmap(
-        &mut self,
+    async fn mmap(
+        &self,
         at: VAddr,
         len: usize,
         mapping: Mapping,
@@ -262,8 +280,12 @@ impl MMListInner<'_> {
         assert_eq!(len & (PAGE_SIZE - 1), 0);
         let range = VRange::new(at, at + len);
 
+        let mut locked = self.locked.lock().await;
+
         // We are doing a area marker insertion.
-        if len == 0 && !self.check_overlapping_addr(at) || !self.check_overlapping_range(range) {
+        if len == 0 && !locked.areas.check_overlapping_addr(at)
+            || !locked.areas.check_overlapping_range(range)
+        {
             return Err(EEXIST);
         }
 
@@ -272,16 +294,19 @@ impl MMListInner<'_> {
             Mapping::File(_) => self.page_table.set_mmapped(range, permission),
         }
 
-        self.areas
+        locked
+            .areas
             .insert(MMArea::new(range, mapping, permission, is_shared));
         Ok(())
     }
 }
 
-impl Drop for MMListInner<'_> {
+impl Drop for MMListInner {
     fn drop(&mut self) {
         // May buggy
-        for area in &self.areas {
+        let locked = self.locked.get_mut();
+
+        for area in &locked.areas {
             if area.is_shared {
                 for pte in self.page_table.iter_user(area.range()) {
                     let (pfn, _) = pte.take();
@@ -305,14 +330,12 @@ impl Drop for MMListInner<'_> {
 
 impl MMList {
     async fn flush_user_tlbs(&self) {
-        match self.user_count.load(Ordering::Relaxed) {
+        match self.inner.borrow().user_count.load(Ordering::Relaxed) {
             0 => {
                 // If there are currently no users, we don't need to do anything.
             }
             1 => {
-                if PAddr::from(get_root_page_table_pfn()).addr()
-                    == self.root_page_table.load(Ordering::Relaxed)
-                {
+                if PAddr::from(get_root_page_table_pfn()) == self.inner.borrow().page_table.addr() {
                     // If there is only one user and we are using the page table,
                     // flushing the TLB for the local cpu only is enough.
                     flush_tlb_all();
@@ -332,48 +355,47 @@ impl MMList {
     pub fn new() -> Self {
         let page_table = GLOBAL_PAGE_TABLE.clone_global();
         Self {
-            root_page_table: AtomicUsize::from(page_table.addr().addr()),
-            user_count: AtomicUsize::new(0),
-            inner: ArcSwap::new(Mutex::new(MMListInner {
-                areas: BTreeSet::new(),
+            inner: ArcSwap::new(MMListInner {
+                user_count: AtomicUsize::new(0),
                 page_table,
-                break_start: None,
-                break_pos: None,
-            })),
+                locked: Mutex::new(MMListLocked {
+                    areas: BTreeSet::new(),
+                    break_start: None,
+                    break_pos: None,
+                }),
+            }),
         }
     }
 
     pub async fn new_cloned(&self) -> Self {
         let inner = self.inner.borrow();
-        let mut inner = inner.lock().await;
+        let locked = inner.locked.lock().await;
 
         let page_table = GLOBAL_PAGE_TABLE.clone_global();
         let list = Self {
-            root_page_table: AtomicUsize::from(page_table.addr().addr()),
-            user_count: AtomicUsize::new(0),
-            inner: ArcSwap::new(Mutex::new(MMListInner {
-                areas: inner.areas.clone(),
+            inner: ArcSwap::new(MMListInner {
+                user_count: AtomicUsize::new(0),
                 page_table,
-                break_start: inner.break_start,
-                break_pos: inner.break_pos,
-            })),
+                locked: Mutex::new(MMListLocked {
+                    areas: locked.areas.clone(),
+                    break_start: locked.break_start,
+                    break_pos: locked.break_pos,
+                }),
+            }),
         };
 
-        {
-            let list_inner = list.inner.borrow();
-            let list_inner = list_inner.lock().await;
+        let list_inner = list.inner.borrow();
 
-            for area in list_inner.areas.iter() {
-                if !area.is_shared {
-                    list_inner
-                        .page_table
-                        .set_copy_on_write(&mut inner.page_table, area.range());
-                } else {
-                    // may buggy here
-                    list_inner
-                        .page_table
-                        .set_copied(&mut inner.page_table, area.range());
-                }
+        for area in locked.areas.iter() {
+            if !area.is_shared {
+                list_inner
+                    .page_table
+                    .set_copy_on_write(&inner.page_table, area.range());
+            } else {
+                // may buggy here
+                list_inner
+                    .page_table
+                    .set_copied(&inner.page_table, area.range());
             }
         }
 
@@ -384,36 +406,25 @@ impl MMList {
     }
 
     pub async fn new_shared(&self) -> Self {
-        todo!()
+        let inner = self.inner.borrow();
+
+        Self {
+            inner: ArcSwap::with_pointer(inner.clone()),
+        }
     }
 
     pub fn activate(&self) {
-        self.user_count.fetch_add(1, Ordering::Acquire);
-
-        let root_page_table = self.root_page_table.load(Ordering::Relaxed);
-        assert_ne!(root_page_table, 0);
-        set_root_page_table_pfn(PFN::from(PAddr::from(root_page_table)));
+        if let Some(inner) = self.inner.try_borrow() {
+            inner.user_count.fetch_add(1, Ordering::Acquire);
+            set_root_page_table_pfn(PFN::from(inner.page_table.addr()));
+        }
     }
 
     pub fn deactivate(&self) {
-        set_root_page_table_pfn(PFN::from(GLOBAL_PAGE_TABLE.addr()));
-
-        let old_user_count = self.user_count.fetch_sub(1, Ordering::Release);
-        assert_ne!(old_user_count, 0);
-    }
-
-    /// Deactivate `self` and activate `to` with root page table changed only once.
-    /// This might reduce the overhead of switching page tables twice.
-    #[allow(dead_code)]
-    pub fn switch(&self, to: &Self) {
-        self.user_count.fetch_add(1, Ordering::Acquire);
-
-        let root_page_table = self.root_page_table.load(Ordering::Relaxed);
-        assert_ne!(root_page_table, 0);
-        set_root_page_table_pfn(PFN::from(PAddr::from(root_page_table)));
-
-        let old_user_count = to.user_count.fetch_sub(1, Ordering::Release);
-        assert_ne!(old_user_count, 0);
+        if let Some(inner) = self.inner.try_borrow() {
+            let old_user_count = inner.user_count.fetch_sub(1, Ordering::Release);
+            assert_ne!(old_user_count, 0);
+        }
     }
 
     /// Replace the current page table with a new one.
@@ -424,37 +435,27 @@ impl MMList {
     pub unsafe fn replace(&self, new: Option<Self>) {
         eonix_preempt::disable();
 
-        assert_eq!(
-            self.user_count.load(Ordering::Relaxed),
-            1,
-            "We should be the only user"
-        );
+        let me_inner = self.inner.borrow();
+
+        let current_root_page_table = PAddr::from(get_root_page_table_pfn());
 
         assert_eq!(
             new.as_ref()
-                .map(|new_mm| new_mm.user_count.load(Ordering::Relaxed))
+                .map(|new_mm| new_mm.inner.borrow().user_count.load(Ordering::Relaxed))
                 .unwrap_or(0),
             0,
             "`new` must not be used by anyone"
         );
 
-        let old_root_page_table = self.root_page_table.load(Ordering::Relaxed);
-        let current_root_page_table = get_root_page_table_pfn();
-        assert_eq!(
-            PAddr::from(current_root_page_table).addr(),
-            old_root_page_table,
-            "We should be the only user"
-        );
+        if me_inner.page_table.addr() == current_root_page_table {
+            self.deactivate();
 
-        let new_root_page_table = match &new {
-            Some(new_mm) => new_mm.root_page_table.load(Ordering::Relaxed),
-            None => GLOBAL_PAGE_TABLE.addr().addr(),
-        };
-
-        set_root_page_table_pfn(PFN::from(PAddr::from(new_root_page_table)));
-
-        self.root_page_table
-            .store(new_root_page_table, Ordering::Relaxed);
+            if let Some(new) = &new {
+                new.activate();
+            } else {
+                set_root_page_table_pfn(PFN::from(GLOBAL_PAGE_TABLE.addr()));
+            }
+        }
 
         // TODO: Check whether we should wake someone up if they've been put
         //       to sleep when calling `vfork`.
@@ -466,7 +467,7 @@ impl MMList {
 
     /// No need to do invalidation manually, `PageTable` already does it.
     pub async fn unmap(&self, start: VAddr, len: usize) -> KResult<()> {
-        let pages_to_free = self.inner.borrow().lock().await.unmap(start, len)?;
+        let pages_to_free = self.inner.borrow().unmap(start, len).await?;
 
         // We need to assure that the pages are not accessed anymore.
         // The ones having these pages in their TLB could read from or write to them.
@@ -480,7 +481,7 @@ impl MMList {
     }
 
     pub async fn protect(&self, start: VAddr, len: usize, prot: Permission) -> KResult<()> {
-        self.inner.borrow().lock().await.protect(start, len, prot)?;
+        self.inner.borrow().protect(start, len, prot).await?;
 
         // flush the tlb due to the pte attribute changes
         self.flush_user_tlbs().await;
@@ -507,7 +508,6 @@ impl MMList {
         const VDSO_SIZE: usize = 0x1000;
 
         let inner = self.inner.borrow();
-        let inner = inner.lock().await;
 
         let mut pte_iter = inner
             .page_table
@@ -538,19 +538,32 @@ impl MMList {
         is_shared: bool,
     ) -> KResult<VAddr> {
         let inner = self.inner.borrow();
-        let mut inner = inner.lock().await;
 
         if hint == VAddr::NULL {
-            let at = inner.find_available(hint, len).ok_or(ENOMEM)?;
-            inner.mmap(at, len, mapping, permission, is_shared)?;
+            let at = inner
+                .locked
+                .lock()
+                .await
+                .find_available(hint, len)
+                .ok_or(ENOMEM)?;
+            inner.mmap(at, len, mapping, permission, is_shared).await?;
             return Ok(at);
         }
 
-        match inner.mmap(hint, len, mapping.clone(), permission, is_shared) {
+        match inner
+            .mmap(hint, len, mapping.clone(), permission, is_shared)
+            .await
+        {
             Ok(()) => Ok(hint),
             Err(EEXIST) => {
-                let at = inner.find_available(hint, len).ok_or(ENOMEM)?;
-                inner.mmap(at, len, mapping, permission, is_shared)?;
+                let at = inner
+                    .locked
+                    .lock()
+                    .await
+                    .find_available(hint, len)
+                    .ok_or(ENOMEM)?;
+
+                inner.mmap(at, len, mapping, permission, is_shared).await?;
                 Ok(at)
             }
             Err(err) => Err(err),
@@ -567,19 +580,18 @@ impl MMList {
     ) -> KResult<VAddr> {
         self.inner
             .borrow()
-            .lock()
-            .await
             .mmap(at, len, mapping.clone(), permission, is_shared)
+            .await
             .map(|_| at)
     }
 
     pub async fn set_break(&self, pos: Option<VAddr>) -> VAddr {
-        let inner_ = self.inner.borrow();
-        let mut inner = inner_.lock().await;
+        let inner = self.inner.borrow();
+        let mut locked = inner.locked.lock().await;
 
         // SAFETY: `set_break` is only called in syscalls, where program break should be valid.
-        assert!(inner.break_start.is_some() && inner.break_pos.is_some());
-        let current_break = inner.break_pos.unwrap();
+        assert!(locked.break_start.is_some() && locked.break_pos.is_some());
+        let current_break = locked.break_pos.unwrap();
         let pos = match pos {
             None => return current_break,
             Some(pos) => pos.ceil(),
@@ -590,13 +602,13 @@ impl MMList {
         }
 
         let range = VRange::new(current_break, pos);
-        if !inner.check_overlapping_range(range) {
+        if !locked.areas.check_overlapping_range(range) {
             return current_break;
         }
 
-        inner.break_pos = Some(pos);
+        locked.break_pos = Some(pos);
 
-        drop(inner);
+        drop(locked);
 
         let len = pos - current_break;
 
@@ -621,11 +633,11 @@ impl MMList {
     /// This should be called only **once** for every thread.
     pub async fn register_break(&self, start: VAddr) {
         let inner = self.inner.borrow();
-        let mut inner = inner.lock().await;
-        assert!(inner.break_start.is_none() && inner.break_pos.is_none());
+        let mut locked = inner.locked.lock().await;
+        assert!(locked.break_start.is_none() && locked.break_pos.is_none());
 
-        inner.break_start = Some(start.into());
-        inner.break_pos = Some(start);
+        locked.break_start = Some(start.into());
+        locked.break_pos = Some(start);
     }
 
     /// Access the memory area with the given function.
@@ -641,14 +653,14 @@ impl MMList {
         }
 
         let inner = self.inner.borrow();
-        let inner = inner.lock().await;
+        let locked = inner.locked.lock().await;
 
         let mut offset = 0;
         let mut remaining = len;
         let mut current = start;
 
         while remaining > 0 {
-            let area = inner.overlapping_addr(current).ok_or(EFAULT)?;
+            let area = locked.areas.overlapping_addr(current).ok_or(EFAULT)?;
 
             let area_start = area.range().start();
             let area_end = area.range().end();

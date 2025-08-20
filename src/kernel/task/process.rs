@@ -631,18 +631,32 @@ impl Entry<'_, '_, '_> {
             let process_list = self.cv.wait(self.process_list).await;
             let wait_procs = wait_procs.relock().await;
 
-            if !no_block && Thread::current().signal_list.has_pending_signal() {
-                Err(EINTR)
-            } else {
-                Ok(Self {
-                    wait_procs,
-                    process_list,
-                    cv: self.cv,
-                    want_stop: self.want_stop,
-                    want_continue: self.want_continue,
-                    want_id: self.want_id,
-                })
-            }
+            // if !no_block && Thread::current().signal_list.has_pending_signal() {
+            //     Err(EINTR)
+            // } else {
+            //     Ok(Self {
+            //         wait_procs,
+            //         process_list,
+            //         cv: self.cv,
+            //         want_stop: self.want_stop,
+            //         want_continue: self.want_continue,
+            //         want_id: self.want_id,
+            //     })
+            // }
+
+            // if !no_block {
+            //     println_debug!("Waiting for process list to change... {:?}", no_block);
+            //     Err(EINTR)
+            // } else {
+            Ok(Self {
+                wait_procs,
+                process_list,
+                cv: self.cv,
+                want_stop: self.want_stop,
+                want_continue: self.want_continue,
+                want_id: self.want_id,
+            })
+            // }
         }
     }
 }

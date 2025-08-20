@@ -24,6 +24,8 @@ pub fn stack_trace() {
         UnwindReasonCode::NO_REASON
     }
 
+    println_fatal!("<<<<<<<<<< 8< CUT HERE 8< <<<<<<<<<<");
+
     let mut data = CallbackData { counter: 0 };
     _Unwind_Backtrace(callback, &raw mut data as *mut c_void);
 }

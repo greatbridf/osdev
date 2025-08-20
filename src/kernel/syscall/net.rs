@@ -8,7 +8,6 @@ use crate::kernel::constants::{EAFNOSUPPORT, EBADF, EINVAL, ENOTSOCK};
 use crate::kernel::syscall::file_rw::IoVec;
 use crate::kernel::syscall::User;
 use crate::kernel::syscall::UserMut;
-use crate::kernel::task::block_on;
 use crate::kernel::user::CheckedUserPointer;
 use crate::kernel::user::UserBuffer;
 use crate::kernel::user::UserPointer;
@@ -145,7 +144,7 @@ async fn get_socktname(
         .get(sockfd)
         .ok_or(EBADF)?
         .get_socket()?
-        .ok_or(ENOTSOCK)?;
+        .ok_or(EBADF)?;
 
     let local_addr = socket.local_addr().unwrap();
     if sockaddr_ptr.addr() != 0 {
@@ -168,7 +167,7 @@ async fn get_peername(
         .get_socket()?
         .ok_or(ENOTSOCK)?;
 
-    let remote_addr = socket.remote_addr().unwrap();
+    let remote_addr = socket.remote_addr().ok_or(ENOTSOCK)?;
     if sockaddr_ptr.addr() != 0 {
         write_socket_addr(sockaddr_ptr, addrlen_ptr, remote_addr)?;
     }
@@ -185,6 +184,8 @@ async fn bind(sockfd: FD, sockaddr_ptr: User<CSockAddr>, addrlen: u32) -> KResul
         .ok_or(ENOTSOCK)?;
 
     let socket_addr = read_socket_addr(sockaddr_ptr, addrlen as usize)?;
+
+    println_debug!("bind socket {:?} to {:?}", sockfd, socket_addr);
 
     let res = socket.bind(socket_addr);
     res
@@ -216,7 +217,7 @@ async fn accept(
         .get_socket()?
         .ok_or(ENOTSOCK)?;
 
-    let accepted_socket = block_on(socket.accept())?;
+    let accepted_socket = socket.accept().await?;
     write_socket_addr(
         sockaddr_ptr,
         addrlen_ptr,
@@ -237,7 +238,9 @@ async fn connect(sockfd: FD, sockaddr_ptr: User<CSockAddr>, addrlen: u32) -> KRe
 
     let remote_addr = read_socket_addr(sockaddr_ptr, addrlen as usize)?;
 
-    let res = block_on(socket.connect(remote_addr));
+    println_debug!("{:?}", remote_addr);
+
+    let res = socket.connect(remote_addr).await;
     res
 }
 
@@ -273,7 +276,7 @@ async fn recvmsg(sockfd: FD, msghdr_ptr: UserMut<MsgHdr>, flags: u32) -> KResult
     let mut recv_metadata = None;
     let mut tot = 0usize;
     for mut buffer in iov_buffers.into_iter() {
-        let (nread, recv_meta) = block_on(socket.recv(&mut buffer))?;
+        let (nread, recv_meta) = socket.recv(&mut buffer).await?;
 
         if recv_metadata.is_none() {
             recv_metadata = Some(recv_meta);
@@ -315,7 +318,7 @@ async fn recvfrom(
         .get_socket()?
         .ok_or(ENOTSOCK)?;
 
-    let (ret, recv_meta) = block_on(socket.recv(&mut UserBuffer::new(buf, len)?))?;
+    let (ret, recv_meta) = socket.recv(&mut UserBuffer::new(buf, len)?).await?;
 
     if srcaddr_ptr.addr() != 0 {
         write_socket_addr(srcaddr_ptr, addrlen_ptr, recv_meta.remote_addr)?;
@@ -365,7 +368,9 @@ async fn sendmsg(sockfd: FD, msghdr: UserMut<MsgHdr>, flags: u32) -> KResult<usi
 
     let mut tot = 0usize;
     for mut stream in iov_streams.into_iter() {
-        let nread = block_on(socket.send(&mut stream, SendMetadata { remote_addr }))?;
+        let nread = socket
+            .send(&mut stream, SendMetadata { remote_addr })
+            .await?;
         tot += nread;
 
         if nread == 0 || !stream.is_drained() {
@@ -399,7 +404,9 @@ async fn sendto(
     };
 
     let mut user_stream = CheckedUserPointer::new(buf, len).map(|ptr| ptr.into_stream())?;
-    block_on(socket.send(&mut user_stream, SendMetadata { remote_addr }))
+    socket
+        .send(&mut user_stream, SendMetadata { remote_addr })
+        .await
 }
 
 pub fn keep_alive() {}

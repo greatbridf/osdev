@@ -4,7 +4,7 @@ use crate::kernel::constants::{
     EBADF, EFAULT, EINVAL, ENOENT, ENOTDIR, SEEK_CUR, SEEK_END, SEEK_SET,
 };
 use crate::kernel::syscall::UserMut;
-use crate::kernel::task::{block_on, Thread};
+use crate::kernel::task::Thread;
 use crate::kernel::timer::sleep;
 use crate::kernel::vfs::filearray::FD;
 use crate::kernel::vfs::inode::Mode;
@@ -20,6 +20,8 @@ use crate::{
     prelude::*,
 };
 use alloc::sync::Arc;
+use core::future::Future;
+use core::pin::Pin;
 use core::time::Duration;
 use posix_types::ctypes::{Long, PtrT};
 use posix_types::namei::RenameFlags;
@@ -685,6 +687,38 @@ struct UserPollFd {
     revents: u16,
 }
 
+pub struct PPollFuture {
+    polls: Vec<(File, PollEvent)>,
+}
+
+impl Future for PPollFuture {
+    type Output = KResult<Option<Vec<(usize, PollEvent)>>>;
+
+    fn poll(
+        self: Pin<&mut Self>,
+        cx: &mut core::task::Context<'_>,
+    ) -> core::task::Poll<Self::Output> {
+        let mut poll_res = Vec::new();
+        for (i, (file, event)) in self.polls.iter().enumerate() {
+            let result = unsafe { Pin::new_unchecked(&mut file.poll(*event)).poll(cx) };
+
+            match result {
+                core::task::Poll::Ready(Ok(revent)) => {
+                    poll_res.push((i, revent));
+                }
+                core::task::Poll::Ready(Err(err)) => return core::task::Poll::Ready(Err(err)),
+                core::task::Poll::Pending => {}
+            }
+        }
+
+        if !poll_res.is_empty() {
+            core::task::Poll::Ready(Ok(Some(poll_res)))
+        } else {
+            core::task::Poll::Ready(Ok(None))
+        }
+    }
+}
+
 async fn do_poll(
     thread: &Thread,
     fds: UserMut<UserPollFd>,
@@ -693,7 +727,36 @@ async fn do_poll(
 ) -> KResult<u32> {
     match nfds {
         0 => Ok(0),
-        2.. => unimplemented!("Poll with {} fds", nfds),
+        2.. => {
+            let mut polls = Vec::with_capacity(nfds as usize);
+            for i in 0..nfds {
+                let fd = UserPointerMut::new(fds)?
+                    .offset(i as isize)
+                    .map_err(|_| EFAULT)?
+                    .read()?;
+                let file = thread.files.get(fd.fd).ok_or(EBADF)?;
+                polls.push((file, PollEvent::from_bits_retain(fd.events)));
+            }
+
+            loop {
+                let polls_future = PPollFuture {
+                    polls: polls.clone(),
+                };
+                let res = polls_future.await?;
+
+                if res.is_some() {
+                    let fds_mut = UserPointerMut::new(fds)?;
+                    let len = res.as_ref().unwrap().len();
+                    for (i, revent) in res.unwrap() {
+                        let mut fd = fds_mut.offset(i as isize).map_err(|_| EFAULT)?.read()?;
+                        fd.revents = revent.bits();
+                        fds_mut.offset(i as isize)?.write(fd)?;
+                    }
+                    return Ok(len as u32);
+                }
+                sleep(Duration::from_millis(100)).await
+            }
+        }
         1 => {
             // TODO!!: Poll with timeout
             // if timeout != u32::MAX {
@@ -753,7 +816,7 @@ async fn pselect6(
         return Ok(0);
     }
 
-    let _time_out = if timeout.is_null() {
+    let time_out = if timeout.is_null() {
         None
     } else {
         let timeout = UserPointer::new(timeout.as_const())?.read()?;
@@ -807,16 +870,20 @@ async fn pselect6(
     }
 
     let mut tot = 0;
+    let mut time_cnt = time_out.map(|time| (time.tv_sec) / 50);
+
+    if poll_fds.len() > 1 {
+        unimplemented!("Poll with multiple fds: {:?}", poll_fds);
+    }
 
     loop {
         for (fd, events) in &poll_fds {
-            let res = block_on(
-                thread
-                    .files
-                    .get(FD::from(*fd))
-                    .ok_or(EBADF)?
-                    .poll(events.clone()),
-            )?;
+            let res = thread
+                .files
+                .get(FD::from(*fd))
+                .ok_or(EBADF)?
+                .poll(events.clone())
+                .await?;
 
             if res.contains(PollEvent::Readable) {
                 if let Some(fds) = &mut read_fds {
@@ -837,7 +904,14 @@ async fn pselect6(
         }
 
         // Since we already have a background iface poll task, simply sleep for a while
-        block_on(sleep(Duration::from_millis(100)));
+        sleep(Duration::from_millis(50)).await;
+
+        if let Some(cnt) = &mut time_cnt {
+            if *cnt == 0 {
+                break;
+            }
+            *cnt = *cnt - 1;
+        }
     }
 
     if let Some(fds) = read_fds {
@@ -942,6 +1016,11 @@ async fn renameat2(
 #[eonix_macros::define_syscall(SYS_MSYNC)]
 async fn msync(/* fill the actual args here */) {
     // TODO
+}
+
+#[eonix_macros::define_syscall(SYS_FALLOCATE)]
+async fn falllocate(/* fill the actual args here */) -> KResult<()> {
+    Ok(())
 }
 
 #[cfg(target_arch = "x86_64")]

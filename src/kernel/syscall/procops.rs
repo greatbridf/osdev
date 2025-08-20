@@ -1,7 +1,7 @@
 use super::SyscallNoReturn;
 use crate::io::Buffer;
 use crate::kernel::constants::{
-    CLOCK_MONOTONIC, CLOCK_REALTIME, CLOCK_REALTIME_COARSE, EINVAL, ENOENT, ENOTDIR, ERANGE, ESRCH,
+    CLOCK_MONOTONIC, CLOCK_REALTIME, CLOCK_REALTIME_COARSE, EBADF, EINVAL, ENOENT, ENOTDIR, ERANGE, ESRCH
 };
 use crate::kernel::constants::{
     ENOSYS, PR_GET_NAME, PR_SET_NAME, RLIMIT_STACK, SIG_BLOCK, SIG_SETMASK, SIG_UNBLOCK,
@@ -16,6 +16,7 @@ use crate::kernel::task::{parse_futexop, CloneArgs};
 use crate::kernel::timer::sleep;
 use crate::kernel::user::UserString;
 use crate::kernel::user::{UserPointer, UserPointerMut};
+use crate::kernel::vfs::filearray::FD;
 use crate::kernel::vfs::inode::Mode;
 use crate::kernel::vfs::{self, dentry::Dentry};
 use crate::path::Path;
@@ -117,6 +118,23 @@ async fn getcwd(buffer: UserMut<u8>, bufsize: usize) -> KResult<usize> {
     user_buffer.fill(buffer.data())?.ok_or(ERANGE)?;
 
     Ok(buffer.wrote())
+}
+
+#[eonix_macros::define_syscall(SYS_FCHDIR)]
+async fn fchdir(fd: FD) -> KResult<()> {
+    let dir_file = thread.files.get(fd).ok_or(EBADF)?;
+    let dentry = dir_file.as_path().ok_or(EBADF).cloned()?;
+
+    if !dentry.is_valid() {
+        return Err(ENOENT);
+    }
+
+    if !dentry.is_directory() {
+        return Err(ENOTDIR);
+    }
+
+    *thread.fs_context.cwd.lock() = dentry;
+    Ok(())
 }
 
 #[eonix_macros::define_syscall(SYS_CHDIR)]
@@ -693,6 +711,11 @@ async fn rt_sigaction(
         thread.signal_list.set_action(signal, action)?;
     }
 
+    Ok(())
+}
+
+#[eonix_macros::define_syscall(SYS_SIGALTSTACK)]
+async fn SYS_SIGALTSTACK() -> KResult<()> {
     Ok(())
 }
 

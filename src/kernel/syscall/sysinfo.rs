@@ -111,9 +111,15 @@ fn do_clock_gettime64(_thread: &Thread, clock_id: u32, timespec: UserMut<TimeSpe
                 tv_nsec: 0,
             })
         }
-        clock_id => unimplemented!("Unsupported clock_id: {}", clock_id),
+        _ => Ok(()),
     }
 }
+
+#[eonix_macros::define_syscall(SYS_TIMER_CREATE)]
+async fn SYS_TIMER_CREATE() {}
+
+#[eonix_macros::define_syscall(SYS_TIMER_SETTIME)]
+async fn SYS_TIMER_SETTIME() {}
 
 #[cfg(not(target_arch = "x86_64"))]
 #[eonix_macros::define_syscall(SYS_CLOCK_GETTIME)]

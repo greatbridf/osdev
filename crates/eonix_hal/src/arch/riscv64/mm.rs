@@ -1,7 +1,4 @@
-use super::{
-    config::mm::{PHYS_MAP_VIRT, ROOT_PAGE_TABLE_PFN},
-    fdt::{FdtExt, FDT},
-};
+use super::config::mm::{PHYS_MAP_VIRT, ROOT_PAGE_TABLE_PFN};
 use crate::{arch::riscv64::config::mm::KIMAGE_OFFSET, traits::mm::Memory};
 use core::{marker::PhantomData, ptr::NonNull};
 use eonix_mm::{
@@ -263,7 +260,7 @@ impl PhysAccess for ArchPhysAccess {
 
 impl Memory for ArchMemory {
     fn present_ram() -> impl Iterator<Item = PRange> {
-        FDT.present_ram()
+        crate::platform::present_ram()
     }
 
     fn free_ram() -> impl Iterator<Item = PRange> {

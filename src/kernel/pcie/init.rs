@@ -33,6 +33,9 @@ pub fn init_pcie() -> Result<(), PciError> {
     #[cfg(target_arch = "x86_64")]
     {
         use acpi::{AcpiTables, PciConfigRegions};
+        use alloc::collections::btree_map::Entry;
+        use alloc::vec;
+        use eonix_log::println_trace;
         use eonix_mm::address::PAddr;
 
         let acpi_tables = unsafe {
@@ -65,7 +68,7 @@ pub fn init_pcie() -> Result<(), PciError> {
         }
     }
 
-    #[cfg(any(target_arch = "riscv64", target_arch = "loongarch64"))]
+    #[cfg(target_arch = "loongarch64")]
     {
         use crate::kernel::constants::{EINVAL, EIO, ENOENT};
         use eonix_hal::arch_exported::fdt::FDT;

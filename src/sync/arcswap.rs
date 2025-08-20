@@ -21,6 +21,12 @@ impl<T> ArcSwap<T> {
         }
     }
 
+    pub fn with_pointer(pointer: Arc<T>) -> Self {
+        Self {
+            pointer: AtomicPtr::new(Arc::into_raw(pointer) as *mut _),
+        }
+    }
+
     /// # Safety
     /// The caller must ensure that the pointer not used elsewhere before ACTUALLLY dropping that.
     pub fn swap(&self, data: Option<Arc<T>>) -> Option<Arc<T>> {
@@ -40,6 +46,11 @@ impl<T> ArcSwap<T> {
                     .expect("ArcSwap: pointer should not be null."),
             )
         }
+    }
+
+    pub fn try_borrow(&self) -> Option<BorrowedArc<T>> {
+        NonNull::new(self.pointer.load(Ordering::Acquire))
+            .map(|ptr| unsafe { BorrowedArc::from_raw(ptr) })
     }
 }
 

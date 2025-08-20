@@ -1,6 +1,5 @@
 use crate::driver::virtio::hal::HAL;
 use crate::net::device::{Mac, NetDev, NetDevError, RxBuffer};
-use eonix_log::println_debug;
 use smoltcp::phy::{DeviceCapabilities, Medium};
 
 use virtio_drivers::{

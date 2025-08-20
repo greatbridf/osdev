@@ -1,5 +1,6 @@
-use super::{config::platform::virt::*, fdt::FDT, fence::memory_barrier, mm::ArchPhysAccess};
+use super::{config::platform::virt::*, fence::memory_barrier, mm::ArchPhysAccess};
 use crate::arch::time;
+use crate::platform::PLIC_BASE;
 use core::{pin::Pin, ptr::NonNull};
 use eonix_mm::address::{PAddr, PhysAccess};
 use eonix_sync_base::LazyLock;
@@ -16,20 +17,6 @@ const CLAIM_COMPLETE_OFFSET: usize = 0x200004;
 const ENABLE_STRIDE: usize = 0x80;
 const CONTEXT_STRIDE: usize = 0x1000;
 
-static PLIC_BASE: LazyLock<PAddr> = LazyLock::new(|| {
-    let plic = FDT
-        .find_compatible(&["riscv,plic0", "riscv,plic1"])
-        .expect("Failed to find PLIC in FDT");
-
-    let reg = plic
-        .reg()
-        .expect("PLIC node has no reg property")
-        .next()
-        .expect("PLIC reg property is empty");
-
-    PAddr::from(reg.starting_address as usize)
-});
-
 pub struct PLIC {
     enable: NonNull<u32>,
     threshold: NonNull<u32>,
@@ -42,7 +29,7 @@ pub struct InterruptControl {
 
 impl PLIC {
     fn new(cpuid: usize) -> Self {
-        let base = *PLIC_BASE.get();
+        let base = PLIC_BASE;
 
         let enable = PAddr::from(base + (cpuid * 2 + 1) * ENABLE_STRIDE + ENABLE_OFFSET);
         let threshold = PAddr::from(base + (cpuid * 2 + 1) * CONTEXT_STRIDE + THRESHOLD_OFFSET);
@@ -70,9 +57,7 @@ impl PLIC {
         let priority_ptr = unsafe {
             // SAFETY: The PLIC priority register is memory-mapped and placed at a specific address.
             //         We are pretty sure that the address is valid.
-            ArchPhysAccess::as_ptr(
-                *PLIC_BASE.get() + PRIORITY_OFFSET + interrupt * size_of::<u32>(),
-            )
+            ArchPhysAccess::as_ptr(PLIC_BASE + PRIORITY_OFFSET + interrupt * size_of::<u32>())
         };
 
         memory_barrier();

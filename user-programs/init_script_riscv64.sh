@@ -39,7 +39,6 @@ echo -n -e "deploying busybox... " >&2
 
 do_or_freeze $BUSYBOX mkdir -p /bin
 do_or_freeze $BUSYBOX --install -s /bin
-do_or_freeze $BUSYBOX mkdir -p /lib
 
 export PATH="/bin"
 
@@ -53,9 +52,6 @@ if dd if=/dev/vda of=/dev/null bs=512 count=1; then
     echo -n -e "Mounting the ext4 image... " >&2
     do_or_freeze mkdir -p /mnt1
     do_or_freeze mount -t ext4 /dev/vda /mnt1
-    mkdir -p test/usr/bin
-    ln -s /mnt1/glibc/usr/bin/git ./test/usr/bin
-    ln -s /mnt1/musl/README.md ./test
     echo ok >&2
 fi
 
@@ -73,6 +69,7 @@ EOF
 
 cat > /root/.profile <<EOF
 export HOME=/root
+export PATH="/bin:/usr/bin:\$PATH"
 
 alias ll="ls -l "
 alias la="ls -la "
@@ -97,10 +94,7 @@ int main() {
 }
 EOF
 
-cp -r /mnt1/glibc/lib /
-
-ln -s /mnt1/glibc/ltp/testcases/bin/dup01 trigger
-
-echo "run ./trigger to trigger the bug..." > /dev/ttyS0
+ln -s /mnt1/lib /lib
+ln -s /mnt1/usr /usr
 
 exec $BUSYBOX sh -l < /dev/ttyS0 > /dev/ttyS0 2> /dev/ttyS0

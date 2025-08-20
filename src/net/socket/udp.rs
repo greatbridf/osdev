@@ -2,11 +2,13 @@ use core::future::Future;
 use core::net::SocketAddr;
 use core::pin::Pin;
 use core::task::{Poll, Waker};
+use core::time::Duration;
 
 use alloc::boxed::Box;
 use alloc::collections::btree_map::BTreeMap;
 use alloc::sync::Arc;
 use async_trait::async_trait;
+use eonix_log::println_debug;
 use eonix_sync::{RwLock, Spin};
 use smoltcp::socket::udp;
 use smoltcp::wire::IpListenEndpoint;
@@ -15,6 +17,7 @@ use smoltcp::{iface::SocketHandle, wire::IpEndpoint};
 use crate::io::{Buffer, Stream};
 use crate::kernel::constants::{EADDRNOTAVAIL, EAGAIN, EINVAL};
 use crate::kernel::task::block_on;
+use crate::kernel::timer::sleep;
 use crate::kernel::vfs::PollEvent;
 use crate::net::iface::{get_ephemeral_iface, get_relate_iface, NetIface};
 use crate::net::socket::{BoundSocket, RecvMetadata, SendMetadata, Socket, SocketType};
@@ -258,6 +261,19 @@ impl Socket for UdpSocket {
     }
 
     async fn connect(&self, remote_addr: SocketAddr) -> KResult<()> {
+        let mut bound_socket_guard = self.bound_socket.write().await;
+        if bound_socket_guard.is_none() {
+            let bind_iface = get_ephemeral_iface(Some(remote_addr.ip())).unwrap();
+            let (bound_socket, local_addr) =
+                BoundSocket::new_bind_single(bind_iface.clone(), 0, SocketType::Udp)?;
+            let socket_handle = bound_socket.as_single_bound().unwrap().handle();
+            Self::bind_impl(bind_iface, socket_handle, local_addr)?;
+            *bound_socket_guard = Some(bound_socket);
+            *block_on(self.local_addr.write()) = Some(local_addr);
+        }
+
+        drop(bound_socket_guard);
+
         *(self.remote_addr.write().await) = Some(remote_addr);
 
         Ok(())
@@ -294,10 +310,10 @@ impl Socket for UdpSocket {
         let remote_addr = if let Some(remote_addr) = send_meta.remote_addr {
             remote_addr
         } else {
-            block_on(self.remote_addr.read()).clone().unwrap()
+            self.remote_addr.read().await.clone().unwrap()
         };
 
-        let mut bound_socket_guard = block_on(self.bound_socket.write());
+        let mut bound_socket_guard = self.bound_socket.write().await;
         if bound_socket_guard.is_none() {
             let bind_iface = get_ephemeral_iface(Some(remote_addr.ip())).unwrap();
             let (bound_socket, local_addr) =
@@ -341,20 +357,29 @@ impl Socket for UdpSocket {
         .await
     }
 
-    fn poll(&self, events: PollEvent) -> KResult<PollEvent> {
-        let bound_socket_guard = block_on(self.bound_socket.read());
+    async fn poll(&self, events: PollEvent) -> KResult<PollEvent> {
+        loop {
+            let bound_socket_guard = block_on(self.bound_socket.read());
 
-        match bound_socket_guard.as_ref().unwrap() {
-            BoundSocket::BoundSingle(single) => {
-                Self::poll_impl(single.iface(), single.handle(), events)
-            }
-            BoundSocket::BoundAll(all) => {
-                let mut poll_state = PollEvent::empty();
-                for bound_socket in &all.sockets {
-                    poll_state |=
-                        Self::poll_impl(bound_socket.iface(), bound_socket.handle(), events)?
+            let res = match bound_socket_guard.as_ref().unwrap() {
+                BoundSocket::BoundSingle(single) => {
+                    Self::poll_impl(single.iface(), single.handle(), events)?
                 }
-                Ok(poll_state)
+                BoundSocket::BoundAll(all) => {
+                    let mut poll_state = PollEvent::empty();
+                    for bound_socket in &all.sockets {
+                        poll_state |=
+                            Self::poll_impl(bound_socket.iface(), bound_socket.handle(), events)?
+                    }
+                    poll_state
+                }
+            };
+            drop(bound_socket_guard);
+
+            if res.is_empty() {
+                sleep(Duration::from_millis(100)).await
+            } else {
+                return Ok(res);
             }
         }
     }

@@ -6,6 +6,7 @@ use core::task::{Poll, Waker};
 use alloc::boxed::Box;
 use alloc::sync::Arc;
 use async_trait::async_trait;
+use eonix_log::println_warn;
 use eonix_sync::RwLock;
 use smoltcp::socket::tcp;
 use smoltcp::wire::IpListenEndpoint;
@@ -213,7 +214,8 @@ impl TcpSocket {
         iface: NetIface,
         socket_handle: SocketHandle,
         events: PollEvent,
-    ) -> KResult<PollEvent> {
+        waker: &Waker,
+    ) -> KResult<Option<PollEvent>> {
         let mut iface_guard = block_on(iface.lock());
         let socket = iface_guard
             .iface_and_sockets()
@@ -234,7 +236,14 @@ impl TcpSocket {
                         poll_state |= PollEvent::Writable;
                     }
                 }
-                Ok(poll_state)
+
+                if poll_state.is_empty() {
+                    socket.register_recv_waker(waker);
+                    socket.register_send_waker(waker);
+                    return Ok(None);
+                }
+
+                Ok(Some(poll_state))
             }
             tcp::State::Listen => {
                 let mut poll_state = PollEvent::empty();
@@ -243,9 +252,43 @@ impl TcpSocket {
                         poll_state |= PollEvent::Readable;
                     }
                 }
-                Ok(poll_state)
+                if poll_state.is_empty() {
+                    socket.register_recv_waker(waker);
+                    socket.register_send_waker(waker);
+                    return Ok(None);
+                }
+
+                Ok(Some(poll_state))
             }
-            _ => Ok(events),
+            _ => {
+                println_warn!("tcp poll uncheck state {:?}", socket.state());
+                Ok(Some(events))
+            }
+        }
+    }
+
+    fn try_poll(&self, events: PollEvent, waker: &Waker) -> KResult<Option<PollEvent>> {
+        let bound_socket_guard = block_on(self.bound_socket.read());
+
+        match bound_socket_guard.as_ref().unwrap() {
+            BoundSocket::BoundSingle(single) => {
+                Self::poll_impl(single.iface(), single.handle(), events, waker)
+            }
+            BoundSocket::BoundAll(all) => {
+                let mut poll_state = PollEvent::empty();
+                for bound_socket in &all.sockets {
+                    if let Some(res) =
+                        Self::poll_impl(bound_socket.iface(), bound_socket.handle(), events, waker)?
+                    {
+                        poll_state |= res;
+                    }
+                }
+
+                if poll_state.is_empty() {
+                    return Ok(None);
+                }
+                Ok(Some(poll_state))
+            }
         }
     }
 }
@@ -450,25 +493,30 @@ impl Socket for TcpSocket {
         .await
     }
 
-    fn poll(&self, events: PollEvent) -> KResult<PollEvent> {
-        let bound_socket_guard = block_on(self.bound_socket.read());
+    async fn poll(&self, events: PollEvent) -> KResult<PollEvent> {
+        struct PollFuture<'a> {
+            socket: &'a TcpSocket,
+            events: PollEvent,
+        }
 
-        match bound_socket_guard.as_ref().unwrap() {
-            BoundSocket::BoundSingle(single) => {
-                Self::poll_impl(single.iface(), single.handle(), events)
-            }
-            BoundSocket::BoundAll(all) => {
-                let mut poll_state = PollEvent::empty();
-                for bound_socket in &all.sockets {
-                    poll_state |= Self::poll_impl(
-                        bound_socket.iface(),
-                        bound_socket.handle(),
-                        events.clone(),
-                    )?
+        impl<'a> Future for PollFuture<'a> {
+            type Output = KResult<PollEvent>;
+
+            fn poll(self: Pin<&mut Self>, cx: &mut core::task::Context<'_>) -> Poll<Self::Output> {
+                let this = self.get_mut();
+                match this.socket.try_poll(this.events, cx.waker()) {
+                    Ok(Some(res)) => Poll::Ready(Ok(res)),
+                    Ok(None) => Poll::Pending,
+                    Err(err) => Poll::Ready(Err(err)),
                 }
-                Ok(poll_state)
             }
         }
+
+        PollFuture {
+            socket: self,
+            events,
+        }
+        .await
     }
 }
 

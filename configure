@@ -11,7 +11,7 @@ event() {
     printf "$1... "
 }
 
-ARCH=${ARCH:-x86_64}
+ARCH=${ARCH:-"$DEFAULT_ARCH"}
 
 # Define toolchain and QEMU/GDB settings for per architecture
 event "target architecture"
@@ -40,7 +40,7 @@ esac
 
 if [ "$QEMU" = "" ]; then
     event "checking default qemu"
-    QEMU="qemu-system-$DEFAULT_ARCH"
+    QEMU="qemu-system-$ARCH"
     if $QEMU --version > /dev/null 2>&1; then
         QEMU="qemu-system-\$(ARCH)"
         break
@@ -65,7 +65,7 @@ check_gdb_arch() {
     local item="$1"
     if $item --init-eval-command 'set arch' \
              --init-eval-command 'q' 2>&1 \
-             | grep "$DEFAULT_ARCH" >/dev/null 2>&1; then
+             | grep "$ARCH" >/dev/null 2>&1; then
         return 0
     else
         return 1
@@ -74,7 +74,7 @@ check_gdb_arch() {
 
 if [ "$GDB" = "" ]; then
     event "checking default gdb"
-    if check_gdb_arch "$DEFAULT_ARCH-elf-gdb"; then
+    if check_gdb_arch "$ARCH-elf-gdb"; then
         GDB="\$(ARCH)-elf-gdb"
         break
     fi
@@ -126,7 +126,7 @@ else
 fi
 
 cp Makefile.src "$OUT"
-sed -i '' -e "s|##DEFAULT_ARCH##|$DEFAULT_ARCH|" "$OUT" > /dev/null 2>&1
+sed -i '' -e "s|##DEFAULT_ARCH##|$ARCH|" "$OUT" > /dev/null 2>&1
 sed -i '' -e "s|##GDB##|$GDB|" "$OUT" > /dev/null 2>&1
 sed -i '' -e "s|##QEMU##|$QEMU|" "$OUT" > /dev/null 2>&1
 sed -i '' -e "s|##FDISK##|$FDISK|" "$OUT" > /dev/null 2>&1

@@ -8,6 +8,7 @@ use crate::prelude::*;
 use alloc::boxed::Box;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
+use async_trait::async_trait;
 use core::ptr::NonNull;
 use eonix_hal::fence::memory_barrier;
 use eonix_mm::address::{Addr, PAddr};
@@ -437,6 +438,7 @@ struct Driver {
     dev_id: u16,
 }
 
+#[async_trait]
 impl PCIDriver for Driver {
     fn vendor_id(&self) -> u16 {
         0x8086
@@ -446,7 +448,7 @@ impl PCIDriver for Driver {
         self.dev_id
     }
 
-    fn handle_device(&self, device: Arc<PCIDevice<'static>>) -> Result<(), PciError> {
+    async fn handle_device(&self, device: Arc<PCIDevice<'static>>) -> Result<(), PciError> {
         let Header::Endpoint(header) = device.header else {
             Err(EINVAL)?
         };
@@ -473,10 +475,10 @@ impl PCIDriver for Driver {
     }
 }
 
-pub fn register_e1000e_driver() {
+pub async fn register_e1000e_driver() {
     let dev_ids = [0x100e, 0x10d3, 0x10ea, 0x153a];
 
     for id in dev_ids.into_iter() {
-        pcie::register_driver(Driver { dev_id: id }).unwrap();
+        pcie::register_driver(Driver { dev_id: id }).await.unwrap();
     }
 }

@@ -31,7 +31,7 @@ pub struct MBRPartTable {
 impl MBRPartTable {
     pub async fn from_disk(disk: &BlockDevice) -> KResult<Self> {
         let mut mbr: UninitBuffer<MBRData> = UninitBuffer::new();
-        disk.read_some(0, &mut mbr)?.ok_or(EIO)?;
+        disk.read_some(0, &mut mbr).await?.ok_or(EIO)?;
         let mbr = mbr.assume_init()?;
 
         if mbr.magic != [0x55, 0xaa] {

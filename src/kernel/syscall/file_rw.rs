@@ -7,7 +7,7 @@ use crate::kernel::syscall::UserMut;
 use crate::kernel::task::Thread;
 use crate::kernel::timer::sleep;
 use crate::kernel::vfs::filearray::FD;
-use crate::kernel::vfs::inode::Mode;
+use crate::kernel::vfs::types::{DeviceId, Mode};
 use crate::kernel::vfs::{PollEvent, SeekOption};
 use crate::{
     io::{Buffer, BufferFill},
@@ -41,7 +41,7 @@ impl FromSyscallArg for AtFlags {
     }
 }
 
-fn dentry_from(
+async fn dentry_from(
     thread: &Thread,
     dirfd: FD,
     pathname: User<u8>,
@@ -52,7 +52,7 @@ fn dentry_from(
     match (path.as_cstr().to_bytes_with_nul()[0], dirfd) {
         (b'/', _) | (_, FD::AT_FDCWD) => {
             let path = Path::new(path.as_cstr().to_bytes())?;
-            Dentry::open(&thread.fs_context, path, follow_symlink)
+            Dentry::open(&thread.fs_context, path, follow_symlink).await
         }
         (0, dirfd) => {
             let dir_file = thread.files.get(dirfd).ok_or(EBADF)?;
@@ -63,7 +63,7 @@ fn dentry_from(
             let dir_file = thread.files.get(dirfd).ok_or(EBADF)?;
             let dir_dentry = dir_file.as_path().ok_or(ENOTDIR)?;
 
-            Dentry::open_at(&thread.fs_context, dir_dentry, path, follow_symlink)
+            Dentry::open_at(&thread.fs_context, dir_dentry, path, follow_symlink).await
         }
     }
 }
@@ -119,13 +119,11 @@ async fn pwrite64(fd: FD, buffer: User<u8>, count: usize, offset: usize) -> KRes
 }
 
 #[eonix_macros::define_syscall(SYS_OPENAT)]
-async fn openat(dirfd: FD, pathname: User<u8>, flags: OpenFlags, mut mode: Mode) -> KResult<FD> {
-    let dentry = dentry_from(thread, dirfd, pathname, flags.follow_symlink())?;
+async fn openat(dirfd: FD, pathname: User<u8>, flags: OpenFlags, mode: Mode) -> KResult<FD> {
+    let dentry = dentry_from(thread, dirfd, pathname, flags.follow_symlink()).await?;
+    let perm = mode.perm().mask_with(*thread.fs_context.umask.lock());
 
-    let umask = *thread.fs_context.umask.lock();
-    mode.mask_perm(!umask.non_format_bits());
-
-    thread.files.open(&dentry, flags, mode)
+    thread.files.open(&dentry, flags, perm).await
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -206,7 +204,7 @@ async fn newfstatat(
         let file = thread.files.get(dirfd).ok_or(EBADF)?;
         file.as_path().ok_or(EBADF)?.clone()
     } else {
-        dentry_from(thread, dirfd, pathname, !flags.no_follow())?
+        dentry_from(thread, dirfd, pathname, !flags.no_follow()).await?
     };
 
     let statbuf = UserPointerMut::new(statbuf)?;
@@ -247,7 +245,7 @@ async fn statx(
         let file = thread.files.get(dirfd).ok_or(EBADF)?;
         file.as_path().ok_or(EBADF)?.clone()
     } else {
-        dentry_from(thread, dirfd, pathname, !flags.no_follow())?
+        dentry_from(thread, dirfd, pathname, !flags.no_follow()).await?
     };
 
     dentry.statx(&mut statx, mask)?;
@@ -257,12 +255,11 @@ async fn statx(
 }
 
 #[eonix_macros::define_syscall(SYS_MKDIRAT)]
-async fn mkdirat(dirfd: FD, pathname: User<u8>, mut mode: Mode) -> KResult<()> {
-    let umask = *thread.fs_context.umask.lock();
-    mode.mask_perm(!umask.non_format_bits());
+async fn mkdirat(dirfd: FD, pathname: User<u8>, mode: Mode) -> KResult<()> {
+    let dentry = dentry_from(thread, dirfd, pathname, true).await?;
+    let perm = mode.perm().mask_with(*thread.fs_context.umask.lock());
 
-    let dentry = dentry_from(thread, dirfd, pathname, true)?;
-    dentry.mkdir(mode)
+    dentry.mkdir(perm).await
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -274,7 +271,7 @@ async fn mkdir(pathname: User<u8>, mode: u32) -> KResult<()> {
 #[eonix_macros::define_syscall(SYS_FTRUNCATE64)]
 async fn truncate64(fd: FD, length: usize) -> KResult<()> {
     let file = thread.files.get(fd).ok_or(EBADF)?;
-    file.as_path().ok_or(EBADF)?.truncate(length)
+    file.as_path().ok_or(EBADF)?.truncate(length).await
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -290,7 +287,10 @@ async fn truncate(pathname: User<u8>, length: usize) -> KResult<()> {
 
 #[eonix_macros::define_syscall(SYS_UNLINKAT)]
 async fn unlinkat(dirfd: FD, pathname: User<u8>) -> KResult<()> {
-    dentry_from(thread, dirfd, pathname, false)?.unlink()
+    dentry_from(thread, dirfd, pathname, false)
+        .await?
+        .unlink()
+        .await
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -302,9 +302,9 @@ async fn unlink(pathname: User<u8>) -> KResult<()> {
 #[eonix_macros::define_syscall(SYS_SYMLINKAT)]
 async fn symlinkat(target: User<u8>, dirfd: FD, linkpath: User<u8>) -> KResult<()> {
     let target = UserString::new(target)?;
-    let dentry = dentry_from(thread, dirfd, linkpath, false)?;
+    let dentry = dentry_from(thread, dirfd, linkpath, false).await?;
 
-    dentry.symlink(target.as_cstr().to_bytes())
+    dentry.symlink(target.as_cstr().to_bytes()).await
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -313,18 +313,36 @@ async fn symlink(target: User<u8>, linkpath: User<u8>) -> KResult<()> {
     sys_symlinkat(thread, target, FD::AT_FDCWD, linkpath)
 }
 
+#[derive(Clone, Copy, Debug)]
+#[repr(transparent)]
+struct UserDeviceId(u32);
+
+impl FromSyscallArg for UserDeviceId {
+    fn from_arg(value: usize) -> Self {
+        Self(value as u32)
+    }
+}
+
+impl UserDeviceId {
+    pub fn into_devid(self) -> DeviceId {
+        let major = (self.0 >> 8) & 0xfff;
+        let minor = (self.0 & 0xff) | ((self.0 >> 12) & 0xfff00);
+
+        // TODO: We strip off the high 4 bits of the minor ID for now...
+        DeviceId::new(major as u16, minor as u16)
+    }
+}
+
 #[eonix_macros::define_syscall(SYS_MKNODAT)]
-async fn mknodat(dirfd: FD, pathname: User<u8>, mut mode: Mode, dev: u32) -> KResult<()> {
+async fn mknodat(dirfd: FD, pathname: User<u8>, mut mode: Mode, dev: UserDeviceId) -> KResult<()> {
     if !mode.is_blk() && !mode.is_chr() {
         return Err(EINVAL);
     }
 
-    let dentry = dentry_from(thread, dirfd, pathname, true)?;
+    let dentry = dentry_from(thread, dirfd, pathname, true).await?;
+    mode.set_perm(mode.perm().mask_with(*thread.fs_context.umask.lock()));
 
-    let umask = *thread.fs_context.umask.lock();
-    mode.mask_perm(!umask.non_format_bits());
-
-    dentry.mknod(mode, dev)
+    dentry.mknod(mode, dev.into_devid()).await
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -340,10 +358,10 @@ async fn readlinkat(
     buffer: UserMut<u8>,
     bufsize: usize,
 ) -> KResult<usize> {
-    let dentry = dentry_from(thread, dirfd, pathname, false)?;
+    let dentry = dentry_from(thread, dirfd, pathname, false).await?;
     let mut buffer = UserBuffer::new(buffer, bufsize)?;
 
-    dentry.readlink(&mut buffer)
+    dentry.readlink(&mut buffer).await
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -471,7 +489,7 @@ async fn faccessat(dirfd: FD, pathname: User<u8>, _mode: u32, flags: AtFlags) ->
         let file = thread.files.get(dirfd).ok_or(EBADF)?;
         file.as_path().ok_or(EBADF)?.clone()
     } else {
-        dentry_from(thread, dirfd, pathname, !flags.no_follow())?
+        dentry_from(thread, dirfd, pathname, !flags.no_follow()).await?
     };
 
     if !dentry.is_valid() {
@@ -614,12 +632,12 @@ async fn fchownat(
     gid: u32,
     flags: AtFlags,
 ) -> KResult<()> {
-    let dentry = dentry_from(thread, dirfd, pathname, !flags.no_follow())?;
+    let dentry = dentry_from(thread, dirfd, pathname, !flags.no_follow()).await?;
     if !dentry.is_valid() {
         return Err(ENOENT);
     }
 
-    dentry.chown(uid, gid)
+    dentry.chown(uid, gid).await
 }
 
 #[eonix_macros::define_syscall(SYS_FCHMODAT)]
@@ -628,14 +646,14 @@ async fn fchmodat(dirfd: FD, pathname: User<u8>, mode: Mode, flags: AtFlags) -> 
         let file = thread.files.get(dirfd).ok_or(EBADF)?;
         file.as_path().ok_or(EBADF)?.clone()
     } else {
-        dentry_from(thread, dirfd, pathname, !flags.no_follow())?
+        dentry_from(thread, dirfd, pathname, !flags.no_follow()).await?
     };
 
     if !dentry.is_valid() {
         return Err(ENOENT);
     }
 
-    dentry.chmod(mode)
+    dentry.chmod(mode).await
 }
 
 #[eonix_macros::define_syscall(SYS_FCHMOD)]
@@ -654,7 +672,7 @@ async fn utimensat(
         let file = thread.files.get(dirfd).ok_or(EBADF)?;
         file.as_path().ok_or(EBADF)?.clone()
     } else {
-        dentry_from(thread, dirfd, pathname, !flags.no_follow())?
+        dentry_from(thread, dirfd, pathname, !flags.no_follow()).await?
     };
 
     if !dentry.is_valid() {
@@ -688,10 +706,10 @@ async fn renameat2(
         Err(EINVAL)?;
     }
 
-    let old_dentry = dentry_from(thread, old_dirfd, old_pathname, false)?;
-    let new_dentry = dentry_from(thread, new_dirfd, new_pathname, false)?;
+    let old_dentry = dentry_from(thread, old_dirfd, old_pathname, false).await?;
+    let new_dentry = dentry_from(thread, new_dirfd, new_pathname, false).await?;
 
-    old_dentry.rename(&new_dentry, flags)
+    old_dentry.rename(&new_dentry, flags).await
 }
 
 #[cfg(target_arch = "x86_64")]

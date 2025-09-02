@@ -16,7 +16,7 @@ use crate::kernel::task::{parse_futexop, CloneArgs};
 use crate::kernel::timer::sleep;
 use crate::kernel::user::UserString;
 use crate::kernel::user::{UserPointer, UserPointerMut};
-use crate::kernel::vfs::inode::Mode;
+use crate::kernel::vfs::types::Permission;
 use crate::kernel::vfs::{self, dentry::Dentry};
 use crate::path::Path;
 use crate::{kernel::user::UserBuffer, prelude::*};
@@ -100,10 +100,11 @@ async fn clock_nanosleep(
 }
 
 #[eonix_macros::define_syscall(SYS_UMASK)]
-async fn umask(mask: Mode) -> KResult<Mode> {
-    let mut umask = thread.fs_context.umask.lock();
+async fn umask(raw_new_mask: u32) -> KResult<u32> {
+    let new_mask = Permission::new(!raw_new_mask);
+    let old_mask = core::mem::replace(&mut *thread.fs_context.umask.lock(), new_mask);
 
-    Ok(core::mem::replace(&mut *umask, mask.non_format()))
+    Ok(!old_mask.bits())
 }
 
 #[eonix_macros::define_syscall(SYS_GETCWD)]
@@ -124,7 +125,7 @@ async fn chdir(path: User<u8>) -> KResult<()> {
     let path = UserString::new(path)?;
     let path = Path::new(path.as_cstr().to_bytes())?;
 
-    let dentry = Dentry::open(&thread.fs_context, path, true)?;
+    let dentry = Dentry::open(&thread.fs_context, path, true).await?;
     if !dentry.is_valid() {
         return Err(ENOENT);
     }
@@ -159,7 +160,8 @@ async fn mount(source: User<u8>, target: User<u8>, fstype: User<u8>, flags: usiz
         &thread.fs_context,
         Path::new(target.as_cstr().to_bytes())?,
         true,
-    )?;
+    )
+    .await?;
 
     if !mountpoint.is_valid() {
         return Err(ENOENT);
@@ -172,6 +174,7 @@ async fn mount(source: User<u8>, target: User<u8>, fstype: User<u8>, flags: usiz
         fstype.as_cstr().to_str().map_err(|_| EINVAL)?,
         flags as u64,
     )
+    .await
 }
 
 fn get_strings(mut ptr_strings: UserPointer<'_, PtrT>) -> KResult<Vec<CString>> {
@@ -199,14 +202,15 @@ async fn execve(exec: User<u8>, argv: User<PtrT>, envp: User<PtrT>) -> KResult<S
     let argv = get_strings(UserPointer::new(argv)?)?;
     let envp = get_strings(UserPointer::new(envp)?)?;
 
-    let dentry = Dentry::open(&thread.fs_context, Path::new(exec.as_bytes())?, true)?;
+    let dentry = Dentry::open(&thread.fs_context, Path::new(exec.as_bytes())?, true).await?;
     if !dentry.is_valid() {
         Err(ENOENT)?;
     }
 
     // TODO: When `execve` is called by one of the threads in a process, the other threads
     //       should be terminated and `execve` is performed in the thread group leader.
-    let load_info = ProgramLoader::parse(&thread.fs_context, exec, dentry.clone(), argv, envp)?
+    let load_info = ProgramLoader::parse(&thread.fs_context, exec, dentry.clone(), argv, envp)
+        .await?
         .load()
         .await?;
 

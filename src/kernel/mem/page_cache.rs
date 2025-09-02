@@ -6,8 +6,10 @@ use crate::{
     GlobalPageAlloc,
 };
 use align_ext::AlignExt;
+use alloc::boxed::Box;
 use alloc::{collections::btree_map::BTreeMap, sync::Weak};
-use core::mem::ManuallyDrop;
+use async_trait::async_trait;
+use core::{future::Future, mem::ManuallyDrop};
 use eonix_hal::mm::ArchPhysAccess;
 use eonix_mm::{
     address::{PAddr, PhysAccess},
@@ -159,7 +161,8 @@ impl PageCache {
                     self.backend
                         .upgrade()
                         .unwrap()
-                        .read_page(&mut new_page, offset.align_down(PAGE_SIZE))?;
+                        .read_page(&mut new_page, offset.align_down(PAGE_SIZE))
+                        .await?;
                     pages.insert(page_id, new_page);
                 }
             }
@@ -205,7 +208,8 @@ impl PageCache {
                         self.backend
                             .upgrade()
                             .unwrap()
-                            .read_page(&mut new_page, offset.align_down(PAGE_SIZE))?;
+                            .read_page(&mut new_page, offset.align_down(PAGE_SIZE))
+                            .await?;
                         new_page
                     };
 
@@ -224,7 +228,8 @@ impl PageCache {
                 self.backend
                     .upgrade()
                     .unwrap()
-                    .write_page(&mut CachePageStream::new(*page), page_id << PAGE_SIZE_BITS)?;
+                    .write_page(&mut CachePageStream::new(*page), page_id << PAGE_SIZE_BITS)
+                    .await?;
                 page.clear_dirty();
             }
         }
@@ -286,7 +291,8 @@ impl PageCache {
                 self.backend
                     .upgrade()
                     .unwrap()
-                    .read_page(&mut new_page, offset_aligin)?;
+                    .read_page(&mut new_page, offset_aligin)
+                    .await?;
                 pages.insert(page_id, new_page);
                 new_page.0
             }
@@ -349,12 +355,45 @@ impl Stream for CachePageStream {
 // for fs, offset is file offset (floor algin to PAGE_SIZE)
 // for blkdev, offset is block idx (floor align to PAGE_SIZE / BLK_SIZE)
 // Oh no, this would make unnecessary cache
-pub trait PageCacheBackend {
-    fn read_page(&self, page: &mut CachePage, offset: usize) -> KResult<usize>;
+pub trait PageCacheBackendOps: Sized {
+    fn read_page(
+        &self,
+        page: &mut CachePage,
+        offset: usize,
+    ) -> impl Future<Output = KResult<usize>> + Send;
 
-    fn write_page(&self, page: &mut CachePageStream, offset: usize) -> KResult<usize>;
+    fn write_page(
+        &self,
+        page: &mut CachePageStream,
+        offset: usize,
+    ) -> impl Future<Output = KResult<usize>> + Send;
 
     fn size(&self) -> usize;
+}
+
+#[async_trait]
+pub trait PageCacheBackend: Send + Sync {
+    async fn read_page(&self, page: &mut CachePage, offset: usize) -> KResult<usize>;
+    async fn write_page(&self, page: &mut CachePageStream, offset: usize) -> KResult<usize>;
+    fn size(&self) -> usize;
+}
+
+#[async_trait]
+impl<T> PageCacheBackend for T
+where
+    T: PageCacheBackendOps + Send + Sync + 'static,
+{
+    async fn read_page(&self, page: &mut CachePage, offset: usize) -> KResult<usize> {
+        self.read_page(page, offset).await
+    }
+
+    async fn write_page(&self, page: &mut CachePageStream, offset: usize) -> KResult<usize> {
+        self.write_page(page, offset).await
+    }
+
+    fn size(&self) -> usize {
+        self.size()
+    }
 }
 
 pub trait PageCacheRawPage: RawPage {

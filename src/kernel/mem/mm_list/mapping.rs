@@ -1,22 +1,13 @@
-use core::fmt::Debug;
-
-use crate::kernel::vfs::inode::Inode;
-use alloc::sync::Arc;
+use crate::kernel::vfs::inode::{Inode, InodeUse};
 use eonix_mm::paging::PAGE_SIZE;
 
 #[derive(Debug, Clone)]
 pub struct FileMapping {
-    pub file: Arc<dyn Inode>,
+    pub file: InodeUse<dyn Inode>,
     /// Offset in the file, aligned to 4KB boundary.
     pub offset: usize,
     /// Length of the mapping. Exceeding part will be zeroed.
     pub length: usize,
-}
-
-impl Debug for dyn Inode {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "Inode()")
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -28,7 +19,7 @@ pub enum Mapping {
 }
 
 impl FileMapping {
-    pub fn new(file: Arc<dyn Inode>, offset: usize, length: usize) -> Self {
+    pub fn new(file: InodeUse<dyn Inode>, offset: usize, length: usize) -> Self {
         assert_eq!(offset & (PAGE_SIZE - 1), 0);
         Self {
             file,

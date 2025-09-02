@@ -33,7 +33,7 @@ pub struct ProgramLoader {
 }
 
 impl ProgramLoader {
-    pub fn parse(
+    pub async fn parse(
         fs_context: &FsContext,
         mut exec_path: CString,
         mut file: Arc<Dentry>,
@@ -49,12 +49,15 @@ impl ProgramLoader {
             }
 
             let mut magic = [0; 4];
-            file.read(&mut ByteBuffer::new(magic.as_mut_slice()), 0)?;
+            file.read(&mut ByteBuffer::new(magic.as_mut_slice()), 0)
+                .await?;
 
             match magic {
                 [b'#', b'!', ..] => {
                     let mut interpreter_line = [0; 256];
-                    let nread = file.read(&mut ByteBuffer::new(&mut interpreter_line), 0)?;
+                    let nread = file
+                        .read(&mut ByteBuffer::new(&mut interpreter_line), 0)
+                        .await?;
 
                     // There is a tiny time gap between reading the magic number and
                     // reading the interpreter line, so we need to check if the line
@@ -77,7 +80,7 @@ impl ProgramLoader {
                     }
 
                     let path = Path::new(interpreter_name.as_bytes())?;
-                    file = Dentry::open(fs_context, path, true)?;
+                    file = Dentry::open(fs_context, path, true).await?;
 
                     args.insert(0, interpreter_name.clone());
                     if let Some(arg) = interpreter_arg {
@@ -92,7 +95,7 @@ impl ProgramLoader {
 
                     exec_path = interpreter_name;
                 }
-                ELF_MAGIC => break ELF::parse(file)?,
+                ELF_MAGIC => break ELF::parse(file).await?,
                 _ => return Err(ENOEXEC),
             }
 

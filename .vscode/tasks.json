@@ -6,7 +6,7 @@
         {
             "label": "debug run riscv64",
             "type": "shell",
-            "command": "make srun ARCH=riscv64",
+            "command": "make srun ARCH=riscv64 IMG=/Volumes/oscomp/sdcard-rv.img",
             "isBackground": true,
             "problemMatcher": [
                 {

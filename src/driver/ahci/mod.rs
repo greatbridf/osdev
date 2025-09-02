@@ -2,15 +2,16 @@ use crate::{
     fs::procfs,
     io::Buffer as _,
     kernel::{
-        block::{make_device, BlockDevice},
+        block::BlockDevice,
         constants::{EINVAL, EIO},
         interrupt::register_irq_handler,
         pcie::{self, Header, PCIDevice, PCIDriver, PciError},
-        task::block_on,
+        vfs::types::DeviceId,
     },
     prelude::*,
 };
 use alloc::{format, sync::Arc};
+use async_trait::async_trait;
 use control::AdapterControl;
 use defs::*;
 use eonix_mm::address::{AddrOps as _, PAddr};
@@ -108,7 +109,30 @@ impl Device<'_> {
 }
 
 impl Device<'static> {
-    fn probe_ports(&self) -> KResult<()> {
+    async fn probe_port(&self, port: Arc<AdapterPort<'static>>) -> KResult<()> {
+        port.init().await?;
+
+        {
+            let port = port.clone();
+            let name = format!("ahci-p{}-stats", port.nport);
+            procfs::populate_root(name.into_bytes().into(), move |buffer| {
+                port.print_stats(&mut buffer.get_writer())
+            })
+            .await;
+        }
+
+        let port = BlockDevice::register_disk(
+            DeviceId::new(8, port.nport as u16 * 16),
+            2147483647, // TODO: get size from device
+            port,
+        )?;
+
+        port.partprobe().await?;
+
+        Ok(())
+    }
+
+    async fn probe_ports(&self) -> KResult<()> {
         for nport in self.control.implemented_ports() {
             let port = Arc::new(AdapterPort::new(self.control_base, nport));
             if !port.status_ok() {
@@ -116,27 +140,7 @@ impl Device<'static> {
             }
 
             self.ports.lock_irq()[nport as usize] = Some(port.clone());
-            if let Err(e) = (|| -> KResult<()> {
-                port.init()?;
-
-                {
-                    let port = port.clone();
-                    let name = format!("ahci-p{}-stats", port.nport);
-                    procfs::populate_root(name.into_bytes().into(), move |buffer| {
-                        port.print_stats(&mut buffer.get_writer())
-                    })?;
-                }
-
-                let port = BlockDevice::register_disk(
-                    make_device(8, nport * 16),
-                    2147483647, // TODO: get size from device
-                    port,
-                )?;
-
-                block_on(port.partprobe())?;
-
-                Ok(())
-            })() {
+            if let Err(e) = self.probe_port(port).await {
                 self.ports.lock_irq()[nport as usize] = None;
                 println_warn!("probe port {nport} failed with {e}");
             }
@@ -154,6 +158,7 @@ impl AHCIDriver {
     }
 }
 
+#[async_trait]
 impl PCIDriver for AHCIDriver {
     fn vendor_id(&self) -> u16 {
         VENDOR_INTEL
@@ -163,7 +168,7 @@ impl PCIDriver for AHCIDriver {
         DEVICE_AHCI
     }
 
-    fn handle_device(&self, pcidev: Arc<PCIDevice<'static>>) -> Result<(), PciError> {
+    async fn handle_device(&self, pcidev: Arc<PCIDevice<'static>>) -> Result<(), PciError> {
         let Header::Endpoint(header) = pcidev.header else {
             Err(EINVAL)?
         };
@@ -200,7 +205,7 @@ impl PCIDriver for AHCIDriver {
         let device_irq = device.clone();
         register_irq_handler(irqno as i32, move || device_irq.handle_interrupt())?;
 
-        device.probe_ports()?;
+        device.probe_ports().await?;
 
         self.devices.lock().push(device);
 
@@ -208,6 +213,8 @@ impl PCIDriver for AHCIDriver {
     }
 }
 
-pub fn register_ahci_driver() {
-    pcie::register_driver(AHCIDriver::new()).expect("Register ahci driver failed");
+pub async fn register_ahci_driver() {
+    pcie::register_driver(AHCIDriver::new())
+        .await
+        .expect("Register ahci driver failed");
 }

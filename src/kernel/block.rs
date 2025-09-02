@@ -3,7 +3,7 @@ mod mbr;
 use super::{
     constants::ENOENT,
     mem::{paging::Page, AsMemoryBlock as _},
-    vfs::DevId,
+    vfs::types::DeviceId,
 };
 use crate::kernel::constants::{EEXIST, EINVAL};
 use crate::{
@@ -14,12 +14,9 @@ use alloc::{
     collections::btree_map::{BTreeMap, Entry},
     sync::Arc,
 };
+use async_trait::async_trait;
 use core::cmp::Ordering;
 use mbr::MBRPartTable;
-
-pub fn make_device(major: u32, minor: u32) -> DevId {
-    (major << 8) & 0xff00u32 | minor & 0xffu32
-}
 
 pub struct Partition {
     pub lba_offset: u64,
@@ -30,11 +27,12 @@ pub trait PartTable {
     fn partitions(&self) -> impl Iterator<Item = Partition> + use<'_, Self>;
 }
 
+#[async_trait]
 pub trait BlockRequestQueue: Send + Sync {
     /// Maximum number of sectors that can be read in one request
     fn max_request_pages(&self) -> u64;
 
-    fn submit(&self, req: BlockDeviceRequest) -> KResult<()>;
+    async fn submit<'a>(&'a self, req: BlockDeviceRequest<'a>) -> KResult<()>;
 }
 
 enum BlockDeviceType {
@@ -42,7 +40,7 @@ enum BlockDeviceType {
         queue: Arc<dyn BlockRequestQueue>,
     },
     Partition {
-        disk_dev: DevId,
+        disk_dev: DeviceId,
         lba_offset: u64,
         queue: Arc<dyn BlockRequestQueue>,
     },
@@ -50,7 +48,7 @@ enum BlockDeviceType {
 
 pub struct BlockDevice {
     /// Unique device identifier, major and minor numbers
-    devid: DevId,
+    devid: DeviceId,
     /// Total size of the device in sectors (512 bytes each)
     sector_count: u64,
 
@@ -77,11 +75,11 @@ impl Ord for BlockDevice {
     }
 }
 
-static BLOCK_DEVICE_LIST: Spin<BTreeMap<DevId, Arc<BlockDevice>>> = Spin::new(BTreeMap::new());
+static BLOCK_DEVICE_LIST: Spin<BTreeMap<DeviceId, Arc<BlockDevice>>> = Spin::new(BTreeMap::new());
 
 impl BlockDevice {
     pub fn register_disk(
-        devid: DevId,
+        devid: DeviceId,
         size: u64,
         queue: Arc<dyn BlockRequestQueue>,
     ) -> KResult<Arc<Self>> {
@@ -97,13 +95,13 @@ impl BlockDevice {
         }
     }
 
-    pub fn get(devid: DevId) -> KResult<Arc<Self>> {
+    pub fn get(devid: DeviceId) -> KResult<Arc<Self>> {
         BLOCK_DEVICE_LIST.lock().get(&devid).cloned().ok_or(ENOENT)
     }
 }
 
 impl BlockDevice {
-    pub fn devid(&self) -> DevId {
+    pub fn devid(&self) -> DeviceId {
         self.devid
     }
 
@@ -121,7 +119,7 @@ impl BlockDevice {
         };
 
         let device = Arc::new(BlockDevice {
-            devid: make_device(self.devid >> 8, (self.devid & 0xff) + idx as u32 + 1),
+            devid: DeviceId::new(self.devid.major, self.devid.minor + idx as u16 + 1),
             sector_count: size,
             dev_type: BlockDeviceType::Partition {
                 disk_dev: self.devid,
@@ -159,7 +157,7 @@ impl BlockDevice {
     /// - `req.sector` must be within the disk size
     /// - `req.buffer` must be enough to hold the data
     ///
-    pub fn commit_request(&self, mut req: BlockDeviceRequest) -> KResult<()> {
+    pub async fn commit_request(&self, mut req: BlockDeviceRequest<'_>) -> KResult<()> {
         // Verify the request parameters.
         match &mut req {
             BlockDeviceRequest::Read { sector, count, .. } => {
@@ -184,7 +182,7 @@ impl BlockDevice {
             }
         }
 
-        self.queue().submit(req)
+        self.queue().submit(req).await
     }
 
     /// Read some from the block device, may involve some copy and fragmentation
@@ -194,7 +192,7 @@ impl BlockDevice {
     /// # Arguments
     /// `offset` - offset in bytes
     ///
-    pub fn read_some(&self, offset: usize, buffer: &mut dyn Buffer) -> KResult<FillResult> {
+    pub async fn read_some(&self, offset: usize, buffer: &mut dyn Buffer) -> KResult<FillResult> {
         let mut sector_start = offset as u64 / 512;
         let mut first_sector_offset = offset as u64 % 512;
         let mut sector_count = (first_sector_offset + buffer.total() as u64 + 511) / 512;
@@ -241,7 +239,7 @@ impl BlockDevice {
                 buffer: &pages,
             };
 
-            self.commit_request(req)?;
+            self.commit_request(req).await?;
 
             for page in pages.iter() {
                 // SAFETY: We are the only owner of the page so no one could be mutating it.
@@ -277,7 +275,7 @@ impl BlockDevice {
     /// `offset` - offset in bytes
     /// `data` - data to write
     ///
-    pub fn write_some(&self, offset: usize, data: &[u8]) -> KResult<usize> {
+    pub async fn write_some(&self, offset: usize, data: &[u8]) -> KResult<usize> {
         let mut sector_start = offset as u64 / 512;
         let mut first_sector_offset = offset as u64 % 512;
         let mut remaining_data = data;
@@ -320,7 +318,7 @@ impl BlockDevice {
                     count: sector_count,
                     buffer: pages,
                 };
-                self.commit_request(read_req)?;
+                self.commit_request(read_req).await?;
             }
 
             let mut data_offset = 0;
@@ -356,7 +354,7 @@ impl BlockDevice {
                 count: sector_count,
                 buffer: pages,
             };
-            self.commit_request(write_req)?;
+            self.commit_request(write_req).await?;
 
             let bytes_written = data_offset;
             nwritten += bytes_written;

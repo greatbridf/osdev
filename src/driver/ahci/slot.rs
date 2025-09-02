@@ -71,19 +71,20 @@ impl<'a> CommandSlot<'a> {
 
     pub async fn wait_finish(&self) -> KResult<()> {
         let mut inner = loop {
-            let inner = self.inner.lock_irq();
-            if inner.state != SlotState::Working {
-                break inner;
-            }
-
             let mut wait = pin!(self.wait_list.prepare_to_wait());
-            wait.as_mut().add_to_wait_list();
 
-            if inner.state != SlotState::Working {
-                break inner;
+            {
+                let inner = self.inner.lock_irq();
+                if inner.state != SlotState::Working {
+                    break inner;
+                }
+                wait.as_mut().add_to_wait_list();
+
+                if inner.state != SlotState::Working {
+                    break inner;
+                }
             }
 
-            drop(inner);
             wait.await;
         };
 

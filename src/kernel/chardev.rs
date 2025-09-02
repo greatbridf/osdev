@@ -1,10 +1,9 @@
 use super::{
-    block::make_device,
     console::get_console,
     constants::{EEXIST, EIO},
     task::{block_on, ProcessList, Thread},
     terminal::Terminal,
-    vfs::{DevId, File, FileType, TerminalFile},
+    vfs::{types::DeviceId, File, FileType, TerminalFile},
 };
 use crate::{
     io::{Buffer, Stream, StreamRead},
@@ -34,7 +33,7 @@ pub struct CharDevice {
     device: CharDeviceType,
 }
 
-static CHAR_DEVICES: Spin<BTreeMap<DevId, Arc<CharDevice>>> = Spin::new(BTreeMap::new());
+static CHAR_DEVICES: Spin<BTreeMap<DeviceId, Arc<CharDevice>>> = Spin::new(BTreeMap::new());
 
 impl CharDevice {
     pub fn read(&self, buffer: &mut dyn Buffer) -> KResult<usize> {
@@ -54,11 +53,11 @@ impl CharDevice {
         }
     }
 
-    pub fn get(devid: DevId) -> Option<Arc<CharDevice>> {
+    pub fn get(devid: DeviceId) -> Option<Arc<CharDevice>> {
         CHAR_DEVICES.lock().get(&devid).cloned()
     }
 
-    pub fn register(devid: DevId, name: Arc<str>, device: CharDeviceType) -> KResult<()> {
+    pub fn register(devid: DeviceId, name: Arc<str>, device: CharDeviceType) -> KResult<()> {
         match CHAR_DEVICES.lock().entry(devid) {
             Entry::Vacant(entry) => {
                 entry.insert(Arc::new(CharDevice { name, device }));
@@ -134,19 +133,19 @@ impl VirtualCharDevice for ConsoleDevice {
 impl CharDevice {
     pub fn init() -> KResult<()> {
         Self::register(
-            make_device(1, 3),
+            DeviceId::new(1, 3),
             Arc::from("null"),
             CharDeviceType::Virtual(Box::new(NullDevice)),
         )?;
 
         Self::register(
-            make_device(1, 5),
+            DeviceId::new(1, 5),
             Arc::from("zero"),
             CharDeviceType::Virtual(Box::new(ZeroDevice)),
         )?;
 
         Self::register(
-            make_device(5, 1),
+            DeviceId::new(5, 1),
             Arc::from("console"),
             CharDeviceType::Virtual(Box::new(ConsoleDevice)),
         )?;

@@ -1,11 +1,15 @@
 use super::{
     dentry::{dcache, Dentry, DROOT},
-    inode::Inode,
-    vfs::Vfs,
+    inode::{Inode, InodeUse},
+    SbUse, SuperBlock,
 };
-use crate::kernel::constants::{EEXIST, ENODEV, ENOTDIR};
+use crate::kernel::{
+    constants::{EEXIST, ENODEV, ENOTDIR},
+    task::block_on,
+};
 use crate::prelude::*;
 use alloc::{collections::btree_map::BTreeMap, string::ToString as _, sync::Arc};
+use async_trait::async_trait;
 use eonix_sync::LazyLock;
 
 pub const MS_RDONLY: u64 = 1 << 0;
@@ -30,17 +34,21 @@ static MOUNT_CREATORS: Spin<BTreeMap<String, Arc<dyn MountCreator>>> = Spin::new
 static MOUNTS: Spin<Vec<(Arc<Dentry>, MountPointData)>> = Spin::new(vec![]);
 
 pub struct Mount {
-    _vfs: Arc<dyn Vfs>,
+    sb: SbUse<dyn SuperBlock>,
     root: Arc<Dentry>,
 }
 
 impl Mount {
-    pub fn new(mp: &Dentry, vfs: Arc<dyn Vfs>, root_inode: Arc<dyn Inode>) -> KResult<Self> {
+    pub fn new(
+        mp: &Dentry,
+        sb: SbUse<dyn SuperBlock>,
+        root_inode: InodeUse<dyn Inode>,
+    ) -> KResult<Self> {
         let root_dentry = Dentry::create(mp.parent().clone(), &mp.get_name());
-        root_dentry.save_dir(root_inode)?;
+        root_dentry.fill(root_inode);
 
         Ok(Self {
-            _vfs: vfs,
+            sb,
             root: root_dentry,
         })
     }
@@ -53,9 +61,10 @@ impl Mount {
 unsafe impl Send for Mount {}
 unsafe impl Sync for Mount {}
 
+#[async_trait]
 pub trait MountCreator: Send + Sync {
     fn check_signature(&self, first_block: &[u8]) -> KResult<bool>;
-    fn create_mount(&self, source: &str, flags: u64, mp: &Arc<Dentry>) -> KResult<Mount>;
+    async fn create_mount(&self, source: &str, flags: u64, mp: &Arc<Dentry>) -> KResult<Mount>;
 }
 
 pub fn register_filesystem(fstype: &str, creator: Arc<dyn MountCreator>) -> KResult<()> {
@@ -77,7 +86,7 @@ struct MountPointData {
     flags: u64,
 }
 
-pub fn do_mount(
+pub async fn do_mount(
     mountpoint: &Arc<Dentry>,
     source: &str,
     mountpoint_str: &str,
@@ -101,7 +110,7 @@ pub fn do_mount(
         let creators = { MOUNT_CREATORS.lock() };
         creators.get(fstype).ok_or(ENODEV)?.clone()
     };
-    let mount = creator.create_mount(source, flags, mountpoint)?;
+    let mount = creator.create_mount(source, flags, mountpoint).await?;
 
     let root_dentry = mount.root().clone();
 
@@ -165,8 +174,7 @@ impl Dentry {
                 .cloned()
                 .expect("tmpfs not registered.");
 
-            let mount = creator
-                .create_mount(&source, mount_flags, &DROOT)
+            let mount = block_on(creator.create_mount(&source, mount_flags, &DROOT))
                 .expect("Failed to create root mount.");
 
             let root_dentry = mount.root().clone();

@@ -1,31 +1,31 @@
-use crate::prelude::*;
-use alloc::sync::Arc;
-use dentry::Dentry;
-use eonix_sync::LazyLock;
-use inode::Mode;
-
 pub mod dentry;
 mod file;
 pub mod filearray;
 pub mod inode;
 pub mod mount;
-pub mod vfs;
+mod superblock;
+pub mod types;
+
+use crate::prelude::*;
+use alloc::sync::Arc;
+use dentry::Dentry;
+use eonix_sync::LazyLock;
+use types::Permission;
 
 pub use file::{File, FileType, PollEvent, SeekOption, TerminalFile};
-
-pub type DevId = u32;
+pub use superblock::{SbRef, SbUse, SuperBlock, SuperBlockInfo, SuperBlockLock};
 
 pub struct FsContext {
     pub fsroot: Arc<Dentry>,
     pub cwd: Spin<Arc<Dentry>>,
-    pub umask: Spin<Mode>,
+    pub umask: Spin<Permission>,
 }
 
 static GLOBAL_FS_CONTEXT: LazyLock<Arc<FsContext>> = LazyLock::new(|| {
     Arc::new(FsContext {
         fsroot: Dentry::root().clone(),
         cwd: Spin::new(Dentry::root().clone()),
-        umask: Spin::new(Mode::new(0o022)),
+        umask: Spin::new(Permission::new(0o755)),
     })
 });
 

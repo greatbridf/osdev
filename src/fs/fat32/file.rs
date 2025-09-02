@@ -1,40 +1,24 @@
+use futures::Stream;
+
+use crate::{kernel::mem::Page, prelude::KResult};
+
 use super::{ClusterIterator, FatFs};
-use crate::{
-    kernel::mem::{AsMemoryBlock as _, Page},
-    KResult,
-};
 
-pub trait ClusterReadIterator<'data>: Iterator<Item = KResult<&'data [u8]>> + 'data {}
-impl<'a, I> ClusterReadIterator<'a> for I where I: Iterator<Item = KResult<&'a [u8]>> + 'a {}
-
-pub(super) trait ClusterRead<'data> {
-    fn read<'vfs>(self, vfs: &'vfs FatFs, offset: usize) -> impl ClusterReadIterator<'data>
-    where
-        Self: Sized,
-        'vfs: 'data;
+pub trait ReadClusters {
+    fn read_clusters(self, fs: &FatFs) -> impl Stream<Item = KResult<Page>> + Send;
 }
 
-impl<'data, 'fat: 'data> ClusterRead<'data> for ClusterIterator<'fat> {
-    fn read<'vfs: 'data>(self, vfs: &'vfs FatFs, offset: usize) -> impl ClusterReadIterator<'data> {
-        const SECTOR_SIZE: usize = 512;
+impl ReadClusters for ClusterIterator<'_> {
+    fn read_clusters(self, fs: &FatFs) -> impl Stream<Item = KResult<Page>> + Send {
+        futures::stream::unfold(self, move |mut me| async {
+            let cluster = me.next()?;
+            let page = Page::alloc();
 
-        let cluster_size = vfs.sectors_per_cluster as usize * SECTOR_SIZE;
-        assert!(cluster_size <= 0x1000, "Cluster size is too large");
+            if let Err(err) = fs.read_cluster(cluster, &page).await {
+                return Some((Err(err), me));
+            }
 
-        let skip_clusters = offset / cluster_size;
-        let mut inner_offset = offset % cluster_size;
-
-        // TODO: Use block cache.
-        let buffer_page = Page::alloc();
-
-        self.skip(skip_clusters).map(move |cluster| {
-            vfs.read_cluster(cluster, &buffer_page)?;
-            let data = unsafe {
-                // SAFETY: No one could be writing to it.
-                &buffer_page.as_memblk().as_bytes()[inner_offset..]
-            };
-            inner_offset = 0;
-            Ok(data)
+            Some((Ok(page), me))
         })
     }
 }

@@ -1,8 +1,9 @@
 pub mod dcache;
 
 use super::{
-    inode::{Ino, Inode, Mode, RenameData, WriteOffset},
-    DevId, FsContext,
+    inode::{Ino, Inode, InodeUse, RenameData, WriteOffset},
+    types::{DeviceId, Format, Mode, Permission},
+    FsContext,
 };
 use crate::{
     hash::KernelHasher,
@@ -14,22 +15,31 @@ use crate::{
 };
 use crate::{
     io::Stream,
-    kernel::constants::{EEXIST, EINVAL, EIO, EISDIR, ELOOP, ENOENT, ENOTDIR, EPERM, ERANGE},
+    kernel::constants::{EEXIST, EINVAL, EISDIR, ELOOP, ENOENT, ENOTDIR, EPERM, ERANGE},
 };
-use alloc::sync::{Arc, Weak};
+use alloc::sync::Arc;
 use core::{
     fmt,
+    future::Future,
     hash::{BuildHasher, BuildHasherDefault, Hasher},
-    ops::ControlFlow,
+    pin::Pin,
     sync::atomic::{AtomicPtr, AtomicU64, Ordering},
 };
 use eonix_sync::LazyLock;
 use pointers::BorrowedArc;
 use posix_types::{namei::RenameFlags, open::OpenFlags, result::PosixError, stat::StatX};
 
+#[derive(PartialEq, Eq)]
+enum DentryKind {
+    Regular,
+    Directory,
+    Symlink,
+    Mountpoint,
+}
+
 struct DentryData {
-    inode: Arc<dyn Inode>,
-    flags: u64,
+    inode: InodeUse<dyn Inode>,
+    kind: DentryKind,
 }
 
 /// # Safety
@@ -79,12 +89,6 @@ impl fmt::Debug for Dentry {
     }
 }
 
-const D_DIRECTORY: u64 = 1;
-#[allow(dead_code)]
-const D_MOUNTPOINT: u64 = 2;
-const D_SYMLINK: u64 = 4;
-const D_REGULAR: u64 = 8;
-
 impl RCUNode<Dentry> for Dentry {
     fn rcu_prev(&self) -> &AtomicPtr<Self> {
         &self.prev
@@ -116,11 +120,11 @@ impl Dentry {
         self.hash.store(hash, Ordering::Relaxed);
     }
 
-    fn find(self: &Arc<Self>, name: &[u8]) -> KResult<Arc<Self>> {
+    async fn find(self: &Arc<Self>, name: &[u8]) -> KResult<Arc<Self>> {
         let data = self.data.load();
         let data = data.as_ref().ok_or(ENOENT)?;
 
-        if data.flags & D_DIRECTORY == 0 {
+        if data.kind != DentryKind::Directory {
             return Err(ENOTDIR);
         }
 
@@ -141,7 +145,7 @@ impl Dentry {
                     return Ok(found);
                 }
 
-                dcache::d_try_revalidate(&dentry);
+                let _ = dcache::d_try_revalidate(&dentry).await;
                 dcache::d_add(dentry.clone());
 
                 Ok(dentry)
@@ -192,8 +196,8 @@ impl Dentry {
             .map_or(core::ptr::null(), |parent| Arc::as_ptr(&parent))
     }
 
-    fn save_data(&self, inode: Arc<dyn Inode>, flags: u64) -> KResult<()> {
-        let new = DentryData { inode, flags };
+    fn save(&self, inode: InodeUse<dyn Inode>, kind: DentryKind) {
+        let new = DentryData { inode, kind };
 
         // TODO!!!: We don't actually need to use `RCUPointer` here
         // Safety: this function may only be called from `create`-like functions which requires the
@@ -201,41 +205,35 @@ impl Dentry {
         // can't get a reference to the old data.
         let old = unsafe { self.data.swap(Some(Arc::new(new))) };
         assert!(old.is_none());
-
-        Ok(())
     }
 
-    pub fn save_reg(&self, file: Arc<dyn Inode>) -> KResult<()> {
-        self.save_data(file, D_REGULAR)
+    pub fn fill(&self, file: InodeUse<dyn Inode>) {
+        match file.format() {
+            Format::REG | Format::BLK | Format::CHR => self.save(file, DentryKind::Regular),
+            Format::DIR => self.save(file, DentryKind::Directory),
+            Format::LNK => self.save(file, DentryKind::Symlink),
+        }
     }
 
-    pub fn save_symlink(&self, link: Arc<dyn Inode>) -> KResult<()> {
-        self.save_data(link, D_SYMLINK)
+    pub fn inode(&self) -> Option<InodeUse<dyn Inode>> {
+        self.data.load().as_ref().map(|data| data.inode.clone())
     }
 
-    pub fn save_dir(&self, dir: Arc<dyn Inode>) -> KResult<()> {
-        self.save_data(dir, D_DIRECTORY)
-    }
-
-    pub fn get_inode(&self) -> KResult<Arc<dyn Inode>> {
-        self.data
-            .load()
-            .as_ref()
-            .ok_or(ENOENT)
-            .map(|data| data.inode.clone())
+    pub fn get_inode(&self) -> KResult<InodeUse<dyn Inode>> {
+        self.inode().ok_or(ENOENT)
     }
 
     pub fn is_directory(&self) -> bool {
         let data = self.data.load();
         data.as_ref()
-            .map_or(false, |data| data.flags & D_DIRECTORY != 0)
+            .map_or(false, |data| data.kind == DentryKind::Directory)
     }
 
     pub fn is_valid(&self) -> bool {
         self.data.load().is_some()
     }
 
-    pub fn open_check(self: &Arc<Self>, flags: OpenFlags, mode: Mode) -> KResult<()> {
+    pub async fn open_check(self: &Arc<Self>, flags: OpenFlags, perm: Permission) -> KResult<()> {
         let data = self.data.load();
 
         if data.is_some() {
@@ -250,7 +248,7 @@ impl Dentry {
             }
 
             let parent = self.parent().get_inode()?;
-            parent.creat(self, mode)
+            parent.create(self, perm).await
         }
     }
 }
@@ -260,110 +258,120 @@ impl Dentry {
         context: &FsContext,
         dentry: Arc<Self>,
         nrecur: u32,
-    ) -> KResult<Arc<Self>> {
-        if nrecur >= 16 {
-            return Err(ELOOP);
-        }
-
-        let data = dentry.data.load();
-        let data = data.as_ref().ok_or(ENOENT)?;
-
-        match data.flags {
-            flags if flags & D_REGULAR != 0 => Err(ENOTDIR),
-            flags if flags & D_DIRECTORY != 0 => Ok(dentry),
-            flags if flags & D_SYMLINK != 0 => {
-                let mut buffer = [0u8; 256];
-                let mut buffer = ByteBuffer::new(&mut buffer);
-
-                data.inode.readlink(&mut buffer)?;
-                let path = Path::new(buffer.data())?;
-
-                let dentry =
-                    Self::open_recursive(context, &dentry.parent(), path, true, nrecur + 1)?;
-
-                Self::resolve_directory(context, dentry, nrecur + 1)
-            }
-            _ => panic!("Invalid dentry flags"),
-        }
-    }
-
-    pub fn open_recursive(
-        context: &FsContext,
-        cwd: &Arc<Self>,
-        path: Path,
-        follow: bool,
-        nrecur: u32,
-    ) -> KResult<Arc<Self>> {
-        // too many recursive search layers will cause stack overflow
-        // so we use 16 for now
-        if nrecur >= 16 {
-            return Err(ELOOP);
-        }
-
-        let mut cwd = if path.is_absolute() {
-            context.fsroot.clone()
-        } else {
-            cwd.clone()
-        };
-
-        for item in path.iter() {
-            if let PathComponent::TrailingEmpty = item {
-                if cwd.data.load().as_ref().is_none() {
-                    return Ok(cwd);
-                }
+    ) -> Pin<Box<impl Future<Output = KResult<Arc<Self>>> + use<'_>>> {
+        Box::pin(async move {
+            if nrecur >= 16 {
+                return Err(ELOOP);
             }
 
-            cwd = Self::resolve_directory(context, cwd, nrecur)?;
+            let data = dentry.data.load();
+            let data = data.as_ref().ok_or(ENOENT)?;
 
-            match item {
-                PathComponent::TrailingEmpty | PathComponent::Current => {} // pass
-                PathComponent::Parent => {
-                    if !cwd.hash_eq(&context.fsroot) {
-                        let parent = cwd.parent().clone();
-                        cwd = Self::resolve_directory(context, parent, nrecur)?;
-                    }
-                    continue;
-                }
-                PathComponent::Name(name) => {
-                    cwd = cwd.find(name)?;
-                }
-            }
-        }
-
-        if follow {
-            let data = cwd.data.load();
-
-            if let Some(data) = data.as_ref() {
-                if data.flags & D_SYMLINK != 0 {
-                    let data = cwd.data.load();
-                    let data = data.as_ref().unwrap();
+            match data.kind {
+                DentryKind::Regular => Err(ENOTDIR),
+                DentryKind::Directory => Ok(dentry),
+                DentryKind::Symlink => {
                     let mut buffer = [0u8; 256];
                     let mut buffer = ByteBuffer::new(&mut buffer);
 
-                    data.inode.readlink(&mut buffer)?;
+                    data.inode.readlink(&mut buffer).await?;
                     let path = Path::new(buffer.data())?;
 
-                    let parent = cwd.parent().clone();
-                    cwd = Self::open_recursive(context, &parent, path, true, nrecur + 1)?;
+                    let dentry =
+                        Self::open_recursive(context, &dentry.parent(), path, true, nrecur + 1)
+                            .await?;
+
+                    Self::resolve_directory(context, dentry, nrecur + 1).await
+                }
+                _ => panic!("Invalid dentry flags"),
+            }
+        })
+    }
+
+    pub fn open_recursive<'r, 'a: 'r, 'b: 'r, 'c: 'r>(
+        context: &'a FsContext,
+        cwd: &'b Arc<Self>,
+        path: Path<'c>,
+        follow: bool,
+        nrecur: u32,
+    ) -> Pin<Box<impl Future<Output = KResult<Arc<Self>>> + 'r>> {
+        Box::pin(async move {
+            // too many recursive search layers will cause stack overflow
+            // so we use 16 for now
+            if nrecur >= 16 {
+                return Err(ELOOP);
+            }
+
+            let mut cwd = if path.is_absolute() {
+                context.fsroot.clone()
+            } else {
+                cwd.clone()
+            };
+
+            for item in path.iter() {
+                if let PathComponent::TrailingEmpty = item {
+                    if cwd.data.load().as_ref().is_none() {
+                        return Ok(cwd);
+                    }
+                }
+
+                cwd = Self::resolve_directory(context, cwd, nrecur).await?;
+
+                match item {
+                    PathComponent::TrailingEmpty | PathComponent::Current => {} // pass
+                    PathComponent::Parent => {
+                        if !cwd.hash_eq(&context.fsroot) {
+                            let parent = cwd.parent().clone();
+                            cwd = Self::resolve_directory(context, parent, nrecur).await?;
+                        }
+                        continue;
+                    }
+                    PathComponent::Name(name) => {
+                        cwd = cwd.find(name).await?;
+                    }
                 }
             }
-        }
 
-        Ok(cwd)
+            if follow {
+                let data = cwd.data.load();
+
+                if let Some(data) = data.as_ref() {
+                    if data.kind == DentryKind::Symlink {
+                        let data = cwd.data.load();
+                        let data = data.as_ref().unwrap();
+                        let mut buffer = [0u8; 256];
+                        let mut buffer = ByteBuffer::new(&mut buffer);
+
+                        data.inode.readlink(&mut buffer).await?;
+                        let path = Path::new(buffer.data())?;
+
+                        let parent = cwd.parent().clone();
+                        cwd =
+                            Self::open_recursive(context, &parent, path, true, nrecur + 1).await?;
+                    }
+                }
+            }
+
+            Ok(cwd)
+        })
     }
 
-    pub fn open(context: &FsContext, path: Path, follow_symlinks: bool) -> KResult<Arc<Self>> {
-        let cwd = context.cwd.lock().clone();
-        Dentry::open_recursive(context, &cwd, path, follow_symlinks, 0)
-    }
-
-    pub fn open_at(
+    pub async fn open(
         context: &FsContext,
-        at: &Arc<Self>,
-        path: Path,
+        path: Path<'_>,
         follow_symlinks: bool,
     ) -> KResult<Arc<Self>> {
-        Dentry::open_recursive(context, at, path, follow_symlinks, 0)
+        let cwd = context.cwd.lock().clone();
+        Dentry::open_recursive(context, &cwd, path, follow_symlinks, 0).await
+    }
+
+    pub async fn open_at(
+        context: &FsContext,
+        at: &Arc<Self>,
+        path: Path<'_>,
+        follow_symlinks: bool,
+    ) -> KResult<Arc<Self>> {
+        Dentry::open_recursive(context, at, path, follow_symlinks, 0).await
     }
 
     pub fn get_path(
@@ -405,18 +413,18 @@ impl Dentry {
 }
 
 impl Dentry {
-    pub fn read(&self, buffer: &mut dyn Buffer, offset: usize) -> KResult<usize> {
+    pub async fn read(&self, buffer: &mut dyn Buffer, offset: usize) -> KResult<usize> {
         let inode = self.get_inode()?;
 
         // Safety: Changing mode alone will have no effect on the file's contents
-        match inode.mode.load().format() {
-            Mode::DIR => Err(EISDIR),
-            Mode::REG => inode.read(buffer, offset),
-            Mode::BLK => {
+        match inode.format() {
+            Format::DIR => Err(EISDIR),
+            Format::REG => inode.read(buffer, offset).await,
+            Format::BLK => {
                 let device = BlockDevice::get(inode.devid()?)?;
-                Ok(device.read_some(offset, buffer)?.allow_partial())
+                Ok(device.read_some(offset, buffer).await?.allow_partial())
             }
-            Mode::CHR => {
+            Format::CHR => {
                 let device = CharDevice::get(inode.devid()?).ok_or(EPERM)?;
                 device.read(buffer)
             }
@@ -424,32 +432,32 @@ impl Dentry {
         }
     }
 
-    pub fn write(&self, stream: &mut dyn Stream, offset: WriteOffset) -> KResult<usize> {
+    pub async fn write(&self, stream: &mut dyn Stream, offset: WriteOffset<'_>) -> KResult<usize> {
         let inode = self.get_inode()?;
         // Safety: Changing mode alone will have no effect on the file's contents
-        match inode.mode.load().format() {
-            Mode::DIR => Err(EISDIR),
-            Mode::REG => inode.write(stream, offset),
-            Mode::BLK => Err(EINVAL), // TODO
-            Mode::CHR => CharDevice::get(inode.devid()?).ok_or(EPERM)?.write(stream),
+        match inode.format() {
+            Format::DIR => Err(EISDIR),
+            Format::REG => inode.write(stream, offset).await,
+            Format::BLK => Err(EINVAL), // TODO
+            Format::CHR => CharDevice::get(inode.devid()?).ok_or(EPERM)?.write(stream),
             _ => Err(EINVAL),
         }
     }
 
-    pub fn readdir<F>(&self, offset: usize, mut callback: F) -> KResult<usize>
+    pub async fn readdir<F>(&self, offset: usize, mut for_each_entry: F) -> KResult<KResult<usize>>
     where
-        F: FnMut(&[u8], Ino) -> KResult<ControlFlow<(), ()>>,
+        F: FnMut(&[u8], Ino) -> KResult<bool> + Send,
     {
         let dir = self.get_inode()?;
-        dir.do_readdir(offset, &mut callback)
+        dir.readdir(offset, &mut for_each_entry).await
     }
 
-    pub fn mkdir(&self, mode: Mode) -> KResult<()> {
+    pub async fn mkdir(&self, perm: Permission) -> KResult<()> {
         if self.get_inode().is_ok() {
             Err(EEXIST)
         } else {
             let dir = self.parent().get_inode()?;
-            dir.mkdir(self, mode)
+            dir.mkdir(self, perm).await
         }
     }
 
@@ -457,50 +465,50 @@ impl Dentry {
         self.get_inode()?.statx(stat, mask)
     }
 
-    pub fn truncate(&self, size: usize) -> KResult<()> {
-        self.get_inode()?.truncate(size)
+    pub async fn truncate(&self, size: usize) -> KResult<()> {
+        self.get_inode()?.truncate(size).await
     }
 
-    pub fn unlink(self: &Arc<Self>) -> KResult<()> {
+    pub async fn unlink(self: &Arc<Self>) -> KResult<()> {
         if self.get_inode().is_err() {
             Err(ENOENT)
         } else {
             let dir = self.parent().get_inode()?;
-            dir.unlink(self)
+            dir.unlink(self).await
         }
     }
 
-    pub fn symlink(self: &Arc<Self>, link: &[u8]) -> KResult<()> {
+    pub async fn symlink(self: &Arc<Self>, link: &[u8]) -> KResult<()> {
         if self.get_inode().is_ok() {
             Err(EEXIST)
         } else {
             let dir = self.parent().get_inode()?;
-            dir.symlink(self, link)
+            dir.symlink(self, link).await
         }
     }
 
-    pub fn readlink(&self, buffer: &mut dyn Buffer) -> KResult<usize> {
-        self.get_inode()?.readlink(buffer)
+    pub async fn readlink(&self, buffer: &mut dyn Buffer) -> KResult<usize> {
+        self.get_inode()?.readlink(buffer).await
     }
 
-    pub fn mknod(&self, mode: Mode, devid: DevId) -> KResult<()> {
+    pub async fn mknod(&self, mode: Mode, devid: DeviceId) -> KResult<()> {
         if self.get_inode().is_ok() {
             Err(EEXIST)
         } else {
             let dir = self.parent().get_inode()?;
-            dir.mknod(self, mode, devid)
+            dir.mknod(self, mode, devid).await
         }
     }
 
-    pub fn chmod(&self, mode: Mode) -> KResult<()> {
-        self.get_inode()?.chmod(mode)
+    pub async fn chmod(&self, mode: Mode) -> KResult<()> {
+        self.get_inode()?.chmod(mode).await
     }
 
-    pub fn chown(&self, uid: u32, gid: u32) -> KResult<()> {
-        self.get_inode()?.chown(uid, gid)
+    pub async fn chown(&self, uid: u32, gid: u32) -> KResult<()> {
+        self.get_inode()?.chown(uid, gid).await
     }
 
-    pub fn rename(self: &Arc<Self>, new: &Arc<Self>, flags: RenameFlags) -> KResult<()> {
+    pub async fn rename(self: &Arc<Self>, new: &Arc<Self>, flags: RenameFlags) -> KResult<()> {
         if Arc::ptr_eq(self, new) {
             return Ok(());
         }
@@ -509,22 +517,19 @@ impl Dentry {
         let new_parent = new.parent().get_inode()?;
 
         // If the two dentries are not in the same filesystem, return EXDEV.
-        if !Weak::ptr_eq(&old_parent.vfs, &new_parent.vfs) {
+        if old_parent.sbref().eq(&new_parent.sbref()) {
             Err(PosixError::EXDEV)?;
         }
-
-        let vfs = old_parent.vfs.upgrade().ok_or(EIO)?;
 
         let rename_data = RenameData {
             old_dentry: self,
             new_dentry: new,
             new_parent,
-            vfs,
             is_exchange: flags.contains(RenameFlags::RENAME_EXCHANGE),
             no_replace: flags.contains(RenameFlags::RENAME_NOREPLACE),
         };
 
         // Delegate to the parent directory's rename implementation
-        old_parent.rename(rename_data)
+        old_parent.rename(rename_data).await
     }
 }

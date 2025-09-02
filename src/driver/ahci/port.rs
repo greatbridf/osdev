@@ -9,9 +9,9 @@ use crate::kernel::block::{BlockDeviceRequest, BlockRequestQueue};
 use crate::kernel::constants::{EINVAL, EIO};
 use crate::kernel::mem::paging::Page;
 use crate::kernel::mem::AsMemoryBlock as _;
-use crate::kernel::task::block_on;
 use crate::prelude::*;
 use alloc::collections::vec_deque::VecDeque;
+use async_trait::async_trait;
 use core::pin::pin;
 use eonix_mm::address::{Addr as _, PAddr};
 use eonix_sync::{SpinIrq as _, WaitList};
@@ -145,18 +145,25 @@ impl AdapterPort<'_> {
         self.sata_status().read_once() & 0xf == 0x3
     }
 
-    fn get_free_slot(&self) -> u32 {
+    async fn get_free_slot(&self) -> u32 {
         loop {
-            let mut free_list = self.free_list.lock_irq();
-            let free_slot = free_list.free.pop_front();
-            if let Some(slot) = free_slot {
-                return slot;
-            }
             let mut wait = pin!(self.free_list_wait.prepare_to_wait());
-            wait.as_mut().add_to_wait_list();
-            drop(free_list);
 
-            block_on(wait);
+            {
+                let mut free_list = self.free_list.lock_irq();
+
+                if let Some(slot) = free_list.free.pop_front() {
+                    return slot;
+                }
+
+                wait.as_mut().add_to_wait_list();
+
+                if let Some(slot) = free_list.free.pop_front() {
+                    return slot;
+                }
+            }
+
+            wait.await;
         }
     }
 
@@ -204,11 +211,11 @@ impl AdapterPort<'_> {
         Ok(())
     }
 
-    fn send_command(&self, cmd: &impl Command) -> KResult<()> {
+    async fn send_command(&self, cmd: &impl Command) -> KResult<()> {
         let mut cmdtable = CommandTable::new();
         cmdtable.setup(cmd);
 
-        let slot_index = self.get_free_slot();
+        let slot_index = self.get_free_slot().await;
         let slot = &self.slots[slot_index as usize];
 
         slot.prepare_command(&cmdtable, cmd.write());
@@ -222,7 +229,7 @@ impl AdapterPort<'_> {
 
         self.stats.inc_cmd_sent();
 
-        if let Err(_) = block_on(slot.wait_finish()) {
+        if let Err(_) = slot.wait_finish().await {
             self.stats.inc_cmd_error();
             return Err(EIO);
         };
@@ -231,16 +238,16 @@ impl AdapterPort<'_> {
         Ok(())
     }
 
-    fn identify(&self) -> KResult<()> {
+    async fn identify(&self) -> KResult<()> {
         let cmd = IdentifyCommand::new();
 
         // TODO: check returned data
-        self.send_command(&cmd)?;
+        self.send_command(&cmd).await?;
 
         Ok(())
     }
 
-    pub fn init(&self) -> KResult<()> {
+    pub async fn init(&self) -> KResult<()> {
         self.stop_command()?;
 
         self.command_list_base()
@@ -251,7 +258,7 @@ impl AdapterPort<'_> {
 
         self.start_command()?;
 
-        match self.identify() {
+        match self.identify().await {
             Err(err) => {
                 self.stop_command()?;
                 Err(err)
@@ -269,12 +276,13 @@ impl AdapterPort<'_> {
     }
 }
 
+#[async_trait]
 impl BlockRequestQueue for AdapterPort<'_> {
     fn max_request_pages(&self) -> u64 {
         1024
     }
 
-    fn submit(&self, req: BlockDeviceRequest) -> KResult<()> {
+    async fn submit<'a>(&'a self, req: BlockDeviceRequest<'a>) -> KResult<()> {
         match req {
             BlockDeviceRequest::Read {
                 sector,
@@ -287,7 +295,7 @@ impl BlockRequestQueue for AdapterPort<'_> {
 
                 let command = ReadLBACommand::new(buffer, sector, count as u16)?;
 
-                self.send_command(&command)
+                self.send_command(&command).await
             }
             BlockDeviceRequest::Write {
                 sector,
@@ -300,7 +308,7 @@ impl BlockRequestQueue for AdapterPort<'_> {
 
                 let command = WriteLBACommand::new(buffer, sector, count as u16)?;
 
-                self.send_command(&command)
+                self.send_command(&command).await
             }
         }
     }

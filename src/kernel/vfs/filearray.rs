@@ -1,6 +1,6 @@
 use super::{
     file::{File, InodeFile, Pipe},
-    inode::Mode,
+    types::{Format, Permission},
     Spin, TerminalFile,
 };
 use crate::kernel::{
@@ -280,26 +280,31 @@ impl FileArray {
         Ok((read_fd, write_fd))
     }
 
-    pub fn open(&self, dentry: &Arc<Dentry>, flags: OpenFlags, mode: Mode) -> KResult<FD> {
-        dentry.open_check(flags, mode)?;
+    pub async fn open(
+        &self,
+        dentry: &Arc<Dentry>,
+        flags: OpenFlags,
+        perm: Permission,
+    ) -> KResult<FD> {
+        dentry.open_check(flags, perm).await?;
 
         let fdflag = flags.as_fd_flags();
 
         let inode = dentry.get_inode()?;
-        let file_format = inode.mode.load().format();
+        let file_format = inode.format();
 
         match (flags.directory(), file_format, flags.write()) {
-            (true, Mode::DIR, _) => {}
+            (true, Format::DIR, _) => {}
             (true, _, _) => return Err(ENOTDIR),
-            (false, Mode::DIR, true) => return Err(EISDIR),
+            (false, Format::DIR, true) => return Err(EISDIR),
             _ => {}
         }
 
-        if flags.truncate() && flags.write() && file_format.is_reg() {
-            inode.truncate(0)?;
+        if flags.truncate() && flags.write() && file_format == Format::REG {
+            inode.truncate(0).await?;
         }
 
-        let file = if file_format.is_chr() {
+        let file = if file_format == Format::CHR {
             let device = CharDevice::get(inode.devid()?).ok_or(ENXIO)?;
             device.open(flags)?
         } else {

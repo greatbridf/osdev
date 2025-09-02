@@ -4,21 +4,24 @@ use super::{
 };
 use crate::{kernel::constants::EEXIST, KResult};
 use alloc::{
+    boxed::Box,
     collections::btree_map::{self, BTreeMap},
     sync::Arc,
 };
+use async_trait::async_trait;
 use eonix_sync::Spin;
 
 static PCIE_DRIVERS: Spin<BTreeMap<u32, Arc<dyn PCIDriver>>> = Spin::new(BTreeMap::new());
 
+#[async_trait]
 pub trait PCIDriver: Send + Sync {
     fn vendor_id(&self) -> u16;
     fn device_id(&self) -> u16;
 
-    fn handle_device(&self, device: Arc<PCIDevice<'static>>) -> Result<(), PciError>;
+    async fn handle_device(&self, device: Arc<PCIDevice<'static>>) -> Result<(), PciError>;
 }
 
-pub fn register_driver(driver: impl PCIDriver + 'static) -> KResult<()> {
+pub async fn register_driver(driver: impl PCIDriver + 'static) -> KResult<()> {
     let index = (driver.vendor_id() as u32) << 16 | driver.device_id() as u32;
 
     let driver = Arc::new(driver);
@@ -31,7 +34,7 @@ pub fn register_driver(driver: impl PCIDriver + 'static) -> KResult<()> {
     let devices = PCIE_DEVICES.lock().get(&index).cloned();
     if let Some(devices) = devices {
         for device in devices {
-            driver.handle_device(device)?;
+            driver.handle_device(device).await?;
         }
     };
 

@@ -2,10 +2,12 @@
 #![no_main]
 #![feature(allocator_api)]
 #![feature(c_size_t)]
+#![feature(coerce_unsized)]
 #![feature(concat_idents)]
 #![feature(arbitrary_self_types)]
 #![feature(get_mut_unchecked)]
 #![feature(macro_metavar_expr)]
+#![feature(unsize)]
 
 extern crate alloc;
 
@@ -46,8 +48,8 @@ use kernel::{
     task::{KernelStack, ProcessBuilder, ProcessList, ProgramLoader, ThreadBuilder},
     vfs::{
         dentry::Dentry,
-        inode::Mode,
         mount::{do_mount, MS_NOATIME, MS_NODEV, MS_NOSUID, MS_RDONLY},
+        types::Permission,
         FsContext,
     },
     CharDevice,
@@ -192,16 +194,16 @@ async fn init_process(early_kstack: PRange) {
     {
         // We might want the serial initialized as soon as possible.
         driver::serial::init().unwrap();
-        driver::e1000e::register_e1000e_driver();
-        driver::ahci::register_ahci_driver();
+        driver::e1000e::register_e1000e_driver().await;
+        driver::ahci::register_ahci_driver().await;
     }
 
     #[cfg(target_arch = "riscv64")]
     {
         driver::serial::init().unwrap();
         driver::virtio::init_virtio_devices();
-        driver::e1000e::register_e1000e_driver();
-        driver::ahci::register_ahci_driver();
+        driver::e1000e::register_e1000e_driver().await;
+        driver::ahci::register_ahci_driver().await;
         driver::goldfish_rtc::probe();
     }
 
@@ -209,21 +211,26 @@ async fn init_process(early_kstack: PRange) {
     {
         driver::serial::init().unwrap();
         driver::virtio::init_virtio_devices();
-        driver::e1000e::register_e1000e_driver();
-        driver::ahci::register_ahci_driver();
+        driver::e1000e::register_e1000e_driver().await;
+        driver::ahci::register_ahci_driver().await;
     }
 
     fs::tmpfs::init();
-    fs::procfs::init();
+    fs::procfs::init().await;
     fs::fat32::init();
-    fs::ext4::init();
+    // fs::ext4::init();
 
     let load_info = {
         // mount fat32 /mnt directory
         let fs_context = FsContext::global();
-        let mnt_dir = Dentry::open(fs_context, Path::new(b"/mnt/").unwrap(), true).unwrap();
+        let mnt_dir = Dentry::open(fs_context, Path::new(b"/mnt/").unwrap(), true)
+            .await
+            .unwrap();
 
-        mnt_dir.mkdir(Mode::new(0o755)).unwrap();
+        mnt_dir
+            .mkdir(Permission::new(0o755))
+            .await
+            .expect("Failed to create /mnt directory");
 
         do_mount(
             &mnt_dir,
@@ -232,6 +239,7 @@ async fn init_process(early_kstack: PRange) {
             "fat32",
             MS_RDONLY | MS_NOATIME | MS_NODEV | MS_NOSUID,
         )
+        .await
         .unwrap();
 
         let init_names = [&b"/init"[..], &b"/sbin/init"[..], &b"/mnt/initsh"[..]];
@@ -239,7 +247,7 @@ async fn init_process(early_kstack: PRange) {
         let mut init_name = None;
         let mut init = None;
         for name in init_names {
-            if let Ok(dentry) = Dentry::open(fs_context, Path::new(name).unwrap(), true) {
+            if let Ok(dentry) = Dentry::open(fs_context, Path::new(name).unwrap(), true).await {
                 if dentry.is_valid() {
                     init_name = Some(CString::new(name).unwrap());
                     init = Some(dentry);
@@ -261,6 +269,7 @@ async fn init_process(early_kstack: PRange) {
         ];
 
         ProgramLoader::parse(fs_context, init_name, init.clone(), argv, envp)
+            .await
             .expect("Failed to parse init program")
             .load()
             .await

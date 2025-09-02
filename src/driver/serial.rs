@@ -2,8 +2,8 @@ mod io;
 
 use crate::{
     kernel::{
-        block::make_device, console::set_console, constants::EIO, interrupt::register_irq_handler,
-        CharDevice, CharDeviceType, Terminal, TerminalDevice,
+        console::set_console, constants::EIO, interrupt::register_irq_handler,
+        vfs::types::DeviceId, CharDevice, CharDeviceType, Terminal, TerminalDevice,
     },
     prelude::*,
 };
@@ -167,7 +167,7 @@ impl Serial {
         eonix_log::set_console(terminal.clone());
 
         CharDevice::register(
-            make_device(4, 64 + port.id),
+            DeviceId::new(4, 64 + port.id as u16),
             port.name.clone(),
             CharDeviceType::Terminal(terminal),
         )?;

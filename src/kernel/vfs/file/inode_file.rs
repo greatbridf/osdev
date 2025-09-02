@@ -5,13 +5,13 @@ use crate::{
         constants::{EBADF, EFAULT, ENOTDIR, EOVERFLOW, ESPIPE},
         vfs::{
             dentry::Dentry,
-            inode::{Inode, Mode, WriteOffset},
+            inode::{Inode, InodeUse, WriteOffset},
+            types::Format,
         },
     },
     prelude::KResult,
 };
 use alloc::sync::Arc;
-use core::{ops::ControlFlow, sync::atomic::Ordering};
 use eonix_sync::Mutex;
 use posix_types::{
     getdent::{UserDirent, UserDirent64},
@@ -25,7 +25,7 @@ pub struct InodeFile {
     pub a: bool,
     /// Only a few modes those won't possibly change are cached here to speed up file operations.
     /// Specifically, `S_IFMT` masked bits.
-    pub mode: Mode,
+    pub format: Format,
     cursor: Mutex<usize>,
     dentry: Arc<Dentry>,
 }
@@ -34,12 +34,7 @@ impl InodeFile {
     pub fn new(dentry: Arc<Dentry>, flags: OpenFlags) -> File {
         // SAFETY: `dentry` used to create `InodeFile` is valid.
         // SAFETY: `mode` should never change with respect to the `S_IFMT` fields.
-        let cached_mode = dentry
-            .get_inode()
-            .expect("`dentry` is invalid")
-            .mode
-            .load()
-            .format();
+        let format = dentry.inode().expect("dentry should be invalid").format();
 
         let (r, w, a) = flags.as_rwa();
 
@@ -50,15 +45,15 @@ impl InodeFile {
                 r,
                 w,
                 a,
-                mode: cached_mode,
+                format,
                 cursor: Mutex::new(0),
             }),
         )
     }
 
     pub fn sendfile_check(&self) -> KResult<()> {
-        match self.mode {
-            Mode::REG | Mode::BLK => Ok(()),
+        match self.format {
+            Format::REG | Format::BLK => Ok(()),
             _ => Err(EBADF),
         }
     }
@@ -70,21 +65,19 @@ impl InodeFile {
 
         let mut cursor = self.cursor.lock().await;
 
-        if self.a {
-            let nwrote = self.dentry.write(stream, WriteOffset::End(&mut cursor))?;
+        let (offset, update_offset) = match (self.a, offset) {
+            (true, _) => (WriteOffset::End(&mut cursor), None),
+            (false, Some(offset)) => (WriteOffset::Position(offset), None),
+            (false, None) => (WriteOffset::Position(*cursor), Some(&mut *cursor)),
+        };
 
-            Ok(nwrote)
-        } else {
-            let nwrote = if let Some(offset) = offset {
-                self.dentry.write(stream, WriteOffset::Position(offset))?
-            } else {
-                let nwrote = self.dentry.write(stream, WriteOffset::Position(*cursor))?;
-                *cursor += nwrote;
-                nwrote
-            };
+        let nr_write = self.dentry.write(stream, offset).await?;
 
-            Ok(nwrote)
+        if let Some(update_offset) = update_offset {
+            *update_offset += nr_write;
         }
+
+        Ok(nr_write)
     }
 
     pub async fn read(&self, buffer: &mut dyn Buffer, offset: Option<usize>) -> KResult<usize> {
@@ -92,24 +85,20 @@ impl InodeFile {
             return Err(EBADF);
         }
 
-        let nread = if let Some(offset) = offset {
-            let nread = self.dentry.read(buffer, offset)?;
-            nread
-        } else {
-            let mut cursor = self.cursor.lock().await;
+        if let Some(offset) = offset {
+            return Ok(self.dentry.read(buffer, offset).await?);
+        }
 
-            let nread = self.dentry.read(buffer, *cursor)?;
+        let mut cursor = self.cursor.lock().await;
+        let nread = self.dentry.read(buffer, *cursor).await?;
 
-            *cursor += nread;
-            nread
-        };
-
+        *cursor += nread;
         Ok(nread)
     }
 }
 
 impl File {
-    pub fn get_inode(&self) -> KResult<Option<Arc<dyn Inode>>> {
+    pub fn get_inode(&self) -> KResult<Option<InodeUse<dyn Inode>>> {
         if let FileType::Inode(inode_file) = &**self {
             Ok(Some(inode_file.dentry.get_inode()?))
         } else {
@@ -124,27 +113,30 @@ impl File {
 
         let mut cursor = inode_file.cursor.lock().await;
 
-        let nread = inode_file.dentry.readdir(*cursor, |filename, ino| {
-            // + 1 for filename length padding '\0', + 1 for d_type.
-            let real_record_len = core::mem::size_of::<UserDirent>() + filename.len() + 2;
+        let nread = inode_file
+            .dentry
+            .readdir(*cursor, |filename, ino| {
+                // + 1 for filename length padding '\0', + 1 for d_type.
+                let real_record_len = core::mem::size_of::<UserDirent>() + filename.len() + 2;
 
-            if buffer.available() < real_record_len {
-                return Ok(ControlFlow::Break(()));
-            }
+                if buffer.available() < real_record_len {
+                    return Ok(false);
+                }
 
-            let record = UserDirent {
-                d_ino: ino as u32,
-                d_off: 0,
-                d_reclen: real_record_len as u16,
-                d_name: [0; 0],
-            };
+                let record = UserDirent {
+                    d_ino: ino.as_raw() as u32,
+                    d_off: 0,
+                    d_reclen: real_record_len as u16,
+                    d_name: [0; 0],
+                };
 
-            buffer.copy(&record)?.ok_or(EFAULT)?;
-            buffer.fill(filename)?.ok_or(EFAULT)?;
-            buffer.fill(&[0, 0])?.ok_or(EFAULT)?;
+                buffer.copy(&record)?.ok_or(EFAULT)?;
+                buffer.fill(filename)?.ok_or(EFAULT)?;
+                buffer.fill(&[0, 0])?.ok_or(EFAULT)?;
 
-            Ok(ControlFlow::Continue(()))
-        })?;
+                Ok(true)
+            })
+            .await??;
 
         *cursor += nread;
         Ok(())
@@ -157,28 +149,31 @@ impl File {
 
         let mut cursor = inode_file.cursor.lock().await;
 
-        let nread = inode_file.dentry.readdir(*cursor, |filename, ino| {
-            // Filename length + 1 for padding '\0'
-            let real_record_len = core::mem::size_of::<UserDirent64>() + filename.len() + 1;
+        let nread = inode_file
+            .dentry
+            .readdir(*cursor, |filename, ino| {
+                // Filename length + 1 for padding '\0'
+                let real_record_len = core::mem::size_of::<UserDirent64>() + filename.len() + 1;
 
-            if buffer.available() < real_record_len {
-                return Ok(ControlFlow::Break(()));
-            }
+                if buffer.available() < real_record_len {
+                    return Ok(false);
+                }
 
-            let record = UserDirent64 {
-                d_ino: ino,
-                d_off: 0,
-                d_reclen: real_record_len as u16,
-                d_type: 0,
-                d_name: [0; 0],
-            };
+                let record = UserDirent64 {
+                    d_ino: ino.as_raw(),
+                    d_off: 0,
+                    d_reclen: real_record_len as u16,
+                    d_type: 0,
+                    d_name: [0; 0],
+                };
 
-            buffer.copy(&record)?.ok_or(EFAULT)?;
-            buffer.fill(filename)?.ok_or(EFAULT)?;
-            buffer.fill(&[0])?.ok_or(EFAULT)?;
+                buffer.copy(&record)?.ok_or(EFAULT)?;
+                buffer.fill(filename)?.ok_or(EFAULT)?;
+                buffer.fill(&[0])?.ok_or(EFAULT)?;
 
-            Ok(ControlFlow::Continue(()))
-        })?;
+                Ok(true)
+            })
+            .await??;
 
         *cursor += nread;
         Ok(())
@@ -196,7 +191,7 @@ impl File {
             SeekOption::Set(n) => n,
             SeekOption::End(off) => {
                 let inode = inode_file.dentry.get_inode()?;
-                let size = inode.size.load(Ordering::Relaxed) as usize;
+                let size = inode.info().lock().size as usize;
                 size.checked_add_signed(off).ok_or(EOVERFLOW)?
             }
         };

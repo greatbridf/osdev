@@ -7,6 +7,8 @@ use crate::{
     },
     prelude::KResult,
 };
+use alloc::boxed::Box;
+use async_trait::async_trait;
 use eonix_hal::mm::ArchPhysAccess;
 use eonix_mm::{
     address::{Addr, PAddr, PhysAccess},
@@ -74,6 +76,7 @@ unsafe impl Hal for HAL {
     }
 }
 
+#[async_trait]
 impl<T> BlockRequestQueue for Spin<VirtIOBlk<HAL, T>>
 where
     T: Transport + Send,
@@ -82,7 +85,7 @@ where
         1024
     }
 
-    fn submit(&self, req: BlockDeviceRequest) -> KResult<()> {
+    async fn submit<'a>(&'a self, req: BlockDeviceRequest<'a>) -> KResult<()> {
         match req {
             BlockDeviceRequest::Write {
                 sector,

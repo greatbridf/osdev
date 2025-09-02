@@ -34,6 +34,8 @@ another_ext4 = { git = "https://github.com/SMS-Derfflinger/another_ext4", branch
 stalloc = { version = "0.6.1", default-features = false, features = [
     "allocator-api",
 ] }
+async-trait = "0.1.89"
+futures = { version = "0.3.31", features = ["alloc", "async-await"], default-features = false }
 
 [target.'cfg(any(target_arch = "riscv64", target_arch = "loongarch64"))'.dependencies]
 virtio-drivers = { version = "0.11.0" }

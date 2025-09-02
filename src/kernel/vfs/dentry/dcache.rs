@@ -1,7 +1,5 @@
-use super::{Dentry, Inode};
+use super::Dentry;
 use crate::kernel::constants::ENOENT;
-use crate::kernel::task::block_on;
-use crate::kernel::vfs::inode::Mode;
 use crate::rcu::RCUPointer;
 use crate::{
     prelude::*,
@@ -41,27 +39,14 @@ pub fn d_find_fast(dentry: &Dentry) -> Option<Arc<Dentry>> {
 /// Call `lookup()` on the parent inode to try find if the dentry points to a valid inode
 ///
 /// Silently fail without any side effects
-pub fn d_try_revalidate(dentry: &Arc<Dentry>) {
-    let _lock = block_on(D_EXCHANGE_LOCK.lock());
+pub async fn d_try_revalidate(dentry: &Arc<Dentry>) -> KResult<()> {
+    let _lock = D_EXCHANGE_LOCK.lock().await;
 
-    (|| -> KResult<()> {
-        let parent = dentry.parent().get_inode()?;
-        let inode = parent.lookup(dentry)?.ok_or(ENOENT)?;
+    let parent = dentry.parent().get_inode()?;
+    let inode = parent.lookup(dentry).await?.ok_or(ENOENT)?;
 
-        d_save(dentry, inode)
-    })()
-    .unwrap_or_default();
-}
-
-/// Save the inode to the dentry.
-///
-/// Dentry flags will be determined by the inode's mode.
-pub fn d_save(dentry: &Arc<Dentry>, inode: Arc<dyn Inode>) -> KResult<()> {
-    match inode.mode.load().format() {
-        Mode::DIR => dentry.save_dir(inode),
-        Mode::LNK => dentry.save_symlink(inode),
-        _ => dentry.save_reg(inode),
-    }
+    dentry.fill(inode);
+    Ok(())
 }
 
 /// Replace the old dentry with the new one in the dcache

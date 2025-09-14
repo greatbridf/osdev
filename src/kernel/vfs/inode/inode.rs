@@ -321,11 +321,6 @@ pub struct InodeInfo {
     pub mtime: Instant,
 }
 
-#[derive(Clone)]
-pub struct InodeRef<I>(Weak<I>)
-where
-    I: Inode + ?Sized;
-
 pub struct InodeUse<I>(Arc<I>)
 where
     I: Inode + ?Sized;

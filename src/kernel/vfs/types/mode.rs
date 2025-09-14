@@ -44,22 +44,25 @@ impl Mode {
     }
 
     pub fn format(&self) -> Format {
+        match self.try_format() {
+            None => panic!("unknown format bits: {:#o}", self.format_bits()),
+            Some(format) => format,
+        }
+    }
+
+    pub fn try_format(&self) -> Option<Format> {
         match self.format_bits() {
-            S_IFREG => Format::REG,
-            S_IFDIR => Format::DIR,
-            S_IFLNK => Format::LNK,
-            S_IFBLK => Format::BLK,
-            S_IFCHR => Format::CHR,
-            _ => panic!("unknown format bits: {:#o}", self.format_bits()),
+            S_IFREG => Some(Format::REG),
+            S_IFDIR => Some(Format::DIR),
+            S_IFLNK => Some(Format::LNK),
+            S_IFBLK => Some(Format::BLK),
+            S_IFCHR => Some(Format::CHR),
+            _ => None,
         }
     }
 
     pub fn perm(&self) -> Permission {
         Permission::new(self.non_format_bits())
-    }
-
-    pub const fn non_format(&self) -> Self {
-        Self::new(self.non_format_bits())
     }
 
     pub const fn set_perm(&mut self, perm: Permission) {
@@ -100,15 +103,15 @@ impl core::fmt::Debug for Mode {
         match self.non_format_bits() & !0o777 {
             0 => write!(
                 f,
-                "Mode({format:?}, {perm:#o})",
-                format = self.format(),
-                perm = self.non_format_bits()
+                "Mode({format:?}, {perm:?})",
+                format = self.try_format(),
+                perm = Permission::new(self.non_format_bits()),
             )?,
             rem => write!(
                 f,
-                "Mode({format:?}, {perm:#o}, rem={rem:#x})",
-                format = self.format(),
-                perm = self.non_format_bits() & 0o777
+                "Mode({format:?}, {perm:?}, rem={rem:#x})",
+                format = self.try_format(),
+                perm = Permission::new(self.non_format_bits())
             )?,
         }
 

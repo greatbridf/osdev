@@ -9,9 +9,12 @@ use crate::{
 };
 use alloc::{collections::vec_deque::VecDeque, format, sync::Arc};
 use bitflags::bitflags;
-use core::pin::pin;
+use core::{
+    sync::atomic::{compiler_fence, Ordering},
+    task::{Poll, Waker},
+};
 use eonix_runtime::scheduler::RUNTIME;
-use eonix_sync::{SpinIrq as _, WaitList};
+use eonix_sync::SpinIrq;
 use io::SerialIO;
 
 bitflags! {
@@ -32,9 +35,8 @@ struct Serial {
     name: Arc<str>,
 
     terminal: Spin<Option<Arc<Terminal>>>,
-    worker_wait: WaitList,
+    worker_waker: Spin<Option<Waker>>,
 
-    working: Spin<bool>,
     tx_buffer: Spin<VecDeque<u8>>,
 
     ioregs: SerialIO,
@@ -42,13 +44,21 @@ struct Serial {
 
 impl Serial {
     fn enable_interrupts(&self) {
+        compiler_fence(Ordering::SeqCst);
+
         // Enable interrupt #0: Received data available
         self.ioregs.int_ena().write(0x03);
+
+        compiler_fence(Ordering::SeqCst);
     }
 
     fn disable_interrupts(&self) {
+        compiler_fence(Ordering::SeqCst);
+
         // Disable interrupt #0: Received data available
         self.ioregs.int_ena().write(0x02);
+
+        compiler_fence(Ordering::SeqCst);
     }
 
     fn line_status(&self) -> LineStatus {
@@ -56,19 +66,18 @@ impl Serial {
     }
 
     async fn wait_for_interrupt(&self) {
-        let mut wait = pin!(self.worker_wait.prepare_to_wait());
-
-        {
-            let mut working = self.working.lock_irq();
-            self.enable_interrupts();
-            wait.as_mut().add_to_wait_list();
-            *working = false;
-        };
-
-        wait.await;
-
-        *self.working.lock_irq() = true;
-        self.disable_interrupts();
+        let mut slept = false;
+        core::future::poll_fn(move |cx| match slept {
+            true => Poll::Ready(()),
+            false => {
+                slept = true;
+                let mut waker = self.worker_waker.lock_irq();
+                waker.replace(cx.waker().clone());
+                self.enable_interrupts();
+                Poll::Pending
+            }
+        })
+        .await
     }
 
     async fn worker(port: Arc<Self>) {
@@ -128,17 +137,16 @@ impl Serial {
             id,
             name: Arc::from(format!("ttyS{id}")),
             terminal: Spin::new(None),
-            worker_wait: WaitList::new(),
-            working: Spin::new(true),
+            worker_waker: Spin::new(None),
             tx_buffer: Spin::new(VecDeque::new()),
             ioregs,
         })
     }
 
     fn wakeup_worker(&self) {
-        let working = self.working.lock_irq();
-        if !*working {
-            self.worker_wait.notify_one();
+        self.disable_interrupts();
+        if let Some(waker) = self.worker_waker.lock_irq().take() {
+            waker.wake();
         }
     }
 

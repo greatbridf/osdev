@@ -29,6 +29,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "arcref"
+version = "0.1.0"
+
+[[package]]
 name = "async-trait"
 version = "0.1.89"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -155,6 +159,7 @@ dependencies = [
  "acpi",
  "align_ext",
  "another_ext4",
+ "arcref",
  "async-trait",
  "atomic_unique_refcell",
  "bitflags",

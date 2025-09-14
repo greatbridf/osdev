@@ -1,34 +1,30 @@
 use crate::{kernel::constants::ENOENT, prelude::*};
 use core::fmt::{self, Debug, Formatter};
 
-pub struct Path<'lt> {
-    all: &'lt [u8],
+#[repr(transparent)]
+pub struct Path {
+    all: [u8],
 }
 
 pub struct PathIterator<'lt> {
     rem: &'lt [u8],
 }
 
-#[allow(dead_code)]
-impl<'lt> Path<'lt> {
-    pub fn new(all: &'lt [u8]) -> KResult<Self> {
+impl Path {
+    pub fn new(all: &[u8]) -> KResult<&Self> {
         if all.is_empty() {
             Err(ENOENT)
         } else {
-            Ok(Self { all })
+            Ok(unsafe { &*(all as *const [u8] as *const Path) })
         }
-    }
-
-    pub fn from_str(all: &'lt str) -> KResult<Self> {
-        Self::new(all.as_bytes())
     }
 
     pub fn is_absolute(&self) -> bool {
         self.all.starts_with(&['/' as u8])
     }
 
-    pub fn iter(&self) -> PathIterator<'lt> {
-        PathIterator::new(self.all)
+    pub fn iter(&self) -> PathIterator {
+        PathIterator::new(&self.all)
     }
 }
 
@@ -46,11 +42,17 @@ pub enum PathComponent<'lt> {
     Parent,
 }
 
+impl PathIterator<'_> {
+    pub fn is_empty(&self) -> bool {
+        self.rem.is_empty()
+    }
+}
+
 impl<'lt> Iterator for PathIterator<'lt> {
     type Item = PathComponent<'lt>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.rem.is_empty() {
+        if self.is_empty() {
             return None;
         }
 
@@ -71,16 +73,16 @@ impl<'lt> Iterator for PathIterator<'lt> {
         self.rem = rem;
 
         match cur {
-            cur if cur.is_empty() => Some(PathComponent::TrailingEmpty),
-            cur if cur == b"." => Some(PathComponent::Current),
-            cur if cur == b".." => Some(PathComponent::Parent),
-            cur => Some(PathComponent::Name(cur)),
+            b"" => Some(PathComponent::TrailingEmpty),
+            b"." => Some(PathComponent::Current),
+            b".." => Some(PathComponent::Parent),
+            name => Some(PathComponent::Name(name)),
         }
     }
 }
 
-impl Debug for Path<'_> {
+impl Debug for Path {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "Path({:?})", self.all)
+        write!(f, "Path({:?})", &self.all)
     }
 }

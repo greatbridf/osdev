@@ -1,21 +1,35 @@
 use crate::{kernel::task::block_on, prelude::*};
 use alloc::sync::Arc;
+use arcref::ArcRef;
 use core::{
     ops::Deref,
     ptr::NonNull,
     sync::atomic::{AtomicPtr, Ordering},
 };
+use eonix_preempt::PreemptGuard;
 use eonix_runtime::scheduler::RUNTIME;
-use eonix_sync::{Mutex, RwLock, RwLockReadGuard};
+use eonix_sync::{RwLock, RwLockReadGuard};
 use pointers::BorrowedArc;
+
+/// The RCU Read Lock. Holding a reference to an instance of the struct assures
+/// you that any RCU protected data would not be dropped.
+///
+/// The struct cannot be created directly. Instead, use [`rcu_read_lock()`].
+#[derive(Debug)]
+pub struct RCUReadLock();
+
+pub struct RCUReadGuardNew {
+    guard: RwLockReadGuard<'static, RCUReadLock>,
+    _disable_preempt: PreemptGuard<()>,
+}
 
 pub struct RCUReadGuard<'data, T: 'data> {
     value: T,
-    _guard: RwLockReadGuard<'data, ()>,
+    _guard: RwLockReadGuard<'static, RCUReadLock>,
     _phantom: PhantomData<&'data T>,
 }
 
-static GLOBAL_RCU_SEM: RwLock<()> = RwLock::new(());
+static GLOBAL_RCU_SEM: RwLock<RCUReadLock> = RwLock::new(RCUReadLock());
 
 impl<'data, T> RCUReadGuard<'data, BorrowedArc<'data, T>> {
     fn lock(value: BorrowedArc<'data, T>) -> Self {
@@ -23,14 +37,6 @@ impl<'data, T> RCUReadGuard<'data, BorrowedArc<'data, T>> {
             value,
             _guard: block_on(GLOBAL_RCU_SEM.read()),
             _phantom: PhantomData,
-        }
-    }
-
-    pub fn borrow(&self) -> BorrowedArc<'data, T> {
-        unsafe {
-            BorrowedArc::from_raw(NonNull::new_unchecked(
-                &raw const *self.value.borrow() as *mut T
-            ))
         }
     }
 }
@@ -63,17 +69,14 @@ pub trait RCUNode<MySelf> {
 
 pub struct RCUList<T: RCUNode<T>> {
     head: AtomicPtr<T>,
-
-    reader_lock: RwLock<()>,
-    update_lock: Mutex<()>,
+    update_lock: Spin<()>,
 }
 
 impl<T: RCUNode<T>> RCUList<T> {
     pub const fn new() -> Self {
         Self {
             head: AtomicPtr::new(core::ptr::null_mut()),
-            reader_lock: RwLock::new(()),
-            update_lock: Mutex::new(()),
+            update_lock: Spin::new(()),
         }
     }
 
@@ -117,7 +120,6 @@ impl<T: RCUNode<T>> RCUList<T> {
             unsafe { Arc::from_raw(me) };
         }
 
-        let _lck = self.reader_lock.write();
         node.rcu_prev()
             .store(core::ptr::null_mut(), Ordering::Release);
         node.rcu_next()
@@ -152,7 +154,6 @@ impl<T: RCUNode<T>> RCUList<T> {
             unsafe { Arc::from_raw(old) };
         }
 
-        let _lck = self.reader_lock.write();
         old_node
             .rcu_prev()
             .store(core::ptr::null_mut(), Ordering::Release);
@@ -161,36 +162,36 @@ impl<T: RCUNode<T>> RCUList<T> {
             .store(core::ptr::null_mut(), Ordering::Release);
     }
 
-    pub fn iter(&self) -> RCUIterator<T> {
-        let _lck = block_on(self.reader_lock.read());
-
+    pub fn iter<'a, 'r>(&'a self, _lock: &'r RCUReadLock) -> RCUIterator<'a, 'r, T> {
         RCUIterator {
-            // SAFETY: We have a read lock, so the node is still alive.
-            cur: NonNull::new(self.head.load(Ordering::SeqCst)),
-            _lock: _lck,
+            cur: NonNull::new(self.head.load(Ordering::Acquire)),
+            _phantom: PhantomData,
         }
     }
 }
 
-pub struct RCUIterator<'lt, T: RCUNode<T>> {
+pub struct RCUIterator<'list, 'rcu, T: RCUNode<T>> {
     cur: Option<NonNull<T>>,
-    _lock: RwLockReadGuard<'lt, ()>,
+    _phantom: PhantomData<(&'list (), &'rcu ())>,
 }
 
-impl<'lt, T: RCUNode<T>> Iterator for RCUIterator<'lt, T> {
-    type Item = BorrowedArc<'lt, T>;
+impl<'rcu, T: RCUNode<T>> Iterator for RCUIterator<'_, 'rcu, T> {
+    type Item = ArcRef<'rcu, T>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        match self.cur {
-            None => None,
-            Some(pointer) => {
-                // SAFETY: We have a read lock, so the node is still alive.
-                let reference = unsafe { pointer.as_ref() };
+        self.cur.map(|pointer| {
+            let reference = unsafe {
+                // SAFETY: We have the read lock so the node is still alive.
+                pointer.as_ref()
+            };
 
-                self.cur = NonNull::new(reference.rcu_next().load(Ordering::SeqCst));
-                Some(unsafe { BorrowedArc::from_raw(pointer) })
+            self.cur = NonNull::new(reference.rcu_next().load(Ordering::Acquire));
+
+            unsafe {
+                // SAFETY: We have the read lock so the node is still alive.
+                ArcRef::new_unchecked(pointer.as_ptr())
             }
-        }
+        })
     }
 }
 
@@ -228,15 +229,16 @@ where
     }
 
     pub fn load<'lt>(&self) -> Option<RCUReadGuard<'lt, BorrowedArc<'lt, T>>> {
+        // BUG: We should acquire the lock before loading the pointer
         NonNull::new(self.0.load(Ordering::Acquire))
             .map(|p| RCUReadGuard::lock(unsafe { BorrowedArc::from_raw(p) }))
     }
 
-    pub fn load_protected<'a, U: 'a>(
-        &self,
-        _guard: &RCUReadGuard<'a, U>,
-    ) -> Option<BorrowedArc<'a, T>> {
-        NonNull::new(self.0.load(Ordering::Acquire)).map(|p| unsafe { BorrowedArc::from_raw(p) })
+    pub fn dereference<'r, 'a: 'r>(&self, _lock: &'a RCUReadLock) -> Option<ArcRef<'r, T>> {
+        NonNull::new(self.0.load(Ordering::Acquire)).map(|p| unsafe {
+            // SAFETY: We have a read lock, so the node is still alive.
+            ArcRef::new_unchecked(p.as_ptr())
+        })
     }
 
     /// # Safety
@@ -287,5 +289,20 @@ where
                 call_rcu(move || drop(arc));
             }
         }
+    }
+}
+
+impl Deref for RCUReadGuardNew {
+    type Target = RCUReadLock;
+
+    fn deref(&self) -> &Self::Target {
+        &self.guard
+    }
+}
+
+pub fn rcu_read_lock() -> RCUReadGuardNew {
+    RCUReadGuardNew {
+        guard: block_on(GLOBAL_RCU_SEM.read()),
+        _disable_preempt: PreemptGuard::new(()),
     }
 }

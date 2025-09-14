@@ -1,11 +1,13 @@
 use super::Dentry;
 use crate::kernel::constants::ENOENT;
-use crate::rcu::RCUPointer;
+use crate::rcu::{RCUPointer, RCUReadLock};
 use crate::{
     prelude::*,
     rcu::{RCUIterator, RCUList},
 };
 use alloc::sync::Arc;
+use arcref::ArcRef;
+use core::ops::Deref;
 use core::sync::atomic::Ordering;
 use eonix_sync::Mutex;
 
@@ -16,24 +18,45 @@ static DCACHE: [RCUList<Dentry>; 1 << DCACHE_HASH_BITS] =
 
 static D_EXCHANGE_LOCK: Mutex<()> = Mutex::new(());
 
-pub fn d_hinted(dentry: &Dentry) -> &'static RCUList<Dentry> {
-    let hash = dentry.hash.load(Ordering::Relaxed) as usize & ((1 << DCACHE_HASH_BITS) - 1);
+pub trait DCacheItem {
+    fn d_hash(&self) -> usize;
+    fn d_parent(&self) -> *const Dentry;
+    fn d_name<'r, 'a: 'r, 'b: 'a>(
+        &'a self,
+        rcu_read: &'b RCUReadLock,
+    ) -> impl Deref<Target = [u8]> + 'r;
+}
+
+fn d_eq(lhs: &impl DCacheItem, rhs: &impl DCacheItem, rcu_read: &RCUReadLock) -> bool {
+    lhs.d_hash() == rhs.d_hash()
+        && lhs.d_parent() == rhs.d_parent()
+        && *lhs.d_name(rcu_read) == *rhs.d_name(rcu_read)
+}
+
+fn d_hinted(item: &impl DCacheItem) -> &'static RCUList<Dentry> {
+    let hash = item.d_hash() & ((1 << DCACHE_HASH_BITS) - 1);
     &DCACHE[hash]
 }
 
-pub fn d_iter_for(dentry: &Dentry) -> RCUIterator<'static, Dentry> {
-    d_hinted(dentry).iter()
+fn d_iter_for<'rcu>(
+    item: &impl DCacheItem,
+    rcu_read: &'rcu RCUReadLock,
+) -> RCUIterator<'static, 'rcu, Dentry> {
+    d_hinted(item).iter(rcu_read)
+}
+
+pub fn d_find_rcu<'rcu>(
+    item: &impl DCacheItem,
+    rcu_read: &'rcu RCUReadLock,
+) -> Option<ArcRef<'rcu, Dentry>> {
+    d_iter_for(item, rcu_read).find(|cur_ref| cur_ref.with_arc(|cur| d_eq(cur, item, rcu_read)))
 }
 
 /// Add the dentry to the dcache
 pub fn d_add(dentry: Arc<Dentry>) {
+    // TODO: Add `children` field to parent and lock parent dentry to avoid
+    //       concurrent insertion causing duplication.
     d_hinted(&dentry).insert(dentry);
-}
-
-pub fn d_find_fast(dentry: &Dentry) -> Option<Arc<Dentry>> {
-    d_iter_for(dentry)
-        .find(|cur| cur.hash_eq(dentry))
-        .map(|dentry| dentry.clone())
 }
 
 /// Call `lookup()` on the parent inode to try find if the dentry points to a valid inode
@@ -79,4 +102,35 @@ pub async fn d_exchange(old: &Arc<Dentry>, new: &Arc<Dentry>) {
 
     d_add(old.clone());
     d_add(new.clone());
+}
+
+impl DCacheItem for Arc<Dentry> {
+    fn d_hash(&self) -> usize {
+        self.hash.load(Ordering::Relaxed) as usize
+    }
+
+    fn d_parent(&self) -> *const Dentry {
+        self.parent_addr()
+    }
+
+    fn d_name<'r, 'a: 'r, 'b: 'a>(
+        &'a self,
+        rcu_read: &'b RCUReadLock,
+    ) -> impl Deref<Target = [u8]> + 'r {
+        struct Name<'a>(ArcRef<'a, Arc<[u8]>>);
+
+        impl Deref for Name<'_> {
+            type Target = [u8];
+
+            fn deref(&self) -> &Self::Target {
+                &self.0
+            }
+        }
+
+        Name(
+            self.name
+                .dereference(rcu_read)
+                .expect("Dentry should have a non-null name"),
+        )
+    }
 }

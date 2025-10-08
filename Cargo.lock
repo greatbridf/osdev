@@ -180,6 +180,7 @@ dependencies = [
  "posix_types",
  "slab_allocator",
  "stalloc",
+ "static_assertions",
  "unwinding",
  "virtio-drivers",
  "xmas-elf",
@@ -524,6 +525,12 @@ name = "stalloc"
 version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a37f0ead4094eeb54c6893316aa139e48b252f1c07511e5124fa1f9414df5b6c"
+
+[[package]]
+name = "static_assertions"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
 name = "syn"

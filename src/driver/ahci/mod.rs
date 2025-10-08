@@ -1,24 +1,22 @@
-use crate::{
-    fs::procfs,
-    io::Buffer as _,
-    kernel::{
-        block::BlockDevice,
-        constants::{EINVAL, EIO},
-        interrupt::register_irq_handler,
-        pcie::{self, Header, PCIDevice, PCIDriver, PciError},
-        vfs::types::DeviceId,
-    },
-    prelude::*,
-};
-use alloc::{format, sync::Arc};
+use alloc::format;
+use alloc::sync::Arc;
+
 use async_trait::async_trait;
 use control::AdapterControl;
 use defs::*;
 use eonix_mm::address::{AddrOps as _, PAddr};
 use eonix_sync::SpinIrq as _;
 use port::AdapterPort;
-
 pub(self) use register::Register;
+
+use crate::fs::procfs;
+use crate::io::Buffer as _;
+use crate::kernel::block::BlockDevice;
+use crate::kernel::constants::{EINVAL, EIO};
+use crate::kernel::interrupt::register_irq_handler;
+use crate::kernel::pcie::{self, Header, PCIDevice, PCIDriver, PciError};
+use crate::kernel::vfs::types::DeviceId;
+use crate::prelude::*;
 
 mod command;
 mod command_table;
@@ -30,7 +28,7 @@ pub(self) mod slot;
 mod stats;
 
 pub struct AHCIDriver {
-    devices: Spin<Vec<Arc<Device<'static>>>>,
+    devices: Spin<Vec<Arc<Device>>>,
 }
 
 pub struct BitsIterator {
@@ -64,22 +62,22 @@ impl Iterator for BitsIterator {
     }
 }
 
-struct Device<'a> {
+struct Device {
     control_base: PAddr,
     control: AdapterControl,
     _pcidev: Arc<PCIDevice<'static>>,
     /// # Lock
     /// Might be accessed from irq handler, use with `lock_irq()`
-    ports: Spin<[Option<Arc<AdapterPort<'a>>>; 32]>,
+    ports: Spin<[Option<Arc<AdapterPort>>; 32]>,
 }
 
 /// # Safety
 /// `pcidev` is never accessed from Rust code
 /// TODO!!!: place *mut pci_device in a safe wrapper
-unsafe impl Send for Device<'_> {}
-unsafe impl Sync for Device<'_> {}
+unsafe impl Send for Device {}
+unsafe impl Sync for Device {}
 
-impl Device<'_> {
+impl Device {
     fn handle_interrupt(&self) {
         // Safety
         // `self.ports` is accessed inside irq handler
@@ -108,8 +106,8 @@ impl Device<'_> {
     }
 }
 
-impl Device<'static> {
-    async fn probe_port(&self, port: Arc<AdapterPort<'static>>) -> KResult<()> {
+impl Device {
+    async fn probe_port(&self, port: Arc<AdapterPort>) -> KResult<()> {
         port.init().await?;
 
         {

@@ -2,28 +2,23 @@ mod inode_file;
 mod pipe;
 mod terminal_file;
 
-use crate::{
-    io::{Buffer, ByteBuffer, Chunks, IntoStream, Stream},
-    kernel::{
-        constants::{EBADF, EINTR, EINVAL, ENOTTY},
-        mem::{AsMemoryBlock, Page},
-        task::Thread,
-        CharDevice,
-    },
-    prelude::KResult,
-};
 use alloc::sync::Arc;
-use bitflags::bitflags;
-use core::{
-    ops::Deref,
-    sync::atomic::{AtomicI32, AtomicU32, Ordering},
-};
-use pipe::{PipeReadEnd, PipeWriteEnd};
-use posix_types::open::OpenFlags;
+use core::ops::Deref;
+use core::sync::atomic::{AtomicI32, AtomicU32, Ordering};
 
+use bitflags::bitflags;
 pub use inode_file::InodeFile;
 pub use pipe::Pipe;
+use pipe::{PipeReadEnd, PipeWriteEnd};
+use posix_types::open::OpenFlags;
 pub use terminal_file::TerminalFile;
+
+use crate::io::{Buffer, ByteBuffer, Chunks, IntoStream, Stream};
+use crate::kernel::constants::{EBADF, EINTR, EINVAL, ENOTTY};
+use crate::kernel::mem::PageExcl;
+use crate::kernel::task::Thread;
+use crate::kernel::CharDevice;
+use crate::prelude::KResult;
 
 pub enum FileType {
     Inode(InodeFile),
@@ -99,9 +94,8 @@ impl FileType {
     }
 
     pub async fn sendfile(&self, dest_file: &Self, count: usize) -> KResult<usize> {
-        let buffer_page = Page::alloc();
-        // SAFETY: We are the only owner of the page.
-        let buffer = unsafe { buffer_page.as_memblk().as_bytes_mut() };
+        let mut buffer_page = PageExcl::alloc();
+        let buffer = buffer_page.as_bytes_mut();
 
         self.sendfile_check()?;
 

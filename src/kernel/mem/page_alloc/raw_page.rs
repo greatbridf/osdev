@@ -81,7 +81,7 @@ pub struct RawPagePtr(NonNull<RawPage>);
 
 impl PageFlags {
     pub const PRESENT: u32 = 1 << 0;
-    // pub const LOCKED: u32 = 1 << 1;
+    pub const LOCKED: u32 = 1 << 1;
     pub const BUDDY: u32 = 1 << 2;
     pub const SLAB: u32 = 1 << 3;
     pub const DIRTY: u32 = 1 << 4;
@@ -98,6 +98,13 @@ impl PageFlags {
 
     pub fn clear(&self, flag: u32) {
         self.0.fetch_and(!flag, Ordering::Relaxed);
+    }
+
+    /// Set the flag and return whether it was already set.
+    ///
+    /// If multiple flags are given, returns true if any of them were already set.
+    pub fn test_and_set(&self, flag: u32) -> bool {
+        (self.0.fetch_or(flag, Ordering::Relaxed) & flag) != 0
     }
 }
 

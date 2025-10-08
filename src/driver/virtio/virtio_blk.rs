@@ -1,21 +1,19 @@
-use crate::{
-    io::Chunks,
-    kernel::{
-        block::{BlockDeviceRequest, BlockRequestQueue},
-        constants::EIO,
-        mem::{AsMemoryBlock, Page},
-    },
-    prelude::KResult,
-};
 use alloc::boxed::Box;
+
 use async_trait::async_trait;
 use eonix_hal::mm::ArchPhysAccess;
-use eonix_mm::{
-    address::{Addr, PAddr, PhysAccess},
-    paging::PFN,
-};
+use eonix_mm::address::{Addr, PAddr, PhysAccess};
+use eonix_mm::paging::PFN;
 use eonix_sync::Spin;
-use virtio_drivers::{device::blk::VirtIOBlk, transport::Transport, Hal};
+use virtio_drivers::device::blk::VirtIOBlk;
+use virtio_drivers::transport::Transport;
+use virtio_drivers::Hal;
+
+use crate::io::Chunks;
+use crate::kernel::block::{BlockDeviceRequest, BlockRequestQueue};
+use crate::kernel::constants::EIO;
+use crate::kernel::mem::{Page, PageExt};
+use crate::prelude::KResult;
 
 pub struct HAL;
 
@@ -26,11 +24,10 @@ unsafe impl Hal for HAL {
     ) -> (virtio_drivers::PhysAddr, core::ptr::NonNull<u8>) {
         let page = Page::alloc_at_least(pages);
 
-        let paddr = page.start().addr();
-        let ptr = page.as_memblk().as_byte_ptr();
-        page.into_raw();
+        let ptr = page.get_ptr();
+        let pfn = page.into_raw();
 
-        (paddr, ptr)
+        (PAddr::from(pfn).addr(), ptr)
     }
 
     unsafe fn dma_dealloc(
@@ -93,15 +90,14 @@ where
                 buffer,
             } => {
                 let mut dev = self.lock();
-                for ((start, len), buffer_page) in
+                for ((start, sectors), buffer_page) in
                     Chunks::new(sector as usize, count as usize, 8).zip(buffer.iter())
                 {
-                    let buffer = unsafe {
-                        // SAFETY: Pages in `req.buffer` are guaranteed to be exclusively owned by us.
-                        &buffer_page.as_memblk().as_bytes()[..len as usize * 512]
-                    };
+                    let len = sectors * 512;
+                    let pg = buffer_page.lock();
 
-                    dev.write_blocks(start, buffer).map_err(|_| EIO)?;
+                    dev.write_blocks(start, &pg.as_bytes()[..len])
+                        .map_err(|_| EIO)?;
                 }
             }
             BlockDeviceRequest::Read {
@@ -110,15 +106,14 @@ where
                 buffer,
             } => {
                 let mut dev = self.lock();
-                for ((start, len), buffer_page) in
+                for ((start, sectors), buffer_page) in
                     Chunks::new(sector as usize, count as usize, 8).zip(buffer.iter())
                 {
-                    let buffer = unsafe {
-                        // SAFETY: Pages in `req.buffer` are guaranteed to be exclusively owned by us.
-                        &mut buffer_page.as_memblk().as_bytes_mut()[..len as usize * 512]
-                    };
+                    let len = sectors * 512;
+                    let mut pg = buffer_page.lock();
 
-                    dev.read_blocks(start, buffer).map_err(|_| EIO)?;
+                    dev.read_blocks(start, &mut pg.as_bytes_mut()[..len])
+                        .map_err(|_| EIO)?;
                 }
             }
         }

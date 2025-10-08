@@ -1,45 +1,38 @@
 mod dir;
 mod file;
 
+use alloc::sync::{Arc, Weak};
 use core::future::Future;
 use core::ops::Deref;
 
-use alloc::sync::{Arc, Weak};
 use async_trait::async_trait;
 use dir::{as_raw_dirents, ParseDirent};
 use eonix_sync::RwLock;
 use itertools::Itertools;
 
+use crate::io::{Buffer, ByteBuffer, UninitBuffer};
+use crate::kernel::block::{BlockDevice, BlockDeviceRequest};
 use crate::kernel::constants::{EINVAL, EIO};
-use crate::kernel::mem::{AsMemoryBlock, CachePageStream};
+use crate::kernel::mem::{
+    CachePage, CachePageStream, Page, PageCache, PageCacheBackendOps, PageExcl, PageExt,
+};
 use crate::kernel::timer::Instant;
-use crate::kernel::vfs::inode::{InodeDirOps, InodeFileOps, InodeInfo, InodeOps, InodeUse};
+use crate::kernel::vfs::dentry::Dentry;
+use crate::kernel::vfs::inode::{
+    Ino, Inode, InodeDirOps, InodeFileOps, InodeInfo, InodeOps, InodeUse,
+};
+use crate::kernel::vfs::mount::{register_filesystem, Mount, MountCreator};
 use crate::kernel::vfs::types::{DeviceId, Format, Permission};
 use crate::kernel::vfs::{SbRef, SbUse, SuperBlock, SuperBlockInfo};
 use crate::prelude::*;
-use crate::{
-    io::{Buffer, ByteBuffer, UninitBuffer},
-    kernel::{
-        block::{BlockDevice, BlockDeviceRequest},
-        mem::{
-            paging::Page,
-            {CachePage, PageCache, PageCacheBackendOps},
-        },
-        vfs::{
-            dentry::Dentry,
-            inode::{Ino, Inode},
-            mount::{register_filesystem, Mount, MountCreator},
-        },
-    },
-    KResult,
-};
+use crate::KResult;
 
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 struct Cluster(u32);
 
 #[repr(transparent)]
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 struct RawCluster(pub u32);
 
 impl RawCluster {
@@ -70,7 +63,7 @@ impl Cluster {
 
 const SECTOR_SIZE: usize = 512;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 #[repr(C, packed)]
 struct Bootsector {
     jmp: [u8; 3],
@@ -302,10 +295,8 @@ impl InodeFileOps for FileInode {
         for cluster in cluster_iter {
             fs.read_cluster(cluster, &buffer_page).await?;
 
-            let data = unsafe {
-                // SAFETY: We are the only one holding this page.
-                &buffer_page.as_memblk().as_bytes()[inner_offset..]
-            };
+            let pg = buffer_page.lock();
+            let data = &pg.as_bytes()[inner_offset..];
 
             let end = offset + data.len();
             let real_end = end.min(self.info.lock().size as usize);
@@ -340,7 +331,7 @@ struct DirInode {
     sb: SbRef<FatFs>,
 
     // TODO: Use the new PageCache...
-    dir_pages: RwLock<Vec<Page>>,
+    dir_pages: RwLock<Vec<PageExcl>>,
 }
 
 impl DirInode {
@@ -375,7 +366,7 @@ impl DirInode {
         let clusters = ClusterIterator::new(fat.as_ref(), self.cluster);
 
         for cluster in clusters {
-            let page = Page::alloc();
+            let page = PageExcl::alloc();
             fs.read_cluster(cluster, &page).await?;
 
             dir_pages.push(page);
@@ -384,7 +375,7 @@ impl DirInode {
         Ok(())
     }
 
-    async fn get_dir_pages(&self) -> KResult<impl Deref<Target = Vec<Page>> + use<'_>> {
+    async fn get_dir_pages(&self) -> KResult<impl Deref<Target = Vec<PageExcl>> + use<'_>> {
         {
             let dir_pages = self.dir_pages.read().await;
             if !dir_pages.is_empty() {
@@ -432,12 +423,7 @@ impl InodeDirOps for DirInode {
         let sb = self.sb.get()?;
         let dir_pages = self.get_dir_pages().await?;
 
-        let dir_data = dir_pages.iter().map(|page| {
-            unsafe {
-                // SAFETY: No one could be writing to it.
-                page.as_memblk().as_bytes()
-            }
-        });
+        let dir_data = dir_pages.iter().map(|pg| pg.as_bytes());
 
         let raw_dirents = dir_data
             .map(as_raw_dirents)
@@ -481,12 +467,10 @@ impl InodeDirOps for DirInode {
             let inner_offset = offset % cluster_size;
             let inner_raw_dirent_offset = inner_offset / core::mem::size_of::<dir::RawDirEntry>();
 
-            let dir_data = dir_pages.iter().skip(cluster_offset).map(|page| {
-                unsafe {
-                    // SAFETY: No one could be writing to it.
-                    page.as_memblk().as_bytes()
-                }
-            });
+            let dir_data = dir_pages
+                .iter()
+                .skip(cluster_offset)
+                .map(|pg| pg.as_bytes());
 
             let raw_dirents = dir_data
                 .map(as_raw_dirents)

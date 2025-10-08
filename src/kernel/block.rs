@@ -1,22 +1,19 @@
 mod mbr;
 
-use super::{
-    constants::ENOENT,
-    mem::{paging::Page, AsMemoryBlock as _},
-    vfs::types::DeviceId,
-};
-use crate::kernel::constants::{EEXIST, EINVAL};
-use crate::{
-    io::{Buffer, FillResult},
-    prelude::*,
-};
-use alloc::{
-    collections::btree_map::{BTreeMap, Entry},
-    sync::Arc,
-};
-use async_trait::async_trait;
+use alloc::collections::btree_map::{BTreeMap, Entry};
+use alloc::sync::Arc;
 use core::cmp::Ordering;
+
+use async_trait::async_trait;
 use mbr::MBRPartTable;
+
+use super::constants::ENOENT;
+use super::mem::paging::Page;
+use super::mem::PageExt;
+use super::vfs::types::DeviceId;
+use crate::io::{Buffer, Chunks, FillResult};
+use crate::kernel::constants::{EEXIST, EINVAL};
+use crate::prelude::*;
 
 pub struct Partition {
     pub lba_offset: u64,
@@ -193,177 +190,72 @@ impl BlockDevice {
     /// `offset` - offset in bytes
     ///
     pub async fn read_some(&self, offset: usize, buffer: &mut dyn Buffer) -> KResult<FillResult> {
-        let mut sector_start = offset as u64 / 512;
-        let mut first_sector_offset = offset as u64 % 512;
-        let mut sector_count = (first_sector_offset + buffer.total() as u64 + 511) / 512;
+        let sector_start = offset as u64 / 512;
+        let mut first_sector_offset = offset % 512;
+        let nr_sectors = (first_sector_offset + buffer.total() + 511) / 512;
 
-        let mut nfilled = 0;
-        'outer: while sector_count != 0 {
-            let pages: &[Page];
-            let page: Option<Page>;
-            let page_vec: Option<Vec<Page>>;
+        let nr_sectors_per_batch = self.queue().max_request_pages() / 2 * 2 * 8;
 
-            let nread;
-
-            match sector_count {
-                count if count <= 8 => {
-                    nread = count;
-
-                    let _page = Page::alloc();
-                    page = Some(_page);
-                    pages = core::slice::from_ref(page.as_ref().unwrap());
+        let mut nr_filled = 0;
+        for (start, nr_batch) in Chunks::new(sector_start, nr_sectors as u64, nr_sectors_per_batch)
+        {
+            let (page_slice, page, mut page_vec);
+            match nr_batch {
+                ..=8 => {
+                    page = Page::alloc();
+                    page_slice = core::slice::from_ref(&page);
                 }
-                count if count <= 16 => {
-                    nread = count;
-
-                    let _pages = Page::alloc_order(1);
-                    page = Some(_pages);
-                    pages = core::slice::from_ref(page.as_ref().unwrap());
+                ..=16 => {
+                    page = Page::alloc_order(1);
+                    page_slice = core::slice::from_ref(&page);
+                }
+                ..=32 => {
+                    page = Page::alloc_order(2);
+                    page_slice = core::slice::from_ref(&page);
                 }
                 count => {
-                    nread = count.min(self.queue().max_request_pages());
+                    let nr_huge_pages = count as usize / 32;
+                    let nr_small_pages = ((count as usize % 32) + 7) / 8;
 
-                    let npages = (nread + 15) / 16;
-                    let mut _page_vec = Vec::with_capacity(npages as usize);
-                    for _ in 0..npages {
-                        _page_vec.push(Page::alloc_order(1));
-                    }
-                    page_vec = Some(_page_vec);
-                    pages = page_vec.as_ref().unwrap().as_slice();
+                    let nr_pages = nr_huge_pages + nr_small_pages;
+                    page_vec = Vec::with_capacity(nr_pages);
+
+                    page_vec.resize_with(nr_huge_pages, || Page::alloc_order(2));
+                    page_vec.resize_with(nr_pages, || Page::alloc());
+                    page_slice = &page_vec;
                 }
             }
 
             let req = BlockDeviceRequest::Read {
-                sector: sector_start,
-                count: nread,
-                buffer: &pages,
+                sector: start,
+                count: nr_batch,
+                buffer: page_slice,
             };
 
             self.commit_request(req).await?;
 
-            for page in pages.iter() {
-                // SAFETY: We are the only owner of the page so no one could be mutating it.
-                let data = unsafe { &page.as_memblk().as_bytes()[first_sector_offset as usize..] };
+            for page in page_slice {
+                let pg = page.lock();
+                let data = &pg.as_bytes()[first_sector_offset..];
                 first_sector_offset = 0;
 
-                match buffer.fill(data)? {
-                    FillResult::Done(n) => nfilled += n,
-                    FillResult::Partial(n) => {
-                        nfilled += n;
-                        break 'outer;
-                    }
-                    FillResult::Full => {
-                        break 'outer;
-                    }
+                nr_filled += buffer.fill(data)?.allow_partial();
+
+                if buffer.available() == 0 {
+                    break;
                 }
             }
 
-            sector_start += nread;
-            sector_count -= nread;
+            if buffer.available() == 0 {
+                break;
+            }
         }
 
-        if nfilled == buffer.total() {
-            Ok(FillResult::Done(nfilled))
+        if buffer.available() == 0 {
+            Ok(FillResult::Done(nr_filled))
         } else {
-            Ok(FillResult::Partial(nfilled))
+            Ok(FillResult::Partial(nr_filled))
         }
-    }
-
-    /// Write some data to the block device, may involve some copy and fragmentation
-    ///
-    /// # Arguments
-    /// `offset` - offset in bytes
-    /// `data` - data to write
-    ///
-    pub async fn write_some(&self, offset: usize, data: &[u8]) -> KResult<usize> {
-        let mut sector_start = offset as u64 / 512;
-        let mut first_sector_offset = offset as u64 % 512;
-        let mut remaining_data = data;
-        let mut nwritten = 0;
-
-        while !remaining_data.is_empty() {
-            let pages: &[Page];
-            let page: Option<Page>;
-            let page_vec: Option<Vec<Page>>;
-
-            // Calculate sectors needed for this write
-            let write_end = first_sector_offset + remaining_data.len() as u64;
-            let sector_count = ((write_end + 511) / 512).min(self.queue().max_request_pages());
-
-            match sector_count {
-                count if count <= 8 => {
-                    let _page = Page::alloc();
-                    page = Some(_page);
-                    pages = core::slice::from_ref(page.as_ref().unwrap());
-                }
-                count if count <= 16 => {
-                    let _pages = Page::alloc_order(1);
-                    page = Some(_pages);
-                    pages = core::slice::from_ref(page.as_ref().unwrap());
-                }
-                count => {
-                    let npages = (count + 15) / 16;
-                    let mut _page_vec = Vec::with_capacity(npages as usize);
-                    for _ in 0..npages {
-                        _page_vec.push(Page::alloc_order(1));
-                    }
-                    page_vec = Some(_page_vec);
-                    pages = page_vec.as_ref().unwrap().as_slice();
-                }
-            }
-
-            if first_sector_offset != 0 || remaining_data.len() < (sector_count * 512) as usize {
-                let read_req = BlockDeviceRequest::Read {
-                    sector: sector_start,
-                    count: sector_count,
-                    buffer: pages,
-                };
-                self.commit_request(read_req).await?;
-            }
-
-            let mut data_offset = 0;
-            let mut page_offset = first_sector_offset as usize;
-
-            for page in pages.iter() {
-                // SAFETY: We own the page and can modify it
-                let page_data = unsafe {
-                    let memblk = page.as_memblk();
-                    core::slice::from_raw_parts_mut(memblk.addr().get() as *mut u8, memblk.len())
-                };
-
-                let copy_len =
-                    (remaining_data.len() - data_offset).min(page_data.len() - page_offset);
-
-                if copy_len == 0 {
-                    break;
-                }
-
-                page_data[page_offset..page_offset + copy_len]
-                    .copy_from_slice(&remaining_data[data_offset..data_offset + copy_len]);
-
-                data_offset += copy_len;
-                page_offset = 0; // Only first page has offset
-
-                if data_offset >= remaining_data.len() {
-                    break;
-                }
-            }
-
-            let write_req = BlockDeviceRequest::Write {
-                sector: sector_start,
-                count: sector_count,
-                buffer: pages,
-            };
-            self.commit_request(write_req).await?;
-
-            let bytes_written = data_offset;
-            nwritten += bytes_written;
-            remaining_data = &remaining_data[bytes_written..];
-            sector_start += sector_count;
-            first_sector_offset = 0;
-        }
-
-        Ok(nwritten)
     }
 }
 

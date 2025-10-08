@@ -1,14 +1,16 @@
-use super::mm_list::EMPTY_PAGE;
-use super::paging::AllocZeroed as _;
-use super::{AsMemoryBlock, Mapping, Page, Permission};
-use crate::kernel::constants::EINVAL;
-use crate::prelude::KResult;
 use core::borrow::Borrow;
 use core::cell::UnsafeCell;
 use core::cmp;
+
 use eonix_mm::address::{AddrOps as _, VAddr, VRange};
 use eonix_mm::page_table::{PageAttribute, RawAttribute, PTE};
 use eonix_mm::paging::{PAGE_SIZE, PFN};
+
+use super::mm_list::EMPTY_PAGE;
+use super::{Mapping, Page, Permission};
+use crate::kernel::constants::EINVAL;
+use crate::kernel::mem::{PageExcl, PageExt};
+use crate::prelude::KResult;
 
 #[derive(Debug)]
 pub struct MMArea {
@@ -105,25 +107,23 @@ impl MMArea {
             return;
         }
 
-        let new_page;
+        let mut new_page;
         if *pfn == EMPTY_PAGE.pfn() {
-            new_page = Page::zeroed();
+            new_page = PageExcl::zeroed();
         } else {
-            new_page = Page::alloc();
+            new_page = PageExcl::alloc();
 
             unsafe {
                 // SAFETY: `page` is CoW, which means that others won't write to it.
-                let old_page_data = page.as_memblk().as_bytes();
-
-                // SAFETY: `new_page` is exclusive owned by us.
-                let new_page_data = new_page.as_memblk().as_bytes_mut();
+                let old_page_data = page.get_bytes_ptr().as_ref();
+                let new_page_data = new_page.as_bytes_mut();
 
                 new_page_data.copy_from_slice(old_page_data);
             };
         }
 
         attr.remove(PageAttribute::ACCESSED);
-        *pfn = new_page.into_raw();
+        *pfn = new_page.into_page().into_raw();
     }
 
     /// # Arguments
@@ -156,13 +156,12 @@ impl MMArea {
                     // Bss is embarrassing in pagecache!
                     // We have to assume cnt_to_read < PAGE_SIZE all bss
                     if cnt_to_read < PAGE_SIZE {
-                        let new_page = Page::zeroed();
-                        unsafe {
-                            let page_data = new_page.as_memblk().as_bytes_mut();
-                            page_data[..cnt_to_read]
-                                .copy_from_slice(&page.as_memblk().as_bytes()[..cnt_to_read]);
-                        }
-                        *pfn = new_page.into_raw();
+                        let mut new_page = PageExcl::zeroed();
+
+                        new_page.as_bytes_mut()[..cnt_to_read]
+                            .copy_from_slice(&page.lock().as_bytes()[..cnt_to_read]);
+
+                        *pfn = new_page.into_page().into_raw();
                     } else {
                         *pfn = page.clone().into_raw();
                     }
@@ -182,13 +181,12 @@ impl MMArea {
                         cache_page.set_dirty();
                         *pfn = page.clone().into_raw();
                     } else {
-                        let new_page = Page::zeroed();
-                        unsafe {
-                            let page_data = new_page.as_memblk().as_bytes_mut();
-                            page_data[..cnt_to_read]
-                                .copy_from_slice(&page.as_memblk().as_bytes()[..cnt_to_read]);
-                        }
-                        *pfn = new_page.into_raw();
+                        let mut new_page = PageExcl::zeroed();
+
+                        new_page.as_bytes_mut()[..cnt_to_read]
+                            .copy_from_slice(&page.lock().as_bytes()[..cnt_to_read]);
+
+                        *pfn = new_page.into_page().into_raw();
                     }
 
                     attr.insert(PageAttribute::WRITE);

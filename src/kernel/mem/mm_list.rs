@@ -19,7 +19,7 @@ pub use page_fault::handle_kernel_page_fault;
 use super::address::{VAddrExt as _, VRangeExt as _};
 use super::page_alloc::GlobalPageAlloc;
 use super::paging::AllocZeroed as _;
-use super::{AsMemoryBlock, MMArea, Page};
+use super::{MMArea, Page, PageExt};
 use crate::kernel::constants::{EEXIST, EFAULT, EINVAL, ENOMEM};
 use crate::kernel::mem::page_alloc::RawPagePtr;
 use crate::prelude::*;
@@ -694,12 +694,10 @@ impl MMList {
                 unsafe {
                     // SAFETY: We are sure that the page is valid and we have the right to access it.
                     Page::with_raw(pte.get_pfn(), |page| {
-                        // SAFETY: The caller guarantees that no one else is using the page.
-                        let page_data = page.as_memblk().as_bytes_mut();
-                        func(
-                            offset + idx * 0x1000,
-                            &mut page_data[start_offset..end_offset],
-                        );
+                        let mut pg = page.lock();
+                        let page_data = &mut pg.as_bytes_mut()[start_offset..end_offset];
+
+                        func(offset + idx * 0x1000, page_data);
                     });
                 }
             }

@@ -316,14 +316,6 @@ impl CachePageStream {
     pub fn new(page: CachePage) -> Self {
         Self { page, cur: 0 }
     }
-
-    pub fn remaining(&self) -> usize {
-        self.page.valid_size().saturating_sub(self.cur)
-    }
-
-    pub fn is_drained(&self) -> bool {
-        self.cur >= self.page.valid_size()
-    }
 }
 
 impl Stream for CachePageStream {

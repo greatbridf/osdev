@@ -11,6 +11,9 @@
 
 extern crate alloc;
 
+#[macro_use]
+extern crate static_assertions;
+
 #[cfg(any(target_arch = "riscv64", target_arch = "x86_64"))]
 extern crate unwinding;
 

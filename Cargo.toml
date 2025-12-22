@@ -43,6 +43,7 @@ futures = { version = "0.3.31", features = [
     "async-await",
 ], default-features = false }
 static_assertions = "1.1.0"
+cfg-if = "1.0.4"
 
 [target.'cfg(any(target_arch = "riscv64", target_arch = "loongarch64"))'.dependencies]
 virtio-drivers = { version = "0.11.0" }

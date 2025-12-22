@@ -1,17 +1,14 @@
-use crate::{
-    io::{Buffer, FillResult},
-    prelude::*,
-};
-use crate::{
-    io::{IntoStream, Stream},
-    kernel::{
-        constants::{EFAULT, EINVAL},
-        syscall::{User, UserMut},
-    },
-};
-use core::{arch::asm, ffi::CStr, marker::PhantomData};
+use core::arch::asm;
+use core::ffi::CStr;
+use core::marker::PhantomData;
+
 use eonix_mm::address::Addr;
 use eonix_preempt::assert_preempt_enabled;
+
+use crate::io::{Buffer, FillResult, IntoStream, Stream};
+use crate::kernel::constants::{EFAULT, EINVAL};
+use crate::kernel::syscall::{User, UserMut};
+use crate::prelude::*;
 
 pub struct CheckedUserPointer<'a> {
     ptr: User<u8>,

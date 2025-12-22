@@ -1,33 +1,31 @@
+use alloc::sync::Arc;
+use core::time::Duration;
+
+use posix_types::ctypes::{Long, PtrT};
+use posix_types::namei::RenameFlags;
+use posix_types::open::{AtFlags, OpenFlags};
+use posix_types::poll::FDSet;
+use posix_types::signal::{SigSet, Signal};
+use posix_types::stat::{Stat, StatX, TimeSpec};
+use posix_types::syscall_no::*;
+
 use super::{FromSyscallArg, User};
-use crate::io::IntoStream;
+use crate::io::{Buffer, BufferFill, IntoStream};
 use crate::kernel::constants::{
     EBADF, EFAULT, EINVAL, ENOENT, ENOSYS, ENOTDIR, SEEK_CUR, SEEK_END, SEEK_SET,
 };
 use crate::kernel::syscall::UserMut;
 use crate::kernel::task::Thread;
 use crate::kernel::timer::sleep;
+use crate::kernel::user::{
+    CheckedUserPointer, UserBuffer, UserPointer, UserPointerMut, UserString,
+};
+use crate::kernel::vfs::dentry::Dentry;
 use crate::kernel::vfs::filearray::FD;
 use crate::kernel::vfs::types::{DeviceId, Mode};
 use crate::kernel::vfs::{PollEvent, SeekOption};
-use crate::{
-    io::{Buffer, BufferFill},
-    kernel::{
-        user::{CheckedUserPointer, UserBuffer, UserPointer, UserPointerMut, UserString},
-        vfs::dentry::Dentry,
-    },
-    path::Path,
-    prelude::*,
-};
-use alloc::sync::Arc;
-use core::time::Duration;
-use posix_types::ctypes::{Long, PtrT};
-use posix_types::namei::RenameFlags;
-use posix_types::open::{AtFlags, OpenFlags};
-use posix_types::poll::FDSet;
-use posix_types::signal::{SigSet, Signal};
-use posix_types::stat::Stat;
-use posix_types::stat::{StatX, TimeSpec};
-use posix_types::syscall_no::*;
+use crate::path::Path;
+use crate::prelude::*;
 
 impl FromSyscallArg for OpenFlags {
     fn from_arg(value: usize) -> Self {
@@ -128,7 +126,7 @@ async fn openat(dirfd: FD, pathname: User<u8>, flags: OpenFlags, mode: Mode) -> 
 
 #[cfg(target_arch = "x86_64")]
 #[eonix_macros::define_syscall(SYS_OPEN)]
-async fn open(path: User<u8>, flags: OpenFlags, mode: u32) -> KResult<FD> {
+async fn open(path: User<u8>, flags: OpenFlags, mode: Mode) -> KResult<FD> {
     sys_openat(thread, FD::AT_FDCWD, path, flags, mode).await
 }
 
@@ -145,7 +143,10 @@ async fn dup(fd: FD) -> KResult<FD> {
 #[cfg(target_arch = "x86_64")]
 #[eonix_macros::define_syscall(SYS_DUP2)]
 async fn dup2(old_fd: FD, new_fd: FD) -> KResult<FD> {
-    thread.files.dup_to(old_fd, new_fd, OpenFlags::empty())
+    thread
+        .files
+        .dup_to(old_fd, new_fd, OpenFlags::empty())
+        .await
 }
 
 #[eonix_macros::define_syscall(SYS_DUP3)]
@@ -172,7 +173,13 @@ async fn pipe(pipe_fd: UserMut<[FD; 2]>) -> KResult<()> {
 async fn getdents(fd: FD, buffer: UserMut<u8>, bufsize: usize) -> KResult<usize> {
     let mut buffer = UserBuffer::new(buffer, bufsize)?;
 
-    thread.files.get(fd).ok_or(EBADF)?.getdents(&mut buffer)?;
+    thread
+        .files
+        .get(fd)
+        .ok_or(EBADF)?
+        .getdents(&mut buffer)
+        .await?;
+
     Ok(buffer.wrote())
 }
 
@@ -264,7 +271,7 @@ async fn mkdirat(dirfd: FD, pathname: User<u8>, mode: Mode) -> KResult<()> {
 
 #[cfg(target_arch = "x86_64")]
 #[eonix_macros::define_syscall(SYS_MKDIR)]
-async fn mkdir(pathname: User<u8>, mode: u32) -> KResult<()> {
+async fn mkdir(pathname: User<u8>, mode: Mode) -> KResult<()> {
     sys_mkdirat(thread, FD::AT_FDCWD, pathname, mode).await
 }
 
@@ -280,9 +287,9 @@ async fn truncate(pathname: User<u8>, length: usize) -> KResult<()> {
     let path = UserString::new(pathname)?;
     let path = Path::new(path.as_cstr().to_bytes())?;
 
-    let dentry = Dentry::open(&thread.fs_context, path, true)?;
+    let dentry = Dentry::open(&thread.fs_context, path, true).await?;
 
-    dentry.truncate(length)
+    dentry.truncate(length).await
 }
 
 #[eonix_macros::define_syscall(SYS_UNLINKAT)]
@@ -296,7 +303,7 @@ async fn unlinkat(dirfd: FD, pathname: User<u8>) -> KResult<()> {
 #[cfg(target_arch = "x86_64")]
 #[eonix_macros::define_syscall(SYS_UNLINK)]
 async fn unlink(pathname: User<u8>) -> KResult<()> {
-    sys_unlinkat(thread, FD::AT_FDCWD, pathname)
+    sys_unlinkat(thread, FD::AT_FDCWD, pathname).await
 }
 
 #[eonix_macros::define_syscall(SYS_SYMLINKAT)]
@@ -310,7 +317,7 @@ async fn symlinkat(target: User<u8>, dirfd: FD, linkpath: User<u8>) -> KResult<(
 #[cfg(target_arch = "x86_64")]
 #[eonix_macros::define_syscall(SYS_SYMLINK)]
 async fn symlink(target: User<u8>, linkpath: User<u8>) -> KResult<()> {
-    sys_symlinkat(thread, target, FD::AT_FDCWD, linkpath)
+    sys_symlinkat(thread, target, FD::AT_FDCWD, linkpath).await
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -347,7 +354,7 @@ async fn mknodat(dirfd: FD, pathname: User<u8>, mut mode: Mode, dev: UserDeviceI
 
 #[cfg(target_arch = "x86_64")]
 #[eonix_macros::define_syscall(SYS_MKNOD)]
-async fn mknod(pathname: User<u8>, mode: u32, dev: u32) -> KResult<()> {
+async fn mknod(pathname: User<u8>, mode: Mode, dev: UserDeviceId) -> KResult<()> {
     sys_mknodat(thread, FD::AT_FDCWD, pathname, mode, dev).await
 }
 
@@ -389,7 +396,7 @@ async fn lseek(fd: FD, offset: u64, whence: u32) -> KResult<u64> {
 
 #[cfg(target_arch = "x86_64")]
 #[eonix_macros::define_syscall(SYS_LLSEEK)]
-fn llseek(
+async fn llseek(
     fd: FD,
     offset_high: u32,
     offset_low: u32,

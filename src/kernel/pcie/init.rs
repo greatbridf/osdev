@@ -1,13 +1,14 @@
-use super::{
-    device::{PCIDevice, SegmentGroup, PCIE_DEVICES},
-    error::PciError,
-};
-use crate::kernel::{mem::PhysAccess as _, pcie::device::PciMemoryAllocator};
-use acpi::{AcpiHandler, PhysicalMapping};
 use alloc::collections::btree_map::Entry;
 use alloc::vec;
+
+use acpi::{AcpiHandler, PhysicalMapping};
 use eonix_log::println_trace;
-use eonix_mm::address::PAddr;
+use eonix_mm::address::{PAddr, PRange};
+
+use super::device::{PCIDevice, SegmentGroup, PCIE_DEVICES};
+use super::error::PciError;
+use crate::kernel::mem::PhysAccess as _;
+use crate::kernel::pcie::device::PciMemoryAllocator;
 
 #[derive(Clone)]
 struct AcpiHandlerImpl;
@@ -67,9 +68,10 @@ pub fn init_pcie() -> Result<(), PciError> {
 
     #[cfg(any(target_arch = "riscv64", target_arch = "loongarch64"))]
     {
-        use crate::kernel::constants::{EINVAL, EIO, ENOENT};
         use eonix_hal::arch_exported::fdt::FDT;
         use eonix_mm::address::PRange;
+
+        use crate::kernel::constants::{EINVAL, EIO, ENOENT};
 
         let pcie_node = FDT
             .find_compatible(&["pci-host-ecam-generic"])

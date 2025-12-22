@@ -1,42 +1,36 @@
-use super::{
-    signal::{RaiseResult, SignalList},
-    stackful, Process, ProcessList, WaitType,
-};
-use crate::{
-    kernel::{
-        interrupt::default_irq_handler,
-        syscall::{syscall_handlers, SyscallHandler, User, UserMut},
-        task::{clone::CloneArgs, futex::RobustListHead, CloneFlags},
-        timer::{should_reschedule, timer_interrupt},
-        user::{UserPointer, UserPointerMut},
-        vfs::{filearray::FileArray, FsContext},
-    },
-    prelude::*,
-};
-use alloc::{alloc::Allocator, sync::Arc};
+use alloc::alloc::Allocator;
+use alloc::sync::Arc;
+use core::future::{poll_fn, Future};
+use core::pin::Pin;
+use core::ptr::NonNull;
+use core::sync::atomic::{AtomicBool, Ordering};
+use core::task::{Context, Poll};
+
 use atomic_unique_refcell::AtomicUniqueRefCell;
-use core::{
-    future::{poll_fn, Future},
-    pin::Pin,
-    ptr::NonNull,
-    sync::atomic::{AtomicBool, Ordering},
-    task::{Context, Poll},
-};
-use eonix_hal::{
-    fpu::FpuState,
-    processor::{UserTLS, CPU},
-    traits::{
-        fault::Fault,
-        fpu::RawFpuState as _,
-        trap::{RawTrapContext, TrapReturn, TrapType},
-    },
-    trap::TrapContext,
-};
+use eonix_hal::fpu::FpuState;
+use eonix_hal::traits::fault::Fault;
+use eonix_hal::traits::fpu::RawFpuState as _;
+use eonix_hal::traits::trap::{RawTrapContext, TrapReturn, TrapType};
+use eonix_hal::trap::TrapContext;
 use eonix_mm::address::{Addr as _, VAddr};
 use eonix_sync::AsProofMut as _;
 use pointers::BorrowedArc;
 use posix_types::signal::Signal;
 use stalloc::UnsafeStalloc;
+
+use super::signal::{RaiseResult, SignalList};
+use super::user_tls::UserTLS;
+use super::{stackful, Process, ProcessList, WaitType};
+use crate::kernel::interrupt::default_irq_handler;
+use crate::kernel::syscall::{syscall_handlers, SyscallHandler, User, UserMut};
+use crate::kernel::task::clone::CloneArgs;
+use crate::kernel::task::futex::RobustListHead;
+use crate::kernel::task::CloneFlags;
+use crate::kernel::timer::{should_reschedule, timer_interrupt};
+use crate::kernel::user::{UserPointer, UserPointerMut};
+use crate::kernel::vfs::filearray::FileArray;
+use crate::kernel::vfs::FsContext;
+use crate::prelude::*;
 
 #[eonix_percpu::define_percpu]
 static CURRENT_THREAD: Option<NonNull<Thread>> = None;
@@ -275,12 +269,9 @@ impl Thread {
         self.signal_list.raise(signal)
     }
 
-    /// # Safety
-    /// This function is unsafe because it accesses the `current_cpu()`, which needs
-    /// to be called in a preemption disabled context.
-    pub unsafe fn load_thread_area32(&self) {
+    pub fn activate_tls(&self) {
         if let Some(tls) = self.inner.lock().tls.as_ref() {
-            CPU::local().as_mut().set_tls32(tls);
+            tls.activate();
         }
     }
 
@@ -442,14 +433,7 @@ impl Thread {
 
             CURRENT_THREAD.set(NonNull::new(&raw const *self as *mut _));
 
-            unsafe {
-                eonix_preempt::disable();
-
-                // SAFETY: Preemption is disabled.
-                self.load_thread_area32();
-
-                eonix_preempt::enable();
-            }
+            self.activate_tls();
 
             let result = future.as_mut().poll(cx);
 

@@ -27,20 +27,9 @@ static DEFAULT_TRAP_CONTEXT: MaybeUninit<TrapContext> = MaybeUninit::uninit();
 #[eonix_percpu::define_percpu]
 static LOCAL_CPU: LazyLock<CPU> = LazyLock::new(|| CPU::new(CPUID.get()));
 
-#[derive(Debug, Clone)]
-pub enum UserTLS {
-    Base(u64),
-}
-
 /// RISC-V Hart
 pub struct CPU {
     pub(crate) interrupt: InterruptControl,
-}
-
-impl UserTLS {
-    pub fn new(base: u64) -> Self {
-        Self::Base(base)
-    }
 }
 
 impl CPU {
@@ -64,12 +53,6 @@ impl CPU {
 
         sstatus::set_sum();
         sscratch::write(DEFAULT_TRAP_CONTEXT.as_ptr() as usize);
-    }
-
-    pub unsafe fn load_interrupt_stack(self: Pin<&mut Self>, sp: u64) {}
-
-    pub fn set_tls32(self: Pin<&mut Self>, _user_tls: &UserTLS) {
-        // nothing
     }
 
     pub fn local() -> PreemptGuard<Pin<&'static mut Self>> {

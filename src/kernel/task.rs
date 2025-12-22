@@ -8,6 +8,7 @@ mod process_list;
 mod session;
 mod signal;
 mod thread;
+mod user_tls;
 
 pub use clone::{do_clone, CloneArgs, CloneFlags};
 pub use futex::{futex_wait, futex_wake, parse_futexop, FutexFlags, FutexOp, RobustListHead};
@@ -19,6 +20,7 @@ pub use process_list::ProcessList;
 pub use session::Session;
 pub use signal::SignalAction;
 pub use thread::{yield_now, Thread, ThreadAlloc, ThreadBuilder};
+pub use user_tls::{UserTLS, UserTLSDescriptor};
 
 fn do_block_on<F>(mut future: core::pin::Pin<&mut F>) -> F::Output
 where
@@ -79,29 +81,24 @@ pub async fn stackful<F>(mut future: F) -> F::Output
 where
     F: core::future::Future,
 {
-    use crate::kernel::{
-        interrupt::{default_fault_handler, default_irq_handler},
-        timer::{should_reschedule, timer_interrupt},
-    };
     use alloc::sync::Arc;
     use alloc::task::Wake;
     use core::cell::UnsafeCell;
     use core::future::Future;
     use core::pin::Pin;
     use core::ptr::NonNull;
-    use core::sync::atomic::AtomicBool;
-    use core::sync::atomic::Ordering;
-    use core::task::Context;
-    use core::task::Poll;
-    use core::task::Waker;
-    use eonix_hal::traits::trap::RawTrapContext;
-    use eonix_hal::traits::trap::TrapReturn;
-    use eonix_hal::traits::trap::TrapType;
+    use core::sync::atomic::{AtomicBool, Ordering};
+    use core::task::{Context, Poll, Waker};
+
+    use eonix_hal::traits::trap::{RawTrapContext, TrapReturn, TrapType};
     use eonix_hal::trap::TrapContext;
     use eonix_preempt::assert_preempt_enabled;
     use eonix_runtime::executor::Stack;
     use eonix_runtime::task::Task;
     use thread::wait_for_wakeups;
+
+    use crate::kernel::interrupt::{default_fault_handler, default_irq_handler};
+    use crate::kernel::timer::{should_reschedule, timer_interrupt};
 
     let stack = KernelStack::new();
 

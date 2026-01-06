@@ -5,4 +5,3 @@ edition = "2024"
 
 [dependencies]
 eonix_mm = { path = "../eonix_mm" }
-intrusive_list = { path = "../intrusive_list" }

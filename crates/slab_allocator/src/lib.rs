@@ -2,25 +2,13 @@
 
 use core::ptr::NonNull;
 
+use eonix_mm::paging::{PageList, PageListSized};
 use eonix_sync::Spin;
 
 #[repr(C)]
 pub union SlabSlot {
     slab_slot: Option<NonNull<SlabSlot>>,
     data: u8,
-}
-
-pub trait SlabPageList: Sized {
-    type Page: SlabPage;
-
-    fn new() -> Self;
-    fn is_empty(&self) -> bool;
-
-    fn peek_head(&mut self) -> Option<&mut Self::Page>;
-
-    fn pop_head(&mut self) -> Option<&'static mut Self::Page>;
-    fn push_tail(&mut self, page: &'static mut Self::Page);
-    fn remove(&mut self, page: &mut Self::Page);
 }
 
 pub trait SlabPage: Sized + 'static {
@@ -98,7 +86,7 @@ where
 
 pub trait SlabPageAlloc {
     type Page: SlabPage;
-    type PageList: SlabPageList<Page = Self::Page>;
+    type PageList: PageList<Page = Self::Page>;
 
     /// Allocate a page suitable for slab system use. The page MUST come with
     /// its allocation count 0 and next free slot None.
@@ -110,7 +98,7 @@ pub trait SlabPageAlloc {
 
 pub(crate) struct SlabList<T>
 where
-    T: SlabPageList,
+    T: PageList,
 {
     empty_list: T,
     partial_list: T,
@@ -132,6 +120,7 @@ unsafe impl<P, const COUNT: usize> Sync for SlabAlloc<P, COUNT> where P: SlabPag
 impl<L, const COUNT: usize> SlabAlloc<L, COUNT>
 where
     L: SlabPageAlloc,
+    L::PageList: PageListSized,
 {
     pub fn new_in(alloc: L) -> Self {
         Self {
@@ -159,17 +148,23 @@ where
 
 impl<T> SlabList<T>
 where
-    T: SlabPageList,
+    T: PageListSized,
 {
-    fn new(object_size: usize) -> Self {
+    const fn new(object_size: usize) -> Self {
         Self {
-            empty_list: T::new(),
-            partial_list: T::new(),
-            full_list: T::new(),
+            empty_list: T::NEW,
+            partial_list: T::NEW,
+            full_list: T::NEW,
             object_size,
         }
     }
+}
 
+impl<T> SlabList<T>
+where
+    T: PageList,
+    T::Page: SlabPage,
+{
     fn alloc_from_partial(&mut self) -> NonNull<u8> {
         let head = self.partial_list.peek_head().unwrap();
         let slot = head.alloc_slot().unwrap();

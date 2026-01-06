@@ -1,14 +1,11 @@
+use eonix_hal::bootstrap::BootStrapData;
+use eonix_hal::mm::{ArchMemory, ArchPagingMode, GLOBAL_PAGE_TABLE};
+use eonix_hal::traits::mm::Memory;
+use eonix_mm::address::{Addr as _, AddrOps as _, VAddr, VRange};
+use eonix_mm::page_table::{PageAttribute, PagingMode as _, PTE};
+use eonix_mm::paging::{Page as GenericPage, PAGE_SIZE, PFN};
+
 use crate::kernel::mem::{GlobalPageAlloc, RawPage};
-use eonix_hal::{
-    bootstrap::BootStrapData,
-    mm::{ArchMemory, ArchPagingMode, GLOBAL_PAGE_TABLE},
-    traits::mm::Memory,
-};
-use eonix_mm::{
-    address::{Addr as _, AddrOps as _, VAddr, VRange},
-    page_table::{PageAttribute, PagingMode as _, PTE},
-    paging::{Page as GenericPage, PAGE_SIZE, PFN},
-};
 
 pub fn setup_memory(data: &mut BootStrapData) {
     let addr_max = ArchMemory::present_ram()
@@ -50,9 +47,10 @@ pub fn setup_memory(data: &mut BootStrapData) {
         );
     }
 
-    for range in ArchMemory::present_ram() {
-        GlobalPageAlloc::mark_present(range);
-    }
+    // TODO!!!: Construct the global zone with all present ram.
+    // for range in ArchMemory::present_ram() {
+    //     GlobalPageAlloc::mark_present(range);
+    // }
 
     if let Some(early_alloc) = data.take_alloc() {
         for range in early_alloc.into_iter() {

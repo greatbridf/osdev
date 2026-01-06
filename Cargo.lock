@@ -70,7 +70,6 @@ name = "buddy_allocator"
 version = "0.1.0"
 dependencies = [
  "eonix_mm",
- "intrusive_list",
 ]
 
 [[package]]

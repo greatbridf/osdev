@@ -1,5 +1,6 @@
-use super::PFN;
 use core::sync::atomic::AtomicUsize;
+
+use super::PFN;
 
 /// A `RawPage` represents a page of memory in the kernel. It is a low-level
 /// representation of a page that is used by the kernel to manage memory.
@@ -7,8 +8,6 @@ use core::sync::atomic::AtomicUsize;
 pub trait RawPage: Clone + Copy + From<PFN> + Into<PFN> {
     fn order(&self) -> u32;
     fn refcount(&self) -> &AtomicUsize;
-
-    fn is_present(&self) -> bool;
 }
 
 #[derive(Clone, Copy)]
@@ -44,9 +43,5 @@ impl RawPage for UnmanagedRawPage {
 
     fn refcount(&self) -> &AtomicUsize {
         &UNMANAGED_RAW_PAGE_CLONE_COUNT
-    }
-
-    fn is_present(&self) -> bool {
-        true
     }
 }

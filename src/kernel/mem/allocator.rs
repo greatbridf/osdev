@@ -5,13 +5,12 @@ use eonix_hal::mm::ArchPhysAccess;
 use eonix_mm::address::PhysAccess;
 use eonix_mm::paging::{PAGE_SIZE_BITS, PFN};
 use eonix_sync::LazyLock;
-use slab_allocator::SlabAllocator;
+use slab_allocator::SlabAlloc;
 
-use super::page_alloc::RawPagePtr;
 use super::{GlobalPageAlloc, Page, PageExt};
 
-static SLAB_ALLOCATOR: LazyLock<SlabAllocator<RawPagePtr, GlobalPageAlloc, 9>> =
-    LazyLock::new(|| SlabAllocator::new_in(GlobalPageAlloc));
+static SLAB_ALLOCATOR: LazyLock<SlabAlloc<GlobalPageAlloc, 9>> =
+    LazyLock::new(|| SlabAlloc::new_in(GlobalPageAlloc));
 
 struct Allocator;
 
@@ -28,23 +27,23 @@ unsafe impl GlobalAlloc for Allocator {
             let ptr = page.get_ptr();
             page.into_raw();
 
-            ptr.as_ptr()
+            ptr
         };
 
-        if result.is_null() {
-            core::ptr::null_mut()
-        } else {
-            result as *mut u8
-        }
+        result.as_ptr()
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
         let size = layout.size().next_power_of_two();
+        let ptr = unsafe {
+            // SAFETY: The memory we've allocated MUST be non-null.
+            NonNull::new_unchecked(ptr)
+        };
 
         if size <= 2048 {
             SLAB_ALLOCATOR.dealloc(ptr, size)
         } else {
-            let paddr = ArchPhysAccess::from_ptr(NonNull::new_unchecked(ptr));
+            let paddr = ArchPhysAccess::from_ptr(ptr);
             let pfn = PFN::from(paddr);
             Page::from_raw(pfn);
         };

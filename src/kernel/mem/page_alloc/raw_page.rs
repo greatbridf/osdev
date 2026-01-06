@@ -1,18 +1,18 @@
 use core::ptr::NonNull;
 use core::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 
-use buddy_allocator::BuddyRawPage;
+use buddy_allocator::BuddyPage;
 use eonix_hal::mm::ArchPhysAccess;
 use eonix_mm::address::{PAddr, PhysAccess as _};
-use eonix_mm::paging::{PageAlloc, RawPage as RawPageTrait, PFN};
+use eonix_mm::paging::{PageAlloc, PageList, PageListSized, RawPage as RawPageTrait, PFN};
 use intrusive_list::{container_of, Link, List};
-use slab_allocator::{SlabPage, SlabPageAlloc, SlabPageList, SlabSlot};
+use slab_allocator::{SlabPage, SlabPageAlloc, SlabSlot};
 
-use super::GlobalPageAlloc;
+use super::{GlobalPageAlloc, PerCpuPage};
 use crate::kernel::mem::page_cache::PageCacheRawPage;
 use crate::kernel::mem::PhysAccess;
 
-const PAGE_ARRAY: NonNull<RawPage> =
+pub const PAGE_ARRAY: NonNull<RawPage> =
     unsafe { NonNull::new_unchecked(0xffffff8040000000 as *mut _) };
 
 pub struct PageFlags(AtomicU32);
@@ -52,21 +52,23 @@ pub struct RawPage {
     /// This field is only used in buddy system and is protected by the global lock.
     order: u32,
     flags: PageFlags,
-    refcount: AtomicUsize,
+    pub refcount: AtomicUsize,
 
     shared_data: PageData,
 }
+
+// XXX: introduce Folio and remove this.
+unsafe impl Send for RawPage {}
+unsafe impl Sync for RawPage {}
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct RawPagePtr(NonNull<RawPage>);
 
 impl PageFlags {
-    pub const PRESENT: u32 = 1 << 0;
     pub const LOCKED: u32 = 1 << 1;
     pub const BUDDY: u32 = 1 << 2;
     pub const SLAB: u32 = 1 << 3;
     pub const DIRTY: u32 = 1 << 4;
-    pub const FREE: u32 = 1 << 5;
     pub const LOCAL: u32 = 1 << 6;
 
     pub fn has(&self, flag: u32) -> bool {
@@ -158,48 +160,31 @@ impl RawPageTrait for RawPagePtr {
     fn refcount(&self) -> &AtomicUsize {
         self.refcount()
     }
-
-    fn is_present(&self) -> bool {
-        self.flags().has(PageFlags::PRESENT)
-    }
 }
 
-impl BuddyRawPage for RawPagePtr {
-    unsafe fn from_link(link: &mut Link) -> Self {
-        let raw_page_ptr = container_of!(link, RawPage, link);
-        Self(raw_page_ptr)
+impl BuddyPage for RawPage {
+    fn pfn(&self) -> PFN {
+        PFN::from(RawPagePtr::from_ref(self))
     }
 
-    fn set_order(&self, order: u32) {
-        self.as_mut().order = order;
-    }
-
-    unsafe fn get_link(&self) -> &mut Link {
-        &mut self.as_mut().link
+    fn get_order(&self) -> u32 {
+        self.order
     }
 
     fn is_buddy(&self) -> bool {
-        self.flags().has(PageFlags::BUDDY)
+        self.flags.has(PageFlags::BUDDY)
     }
 
-    fn is_free(&self) -> bool {
-        self.flags().has(PageFlags::FREE)
+    fn set_order(&mut self, order: u32) {
+        self.order = order;
     }
 
-    fn set_buddy(&self) {
-        self.flags().set(PageFlags::BUDDY);
-    }
-
-    fn set_free(&self) {
-        self.flags().set(PageFlags::FREE);
-    }
-
-    fn clear_buddy(&self) {
-        self.flags().clear(PageFlags::BUDDY);
-    }
-
-    fn clear_free(&self) {
-        self.flags().clear(PageFlags::FREE);
+    fn set_buddy(&mut self, val: bool) {
+        if val {
+            self.flags.set(PageFlags::BUDDY);
+        } else {
+            self.flags.clear(PageFlags::BUDDY)
+        }
     }
 }
 
@@ -284,14 +269,20 @@ impl PageCacheRawPage for RawPagePtr {
     }
 }
 
-pub struct RawSlabPageList(List);
-
-impl SlabPageList for RawSlabPageList {
-    type Page = RawPage;
-
-    fn new() -> Self {
-        Self(List::new())
+impl PerCpuPage for RawPage {
+    fn set_local(&mut self, val: bool) {
+        if val {
+            self.flags.set(PageFlags::LOCAL)
+        } else {
+            self.flags.clear(PageFlags::LOCAL)
+        }
     }
+}
+
+pub struct RawPageList(List);
+
+impl PageList for RawPageList {
+    type Page = RawPage;
 
     fn is_empty(&self) -> bool {
         self.0.is_empty()
@@ -324,9 +315,13 @@ impl SlabPageList for RawSlabPageList {
     }
 }
 
+impl PageListSized for RawPageList {
+    const NEW: Self = RawPageList(List::new());
+}
+
 impl SlabPageAlloc for GlobalPageAlloc {
     type Page = RawPage;
-    type PageList = RawSlabPageList;
+    type PageList = RawPageList;
 
     unsafe fn alloc_uninit(&self) -> &'static mut RawPage {
         let raw_page = self.alloc().expect("Out of memory").as_mut();

@@ -1,9 +1,13 @@
+mod list;
 mod page;
 mod page_alloc;
 mod pfn;
 mod raw_page;
+mod zone;
 
+pub use list::{PageList, PageListSized};
 pub use page::{Page, PageAccess, PageBlock, PAGE_SIZE, PAGE_SIZE_BITS};
 pub use page_alloc::{GlobalPageAlloc, NoAlloc, PageAlloc};
 pub use pfn::PFN;
 pub use raw_page::{RawPage, UnmanagedRawPage};
+pub use zone::Zone;

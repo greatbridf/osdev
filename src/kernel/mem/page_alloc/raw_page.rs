@@ -1,65 +1,46 @@
+use core::ptr::NonNull;
+use core::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
+
+use buddy_allocator::BuddyRawPage;
+use eonix_hal::mm::ArchPhysAccess;
+use eonix_mm::address::{PAddr, PhysAccess as _};
+use eonix_mm::paging::{PageAlloc, RawPage as RawPageTrait, PFN};
+use intrusive_list::{container_of, Link, List};
+use slab_allocator::{SlabPage, SlabPageAlloc, SlabPageList, SlabSlot};
+
+use super::GlobalPageAlloc;
 use crate::kernel::mem::page_cache::PageCacheRawPage;
 use crate::kernel::mem::PhysAccess;
-use buddy_allocator::BuddyRawPage;
-use core::{
-    ptr::NonNull,
-    sync::atomic::{AtomicU32, AtomicUsize, Ordering},
-};
-use eonix_hal::mm::ArchPhysAccess;
-use eonix_mm::{
-    address::{PAddr, PhysAccess as _},
-    paging::{RawPage as RawPageTrait, PFN},
-};
-use intrusive_list::{container_of, Link};
-use slab_allocator::SlabRawPage;
 
 const PAGE_ARRAY: NonNull<RawPage> =
     unsafe { NonNull::new_unchecked(0xffffff8040000000 as *mut _) };
 
 pub struct PageFlags(AtomicU32);
 
-struct SlabPageInner {
-    allocated_count: u32,
-    free_next: Option<NonNull<usize>>,
+#[derive(Clone, Copy)]
+struct SlabPageData {
+    allocated_count: usize,
+    free_next: Option<NonNull<SlabSlot>>,
 }
 
-impl SlabPageInner {
-    fn new(free_next: Option<NonNull<usize>>) -> Self {
+impl SlabPageData {
+    const fn new() -> Self {
         Self {
             allocated_count: 0,
-            free_next,
+            free_next: None,
         }
     }
 }
 
-struct PageCacheInner {
+#[derive(Clone, Copy)]
+struct PageCacheData {
     valid_size: usize,
 }
 
-pub struct BuddyPageInner {}
-
-enum PageType {
-    Buddy(BuddyPageInner),
-    Slab(SlabPageInner),
-    PageCache(PageCacheInner),
-}
-
-impl PageType {
-    fn slab_data(&mut self) -> &mut SlabPageInner {
-        if let PageType::Slab(slab_data) = self {
-            return slab_data;
-        } else {
-            unreachable!()
-        }
-    }
-
-    fn page_cache_data(&mut self) -> &mut PageCacheInner {
-        if let PageType::PageCache(cache_data) = self {
-            return cache_data;
-        } else {
-            unreachable!()
-        }
-    }
+#[repr(C)]
+union PageData {
+    slab: SlabPageData,
+    page_cache: PageCacheData,
 }
 
 pub struct RawPage {
@@ -73,7 +54,7 @@ pub struct RawPage {
     flags: PageFlags,
     refcount: AtomicUsize,
 
-    shared_data: PageType,
+    shared_data: PageData,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -109,6 +90,13 @@ impl PageFlags {
 }
 
 impl RawPagePtr {
+    pub const fn from_ref(raw_page_ref: &RawPage) -> Self {
+        Self::new(unsafe {
+            // SAFETY: Rust references always points to non-null addresses.
+            NonNull::new_unchecked(&raw const *raw_page_ref as *mut _)
+        })
+    }
+
     pub const fn new(ptr: NonNull<RawPage>) -> Self {
         Self(ptr)
     }
@@ -215,50 +203,68 @@ impl BuddyRawPage for RawPagePtr {
     }
 }
 
-impl SlabRawPage for RawPagePtr {
-    unsafe fn from_link(link: &mut Link) -> Self {
-        let raw_page_ptr = container_of!(link, RawPage, link);
-        Self(raw_page_ptr)
+impl SlabPage for RawPage {
+    fn get_data_ptr(&self) -> NonNull<[u8]> {
+        let raw_page_ptr = RawPagePtr::from_ref(self);
+        let paddr_start = PAddr::from(PFN::from(raw_page_ptr));
+        let page_data_ptr = unsafe { paddr_start.as_ptr() };
+
+        NonNull::slice_from_raw_parts(page_data_ptr, 1 << (self.order + 12))
     }
 
-    unsafe fn get_link(&self) -> &mut Link {
-        &mut self.as_mut().link
-    }
-
-    fn in_which(ptr: *mut u8) -> RawPagePtr {
+    fn get_free_slot(&self) -> Option<NonNull<SlabSlot>> {
         unsafe {
-            // SAFETY: The pointer is allocated from the slab allocator,
-            //         which can't be null.
-            let ptr = NonNull::new_unchecked(ptr);
-
-            // SAFETY: The pointer is valid.
-            let paddr = ArchPhysAccess::from_ptr(ptr);
-            let pfn = PFN::from(paddr);
-
-            RawPagePtr::from(pfn)
+            // SAFETY: TODO
+            self.shared_data.slab.free_next
         }
     }
 
-    fn allocated_count(&self) -> &mut u32 {
-        &mut self.as_mut().shared_data.slab_data().allocated_count
+    fn set_free_slot(&mut self, next: Option<NonNull<SlabSlot>>) {
+        self.shared_data.slab.free_next = next;
     }
 
-    fn next_free(&self) -> &mut Option<NonNull<usize>> {
-        &mut self.as_mut().shared_data.slab_data().free_next
+    fn get_alloc_count(&self) -> usize {
+        unsafe {
+            // SAFETY: TODO
+            self.shared_data.slab.allocated_count
+        }
     }
 
-    fn real_page_ptr(&self) -> *mut u8 {
-        self.real_ptr().as_ptr()
+    fn inc_alloc_count(&mut self) -> usize {
+        unsafe {
+            // SAFETY: TODO
+            self.shared_data.slab.allocated_count += 1;
+
+            self.shared_data.slab.allocated_count
+        }
     }
 
-    fn slab_init(&self, first_free: Option<NonNull<usize>>) {
-        self.as_mut().shared_data = PageType::Slab(SlabPageInner::new(first_free));
+    fn dec_alloc_count(&mut self) -> usize {
+        unsafe {
+            // SAFETY: TODO
+            self.shared_data.slab.allocated_count -= 1;
+
+            self.shared_data.slab.allocated_count
+        }
+    }
+
+    unsafe fn from_allocated(ptr: NonNull<u8>) -> &'static mut Self {
+        unsafe {
+            // SAFETY: The caller ensures that `ptr` is valid.
+            let paddr = ArchPhysAccess::from_ptr(ptr);
+            let pfn = PFN::from(paddr);
+
+            RawPagePtr::from(pfn).as_mut()
+        }
     }
 }
 
 impl PageCacheRawPage for RawPagePtr {
     fn valid_size(&self) -> &mut usize {
-        &mut self.as_mut().shared_data.page_cache_data().valid_size
+        unsafe {
+            // SAFETY: The caller ensures that the page is in some page cache.
+            &mut self.as_mut().shared_data.page_cache.valid_size
+        }
     }
 
     fn is_dirty(&self) -> bool {
@@ -274,6 +280,59 @@ impl PageCacheRawPage for RawPagePtr {
     }
 
     fn cache_init(&self) {
-        self.as_mut().shared_data = PageType::PageCache(PageCacheInner { valid_size: 0 });
+        self.as_mut().shared_data.page_cache = PageCacheData { valid_size: 0 };
+    }
+}
+
+pub struct RawSlabPageList(List);
+
+impl SlabPageList for RawSlabPageList {
+    type Page = RawPage;
+
+    fn new() -> Self {
+        Self(List::new())
+    }
+
+    fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    fn peek_head(&mut self) -> Option<&mut Self::Page> {
+        unsafe {
+            let link = self.0.head()?;
+            let mut raw_page_ptr = container_of!(link, RawPage, link);
+
+            Some(raw_page_ptr.as_mut())
+        }
+    }
+
+    fn pop_head(&mut self) -> Option<&'static mut Self::Page> {
+        unsafe {
+            let link = self.0.pop()?;
+            let mut raw_page_ptr = container_of!(link, RawPage, link);
+
+            Some(raw_page_ptr.as_mut())
+        }
+    }
+
+    fn push_tail(&mut self, page: &'static mut Self::Page) {
+        self.0.insert(&mut page.link);
+    }
+
+    fn remove(&mut self, page: &mut Self::Page) {
+        self.0.remove(&mut page.link)
+    }
+}
+
+impl SlabPageAlloc for GlobalPageAlloc {
+    type Page = RawPage;
+    type PageList = RawSlabPageList;
+
+    unsafe fn alloc_uninit(&self) -> &'static mut RawPage {
+        let raw_page = self.alloc().expect("Out of memory").as_mut();
+        raw_page.flags.set(PageFlags::SLAB);
+        raw_page.shared_data.slab = SlabPageData::new();
+
+        raw_page
     }
 }

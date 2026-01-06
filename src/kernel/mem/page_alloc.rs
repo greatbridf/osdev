@@ -1,15 +1,13 @@
 mod raw_page;
 
-use buddy_allocator::{BuddyAllocator, BuddyRawPage as _};
 use core::sync::atomic::Ordering;
-use eonix_mm::{
-    address::{AddrOps as _, PRange},
-    paging::{GlobalPageAlloc as GlobalPageAllocTrait, PageAlloc, PFN},
-};
+
+use buddy_allocator::{BuddyAllocator, BuddyRawPage as _};
+use eonix_mm::address::{AddrOps as _, PRange};
+use eonix_mm::paging::{GlobalPageAlloc as GlobalPageAllocTrait, PageAlloc, PFN};
 use eonix_sync::{NoContext, Spin};
 use intrusive_list::List;
 use raw_page::PageFlags;
-
 pub use raw_page::{RawPage, RawPagePtr};
 
 const COSTLY_ORDER: u32 = 3;

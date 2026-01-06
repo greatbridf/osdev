@@ -518,7 +518,6 @@ version = "0.1.0"
 dependencies = [
  "eonix_mm",
  "eonix_sync",
- "intrusive_list",
 ]
 
 [[package]]

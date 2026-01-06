@@ -25,6 +25,8 @@ impl List {
     }
 
     pub fn insert(&mut self, node: &mut Link) {
+        // TODO: `node` above should be of 'static.
+
         self.head.insert(node);
         self.count += 1;
     }

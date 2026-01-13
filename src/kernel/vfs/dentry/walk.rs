@@ -1,33 +1,23 @@
-use core::{
-    future::Future,
-    hash::{BuildHasher, BuildHasherDefault, Hasher},
-    ops::Deref,
-    pin::Pin,
-};
+use alloc::boxed::Box;
+use alloc::sync::Arc;
+use core::future::Future;
+use core::hash::{BuildHasher, BuildHasherDefault, Hasher};
+use core::ops::Deref;
+use core::pin::Pin;
 
-use alloc::{boxed::Box, sync::Arc};
 use arcref::{ArcRef, AsArcRef};
 use posix_types::result::PosixError;
 
-use crate::{
-    hash::KernelHasher,
-    io::ByteBuffer,
-    kernel::{
-        constants::ELOOP,
-        vfs::{
-            inode::{Inode, InodeUse},
-            FsContext,
-        },
-    },
-    path::{Path, PathComponent, PathIterator},
-    prelude::KResult,
-    rcu::{rcu_read_lock, RCUReadLock},
-};
-
-use super::{
-    dcache::{self, DCacheItem},
-    Dentry, DentryKind,
-};
+use super::dcache::{self, DCacheItem};
+use super::{Dentry, DentryKind};
+use crate::hash::KernelHasher;
+use crate::io::ByteBuffer;
+use crate::kernel::constants::ELOOP;
+use crate::kernel::vfs::inode::InodeUse;
+use crate::kernel::vfs::FsContext;
+use crate::path::{Path, PathComponent, PathIterator};
+use crate::prelude::KResult;
+use crate::rcu::{rcu_read_lock, RCUReadLock};
 
 struct DentryFind<'a, 'b> {
     parent: &'a Dentry,
@@ -40,7 +30,7 @@ pub enum WalkResultRcu<'rcu, 'path> {
     Ok(ArcRef<'rcu, Dentry>),
     Symlink {
         symlink: ArcRef<'rcu, Dentry>,
-        inode: InodeUse<dyn Inode>,
+        inode: InodeUse,
     },
     Miss {
         parent: ArcRef<'rcu, Dentry>,
@@ -53,7 +43,7 @@ pub enum WalkResult {
     Ok(Arc<Dentry>),
     Symlink {
         symlink: Arc<Dentry>,
-        inode: InodeUse<dyn Inode>,
+        inode: InodeUse,
     },
 }
 
@@ -270,7 +260,7 @@ impl FsContext {
     pub async fn follow_symlink(
         &self,
         symlink: ArcRef<'_, Dentry>,
-        inode: &InodeUse<dyn Inode>,
+        inode: &InodeUse,
         nr_follows: u32,
     ) -> KResult<Arc<Dentry>> {
         let mut target = [0; 256];
@@ -288,7 +278,7 @@ impl FsContext {
     fn follow_symlink_boxed<'r, 'a: 'r, 'b: 'r, 'c: 'r>(
         &'a self,
         symlink: ArcRef<'b, Dentry>,
-        inode: &'c InodeUse<dyn Inode>,
+        inode: &'c InodeUse,
         nr_follows: u32,
     ) -> Pin<Box<dyn Future<Output = KResult<Arc<Dentry>>> + Send + 'r>> {
         Box::pin(self.follow_symlink(symlink, inode, nr_follows))

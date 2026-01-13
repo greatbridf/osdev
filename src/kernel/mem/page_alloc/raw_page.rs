@@ -32,15 +32,9 @@ impl SlabPageData {
     }
 }
 
-#[derive(Clone, Copy)]
-struct PageCacheData {
-    valid_size: usize,
-}
-
 #[repr(C)]
 union PageData {
     slab: SlabPageData,
-    page_cache: PageCacheData,
 }
 
 pub struct RawPage {
@@ -245,27 +239,16 @@ impl SlabPage for RawPage {
 }
 
 impl PageCacheRawPage for RawPagePtr {
-    fn valid_size(&self) -> &mut usize {
-        unsafe {
-            // SAFETY: The caller ensures that the page is in some page cache.
-            &mut self.as_mut().shared_data.page_cache.valid_size
-        }
-    }
-
     fn is_dirty(&self) -> bool {
         self.flags().has(PageFlags::DIRTY)
     }
 
-    fn clear_dirty(&self) {
-        self.flags().clear(PageFlags::DIRTY);
-    }
-
-    fn set_dirty(&self) {
-        self.flags().set(PageFlags::DIRTY);
-    }
-
-    fn cache_init(&self) {
-        self.as_mut().shared_data.page_cache = PageCacheData { valid_size: 0 };
+    fn set_dirty(&self, dirty: bool) {
+        if dirty {
+            self.flags().set(PageFlags::DIRTY);
+        } else {
+            self.flags().clear(PageFlags::DIRTY);
+        }
     }
 }
 

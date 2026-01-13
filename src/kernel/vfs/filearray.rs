@@ -1,27 +1,22 @@
-use super::{
-    file::{File, InodeFile, Pipe},
-    types::{Format, Permission},
-    Spin, TerminalFile,
-};
-use crate::kernel::{
-    constants::{
-        EBADF, EISDIR, ENOTDIR, F_DUPFD, F_DUPFD_CLOEXEC, F_GETFD, F_GETFL, F_SETFD, F_SETFL,
-    },
-    syscall::{FromSyscallArg, SyscallRetVal},
-};
-use crate::{
-    kernel::{console::get_console, constants::ENXIO, vfs::dentry::Dentry, CharDevice},
-    prelude::*,
-};
 use alloc::sync::Arc;
-use intrusive_collections::{
-    intrusive_adapter, rbtree::Entry, Bound, KeyAdapter, RBTree, RBTreeAtomicLink,
-};
-use itertools::{
-    FoldWhile::{Continue, Done},
-    Itertools,
-};
+
+use intrusive_collections::rbtree::Entry;
+use intrusive_collections::{intrusive_adapter, Bound, KeyAdapter, RBTree, RBTreeAtomicLink};
+use itertools::FoldWhile::{Continue, Done};
+use itertools::Itertools;
 use posix_types::open::{FDFlags, OpenFlags};
+
+use super::file::{File, InodeFile, Pipe};
+use super::types::{Format, Permission};
+use super::{Spin, TerminalFile};
+use crate::kernel::console::get_console;
+use crate::kernel::constants::{
+    EBADF, EISDIR, ENOTDIR, ENXIO, F_DUPFD, F_DUPFD_CLOEXEC, F_GETFD, F_GETFL, F_SETFD, F_SETFL,
+};
+use crate::kernel::syscall::{FromSyscallArg, SyscallRetVal};
+use crate::kernel::vfs::dentry::Dentry;
+use crate::kernel::CharDevice;
+use crate::prelude::*;
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct FD(u32);
@@ -291,20 +286,19 @@ impl FileArray {
         let fdflag = flags.as_fd_flags();
 
         let inode = dentry.get_inode()?;
-        let file_format = inode.format();
 
-        match (flags.directory(), file_format, flags.write()) {
+        match (flags.directory(), inode.format, flags.write()) {
             (true, Format::DIR, _) => {}
             (true, _, _) => return Err(ENOTDIR),
             (false, Format::DIR, true) => return Err(EISDIR),
             _ => {}
         }
 
-        if flags.truncate() && flags.write() && file_format == Format::REG {
+        if flags.truncate() && flags.write() && inode.format == Format::REG {
             inode.truncate(0).await?;
         }
 
-        let file = if file_format == Format::CHR {
+        let file = if inode.format == Format::CHR {
             let device = CharDevice::get(inode.devid()?).ok_or(ENXIO)?;
             device.open(flags)?
         } else {

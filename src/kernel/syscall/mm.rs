@@ -1,19 +1,14 @@
-use super::FromSyscallArg;
-use crate::kernel::constants::{EBADF, EINVAL};
-use crate::kernel::mem::FileMapping;
-use crate::kernel::task::Thread;
-use crate::kernel::vfs::filearray::FD;
-use crate::{
-    kernel::{
-        constants::{UserMmapFlags, UserMmapProtocol},
-        mem::{Mapping, Permission},
-    },
-    prelude::*,
-};
 use align_ext::AlignExt;
 use eonix_mm::address::{Addr as _, AddrOps as _, VAddr};
 use eonix_mm::paging::PAGE_SIZE;
 use posix_types::syscall_no::*;
+
+use super::FromSyscallArg;
+use crate::kernel::constants::{UserMmapFlags, UserMmapProtocol, EBADF, EINVAL};
+use crate::kernel::mem::{FileMapping, Mapping, Permission};
+use crate::kernel::task::Thread;
+use crate::kernel::vfs::filearray::FD;
+use crate::prelude::*;
 
 impl FromSyscallArg for UserMmapProtocol {
     fn from_arg(value: usize) -> UserMmapProtocol {
@@ -74,7 +69,7 @@ async fn do_mmap2(
             .get_inode()?
             .ok_or(EBADF)?;
 
-        Mapping::File(FileMapping::new(file, pgoffset, len))
+        Mapping::File(FileMapping::new(file.get_page_cache(), pgoffset, len))
     };
 
     let permission = Permission {

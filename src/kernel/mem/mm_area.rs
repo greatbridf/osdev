@@ -4,12 +4,12 @@ use core::cmp;
 
 use eonix_mm::address::{AddrOps as _, VAddr, VRange};
 use eonix_mm::page_table::{PageAttribute, RawAttribute, PTE};
-use eonix_mm::paging::{PAGE_SIZE, PFN};
+use eonix_mm::paging::PFN;
 
 use super::mm_list::EMPTY_PAGE;
 use super::{Mapping, Page, Permission};
-use crate::kernel::constants::EINVAL;
-use crate::kernel::mem::{PageExcl, PageExt};
+use crate::kernel::mem::page_cache::PageOffset;
+use crate::kernel::mem::{CachePage, PageExcl, PageExt};
 use crate::prelude::KResult;
 
 #[derive(Debug)]
@@ -141,59 +141,48 @@ impl MMArea {
 
         assert!(offset < file_mapping.length, "Offset out of range");
 
-        let Some(page_cache) = file_mapping.file.page_cache() else {
-            panic!("Mapping file should have pagecache");
+        let file_offset = file_mapping.offset + offset;
+
+        let map_page = |page: &Page, cache_page: &CachePage| {
+            if !self.permission.write {
+                assert!(!write, "Write fault on read-only mapping");
+
+                *pfn = page.clone().into_raw();
+                return;
+            }
+
+            if self.is_shared {
+                // We don't process dirty flags in write faults.
+                // Simply assume that page will eventually be dirtied.
+                // So here we can set the dirty flag now.
+                cache_page.set_dirty(true);
+                attr.insert(PageAttribute::WRITE);
+                *pfn = page.clone().into_raw();
+                return;
+            }
+
+            if !write {
+                // Delay the copy-on-write until write fault happens.
+                attr.insert(PageAttribute::COPY_ON_WRITE);
+                *pfn = page.clone().into_raw();
+                return;
+            }
+
+            // XXX: Change this. Let's handle mapped pages before CoW pages.
+            // Nah, we are writing to a mapped private mapping...
+            let mut new_page = PageExcl::zeroed();
+            new_page
+                .as_bytes_mut()
+                .copy_from_slice(page.lock().as_bytes());
+
+            attr.insert(PageAttribute::WRITE);
+            *pfn = new_page.into_page().into_raw();
         };
 
-        let file_offset = file_mapping.offset + offset;
-        let cnt_to_read = (file_mapping.length - offset).min(0x1000);
-
-        page_cache
-            .with_page(file_offset, |page, cache_page| {
-                // Non-write faults: we find page in pagecache and do mapping
-                // Write fault: we need to care about shared or private mapping.
-                if !write {
-                    // Bss is embarrassing in pagecache!
-                    // We have to assume cnt_to_read < PAGE_SIZE all bss
-                    if cnt_to_read < PAGE_SIZE {
-                        let mut new_page = PageExcl::zeroed();
-
-                        new_page.as_bytes_mut()[..cnt_to_read]
-                            .copy_from_slice(&page.lock().as_bytes()[..cnt_to_read]);
-
-                        *pfn = new_page.into_page().into_raw();
-                    } else {
-                        *pfn = page.clone().into_raw();
-                    }
-
-                    if self.permission.write {
-                        if self.is_shared {
-                            // The page may will not be written,
-                            // But we simply assume page will be dirty
-                            cache_page.set_dirty();
-                            attr.insert(PageAttribute::WRITE);
-                        } else {
-                            attr.insert(PageAttribute::COPY_ON_WRITE);
-                        }
-                    }
-                } else {
-                    if self.is_shared {
-                        cache_page.set_dirty();
-                        *pfn = page.clone().into_raw();
-                    } else {
-                        let mut new_page = PageExcl::zeroed();
-
-                        new_page.as_bytes_mut()[..cnt_to_read]
-                            .copy_from_slice(&page.lock().as_bytes()[..cnt_to_read]);
-
-                        *pfn = new_page.into_page().into_raw();
-                    }
-
-                    attr.insert(PageAttribute::WRITE);
-                }
-            })
-            .await?
-            .ok_or(EINVAL)?;
+        file_mapping
+            .page_cache
+            .with_page(PageOffset::from_byte_floor(file_offset), map_page)
+            .await?;
 
         attr.insert(PageAttribute::PRESENT);
         attr.remove(PageAttribute::MAPPED);

@@ -4,9 +4,9 @@ mod zones;
 use core::sync::atomic::Ordering;
 
 use buddy_allocator::BuddyAllocator;
-use eonix_mm::address::{AddrOps as _, PRange};
+use eonix_mm::address::PRange;
 use eonix_mm::paging::{
-    GlobalPageAlloc as GlobalPageAllocTrait, PageAlloc, PageList, PageListSized as _, PFN,
+    GlobalPageAlloc as GlobalPageAllocTrait, PageAlloc, PageList, PageListSized as _,
 };
 use eonix_preempt::PreemptGuard;
 use eonix_sync::{NoContext, Spin};

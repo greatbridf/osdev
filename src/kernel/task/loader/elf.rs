@@ -1,27 +1,22 @@
-use super::{LoadInfo, ELF_MAGIC};
-use crate::io::UninitBuffer;
-use crate::kernel::task::loader::aux_vec::{AuxKey, AuxVec};
-use crate::path::Path;
-use crate::{
-    io::ByteBuffer,
-    kernel::{
-        constants::ENOEXEC,
-        mem::{FileMapping, MMList, Mapping, Permission},
-        vfs::{dentry::Dentry, FsContext},
-    },
-    prelude::*,
-};
-use align_ext::AlignExt;
+use alloc::ffi::CString;
+use alloc::sync::Arc;
 use alloc::vec::Vec;
-use alloc::{ffi::CString, sync::Arc};
-use eonix_mm::{
-    address::{Addr, AddrOps as _, VAddr},
-    paging::PAGE_SIZE,
-};
-use xmas_elf::{
-    header::{self, Class, HeaderPt1, Machine_},
-    program::{self, ProgramHeader32, ProgramHeader64},
-};
+
+use align_ext::AlignExt;
+use eonix_mm::address::{Addr, AddrOps as _, VAddr};
+use eonix_mm::paging::PAGE_SIZE;
+use xmas_elf::header::{self, Class, HeaderPt1, Machine_};
+use xmas_elf::program::{self, ProgramHeader32, ProgramHeader64};
+
+use super::{LoadInfo, ELF_MAGIC};
+use crate::io::{ByteBuffer, UninitBuffer};
+use crate::kernel::constants::ENOEXEC;
+use crate::kernel::mem::{FileMapping, MMList, Mapping, Permission};
+use crate::kernel::task::loader::aux_vec::{AuxKey, AuxVec};
+use crate::kernel::vfs::dentry::Dentry;
+use crate::kernel::vfs::FsContext;
+use crate::path::Path;
+use crate::prelude::*;
 
 const INIT_STACK_SIZE: usize = 0x80_0000;
 
@@ -366,7 +361,7 @@ impl<E: ElfArch> Elf<E> {
                     vmap_start,
                     file_len,
                     Mapping::File(FileMapping::new(
-                        self.file.get_inode()?,
+                        self.file.get_inode()?.get_page_cache(),
                         file_offset,
                         real_file_length,
                     )),
@@ -376,16 +371,27 @@ impl<E: ElfArch> Elf<E> {
                 .await?;
         }
 
-        if vmem_len > file_len {
-            mm_list
-                .mmap_fixed(
-                    vmap_start + file_len,
-                    vmem_len - file_len,
-                    Mapping::Anonymous,
-                    permission,
-                    false,
-                )
-                .await?;
+        if vmem_vaddr_end > load_vaddr_end {
+            if load_vaddr_end.page_offset() != 0 {
+                let mut zero_len = PAGE_SIZE - load_vaddr_end.page_offset();
+                zero_len = zero_len.min(vmem_vaddr_end - load_vaddr_end);
+
+                mm_list
+                    .access_mut(load_vaddr_end, zero_len, |_, data| data.fill(0))
+                    .await?;
+            }
+
+            if vmem_len - file_len > 0 {
+                mm_list
+                    .mmap_fixed(
+                        vmap_start + file_len,
+                        vmem_len - file_len,
+                        Mapping::Anonymous,
+                        permission,
+                        false,
+                    )
+                    .await?;
+            }
         }
 
         Ok(vmap_start + vmem_len)

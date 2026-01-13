@@ -1,35 +1,31 @@
 pub mod dcache;
 mod walk;
 
-use core::{
-    cell::UnsafeCell,
-    fmt,
-    hash::{BuildHasher, BuildHasherDefault, Hasher},
-    sync::atomic::{AtomicPtr, AtomicU64, AtomicU8, Ordering},
-};
-
 use alloc::sync::Arc;
+use core::cell::UnsafeCell;
+use core::fmt;
+use core::hash::{BuildHasher, BuildHasherDefault, Hasher};
+use core::sync::atomic::{AtomicPtr, AtomicU64, AtomicU8, Ordering};
+
 use arcref::AsArcRef;
 use eonix_sync::LazyLock;
 use pointers::BorrowedArc;
-use posix_types::{namei::RenameFlags, open::OpenFlags, result::PosixError, stat::StatX};
+use posix_types::namei::RenameFlags;
+use posix_types::open::OpenFlags;
+use posix_types::result::PosixError;
+use posix_types::stat::StatX;
 
-use crate::{
-    hash::KernelHasher,
-    io::Buffer,
-    io::Stream,
-    kernel::constants::{EEXIST, EINVAL, EISDIR, ELOOP, ENOENT, EPERM, ERANGE},
-    kernel::{block::BlockDevice, CharDevice},
-    path::Path,
-    prelude::*,
-    rcu::{rcu_read_lock, RCUNode, RCUPointer, RCUReadGuard},
-};
-
-use super::{
-    inode::{Ino, Inode, InodeUse, RenameData, WriteOffset},
-    types::{DeviceId, Format, Mode, Permission},
-    FsContext,
-};
+use super::inode::{Ino, InodeUse, RenameData, WriteOffset};
+use super::types::{DeviceId, Format, Mode, Permission};
+use super::FsContext;
+use crate::hash::KernelHasher;
+use crate::io::{Buffer, Stream};
+use crate::kernel::block::BlockDevice;
+use crate::kernel::constants::{EEXIST, EINVAL, EISDIR, ELOOP, ENOENT, EPERM, ERANGE};
+use crate::kernel::CharDevice;
+use crate::path::Path;
+use crate::prelude::*;
+use crate::rcu::{rcu_read_lock, RCUNode, RCUPointer, RCUReadGuard};
 
 const D_INVALID: u8 = 0;
 const D_REGULAR: u8 = 1;
@@ -56,7 +52,7 @@ enum DentryKind {
 /// [lookup()]: crate::kernel::vfs::inode::InodeDirOps::lookup
 struct AssociatedInode {
     kind: UnsafeCell<Option<DentryKind>>,
-    inode: UnsafeCell<Option<InodeUse<dyn Inode>>>,
+    inode: UnsafeCell<Option<InodeUse>>,
 }
 
 /// # Safety
@@ -181,15 +177,15 @@ impl Dentry {
             .map_or(core::ptr::null(), |parent| Arc::as_ptr(&parent))
     }
 
-    pub fn fill(&self, file: InodeUse<dyn Inode>) {
+    pub fn fill(&self, file: InodeUse) {
         self.inode.store(file);
     }
 
-    pub fn inode(&self) -> Option<InodeUse<dyn Inode>> {
+    pub fn inode(&self) -> Option<InodeUse> {
         self.inode.load().map(|(_, inode)| inode.clone())
     }
 
-    pub fn get_inode(&self) -> KResult<InodeUse<dyn Inode>> {
+    pub fn get_inode(&self) -> KResult<InodeUse> {
         self.inode().ok_or(ENOENT)
     }
 
@@ -291,7 +287,7 @@ impl Dentry {
         let inode = self.get_inode()?;
 
         // Safety: Changing mode alone will have no effect on the file's contents
-        match inode.format() {
+        match inode.format {
             Format::DIR => Err(EISDIR),
             Format::REG => inode.read(buffer, offset).await,
             Format::BLK => {
@@ -309,7 +305,7 @@ impl Dentry {
     pub async fn write(&self, stream: &mut dyn Stream, offset: WriteOffset<'_>) -> KResult<usize> {
         let inode = self.get_inode()?;
         // Safety: Changing mode alone will have no effect on the file's contents
-        match inode.format() {
+        match inode.format {
             Format::DIR => Err(EISDIR),
             Format::REG => inode.write(stream, offset).await,
             Format::BLK => Err(EINVAL), // TODO
@@ -375,7 +371,7 @@ impl Dentry {
     }
 
     pub async fn chmod(&self, mode: Mode) -> KResult<()> {
-        self.get_inode()?.chmod(mode).await
+        self.get_inode()?.chmod(mode.perm()).await
     }
 
     pub async fn chown(&self, uid: u32, gid: u32) -> KResult<()> {
@@ -438,8 +434,8 @@ impl AssociatedInode {
         }
     }
 
-    fn store(&self, inode: InodeUse<dyn Inode>) {
-        let kind = match inode.format() {
+    fn store(&self, inode: InodeUse) {
+        let kind = match inode.format {
             Format::REG | Format::BLK | Format::CHR => DentryKind::Regular,
             Format::DIR => DentryKind::Directory,
             Format::LNK => DentryKind::Symlink,
@@ -463,7 +459,7 @@ impl AssociatedInode {
         DentryKind::atomic_acq(&self.kind)
     }
 
-    fn load(&self) -> Option<(DentryKind, &InodeUse<dyn Inode>)> {
+    fn load(&self) -> Option<(DentryKind, &InodeUse)> {
         self.kind().map(|kind| unsafe {
             let inode = (&*self.inode.get())
                 .as_ref()

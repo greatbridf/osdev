@@ -1,52 +1,149 @@
 use alloc::boxed::Box;
-use core::{
-    any::Any,
-    future::Future,
-    marker::Unsize,
-    ops::{CoerceUnsized, Deref},
-    pin::Pin,
-};
-use eonix_sync::Spin;
-
+use alloc::collections::btree_map::BTreeMap;
 use alloc::sync::{Arc, Weak};
-use async_trait::async_trait;
+use core::any::Any;
+use core::future::Future;
+use core::ops::Deref;
 
-use crate::{
-    io::{Buffer, Stream},
-    kernel::{
-        constants::{EINVAL, EPERM},
-        mem::PageCache,
-        timer::Instant,
-        vfs::{
-            dentry::Dentry,
-            types::{DeviceId, Format, Mode, Permission},
-            SbRef, SbUse, SuperBlock,
-        },
-    },
-    prelude::KResult,
-};
+use async_trait::async_trait;
+use eonix_sync::{RwLock, Spin};
 
 use super::{Ino, RenameData, WriteOffset};
+use crate::io::{Buffer, Stream};
+use crate::kernel::constants::{EINVAL, EPERM};
+use crate::kernel::mem::{CachePage, PageCache, PageOffset};
+use crate::kernel::timer::Instant;
+use crate::kernel::vfs::dentry::Dentry;
+use crate::kernel::vfs::types::{DeviceId, Format, Mode, Permission};
+use crate::kernel::vfs::{SbRef, SbUse, SuperBlock};
+use crate::prelude::KResult;
 
-pub trait InodeOps: Sized + Send + Sync + 'static {
-    type SuperBlock: SuperBlock + Sized;
-
-    fn ino(&self) -> Ino;
-    fn format(&self) -> Format;
-    fn info(&self) -> &Spin<InodeInfo>;
-
-    fn super_block(&self) -> &SbRef<Self::SuperBlock>;
-
-    fn page_cache(&self) -> Option<&PageCache>;
+pub struct Inode {
+    pub ino: Ino,
+    pub format: Format,
+    pub info: Spin<InodeInfo>,
+    pub rwsem: RwLock<()>,
+    page_cache: Spin<Weak<PageCache>>,
+    sb: SbRef<dyn SuperBlock>,
+    ops: Box<dyn InodeOpsErased>,
 }
 
-#[allow(unused_variables)]
-pub trait InodeDirOps: InodeOps {
-    fn lookup(
-        &self,
-        dentry: &Arc<Dentry>,
-    ) -> impl Future<Output = KResult<Option<InodeUse<dyn Inode>>>> + Send {
-        async { Err(EPERM) }
+macro_rules! return_type {
+    ($type:ty) => {
+        $type
+    };
+    () => {
+        ()
+    };
+}
+
+macro_rules! define_inode_ops {
+    {
+        $(
+            $(#[$attr:meta])*
+            async fn $method:ident $(<$($lt:lifetime),+>)? (&self $(,)? $($name:ident : $type:ty $(,)?)*) $(-> $ret:ty)?
+                $body:block
+        )*
+
+        ---
+
+        $(
+            $(#[$attr1:meta])*
+            fn $method1:ident $(<$($lt1:lifetime),+>)? (&self $(,)? $($name1:ident : $type1:ty $(,)?)*) $(-> $ret1:ty)?
+                $body1:block
+        )*
+    } => {
+        #[allow(unused_variables)]
+        pub trait InodeOps: Sized + Send + Sync + 'static {
+            type SuperBlock: SuperBlock + Sized;
+
+            $(
+                $(#[$attr])*
+                fn $method $(<$($lt),+>)? (
+                &self,
+                sb: SbUse<Self::SuperBlock>,
+                inode: &InodeUse,
+                $($name : $type),*
+            ) -> impl Future<Output = return_type!($($ret)?)> + Send {
+                async { $body }
+            })*
+
+            $(
+                $(#[$attr1])*
+                fn $method1 $(<$($lt1),+>)? (
+                &self,
+                sb: SbUse<Self::SuperBlock>,
+                inode: &InodeUse,
+                $($name1 : $type1),*
+            ) -> return_type!($($ret1)?) {
+                $body1
+            })*
+        }
+
+        #[async_trait]
+        trait InodeOpsErased: Any + Send + Sync + 'static {
+            $(async fn $method $(<$($lt),+>)? (
+                &self,
+                sb: SbUse<dyn SuperBlock>,
+                inode: &InodeUse,
+                $($name : $type),*
+            ) -> return_type!($($ret)?);)*
+
+            $(fn $method1 $(<$($lt1),+>)? (
+                &self,
+                sb: SbUse<dyn SuperBlock>,
+                inode: &InodeUse,
+                $($name1 : $type1),*
+            ) -> return_type!($($ret1)?);)*
+        }
+
+        #[async_trait]
+        impl<T> InodeOpsErased for T
+        where
+            T: InodeOps,
+        {
+            $(async fn $method $(<$($lt),+>)? (
+                &self,
+                sb: SbUse<dyn SuperBlock>,
+                inode: &InodeUse,
+                $($name : $type),*
+            ) -> return_type!($($ret)?) {
+                self.$method(sb.downcast(), inode, $($name),*).await
+            })*
+
+            $(fn $method1 $(<$($lt1),+>)? (
+                &self,
+                sb: SbUse<dyn SuperBlock>,
+                inode: &InodeUse,
+                $($name1 : $type1),*
+            ) -> return_type!($($ret1)?) {
+                self.$method1(sb.downcast(), inode, $($name1),*)
+            })*
+        }
+
+        impl InodeUse {
+            $(pub async fn $method $(<$($lt),+>)? (
+                &self,
+                $($name : $type),*
+            ) -> return_type!($($ret)?) {
+                self.ops.$method(self.sbget()?, self, $($name),*).await
+            })*
+
+            $(pub fn $method1 $(<$($lt1),+>)? (
+                &self,
+                $($name1 : $type1),*
+            ) -> return_type!($($ret1)?) {
+                self.ops.$method1(self.sbget()?, self, $($name1),*)
+            })*
+        }
+    };
+}
+
+define_inode_ops! {
+    // DIRECTORY OPERATIONS
+
+    async fn lookup(&self, dentry: &Arc<Dentry>) -> KResult<Option<InodeUse>> {
+        Err(EPERM)
     }
 
     /// Read directory entries and call the given closure for each entry.
@@ -55,255 +152,114 @@ pub trait InodeDirOps: InodeOps {
     /// - Ok(count): The number of entries read.
     /// - Ok(Err(err)): Some error occurred while calling the given closure.
     /// - Err(err): An error occurred while reading the directory.
-    fn readdir<'r, 'a: 'r, 'b: 'r>(
-        &'a self,
+    async fn readdir(
+        &self,
         offset: usize,
-        for_each_entry: &'b mut (dyn FnMut(&[u8], Ino) -> KResult<bool> + Send),
-    ) -> impl Future<Output = KResult<KResult<usize>>> + Send + 'r {
-        async { Err(EPERM) }
+        for_each_entry: &mut (dyn (for<'a> FnMut(&'a [u8], Ino) -> KResult<bool>) + Send),
+    ) -> KResult<KResult<usize>> {
+        Err(EPERM)
     }
 
-    fn create(
-        &self,
-        at: &Arc<Dentry>,
-        mode: Permission,
-    ) -> impl Future<Output = KResult<()>> + Send {
-        async { Err(EPERM) }
+    async fn create(&self, at: &Arc<Dentry>, mode: Permission) -> KResult<()> {
+        Err(EPERM)
     }
 
-    fn mkdir(&self, at: &Dentry, mode: Permission) -> impl Future<Output = KResult<()>> + Send {
-        async { Err(EPERM) }
-    }
-
-    fn mknod(
-        &self,
-        at: &Dentry,
-        mode: Mode,
-        dev: DeviceId,
-    ) -> impl Future<Output = KResult<()>> + Send {
-        async { Err(EPERM) }
-    }
-
-    fn unlink(&self, at: &Arc<Dentry>) -> impl Future<Output = KResult<()>> + Send {
-        async { Err(EPERM) }
-    }
-
-    fn symlink(&self, at: &Arc<Dentry>, target: &[u8]) -> impl Future<Output = KResult<()>> + Send {
-        async { Err(EPERM) }
-    }
-
-    fn rename(&self, rename_data: RenameData<'_, '_>) -> impl Future<Output = KResult<()>> + Send {
-        async { Err(EPERM) }
-    }
-}
-
-#[allow(unused_variables)]
-pub trait InodeFileOps: InodeOps {
-    fn read(
-        &self,
-        buffer: &mut dyn Buffer,
-        offset: usize,
-    ) -> impl Future<Output = KResult<usize>> + Send {
-        async { Err(EINVAL) }
-    }
-
-    fn read_direct(
-        &self,
-        buffer: &mut dyn Buffer,
-        offset: usize,
-    ) -> impl Future<Output = KResult<usize>> + Send {
-        async { Err(EINVAL) }
-    }
-
-    fn write(
-        &self,
-        stream: &mut dyn Stream,
-        offset: WriteOffset<'_>,
-    ) -> impl Future<Output = KResult<usize>> + Send {
-        async { Err(EINVAL) }
-    }
-
-    fn write_direct(
-        &self,
-        stream: &mut dyn Stream,
-        offset: usize,
-    ) -> impl Future<Output = KResult<usize>> + Send {
-        async { Err(EINVAL) }
-    }
-
-    fn devid(&self) -> KResult<DeviceId> {
-        Err(EINVAL)
-    }
-
-    fn readlink(&self, buffer: &mut dyn Buffer) -> impl Future<Output = KResult<usize>> + Send {
-        async { Err(EINVAL) }
-    }
-
-    fn truncate(&self, length: usize) -> impl Future<Output = KResult<()>> + Send {
-        async { Err(EPERM) }
-    }
-
-    fn chmod(&self, perm: Permission) -> impl Future<Output = KResult<()>> + Send {
-        async { Err(EPERM) }
-    }
-
-    fn chown(&self, uid: u32, gid: u32) -> impl Future<Output = KResult<()>> + Send {
-        async { Err(EPERM) }
-    }
-}
-
-#[async_trait]
-pub trait InodeDir {
-    async fn lookup(&self, dentry: &Arc<Dentry>) -> KResult<Option<InodeUse<dyn Inode>>>;
-    async fn create(&self, at: &Arc<Dentry>, perm: Permission) -> KResult<()>;
-    async fn mkdir(&self, at: &Dentry, perm: Permission) -> KResult<()>;
-    async fn mknod(&self, at: &Dentry, mode: Mode, dev: DeviceId) -> KResult<()>;
-    async fn unlink(&self, at: &Arc<Dentry>) -> KResult<()>;
-    async fn symlink(&self, at: &Arc<Dentry>, target: &[u8]) -> KResult<()>;
-    async fn rename(&self, rename_data: RenameData<'_, '_>) -> KResult<()>;
-
-    fn readdir<'r, 'a: 'r, 'b: 'r>(
-        &'a self,
-        offset: usize,
-        callback: &'b mut (dyn FnMut(&[u8], Ino) -> KResult<bool> + Send),
-    ) -> Pin<Box<dyn Future<Output = KResult<KResult<usize>>> + Send + 'r>>;
-}
-
-#[async_trait]
-pub trait InodeFile {
-    async fn read(&self, buffer: &mut dyn Buffer, offset: usize) -> KResult<usize>;
-    async fn read_direct(&self, buffer: &mut dyn Buffer, offset: usize) -> KResult<usize>;
-    async fn write(&self, stream: &mut dyn Stream, offset: WriteOffset<'_>) -> KResult<usize>;
-    async fn write_direct(&self, stream: &mut dyn Stream, offset: usize) -> KResult<usize>;
-    fn devid(&self) -> KResult<DeviceId>;
-    async fn readlink(&self, buffer: &mut dyn Buffer) -> KResult<usize>;
-    async fn truncate(&self, length: usize) -> KResult<()>;
-    async fn chmod(&self, mode: Mode) -> KResult<()>;
-    async fn chown(&self, uid: u32, gid: u32) -> KResult<()>;
-}
-
-pub trait Inode: InodeFile + InodeDir + Any + Send + Sync + 'static {
-    fn ino(&self) -> Ino;
-    fn format(&self) -> Format;
-    fn info(&self) -> &Spin<InodeInfo>;
-
-    // TODO: This might should be removed... Temporary workaround for now.
-    fn page_cache(&self) -> Option<&PageCache>;
-
-    fn sbref(&self) -> SbRef<dyn SuperBlock>;
-    fn sbget(&self) -> KResult<SbUse<dyn SuperBlock>>;
-}
-
-#[async_trait]
-impl<T> InodeFile for T
-where
-    T: InodeFileOps,
-{
-    async fn read(&self, buffer: &mut dyn Buffer, offset: usize) -> KResult<usize> {
-        self.read(buffer, offset).await
-    }
-
-    async fn read_direct(&self, buffer: &mut dyn Buffer, offset: usize) -> KResult<usize> {
-        self.read_direct(buffer, offset).await
-    }
-
-    async fn write(&self, stream: &mut dyn Stream, offset: WriteOffset<'_>) -> KResult<usize> {
-        self.write(stream, offset).await
-    }
-
-    async fn write_direct(&self, stream: &mut dyn Stream, offset: usize) -> KResult<usize> {
-        self.write_direct(stream, offset).await
-    }
-
-    fn devid(&self) -> KResult<DeviceId> {
-        self.devid()
-    }
-
-    async fn readlink(&self, buffer: &mut dyn Buffer) -> KResult<usize> {
-        self.readlink(buffer).await
-    }
-
-    async fn truncate(&self, length: usize) -> KResult<()> {
-        self.truncate(length).await
-    }
-
-    async fn chmod(&self, mode: Mode) -> KResult<()> {
-        self.chmod(Permission::new(mode.non_format_bits())).await
-    }
-
-    async fn chown(&self, uid: u32, gid: u32) -> KResult<()> {
-        self.chown(uid, gid).await
-    }
-}
-
-#[async_trait]
-impl<T> InodeDir for T
-where
-    T: InodeDirOps,
-{
-    async fn lookup(&self, dentry: &Arc<Dentry>) -> KResult<Option<InodeUse<dyn Inode>>> {
-        self.lookup(dentry).await
-    }
-
-    async fn create(&self, at: &Arc<Dentry>, perm: Permission) -> KResult<()> {
-        self.create(at, perm).await
-    }
-
-    async fn mkdir(&self, at: &Dentry, perm: Permission) -> KResult<()> {
-        self.mkdir(at, perm).await
+    async fn mkdir(&self, at: &Dentry, mode: Permission) -> KResult<()> {
+        Err(EPERM)
     }
 
     async fn mknod(&self, at: &Dentry, mode: Mode, dev: DeviceId) -> KResult<()> {
-        self.mknod(at, mode, dev).await
+        Err(EPERM)
     }
 
     async fn unlink(&self, at: &Arc<Dentry>) -> KResult<()> {
-        self.unlink(at).await
+        Err(EPERM)
     }
 
     async fn symlink(&self, at: &Arc<Dentry>, target: &[u8]) -> KResult<()> {
-        self.symlink(at, target).await
+        Err(EPERM)
     }
 
     async fn rename(&self, rename_data: RenameData<'_, '_>) -> KResult<()> {
-        self.rename(rename_data).await
+        Err(EPERM)
     }
 
-    fn readdir<'r, 'a: 'r, 'b: 'r>(
-        &'a self,
+    // FILE OPERATIONS
+
+    async fn read(&self, buffer: &mut dyn Buffer, offset: usize) -> KResult<usize> {
+        Err(EINVAL)
+    }
+
+    async fn read_direct(&self, buffer: &mut dyn Buffer, offset: usize) -> KResult<usize> {
+        Err(EINVAL)
+    }
+
+    async fn write(
+        &self,
+        stream: &mut dyn Stream,
+        offset: WriteOffset<'_>
+    ) -> KResult<usize> {
+        Err(EINVAL)
+    }
+
+    async fn write_direct(
+        &self,
+        stream: &mut dyn Stream,
         offset: usize,
-        callback: &'b mut (dyn FnMut(&[u8], Ino) -> KResult<bool> + Send),
-    ) -> Pin<Box<dyn Future<Output = KResult<KResult<usize>>> + Send + 'r>> {
-        Box::pin(self.readdir(offset, callback))
-    }
-}
-
-impl<T> Inode for T
-where
-    T: InodeOps + InodeFile + InodeDir,
-{
-    fn ino(&self) -> Ino {
-        self.ino()
+    ) -> KResult<usize> {
+        Err(EINVAL)
     }
 
-    fn format(&self) -> Format {
-        self.format()
+    async fn readlink(&self, buffer: &mut dyn Buffer) -> KResult<usize> {
+        Err(EINVAL)
     }
 
-    fn info(&self) -> &Spin<InodeInfo> {
-        self.info()
+    async fn truncate(&self, length: usize) -> KResult<()> {
+        Err(EPERM)
     }
 
-    fn page_cache(&self) -> Option<&PageCache> {
-        self.page_cache()
+    async fn chmod(&self, perm: Permission) -> KResult<()> {
+        Err(EPERM)
     }
 
-    fn sbref(&self) -> SbRef<dyn SuperBlock> {
-        self.super_block().clone()
+    async fn chown(&self, uid: u32, gid: u32) -> KResult<()> {
+        Err(EPERM)
     }
 
-    fn sbget(&self) -> KResult<SbUse<dyn SuperBlock>> {
-        self.super_block().get().map(|sb| sb as _)
+    // PAGE CACHE OPERATIONS
+    async fn read_page(&self, page: &mut CachePage, offset: PageOffset) -> KResult<()> {
+        Err(EINVAL)
+    }
+
+    async fn write_page(&self, page: &mut CachePage, offset: PageOffset) -> KResult<()> {
+        Err(EINVAL)
+    }
+
+    async fn write_begin<'a>(
+        &self,
+        page_cache: &PageCache,
+        pages: &'a mut BTreeMap<PageOffset, CachePage>,
+        offset: usize,
+        len: usize,
+    ) -> KResult<&'a mut CachePage> {
+        Err(EINVAL)
+    }
+
+    async fn write_end(
+        &self,
+        page_cache: &PageCache,
+        pages: &mut BTreeMap<PageOffset, CachePage>,
+        offset: usize,
+        len: usize,
+        copied: usize
+    ) -> KResult<()> {
+        Err(EINVAL)
+    }
+
+    ---
+
+    fn devid(&self) -> KResult<DeviceId> {
+        Err(EINVAL)
     }
 }
 
@@ -321,64 +277,87 @@ pub struct InodeInfo {
     pub mtime: Instant,
 }
 
-pub struct InodeUse<I>(Arc<I>)
-where
-    I: Inode + ?Sized;
+#[repr(transparent)]
+pub struct InodeUse(Arc<Inode>);
 
-impl<I> InodeUse<I>
-where
-    I: Inode,
-{
-    pub fn new(inode: I) -> Self {
+impl InodeUse {
+    pub fn new(
+        sb: SbRef<dyn SuperBlock>,
+        ino: Ino,
+        format: Format,
+        info: InodeInfo,
+        ops: impl InodeOps,
+    ) -> Self {
+        let inode = Inode {
+            sb,
+            ino,
+            format,
+            info: Spin::new(info),
+            rwsem: RwLock::new(()),
+            page_cache: Spin::new(Weak::new()),
+            ops: Box::new(ops),
+        };
+
         Self(Arc::new(inode))
     }
 
-    pub fn new_cyclic(inode_func: impl FnOnce(&Weak<I>) -> I) -> Self {
-        Self(Arc::new_cyclic(inode_func))
+    pub fn sbref(&self) -> SbRef<dyn SuperBlock> {
+        self.sb.clone()
+    }
+
+    pub fn sbget(&self) -> KResult<SbUse<dyn SuperBlock>> {
+        self.sb.get().map(|sb| sb as _)
+    }
+
+    pub fn get_priv<I>(&self) -> &I
+    where
+        I: InodeOps,
+    {
+        let ops = (&*self.ops) as &dyn Any;
+
+        ops.downcast_ref()
+            .expect("InodeUse::private: InodeOps type mismatch")
+    }
+
+    pub fn get_page_cache(&self) -> Arc<PageCache> {
+        if let Some(cache) = self.page_cache.lock().upgrade() {
+            return cache;
+        }
+
+        // Slow path...
+        let cache = Arc::new(PageCache::new(self.clone()));
+        let mut page_cache = self.page_cache.lock();
+        if let Some(cache) = page_cache.upgrade() {
+            return cache;
+        }
+
+        *page_cache = Arc::downgrade(&cache);
+        cache
     }
 }
 
-impl<I> InodeUse<I>
-where
-    I: Inode + ?Sized,
-{
-    pub fn as_raw(&self) -> *const I {
-        Arc::as_ptr(&self.0)
-    }
-}
-
-impl<T, U> CoerceUnsized<InodeUse<U>> for InodeUse<T>
-where
-    T: Inode + Unsize<U> + ?Sized,
-    U: Inode + ?Sized,
-{
-}
-
-impl<I> Clone for InodeUse<I>
-where
-    I: Inode + ?Sized,
-{
+impl Clone for InodeUse {
     fn clone(&self) -> Self {
         Self(self.0.clone())
     }
 }
 
-impl<I> core::fmt::Debug for InodeUse<I>
-where
-    I: Inode + ?Sized,
-{
+impl core::fmt::Debug for InodeUse {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "InodeUse(ino={})", self.ino())
+        write!(f, "InodeUse(ino={})", self.ino)
     }
 }
 
-impl<I> Deref for InodeUse<I>
-where
-    I: Inode + ?Sized,
-{
-    type Target = I;
+impl Deref for InodeUse {
+    type Target = Inode;
 
     fn deref(&self) -> &Self::Target {
         self.0.deref()
+    }
+}
+
+impl PartialEq for InodeUse {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
     }
 }

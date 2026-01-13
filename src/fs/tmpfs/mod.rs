@@ -1,22 +1,19 @@
 mod dir;
 mod file;
 
-use crate::kernel::vfs::inode::{Ino, InodeUse};
-use crate::kernel::vfs::types::{DeviceId, Permission};
-use crate::kernel::vfs::{SbRef, SbUse, SuperBlock, SuperBlockInfo};
-use crate::{
-    kernel::vfs::{
-        dentry::Dentry,
-        mount::{register_filesystem, Mount, MountCreator},
-    },
-    prelude::*,
-};
 use alloc::sync::Arc;
+use core::sync::atomic::{AtomicU64, Ordering};
+
 use async_trait::async_trait;
-use core::sync::atomic::AtomicU64;
-use core::sync::atomic::Ordering;
 use dir::DirectoryInode;
 use eonix_sync::Mutex;
+
+use crate::kernel::vfs::dentry::Dentry;
+use crate::kernel::vfs::inode::{Ino, InodeUse};
+use crate::kernel::vfs::mount::{register_filesystem, Mount, MountCreator};
+use crate::kernel::vfs::types::{DeviceId, Permission};
+use crate::kernel::vfs::{SbRef, SbUse, SuperBlock, SuperBlockInfo};
+use crate::prelude::*;
 
 pub struct TmpFs {
     next_ino: AtomicU64,
@@ -30,7 +27,7 @@ impl TmpFs {
         Ino::new(self.next_ino.fetch_add(1, Ordering::Relaxed))
     }
 
-    fn create() -> KResult<(SbUse<TmpFs>, InodeUse<DirectoryInode>)> {
+    fn create() -> KResult<(SbUse<TmpFs>, InodeUse)> {
         let tmpfs = SbUse::new(
             SuperBlockInfo {
                 io_blksize: 4096,

@@ -1,26 +1,22 @@
 mod dir;
 mod file;
 
-use alloc::sync::{Arc, Weak};
-use core::future::Future;
+use alloc::sync::Arc;
 use core::ops::Deref;
 
 use async_trait::async_trait;
 use dir::{as_raw_dirents, ParseDirent};
+use eonix_mm::paging::PAGE_SIZE;
 use eonix_sync::RwLock;
 use itertools::Itertools;
 
 use crate::io::{Buffer, ByteBuffer, UninitBuffer};
 use crate::kernel::block::{BlockDevice, BlockDeviceRequest};
 use crate::kernel::constants::{EINVAL, EIO};
-use crate::kernel::mem::{
-    CachePage, CachePageStream, Page, PageCache, PageCacheBackendOps, PageExcl, PageExt,
-};
+use crate::kernel::mem::{CachePage, Page, PageExcl, PageExt, PageOffset};
 use crate::kernel::timer::Instant;
 use crate::kernel::vfs::dentry::Dentry;
-use crate::kernel::vfs::inode::{
-    Ino, Inode, InodeDirOps, InodeFileOps, InodeInfo, InodeOps, InodeUse,
-};
+use crate::kernel::vfs::inode::{Ino, InodeInfo, InodeOps, InodeUse};
 use crate::kernel::vfs::mount::{register_filesystem, Mount, MountCreator};
 use crate::kernel::vfs::types::{DeviceId, Format, Permission};
 use crate::kernel::vfs::{SbRef, SbUse, SuperBlock, SuperBlockInfo};
@@ -54,6 +50,10 @@ impl RawCluster {
 impl Cluster {
     pub fn as_ino(self) -> Ino {
         Ino::new(self.0 as _)
+    }
+
+    pub fn from_ino(ino: Ino) -> Self {
+        Self(ino.as_raw() as u32)
     }
 
     fn normalized(self) -> Self {
@@ -130,7 +130,7 @@ impl FatFs {
 }
 
 impl FatFs {
-    pub async fn create(device: DeviceId) -> KResult<(SbUse<Self>, InodeUse<dyn Inode>)> {
+    pub async fn create(device: DeviceId) -> KResult<(SbUse<Self>, InodeUse)> {
         let device = BlockDevice::get(device)?;
 
         let mut info = UninitBuffer::<Bootsector>::new();
@@ -217,18 +217,15 @@ impl<'fat> Iterator for ClusterIterator<'fat> {
     }
 }
 
-struct FileInode {
-    cluster: Cluster,
-    info: Spin<InodeInfo>,
-    sb: SbRef<FatFs>,
-    page_cache: PageCache,
-}
+struct FileInode;
 
 impl FileInode {
-    fn new(cluster: Cluster, sb: SbRef<FatFs>, size: u32) -> InodeUse<FileInode> {
-        InodeUse::new_cyclic(|weak: &Weak<FileInode>| Self {
-            cluster,
-            info: Spin::new(InodeInfo {
+    fn new(cluster: Cluster, sb: SbRef<FatFs>, size: u32) -> InodeUse {
+        InodeUse::new(
+            sb,
+            cluster.as_ino(),
+            Format::REG,
+            InodeInfo {
                 size: size as u64,
                 nlink: 1,
                 uid: 0,
@@ -237,108 +234,75 @@ impl FileInode {
                 atime: Instant::UNIX_EPOCH,
                 ctime: Instant::UNIX_EPOCH,
                 mtime: Instant::UNIX_EPOCH,
-            }),
-            sb,
-            page_cache: PageCache::new(weak.clone()),
-        })
+            },
+            Self,
+        )
     }
 }
 
 impl InodeOps for FileInode {
     type SuperBlock = FatFs;
 
-    fn ino(&self) -> Ino {
-        self.cluster.as_ino()
+    async fn read(
+        &self,
+        _: SbUse<Self::SuperBlock>,
+        inode: &InodeUse,
+        buffer: &mut dyn Buffer,
+        offset: usize,
+    ) -> KResult<usize> {
+        inode.get_page_cache().read(buffer, offset).await
     }
 
-    fn format(&self) -> Format {
-        Format::REG
-    }
-
-    fn info(&self) -> &Spin<InodeInfo> {
-        &self.info
-    }
-
-    fn super_block(&self) -> &SbRef<Self::SuperBlock> {
-        &self.sb
-    }
-
-    fn page_cache(&self) -> Option<&PageCache> {
-        Some(&self.page_cache)
-    }
-}
-
-impl InodeDirOps for FileInode {}
-impl InodeFileOps for FileInode {
-    async fn read(&self, buffer: &mut dyn Buffer, offset: usize) -> KResult<usize> {
-        self.page_cache.read(buffer, offset).await
-    }
-
-    async fn read_direct(&self, buffer: &mut dyn Buffer, offset: usize) -> KResult<usize> {
-        let sb = self.sb.get()?;
+    async fn read_page(
+        &self,
+        sb: SbUse<Self::SuperBlock>,
+        inode: &InodeUse,
+        page: &mut CachePage,
+        offset: PageOffset,
+    ) -> KResult<()> {
         let fs = &sb.backend;
         let fat = sb.backend.fat.read().await;
 
-        if offset >= self.info.lock().size as usize {
-            return Ok(0);
+        if offset >= PageOffset::from_byte_ceil(inode.info.lock().size as usize) {
+            unreachable!("read_page called with offset beyond file size");
         }
 
         let cluster_size = fs.sectors_per_cluster as usize * SECTOR_SIZE;
-        assert!(cluster_size <= 0x1000, "Cluster size is too large");
-
-        let skip_clusters = offset / cluster_size;
-        let inner_offset = offset % cluster_size;
-
-        let cluster_iter = ClusterIterator::new(fat.as_ref(), self.cluster).skip(skip_clusters);
-
-        let buffer_page = Page::alloc();
-        for cluster in cluster_iter {
-            fs.read_cluster(cluster, &buffer_page).await?;
-
-            let pg = buffer_page.lock();
-            let data = &pg.as_bytes()[inner_offset..];
-
-            let end = offset + data.len();
-            let real_end = end.min(self.info.lock().size as usize);
-            let real_size = real_end - offset;
-
-            if buffer.fill(&data[..real_size])?.should_stop() {
-                break;
-            }
+        if cluster_size != PAGE_SIZE {
+            unimplemented!("cluster size != PAGE_SIZE");
         }
 
-        Ok(buffer.wrote())
-    }
-}
+        // XXX: Ugly and inefficient O(n^2) algorithm for sequential file read.
+        let cluster = ClusterIterator::new(fat.as_ref(), Cluster::from_ino(inode.ino))
+            .skip(offset.page_count())
+            .next()
+            .ok_or(EIO)?;
 
-impl PageCacheBackendOps for FileInode {
-    async fn read_page(&self, page: &mut CachePage, offset: usize) -> KResult<usize> {
-        self.read_direct(page, offset).await
-    }
+        let page = page.get_page();
+        fs.read_cluster(cluster, &page).await?;
 
-    async fn write_page(&self, _page: &mut CachePageStream, _offset: usize) -> KResult<usize> {
-        todo!()
-    }
+        let real_len = (inode.info.lock().size as usize) - offset.byte_count();
+        if real_len < PAGE_SIZE {
+            let mut page = page.lock();
+            page.as_bytes_mut()[real_len..].fill(0);
+        }
 
-    fn size(&self) -> usize {
-        self.info.lock().size as usize
+        Ok(())
     }
 }
 
 struct DirInode {
-    cluster: Cluster,
-    info: Spin<InodeInfo>,
-    sb: SbRef<FatFs>,
-
     // TODO: Use the new PageCache...
     dir_pages: RwLock<Vec<PageExcl>>,
 }
 
 impl DirInode {
-    fn new(cluster: Cluster, sb: SbRef<FatFs>, size: u32) -> InodeUse<Self> {
-        InodeUse::new(Self {
-            cluster,
-            info: Spin::new(InodeInfo {
+    fn new(cluster: Cluster, sb: SbRef<FatFs>, size: u32) -> InodeUse {
+        InodeUse::new(
+            sb,
+            cluster.as_ino(),
+            Format::DIR,
+            InodeInfo {
                 size: size as u64,
                 nlink: 2, // '.' and '..'
                 uid: 0,
@@ -347,23 +311,23 @@ impl DirInode {
                 atime: Instant::UNIX_EPOCH,
                 ctime: Instant::UNIX_EPOCH,
                 mtime: Instant::UNIX_EPOCH,
-            }),
-            sb,
-            dir_pages: RwLock::new(Vec::new()),
-        })
+            },
+            Self {
+                dir_pages: RwLock::new(Vec::new()),
+            },
+        )
     }
 
-    async fn read_dir_pages(&self) -> KResult<()> {
+    async fn read_dir_pages(&self, sb: &SbUse<FatFs>, inode: &InodeUse) -> KResult<()> {
         let mut dir_pages = self.dir_pages.write().await;
         if !dir_pages.is_empty() {
             return Ok(());
         }
 
-        let sb = self.sb.get()?;
         let fs = &sb.backend;
         let fat = fs.fat.read().await;
 
-        let clusters = ClusterIterator::new(fat.as_ref(), self.cluster);
+        let clusters = ClusterIterator::new(fat.as_ref(), Cluster::from_ino(inode.ino));
 
         for cluster in clusters {
             let page = PageExcl::alloc();
@@ -375,7 +339,11 @@ impl DirInode {
         Ok(())
     }
 
-    async fn get_dir_pages(&self) -> KResult<impl Deref<Target = Vec<PageExcl>> + use<'_>> {
+    async fn get_dir_pages(
+        &self,
+        sb: &SbUse<FatFs>,
+        inode: &InodeUse,
+    ) -> KResult<impl Deref<Target = Vec<PageExcl>> + use<'_>> {
         {
             let dir_pages = self.dir_pages.read().await;
             if !dir_pages.is_empty() {
@@ -383,7 +351,7 @@ impl DirInode {
             }
         }
 
-        self.read_dir_pages().await?;
+        self.read_dir_pages(sb, inode).await?;
 
         if let Some(dir_pages) = self.dir_pages.try_read() {
             return Ok(dir_pages);
@@ -396,32 +364,13 @@ impl DirInode {
 impl InodeOps for DirInode {
     type SuperBlock = FatFs;
 
-    fn ino(&self) -> Ino {
-        self.cluster.as_ino()
-    }
-
-    fn format(&self) -> Format {
-        Format::DIR
-    }
-
-    fn info(&self) -> &Spin<InodeInfo> {
-        &self.info
-    }
-
-    fn super_block(&self) -> &SbRef<Self::SuperBlock> {
-        &self.sb
-    }
-
-    fn page_cache(&self) -> Option<&PageCache> {
-        None
-    }
-}
-
-impl InodeFileOps for DirInode {}
-impl InodeDirOps for DirInode {
-    async fn lookup(&self, dentry: &Arc<Dentry>) -> KResult<Option<InodeUse<dyn Inode>>> {
-        let sb = self.sb.get()?;
-        let dir_pages = self.get_dir_pages().await?;
+    async fn lookup(
+        &self,
+        sb: SbUse<Self::SuperBlock>,
+        inode: &InodeUse,
+        dentry: &Arc<Dentry>,
+    ) -> KResult<Option<InodeUse>> {
+        let dir_pages = self.get_dir_pages(&sb, inode).await?;
 
         let dir_data = dir_pages.iter().map(|pg| pg.as_bytes());
 
@@ -451,48 +400,47 @@ impl InodeDirOps for DirInode {
         Ok(None)
     }
 
-    fn readdir<'r, 'a: 'r, 'b: 'r>(
-        &'a self,
+    async fn readdir(
+        &self,
+        sb: SbUse<Self::SuperBlock>,
+        inode: &InodeUse,
         offset: usize,
-        callback: &'b mut (dyn FnMut(&[u8], Ino) -> KResult<bool> + Send),
-    ) -> impl Future<Output = KResult<KResult<usize>>> + Send + 'r {
-        async move {
-            let sb = self.sb.get()?;
-            let fs = &sb.backend;
-            let dir_pages = self.get_dir_pages().await?;
+        callback: &mut (dyn FnMut(&[u8], Ino) -> KResult<bool> + Send),
+    ) -> KResult<KResult<usize>> {
+        let fs = &sb.backend;
+        let dir_pages = self.get_dir_pages(&sb, inode).await?;
 
-            let cluster_size = fs.sectors_per_cluster as usize * SECTOR_SIZE;
+        let cluster_size = fs.sectors_per_cluster as usize * SECTOR_SIZE;
 
-            let cluster_offset = offset / cluster_size;
-            let inner_offset = offset % cluster_size;
-            let inner_raw_dirent_offset = inner_offset / core::mem::size_of::<dir::RawDirEntry>();
+        let cluster_offset = offset / cluster_size;
+        let inner_offset = offset % cluster_size;
+        let inner_raw_dirent_offset = inner_offset / core::mem::size_of::<dir::RawDirEntry>();
 
-            let dir_data = dir_pages
-                .iter()
-                .skip(cluster_offset)
-                .map(|pg| pg.as_bytes());
+        let dir_data = dir_pages
+            .iter()
+            .skip(cluster_offset)
+            .map(|pg| pg.as_bytes());
 
-            let raw_dirents = dir_data
-                .map(as_raw_dirents)
-                .take_while_inclusive(Result::is_ok)
-                .flatten_ok()
-                .skip(inner_raw_dirent_offset);
+        let raw_dirents = dir_data
+            .map(as_raw_dirents)
+            .take_while_inclusive(Result::is_ok)
+            .flatten_ok()
+            .skip(inner_raw_dirent_offset);
 
-            let mut dirents = futures::stream::iter(raw_dirents);
+        let mut dirents = futures::stream::iter(raw_dirents);
 
-            let mut nread = 0;
-            while let Some(result) = dirents.next_dirent().await {
-                let entry = result?;
+        let mut nread = 0;
+        while let Some(result) = dirents.next_dirent().await {
+            let entry = result?;
 
-                match callback(&entry.filename, entry.cluster.as_ino()) {
-                    Err(err) => return Ok(Err(err)),
-                    Ok(true) => nread += entry.entry_offset as usize,
-                    Ok(false) => break,
-                }
+            match callback(&entry.filename, entry.cluster.as_ino()) {
+                Err(err) => return Ok(Err(err)),
+                Ok(true) => nread += entry.entry_offset as usize,
+                Ok(false) => break,
             }
-
-            Ok(Ok(nread))
         }
+
+        Ok(Ok(nread))
     }
 }
 

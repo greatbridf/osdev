@@ -3,7 +3,6 @@
 #![feature(allocator_api)]
 #![feature(c_size_t)]
 #![feature(coerce_unsized)]
-#![feature(concat_idents)]
 #![feature(arbitrary_self_types)]
 #![feature(get_mut_unchecked)]
 #![feature(macro_metavar_expr)]

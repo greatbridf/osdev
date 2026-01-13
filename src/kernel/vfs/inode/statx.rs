@@ -1,25 +1,17 @@
 use posix_types::stat::StatX;
 
-use crate::{
-    kernel::{
-        constants::{
-            STATX_ATIME, STATX_BLOCKS, STATX_CTIME, STATX_GID, STATX_INO, STATX_MODE, STATX_MTIME,
-            STATX_NLINK, STATX_SIZE, STATX_TYPE, STATX_UID,
-        },
-        vfs::types::Format,
-    },
-    prelude::KResult,
+use super::inode::InodeUse;
+use crate::kernel::constants::{
+    STATX_ATIME, STATX_BLOCKS, STATX_CTIME, STATX_GID, STATX_INO, STATX_MODE, STATX_MTIME,
+    STATX_NLINK, STATX_SIZE, STATX_TYPE, STATX_UID,
 };
+use crate::kernel::vfs::types::Format;
+use crate::prelude::KResult;
 
-use super::{inode::InodeUse, Inode};
-
-impl<I> InodeUse<I>
-where
-    I: Inode + ?Sized,
-{
+impl InodeUse {
     pub fn statx(&self, stat: &mut StatX, mask: u32) -> KResult<()> {
         let sb = self.sbget()?;
-        let info = self.info().lock();
+        let info = self.info.lock();
 
         if mask & STATX_NLINK != 0 {
             stat.stx_nlink = info.nlink as _;
@@ -53,10 +45,8 @@ where
         }
 
         if mask & STATX_TYPE != 0 {
-            let format = self.format();
-
-            stat.stx_mode |= format.as_raw() as u16;
-            if let Format::BLK | Format::CHR = format {
+            stat.stx_mode |= self.format.as_raw() as u16;
+            if let Format::BLK | Format::CHR = self.format {
                 let devid = self.devid()?;
                 stat.stx_rdev_major = devid.major as _;
                 stat.stx_rdev_minor = devid.minor as _;
@@ -65,7 +55,7 @@ where
         }
 
         if mask & STATX_INO != 0 {
-            stat.stx_ino = self.ino().as_raw();
+            stat.stx_ino = self.ino.as_raw();
             stat.stx_mask |= STATX_INO;
         }
 

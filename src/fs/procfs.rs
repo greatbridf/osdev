@@ -1,30 +1,21 @@
-use crate::kernel::constants::{EACCES, EISDIR, ENOTDIR};
-use crate::kernel::timer::Instant;
-use crate::kernel::vfs::inode::{InodeDirOps, InodeFileOps, InodeInfo, InodeOps, InodeUse};
-use crate::kernel::vfs::types::{DeviceId, Format, Permission};
-use crate::kernel::vfs::{SbRef, SbUse, SuperBlock, SuperBlockInfo};
-use crate::{
-    io::Buffer,
-    kernel::{
-        mem::paging::PageBuffer,
-        vfs::{
-            dentry::Dentry,
-            inode::{Ino, Inode},
-            mount::{dump_mounts, register_filesystem, Mount, MountCreator},
-        },
-    },
-    prelude::*,
-};
 use alloc::sync::Arc;
-use async_trait::async_trait;
-use core::future::Future;
 use core::sync::atomic::{AtomicU64, Ordering};
+
+use async_trait::async_trait;
 use eonix_sync::{LazyLock, RwLock};
 
+use crate::io::Buffer;
+use crate::kernel::constants::{EACCES, EISDIR, ENOTDIR};
+use crate::kernel::mem::paging::PageBuffer;
+use crate::kernel::timer::Instant;
+use crate::kernel::vfs::dentry::Dentry;
+use crate::kernel::vfs::inode::{Ino, InodeInfo, InodeOps, InodeUse};
+use crate::kernel::vfs::mount::{dump_mounts, register_filesystem, Mount, MountCreator};
+use crate::kernel::vfs::types::{DeviceId, Format, Permission};
+use crate::kernel::vfs::{SbRef, SbUse, SuperBlock, SuperBlockInfo};
+use crate::prelude::*;
+
 struct Node {
-    ino: Ino,
-    sb: SbRef<ProcFs>,
-    info: Spin<InodeInfo>,
     kind: NodeKind,
 }
 
@@ -39,38 +30,19 @@ struct FileInode {
 }
 
 struct DirInode {
-    entries: RwLock<Vec<(Arc<[u8]>, InodeUse<Node>)>>,
+    entries: RwLock<Vec<(Arc<[u8]>, InodeUse)>>,
 }
 
 impl InodeOps for Node {
     type SuperBlock = ProcFs;
 
-    fn ino(&self) -> Ino {
-        self.ino
-    }
-
-    fn format(&self) -> Format {
-        match &self.kind {
-            NodeKind::File(_) => Format::REG,
-            NodeKind::Dir(_) => Format::DIR,
-        }
-    }
-
-    fn info(&self) -> &Spin<InodeInfo> {
-        &self.info
-    }
-
-    fn super_block(&self) -> &SbRef<Self::SuperBlock> {
-        &self.sb
-    }
-
-    fn page_cache(&self) -> Option<&crate::kernel::mem::PageCache> {
-        None
-    }
-}
-
-impl InodeFileOps for Node {
-    async fn read(&self, buffer: &mut dyn Buffer, offset: usize) -> KResult<usize> {
+    async fn read(
+        &self,
+        _: SbUse<Self::SuperBlock>,
+        _: &InodeUse,
+        buffer: &mut dyn Buffer,
+        offset: usize,
+    ) -> KResult<usize> {
         let NodeKind::File(file_inode) = &self.kind else {
             return Err(EISDIR);
         };
@@ -88,10 +60,13 @@ impl InodeFileOps for Node {
 
         Ok(buffer.fill(data)?.allow_partial())
     }
-}
 
-impl InodeDirOps for Node {
-    async fn lookup(&self, dentry: &Arc<Dentry>) -> KResult<Option<InodeUse<dyn Inode>>> {
+    async fn lookup(
+        &self,
+        _: SbUse<Self::SuperBlock>,
+        _: &InodeUse,
+        dentry: &Arc<Dentry>,
+    ) -> KResult<Option<InodeUse>> {
         let NodeKind::Dir(dir) = &self.kind else {
             return Err(ENOTDIR);
         };
@@ -108,29 +83,29 @@ impl InodeDirOps for Node {
         Ok(None)
     }
 
-    fn readdir<'r, 'a: 'r, 'b: 'r>(
-        &'a self,
+    async fn readdir(
+        &self,
+        _: SbUse<Self::SuperBlock>,
+        _: &InodeUse,
         offset: usize,
-        callback: &'b mut (dyn FnMut(&[u8], Ino) -> KResult<bool> + Send),
-    ) -> impl Future<Output = KResult<KResult<usize>>> + Send + 'r {
-        Box::pin(async move {
-            let NodeKind::Dir(dir) = &self.kind else {
-                return Err(ENOTDIR);
-            };
+        callback: &mut (dyn FnMut(&[u8], Ino) -> KResult<bool> + Send),
+    ) -> KResult<KResult<usize>> {
+        let NodeKind::Dir(dir) = &self.kind else {
+            return Err(ENOTDIR);
+        };
 
-            let entries = dir.entries.read().await;
+        let entries = dir.entries.read().await;
 
-            let mut count = 0;
-            for (name, node) in entries.iter().skip(offset) {
-                match callback(name.as_ref(), node.ino) {
-                    Err(err) => return Ok(Err(err)),
-                    Ok(true) => count += 1,
-                    Ok(false) => break,
-                }
+        let mut count = 0;
+        for (name, node) in entries.iter().skip(offset) {
+            match callback(name.as_ref(), node.ino) {
+                Err(err) => return Ok(Err(err)),
+                Ok(true) => count += 1,
+                Ok(false) => break,
             }
+        }
 
-            Ok(Ok(count))
-        })
+        Ok(Ok(count))
     }
 }
 
@@ -139,11 +114,12 @@ impl Node {
         ino: Ino,
         sb: SbRef<ProcFs>,
         read: impl Fn(&mut PageBuffer) -> KResult<()> + Send + Sync + 'static,
-    ) -> InodeUse<Self> {
-        InodeUse::new(Self {
-            ino,
+    ) -> InodeUse {
+        InodeUse::new(
             sb,
-            info: Spin::new(InodeInfo {
+            ino,
+            Format::REG,
+            InodeInfo {
                 size: 0,
                 nlink: 1,
                 uid: 0,
@@ -152,16 +128,19 @@ impl Node {
                 atime: Instant::UNIX_EPOCH,
                 ctime: Instant::UNIX_EPOCH,
                 mtime: Instant::UNIX_EPOCH,
-            }),
-            kind: NodeKind::File(FileInode::new(Box::new(read))),
-        })
+            },
+            Self {
+                kind: NodeKind::File(FileInode::new(Box::new(read))),
+            },
+        )
     }
 
-    fn new_dir(ino: Ino, sb: SbRef<ProcFs>) -> InodeUse<Self> {
-        InodeUse::new(Self {
-            ino,
+    fn new_dir(ino: Ino, sb: SbRef<ProcFs>) -> InodeUse {
+        InodeUse::new(
             sb,
-            info: Spin::new(InodeInfo {
+            ino,
+            Format::DIR,
+            InodeInfo {
                 size: 0,
                 nlink: 1,
                 uid: 0,
@@ -170,9 +149,11 @@ impl Node {
                 atime: Instant::UNIX_EPOCH,
                 ctime: Instant::UNIX_EPOCH,
                 mtime: Instant::UNIX_EPOCH,
-            }),
-            kind: NodeKind::Dir(DirInode::new()),
-        })
+            },
+            Self {
+                kind: NodeKind::Dir(DirInode::new()),
+            },
+        )
     }
 }
 
@@ -194,7 +175,7 @@ impl DirInode {
 }
 
 pub struct ProcFs {
-    root: InodeUse<Node>,
+    root: InodeUse,
     next_ino: AtomicU64,
 }
 
@@ -240,7 +221,7 @@ where
     F: Send + Sync + Fn(&mut PageBuffer) -> KResult<()> + 'static,
 {
     let procfs = &GLOBAL_PROCFS.backend;
-    let root = &procfs.root;
+    let root = &procfs.root.get_priv::<Node>();
 
     let NodeKind::Dir(root) = &root.kind else {
         unreachable!();

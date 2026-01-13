@@ -1,39 +1,31 @@
-use super::{
-    config::{self, mm::*},
-    console::write_str,
-    cpu::{CPUID, CPU_COUNT},
-    time::set_next_timer,
-};
-use crate::{
-    arch::{
-        cpu::CPU,
-        fdt::{init_dtb_and_fdt, FdtExt, FDT},
-        mm::{ArchPhysAccess, FreeRam, PageAttribute64, GLOBAL_PAGE_TABLE},
-    },
-    bootstrap::BootStrapData,
-    mm::{ArchMemory, ArchPagingMode, BasicPageAlloc, BasicPageAllocRef, ScopedAllocator},
-};
-use core::{
-    alloc::Allocator,
-    arch::asm,
-    cell::RefCell,
-    sync::atomic::{AtomicBool, AtomicUsize},
-};
-use core::{
-    arch::{global_asm, naked_asm},
-    hint::spin_loop,
-    sync::atomic::{AtomicPtr, Ordering},
-};
+use core::alloc::Allocator;
+use core::arch::{asm, global_asm, naked_asm};
+use core::cell::RefCell;
+use core::hint::spin_loop;
+use core::sync::atomic::{AtomicBool, AtomicPtr, AtomicUsize, Ordering};
+
 use eonix_hal_traits::mm::Memory;
-use eonix_mm::{
-    address::{Addr as _, PAddr, PRange, PhysAccess, VAddr, VRange},
-    page_table::{PageAttribute, PagingMode, PTE as _},
-    paging::{Page, PageAccess, PageAlloc, PAGE_SIZE, PFN},
-};
+use eonix_mm::address::{Addr as _, PAddr, PRange, PhysAccess, VAddr, VRange};
+use eonix_mm::page_table::{PageAttribute, PagingMode, PTE as _};
+use eonix_mm::paging::{Page, PageAccess, PageAlloc, PAGE_SIZE, PFN};
 use eonix_percpu::PercpuArea;
 use fdt::Fdt;
-use riscv::{asm::sfence_vma_all, register::satp};
-use sbi::{hsm::hart_start, legacy::console_putchar, PhysicalAddress};
+use riscv::asm::sfence_vma_all;
+use riscv::register::satp;
+use sbi::hsm::hart_start;
+use sbi::legacy::console_putchar;
+use sbi::PhysicalAddress;
+
+use super::config::mm::*;
+use super::config::{self};
+use super::console::write_str;
+use super::cpu::{CPUID, CPU_COUNT};
+use super::time::set_next_timer;
+use crate::arch::cpu::CPU;
+use crate::arch::fdt::{init_dtb_and_fdt, FdtExt, FDT};
+use crate::arch::mm::{ArchPhysAccess, FreeRam, PageAttribute64, GLOBAL_PAGE_TABLE};
+use crate::bootstrap::BootStrapData;
+use crate::mm::{ArchMemory, ArchPagingMode, BasicPageAlloc, BasicPageAllocRef, ScopedAllocator};
 
 #[unsafe(link_section = ".bootstrap.stack")]
 static BOOT_STACK: [u8; 4096 * 16] = [0; 4096 * 16];
@@ -78,7 +70,7 @@ static AP_SEM: AtomicBool = AtomicBool::new(false);
 #[unsafe(naked)]
 #[unsafe(no_mangle)]
 #[unsafe(link_section = ".bootstrap.entry")]
-unsafe extern "C" fn _start(hart_id: usize, dtb_addr: usize) -> ! {
+unsafe extern "C" fn _start(hart_id: usize, dtb_addr: usize) {
     naked_asm!(
         "
             ld    sp, 2f
@@ -289,7 +281,7 @@ fn bootstrap_smp(alloc: impl Allocator, page_alloc: &RefCell<BasicPageAlloc>) {
 #[unsafe(naked)]
 #[unsafe(no_mangle)]
 #[unsafe(link_section = ".bootstrap.apentry")]
-unsafe extern "C" fn _ap_start(hart_id: usize) -> ! {
+unsafe extern "C" fn _ap_start(hart_id: usize) {
     naked_asm!(
         "
             la    sp, 1f        // set temp stack

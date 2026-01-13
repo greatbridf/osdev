@@ -1,16 +1,16 @@
-use super::{
-    dentry::{dcache, Dentry, DROOT},
-    inode::{Inode, InodeUse},
-    SbUse, SuperBlock,
-};
-use crate::kernel::{
-    constants::{EEXIST, ENODEV, ENOTDIR},
-    task::block_on,
-};
-use crate::prelude::*;
-use alloc::{collections::btree_map::BTreeMap, string::ToString as _, sync::Arc};
+use alloc::collections::btree_map::BTreeMap;
+use alloc::string::ToString as _;
+use alloc::sync::Arc;
+
 use async_trait::async_trait;
 use eonix_sync::LazyLock;
+
+use super::dentry::{dcache, Dentry, DROOT};
+use super::inode::InodeUse;
+use super::{SbUse, SuperBlock};
+use crate::kernel::constants::{EEXIST, ENODEV, ENOTDIR};
+use crate::kernel::task::block_on;
+use crate::prelude::*;
 
 pub const MS_RDONLY: u64 = 1 << 0;
 pub const MS_NOSUID: u64 = 1 << 1;
@@ -39,11 +39,7 @@ pub struct Mount {
 }
 
 impl Mount {
-    pub fn new(
-        mp: &Dentry,
-        sb: SbUse<dyn SuperBlock>,
-        root_inode: InodeUse<dyn Inode>,
-    ) -> KResult<Self> {
+    pub fn new(mp: &Dentry, sb: SbUse<dyn SuperBlock>, root_inode: InodeUse) -> KResult<Self> {
         let root_dentry = Dentry::create(mp.parent().clone(), &mp.get_name());
         root_dentry.fill(root_inode);
 

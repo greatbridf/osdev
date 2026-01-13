@@ -1,23 +1,17 @@
-use super::{File, FileType, SeekOption};
-use crate::{
-    io::{Buffer, BufferFill, Stream},
-    kernel::{
-        constants::{EBADF, EFAULT, ENOTDIR, EOVERFLOW, ESPIPE},
-        vfs::{
-            dentry::Dentry,
-            inode::{Inode, InodeUse, WriteOffset},
-            types::Format,
-        },
-    },
-    prelude::KResult,
-};
 use alloc::sync::Arc;
+
 use eonix_sync::Mutex;
-use posix_types::{
-    getdent::{UserDirent, UserDirent64},
-    open::OpenFlags,
-    stat::StatX,
-};
+use posix_types::getdent::{UserDirent, UserDirent64};
+use posix_types::open::OpenFlags;
+use posix_types::stat::StatX;
+
+use super::{File, FileType, SeekOption};
+use crate::io::{Buffer, BufferFill, Stream};
+use crate::kernel::constants::{EBADF, EFAULT, ENOTDIR, EOVERFLOW, ESPIPE};
+use crate::kernel::vfs::dentry::Dentry;
+use crate::kernel::vfs::inode::{InodeUse, WriteOffset};
+use crate::kernel::vfs::types::Format;
+use crate::prelude::KResult;
 
 pub struct InodeFile {
     pub r: bool,
@@ -34,7 +28,7 @@ impl InodeFile {
     pub fn new(dentry: Arc<Dentry>, flags: OpenFlags) -> File {
         // SAFETY: `dentry` used to create `InodeFile` is valid.
         // SAFETY: `mode` should never change with respect to the `S_IFMT` fields.
-        let format = dentry.inode().expect("dentry should be invalid").format();
+        let format = dentry.inode().expect("dentry should be invalid").format;
 
         let (r, w, a) = flags.as_rwa();
 
@@ -98,7 +92,7 @@ impl InodeFile {
 }
 
 impl File {
-    pub fn get_inode(&self) -> KResult<Option<InodeUse<dyn Inode>>> {
+    pub fn get_inode(&self) -> KResult<Option<InodeUse>> {
         if let FileType::Inode(inode_file) = &**self {
             Ok(Some(inode_file.dentry.get_inode()?))
         } else {
@@ -191,7 +185,7 @@ impl File {
             SeekOption::Set(n) => n,
             SeekOption::End(off) => {
                 let inode = inode_file.dentry.get_inode()?;
-                let size = inode.info().lock().size as usize;
+                let size = inode.info.lock().size as usize;
                 size.checked_add_signed(off).ok_or(EOVERFLOW)?
             }
         };

@@ -1,16 +1,15 @@
-use core::{
-    marker::Unsize,
-    ops::{CoerceUnsized, Deref},
-};
-
 use alloc::sync::{Arc, Weak};
+use core::any::{Any, TypeId};
+use core::marker::Unsize;
+use core::ops::{CoerceUnsized, Deref};
+
 use eonix_sync::RwLock;
 
-use crate::{kernel::constants::EIO, prelude::KResult};
-
 use super::types::DeviceId;
+use crate::kernel::constants::EIO;
+use crate::prelude::KResult;
 
-pub trait SuperBlock: Send + Sync + 'static {}
+pub trait SuperBlock: Any + Send + Sync + 'static {}
 
 #[derive(Debug, Clone)]
 pub struct SuperBlockInfo {
@@ -80,6 +79,36 @@ where
             rwsem: RwLock::new(SuperBlockLock(())),
             backend: backend_func(SbRef(weak.clone())),
         }))
+    }
+}
+
+impl<S> SbUse<S>
+where
+    S: SuperBlock + ?Sized,
+{
+    pub fn get_ref(&self) -> SbRef<S> {
+        SbRef(Arc::downgrade(&self.0))
+    }
+}
+
+impl SbUse<dyn SuperBlock> {
+    /// Downcast the superblock to a specific type.
+    ///
+    /// # Panics
+    /// Panics if the downcast fails.
+    pub fn downcast<U: SuperBlock>(self) -> SbUse<U> {
+        let Self(sb_complex) = self;
+        if (&sb_complex.backend as &dyn Any).type_id() != TypeId::of::<U>() {
+            panic!("Downcast failed: type mismatch");
+        }
+
+        unsafe {
+            // SAFETY: We have checked the type above and unsized coercion says
+            //         that Arc<T> has the same layout as Arc<U> if T: Unsize<U>.
+            SbUse(Arc::from_raw(
+                Arc::into_raw(sb_complex) as *const SuperBlockComplex<U>
+            ))
+        }
     }
 }
 

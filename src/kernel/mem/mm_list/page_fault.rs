@@ -1,10 +1,11 @@
-use super::{MMList, VAddr};
-use crate::kernel::task::Thread;
 use eonix_hal::mm::flush_tlb;
 use eonix_hal::traits::fault::PageFaultErrorCode;
 use eonix_mm::address::{Addr as _, AddrOps as _, VRange};
 use eonix_mm::paging::PAGE_SIZE;
 use posix_types::signal::Signal;
+
+use super::{MMList, VAddr};
+use crate::kernel::task::Thread;
 
 #[repr(C)]
 struct FixEntry {

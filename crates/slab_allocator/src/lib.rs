@@ -2,7 +2,7 @@
 
 use core::ptr::NonNull;
 
-use eonix_mm::paging::{PageList, PageListSized};
+use eonix_mm::paging::{FolioList, FolioListSized};
 use eonix_sync::Spin;
 
 #[repr(C)]
@@ -84,21 +84,21 @@ where
     }
 }
 
-pub trait SlabPageAlloc {
+/// Allocate a page suitable for slab system use. The page MUST come with
+/// its allocation count 0 and next free slot None.
+///
+/// # Safety
+/// The page returned MUST have been properly initialized after allocation.
+pub unsafe trait SlabPageAlloc {
     type Page: SlabPage;
-    type PageList: PageList<Page = Self::Page>;
+    type PageList: FolioList<Folio = Self::Page>;
 
-    /// Allocate a page suitable for slab system use. The page MUST come with
-    /// its allocation count 0 and next free slot None.
-    ///
-    /// # Safety
-    /// The page returned MUST be properly initialized before its usage.
-    unsafe fn alloc_uninit(&self) -> &'static mut Self::Page;
+    fn alloc_slab_page(&self) -> &'static mut Self::Page;
 }
 
 pub(crate) struct SlabList<T>
 where
-    T: PageList,
+    T: FolioList,
 {
     empty_list: T,
     partial_list: T,
@@ -120,7 +120,7 @@ unsafe impl<P, const COUNT: usize> Sync for SlabAlloc<P, COUNT> where P: SlabPag
 impl<L, const COUNT: usize> SlabAlloc<L, COUNT>
 where
     L: SlabPageAlloc,
-    L::PageList: PageListSized,
+    L::PageList: FolioListSized,
 {
     pub fn new_in(alloc: L) -> Self {
         Self {
@@ -148,7 +148,7 @@ where
 
 impl<T> SlabList<T>
 where
-    T: PageListSized,
+    T: FolioListSized,
 {
     const fn new(object_size: usize) -> Self {
         Self {
@@ -162,8 +162,8 @@ where
 
 impl<T> SlabList<T>
 where
-    T: PageList,
-    T::Page: SlabPage,
+    T: FolioList,
+    T::Folio: SlabPage,
 {
     fn alloc_from_partial(&mut self) -> NonNull<u8> {
         let head = self.partial_list.peek_head().unwrap();
@@ -190,18 +190,16 @@ where
         slot
     }
 
-    fn charge(&mut self, alloc: &impl SlabPageAlloc<Page = T::Page>) {
-        unsafe {
-            let slab = alloc.alloc_uninit();
-            let free_slot = make_slab_page(slab.get_data_ptr(), self.object_size);
+    fn charge(&mut self, alloc: &impl SlabPageAlloc<Page = T::Folio>) {
+        let slab = alloc.alloc_slab_page();
+        let free_slot = make_slab_page(slab.get_data_ptr(), self.object_size);
 
-            slab.set_free_slot(Some(free_slot));
+        slab.set_free_slot(Some(free_slot));
 
-            self.empty_list.push_tail(slab);
-        }
+        self.empty_list.push_tail(slab);
     }
 
-    fn alloc(&mut self, alloc: &impl SlabPageAlloc<Page = T::Page>) -> NonNull<u8> {
+    fn alloc(&mut self, alloc: &impl SlabPageAlloc<Page = T::Folio>) -> NonNull<u8> {
         if !self.partial_list.is_empty() {
             return self.alloc_from_partial();
         }
@@ -216,7 +214,7 @@ where
     unsafe fn dealloc(&mut self, ptr: NonNull<u8>, _alloc: &impl SlabPageAlloc) {
         let slab_page = unsafe {
             // SAFETY:
-            <T::Page>::from_allocated(ptr)
+            <T::Folio>::from_allocated(ptr)
         };
 
         let (was_full, is_empty);

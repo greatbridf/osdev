@@ -3,7 +3,7 @@ use alloc::boxed::Box;
 use async_trait::async_trait;
 use eonix_hal::mm::ArchPhysAccess;
 use eonix_mm::address::{Addr, PAddr, PhysAccess};
-use eonix_mm::paging::PFN;
+use eonix_mm::paging::{Folio as _, PFN};
 use eonix_sync::Spin;
 use virtio_drivers::device::blk::VirtIOBlk;
 use virtio_drivers::transport::Transport;
@@ -12,7 +12,7 @@ use virtio_drivers::Hal;
 use crate::io::Chunks;
 use crate::kernel::block::{BlockDeviceRequest, BlockRequestQueue};
 use crate::kernel::constants::EIO;
-use crate::kernel::mem::{Page, PageExt};
+use crate::kernel::mem::Folio;
 use crate::prelude::KResult;
 
 pub struct HAL;
@@ -22,7 +22,7 @@ unsafe impl Hal for HAL {
         pages: usize,
         _direction: virtio_drivers::BufferDirection,
     ) -> (virtio_drivers::PhysAddr, core::ptr::NonNull<u8>) {
-        let page = Page::alloc_at_least(pages);
+        let page = Folio::alloc_at_least(pages);
 
         let ptr = page.get_ptr();
         let pfn = page.into_raw();
@@ -40,7 +40,7 @@ unsafe impl Hal for HAL {
         unsafe {
             // SAFETY: The caller ensures that the pfn corresponds to a valid
             //         page allocated by `dma_alloc`.
-            Page::from_raw(pfn);
+            Folio::from_raw(pfn);
         }
 
         0

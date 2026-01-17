@@ -1,7 +1,6 @@
-use core::cell::UnsafeCell;
+use core::ptr::NonNull;
 
-#[allow(unused_imports)]
-use super::{Page, PageAlloc, RawPage, PFN};
+use super::PFN;
 use crate::address::PRange;
 
 /// A [`Zone`] holds a lot of [`Page`]s that share the same NUMA node or
@@ -16,5 +15,5 @@ pub trait Zone: Send + Sync {
     ///
     /// # Return
     /// [`None`] if [`pfn`] is not in this [`Zone`].
-    fn get_page(&self, pfn: PFN) -> Option<&UnsafeCell<Self::Page>>;
+    fn get_page(&self, pfn: PFN) -> Option<NonNull<Self::Page>>;
 }

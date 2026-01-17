@@ -1,15 +1,16 @@
 use core::borrow::Borrow;
 use core::cell::UnsafeCell;
 use core::cmp;
+use core::sync::atomic::Ordering;
 
 use eonix_mm::address::{AddrOps as _, VAddr, VRange};
 use eonix_mm::page_table::{PageAttribute, RawAttribute, PTE};
-use eonix_mm::paging::PFN;
+use eonix_mm::paging::{Folio as _, PFN};
 
 use super::mm_list::EMPTY_PAGE;
-use super::{Mapping, Page, Permission};
-use crate::kernel::mem::page_cache::PageOffset;
-use crate::kernel::mem::{CachePage, PageExcl, PageExt};
+use super::{Mapping, Permission};
+use crate::kernel::mem::folio::Folio;
+use crate::kernel::mem::{CachePage, FolioOwned, PageOffset};
 use crate::prelude::KResult;
 
 #[derive(Debug)]
@@ -98,8 +99,10 @@ impl MMArea {
         attr.remove(PageAttribute::COPY_ON_WRITE);
         attr.set(PageAttribute::WRITE, self.permission.write);
 
-        let page = unsafe { Page::from_raw(*pfn) };
-        if page.is_exclusive() {
+        let page = unsafe { Folio::from_raw(*pfn) };
+
+        // XXX: Change me!!!
+        if page.refcount.load(Ordering::Relaxed) == 1 {
             // SAFETY: This is actually safe. If we read `1` here and we have `MMList` lock
             // held, there couldn't be neither other processes sharing the page, nor other
             // threads making the page COW at the same time.
@@ -109,9 +112,13 @@ impl MMArea {
 
         let mut new_page;
         if *pfn == EMPTY_PAGE.pfn() {
-            new_page = PageExcl::zeroed();
+            new_page = {
+                let mut folio = FolioOwned::alloc();
+                folio.as_bytes_mut().fill(0);
+                folio
+            };
         } else {
-            new_page = PageExcl::alloc();
+            new_page = FolioOwned::alloc();
 
             unsafe {
                 // SAFETY: `page` is CoW, which means that others won't write to it.
@@ -123,7 +130,7 @@ impl MMArea {
         }
 
         attr.remove(PageAttribute::ACCESSED);
-        *pfn = new_page.into_page().into_raw();
+        *pfn = new_page.share().into_raw();
     }
 
     /// # Arguments
@@ -143,11 +150,11 @@ impl MMArea {
 
         let file_offset = file_mapping.offset + offset;
 
-        let map_page = |page: &Page, cache_page: &CachePage| {
+        let map_page = |cache_page: &CachePage| {
             if !self.permission.write {
                 assert!(!write, "Write fault on read-only mapping");
 
-                *pfn = page.clone().into_raw();
+                *pfn = cache_page.add_mapping();
                 return;
             }
 
@@ -157,26 +164,26 @@ impl MMArea {
                 // So here we can set the dirty flag now.
                 cache_page.set_dirty(true);
                 attr.insert(PageAttribute::WRITE);
-                *pfn = page.clone().into_raw();
+                *pfn = cache_page.add_mapping();
                 return;
             }
 
             if !write {
                 // Delay the copy-on-write until write fault happens.
                 attr.insert(PageAttribute::COPY_ON_WRITE);
-                *pfn = page.clone().into_raw();
+                *pfn = cache_page.add_mapping();
                 return;
             }
 
             // XXX: Change this. Let's handle mapped pages before CoW pages.
             // Nah, we are writing to a mapped private mapping...
-            let mut new_page = PageExcl::zeroed();
+            let mut new_page = FolioOwned::alloc();
             new_page
                 .as_bytes_mut()
-                .copy_from_slice(page.lock().as_bytes());
+                .copy_from_slice(cache_page.lock().as_bytes());
 
             attr.insert(PageAttribute::WRITE);
-            *pfn = new_page.into_page().into_raw();
+            *pfn = new_page.share().into_raw();
         };
 
         file_mapping

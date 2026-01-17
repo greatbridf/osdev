@@ -125,7 +125,7 @@ impl InodeOps for FileInode {
         page: &mut CachePage,
         _: PageOffset,
     ) -> KResult<()> {
-        page.as_bytes_mut().fill(0);
+        page.lock().as_bytes_mut().fill(0);
         Ok(())
     }
 

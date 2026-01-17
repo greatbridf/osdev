@@ -1,13 +1,14 @@
 use core::ptr::NonNull;
 
 use eonix_mm::address::PAddr;
+use eonix_mm::paging::Folio as _;
 
 use super::command::Command;
 use super::{PRDTEntry, FISH2D};
-use crate::kernel::mem::{Page, PageExt};
+use crate::kernel::mem::FolioOwned;
 
 pub struct CommandTable {
-    page: Page,
+    page: FolioOwned,
     cmd_fis: NonNull<FISH2D>,
     prdt: NonNull<[PRDTEntry; 248]>,
     prdt_entries: usize,
@@ -18,7 +19,7 @@ unsafe impl Sync for CommandTable {}
 
 impl CommandTable {
     pub fn new() -> Self {
-        let page = Page::alloc();
+        let page = FolioOwned::alloc();
         let base = page.get_ptr();
 
         unsafe {

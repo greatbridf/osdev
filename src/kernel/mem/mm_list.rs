@@ -1,31 +1,33 @@
 mod mapping;
 mod page_fault;
+mod page_table;
 
 use alloc::collections::btree_set::BTreeSet;
 use core::fmt;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
 use eonix_hal::mm::{
-    flush_tlb_all, get_root_page_table_pfn, set_root_page_table_pfn, ArchPagingMode,
-    ArchPhysAccess, GLOBAL_PAGE_TABLE,
+    flush_tlb_all, get_root_page_table_pfn, set_root_page_table_pfn, GLOBAL_PAGE_TABLE,
 };
 use eonix_mm::address::{Addr as _, AddrOps as _, PAddr, VAddr, VRange};
-use eonix_mm::page_table::{PageAttribute, PageTable, RawAttribute, PTE};
-use eonix_mm::paging::{PAGE_SIZE, PFN};
+use eonix_mm::page_table::{PageAttribute, RawAttribute, PTE};
+use eonix_mm::paging::{Folio as _, PAGE_SIZE, PFN};
 use eonix_sync::{LazyLock, Mutex};
 pub use mapping::{FileMapping, Mapping};
 pub use page_fault::handle_kernel_page_fault;
+use page_table::KernelPageTable;
 
 use super::address::{VAddrExt as _, VRangeExt as _};
-use super::page_alloc::GlobalPageAlloc;
-use super::paging::AllocZeroed as _;
-use super::{MMArea, Page, PageExt};
+use super::{Folio, FolioOwned, MMArea};
 use crate::kernel::constants::{EEXIST, EFAULT, EINVAL, ENOMEM};
-use crate::kernel::mem::page_alloc::RawPagePtr;
 use crate::prelude::*;
 use crate::sync::ArcSwap;
 
-pub static EMPTY_PAGE: LazyLock<Page> = LazyLock::new(|| Page::zeroed());
+pub static EMPTY_PAGE: LazyLock<Folio> = LazyLock::new(|| {
+    let mut folio = FolioOwned::alloc();
+    folio.as_bytes_mut().fill(0);
+    folio.share()
+});
 
 #[derive(Debug, Clone, Copy)]
 pub struct Permission {
@@ -34,23 +36,21 @@ pub struct Permission {
     pub execute: bool,
 }
 
-pub type KernelPageTable<'a> = PageTable<'a, ArchPagingMode, GlobalPageAlloc, ArchPhysAccess>;
-
-struct MMListInner<'a> {
+struct MMListInner {
     areas: BTreeSet<MMArea>,
-    page_table: KernelPageTable<'a>,
+    page_table: KernelPageTable,
     break_start: Option<VRange>,
     break_pos: Option<VAddr>,
 }
 
 pub struct MMList {
-    inner: ArcSwap<Mutex<MMListInner<'static>>>,
+    inner: ArcSwap<Mutex<MMListInner>>,
     user_count: AtomicUsize,
     /// Only used in kernel space to switch page tables on context switch.
     root_page_table: AtomicUsize,
 }
 
-impl MMListInner<'_> {
+impl MMListInner {
     fn overlapping_addr(&self, addr: VAddr) -> Option<&MMArea> {
         self.areas.get(&VRange::from(addr))
     }
@@ -96,7 +96,7 @@ impl MMListInner<'_> {
         }
     }
 
-    fn unmap(&mut self, start: VAddr, len: usize) -> KResult<Vec<Page>> {
+    fn unmap(&mut self, start: VAddr, len: usize) -> KResult<Vec<Folio>> {
         assert_eq!(start.floor(), start);
         let end = (start + len).ceil();
         let range_to_unmap = VRange::new(start, end);
@@ -120,7 +120,7 @@ impl MMListInner<'_> {
                 let (pfn, _) = pte.take();
                 pages_to_free.push(unsafe {
                     // SAFETY: We got the pfn from a valid page table entry, so it should be valid.
-                    Page::from_raw(pfn)
+                    Folio::from_raw(pfn)
                 });
             }
 
@@ -275,23 +275,23 @@ impl MMListInner<'_> {
     }
 }
 
-impl Drop for MMListInner<'_> {
+impl Drop for MMListInner {
     fn drop(&mut self) {
         // May buggy
         for area in &self.areas {
             if area.is_shared {
                 for pte in self.page_table.iter_user(area.range()) {
-                    let (pfn, _) = pte.take();
-                    let raw_page = RawPagePtr::from(pfn);
-                    if raw_page.refcount().fetch_sub(1, Ordering::Relaxed) == 1 {
-                        // Wrong here
-                        // unsafe { Page::from_raw(pfn) };
-                    }
+                    // XXX: Fix me
+                    let _ = pte.take();
+                    // let raw_page = RawPagePtr::from(pfn);
+                    // if raw_page.refcount().fetch_sub(1, Ordering::Relaxed) == 1 {
+                    //     unsafe { Page::from_raw(pfn) };
+                    // }
                 }
             } else {
                 for pte in self.page_table.iter_user(area.range()) {
                     let (pfn, _) = pte.take();
-                    unsafe { Page::from_raw(pfn) };
+                    unsafe { Folio::from_raw(pfn) };
                 }
             }
         }
@@ -327,7 +327,7 @@ impl MMList {
     }
 
     pub fn new() -> Self {
-        let page_table = GLOBAL_PAGE_TABLE.clone_global();
+        let page_table = KernelPageTable::new();
         Self {
             root_page_table: AtomicUsize::from(page_table.addr().addr()),
             user_count: AtomicUsize::new(0),
@@ -344,7 +344,7 @@ impl MMList {
         let inner = self.inner.borrow();
         let mut inner = inner.lock().await;
 
-        let page_table = GLOBAL_PAGE_TABLE.clone_global();
+        let page_table = KernelPageTable::new();
         let list = Self {
             root_page_table: AtomicUsize::from(page_table.addr().addr()),
             user_count: AtomicUsize::new(0),
@@ -392,7 +392,7 @@ impl MMList {
     }
 
     pub fn deactivate(&self) {
-        set_root_page_table_pfn(PFN::from(GLOBAL_PAGE_TABLE.addr()));
+        set_root_page_table_pfn(PFN::from(GLOBAL_PAGE_TABLE.start()));
 
         let old_user_count = self.user_count.fetch_sub(1, Ordering::Release);
         assert_ne!(old_user_count, 0);
@@ -444,7 +444,7 @@ impl MMList {
 
         let new_root_page_table = match &new {
             Some(new_mm) => new_mm.root_page_table.load(Ordering::Relaxed),
-            None => GLOBAL_PAGE_TABLE.addr().addr(),
+            None => GLOBAL_PAGE_TABLE.start().addr(),
         };
 
         set_root_page_table_pfn(PFN::from(PAddr::from(new_root_page_table)));
@@ -693,7 +693,7 @@ impl MMList {
 
                 unsafe {
                     // SAFETY: We are sure that the page is valid and we have the right to access it.
-                    Page::with_raw(pte.get_pfn(), |page| {
+                    Folio::with_raw(pte.get_pfn(), |page| {
                         let mut pg = page.lock();
                         let page_data = &mut pg.as_bytes_mut()[start_offset..end_offset];
 
@@ -724,7 +724,7 @@ trait PageTableExt {
     fn set_copied(&self, from: &Self, range: VRange);
 }
 
-impl PageTableExt for KernelPageTable<'_> {
+impl PageTableExt for KernelPageTable {
     fn set_anonymous(&self, range: VRange, permission: Permission) {
         for pte in self.iter_user(range) {
             pte.set_anonymous(permission.execute);
@@ -805,7 +805,7 @@ where
 
         let pfn = unsafe {
             // SAFETY: We get the pfn from a valid page table entry, so it should be valid as well.
-            Page::with_raw(from.get_pfn(), |page| page.clone().into_raw())
+            Folio::with_raw(from.get_pfn(), |page| page.clone().into_raw())
         };
 
         self.set(pfn, T::Attr::from(from_attr & !PageAttribute::ACCESSED));

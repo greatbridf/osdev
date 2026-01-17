@@ -8,8 +8,7 @@ use async_trait::async_trait;
 use mbr::MBRPartTable;
 
 use super::constants::ENOENT;
-use super::mem::paging::Page;
-use super::mem::PageExt;
+use super::mem::Folio;
 use super::vfs::types::DeviceId;
 use crate::io::{Buffer, Chunks, FillResult};
 use crate::kernel::constants::{EEXIST, EINVAL};
@@ -202,15 +201,15 @@ impl BlockDevice {
             let (page_slice, page, mut page_vec);
             match nr_batch {
                 ..=8 => {
-                    page = Page::alloc();
+                    page = Folio::alloc();
                     page_slice = core::slice::from_ref(&page);
                 }
                 ..=16 => {
-                    page = Page::alloc_order(1);
+                    page = Folio::alloc_order(1);
                     page_slice = core::slice::from_ref(&page);
                 }
                 ..=32 => {
-                    page = Page::alloc_order(2);
+                    page = Folio::alloc_order(2);
                     page_slice = core::slice::from_ref(&page);
                 }
                 count => {
@@ -220,8 +219,8 @@ impl BlockDevice {
                     let nr_pages = nr_huge_pages + nr_small_pages;
                     page_vec = Vec::with_capacity(nr_pages);
 
-                    page_vec.resize_with(nr_huge_pages, || Page::alloc_order(2));
-                    page_vec.resize_with(nr_pages, || Page::alloc());
+                    page_vec.resize_with(nr_huge_pages, || Folio::alloc_order(2));
+                    page_vec.resize_with(nr_pages, || Folio::alloc());
                     page_slice = &page_vec;
                 }
             }
@@ -266,7 +265,7 @@ pub enum BlockDeviceRequest<'lt> {
         /// Number of sectors to read
         count: u64,
         /// Buffer pages to read into
-        buffer: &'lt [Page],
+        buffer: &'lt [Folio],
     },
     Write {
         /// Sector to write to, in 512-byte blocks
@@ -274,6 +273,6 @@ pub enum BlockDeviceRequest<'lt> {
         /// Number of sectors to write
         count: u64,
         /// Buffer pages to write from
-        buffer: &'lt [Page],
+        buffer: &'lt [Folio],
     },
 }

@@ -1,5 +1,4 @@
 mod dir;
-mod file;
 
 use alloc::sync::Arc;
 use core::ops::Deref;
@@ -13,7 +12,7 @@ use itertools::Itertools;
 use crate::io::{Buffer, ByteBuffer, UninitBuffer};
 use crate::kernel::block::{BlockDevice, BlockDeviceRequest};
 use crate::kernel::constants::{EINVAL, EIO};
-use crate::kernel::mem::{CachePage, Page, PageExcl, PageExt, PageOffset};
+use crate::kernel::mem::{CachePage, Folio, FolioOwned, PageOffset};
 use crate::kernel::timer::Instant;
 use crate::kernel::vfs::dentry::Dentry;
 use crate::kernel::vfs::inode::{Ino, InodeInfo, InodeOps, InodeUse};
@@ -114,7 +113,7 @@ struct FatFs {
 impl SuperBlock for FatFs {}
 
 impl FatFs {
-    async fn read_cluster(&self, mut cluster: Cluster, buf: &Page) -> KResult<()> {
+    async fn read_cluster(&self, mut cluster: Cluster, buf: &Folio) -> KResult<()> {
         cluster = cluster.normalized();
 
         let rq = BlockDeviceRequest::Read {
@@ -278,7 +277,6 @@ impl InodeOps for FileInode {
             .next()
             .ok_or(EIO)?;
 
-        let page = page.get_page();
         fs.read_cluster(cluster, &page).await?;
 
         let real_len = (inode.info.lock().size as usize) - offset.byte_count();
@@ -293,7 +291,7 @@ impl InodeOps for FileInode {
 
 struct DirInode {
     // TODO: Use the new PageCache...
-    dir_pages: RwLock<Vec<PageExcl>>,
+    dir_pages: RwLock<Vec<FolioOwned>>,
 }
 
 impl DirInode {
@@ -330,7 +328,7 @@ impl DirInode {
         let clusters = ClusterIterator::new(fat.as_ref(), Cluster::from_ino(inode.ino));
 
         for cluster in clusters {
-            let page = PageExcl::alloc();
+            let page = FolioOwned::alloc();
             fs.read_cluster(cluster, &page).await?;
 
             dir_pages.push(page);
@@ -343,7 +341,7 @@ impl DirInode {
         &self,
         sb: &SbUse<FatFs>,
         inode: &InodeUse,
-    ) -> KResult<impl Deref<Target = Vec<PageExcl>> + use<'_>> {
+    ) -> KResult<impl Deref<Target = Vec<FolioOwned>> + use<'_>> {
         {
             let dir_pages = self.dir_pages.read().await;
             if !dir_pages.is_empty() {

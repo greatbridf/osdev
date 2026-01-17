@@ -3,12 +3,12 @@
 use core::hint::unreachable_unchecked;
 
 use eonix_mm::address::{AddrOps as _, PAddr, PRange};
-use eonix_mm::paging::{PageList, PageListSized, Zone, PFN};
+use eonix_mm::paging::{FolioList, FolioListSized, Zone, PFN};
 
 const MAX_ORDER: u32 = 10;
 const AREAS: usize = const { MAX_ORDER as usize + 1 };
 
-pub trait BuddyPage: Sized + 'static {
+pub trait BuddyFolio: Sized + 'static {
     fn pfn(&self) -> PFN;
 
     fn get_order(&self) -> u32;
@@ -20,19 +20,19 @@ pub trait BuddyPage: Sized + 'static {
 
 struct FreeArea<L>
 where
-    L: PageList,
+    L: FolioList,
 {
     free_list: L,
     count: usize,
 }
 
-unsafe impl<L> Send for FreeArea<L> where L: PageList {}
-unsafe impl<L> Sync for FreeArea<L> where L: PageList {}
+unsafe impl<L> Send for FreeArea<L> where L: FolioList {}
+unsafe impl<L> Sync for FreeArea<L> where L: FolioList {}
 
 pub struct BuddyAllocator<Z, L>
 where
     Z: Zone + 'static,
-    L: PageList,
+    L: FolioList,
 {
     zone: &'static Z,
     free_areas: [FreeArea<L>; AREAS],
@@ -41,8 +41,8 @@ where
 impl<Z, L> BuddyAllocator<Z, L>
 where
     Z: Zone + 'static,
-    Z::Page: BuddyPage,
-    L: PageListSized,
+    Z::Page: BuddyFolio,
+    L: FolioListSized,
 {
     pub const fn new(zone: &'static Z) -> Self {
         Self {
@@ -52,13 +52,13 @@ where
     }
 }
 
-impl<Z, L, P> BuddyAllocator<Z, L>
+impl<Z, L, F> BuddyAllocator<Z, L>
 where
-    Z: Zone<Page = P>,
-    L: PageList<Page = P>,
-    P: BuddyPage + 'static,
+    Z: Zone<Page = F>,
+    L: FolioList<Folio = F>,
+    F: BuddyFolio + 'static,
 {
-    pub fn create_pages(&mut self, start: PAddr, end: PAddr) {
+    pub fn create_folios(&mut self, start: PAddr, end: PAddr) {
         assert!(
             self.zone
                 .contains_prange(PRange::new(start.ceil(), end.floor())),
@@ -82,40 +82,40 @@ where
 
             unsafe {
                 // SAFETY: We've checked that the range is within the zone above.
-                self.add_page_unchecked(pfn, order)
+                self.add_folio_unchecked(pfn, order)
             };
 
             pfn = new_end_pfn;
         }
     }
 
-    fn add_page(&mut self, pfn: PFN, order: u32) {
+    fn add_folio(&mut self, pfn: PFN, order: u32) {
         let prange = PRange::from(PAddr::from(pfn)).grow(1 << (order + 12));
         assert!(
             self.zone.contains_prange(prange),
-            "The given page is not within the zone."
+            "The given folio is not within the zone."
         );
 
         unsafe {
             // SAFETY: Checks above.
-            self.add_page_unchecked(pfn, order);
+            self.add_folio_unchecked(pfn, order);
         }
     }
 
-    unsafe fn add_page_unchecked(&mut self, pfn: PFN, order: u32) {
-        let Some(page) = self.zone.get_page(pfn) else {
+    unsafe fn add_folio_unchecked(&mut self, pfn: PFN, order: u32) {
+        let Some(mut folio) = self.zone.get_page(pfn) else {
             unsafe { unreachable_unchecked() }
         };
 
         unsafe {
             // SAFETY: The caller ensures that the page is unused.
-            let page_mut = &mut *page.get();
-            self.free_areas[order as usize].add_page(page_mut, order);
+            let folio_mut = folio.as_mut();
+            self.free_areas[order as usize].add_folio(folio_mut, order);
         }
     }
 
-    fn break_page(&mut self, page: &mut P, order: u32, target_order: u32) {
-        let pfn = page.pfn();
+    fn break_folio(&mut self, folio: &mut F, order: u32, target_order: u32) {
+        let pfn = folio.pfn();
 
         for order in (target_order..order).rev() {
             let buddy_pfn = pfn + (1 << order);
@@ -123,50 +123,50 @@ where
             unsafe {
                 // SAFETY: We got the page from `self.free_areas`. Checks are
                 //         done when we've put the page into the buddy system.
-                self.add_page_unchecked(buddy_pfn, order);
+                self.add_folio_unchecked(buddy_pfn, order);
             }
         }
 
-        page.set_order(target_order);
+        folio.set_order(target_order);
     }
 
     pub fn alloc_order(&mut self, order: u32) -> Option<&'static mut Z::Page> {
         for current_order in order..AREAS as u32 {
-            let Some(page) = self.free_areas[current_order as usize].get_free_page() else {
+            let Some(folio) = self.free_areas[current_order as usize].get_free_folio() else {
                 continue;
             };
 
             if current_order > order {
-                self.break_page(page, current_order, order);
+                self.break_folio(folio, current_order, order);
             }
 
-            return Some(page);
+            return Some(folio);
         }
 
         None
     }
 
-    pub unsafe fn dealloc(&mut self, page: &'static mut Z::Page) {
-        let mut pfn = page.pfn();
-        let mut order = page.get_order();
+    pub unsafe fn dealloc(&mut self, folio: &'static mut Z::Page) {
+        let mut pfn = folio.pfn();
+        let mut order = folio.get_order();
 
         assert!(
-            !page.is_buddy(),
-            "Trying to free a page that is already in the buddy system: {pfn:?}",
+            !folio.is_buddy(),
+            "Trying to free a folio that is already in the buddy system: {pfn:?}",
         );
 
         while order < MAX_ORDER {
             let buddy_pfn = pfn.buddy_pfn(order);
-            let Some(buddy_page) = self.try_get_buddy(buddy_pfn, order) else {
+            let Some(buddy) = self.try_get_buddy(buddy_pfn, order) else {
                 break;
             };
 
-            self.free_areas[order as usize].remove_page(buddy_page);
+            self.free_areas[order as usize].remove_folio(buddy);
             pfn = pfn.combined_pfn(buddy_pfn);
             order += 1;
         }
 
-        self.add_page(pfn, order);
+        self.add_folio(pfn, order);
     }
 
     /// This function checks whether the given page is within our [`Zone`] and
@@ -176,32 +176,32 @@ where
     /// - the buddy is within the same [`Zone`] as us.
     /// - the buddy is a free buddy (in some [`FreeArea`])
     /// - the buddy has order [`order`]
-    fn try_get_buddy<'a>(&mut self, buddy_pfn: PFN, order: u32) -> Option<&'a mut P> {
-        let buddy_page = self.zone.get_page(buddy_pfn)?;
+    fn try_get_buddy<'a>(&mut self, buddy_pfn: PFN, order: u32) -> Option<&'a mut F> {
+        let mut buddy = self.zone.get_page(buddy_pfn)?;
 
         unsafe {
             // SAFETY: We just test whether the page is a buddy.
-            let buddy_page_ref = &*buddy_page.get();
+            let buddy_ref = buddy.as_ref();
 
-            if !buddy_page_ref.is_buddy() {
+            if !buddy_ref.is_buddy() {
                 return None;
             }
 
             // Sad...
-            if buddy_page_ref.get_order() != order {
+            if buddy_ref.get_order() != order {
                 return None;
             }
 
             // SAFETY: We have the mutable reference to the buddy allocator.
             //         So all the pages within are exclusively accessible to us.
-            Some(&mut *buddy_page.get())
+            Some(buddy.as_mut())
         }
     }
 }
 
 impl<L> FreeArea<L>
 where
-    L: PageListSized,
+    L: FolioListSized,
 {
     const fn new() -> Self {
         Self {
@@ -213,34 +213,34 @@ where
 
 impl<L> FreeArea<L>
 where
-    L: PageList,
-    L::Page: BuddyPage + 'static,
+    L: FolioList,
+    L::Folio: BuddyFolio + 'static,
 {
-    pub fn get_free_page(&mut self) -> Option<&'static mut L::Page> {
-        self.free_list.pop_head().map(|page| {
+    pub fn get_free_folio(&mut self) -> Option<&'static mut L::Folio> {
+        self.free_list.pop_head().map(|folio| {
             assert_ne!(self.count, 0, "Oops");
 
-            page.set_buddy(false);
+            folio.set_buddy(false);
             self.count -= 1;
 
-            page
+            folio
         })
     }
 
-    pub fn add_page(&mut self, page: &'static mut L::Page, order: u32) {
-        page.set_order(order);
-        page.set_buddy(true);
+    pub fn add_folio(&mut self, folio: &'static mut L::Folio, order: u32) {
+        folio.set_order(order);
+        folio.set_buddy(true);
 
         self.count += 1;
-        self.free_list.push_tail(page);
+        self.free_list.push_tail(folio);
     }
 
-    pub fn remove_page(&mut self, page: &mut L::Page) {
+    pub fn remove_folio(&mut self, folio: &mut L::Folio) {
         assert_ne!(self.count, 0, "Oops");
-        page.set_buddy(false);
+        folio.set_buddy(false);
 
         self.count -= 1;
-        self.free_list.remove(page);
+        self.free_list.remove(folio);
     }
 }
 

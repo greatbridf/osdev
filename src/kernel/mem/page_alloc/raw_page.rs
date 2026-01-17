@@ -1,19 +1,16 @@
 use core::ptr::NonNull;
 use core::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 
-use buddy_allocator::BuddyPage;
+use buddy_allocator::BuddyFolio;
 use eonix_hal::mm::ArchPhysAccess;
 use eonix_mm::address::{PAddr, PhysAccess as _};
-use eonix_mm::paging::{PageAlloc, PageList, PageListSized, RawPage as RawPageTrait, PFN};
+use eonix_mm::paging::{FolioList, FolioListSized, Zone, PFN};
 use intrusive_list::{container_of, Link, List};
 use slab_allocator::{SlabPage, SlabPageAlloc, SlabSlot};
 
+use super::zones::ZONE;
 use super::{GlobalPageAlloc, PerCpuPage};
-use crate::kernel::mem::page_cache::PageCacheRawPage;
 use crate::kernel::mem::PhysAccess;
-
-pub const PAGE_ARRAY: NonNull<RawPage> =
-    unsafe { NonNull::new_unchecked(0xffffff8040000000 as *mut _) };
 
 pub struct PageFlags(AtomicU32);
 
@@ -41,11 +38,11 @@ pub struct RawPage {
     /// This can be used for LRU page swap in the future.
     ///
     /// Now only used for free page links in the buddy system.
-    link: Link,
+    pub link: Link,
     /// # Safety
     /// This field is only used in buddy system and is protected by the global lock.
-    order: u32,
-    flags: PageFlags,
+    pub order: u32,
+    pub flags: PageFlags,
     pub refcount: AtomicUsize,
 
     shared_data: PageData,
@@ -54,9 +51,6 @@ pub struct RawPage {
 // XXX: introduce Folio and remove this.
 unsafe impl Send for RawPage {}
 unsafe impl Sync for RawPage {}
-
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct RawPagePtr(NonNull<RawPage>);
 
 impl PageFlags {
     pub const LOCKED: u32 = 1 << 1;
@@ -85,80 +79,9 @@ impl PageFlags {
     }
 }
 
-impl RawPagePtr {
-    pub const fn from_ref(raw_page_ref: &RawPage) -> Self {
-        Self::new(unsafe {
-            // SAFETY: Rust references always points to non-null addresses.
-            NonNull::new_unchecked(&raw const *raw_page_ref as *mut _)
-        })
-    }
-
-    pub const fn new(ptr: NonNull<RawPage>) -> Self {
-        Self(ptr)
-    }
-
-    /// Get a raw pointer to the underlying `RawPage` struct.
-    ///
-    /// # Safety
-    /// Doing arithmetic on the pointer returned will cause immediate undefined behavior.
-    pub const unsafe fn as_ptr(self) -> *mut RawPage {
-        self.0.as_ptr()
-    }
-
-    pub const fn as_ref<'a>(self) -> &'a RawPage {
-        unsafe { &*self.as_ptr() }
-    }
-
-    pub const fn as_mut<'a>(self) -> &'a mut RawPage {
-        unsafe { &mut *self.as_ptr() }
-    }
-
-    pub const fn order(&self) -> u32 {
-        self.as_ref().order
-    }
-
-    pub const fn flags(&self) -> &PageFlags {
-        &self.as_ref().flags
-    }
-
-    pub const fn refcount(&self) -> &AtomicUsize {
-        &self.as_ref().refcount
-    }
-
-    // return the ptr point to the actually raw page
-    pub fn real_ptr<T>(&self) -> NonNull<T> {
-        let pfn = unsafe { PFN::from(RawPagePtr(NonNull::new_unchecked(self.as_ptr()))) };
-        unsafe { PAddr::from(pfn).as_ptr::<T>() }
-    }
-}
-
-impl From<RawPagePtr> for PFN {
-    fn from(value: RawPagePtr) -> Self {
-        let idx = unsafe { value.as_ptr().offset_from(PAGE_ARRAY.as_ptr()) as usize };
-        Self::from(idx)
-    }
-}
-
-impl From<PFN> for RawPagePtr {
-    fn from(pfn: PFN) -> Self {
-        let raw_page_ptr = unsafe { PAGE_ARRAY.add(usize::from(pfn)) };
-        Self::new(raw_page_ptr)
-    }
-}
-
-impl RawPageTrait for RawPagePtr {
-    fn order(&self) -> u32 {
-        self.order()
-    }
-
-    fn refcount(&self) -> &AtomicUsize {
-        self.refcount()
-    }
-}
-
-impl BuddyPage for RawPage {
+impl BuddyFolio for RawPage {
     fn pfn(&self) -> PFN {
-        PFN::from(RawPagePtr::from_ref(self))
+        ZONE.get_pfn(self)
     }
 
     fn get_order(&self) -> u32 {
@@ -184,8 +107,7 @@ impl BuddyPage for RawPage {
 
 impl SlabPage for RawPage {
     fn get_data_ptr(&self) -> NonNull<[u8]> {
-        let raw_page_ptr = RawPagePtr::from_ref(self);
-        let paddr_start = PAddr::from(PFN::from(raw_page_ptr));
+        let paddr_start = PAddr::from(ZONE.get_pfn(self));
         let page_data_ptr = unsafe { paddr_start.as_ptr() };
 
         NonNull::slice_from_raw_parts(page_data_ptr, 1 << (self.order + 12))
@@ -233,21 +155,9 @@ impl SlabPage for RawPage {
             let paddr = ArchPhysAccess::from_ptr(ptr);
             let pfn = PFN::from(paddr);
 
-            RawPagePtr::from(pfn).as_mut()
-        }
-    }
-}
-
-impl PageCacheRawPage for RawPagePtr {
-    fn is_dirty(&self) -> bool {
-        self.flags().has(PageFlags::DIRTY)
-    }
-
-    fn set_dirty(&self, dirty: bool) {
-        if dirty {
-            self.flags().set(PageFlags::DIRTY);
-        } else {
-            self.flags().clear(PageFlags::DIRTY);
+            ZONE.get_page(pfn)
+                .expect("Page outside of the global zone")
+                .as_mut()
         }
     }
 }
@@ -264,14 +174,16 @@ impl PerCpuPage for RawPage {
 
 pub struct RawPageList(List);
 
-impl PageList for RawPageList {
-    type Page = RawPage;
+unsafe impl Send for RawPageList {}
+
+impl FolioList for RawPageList {
+    type Folio = RawPage;
 
     fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
 
-    fn peek_head(&mut self) -> Option<&mut Self::Page> {
+    fn peek_head(&mut self) -> Option<&mut Self::Folio> {
         unsafe {
             let link = self.0.head()?;
             let mut raw_page_ptr = container_of!(link, RawPage, link);
@@ -280,7 +192,7 @@ impl PageList for RawPageList {
         }
     }
 
-    fn pop_head(&mut self) -> Option<&'static mut Self::Page> {
+    fn pop_head(&mut self) -> Option<&'static mut Self::Folio> {
         unsafe {
             let link = self.0.pop()?;
             let mut raw_page_ptr = container_of!(link, RawPage, link);
@@ -289,25 +201,25 @@ impl PageList for RawPageList {
         }
     }
 
-    fn push_tail(&mut self, page: &'static mut Self::Page) {
+    fn push_tail(&mut self, page: &'static mut Self::Folio) {
         self.0.insert(&mut page.link);
     }
 
-    fn remove(&mut self, page: &mut Self::Page) {
+    fn remove(&mut self, page: &mut Self::Folio) {
         self.0.remove(&mut page.link)
     }
 }
 
-impl PageListSized for RawPageList {
+impl FolioListSized for RawPageList {
     const NEW: Self = RawPageList(List::new());
 }
 
-impl SlabPageAlloc for GlobalPageAlloc {
+unsafe impl SlabPageAlloc for GlobalPageAlloc {
     type Page = RawPage;
     type PageList = RawPageList;
 
-    unsafe fn alloc_uninit(&self) -> &'static mut RawPage {
-        let raw_page = self.alloc().expect("Out of memory").as_mut();
+    fn alloc_slab_page(&self) -> &'static mut RawPage {
+        let raw_page = self.alloc_raw_order(0).expect("Out of memory");
         raw_page.flags.set(PageFlags::SLAB);
         raw_page.shared_data.slab = SlabPageData::new();
 

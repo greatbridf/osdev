@@ -1,12 +1,22 @@
-use core::cell::UnsafeCell;
+use core::ptr::NonNull;
 
 use eonix_mm::address::PRange;
 use eonix_mm::paging::{Zone, PFN};
 
 use super::RawPage;
-use crate::kernel::mem::page_alloc::RawPagePtr;
+
+pub static ZONE: GlobalZone = GlobalZone();
+
+const PAGE_ARRAY: NonNull<RawPage> =
+    unsafe { NonNull::new_unchecked(0xffffff8040000000 as *mut _) };
 
 pub struct GlobalZone();
+
+impl GlobalZone {
+    pub fn get_pfn(&self, page_ptr: *const RawPage) -> PFN {
+        PFN::from(unsafe { page_ptr.offset_from(PAGE_ARRAY.as_ptr()) as usize })
+    }
+}
 
 impl Zone for GlobalZone {
     type Page = RawPage;
@@ -15,11 +25,7 @@ impl Zone for GlobalZone {
         true
     }
 
-    fn get_page(&self, pfn: PFN) -> Option<&UnsafeCell<Self::Page>> {
-        unsafe {
-            // SAFETY: The pointer returned by [`RawPagePtr::as_ptr()`] is valid.
-            //         And so is it wrapped with [`UnsafeCell`]
-            Some(&*(RawPagePtr::from(pfn).as_ptr() as *const UnsafeCell<Self::Page>))
-        }
+    fn get_page(&self, pfn: PFN) -> Option<NonNull<RawPage>> {
+        Some(unsafe { PAGE_ARRAY.add(usize::from(pfn)) })
     }
 }

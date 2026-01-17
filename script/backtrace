@@ -1,0 +1,100 @@
+#!/bin/bash
+
+ADDR2LINE=${ADDR2LINE:-riscv64-unknown-elf-addr2line}
+
+ksym=build/riscv64gc-unknown-none-elf/debug/eonix_kernel
+
+usage() {
+    cat <<EOF
+Usage: $0 [options] [--] [addr2line options]
+
+Filter and translate backtrace addresses into human readable line numbers.
+
+Options:
+        -s, --ksym <symbol file>        Use the given kernel symbol file
+        -o, --only-gbos                 Show kernel function calls only
+        -h, --help                      Show this message
+EOF
+    exit "$1"
+}
+
+# $1: instruction address
+parse_pos() {
+    addr="$1"
+    shift
+
+    "$ADDR2LINE" -e "$ksym" -i "$addr" "$@" 2>/dev/null
+}
+
+filter_col() {
+    [ "$1" -eq 0 ] || awk "{ print \$$1; }"
+}
+
+str_contains() {
+    grep -E "$1" >/dev/null 2>&1
+}
+
+filter_stacktrace() {
+    NL=$'\n'
+    _state=nonstart
+    _out=
+    while [ $_state != "end" ]; do
+        read -r _line
+        case $_state in
+            nonstart)
+                str_contains "8< CUT HERE" <<< "$_line" && _state=save
+                ;;
+            save)
+                if str_contains "8< CUT HERE" <<< "$_line"; then
+                    _state=end
+                else
+                    _out="$_out$_line$NL"
+                fi
+                ;;
+        esac
+    done
+
+    echo "$_out"
+}
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        -s|--ksym)
+            shift
+            ksym="$1"
+            ;;
+        -o|--only-gbos)
+            only_gb=y
+            ;;
+        --)
+            shift
+            break
+            ;;
+        -h|--help)
+            usage 0
+            ;;
+        *)
+            usage 1
+            ;;
+    esac
+    shift
+done
+
+stacktrace="$(filter_stacktrace)"
+
+i=1
+for addr in $(filter_col 3 <<< "$stacktrace"); do
+    pos="$(parse_pos "$addr" "$@")"
+
+    if [ -n "$only_gb" ]; then
+        if ! str_contains "greatbridf_os" <<< "$pos"; then
+            continue
+        fi
+    fi
+
+    printf "========== %4d ==========\n" "$i"
+
+    parse_pos "$addr" "$@"
+
+    i=$((i + 1))
+done

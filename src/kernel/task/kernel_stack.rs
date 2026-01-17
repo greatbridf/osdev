@@ -1,11 +1,12 @@
-use crate::kernel::mem::{paging::Page, PhysAccess as _};
-use core::{num::NonZero, ptr::NonNull};
+use core::ptr::NonNull;
+
 use eonix_runtime::executor::Stack;
+
+use crate::kernel::mem::FolioOwned;
 
 #[derive(Debug)]
 pub struct KernelStack {
-    _pages: Page,
-    bottom: NonZero<usize>,
+    folio: FolioOwned,
 }
 
 impl KernelStack {
@@ -14,15 +15,8 @@ impl KernelStack {
     const KERNEL_STACK_ORDER: u32 = 7;
 
     pub fn new() -> Self {
-        let pages = Page::alloc_order(Self::KERNEL_STACK_ORDER);
-        let bottom = unsafe {
-            // SAFETY: The paddr is from a page, which should be valid.
-            pages.range().end().as_ptr::<u8>().addr()
-        };
-
         Self {
-            _pages: pages,
-            bottom,
+            folio: FolioOwned::alloc_order(Self::KERNEL_STACK_ORDER),
         }
     }
 }
@@ -33,7 +27,10 @@ impl Stack for KernelStack {
     }
 
     fn get_bottom(&self) -> NonNull<()> {
-        // SAFETY: The stack is allocated and `bottom` is non-zero.
-        unsafe { NonNull::new_unchecked(self.bottom.get() as *mut _) }
+        let ptr = self.folio.get_bytes_ptr();
+        let len = ptr.len();
+
+        // SAFETY: The vaddr of the folio is guaranteed to be non-zero.
+        unsafe { ptr.cast().byte_add(len) }
     }
 }

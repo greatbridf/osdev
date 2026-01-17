@@ -1,62 +1,14 @@
-use super::{
-    pte::{RawAttribute, TableAttribute},
-    PageTableLevel, PagingMode, RawPageTable as _, PTE,
-};
-use crate::{
-    address::{AddrOps as _, VRange},
-    paging::{Page, PageAccess, PageAlloc},
-};
-use core::{marker::PhantomData};
+use super::page_table::PageTableAlloc;
+use super::pte::{RawAttribute, TableAttribute};
+use super::{PageTableLevel, PagingMode, RawPageTable as _, PTE};
+use crate::address::{AddrOps as _, VRange};
+use crate::paging::{Folio, PageAccess};
 
-pub struct KernelIterator;
-pub struct UserIterator;
-
-pub trait IteratorType<M: PagingMode> {
-    fn page_table_attributes() -> TableAttribute;
-
-    fn get_page_table<'a, A, X>(pte: &mut M::Entry, alloc: &A) -> M::RawTable<'a>
-    where
-        A: PageAlloc,
-        X: PageAccess,
-    {
-        let attr = pte.get_attr().as_table_attr().expect("Not a page table");
-
-        if attr.contains(TableAttribute::PRESENT) {
-            let pfn = pte.get_pfn();
-            unsafe {
-                // SAFETY: We are creating a pointer to a page referenced to in
-                //         some page table, which should be valid.
-                let page_table_ptr = X::get_ptr_for_pfn(pfn);
-                // SAFETY: `page_table_ptr` is a valid pointer to a page table.
-                M::RawTable::from_ptr(page_table_ptr)
-            }
-        } else {
-            let page = Page::alloc_in(alloc.clone());
-            let page_table_ptr = X::get_ptr_for_page(&page);
-
-            unsafe {
-                // SAFETY: `page_table_ptr` is good for writing and properly aligned.
-                page_table_ptr.write_bytes(0, 1);
-            }
-
-            pte.set(
-                page.into_raw(),
-                <M::Entry as PTE>::Attr::from(Self::page_table_attributes()),
-            );
-
-            unsafe {
-                // SAFETY: `page_table_ptr` is a valid pointer to a page table.
-                M::RawTable::from_ptr(page_table_ptr)
-            }
-        }
-    }
-}
-
-pub struct PageTableIterator<'a, M, A, X, K>
+pub struct PageTableIterator<'a, M, A, X>
 where
     M: PagingMode,
     M::Entry: 'a,
-    A: PageAlloc,
+    A: PageTableAlloc,
     X: PageAccess,
 {
     /// Specifies the hierarchy of page table levels to iterate over.
@@ -69,19 +21,19 @@ where
     indicies: [u16; 8],
     tables: [Option<M::RawTable<'a>>; 8],
 
+    fill_entry_attr: TableAttribute,
+
     alloc: A,
-    _phantom: PhantomData<&'a (X, K)>,
+    access: X,
 }
 
-impl<'a, M, A, X, K> PageTableIterator<'a, M, A, X, K>
+impl<'a, M, A, X> PageTableIterator<'a, M, A, X>
 where
     M: PagingMode,
     M::Entry: 'a,
-    A: PageAlloc,
+    A: PageTableAlloc,
     X: PageAccess,
-    K: IteratorType<M>,
 {
-
     fn parse_tables_starting_from(&mut self, idx_level: usize) {
         for (idx, &pt_idx) in self
             .indicies
@@ -98,18 +50,58 @@ where
             };
             let parent_table = parent_table.as_mut().expect("Parent table is None");
             let next_pte = parent_table.index_mut(pt_idx);
-            child_table.replace(K::get_page_table::<A, X>(next_pte, &self.alloc));
+
+            child_table.replace({
+                let attr = next_pte
+                    .get_attr()
+                    .as_table_attr()
+                    .expect("Not a page table");
+
+                if attr.contains(TableAttribute::PRESENT) {
+                    let pfn = next_pte.get_pfn();
+                    unsafe {
+                        // SAFETY: We are creating a pointer to a page referenced to in
+                        //         some page table, which should be valid.
+                        let page_table_ptr = self.access.get_ptr_for_pfn(pfn);
+                        // SAFETY: `page_table_ptr` is a valid pointer to a page table.
+                        M::RawTable::from_ptr(page_table_ptr)
+                    }
+                } else {
+                    let page = self.alloc.alloc();
+                    let page_table_ptr = self.access.get_ptr_for_page(&page);
+
+                    unsafe {
+                        // SAFETY: `page_table_ptr` is good for writing and properly aligned.
+                        page_table_ptr.write_bytes(0, 1);
+                    }
+
+                    next_pte.set(page.into_raw(), self.fill_entry_attr.into());
+
+                    unsafe {
+                        // SAFETY: `page_table_ptr` is a valid pointer to a page table.
+                        M::RawTable::from_ptr(page_table_ptr)
+                    }
+                }
+            });
         }
     }
 
-    pub fn new(page_table: M::RawTable<'a>, range: VRange, alloc: A) -> Self {
-        Self::with_levels(page_table, range, alloc, M::LEVELS)
+    pub fn new(
+        page_table: M::RawTable<'a>,
+        range: VRange,
+        fill_entry_attr: TableAttribute,
+        alloc: A,
+        access: X,
+    ) -> Self {
+        Self::with_levels(page_table, range, fill_entry_attr, alloc, access, M::LEVELS)
     }
 
     pub fn with_levels(
         page_table: M::RawTable<'a>,
         range: VRange,
+        fill_entry_attr: TableAttribute,
         alloc: A,
+        access: X,
         levels: &'static [PageTableLevel],
     ) -> Self {
         let start = range.start().floor();
@@ -122,8 +114,9 @@ where
             remaining: (end - start) / last_level.page_size(),
             indicies: [0; 8],
             tables: [const { None }; 8],
+            fill_entry_attr: fill_entry_attr.union(TableAttribute::PRESENT),
             alloc,
-            _phantom: PhantomData,
+            access,
         };
 
         for (i, level) in levels.iter().enumerate() {
@@ -137,13 +130,12 @@ where
     }
 }
 
-impl<'a, M, A, X, K> Iterator for PageTableIterator<'a, M, A, X, K>
+impl<'a, M, A, X> Iterator for PageTableIterator<'a, M, A, X>
 where
     M: PagingMode,
     M::Entry: 'a,
-    A: PageAlloc,
+    A: PageTableAlloc,
     X: PageAccess,
-    K: IteratorType<M>,
 {
     type Item = &'a mut M::Entry;
 
@@ -176,17 +168,5 @@ where
         self.parse_tables_starting_from(idx_level_start_updating);
 
         Some(retval)
-    }
-}
-
-impl<M: PagingMode> IteratorType<M> for KernelIterator {
-    fn page_table_attributes() -> TableAttribute {
-        TableAttribute::PRESENT | TableAttribute::GLOBAL
-    }
-}
-
-impl<M: PagingMode> IteratorType<M> for UserIterator {
-    fn page_table_attributes() -> TableAttribute {
-        TableAttribute::PRESENT | TableAttribute::USER
     }
 }

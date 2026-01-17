@@ -1,16 +1,14 @@
-use core::{
-    alloc::{AllocError, Allocator, Layout},
-    cell::RefCell,
-    ptr::NonNull,
-};
-use eonix_mm::{
-    address::{AddrOps as _, PRange},
-    paging::{PageAlloc, UnmanagedRawPage, PAGE_SIZE, PFN},
-};
+use core::alloc::{AllocError, Allocator, Layout};
+use core::cell::RefCell;
+use core::ptr::NonNull;
+
+use eonix_mm::address::{AddrOps as _, PRange};
+use eonix_mm::page_table::PageTableAlloc;
+use eonix_mm::paging::{BasicFolio, FrameAlloc, PAGE_SIZE, PFN};
 
 pub use crate::arch::mm::{
     flush_tlb, flush_tlb_all, get_root_page_table_pfn, set_root_page_table_pfn, ArchMemory,
-    ArchPagingMode, ArchPhysAccess, GLOBAL_PAGE_TABLE,
+    ArchPhysAccess, GLOBAL_PAGE_TABLE,
 };
 
 pub struct BasicPageAlloc {
@@ -118,19 +116,23 @@ impl<'a> BasicPageAllocRef<'a> {
     }
 }
 
-impl PageAlloc for BasicPageAllocRef<'_> {
-    type RawPage = UnmanagedRawPage;
+impl FrameAlloc for BasicPageAllocRef<'_> {
+    type Folio = BasicFolio;
 
-    fn alloc_order(&self, order: u32) -> Option<Self::RawPage> {
-        Some(Self::RawPage::new(self.0.borrow_mut().alloc(order), order))
+    fn alloc_order(&self, order: u32) -> Option<Self::Folio> {
+        Some(BasicFolio::new(self.0.borrow_mut().alloc(order), order))
+    }
+}
+
+impl PageTableAlloc for BasicPageAllocRef<'_> {
+    type Folio = BasicFolio;
+
+    fn alloc(&self) -> Self::Folio {
+        FrameAlloc::alloc(self).unwrap()
     }
 
-    unsafe fn dealloc(&self, _: Self::RawPage) {
-        panic!("Dealloc is not supported in BasicPageAlloc");
-    }
-
-    fn has_management_over(&self, _: Self::RawPage) -> bool {
-        true
+    unsafe fn from_raw(&self, pfn: PFN) -> Self::Folio {
+        BasicFolio::new(pfn, 0)
     }
 }
 

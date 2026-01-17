@@ -15,7 +15,7 @@ pub use terminal_file::TerminalFile;
 
 use crate::io::{Buffer, ByteBuffer, Chunks, IntoStream, Stream};
 use crate::kernel::constants::{EBADF, EINTR, EINVAL, ENOTTY};
-use crate::kernel::mem::PageExcl;
+use crate::kernel::mem::FolioOwned;
 use crate::kernel::task::Thread;
 use crate::kernel::CharDevice;
 use crate::prelude::KResult;
@@ -94,7 +94,7 @@ impl FileType {
     }
 
     pub async fn sendfile(&self, dest_file: &Self, count: usize) -> KResult<usize> {
-        let mut buffer_page = PageExcl::alloc();
+        let mut buffer_page = FolioOwned::alloc();
         let buffer = buffer_page.as_bytes_mut();
 
         self.sendfile_check()?;

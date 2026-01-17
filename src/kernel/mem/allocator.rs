@@ -3,11 +3,12 @@ use core::ptr::NonNull;
 
 use eonix_hal::mm::ArchPhysAccess;
 use eonix_mm::address::PhysAccess;
-use eonix_mm::paging::{PAGE_SIZE_BITS, PFN};
+use eonix_mm::paging::{Folio as _, PAGE_SIZE_BITS, PFN};
 use eonix_sync::LazyLock;
 use slab_allocator::SlabAlloc;
 
-use super::{GlobalPageAlloc, Page, PageExt};
+use super::folio::Folio;
+use super::GlobalPageAlloc;
 
 static SLAB_ALLOCATOR: LazyLock<SlabAlloc<GlobalPageAlloc, 9>> =
     LazyLock::new(|| SlabAlloc::new_in(GlobalPageAlloc));
@@ -18,19 +19,15 @@ unsafe impl GlobalAlloc for Allocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         let size = layout.size().next_power_of_two();
 
-        let result = if size <= 2048 {
-            SLAB_ALLOCATOR.alloc(size)
+        if size <= 2048 {
+            SLAB_ALLOCATOR.alloc(size).as_ptr()
         } else {
-            let page_count = size >> PAGE_SIZE_BITS;
-            let page = Page::alloc_at_least(page_count);
+            let folio = Folio::alloc_at_least(size >> PAGE_SIZE_BITS);
+            let ptr = folio.get_ptr();
+            folio.into_raw();
 
-            let ptr = page.get_ptr();
-            page.into_raw();
-
-            ptr
-        };
-
-        result.as_ptr()
+            ptr.as_ptr()
+        }
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
@@ -45,7 +42,8 @@ unsafe impl GlobalAlloc for Allocator {
         } else {
             let paddr = ArchPhysAccess::from_ptr(ptr);
             let pfn = PFN::from(paddr);
-            Page::from_raw(pfn);
+
+            Folio::from_raw(pfn);
         };
     }
 }

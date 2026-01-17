@@ -2,12 +2,13 @@ use core::alloc::Allocator;
 use core::arch::{asm, global_asm, naked_asm};
 use core::cell::RefCell;
 use core::hint::spin_loop;
+use core::ptr::NonNull;
 use core::sync::atomic::{AtomicBool, AtomicPtr, AtomicUsize, Ordering};
 
 use eonix_hal_traits::mm::Memory;
 use eonix_mm::address::{Addr as _, PAddr, PRange, PhysAccess, VAddr, VRange};
-use eonix_mm::page_table::{PageAttribute, PagingMode, PTE as _};
-use eonix_mm::paging::{Page, PageAccess, PageAlloc, PAGE_SIZE, PFN};
+use eonix_mm::page_table::{PageAttribute, PageTable, PagingMode, TableAttribute, PTE as _};
+use eonix_mm::paging::{Folio, FrameAlloc, PageAccess, PageBlock, PAGE_SIZE, PFN};
 use eonix_percpu::PercpuArea;
 use fdt::Fdt;
 use riscv::asm::sfence_vma_all;
@@ -23,9 +24,12 @@ use super::cpu::{CPUID, CPU_COUNT};
 use super::time::set_next_timer;
 use crate::arch::cpu::CPU;
 use crate::arch::fdt::{init_dtb_and_fdt, FdtExt, FDT};
-use crate::arch::mm::{ArchPhysAccess, FreeRam, PageAttribute64, GLOBAL_PAGE_TABLE};
+use crate::arch::mm::{
+    ArchPagingMode, ArchPhysAccess, FreeRam, PageAccessImpl, PageAttribute64, RawPageTableSv48,
+    GLOBAL_PAGE_TABLE,
+};
 use crate::bootstrap::BootStrapData;
-use crate::mm::{ArchMemory, ArchPagingMode, BasicPageAlloc, BasicPageAllocRef, ScopedAllocator};
+use crate::mm::{ArchMemory, BasicPageAlloc, BasicPageAllocRef, ScopedAllocator};
 
 #[unsafe(link_section = ".bootstrap.stack")]
 static BOOT_STACK: [u8; 4096 * 16] = [0; 4096 * 16];
@@ -38,26 +42,26 @@ static TEMP_AP_STACK: [u8; 256] = [0; 256];
 static TEMP_AP_STACK_START: &'static [u8; 256] = &TEMP_AP_STACK;
 
 #[repr(C, align(4096))]
-struct PageTable([u64; PTES_PER_PAGE]);
+struct BootPageTable([u64; PTES_PER_PAGE]);
 
 /// map 0x8000 0000 to itself and 0xffff ffff 8000 0000
 #[unsafe(link_section = ".bootstrap.page_table.1")]
-static BOOT_PAGE_TABLE: PageTable = {
+static BOOT_PAGE_TABLE: BootPageTable = {
     let mut arr: [u64; PTES_PER_PAGE] = [0; PTES_PER_PAGE];
     arr[0] = 0 | 0x2f;
     arr[510] = 0 | 0x2f;
     arr[511] = (0x80202 << 10) | 0x21;
 
-    PageTable(arr)
+    BootPageTable(arr)
 };
 
 #[unsafe(link_section = ".bootstrap.page_table.2")]
 #[used]
-static PT1: PageTable = {
+static PT1: BootPageTable = {
     let mut arr: [u64; PTES_PER_PAGE] = [0; PTES_PER_PAGE];
     arr[510] = (0x80000 << 10) | 0x2f;
 
-    PageTable(arr)
+    BootPageTable(arr)
 };
 
 static BSP_PAGE_ALLOC: AtomicPtr<RefCell<BasicPageAlloc>> = AtomicPtr::new(core::ptr::null_mut());
@@ -111,7 +115,7 @@ pub unsafe extern "C" fn riscv64_start(hart_id: usize, dtb_addr: PAddr) -> ! {
         real_allocator.borrow_mut().add_range(range);
     }
 
-    setup_kernel_page_table(&alloc);
+    setup_kernel_page_table(alloc.clone());
     unsafe {
         init_dtb_and_fdt(dtb_addr);
     }
@@ -148,8 +152,12 @@ unsafe extern "C" {
 
 /// TODO:
 /// 对kernel image添加更细的控制，或者不加也行
-fn setup_kernel_page_table(alloc: impl PageAlloc) {
-    let global_page_table = &GLOBAL_PAGE_TABLE;
+fn setup_kernel_page_table(alloc: BasicPageAllocRef) {
+    let global_page_table = PageTable::<ArchPagingMode, _, _>::new(
+        GLOBAL_PAGE_TABLE.clone(),
+        alloc.clone(),
+        PageAccessImpl,
+    );
 
     let attr = PageAttribute::WRITE
         | PageAttribute::READ
@@ -160,18 +168,11 @@ fn setup_kernel_page_table(alloc: impl PageAlloc) {
     const KERNEL_BSS_START: VAddr = VAddr::from(0xffffffff40000000);
 
     // Map kernel BSS
-    for pte in global_page_table.iter_kernel_in(
-        VRange::from(KERNEL_BSS_START).grow(BSS_LENGTH as usize),
-        ArchPagingMode::LEVELS,
-        &alloc,
-    ) {
-        let page = Page::alloc_in(&alloc);
+    let bss_range = VRange::from(KERNEL_BSS_START).grow(BSS_LENGTH as usize);
+    for pte in global_page_table.iter_kernel(bss_range) {
+        let page = alloc.alloc().unwrap();
+        let attr = attr.difference(PageAttribute::EXECUTE);
 
-        let attr = {
-            let mut attr = attr.clone();
-            attr.remove(PageAttribute::EXECUTE);
-            attr
-        };
         pte.set(page.into_raw(), attr.into());
     }
 
@@ -189,17 +190,22 @@ fn setup_kernel_page_table(alloc: impl PageAlloc) {
         );
     }
     sfence_vma_all();
+
+    core::mem::forget(global_page_table);
 }
 
 /// set up tp register to percpu
-fn setup_cpu(alloc: impl PageAlloc, hart_id: usize) {
+fn setup_cpu(alloc: impl FrameAlloc, hart_id: usize) {
     CPU_COUNT.fetch_add(1, Ordering::Relaxed);
 
     let mut percpu_area = PercpuArea::new(|layout| {
         let page_count = layout.size().div_ceil(PAGE_SIZE);
-        let page = Page::alloc_at_least_in(page_count, alloc);
+        let page = alloc.alloc_at_least(page_count).unwrap();
 
-        let ptr = ArchPhysAccess::get_ptr_for_page(&page).cast();
+        let ptr = unsafe {
+            // TODO: safety
+            ArchPhysAccess::as_ptr(page.start())
+        };
         page.into_raw();
 
         ptr
@@ -243,7 +249,7 @@ fn bootstrap_smp(alloc: impl Allocator, page_alloc: &RefCell<BasicPageAlloc>) {
     for hart_id in FDT.harts().filter(|&id| id != local_hart_id) {
         let stack_range = {
             let page_alloc = BasicPageAllocRef::new(&page_alloc);
-            let ap_stack = Page::alloc_order_in(4, page_alloc);
+            let ap_stack = page_alloc.alloc_order(4).unwrap();
             let stack_range = ap_stack.range();
             ap_stack.into_raw();
             stack_range

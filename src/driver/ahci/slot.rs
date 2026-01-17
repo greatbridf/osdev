@@ -3,18 +3,18 @@ use core::ptr::NonNull;
 use core::task::{Poll, Waker};
 
 use eonix_mm::address::{Addr as _, PAddr};
+use eonix_mm::paging::Folio as _;
 use eonix_sync::{Spin, SpinIrq as _};
 
 use super::command_table::CommandTable;
 use super::CommandHeader;
 use crate::kernel::constants::EIO;
-use crate::kernel::mem::paging::AllocZeroed;
-use crate::kernel::mem::{Page, PageExt};
+use crate::kernel::mem::FolioOwned;
 use crate::KResult;
 
 pub struct CommandList {
     base: NonNull<u8>,
-    _page: Page,
+    _page: FolioOwned,
 }
 
 unsafe impl Send for CommandList {}
@@ -75,7 +75,9 @@ impl CommandList {
     }
 
     pub fn new() -> Self {
-        let page = Page::zeroed();
+        let mut page = FolioOwned::alloc();
+        page.as_bytes_mut().fill(0);
+
         let base = page.get_ptr();
 
         let controls_ptr = Self::controls_ptr(base);

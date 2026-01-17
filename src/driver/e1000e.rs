@@ -5,11 +5,12 @@ use core::ptr::NonNull;
 use async_trait::async_trait;
 use eonix_hal::fence::memory_barrier;
 use eonix_mm::address::{Addr, PAddr};
+use eonix_mm::paging::Folio as _;
 use eonix_sync::SpinIrq;
 
 use crate::kernel::constants::{EAGAIN, EFAULT, EINVAL, EIO};
 use crate::kernel::interrupt::register_irq_handler;
-use crate::kernel::mem::{PageExcl, PageExt, PhysAccess};
+use crate::kernel::mem::{FolioOwned, PhysAccess};
 use crate::kernel::pcie::{self, Header, PCIDevice, PCIDriver, PciError};
 use crate::net::netdev;
 use crate::prelude::*;
@@ -54,13 +55,13 @@ struct E1000eDev {
     id: u32,
 
     regs: Registers,
-    rt_desc_page: PageExcl,
+    rt_desc_page: FolioOwned,
     rx_head: Option<u32>,
     rx_tail: Option<u32>,
     tx_tail: Option<u32>,
 
-    rx_buffers: Box<[PageExcl; RX_DESC_SIZE]>,
-    tx_buffers: Box<[Option<PageExcl>; TX_DESC_SIZE]>,
+    rx_buffers: Box<[FolioOwned; RX_DESC_SIZE]>,
+    tx_buffers: Box<[Option<FolioOwned>; TX_DESC_SIZE]>,
 }
 
 fn test(val: u32, bit: u32) -> bool {
@@ -227,7 +228,7 @@ impl netdev::Netdev for E1000eDev {
             return Err(EIO);
         }
 
-        let mut buffer_page = PageExcl::alloc();
+        let mut buffer_page = FolioOwned::alloc();
         if buf.len() > buffer_page.len() {
             return Err(EFAULT);
         }
@@ -363,11 +364,15 @@ impl E1000eDev {
             speed: netdev::LinkSpeed::SpeedUnknown,
             id: netdev::alloc_id(),
             regs,
-            rt_desc_page: PageExcl::zeroed(),
+            rt_desc_page: {
+                let mut folio = FolioOwned::alloc();
+                folio.as_bytes_mut().fill(0);
+                folio
+            },
             rx_head: None,
             rx_tail: None,
             tx_tail: None,
-            rx_buffers: Box::new(core::array::from_fn(|_| PageExcl::alloc_order(2))),
+            rx_buffers: Box::new(core::array::from_fn(|_| FolioOwned::alloc_order(2))),
             tx_buffers: Box::new([const { None }; 32]),
         };
 

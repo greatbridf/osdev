@@ -1,7 +1,9 @@
 #![allow(dead_code)]
 
-use crate::kernel::mem::paging::Page;
 use eonix_mm::address::Addr as _;
+use eonix_mm::paging::Folio as _;
+
+use crate::kernel::mem::Folio;
 
 pub const VENDOR_INTEL: u16 = 0x8086;
 pub const DEVICE_AHCI: u16 = 0x2922;
@@ -239,7 +241,7 @@ pub struct PRDTEntry {
 }
 
 impl PRDTEntry {
-    pub fn setup(&mut self, page: &Page) {
+    pub fn setup(&mut self, page: &Folio) {
         self.base = page.start().addr() as u64;
         self._reserved1 = 0;
 

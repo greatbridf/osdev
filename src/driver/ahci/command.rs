@@ -1,9 +1,11 @@
+use eonix_mm::paging::Folio as _;
+
 use crate::kernel::constants::EINVAL;
-use crate::kernel::mem::paging::Page;
+use crate::kernel::mem::Folio;
 use crate::prelude::*;
 
 pub trait Command {
-    fn pages(&self) -> &[Page];
+    fn pages(&self) -> &[Folio];
     fn lba(&self) -> u64;
 
     // in sectors
@@ -14,19 +16,19 @@ pub trait Command {
 }
 
 pub struct IdentifyCommand {
-    page: Page,
+    page: Folio,
 }
 
 impl IdentifyCommand {
     pub fn new() -> Self {
         Self {
-            page: Page::alloc(),
+            page: Folio::alloc(),
         }
     }
 }
 
 impl Command for IdentifyCommand {
-    fn pages(&self) -> &[Page] {
+    fn pages(&self) -> &[Folio] {
         core::slice::from_ref(&self.page)
     }
 
@@ -47,14 +49,14 @@ impl Command for IdentifyCommand {
     }
 }
 
-pub struct ReadLBACommand<'lt> {
-    pages: &'lt [Page],
+pub struct ReadLBACommand<'a> {
+    pages: &'a [Folio],
     lba: u64,
     count: u16,
 }
 
-impl<'lt> ReadLBACommand<'lt> {
-    pub fn new(pages: &'lt [Page], lba: u64, count: u16) -> KResult<Self> {
+impl<'a> ReadLBACommand<'a> {
+    pub fn new(pages: &'a [Folio], lba: u64, count: u16) -> KResult<Self> {
         if pages.len() > 248 {
             return Err(EINVAL);
         }
@@ -69,7 +71,7 @@ impl<'lt> ReadLBACommand<'lt> {
 }
 
 impl Command for ReadLBACommand<'_> {
-    fn pages(&self) -> &[Page] {
+    fn pages(&self) -> &[Folio] {
         self.pages
     }
 
@@ -91,13 +93,13 @@ impl Command for ReadLBACommand<'_> {
 }
 
 pub struct WriteLBACommand<'a> {
-    pages: &'a [Page],
+    pages: &'a [Folio],
     lba: u64,
     count: u16,
 }
 
 impl<'a> WriteLBACommand<'a> {
-    pub fn new(pages: &'a [Page], lba: u64, count: u16) -> KResult<Self> {
+    pub fn new(pages: &'a [Folio], lba: u64, count: u16) -> KResult<Self> {
         if pages.len() > 248 {
             return Err(EINVAL);
         }
@@ -112,7 +114,7 @@ impl<'a> WriteLBACommand<'a> {
 }
 
 impl Command for WriteLBACommand<'_> {
-    fn pages(&self) -> &[Page] {
+    fn pages(&self) -> &[Folio] {
         self.pages
     }
 

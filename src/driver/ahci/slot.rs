@@ -39,6 +39,8 @@ enum SlotState {
     Idle,
     Working,
     Finished,
+    // TODO: Implement AHCI error handling
+    #[allow(unused)]
     Error,
 }
 
@@ -67,7 +69,7 @@ impl CommandList {
             + (size_of::<UnsafeCell<CommandHeader>>() + size_of::<Spin<SlotControl>>()) * 32
     }
 
-    pub fn get(&self, index: usize) -> CommandSlot {
+    pub fn get(&self, index: usize) -> CommandSlot<'_> {
         CommandSlot {
             cmdheader: &self.cmdheaders()[index],
             control: &self.controls()[index],

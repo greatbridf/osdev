@@ -1,5 +1,7 @@
-use crate::{kernel::constants::ENOENT, prelude::*};
 use core::fmt::{self, Debug, Formatter};
+
+use crate::kernel::constants::ENOENT;
+use crate::prelude::*;
 
 #[repr(transparent)]
 pub struct Path {
@@ -23,7 +25,7 @@ impl Path {
         self.all.starts_with(&['/' as u8])
     }
 
-    pub fn iter(&self) -> PathIterator {
+    pub fn iter(&self) -> PathIterator<'_> {
         PathIterator::new(&self.all)
     }
 }

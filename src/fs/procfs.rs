@@ -26,6 +26,8 @@ enum NodeKind {
 
 struct FileInode {
     read: Option<Box<dyn Fn(&mut PageBuffer) -> KResult<()> + Send + Sync>>,
+    // TODO: Implement writes to procfs files
+    #[allow(unused)]
     write: Option<()>,
 }
 

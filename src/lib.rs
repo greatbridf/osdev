@@ -38,6 +38,7 @@ use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use eonix_hal::arch_exported::bootstrap::shutdown;
 use eonix_hal::context::TaskContext;
 use eonix_hal::processor::{halt, CPU, CPU_COUNT};
+use eonix_hal::symbol_addr;
 use eonix_hal::traits::context::RawTaskContext;
 use eonix_hal::traits::trap::IrqState;
 use eonix_hal::trap::disable_irqs_save;
@@ -136,7 +137,7 @@ fn kernel_init(mut data: eonix_hal::bootstrap::BootStrapData) -> ! {
         bottom
     };
     ctx.set_interrupt_enabled(true);
-    ctx.set_program_counter(standard_main as usize);
+    ctx.set_program_counter(symbol_addr!(standard_main));
     ctx.set_stack_pointer(stack_bottom);
 
     unsafe {
@@ -162,7 +163,7 @@ fn kernel_ap_main(_stack_range: PRange) -> ! {
         bottom
     };
     ctx.set_interrupt_enabled(true);
-    ctx.set_program_counter(standard_main as usize);
+    ctx.set_program_counter(symbol_addr!(standard_main));
     ctx.set_stack_pointer(stack_bottom);
 
     unsafe {

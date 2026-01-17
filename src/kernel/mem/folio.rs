@@ -79,7 +79,7 @@ impl Folio {
         }
     }
 
-    pub fn lock(&self) -> LockedFolio {
+    pub fn lock(&self) -> LockedFolio<'_> {
         // TODO: actually perform the lock...
         LockedFolio(self)
     }

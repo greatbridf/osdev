@@ -1,3 +1,4 @@
+use eonix_hal::extern_symbol_addr;
 use eonix_hal::mm::flush_tlb;
 use eonix_hal::traits::fault::PageFaultErrorCode;
 use eonix_mm::address::{Addr as _, AddrOps as _, VRange};
@@ -24,27 +25,19 @@ impl FixEntry {
         VAddr::from((self.start + self.length) as usize)
     }
 
-    #[allow(dead_code)]
-    fn range(&self) -> VRange {
-        VRange::new(self.start(), self.end())
-    }
-
     fn jump_address(&self) -> VAddr {
         VAddr::from(self.jump_address as usize)
     }
 
     fn entries() -> &'static [FixEntry] {
-        extern "C" {
-            fn FIX_START();
-            fn FIX_END();
-        }
+        let fix_seg_len_bytes = extern_symbol_addr!(FIX_END) - extern_symbol_addr!(FIX_START);
 
         unsafe {
-            // SAFETY: `FIX_START` and `FIX_END` are defined in the
-            //         linker script in `.rodata` section.
+            // SAFETY: `FIX_START` and `FIX_END` are defined in the linker script
+            //         in `.rodata` section.
             core::slice::from_raw_parts(
-                FIX_START as usize as *const FixEntry,
-                (FIX_END as usize - FIX_START as usize) / size_of::<FixEntry>(),
+                extern_symbol_addr!(FIX_START, FixEntry),
+                fix_seg_len_bytes / size_of::<FixEntry>(),
             )
         }
     }

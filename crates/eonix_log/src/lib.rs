@@ -2,6 +2,7 @@
 
 use alloc::sync::Arc;
 use core::fmt::{self, Write};
+
 use eonix_sync::{Spin, SpinIrq as _};
 
 extern crate alloc;
@@ -91,18 +92,31 @@ macro_rules! println_fatal {
 
 #[macro_export]
 macro_rules! println_trace {
-    ($feat:literal) => {
+    (feat:$feat:literal) => {
         #[deny(unexpected_cfgs)]
         {
             #[cfg(feature = $feat)]
-            $crate::println!("[kernel:trace] ")
+            $crate::println!("[kernel:trace]")
         }
     };
-    ($feat:literal, $($arg:tt)*) => {{
+    (feat:$feat:literal, $fmt:literal) => {{
         #[deny(unexpected_cfgs)]
         {
             #[cfg(feature = $feat)]
-            $crate::println!("[kernel:trace] {}", format_args!($($arg)*))
+            $crate::println!(concat!("[kernel:trace] ", $feat))
         }
     }};
+    (feat:$feat:literal, $fmt:literal, $($arg:expr $(,)?)*) => {
+        #[deny(unexpected_cfgs)]
+        {
+            // Suppress unused variables warning
+            #[cfg(not(feature = $feat))]
+            {
+                $(let _ = $arg;)*
+            }
+
+            #[cfg(feature = $feat)]
+            $crate::println!("[kernel:trace] {}", format_args!($fmt, $($arg,)*))
+        }
+    };
 }

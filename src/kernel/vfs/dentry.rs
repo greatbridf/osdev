@@ -27,6 +27,8 @@ use crate::path::Path;
 use crate::prelude::*;
 use crate::rcu::{rcu_read_lock, RCUNode, RCUPointer, RCUReadGuard};
 
+// TODO: Implement slab reclaim
+#[allow(unused)]
 const D_INVALID: u8 = 0;
 const D_REGULAR: u8 = 1;
 const D_DIRECTORY: u8 = 2;
@@ -159,7 +161,7 @@ impl Dentry {
             && &***self.name() == &***other.name()
     }
 
-    pub fn name(&self) -> RCUReadGuard<BorrowedArc<Arc<[u8]>>> {
+    pub fn name(&self) -> RCUReadGuard<'_, BorrowedArc<'_, Arc<[u8]>>> {
         self.name.load().expect("Dentry has no name")
     }
 
@@ -167,7 +169,7 @@ impl Dentry {
         (***self.name()).clone()
     }
 
-    pub fn parent<'a>(&self) -> RCUReadGuard<'a, BorrowedArc<Dentry>> {
+    pub fn parent<'a>(&self) -> RCUReadGuard<'a, BorrowedArc<'_, Dentry>> {
         self.parent.load().expect("Dentry has no parent")
     }
 

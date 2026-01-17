@@ -10,6 +10,7 @@ use super::error::PciError;
 use crate::kernel::mem::PhysAccess as _;
 use crate::kernel::pcie::device::PciMemoryAllocator;
 
+#[allow(unused)]
 #[derive(Clone)]
 struct AcpiHandlerImpl;
 
@@ -34,7 +35,6 @@ pub fn init_pcie() -> Result<(), PciError> {
     #[cfg(target_arch = "x86_64")]
     {
         use acpi::{AcpiTables, PciConfigRegions};
-        use eonix_mm::address::PAddr;
 
         let acpi_tables = unsafe {
             // SAFETY: Our impl should be correct.
@@ -69,7 +69,6 @@ pub fn init_pcie() -> Result<(), PciError> {
     #[cfg(any(target_arch = "riscv64", target_arch = "loongarch64"))]
     {
         use eonix_hal::arch_exported::fdt::FDT;
-        use eonix_mm::address::PRange;
 
         use crate::kernel::constants::{EINVAL, EIO, ENOENT};
 
@@ -88,7 +87,7 @@ pub fn init_pcie() -> Result<(), PciError> {
                     let size = u64::from_be_bytes(entry[20..28].try_into().unwrap());
 
                     println_trace!(
-                        "trace_pci",
+                        feat: "trace_pci",
                         "PCIe range: PCI address = {:#x}, CPU address = {:#x}, size = {:#x}",
                         pci_address,
                         cpu_address,

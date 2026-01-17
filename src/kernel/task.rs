@@ -11,6 +11,7 @@ mod thread;
 mod user_tls;
 
 pub use clone::{do_clone, CloneArgs, CloneFlags};
+use eonix_hal::symbol_addr;
 pub use futex::{futex_wait, futex_wake, parse_futexop, FutexFlags, FutexOp, RobustListHead};
 pub use kernel_stack::KernelStack;
 pub use loader::ProgramLoader;
@@ -185,7 +186,7 @@ where
     trap_ctx.set_user_mode(false);
     trap_ctx.set_interrupt_enabled(true);
     let _ = trap_ctx.set_user_call_frame(
-        execute::<F> as usize,
+        symbol_addr!(execute::<F>),
         Some(sp.addr().get()),
         None,
         &[(&raw mut future) as usize, output.get() as usize],

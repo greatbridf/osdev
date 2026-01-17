@@ -1,10 +1,16 @@
-use super::task::ThreadAlloc;
-use crate::kernel::task::Thread;
 use alloc::boxed::Box;
-use core::{future::Future, marker::PhantomData, ops::Deref, pin::Pin};
+use core::future::Future;
+use core::marker::PhantomData;
+use core::ops::Deref;
+use core::pin::Pin;
+
+use eonix_hal::extern_symbol_addr;
 use eonix_mm::address::{Addr, VAddr};
 use eonix_sync::LazyLock;
 use posix_types::ctypes::PtrT;
+
+use super::task::ThreadAlloc;
+use crate::kernel::task::Thread;
 
 pub mod file_rw;
 pub mod mm;
@@ -280,12 +286,6 @@ impl<T> core::fmt::Debug for UserMut<T> {
 }
 
 static SYSCALL_HANDLERS: LazyLock<[Option<SyscallHandler>; MAX_SYSCALL_NO]> = LazyLock::new(|| {
-    extern "C" {
-        // SAFETY: `SYSCALL_HANDLERS` is defined in linker script.
-        fn RAW_SYSCALL_HANDLERS();
-        fn RAW_SYSCALL_HANDLERS_SIZE();
-    }
-
     // DO NOT TOUCH THESE FUNCTIONS!!!
     // THEY ARE USED FOR KEEPING THE OBJECTS NOT STRIPPED BY THE LINKER!!!
     file_rw::keep_alive();
@@ -294,15 +294,14 @@ static SYSCALL_HANDLERS: LazyLock<[Option<SyscallHandler>; MAX_SYSCALL_NO]> = La
     procops::keep_alive();
     sysinfo::keep_alive();
 
-    let raw_handlers_addr = RAW_SYSCALL_HANDLERS as *const ();
-    let raw_handlers_size_byte = RAW_SYSCALL_HANDLERS_SIZE as usize;
+    let raw_handlers_size_byte = extern_symbol_addr!(RAW_SYSCALL_HANDLERS_SIZE);
     assert!(raw_handlers_size_byte % size_of::<RawSyscallHandler>() == 0);
 
     let raw_handlers_count = raw_handlers_size_byte / size_of::<RawSyscallHandler>();
 
     let raw_handlers = unsafe {
         core::slice::from_raw_parts(
-            raw_handlers_addr as *const RawSyscallHandler,
+            extern_symbol_addr!(RAW_SYSCALL_HANDLERS, RawSyscallHandler),
             raw_handlers_count,
         )
     };

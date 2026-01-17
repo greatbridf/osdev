@@ -1,33 +1,29 @@
-use super::{
-    process_group::ProcessGroupBuilder, signal::RaiseResult, thread::ThreadBuilder, ProcessGroup,
-    ProcessList, Session, Thread,
-};
-use crate::kernel::constants::{ECHILD, EINTR, EINVAL, EPERM, ESRCH};
-use crate::kernel::task::{CloneArgs, CloneFlags};
-use crate::rcu::call_rcu;
-use crate::{
-    kernel::mem::MMList,
-    prelude::*,
-    rcu::{RCUPointer, RCUReadGuard},
-    sync::CondVar,
-};
-use alloc::{
-    collections::{btree_map::BTreeMap, vec_deque::VecDeque},
-    sync::{Arc, Weak},
-};
+use alloc::collections::btree_map::BTreeMap;
+use alloc::collections::vec_deque::VecDeque;
+use alloc::sync::{Arc, Weak};
 use core::sync::atomic::{AtomicU32, Ordering};
-use eonix_mm::address::VAddr;
+
 use eonix_sync::{
     AsProof as _, AsProofMut as _, Locked, Proof, ProofMut, RwLockReadGuard, SpinGuard,
     UnlockableGuard as _, UnlockedGuard as _,
 };
 use pointers::BorrowedArc;
 use posix_types::constants::{
-    CLD_CONTINUED, CLD_DUMPED, CLD_EXITED, CLD_KILLED, CLD_STOPPED, P_PGID, P_PIDFD,
+    CLD_CONTINUED, CLD_DUMPED, CLD_EXITED, CLD_KILLED, CLD_STOPPED, P_ALL, P_PGID, P_PID, P_PIDFD,
 };
-use posix_types::constants::{P_ALL, P_PID};
 use posix_types::signal::Signal;
 use posix_types::SIGNAL_COREDUMP;
+
+use super::process_group::ProcessGroupBuilder;
+use super::signal::RaiseResult;
+use super::thread::ThreadBuilder;
+use super::{ProcessGroup, ProcessList, Session, Thread};
+use crate::kernel::constants::{ECHILD, EINTR, EINVAL, EPERM, ESRCH};
+use crate::kernel::mem::MMList;
+use crate::kernel::task::{CloneArgs, CloneFlags};
+use crate::prelude::*;
+use crate::rcu::{call_rcu, RCUPointer, RCUReadGuard};
+use crate::sync::CondVar;
 
 pub struct ProcessBuilder {
     mm_list: Option<MMList>,
@@ -50,8 +46,6 @@ pub struct Process {
     pub mm_list: MMList,
 
     pub exit_signal: Option<Signal>,
-
-    pub shm_areas: Spin<BTreeMap<VAddr, usize>>,
 
     /// Parent process
     ///
@@ -256,7 +250,6 @@ impl ProcessBuilder {
             pid: self.pid.expect("should set pid before building"),
             wait_list: WaitList::new(),
             mm_list,
-            shm_areas: Spin::new(BTreeMap::new()),
             exit_signal: self.exit_signal,
             parent: RCUPointer::empty(),
             pgroup: RCUPointer::empty(),
@@ -522,17 +515,17 @@ impl Process {
     }
 
     /// Provide RCU locked (maybe inconsistent) access to the session.
-    pub fn session_rcu(&self) -> RCUReadGuard<'_, BorrowedArc<Session>> {
+    pub fn session_rcu(&self) -> RCUReadGuard<'_, BorrowedArc<'_, Session>> {
         self.session.load().unwrap()
     }
 
     /// Provide RCU locked (maybe inconsistent) access to the process group.
-    pub fn pgroup_rcu(&self) -> RCUReadGuard<'_, BorrowedArc<ProcessGroup>> {
+    pub fn pgroup_rcu(&self) -> RCUReadGuard<'_, BorrowedArc<'_, ProcessGroup>> {
         self.pgroup.load().unwrap()
     }
 
     /// Provide RCU locked (maybe inconsistent) access to the parent process.
-    pub fn parent_rcu(&self) -> Option<RCUReadGuard<'_, BorrowedArc<Process>>> {
+    pub fn parent_rcu(&self) -> Option<RCUReadGuard<'_, BorrowedArc<'_, Process>>> {
         self.parent.load()
     }
 
@@ -569,7 +562,7 @@ impl WaitList {
         self.cv_wait_procs.notify_all();
     }
 
-    pub fn drain_exited(&self) -> DrainExited {
+    pub fn drain_exited(&self) -> DrainExited<'_> {
         DrainExited {
             wait_procs: self.wait_procs.lock(),
         }
@@ -578,7 +571,12 @@ impl WaitList {
     /// # Safety
     /// Locks `ProcessList` and `WaitList` at the same time. When `wait` is called,
     /// releases the lock on `ProcessList` and `WaitList` and waits on `cv_wait_procs`.
-    pub async fn entry(&self, wait_id: WaitId, want_stop: bool, want_continue: bool) -> Entry {
+    pub async fn entry(
+        &self,
+        wait_id: WaitId,
+        want_stop: bool,
+        want_continue: bool,
+    ) -> Entry<'_, '_, '_> {
         Entry {
             process_list: ProcessList::get().read().await,
             wait_procs: self.wait_procs.lock(),

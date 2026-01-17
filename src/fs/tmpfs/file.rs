@@ -177,7 +177,6 @@ impl InodeOps for FileInode {
 }
 
 pub struct DeviceInode {
-    is_block: bool,
     devid: DeviceId,
 }
 
@@ -199,10 +198,7 @@ impl DeviceInode {
                 ctime: now,
                 mtime: now,
             },
-            Self {
-                is_block: mode.format() == Format::BLK,
-                devid,
-            },
+            Self { devid },
         )
     }
 }

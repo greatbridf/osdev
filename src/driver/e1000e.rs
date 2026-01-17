@@ -61,6 +61,8 @@ struct E1000eDev {
     tx_tail: Option<u32>,
 
     rx_buffers: Box<[FolioOwned; RX_DESC_SIZE]>,
+    // TODO: Implement E1000e send
+    #[allow(unused)]
     tx_buffers: Box<[Option<FolioOwned>; TX_DESC_SIZE]>,
 }
 

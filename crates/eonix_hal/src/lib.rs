@@ -43,3 +43,29 @@ pub mod arch_exported {
 
 pub use eonix_hal_macros::{ap_main, default_trap_handler, main};
 pub use eonix_hal_traits as traits;
+
+#[macro_export]
+macro_rules! symbol_addr {
+    ($sym:expr) => {{
+        ($sym) as *const () as usize
+    }};
+    ($sym:expr, $type:ty) => {{
+        ($sym) as *const () as *const $type
+    }};
+}
+
+#[macro_export]
+macro_rules! extern_symbol_addr {
+    ($sym:ident) => {{
+        unsafe extern "C" {
+            fn $sym();
+        }
+        $crate::symbol_addr!($sym)
+    }};
+    ($sym:ident, $type:ty) => {{
+        unsafe extern "C" {
+            fn $sym();
+        }
+        $crate::symbol_addr!($sym, $type)
+    }};
+}

@@ -1,19 +1,18 @@
-use crate::{
-    executor::OutputHandle,
-    ready_queue::{local_rq, ReadyQueue},
-    task::{Task, TaskAdapter, TaskHandle, TaskState},
-};
-use alloc::{sync::Arc, task::Wake};
-use core::{
-    ops::{Deref, DerefMut},
-    ptr::NonNull,
-    task::{Context, Poll, Waker},
-};
+use alloc::sync::Arc;
+use alloc::task::Wake;
+use core::ops::{Deref, DerefMut};
+use core::ptr::NonNull;
+use core::task::{Context, Poll, Waker};
+
 use eonix_hal::processor::halt;
 use eonix_log::println_trace;
 use eonix_sync::{LazyLock, Spin, SpinIrq as _};
 use intrusive_collections::RBTree;
 use pointers::BorrowedArc;
+
+use crate::executor::OutputHandle;
+use crate::ready_queue::{local_rq, ReadyQueue};
+use crate::task::{Task, TaskAdapter, TaskHandle, TaskState};
 
 #[eonix_percpu::define_percpu]
 static CURRENT_TASK: Option<NonNull<Task>> = None;
@@ -93,12 +92,6 @@ impl Runtime {
         }
     }
 
-    fn current(&self) -> Option<BorrowedArc<Task>> {
-        CURRENT_TASK
-            .get()
-            .map(|ptr| unsafe { BorrowedArc::from_raw(ptr) })
-    }
-
     fn remove_and_enqueue_current(&self, rq: &mut impl DerefMut<Target = dyn ReadyQueue>) {
         let Some(current) = CURRENT_TASK
             .swap(None)
@@ -116,7 +109,7 @@ impl Runtime {
         }) {
             Ok(TaskState::READY_RUNNING) => {
                 println_trace!(
-                    "trace_scheduler",
+                    feat: "trace_scheduler",
                     "Re-enqueueing task {:?} (CPU{})",
                     current.id,
                     eonix_hal::processor::CPU::local().cpuid(),
@@ -126,7 +119,7 @@ impl Runtime {
             }
             Ok(_) => {
                 println_trace!(
-                    "trace_scheduler",
+                    feat: "trace_scheduler",
                     "Current task {:?} (CPU{}) is blocked, not re-enqueueing",
                     current.id,
                     eonix_hal::processor::CPU::local().cpuid(),
@@ -184,7 +177,7 @@ impl Runtime {
             };
 
             println_trace!(
-                "trace_scheduler",
+                feat: "trace_scheduler",
                 "Switching to task {:?} (CPU{})",
                 next.id,
                 eonix_hal::processor::CPU::local().cpuid(),
@@ -212,7 +205,7 @@ impl Runtime {
                 );
 
                 println_trace!(
-                    "trace_scheduler",
+                    feat: "trace_scheduler",
                     "Task {:?} finished execution, removing...",
                     Task::current().id,
                 );

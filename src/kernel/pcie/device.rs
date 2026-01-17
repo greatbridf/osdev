@@ -1,13 +1,16 @@
-use super::{
-    header::{Bar, Command},
-    CommonHeader, Header,
-};
-use crate::kernel::mem::PhysAccess as _;
+use alloc::collections::btree_map::BTreeMap;
+use alloc::sync::Arc;
+use alloc::vec::Vec;
+use core::num::NonZero;
+use core::ops::RangeInclusive;
+
 use align_ext::AlignExt;
-use alloc::{collections::btree_map::BTreeMap, sync::Arc, vec::Vec};
-use core::{num::NonZero, ops::RangeInclusive};
 use eonix_mm::address::{Addr, PAddr, PRange};
 use eonix_sync::Spin;
+
+use super::header::{Bar, Command};
+use super::{CommonHeader, Header};
+use crate::kernel::mem::PhysAccess as _;
 
 pub(super) static PCIE_DEVICES: Spin<BTreeMap<u32, Vec<Arc<PCIDevice>>>> =
     Spin::new(BTreeMap::new());
@@ -20,7 +23,7 @@ pub struct PCIDevice<'a> {
     pub device_id: u16,
 }
 
-#[allow(dead_code)]
+#[allow(unused)]
 #[derive(Clone)]
 pub struct SegmentGroup {
     id: usize,
@@ -28,6 +31,7 @@ pub struct SegmentGroup {
     base_address: PAddr,
 }
 
+#[allow(unused)]
 #[derive(Clone)]
 pub struct ConfigSpace {
     pub bus: u8,
@@ -180,10 +184,12 @@ impl PCIDevice<'_> {
         );
     }
 
+    #[allow(unused)]
     pub fn config_space(&self) -> &ConfigSpace {
         &self.config_space
     }
 
+    #[allow(unused)]
     pub fn segment_group(&self) -> &SegmentGroup {
         &self.segment_group
     }
@@ -209,7 +215,7 @@ impl PciMemoryAllocator {
         self.start += size;
 
         eonix_log::println_trace!(
-            "trace_pci",
+            feat: "trace_pci",
             "PciMemoryAllocator: Allocated {} bytes at {:#x}",
             size,
             base

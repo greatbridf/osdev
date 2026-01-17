@@ -48,10 +48,6 @@ pub struct RawPage {
     shared_data: PageData,
 }
 
-// XXX: introduce Folio and remove this.
-unsafe impl Send for RawPage {}
-unsafe impl Sync for RawPage {}
-
 impl PageFlags {
     pub const LOCKED: u32 = 1 << 1;
     pub const BUDDY: u32 = 1 << 2;

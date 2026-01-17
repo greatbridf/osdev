@@ -1,10 +1,11 @@
-use super::SerialRegister;
 use core::ptr::NonNull;
-use eonix_hal::{fence::memory_barrier, mm::ArchPhysAccess};
-use eonix_mm::address::{PAddr, PhysAccess};
 
 #[cfg(target_arch = "x86_64")]
 use eonix_hal::arch_exported::io::Port8;
+use eonix_hal::mm::ArchPhysAccess;
+use eonix_mm::address::{PAddr, PhysAccess};
+
+use super::SerialRegister;
 
 #[cfg(target_arch = "x86_64")]
 pub struct SerialIO {
@@ -73,10 +74,12 @@ impl SerialIO {
         self.line_status
     }
 
+    #[allow(unused)]
     pub fn modem_status(&self) -> impl SerialRegister {
         self.modem_status
     }
 
+    #[allow(unused)]
     pub fn scratch(&self) -> impl SerialRegister {
         self.scratch
     }
@@ -100,7 +103,7 @@ impl SerialRegister for NonNull<u8> {
         let retval = unsafe { self.as_ptr().read_volatile() };
 
         #[cfg(target_arch = "loongarch64")]
-        memory_barrier();
+        eonix_hal::fence::memory_barrier();
 
         retval
     }
@@ -110,7 +113,7 @@ impl SerialRegister for NonNull<u8> {
         unsafe { self.as_ptr().write_volatile(data) };
 
         #[cfg(target_arch = "loongarch64")]
-        memory_barrier();
+        eonix_hal::fence::memory_barrier();
     }
 }
 
@@ -155,10 +158,12 @@ impl SerialIO {
         unsafe { self.base_addr.add(5) }
     }
 
+    #[allow(unused)]
     pub fn modem_status(&self) -> impl SerialRegister {
         unsafe { self.base_addr.add(6) }
     }
 
+    #[allow(unused)]
     pub fn scratch(&self) -> impl SerialRegister {
         unsafe { self.base_addr.add(7) }
     }

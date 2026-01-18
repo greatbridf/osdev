@@ -1,6 +1,7 @@
 build/
 
 .idea/
+.vscode/settings.json
 
 test/
 

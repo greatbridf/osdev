@@ -12,7 +12,10 @@ mod user_tls;
 
 pub use clone::{do_clone, CloneArgs, CloneFlags};
 use eonix_hal::symbol_addr;
-pub use futex::{futex_wait, futex_wake, parse_futexop, FutexFlags, FutexOp, RobustListHead};
+pub use futex::{
+    futex_exec, futex_exit, futex_wait, futex_wake, parse_futexop, FutexFlags, FutexOp,
+    RobustListHead,
+};
 pub use kernel_stack::KernelStack;
 pub use loader::ProgramLoader;
 pub use process::{alloc_pid, Process, ProcessBuilder, WaitId, WaitObject, WaitType};

@@ -1,11 +1,10 @@
 mod signal_action;
 
-use super::{ProcessList, Thread, WaitObject, WaitType};
-use crate::kernel::constants::{EFAULT, EINVAL};
-use crate::{kernel::user::UserPointer, prelude::*};
 use alloc::collections::binary_heap::BinaryHeap;
 use alloc::sync::Arc;
-use core::{cmp::Reverse, task::Waker};
+use core::cmp::Reverse;
+use core::task::Waker;
+
 use eonix_hal::fpu::FpuState;
 use eonix_hal::traits::trap::RawTrapContext;
 use eonix_hal::trap::TrapContext;
@@ -14,9 +13,13 @@ use eonix_sync::AsProof as _;
 use intrusive_collections::UnsafeRef;
 use posix_types::signal::{SigSet, Signal};
 use posix_types::{SIGNAL_IGNORE, SIGNAL_NOW, SIGNAL_STOP};
+pub use signal_action::SignalAction;
 use signal_action::SignalActionList;
 
-pub use signal_action::SignalAction;
+use super::{ProcessList, Thread, WaitObject, WaitType};
+use crate::kernel::constants::{EFAULT, EINVAL};
+use crate::kernel::user::UserPointer;
+use crate::prelude::*;
 
 pub(self) const SAVED_DATA_SIZE: usize =
     size_of::<TrapContext>() + size_of::<FpuState>() + size_of::<SigSet>();
@@ -168,10 +171,7 @@ impl SignalList {
     pub async fn handle(&self, trap_ctx: &mut TrapContext, fpu_state: &mut FpuState) {
         loop {
             let signal = {
-                let signal = match self.inner.lock().pop() {
-                    Some(signal) => signal,
-                    None => return,
-                };
+                let Some(signal) = self.inner.lock().pop() else { return };
 
                 let handler = self.inner.lock().actions.get(signal);
                 if let SignalAction::SimpleHandler { mask, .. } = &handler {
@@ -246,7 +246,7 @@ impl SignalList {
                 }
                 signal => {
                     // Default to terminate the thread.
-                    Thread::current().force_kill(signal).await;
+                    Thread::current().force_kill(signal);
                     return;
                 }
             }

@@ -31,7 +31,6 @@ mod rcu;
 mod sync;
 
 use alloc::ffi::CString;
-use alloc::sync::Arc;
 use core::hint::spin_loop;
 use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
@@ -46,7 +45,7 @@ use eonix_mm::address::PRange;
 use eonix_runtime::executor::Stack;
 use eonix_runtime::scheduler::RUNTIME;
 use kernel::mem::GlobalPageAlloc;
-use kernel::task::{KernelStack, ProcessBuilder, ProcessList, ProgramLoader, ThreadBuilder};
+use kernel::task::{KernelStack, ProcessList, ProgramLoader};
 use kernel::vfs::dentry::Dentry;
 use kernel::vfs::mount::{do_mount, MS_NOATIME, MS_NODEV, MS_NOSUID, MS_RDONLY};
 use kernel::vfs::types::Permission;
@@ -55,8 +54,6 @@ use kernel::CharDevice;
 use kernel_init::setup_memory;
 use path::Path;
 use prelude::*;
-
-use crate::kernel::task::alloc_pid;
 
 #[cfg(any(target_arch = "riscv64", target_arch = "loongarch64"))]
 fn do_panic() -> ! {
@@ -276,21 +273,5 @@ async fn init_process(early_kstack: PRange) {
             .expect("Failed to load init program")
     };
 
-    let thread_builder = ThreadBuilder::new()
-        .name(Arc::from(&b"busybox"[..]))
-        .entry(load_info.entry_ip, load_info.sp);
-
-    let mut process_list = ProcessList::get().write().await;
-    let (thread, process) = ProcessBuilder::new()
-        .pid(alloc_pid())
-        .mm_list(load_info.mm_list)
-        .thread_builder(thread_builder)
-        .build(&mut process_list);
-
-    process_list.set_init_process(process);
-
-    // TODO!!!: Remove this.
-    thread.files.open_console();
-
-    RUNTIME.spawn(thread.run());
+    ProcessList::sys_init(load_info).await;
 }

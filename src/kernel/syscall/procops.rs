@@ -22,8 +22,8 @@ use crate::kernel::constants::{
 use crate::kernel::mem::PageBuffer;
 use crate::kernel::syscall::{User, UserMut};
 use crate::kernel::task::{
-    do_clone, futex_wait, futex_wake, parse_futexop, yield_now, CloneArgs, FutexFlags, FutexOp,
-    ProcessList, ProgramLoader, RobustListHead, SignalAction, Thread, WaitId, WaitType,
+    do_clone, futex_exec, futex_wait, futex_wake, parse_futexop, yield_now, CloneArgs, FutexFlags,
+    FutexOp, ProcessList, ProgramLoader, RobustListHead, SignalAction, Thread, WaitId, WaitType,
 };
 use crate::kernel::timer::sleep;
 use crate::kernel::user::{UserBuffer, UserPointer, UserPointerMut, UserString};
@@ -213,10 +213,7 @@ async fn execve(exec: User<u8>, argv: User<PtrT>, envp: User<PtrT>) -> KResult<S
         .load()
         .await?;
 
-    if let Some(robust_list) = thread.get_robust_list() {
-        let _ = robust_list.wake_all().await;
-        thread.set_robust_list(None);
-    }
+    futex_exec(thread).await;
 
     unsafe {
         // SAFETY: We are doing execve, all other threads are terminated.
@@ -240,24 +237,15 @@ async fn execve(exec: User<u8>, argv: User<PtrT>, envp: User<PtrT>) -> KResult<S
 
 #[eonix_macros::define_syscall(SYS_EXIT)]
 async fn exit(status: u32) -> SyscallNoReturn {
-    let mut procs = ProcessList::get().write().await;
-
-    unsafe {
-        procs
-            .do_exit(&thread, WaitType::Exited(status), false)
-            .await;
-    }
+    thread.exit(WaitType::Exited(status));
 
     SyscallNoReturn
 }
 
 #[eonix_macros::define_syscall(SYS_EXIT_GROUP)]
 async fn exit_group(status: u32) -> SyscallNoReturn {
-    let mut procs = ProcessList::get().write().await;
-
-    unsafe {
-        procs.do_exit(&thread, WaitType::Exited(status), true).await;
-    }
+    // XXX: Send SIGKILL to our sibling threads.
+    thread.exit(WaitType::Exited(status));
 
     SyscallNoReturn
 }
@@ -856,7 +844,7 @@ async fn rt_sigreturn() -> KResult<SyscallNoReturn> {
             "`rt_sigreturn` failed in thread {} with error {err}!",
             thread.tid
         );
-        thread.force_kill(Signal::SIGSEGV).await;
+        thread.force_kill(Signal::SIGSEGV);
         return Err(err);
     }
 

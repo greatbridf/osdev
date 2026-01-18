@@ -24,8 +24,7 @@ use super::{stackful, Process, ProcessList, WaitType};
 use crate::kernel::interrupt::default_irq_handler;
 use crate::kernel::syscall::{syscall_handlers, SyscallHandler, User, UserMut};
 use crate::kernel::task::clone::CloneArgs;
-use crate::kernel::task::futex::RobustListHead;
-use crate::kernel::task::CloneFlags;
+use crate::kernel::task::{futex_exit, CloneFlags, RobustListHead};
 use crate::kernel::timer::{should_reschedule, timer_interrupt};
 use crate::kernel::user::{UserPointer, UserPointerMut};
 use crate::kernel::vfs::filearray::FileArray;
@@ -83,6 +82,7 @@ pub struct Thread {
     pub fpu_state: AtomicUniqueRefCell<FpuState>,
 
     pub dead: AtomicBool,
+    pub exit_status: Spin<Option<WaitType>>,
 
     inner: Spin<ThreadInner>,
 }
@@ -240,6 +240,7 @@ impl ThreadBuilder {
             trap_ctx: AtomicUniqueRefCell::new(trap_ctx),
             fpu_state: AtomicUniqueRefCell::new(fpu_state),
             dead: AtomicBool::new(false),
+            exit_status: Spin::new(None),
             inner: Spin::new(ThreadInner {
                 name,
                 tls: self.tls,
@@ -331,18 +332,26 @@ impl Thread {
         }
     }
 
-    pub async fn force_kill(&self, signal: Signal) {
-        let mut proc_list = ProcessList::get().write().await;
-        unsafe {
-            // SAFETY: Preemption is disabled.
-            proc_list
-                .do_exit(self, WaitType::Signaled(signal), false)
-                .await;
+    pub fn exit(&self, exit_status: WaitType) {
+        {
+            let mut self_status = self.exit_status.lock();
+            if self_status.is_some() {
+                // Someone has got here before us.
+                return;
+            }
+
+            *self_status = Some(exit_status);
         }
+
+        self.dead.store(true, Ordering::Release);
+    }
+
+    pub fn force_kill(&self, signal: Signal) {
+        self.exit(WaitType::Signaled(signal));
     }
 
     pub fn is_dead(&self) -> bool {
-        self.dead.load(Ordering::SeqCst)
+        self.dead.load(Ordering::Acquire)
     }
 
     async fn real_run(&self) {
@@ -385,6 +394,10 @@ impl Thread {
                     error_code,
                     address: addr,
                 }) => {
+                    if self.is_dead() {
+                        return;
+                    }
+
                     let mms = &self.process.mm_list;
                     if let Err(signal) = mms.handle_user_page_fault(addr, error_code).await {
                         self.signal_list.raise(signal);
@@ -407,6 +420,10 @@ impl Thread {
                     }
                 }
                 TrapType::Syscall { no, args } => {
+                    if self.is_dead() {
+                        return;
+                    }
+
                     if let Some(retval) = self.handle_syscall(thd_alloc, no, args).await {
                         let mut trap_ctx = self.trap_ctx.borrow();
                         trap_ctx.set_user_return_value(retval);
@@ -447,7 +464,17 @@ impl Thread {
     }
 
     pub fn run(self: Arc<Thread>) -> impl Future<Output = ()> + Send + 'static {
-        async move { self.contexted(stackful(self.real_run())).await }
+        async move {
+            self.contexted(async {
+                stackful(self.real_run()).await;
+
+                futex_exit(&self).await;
+            })
+            .await;
+
+            assert!(self.is_dead(), "`real_run` returned before the thread die?");
+            ProcessList::send_to_reaper(self);
+        }
     }
 }
 

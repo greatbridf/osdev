@@ -1,19 +1,17 @@
-use core::pin::pin;
-
 use alloc::sync::Arc;
 use alloc::vec::Vec;
+use core::pin::pin;
+
 use bitflags::bitflags;
+use eonix_mm::address::Addr;
 use eonix_sync::{LazyLock, Mutex, MutexGuard, WaitList};
 use intrusive_collections::{intrusive_adapter, KeyAdapter, RBTree, RBTreeAtomicLink};
 
-use crate::{
-    kernel::{
-        constants::{EAGAIN, EINVAL},
-        syscall::User,
-        user::UserPointer,
-    },
-    prelude::KResult,
-};
+use super::Thread;
+use crate::kernel::constants::{EAGAIN, EINVAL};
+use crate::kernel::syscall::User;
+use crate::kernel::user::{UserPointer, UserPointerMut};
+use crate::prelude::KResult;
 
 #[derive(PartialEq, Debug, Clone, Copy)]
 #[repr(u32)]
@@ -317,4 +315,39 @@ impl RobustListHead {
 
         Ok(())
     }
+}
+
+async fn do_futex_exit(thread: &Thread) -> KResult<()> {
+    if let Some(clear_ctid) = thread.get_clear_ctid() {
+        UserPointerMut::new(clear_ctid)?.write(0u32)?;
+
+        futex_wake(clear_ctid.addr(), None, 1).await?;
+    }
+
+    if let Some(robust_list) = thread.get_robust_list() {
+        robust_list.wake_all().await?;
+    }
+
+    Ok(())
+}
+
+pub async fn futex_exit(thread: &Thread) {
+    // We don't care about any error happened inside.
+    // If they've set up a wrong pointer, good luck to them...
+    let _ = do_futex_exit(thread);
+}
+
+async fn do_futex_exec(thread: &Thread) -> KResult<()> {
+    if let Some(robust_list) = thread.get_robust_list() {
+        robust_list.wake_all().await?;
+        thread.set_robust_list(None);
+    }
+
+    Ok(())
+}
+
+pub async fn futex_exec(thread: &Thread) {
+    // We don't care about any error happened inside.
+    // If they've set up a wrong pointer, good luck to them...
+    let _ = do_futex_exec(thread);
 }

@@ -398,20 +398,6 @@ impl MMList {
         assert_ne!(old_user_count, 0);
     }
 
-    /// Deactivate `self` and activate `to` with root page table changed only once.
-    /// This might reduce the overhead of switching page tables twice.
-    #[allow(dead_code)]
-    pub fn switch(&self, to: &Self) {
-        self.user_count.fetch_add(1, Ordering::Acquire);
-
-        let root_page_table = self.root_page_table.load(Ordering::Relaxed);
-        assert_ne!(root_page_table, 0);
-        set_root_page_table_pfn(PFN::from(PAddr::from(root_page_table)));
-
-        let old_user_count = to.user_count.fetch_sub(1, Ordering::Release);
-        assert_ne!(old_user_count, 0);
-    }
-
     /// Replace the current page table with a new one.
     ///
     /// # Safety
@@ -454,10 +440,24 @@ impl MMList {
 
         // TODO: Check whether we should wake someone up if they've been put
         //       to sleep when calling `vfork`.
-        self.inner
+        let old_mm = self
+            .inner
             .swap(new.map(|new_mm| new_mm.inner.swap(None)).flatten());
 
         eonix_preempt::enable();
+
+        // This could take long...
+        drop(old_mm);
+    }
+
+    pub fn release(&self) {
+        let old_mm = self.inner.swap(None);
+        let old_table = self.root_page_table.swap(0, Ordering::Relaxed);
+
+        // TODO: Remove this completely...
+        // XXX: `ArcSwap` is broken and never safe to use. Check `replace` above.
+        assert_ne!(old_table, 0, "Already released?");
+        assert!(old_mm.is_some(), "Already released?");
     }
 
     /// No need to do invalidation manually, `PageTable` already does it.

@@ -1,16 +1,17 @@
+use alloc::collections::btree_map::BTreeMap;
+use alloc::collections::vec_deque::VecDeque;
+use alloc::sync::{Arc, Weak};
+use core::pin::pin;
 use core::sync::atomic::Ordering;
 
-use super::{Process, ProcessGroup, Session, Thread, WaitObject, WaitType};
-use crate::{
-    kernel::{task::futex_wake, user::UserPointerMut},
-    rcu::rcu_sync,
+use eonix_runtime::scheduler::RUNTIME;
+use eonix_sync::{AsProof as _, AsProofMut as _, RwLock, Spin, WaitList};
+
+use super::loader::LoadInfo;
+use super::{
+    alloc_pid, Process, ProcessBuilder, ProcessGroup, Session, Thread, ThreadBuilder, WaitObject,
 };
-use alloc::{
-    collections::btree_map::BTreeMap,
-    sync::{Arc, Weak},
-};
-use eonix_mm::address::Addr;
-use eonix_sync::{AsProof as _, AsProofMut as _, RwLock};
+use crate::rcu::rcu_sync;
 
 pub struct ProcessList {
     /// The init process.
@@ -78,7 +79,7 @@ impl ProcessList {
         }
     }
 
-    pub fn set_init_process(&mut self, init: Arc<Process>) {
+    fn set_init_process(&mut self, init: Arc<Process>) {
         let old_init = self.init.replace(init);
         assert!(old_init.is_none(), "Init process already set");
     }
@@ -103,45 +104,66 @@ impl ProcessList {
         self.sessions.get(&sid).and_then(Weak::upgrade)
     }
 
-    /// Make the process a zombie and notify the parent.
-    /// # Safety
-    /// This function will destroy the process and all its threads.
-    /// It is the caller's responsibility to ensure that the process is not
-    /// running or will not run after this function is called.
-    pub async unsafe fn do_exit(
-        &mut self,
-        thread: &Thread,
-        exit_status: WaitType,
-        is_exiting_group: bool,
-    ) {
-        let process = thread.process.clone();
+    pub async fn sys_init(load_info: LoadInfo) {
+        let thread_builder = ThreadBuilder::new()
+            .name(Arc::from(&b"busybox"[..]))
+            .entry(load_info.entry_ip, load_info.sp);
 
-        if process.pid == 1 {
+        let mut process_list = ProcessList::get().write().await;
+        let (thread, process) = ProcessBuilder::new()
+            .pid(alloc_pid())
+            .mm_list(load_info.mm_list)
+            .thread_builder(thread_builder)
+            .build(&mut process_list);
+
+        process_list.set_init_process(process);
+
+        // TODO!!!: Remove this.
+        thread.files.open_console();
+
+        RUNTIME.spawn(Reaper::daemon());
+        RUNTIME.spawn(thread.run());
+    }
+
+    pub fn send_to_reaper(thread: Arc<Thread>) {
+        GLOBAL_REAPER.reap_list.lock().push_back(thread);
+        GLOBAL_REAPER.wait.notify_one();
+    }
+}
+
+struct Reaper {
+    reap_list: Spin<VecDeque<Arc<Thread>>>,
+    wait: WaitList,
+}
+
+static GLOBAL_REAPER: Reaper = Reaper {
+    reap_list: Spin::new(VecDeque::new()),
+    wait: WaitList::new(),
+};
+
+impl Reaper {
+    async fn reap(&self, thread: Arc<Thread>) {
+        let exit_status = thread
+            .exit_status
+            .lock()
+            .take()
+            .expect("Exited thread with no exit status");
+
+        let process = &thread.process;
+
+        if process.pid == 1 && thread.tid == process.pid {
             panic!("init exited");
         }
 
-        let inner = process.inner.access_mut(self.prove_mut());
+        let mut procs = ProcessList::get().write().await;
+
+        let inner = process.inner.access_mut(procs.prove_mut());
 
         thread.dead.store(true, Ordering::SeqCst);
 
-        if is_exiting_group {
-            // TODO: Send SIGKILL to all threads.
-            // todo!()
-        }
-
         if thread.tid != process.pid {
-            self.threads.remove(&thread.tid);
+            procs.threads.remove(&thread.tid);
             inner.threads.remove(&thread.tid).unwrap();
-        }
-
-        if let Some(clear_ctid) = thread.get_clear_ctid() {
-            let _ = UserPointerMut::new(clear_ctid).unwrap().write(0u32);
-
-            let _ = futex_wake(clear_ctid.addr(), None, 1).await;
-        }
-
-        if let Some(robust_list) = thread.get_robust_list() {
-            let _ = robust_list.wake_all().await;
         }
 
         // main thread exit
@@ -151,48 +173,62 @@ impl ProcessList {
             thread.files.close_all().await;
 
             // If we are the session leader, we should drop the control terminal.
-            if process.session(self.prove()).sid == process.pid {
-                if let Some(terminal) = process.session(self.prove()).drop_control_terminal().await
+            if process.session(procs.prove()).sid == process.pid {
+                if let Some(terminal) = process.session(procs.prove()).drop_control_terminal().await
                 {
                     terminal.drop_session().await;
                 }
             }
 
             // Release the MMList as well as the page table.
-            unsafe {
-                // SAFETY: We are exiting the process, so no one might be using it.
-                process.mm_list.replace(None);
-            }
+            process.mm_list.release();
 
             // Make children orphans (adopted by init)
             {
-                let init = self.init_process();
+                let init = procs.init_process();
                 inner.children.retain(|_, child| {
                     let child = child.upgrade().unwrap();
                     // SAFETY: `child.parent` must be ourself. So we don't need to free it.
                     unsafe { child.parent.swap(Some(init.clone())) };
-                    init.add_child(&child, self.prove_mut());
+                    init.add_child(&child, procs.prove_mut());
 
                     false
                 });
             }
 
-            let mut init_notify = self.init_process().notify_batch();
+            let mut init_notify = procs.init_process().notify_batch();
             process
                 .wait_list
                 .drain_exited()
                 .into_iter()
                 .for_each(|item| init_notify.notify(item));
-            init_notify.finish(self.prove());
+            init_notify.finish(procs.prove());
 
-            process.parent(self.prove()).notify(
+            process.parent(procs.prove()).notify(
                 process.exit_signal,
                 WaitObject {
                     pid: process.pid,
                     code: exit_status,
                 },
-                self.prove(),
+                procs.prove(),
             );
+        }
+    }
+
+    async fn daemon() {
+        let me = &GLOBAL_REAPER;
+
+        loop {
+            let mut wait = pin!(me.wait.prepare_to_wait());
+            wait.as_mut().add_to_wait_list();
+
+            let thd_to_reap = me.reap_list.lock().pop_front();
+            if let Some(thd_to_reap) = thd_to_reap {
+                me.reap(thd_to_reap).await;
+                continue;
+            }
+
+            wait.await;
         }
     }
 }

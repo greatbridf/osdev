@@ -1,37 +1,41 @@
-use alloc::collections::btree_map::BTreeMap;
 use alloc::collections::vec_deque::VecDeque;
-use alloc::sync::{Arc, Weak};
+use alloc::sync::Arc;
 use core::pin::pin;
-use core::sync::atomic::Ordering;
 
 use eonix_runtime::scheduler::RUNTIME;
 use eonix_sync::{AsProof as _, AsProofMut as _, RwLock, Spin, WaitList};
+use intrusive_collections::RBTree;
 
 use super::loader::LoadInfo;
+use super::process::AllProcs;
+use super::process_group::AllGroups;
+use super::session::AllSessions;
+use super::thread::AllThreads;
 use super::{
-    alloc_pid, Process, ProcessBuilder, ProcessGroup, Session, Thread, ThreadBuilder, WaitObject,
+    alloc_pid, Process, ProcessBuilder, ProcessGroup, Session, Thread,
+    ThreadBuilder, WaitObject,
 };
-use crate::rcu::rcu_sync;
+use crate::rcu::call_rcu;
 
 pub struct ProcessList {
     /// The init process.
     init: Option<Arc<Process>>,
     /// All threads.
-    threads: BTreeMap<u32, Arc<Thread>>,
+    threads: RBTree<AllThreads>,
     /// All processes.
-    processes: BTreeMap<u32, Weak<Process>>,
+    procs: RBTree<AllProcs>,
     /// All process groups.
-    pgroups: BTreeMap<u32, Weak<ProcessGroup>>,
+    pgroups: RBTree<AllGroups>,
     /// All sessions.
-    sessions: BTreeMap<u32, Weak<Session>>,
+    sessions: RBTree<AllSessions>,
 }
 
 static GLOBAL_PROC_LIST: RwLock<ProcessList> = RwLock::new(ProcessList {
     init: None,
-    threads: BTreeMap::new(),
-    processes: BTreeMap::new(),
-    pgroups: BTreeMap::new(),
-    sessions: BTreeMap::new(),
+    threads: RBTree::new(AllThreads::NEW),
+    procs: RBTree::new(AllProcs::NEW),
+    pgroups: RBTree::new(AllGroups::NEW),
+    sessions: RBTree::new(AllSessions::NEW),
 });
 
 impl ProcessList {
@@ -40,43 +44,64 @@ impl ProcessList {
     }
 
     pub fn add_session(&mut self, session: &Arc<Session>) {
-        self.sessions.insert(session.sid, Arc::downgrade(session));
+        self.sessions.insert(session.clone());
     }
 
     pub fn add_pgroup(&mut self, pgroup: &Arc<ProcessGroup>) {
-        self.pgroups.insert(pgroup.pgid, Arc::downgrade(pgroup));
+        self.pgroups.insert(pgroup.clone());
     }
 
     pub fn add_process(&mut self, process: &Arc<Process>) {
-        self.processes.insert(process.pid, Arc::downgrade(process));
+        self.procs.insert(process.clone());
     }
 
     pub fn add_thread(&mut self, thread: &Arc<Thread>) {
-        self.threads.insert(thread.tid, thread.clone());
+        self.threads.insert(thread.clone());
     }
 
-    pub async fn remove_process(&mut self, pid: u32) {
+    pub fn remove_process(&mut self, pid: u32) {
         // Thread group leader has the same tid as the pid.
-        if let Some(thread) = self.threads.remove(&pid) {
-            self.processes.remove(&pid);
+        let Some(_) = self.threads.find_mut(&pid).remove() else {
+            panic!("Thread {} not found", pid);
+        };
 
-            // SAFETY: We wait until all references are dropped below with `rcu_sync()`.
-            let session = unsafe { thread.process.session.swap(None) }.unwrap();
-            let pgroup = unsafe { thread.process.pgroup.swap(None) }.unwrap();
-            let _parent = unsafe { thread.process.parent.swap(None) }.unwrap();
-            pgroup.remove_member(pid, self.prove_mut());
-            rcu_sync().await;
-
-            if Arc::strong_count(&pgroup) == 1 {
-                self.pgroups.remove(&pgroup.pgid);
-            }
-
-            if Arc::strong_count(&session) == 1 {
-                self.sessions.remove(&session.sid);
-            }
-        } else {
+        let Some(proc) = self.procs.find_mut(&pid).remove() else {
             panic!("Process {} not found", pid);
-        }
+        };
+
+        // SAFETY: `call_rcu` below.
+        let session = unsafe { proc.session.swap(None) }.unwrap();
+        let pgroup = unsafe { proc.pgroup.swap(None) }.unwrap();
+        let parent = unsafe { proc.parent.swap(None) }.unwrap();
+
+        pgroup.remove_member(&proc, self);
+
+        call_rcu(move || {
+            drop(session);
+            drop(pgroup);
+            drop(parent);
+        });
+    }
+
+    pub fn remove_thread(&mut self, thread: &Arc<Thread>) {
+        assert!(
+            self.threads.find_mut(&thread.tid).remove().is_some(),
+            "Double remove"
+        );
+    }
+
+    pub fn remove_session(&mut self, session: &Arc<Session>) {
+        assert!(
+            self.sessions.find_mut(&session.sid).remove().is_some(),
+            "Double remove"
+        );
+    }
+
+    pub fn remove_pgroup(&mut self, pgroup: &Arc<ProcessGroup>) {
+        assert!(
+            self.pgroups.find_mut(&pgroup.pgid).remove().is_some(),
+            "Double remove"
+        );
     }
 
     fn set_init_process(&mut self, init: Arc<Process>) {
@@ -88,20 +113,20 @@ impl ProcessList {
         self.init.as_ref().unwrap()
     }
 
-    pub fn try_find_thread(&self, tid: u32) -> Option<&Arc<Thread>> {
-        self.threads.get(&tid)
+    pub fn try_find_thread(&self, tid: u32) -> Option<Arc<Thread>> {
+        self.threads.find(&tid).clone_pointer()
     }
 
     pub fn try_find_process(&self, pid: u32) -> Option<Arc<Process>> {
-        self.processes.get(&pid).and_then(Weak::upgrade)
+        self.procs.find(&pid).clone_pointer()
     }
 
     pub fn try_find_pgroup(&self, pgid: u32) -> Option<Arc<ProcessGroup>> {
-        self.pgroups.get(&pgid).and_then(Weak::upgrade)
+        self.pgroups.find(&pgid).clone_pointer()
     }
 
     pub fn try_find_session(&self, sid: u32) -> Option<Arc<Session>> {
-        self.sessions.get(&sid).and_then(Weak::upgrade)
+        self.sessions.find(&sid).clone_pointer()
     }
 
     pub async fn sys_init(load_info: LoadInfo) {
@@ -117,9 +142,6 @@ impl ProcessList {
             .build(&mut process_list);
 
         process_list.set_init_process(process);
-
-        // TODO!!!: Remove this.
-        thread.files.open_console();
 
         RUNTIME.spawn(Reaper::daemon());
         RUNTIME.spawn(thread.run());
@@ -152,18 +174,19 @@ impl Reaper {
         let process = &thread.process;
 
         if process.pid == 1 && thread.tid == process.pid {
-            panic!("init exited");
+            panic!("init exited: {}", alloc_pid());
         }
 
         let mut procs = ProcessList::get().write().await;
 
-        let inner = process.inner.access_mut(procs.prove_mut());
-
-        thread.dead.store(true, Ordering::SeqCst);
-
         if thread.tid != process.pid {
-            procs.threads.remove(&thread.tid);
-            inner.threads.remove(&thread.tid).unwrap();
+            let threads = process.threads.access_mut(procs.prove_mut());
+            assert!(
+                threads.find_mut(&thread.tid).remove().is_some(),
+                "Thread gone?"
+            );
+
+            procs.remove_thread(&thread);
         }
 
         // main thread exit
@@ -172,11 +195,11 @@ impl Reaper {
 
             thread.files.close_all().await;
 
+            let session = process.session(procs.prove()).clone();
             // If we are the session leader, we should drop the control terminal.
-            if process.session(procs.prove()).sid == process.pid {
-                if let Some(terminal) = process.session(procs.prove()).drop_control_terminal().await
-                {
-                    terminal.drop_session().await;
+            if session.sid == process.pid {
+                if let Some(terminal) = session.control_terminal() {
+                    terminal.drop_session(procs.prove());
                 }
             }
 
@@ -184,16 +207,14 @@ impl Reaper {
             process.mm_list.release();
 
             // Make children orphans (adopted by init)
-            {
-                let init = procs.init_process();
-                inner.children.retain(|_, child| {
-                    let child = child.upgrade().unwrap();
-                    // SAFETY: `child.parent` must be ourself. So we don't need to free it.
-                    unsafe { child.parent.swap(Some(init.clone())) };
-                    init.add_child(&child, procs.prove_mut());
-
-                    false
-                });
+            let init = procs.init_process();
+            let children = process.children.access_mut(procs.prove_mut());
+            for child in children.take() {
+                // XXX: May buggy. Check here again.
+                // SAFETY: `child.parent` must be ourself.
+                //         So we don't need to free it.
+                unsafe { child.parent.swap(Some(init.clone())) };
+                init.add_child(&child, procs.prove_mut());
             }
 
             let mut init_notify = procs.init_process().notify_batch();

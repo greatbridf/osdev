@@ -1,4 +1,4 @@
-max_width = 100
+max_width = 80
 hard_tabs = false
 tab_spaces = 4
 newline_style = "Auto"
@@ -14,7 +14,7 @@ single_line_if_else_max_width = 60
 single_line_let_else_max_width = 60
 wrap_comments = false
 format_code_in_doc_comments = false
-doc_comment_code_block_width = 100
+doc_comment_code_block_width = 80
 comment_width = 80
 normalize_comments = false
 normalize_doc_attributes = false

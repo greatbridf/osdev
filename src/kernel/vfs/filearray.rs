@@ -1,19 +1,22 @@
 use alloc::sync::Arc;
 
 use intrusive_collections::rbtree::Entry;
-use intrusive_collections::{intrusive_adapter, Bound, KeyAdapter, RBTree, RBTreeAtomicLink};
+use intrusive_collections::{
+    intrusive_adapter, Bound, KeyAdapter, RBTree, RBTreeAtomicLink,
+};
 use itertools::FoldWhile::{Continue, Done};
 use itertools::Itertools;
 use posix_types::open::{FDFlags, OpenFlags};
 
 use super::file::{File, InodeFile, Pipe};
 use super::types::{Format, Permission};
-use super::{Spin, TerminalFile};
-use crate::kernel::console::get_console;
+use super::Spin;
 use crate::kernel::constants::{
-    EBADF, EISDIR, ENOTDIR, ENXIO, F_DUPFD, F_DUPFD_CLOEXEC, F_GETFD, F_GETFL, F_SETFD, F_SETFL,
+    EBADF, EISDIR, ENOTDIR, ENXIO, F_DUPFD, F_DUPFD_CLOEXEC, F_GETFD, F_GETFL,
+    F_SETFD, F_SETFL,
 };
 use crate::kernel::syscall::{FromSyscallArg, SyscallRetVal};
+use crate::kernel::task::Thread;
 use crate::kernel::vfs::dentry::Dentry;
 use crate::kernel::CharDevice;
 use crate::prelude::*;
@@ -80,7 +83,11 @@ impl FDAllocator {
         self.min_avail = FD(0);
     }
 
-    fn find_available(&mut self, from: FD, files: &RBTree<OpenFileAdapter>) -> FD {
+    fn find_available(
+        &mut self,
+        from: FD,
+        files: &RBTree<OpenFileAdapter>,
+    ) -> FD {
         files
             .range(Bound::Included(&from), Bound::Unbounded)
             .fold_while(from, |current, OpenFile { fd, .. }| {
@@ -143,7 +150,8 @@ impl FileArray {
                     let other_inner = other.inner.lock();
 
                     for file in other_inner.files.iter() {
-                        let new_file = OpenFile::new(file.fd, file.flags, file.file.dup());
+                        let new_file =
+                            OpenFile::new(file.fd, file.flags, file.file.dup());
                         new_files.insert(new_file);
                     }
                     (new_files, other_inner.fd_alloc.clone())
@@ -223,7 +231,12 @@ impl FileArray {
 
     /// Duplicates the file to a new file descriptor, returning the old file
     /// description to be dropped.
-    fn dup_to_no_close(&self, old_fd: FD, new_fd: FD, fd_flags: FDFlags) -> KResult<Option<File>> {
+    fn dup_to_no_close(
+        &self,
+        old_fd: FD,
+        new_fd: FD,
+        fd_flags: FDFlags,
+    ) -> KResult<Option<File>> {
         let mut inner = self.inner.lock();
         let (files, fd_alloc) = inner.split_borrow();
 
@@ -240,7 +253,8 @@ impl FileArray {
             Entry::Occupied(mut entry) => {
                 let mut file = entry.remove().unwrap();
                 file.flags = fd_flags;
-                let old_file = core::mem::replace(&mut file.file, new_file_data);
+                let old_file =
+                    core::mem::replace(&mut file.file, new_file_data);
 
                 entry.insert(file);
 
@@ -249,8 +263,15 @@ impl FileArray {
         }
     }
 
-    pub async fn dup_to(&self, old_fd: FD, new_fd: FD, flags: OpenFlags) -> KResult<FD> {
-        if let Some(old_file) = self.dup_to_no_close(old_fd, new_fd, flags.as_fd_flags())? {
+    pub async fn dup_to(
+        &self,
+        old_fd: FD,
+        new_fd: FD,
+        flags: OpenFlags,
+    ) -> KResult<FD> {
+        if let Some(old_file) =
+            self.dup_to_no_close(old_fd, new_fd, flags.as_fd_flags())?
+        {
             old_file.close().await;
         }
 
@@ -277,6 +298,7 @@ impl FileArray {
 
     pub async fn open(
         &self,
+        thread: &Thread,
         dentry: &Arc<Dentry>,
         flags: OpenFlags,
         perm: Permission,
@@ -300,7 +322,7 @@ impl FileArray {
 
         let file = if inode.format == Format::CHR {
             let device = CharDevice::get(inode.devid()?).ok_or(ENXIO)?;
-            device.open(flags)?
+            device.open(thread, flags).await?
         } else {
             InodeFile::new(dentry.clone(), flags)
         };
@@ -323,7 +345,8 @@ impl FileArray {
             F_DUPFD | F_DUPFD_CLOEXEC => {
                 let ofile = cursor.get().ok_or(EBADF)?;
 
-                let cloexec = cmd == F_DUPFD_CLOEXEC || ofile.flags.close_on_exec();
+                let cloexec =
+                    cmd == F_DUPFD_CLOEXEC || ofile.flags.close_on_exec();
                 let flags = cloexec
                     .then_some(FDFlags::FD_CLOEXEC)
                     .unwrap_or(FDFlags::empty());
@@ -342,7 +365,9 @@ impl FileArray {
                 cursor.insert(ofile);
                 0
             }
-            F_GETFL => cursor.get().ok_or(EBADF)?.file.get_flags().bits() as usize,
+            F_GETFL => {
+                cursor.get().ok_or(EBADF)?.file.get_flags().bits() as usize
+            }
             F_SETFL => {
                 cursor
                     .get()
@@ -357,35 +382,6 @@ impl FileArray {
 
         Ok(ret)
     }
-
-    /// Only used for init process.
-    pub fn open_console(&self) {
-        let mut inner = self.inner.lock();
-        let (files, fd_alloc) = inner.split_borrow();
-
-        let (stdin, stdout, stderr) = (
-            fd_alloc.next_fd(files),
-            fd_alloc.next_fd(files),
-            fd_alloc.next_fd(files),
-        );
-        let console_terminal = get_console().expect("No console terminal");
-
-        inner.do_insert(
-            stdin,
-            FDFlags::FD_CLOEXEC,
-            TerminalFile::new(console_terminal.clone(), OpenFlags::empty()),
-        );
-        inner.do_insert(
-            stdout,
-            FDFlags::FD_CLOEXEC,
-            TerminalFile::new(console_terminal.clone(), OpenFlags::empty()),
-        );
-        inner.do_insert(
-            stderr,
-            FDFlags::FD_CLOEXEC,
-            TerminalFile::new(console_terminal.clone(), OpenFlags::empty()),
-        );
-    }
 }
 
 impl FileArrayInner {
@@ -397,7 +393,9 @@ impl FileArrayInner {
     fn do_insert(&mut self, fd: FD, flags: FDFlags, file: File) {
         match self.files.entry(&fd) {
             Entry::Occupied(_) => {
-                panic!("File descriptor {fd:?} already exists in the file array.");
+                panic!(
+                    "File descriptor {fd:?} already exists in the file array."
+                );
             }
             Entry::Vacant(insert_cursor) => {
                 insert_cursor.insert(OpenFile::new(fd, flags, file));
@@ -405,7 +403,9 @@ impl FileArrayInner {
         }
     }
 
-    fn split_borrow(&mut self) -> (&mut RBTree<OpenFileAdapter>, &mut FDAllocator) {
+    fn split_borrow(
+        &mut self,
+    ) -> (&mut RBTree<OpenFileAdapter>, &mut FDAllocator) {
         let Self { files, fd_alloc } = self;
         (files, fd_alloc)
     }

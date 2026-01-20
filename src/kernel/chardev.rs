@@ -1,21 +1,17 @@
-use super::{
-    console::get_console,
-    constants::{EEXIST, EIO},
-    task::{block_on, ProcessList, Thread},
-    terminal::Terminal,
-    vfs::{types::DeviceId, File, FileType, TerminalFile},
-};
-use crate::{
-    io::{Buffer, Stream, StreamRead},
-    prelude::*,
-};
-use alloc::{
-    boxed::Box,
-    collections::btree_map::{BTreeMap, Entry},
-    sync::Arc,
-};
-use eonix_sync::AsProof as _;
+use alloc::boxed::Box;
+use alloc::collections::btree_map::{BTreeMap, Entry};
+use alloc::sync::Arc;
+
 use posix_types::open::OpenFlags;
+
+use super::console::get_console;
+use super::constants::{EEXIST, EIO};
+use super::task::{block_on, Thread};
+use super::terminal::Terminal;
+use super::vfs::types::DeviceId;
+use super::vfs::{File, FileType, TerminalFile};
+use crate::io::{Buffer, Stream, StreamRead};
+use crate::prelude::*;
 
 pub trait VirtualCharDevice: Send + Sync {
     fn read(&self, buffer: &mut dyn Buffer) -> KResult<usize>;
@@ -33,12 +29,15 @@ pub struct CharDevice {
     device: CharDeviceType,
 }
 
-static CHAR_DEVICES: Spin<BTreeMap<DeviceId, Arc<CharDevice>>> = Spin::new(BTreeMap::new());
+static CHAR_DEVICES: Spin<BTreeMap<DeviceId, Arc<CharDevice>>> =
+    Spin::new(BTreeMap::new());
 
 impl CharDevice {
     pub fn read(&self, buffer: &mut dyn Buffer) -> KResult<usize> {
         match &self.device {
-            CharDeviceType::Terminal(terminal) => block_on(terminal.read(buffer)),
+            CharDeviceType::Terminal(terminal) => {
+                block_on(terminal.read(buffer))
+            }
             CharDeviceType::Virtual(device) => device.read(buffer),
         }
     }
@@ -46,10 +45,12 @@ impl CharDevice {
     pub fn write(&self, stream: &mut dyn Stream) -> KResult<usize> {
         match &self.device {
             CharDeviceType::Virtual(device) => device.write(stream),
-            CharDeviceType::Terminal(terminal) => stream.read_till_end(&mut [0; 128], |data| {
-                terminal.write(data);
-                Ok(())
-            }),
+            CharDeviceType::Terminal(terminal) => {
+                stream.read_till_end(&mut [0; 128], |data| {
+                    terminal.write(data);
+                    Ok(())
+                })
+            }
         }
     }
 
@@ -57,7 +58,11 @@ impl CharDevice {
         CHAR_DEVICES.lock().get(&devid).cloned()
     }
 
-    pub fn register(devid: DeviceId, name: Arc<str>, device: CharDeviceType) -> KResult<()> {
+    pub fn register(
+        devid: DeviceId,
+        name: Arc<str>,
+        device: CharDeviceType,
+    ) -> KResult<()> {
         match CHAR_DEVICES.lock().entry(devid) {
             Entry::Vacant(entry) => {
                 entry.insert(Arc::new(CharDevice { name, device }));
@@ -67,26 +72,21 @@ impl CharDevice {
         }
     }
 
-    pub fn open(self: &Arc<Self>, flags: OpenFlags) -> KResult<File> {
-        Ok(match &self.device {
-            CharDeviceType::Terminal(terminal) => {
-                let procs = block_on(ProcessList::get().read());
-                let current = Thread::current();
-                let session = current.process.session(procs.prove());
-                // We only set the control terminal if the process is the session leader.
-                if session.sid == Thread::current().process.pid {
-                    // Silently fail if we can't set the control terminal.
-                    dont_check!(block_on(session.set_control_terminal(
-                        &terminal,
-                        false,
-                        procs.prove()
-                    )));
-                }
-
-                TerminalFile::new(terminal.clone(), flags)
+    pub async fn open(
+        self: &Arc<Self>,
+        thread: &Thread,
+        flags: OpenFlags,
+    ) -> KResult<File> {
+        let file = match &self.device {
+            CharDeviceType::Virtual(_) => {
+                File::new(flags, FileType::CharDev(self.clone()))
             }
-            CharDeviceType::Virtual(_) => File::new(flags, FileType::CharDev(self.clone())),
-        })
+            CharDeviceType::Terminal(terminal) => {
+                TerminalFile::open(thread, terminal, flags).await
+            }
+        };
+
+        Ok(file)
     }
 }
 

@@ -56,6 +56,9 @@ busybox mknod -m 666 /dev/vdb b 8 16
 busybox mknod -m 666 /dev/ttyS0 c 4 64
 busybox mknod -m 666 /dev/ttyS1 c 4 65
 
+exec < "$TERMINAL"
+exec > "$TERMINAL" 2>&1
+
 info "deploying busybox..."
 
 busybox mkdir -p /bin /lib
@@ -106,8 +109,7 @@ int main() {
 }
 EOF
 
-# shellcheck disable=SC2094
-exec sh -l < "$TERMINAL" > "$TERMINAL" 2> "$TERMINAL"
+exec sh -l
 
 # We don't have a working init yet, so we use busybox sh directly for now.
 # exec /mnt/init /bin/sh -c 'exec sh -l < /dev/ttyS0 > /dev/ttyS0 2> /dev/ttyS0'

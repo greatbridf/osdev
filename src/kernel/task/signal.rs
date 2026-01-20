@@ -128,7 +128,11 @@ impl SignalList {
         self.inner.lock().mask.unmask(mask)
     }
 
-    pub fn set_action(&self, signal: Signal, action: SignalAction) -> KResult<()> {
+    pub fn set_action(
+        &self,
+        signal: Signal,
+        action: SignalAction,
+    ) -> KResult<()> {
         if matches!(signal, SIGNAL_NOW!()) {
             return Err(EINVAL);
         }
@@ -141,7 +145,10 @@ impl SignalList {
         self.inner.lock().actions.get(signal)
     }
 
-    pub fn set_signal_waker(&self, waker: Option<UnsafeRef<dyn Fn() + Send + Sync>>) {
+    pub fn set_signal_waker(
+        &self,
+        waker: Option<UnsafeRef<dyn Fn() + Send + Sync>>,
+    ) {
         let mut inner = self.inner.lock();
         inner.signal_waker = waker;
     }
@@ -168,7 +175,11 @@ impl SignalList {
     }
 
     /// Handle signals in the context of `Thread::current()`.
-    pub async fn handle(&self, trap_ctx: &mut TrapContext, fpu_state: &mut FpuState) {
+    pub async fn handle(
+        &self,
+        trap_ctx: &mut TrapContext,
+        fpu_state: &mut FpuState,
+    ) {
         loop {
             let signal = {
                 let Some(signal) = self.inner.lock().pop() else { return };
@@ -182,7 +193,8 @@ impl SignalList {
                         old_mask
                     };
 
-                    let result = handler.handle(signal, old_mask, trap_ctx, fpu_state);
+                    let result =
+                        handler.handle(signal, old_mask, trap_ctx, fpu_state);
                     if result.is_err() {
                         self.inner.lock().mask = old_mask;
                     }
@@ -222,14 +234,15 @@ impl SignalList {
                         );
                     }
 
-                    eonix_preempt::disable();
-
                     // `SIGSTOP` can only be waken up by `SIGCONT` or `SIGKILL`.
                     // SAFETY: Preempt disabled above.
                     Runtime::block_till_woken(|waker| {
                         let mut inner = self.inner.lock();
                         let old_waker = inner.stop_waker.replace(waker.clone());
-                        assert!(old_waker.is_none(), "We should not have a waker here");
+                        assert!(
+                            old_waker.is_none(),
+                            "We should not have a waker here"
+                        );
                     })
                     .await;
 
@@ -293,15 +306,18 @@ impl SignalList {
         let old_fpu_state_vaddr = old_trap_ctx_vaddr + size_of::<TrapContext>();
         let old_mask_vaddr = old_fpu_state_vaddr + size_of::<FpuState>();
 
-        *trap_ctx = UserPointer::<TrapContext>::with_addr(old_trap_ctx_vaddr)?.read()?;
+        *trap_ctx = UserPointer::<TrapContext>::with_addr(old_trap_ctx_vaddr)?
+            .read()?;
 
         // Make sure that at least we won't crash the kernel.
         if !trap_ctx.is_user_mode() || !trap_ctx.is_interrupt_enabled() {
             return Err(EFAULT)?;
         }
 
-        *fpu_state = UserPointer::<FpuState>::with_addr(old_fpu_state_vaddr)?.read()?;
-        self.inner.lock().mask = UserPointer::<SigSet>::with_addr(old_mask_vaddr)?.read()?;
+        *fpu_state =
+            UserPointer::<FpuState>::with_addr(old_fpu_state_vaddr)?.read()?;
+        self.inner.lock().mask =
+            UserPointer::<SigSet>::with_addr(old_mask_vaddr)?.read()?;
 
         Ok(())
     }

@@ -1,117 +1,170 @@
-use super::{Process, ProcessGroup, ProcessList, Thread};
-use crate::kernel::constants::EPERM;
-use crate::{kernel::Terminal, prelude::*};
-use alloc::{
-    collections::btree_map::BTreeMap,
-    sync::{Arc, Weak},
+use alloc::sync::{Arc, Weak};
+
+use eonix_sync::{AsProof as _, AsProofMut, Locked, Proof, ProofMut};
+use intrusive_collections::{
+    intrusive_adapter, KeyAdapter, RBTree, RBTreeAtomicLink,
 };
-use eonix_sync::{AsProof as _, AsProofMut as _, Locked, Proof, ProofMut, RwLock};
 use posix_types::signal::Signal;
 
-#[derive(Debug)]
+use super::process_group::SessionGroups;
+use super::{Process, ProcessGroup, ProcessList};
+use crate::kernel::constants::EPERM;
+use crate::kernel::Terminal;
+use crate::prelude::*;
+
 struct SessionJobControl {
-    /// Foreground process group
-    foreground: Weak<ProcessGroup>,
+    foreground: Option<Arc<ProcessGroup>>,
     control_terminal: Option<Arc<Terminal>>,
 }
 
-#[allow(dead_code)]
-#[derive(Debug)]
 pub struct Session {
     pub sid: u32,
     pub leader: Weak<Process>,
-    job_control: RwLock<SessionJobControl>,
+    job_control: Spin<SessionJobControl>,
+    groups: Locked<RBTree<SessionGroups>, ProcessList>,
+    all_sessions_link: RBTreeAtomicLink,
+}
 
-    groups: Locked<BTreeMap<u32, Weak<ProcessGroup>>, ProcessList>,
+intrusive_adapter!(pub AllSessions = Arc<Session>: Session {
+    all_sessions_link: RBTreeAtomicLink
+});
+
+impl KeyAdapter<'_> for AllSessions {
+    type Key = u32;
+
+    fn get_key(
+        &self,
+        value: &'_ <Self::PointerOps as intrusive_collections::PointerOps>::Value,
+    ) -> Self::Key {
+        value.sid
+    }
 }
 
 impl Session {
     /// Create a session and add it to the global session list.
-    pub fn new(leader: &Arc<Process>, process_list: &mut ProcessList) -> Arc<Self> {
+    pub fn new(leader: &Arc<Process>, proclist: &mut ProcessList) -> Arc<Self> {
         let session = Arc::new(Self {
             sid: leader.pid,
             leader: Arc::downgrade(leader),
-            job_control: RwLock::new(SessionJobControl {
-                foreground: Weak::new(),
+            job_control: Spin::new(SessionJobControl {
+                foreground: None,
                 control_terminal: None,
             }),
-            groups: Locked::new(
-                BTreeMap::new(),
-                // SAFETY: `procs` must be the global process list, which won't be moved.
-                process_list,
-            ),
+            groups: Locked::new(RBTree::new(SessionGroups::NEW), proclist),
+            all_sessions_link: RBTreeAtomicLink::new(),
         });
 
-        process_list.add_session(&session);
+        proclist.add_session(&session);
         session
     }
 
-    pub(super) fn add_member(&self, procs: &mut ProcessList, pgroup: &Arc<ProcessGroup>) {
-        let groups = self.groups.access_mut(procs.prove_mut());
-        let old = groups.insert(pgroup.pgid, Arc::downgrade(pgroup));
-        assert!(old.is_none(), "Process group already exists");
+    pub fn add_member(
+        &self,
+        pgroup: &Arc<ProcessGroup>,
+        procs: ProofMut<'_, ProcessList>,
+    ) {
+        assert!(self.all_sessions_link.is_linked(), "Dead session");
+        self.groups.access_mut(procs).insert(pgroup.clone());
     }
 
-    pub(super) fn remove_member(&self, pgid: u32, procs: ProofMut<'_, ProcessList>) {
-        assert!(self.groups.access_mut(procs).remove(&pgid).is_some());
+    pub fn remove_member(
+        self: &Arc<Self>,
+        pgroup: &Arc<ProcessGroup>,
+        procs: &mut ProcessList,
+    ) {
+        let members = self.groups.access_mut(procs.prove_mut());
+        assert!(
+            members.find_mut(&pgroup.pgid).remove().is_some(),
+            "Not a member"
+        );
+
+        if let Some(fg_pgroup) = self.foreground_pgroup() {
+            if fg_pgroup.pgid == pgroup.pgid {
+                let _ = self.set_foreground_pgroup(None);
+            }
+        }
+
+        if !members.is_empty() {
+            return;
+        }
+
+        // Recycle dead session.
+        procs.remove_session(self);
     }
 
-    pub async fn foreground(&self) -> Option<Arc<ProcessGroup>> {
-        self.job_control.read().await.foreground.upgrade()
+    pub fn leader(&self) -> Option<Arc<Process>> {
+        self.leader.upgrade()
+    }
+
+    pub fn foreground_pgroup(&self) -> Option<Arc<ProcessGroup>> {
+        self.job_control.lock().foreground.clone()
+    }
+
+    pub fn control_terminal(&self) -> Option<Arc<Terminal>> {
+        self.job_control.lock().control_terminal.clone()
     }
 
     /// Set the foreground process group identified by `pgid`.
     /// The process group must belong to the session.
-    pub async fn set_foreground_pgid(
+    pub fn set_foreground_pgroup(
         &self,
-        pgid: u32,
-        procs: Proof<'_, ProcessList>,
+        pgroup: Option<&Arc<ProcessGroup>>,
     ) -> KResult<()> {
-        if let Some(group) = self.groups.access(procs).get(&pgid) {
-            self.job_control.write().await.foreground = group.clone();
-            Ok(())
-        } else {
-            // TODO: Check if the process group refers to an existing process group.
-            //       That's not a problem though, the operation will fail anyway.
-            Err(EPERM)
-        }
-    }
-
-    /// Only session leaders can set the control terminal.
-    /// Make sure we've checked that before calling this function.
-    pub async fn set_control_terminal(
-        self: &Arc<Self>,
-        terminal: &Arc<Terminal>,
-        forced: bool,
-        procs: Proof<'_, ProcessList>,
-    ) -> KResult<()> {
-        let mut job_control = self.job_control.write().await;
-        if let Some(_) = job_control.control_terminal.as_ref() {
-            if let Some(session) = terminal.session().await.as_ref() {
-                if session.sid == self.sid {
-                    return Ok(());
-                }
+        if let Some(pgroup) = pgroup {
+            if pgroup.session.sid != self.sid {
+                return Err(EPERM);
             }
-            return Err(EPERM);
         }
-        terminal.set_session(self, forced).await?;
-        job_control.control_terminal = Some(terminal.clone());
-        job_control.foreground = Arc::downgrade(&Thread::current().process.pgroup(procs));
+
+        self.job_control.lock().foreground = pgroup.cloned();
         Ok(())
     }
 
+    /// Set our controlling terminal to `terminal`. Only meant to be called by
+    /// the session leader. The pgroup that the session leader is in becomes the
+    /// new foreground pgroup.
+    ///
+    /// # Panics
+    /// Panics if we have a controlling terminal already
+    /// or the session leader is gone.
+    pub fn _set_control_terminal(
+        self: &Arc<Self>,
+        terminal: &Arc<Terminal>,
+        procs: Proof<'_, ProcessList>,
+    ) {
+        let mut job_control = self.job_control.lock();
+        let leader = self.leader().expect("Leader is gone?");
+
+        assert!(
+            job_control.control_terminal.is_none(),
+            "We have a controlling terminal already"
+        );
+
+        job_control.control_terminal = Some(terminal.clone());
+        job_control.foreground = Some(leader.pgroup(procs).clone());
+    }
+
     /// Drop the control terminal reference inside the session.
-    /// DO NOT TOUCH THE TERMINAL'S SESSION FIELD.
-    pub async fn drop_control_terminal(&self) -> Option<Arc<Terminal>> {
-        let mut inner = self.job_control.write().await;
-        inner.foreground = Weak::new();
-        inner.control_terminal.take()
+    /// Send SIGHUP and then SIGCONT to our foreground pgroup.
+    pub fn _drop_control_terminal(&self, procs: Proof<'_, ProcessList>) {
+        let foreground = {
+            let mut inner = self.job_control.lock();
+            inner.control_terminal = None;
+            inner.foreground.take()
+        };
+
+        if let Some(foreground) = foreground {
+            foreground.raise(Signal::SIGHUP, procs);
+            foreground.raise(Signal::SIGCHLD, procs);
+        }
     }
 
     pub async fn raise_foreground(&self, signal: Signal) {
-        if let Some(fg) = self.foreground().await {
-            let procs = ProcessList::get().read().await;
-            fg.raise(signal, procs.prove());
-        }
+        let Some(fg) = self.foreground_pgroup() else {
+            return;
+        };
+
+        let procs = ProcessList::get().read().await;
+        fg.raise(signal, procs.prove());
     }
 }

@@ -14,6 +14,7 @@ use eonix_hal::traits::trap::{RawTrapContext, TrapReturn, TrapType};
 use eonix_hal::trap::TrapContext;
 use eonix_mm::address::{Addr as _, VAddr};
 use eonix_sync::AsProofMut as _;
+use intrusive_collections::{intrusive_adapter, KeyAdapter, RBTreeAtomicLink};
 use pointers::BorrowedArc;
 use posix_types::signal::Signal;
 use stalloc::UnsafeStalloc;
@@ -84,7 +85,42 @@ pub struct Thread {
     pub dead: AtomicBool,
     pub exit_status: Spin<Option<WaitType>>,
 
+    /// Link in the global thread list.
+    all_threads_link: RBTreeAtomicLink,
+
+    /// Link in the process's thread list.
+    process_threads_link: RBTreeAtomicLink,
+
     inner: Spin<ThreadInner>,
+}
+
+intrusive_adapter!(pub AllThreads = Arc<Thread>: Thread {
+    all_threads_link: RBTreeAtomicLink
+});
+intrusive_adapter!(pub ProcessThreads = Arc<Thread>: Thread {
+    process_threads_link: RBTreeAtomicLink
+});
+
+impl KeyAdapter<'_> for AllThreads {
+    type Key = u32;
+
+    fn get_key(
+        &self,
+        value: &'_ <Self::PointerOps as intrusive_collections::PointerOps>::Value,
+    ) -> Self::Key {
+        value.tid
+    }
+}
+
+impl KeyAdapter<'_> for ProcessThreads {
+    type Key = u32;
+
+    fn get_key(
+        &self,
+        value: &'_ <Self::PointerOps as intrusive_collections::PointerOps>::Value,
+    ) -> Self::Key {
+        value.tid
+    }
 }
 
 impl ThreadBuilder {
@@ -139,12 +175,18 @@ impl ThreadBuilder {
         self
     }
 
-    pub fn set_child_tid(mut self, set_child_tid: Option<UserMut<u32>>) -> Self {
+    pub fn set_child_tid(
+        mut self,
+        set_child_tid: Option<UserMut<u32>>,
+    ) -> Self {
         self.set_child_tid = set_child_tid;
         self
     }
 
-    pub fn clear_child_tid(mut self, clear_child_tid: Option<UserMut<u32>>) -> Self {
+    pub fn clear_child_tid(
+        mut self,
+        clear_child_tid: Option<UserMut<u32>>,
+    ) -> Self {
         self.clear_child_tid = clear_child_tid;
         self
     }
@@ -171,7 +213,11 @@ impl ThreadBuilder {
     }
 
     /// Clone the thread from another thread.
-    pub fn clone_from(self, thread: &Thread, clone_args: &CloneArgs) -> KResult<Self> {
+    pub fn clone_from(
+        self,
+        thread: &Thread,
+        clone_args: &CloneArgs,
+    ) -> KResult<Self> {
         let inner = thread.inner.lock();
 
         let mut trap_ctx = thread.trap_ctx.borrow().clone();
@@ -199,11 +245,12 @@ impl ThreadBuilder {
             FileArray::new_cloned(&thread.files)
         };
 
-        let signal_list = if clone_args.flags.contains(CloneFlags::CLONE_SIGHAND) {
-            SignalList::new_shared(&thread.signal_list)
-        } else {
-            SignalList::new_cloned(&thread.signal_list)
-        };
+        let signal_list =
+            if clone_args.flags.contains(CloneFlags::CLONE_SIGHAND) {
+                SignalList::new_shared(&thread.signal_list)
+            } else {
+                SignalList::new_cloned(&thread.signal_list)
+            };
 
         Ok(self
             .files(files)
@@ -241,6 +288,8 @@ impl ThreadBuilder {
             fpu_state: AtomicUniqueRefCell::new(fpu_state),
             dead: AtomicBool::new(false),
             exit_status: Spin::new(None),
+            all_threads_link: RBTreeAtomicLink::new(),
+            process_threads_link: RBTreeAtomicLink::new(),
             inner: Spin::new(ThreadInner {
                 name,
                 tls: self.tls,
@@ -281,7 +330,10 @@ impl Thread {
         Ok(())
     }
 
-    pub fn set_robust_list(&self, robust_list_address: Option<User<RobustListHead>>) {
+    pub fn set_robust_list(
+        &self,
+        robust_list_address: Option<User<RobustListHead>>,
+    ) {
         self.inner.lock().robust_list_address = robust_list_address;
     }
 
@@ -371,7 +423,10 @@ impl Thread {
         while !self.is_dead() {
             if self.signal_list.has_pending_signal() {
                 self.signal_list
-                    .handle(&mut self.trap_ctx.borrow(), &mut self.fpu_state.borrow())
+                    .handle(
+                        &mut self.trap_ctx.borrow(),
+                        &mut self.fpu_state.borrow(),
+                    )
                     .await;
             }
 
@@ -399,7 +454,9 @@ impl Thread {
                     }
 
                     let mms = &self.process.mm_list;
-                    if let Err(signal) = mms.handle_user_page_fault(addr, error_code).await {
+                    if let Err(signal) =
+                        mms.handle_user_page_fault(addr, error_code).await
+                    {
                         self.signal_list.raise(signal);
                     }
                 }
@@ -409,8 +466,12 @@ impl Thread {
                 TrapType::Fault(Fault::InvalidOp) => {
                     self.signal_list.raise(Signal::SIGILL);
                 }
-                TrapType::Fault(Fault::Unknown(_)) => unimplemented!("Unhandled fault"),
-                TrapType::Breakpoint => unimplemented!("Breakpoint in user space"),
+                TrapType::Fault(Fault::Unknown(_)) => {
+                    unimplemented!("Unhandled fault")
+                }
+                TrapType::Breakpoint => {
+                    unimplemented!("Breakpoint in user space")
+                }
                 TrapType::Irq { callback } => callback(default_irq_handler),
                 TrapType::Timer { callback } => {
                     callback(timer_interrupt);
@@ -424,11 +485,16 @@ impl Thread {
                         return;
                     }
 
-                    if let Some(retval) = self.handle_syscall(thd_alloc, no, args).await {
+                    if let Some(retval) =
+                        self.handle_syscall(thd_alloc, no, args).await
+                    {
                         let mut trap_ctx = self.trap_ctx.borrow();
                         trap_ctx.set_user_return_value(retval);
 
-                        #[cfg(any(target_arch = "riscv64", target_arch = "loongarch64"))]
+                        #[cfg(any(
+                            target_arch = "riscv64",
+                            target_arch = "loongarch64"
+                        ))]
                         {
                             let pc = trap_ctx.get_program_counter();
                             trap_ctx.set_program_counter(pc + 4);
@@ -472,7 +538,10 @@ impl Thread {
             })
             .await;
 
-            assert!(self.is_dead(), "`real_run` returned before the thread die?");
+            assert!(
+                self.is_dead(),
+                "`real_run` returned before the thread die?"
+            );
             ProcessList::send_to_reaper(self);
         }
     }
@@ -499,7 +568,10 @@ pub async fn yield_now() {
     impl Future for Yield {
         type Output = ();
 
-        fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        fn poll(
+            mut self: Pin<&mut Self>,
+            cx: &mut Context<'_>,
+        ) -> Poll<Self::Output> {
             if self.as_mut().yielded {
                 Poll::Ready(())
             } else {

@@ -12,7 +12,8 @@ use posix_types::syscall_no::*;
 use super::{FromSyscallArg, User};
 use crate::io::{Buffer, BufferFill, IntoStream};
 use crate::kernel::constants::{
-    EBADF, EFAULT, EINVAL, ENOENT, ENOSYS, ENOTDIR, SEEK_CUR, SEEK_END, SEEK_SET,
+    EBADF, EFAULT, EINVAL, ENOENT, ENOSYS, ENOTDIR, SEEK_CUR, SEEK_END,
+    SEEK_SET,
 };
 use crate::kernel::syscall::UserMut;
 use crate::kernel::task::Thread;
@@ -61,7 +62,13 @@ async fn dentry_from(
             let dir_file = thread.files.get(dirfd).ok_or(EBADF)?;
             let dir_dentry = dir_file.as_path().ok_or(ENOTDIR)?;
 
-            Dentry::open_at(&thread.fs_context, dir_dentry, path, follow_symlink).await
+            Dentry::open_at(
+                &thread.fs_context,
+                dir_dentry,
+                path,
+                follow_symlink,
+            )
+            .await
         }
     }
 }
@@ -79,7 +86,12 @@ async fn read(fd: FD, buffer: UserMut<u8>, bufsize: usize) -> KResult<usize> {
 }
 
 #[eonix_macros::define_syscall(SYS_PREAD64)]
-async fn pread64(fd: FD, buffer: UserMut<u8>, bufsize: usize, offset: usize) -> KResult<usize> {
+async fn pread64(
+    fd: FD,
+    buffer: UserMut<u8>,
+    bufsize: usize,
+    offset: usize,
+) -> KResult<usize> {
     let mut buffer = UserBuffer::new(buffer, bufsize)?;
 
     thread
@@ -104,7 +116,12 @@ async fn write(fd: FD, buffer: User<u8>, count: usize) -> KResult<usize> {
 }
 
 #[eonix_macros::define_syscall(SYS_PWRITE64)]
-async fn pwrite64(fd: FD, buffer: User<u8>, count: usize, offset: usize) -> KResult<usize> {
+async fn pwrite64(
+    fd: FD,
+    buffer: User<u8>,
+    count: usize,
+    offset: usize,
+) -> KResult<usize> {
     let buffer = CheckedUserPointer::new(buffer, count)?;
     let mut stream = buffer.into_stream();
 
@@ -117,11 +134,17 @@ async fn pwrite64(fd: FD, buffer: User<u8>, count: usize, offset: usize) -> KRes
 }
 
 #[eonix_macros::define_syscall(SYS_OPENAT)]
-async fn openat(dirfd: FD, pathname: User<u8>, flags: OpenFlags, mode: Mode) -> KResult<FD> {
-    let dentry = dentry_from(thread, dirfd, pathname, flags.follow_symlink()).await?;
+async fn openat(
+    dirfd: FD,
+    pathname: User<u8>,
+    flags: OpenFlags,
+    mode: Mode,
+) -> KResult<FD> {
+    let dentry =
+        dentry_from(thread, dirfd, pathname, flags.follow_symlink()).await?;
     let perm = mode.perm().mask_with(*thread.fs_context.umask.lock());
 
-    thread.files.open(&dentry, flags, perm).await
+    thread.files.open(thread, &dentry, flags, perm).await
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -156,7 +179,8 @@ async fn dup3(old_fd: FD, new_fd: FD, flags: OpenFlags) -> KResult<FD> {
 
 #[eonix_macros::define_syscall(SYS_PIPE2)]
 async fn pipe2(pipe_fd: UserMut<[FD; 2]>, flags: OpenFlags) -> KResult<()> {
-    let mut buffer = UserBuffer::new(pipe_fd.cast(), core::mem::size_of::<[FD; 2]>())?;
+    let mut buffer =
+        UserBuffer::new(pipe_fd.cast(), core::mem::size_of::<[FD; 2]>())?;
     let (read_fd, write_fd) = thread.files.pipe(flags)?;
 
     buffer.copy(&[read_fd, write_fd])?.ok_or(EFAULT)
@@ -170,7 +194,11 @@ async fn pipe(pipe_fd: UserMut<[FD; 2]>) -> KResult<()> {
 
 #[cfg(target_arch = "x86_64")]
 #[eonix_macros::define_syscall(SYS_GETDENTS)]
-async fn getdents(fd: FD, buffer: UserMut<u8>, bufsize: usize) -> KResult<usize> {
+async fn getdents(
+    fd: FD,
+    buffer: UserMut<u8>,
+    bufsize: usize,
+) -> KResult<usize> {
     let mut buffer = UserBuffer::new(buffer, bufsize)?;
 
     thread
@@ -184,7 +212,11 @@ async fn getdents(fd: FD, buffer: UserMut<u8>, bufsize: usize) -> KResult<usize>
 }
 
 #[eonix_macros::define_syscall(SYS_GETDENTS64)]
-async fn getdents64(fd: FD, buffer: UserMut<u8>, bufsize: usize) -> KResult<usize> {
+async fn getdents64(
+    fd: FD,
+    buffer: UserMut<u8>,
+    bufsize: usize,
+) -> KResult<usize> {
     let mut buffer = UserBuffer::new(buffer, bufsize)?;
 
     thread
@@ -230,7 +262,8 @@ async fn newfstatat(
 )]
 #[cfg_attr(target_arch = "x86_64", eonix_macros::define_syscall(SYS_FSTAT64))]
 async fn newfstat(fd: FD, statbuf: UserMut<Stat>) -> KResult<()> {
-    sys_newfstatat(thread, fd, User::null(), statbuf, AtFlags::AT_EMPTY_PATH).await
+    sys_newfstatat(thread, fd, User::null(), statbuf, AtFlags::AT_EMPTY_PATH)
+        .await
 }
 
 #[eonix_macros::define_syscall(SYS_STATX)]
@@ -307,7 +340,11 @@ async fn unlink(pathname: User<u8>) -> KResult<()> {
 }
 
 #[eonix_macros::define_syscall(SYS_SYMLINKAT)]
-async fn symlinkat(target: User<u8>, dirfd: FD, linkpath: User<u8>) -> KResult<()> {
+async fn symlinkat(
+    target: User<u8>,
+    dirfd: FD,
+    linkpath: User<u8>,
+) -> KResult<()> {
     let target = UserString::new(target)?;
     let dentry = dentry_from(thread, dirfd, linkpath, false).await?;
 
@@ -341,7 +378,12 @@ impl UserDeviceId {
 }
 
 #[eonix_macros::define_syscall(SYS_MKNODAT)]
-async fn mknodat(dirfd: FD, pathname: User<u8>, mut mode: Mode, dev: UserDeviceId) -> KResult<()> {
+async fn mknodat(
+    dirfd: FD,
+    pathname: User<u8>,
+    mut mode: Mode,
+    dev: UserDeviceId,
+) -> KResult<()> {
     if !mode.is_blk() && !mode.is_chr() {
         return Err(EINVAL);
     }
@@ -354,7 +396,11 @@ async fn mknodat(dirfd: FD, pathname: User<u8>, mut mode: Mode, dev: UserDeviceI
 
 #[cfg(target_arch = "x86_64")]
 #[eonix_macros::define_syscall(SYS_MKNOD)]
-async fn mknod(pathname: User<u8>, mode: Mode, dev: UserDeviceId) -> KResult<()> {
+async fn mknod(
+    pathname: User<u8>,
+    mode: Mode,
+    dev: UserDeviceId,
+) -> KResult<()> {
     sys_mknodat(thread, FD::AT_FDCWD, pathname, mode, dev).await
 }
 
@@ -373,11 +419,20 @@ async fn readlinkat(
 
 #[cfg(target_arch = "x86_64")]
 #[eonix_macros::define_syscall(SYS_READLINK)]
-async fn readlink(pathname: User<u8>, buffer: UserMut<u8>, bufsize: usize) -> KResult<usize> {
+async fn readlink(
+    pathname: User<u8>,
+    buffer: UserMut<u8>,
+    bufsize: usize,
+) -> KResult<usize> {
     sys_readlinkat(thread, FD::AT_FDCWD, pathname, buffer, bufsize).await
 }
 
-async fn do_lseek(thread: &Thread, fd: FD, offset: u64, whence: u32) -> KResult<u64> {
+async fn do_lseek(
+    thread: &Thread,
+    fd: FD,
+    offset: u64,
+    whence: u32,
+) -> KResult<u64> {
     let file = thread.files.get(fd).ok_or(EBADF)?;
 
     Ok(match whence {
@@ -403,7 +458,8 @@ async fn llseek(
     result: UserMut<u64>,
     whence: u32,
 ) -> KResult<()> {
-    let mut result = UserBuffer::new(result.cast(), core::mem::size_of::<u64>())?;
+    let mut result =
+        UserBuffer::new(result.cast(), core::mem::size_of::<u64>())?;
     let offset = ((offset_high as u64) << 32) | (offset_low as u64);
 
     let new_offset = do_lseek(thread, fd, offset, whence).await?;
@@ -434,9 +490,10 @@ async fn readv(fd: FD, iov_user: User<IoVec>, iovcnt: u32) -> KResult<usize> {
             Ok(IoVec {
                 len: Long::ZERO, ..
             }) => None,
-            Ok(IoVec { base, len }) => {
-                Some(UserBuffer::new(UserMut::with_addr(base.addr()), len.get()))
-            }
+            Ok(IoVec { base, len }) => Some(UserBuffer::new(
+                UserMut::with_addr(base.addr()),
+                len.get(),
+            )),
         })
         .collect::<KResult<Vec<_>>>()?;
 
@@ -471,8 +528,11 @@ async fn writev(fd: FD, iov_user: User<IoVec>, iovcnt: u32) -> KResult<usize> {
                 len: Long::ZERO, ..
             }) => None,
             Ok(IoVec { base, len }) => Some(
-                CheckedUserPointer::new(User::with_addr(base.addr()), len.get())
-                    .map(|ptr| ptr.into_stream()),
+                CheckedUserPointer::new(
+                    User::with_addr(base.addr()),
+                    len.get(),
+                )
+                .map(|ptr| ptr.into_stream()),
             ),
         })
         .collect::<KResult<Vec<_>>>()?;
@@ -491,7 +551,12 @@ async fn writev(fd: FD, iov_user: User<IoVec>, iovcnt: u32) -> KResult<usize> {
 }
 
 #[eonix_macros::define_syscall(SYS_FACCESSAT)]
-async fn faccessat(dirfd: FD, pathname: User<u8>, _mode: u32, flags: AtFlags) -> KResult<()> {
+async fn faccessat(
+    dirfd: FD,
+    pathname: User<u8>,
+    _mode: u32,
+    flags: AtFlags,
+) -> KResult<()> {
     let dentry = if flags.at_empty_path() {
         let file = thread.files.get(dirfd).ok_or(EBADF)?;
         file.as_path().ok_or(EBADF)?.clone()
@@ -522,7 +587,12 @@ async fn access(pathname: User<u8>, mode: u32) -> KResult<()> {
 }
 
 #[eonix_macros::define_syscall(SYS_SENDFILE64)]
-async fn sendfile64(out_fd: FD, in_fd: FD, offset: UserMut<u8>, count: usize) -> KResult<usize> {
+async fn sendfile64(
+    out_fd: FD,
+    in_fd: FD,
+    offset: UserMut<u8>,
+    count: usize,
+) -> KResult<usize> {
     let in_file = thread.files.get(in_fd).ok_or(EBADF)?;
     let out_file = thread.files.get(out_fd).ok_or(EBADF)?;
 
@@ -627,7 +697,11 @@ async fn pselect6(
 
 #[cfg(target_arch = "x86_64")]
 #[eonix_macros::define_syscall(SYS_POLL)]
-async fn poll(fds: UserMut<UserPollFd>, nfds: u32, timeout: u32) -> KResult<u32> {
+async fn poll(
+    fds: UserMut<UserPollFd>,
+    nfds: u32,
+    timeout: u32,
+) -> KResult<u32> {
     do_poll(thread, fds, nfds, timeout).await
 }
 
@@ -639,7 +713,8 @@ async fn fchownat(
     gid: u32,
     flags: AtFlags,
 ) -> KResult<()> {
-    let dentry = dentry_from(thread, dirfd, pathname, !flags.no_follow()).await?;
+    let dentry =
+        dentry_from(thread, dirfd, pathname, !flags.no_follow()).await?;
     if !dentry.is_valid() {
         return Err(ENOENT);
     }
@@ -648,7 +723,12 @@ async fn fchownat(
 }
 
 #[eonix_macros::define_syscall(SYS_FCHMODAT)]
-async fn fchmodat(dirfd: FD, pathname: User<u8>, mode: Mode, flags: AtFlags) -> KResult<()> {
+async fn fchmodat(
+    dirfd: FD,
+    pathname: User<u8>,
+    mode: Mode,
+    flags: AtFlags,
+) -> KResult<()> {
     let dentry = if flags.at_empty_path() {
         let file = thread.files.get(dirfd).ok_or(EBADF)?;
         file.as_path().ok_or(EBADF)?.clone()
@@ -709,12 +789,16 @@ async fn renameat2(
     let flags = RenameFlags::from_bits(flags).ok_or(EINVAL)?;
 
     // The two flags RENAME_NOREPLACE and RENAME_EXCHANGE are mutually exclusive.
-    if flags.contains(RenameFlags::RENAME_NOREPLACE | RenameFlags::RENAME_EXCHANGE) {
+    if flags
+        .contains(RenameFlags::RENAME_NOREPLACE | RenameFlags::RENAME_EXCHANGE)
+    {
         Err(EINVAL)?;
     }
 
-    let old_dentry = dentry_from(thread, old_dirfd, old_pathname, false).await?;
-    let new_dentry = dentry_from(thread, new_dirfd, new_pathname, false).await?;
+    let old_dentry =
+        dentry_from(thread, old_dirfd, old_pathname, false).await?;
+    let new_dentry =
+        dentry_from(thread, new_dirfd, new_pathname, false).await?;
 
     old_dentry.rename(&new_dentry, flags).await
 }

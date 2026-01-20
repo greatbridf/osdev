@@ -1,22 +1,24 @@
-use alloc::collections::btree_map::BTreeMap;
 use alloc::collections::vec_deque::VecDeque;
-use alloc::sync::{Arc, Weak};
+use alloc::sync::Arc;
 use core::sync::atomic::{AtomicU32, Ordering};
 
 use eonix_sync::{
-    AsProof as _, AsProofMut as _, Locked, Proof, ProofMut, RwLockReadGuard, SpinGuard,
-    UnlockableGuard as _, UnlockedGuard as _,
+    AsProof as _, AsProofMut as _, Locked, Proof, ProofMut, RwLockReadGuard,
+    SpinGuard, UnlockableGuard as _, UnlockedGuard as _,
+};
+use intrusive_collections::{
+    intrusive_adapter, KeyAdapter, RBTree, RBTreeAtomicLink,
 };
 use pointers::BorrowedArc;
 use posix_types::constants::{
-    CLD_CONTINUED, CLD_DUMPED, CLD_EXITED, CLD_KILLED, CLD_STOPPED, P_ALL, P_PGID, P_PID, P_PIDFD,
+    CLD_CONTINUED, CLD_DUMPED, CLD_EXITED, CLD_KILLED, CLD_STOPPED, P_ALL,
+    P_PGID, P_PID, P_PIDFD,
 };
 use posix_types::signal::Signal;
 use posix_types::SIGNAL_COREDUMP;
 
-use super::process_group::ProcessGroupBuilder;
 use super::signal::RaiseResult;
-use super::thread::ThreadBuilder;
+use super::thread::{ProcessThreads, ThreadBuilder};
 use super::{ProcessGroup, ProcessList, Session, Thread};
 use crate::kernel::constants::{ECHILD, EINTR, EINVAL, EPERM, ESRCH};
 use crate::kernel::mem::MMList;
@@ -35,7 +37,6 @@ pub struct ProcessBuilder {
     pid: Option<u32>,
 }
 
-#[derive(Debug)]
 pub struct Process {
     /// Process id
     ///
@@ -66,14 +67,55 @@ pub struct Process {
     /// The only case where it may be `None` is when the process is kernel thread.
     pub(super) session: RCUPointer<Session>,
 
-    /// All things related to the process list.
-    pub(super) inner: Locked<ProcessInner, ProcessList>,
+    pub children: Locked<RBTree<ProcessChildren>, ProcessList>,
+    pub threads: Locked<RBTree<ProcessThreads>, ProcessList>,
+
+    all_procs_link: RBTreeAtomicLink,
+    group_procs_link: RBTreeAtomicLink,
+    siblings_link: RBTreeAtomicLink,
 }
 
-#[derive(Debug)]
-pub(super) struct ProcessInner {
-    pub(super) children: BTreeMap<u32, Weak<Process>>,
-    pub(super) threads: BTreeMap<u32, Weak<Thread>>,
+intrusive_adapter!(pub AllProcs = Arc<Process>: Process {
+    all_procs_link: RBTreeAtomicLink
+});
+intrusive_adapter!(pub GroupProcs = Arc<Process>: Process {
+    group_procs_link: RBTreeAtomicLink
+});
+intrusive_adapter!(pub ProcessChildren = Arc<Process>: Process {
+    siblings_link: RBTreeAtomicLink
+});
+
+impl KeyAdapter<'_> for AllProcs {
+    type Key = u32;
+
+    fn get_key(
+        &self,
+        value: &'_ <Self::PointerOps as intrusive_collections::PointerOps>::Value,
+    ) -> Self::Key {
+        value.pid
+    }
+}
+
+impl KeyAdapter<'_> for GroupProcs {
+    type Key = u32;
+
+    fn get_key(
+        &self,
+        value: &'_ <Self::PointerOps as intrusive_collections::PointerOps>::Value,
+    ) -> Self::Key {
+        value.pid
+    }
+}
+
+impl KeyAdapter<'_> for ProcessChildren {
+    type Key = u32;
+
+    fn get_key(
+        &self,
+        value: &'_ <Self::PointerOps as intrusive_collections::PointerOps>::Value,
+    ) -> Self::Key {
+        value.pid
+    }
 }
 
 #[derive(Debug)]
@@ -148,7 +190,9 @@ impl WaitType {
     pub fn to_wstatus(self) -> u32 {
         match self {
             WaitType::Exited(status) => (status & 0xff) << 8,
-            WaitType::Signaled(signal @ SIGNAL_COREDUMP!()) => signal.into_raw() | 0x80,
+            WaitType::Signaled(signal @ SIGNAL_COREDUMP!()) => {
+                signal.into_raw() | 0x80
+            }
             WaitType::Signaled(signal) => signal.into_raw(),
             WaitType::Stopped(signal) => 0x7f | (signal.into_raw() << 8),
             WaitType::Continued => 0xffff,
@@ -159,7 +203,9 @@ impl WaitType {
         // TODO: CLD_TRAPPED
         match self {
             WaitType::Exited(status) => (status, CLD_EXITED),
-            WaitType::Signaled(signal @ SIGNAL_COREDUMP!()) => (signal.into_raw(), CLD_DUMPED),
+            WaitType::Signaled(signal @ SIGNAL_COREDUMP!()) => {
+                (signal.into_raw(), CLD_DUMPED)
+            }
             WaitType::Signaled(signal) => (signal.into_raw(), CLD_KILLED),
             WaitType::Stopped(signal) => (signal.into_raw(), CLD_STOPPED),
             WaitType::Continued => (Signal::SIGCONT.into_raw(), CLD_CONTINUED),
@@ -194,7 +240,11 @@ impl ProcessBuilder {
         }
     }
 
-    pub async fn clone_from(mut self, process: Arc<Process>, clone_args: &CloneArgs) -> Self {
+    pub async fn clone_from(
+        mut self,
+        process: Arc<Process>,
+        clone_args: &CloneArgs,
+    ) -> Self {
         let mm_list = if clone_args.flags.contains(CloneFlags::CLONE_VM) {
             process.mm_list.new_shared().await
         } else {
@@ -243,7 +293,10 @@ impl ProcessBuilder {
         self
     }
 
-    pub fn build(self, process_list: &mut ProcessList) -> (Arc<Thread>, Arc<Process>) {
+    pub fn build(
+        self,
+        process_list: &mut ProcessList,
+    ) -> (Arc<Thread>, Arc<Process>) {
         let mm_list = self.mm_list.unwrap_or_else(|| MMList::new());
 
         let process = Arc::new(Process {
@@ -254,18 +307,23 @@ impl ProcessBuilder {
             parent: RCUPointer::empty(),
             pgroup: RCUPointer::empty(),
             session: RCUPointer::empty(),
-            inner: Locked::new(
-                ProcessInner {
-                    children: BTreeMap::new(),
-                    threads: BTreeMap::new(),
-                },
+            children: Locked::new(
+                RBTree::new(ProcessChildren::NEW),
                 process_list,
             ),
+            threads: Locked::new(
+                RBTree::new(ProcessThreads::NEW),
+                process_list,
+            ),
+            all_procs_link: RBTreeAtomicLink::new(),
+            group_procs_link: RBTreeAtomicLink::new(),
+            siblings_link: RBTreeAtomicLink::new(),
         });
 
         process_list.add_process(&process);
 
-        let thread_builder = self.thread_builder.expect("Thread builder is not set");
+        let thread_builder =
+            self.thread_builder.expect("Thread builder is not set");
         let thread = thread_builder
             .process(process.clone())
             .tid(process.pid)
@@ -281,10 +339,7 @@ impl ProcessBuilder {
                 pgroup.add_member(&process, process_list.prove_mut());
                 pgroup
             }
-            None => ProcessGroupBuilder::new()
-                .leader(&process)
-                .session(session.clone())
-                .build(process_list),
+            None => ProcessGroup::new(&process, &session, process_list),
         };
 
         if let Some(parent) = &self.parent {
@@ -304,30 +359,30 @@ impl ProcessBuilder {
 
 impl Process {
     pub fn raise(&self, signal: Signal, procs: Proof<'_, ProcessList>) {
-        let inner = self.inner.access(procs);
-        for thread in inner.threads.values().map(|t| t.upgrade().unwrap()) {
+        let threads = self.threads.access(procs);
+        for thread in threads.iter() {
             if let RaiseResult::Finished = thread.raise(signal) {
                 break;
             }
         }
     }
 
-    pub(super) fn add_child(&self, child: &Arc<Process>, procs: ProofMut<'_, ProcessList>) {
-        assert!(self
-            .inner
-            .access_mut(procs)
-            .children
-            .insert(child.pid, Arc::downgrade(child))
-            .is_none());
+    pub fn add_child(
+        &self,
+        child: &Arc<Process>,
+        procs: ProofMut<'_, ProcessList>,
+    ) {
+        assert!(self.all_procs_link.is_linked(), "Dead process");
+        self.children.access_mut(procs).insert(child.clone());
     }
 
-    pub(super) fn add_thread(&self, thread: &Arc<Thread>, procs: ProofMut<'_, ProcessList>) {
-        assert!(self
-            .inner
-            .access_mut(procs)
-            .threads
-            .insert(thread.tid, Arc::downgrade(thread))
-            .is_none());
+    pub fn add_thread(
+        &self,
+        thread: &Arc<Thread>,
+        procs: ProofMut<'_, ProcessList>,
+    ) {
+        assert!(self.all_procs_link.is_linked(), "Dead process");
+        self.threads.access_mut(procs).insert(thread.clone());
     }
 
     pub async fn wait(
@@ -354,12 +409,7 @@ impl Process {
                     break object;
                 }
 
-                if self
-                    .inner
-                    .access(waits.process_list.prove())
-                    .children
-                    .is_empty()
-                {
+                if self.children.access(waits.process_list.prove()).is_empty() {
                     return Err(ECHILD);
                 }
 
@@ -375,12 +425,12 @@ impl Process {
             Ok(Some(wait_object))
         } else {
             let mut procs = ProcessList::get().write().await;
-            procs.remove_process(wait_object.pid).await;
+            procs.remove_process(wait_object.pid);
             assert!(self
-                .inner
-                .access_mut(procs.prove_mut())
                 .children
-                .remove(&wait_object.pid)
+                .access_mut(procs.prove_mut())
+                .find_mut(&wait_object.pid)
+                .remove()
                 .is_some());
 
             Ok(Some(wait_object))
@@ -396,15 +446,17 @@ impl Process {
         if process_list.try_find_session(self.pid).is_some() {
             return Err(EPERM);
         }
-        let session = Session::new(self, &mut process_list);
-        let pgroup = ProcessGroupBuilder::new()
-            .leader(self)
-            .session(session.clone())
-            .build(&mut process_list);
 
-        let old_session = unsafe { self.session.swap(Some(session.clone())) }.unwrap();
-        let old_pgroup = unsafe { self.pgroup.swap(Some(pgroup.clone())) }.unwrap();
-        old_pgroup.remove_member(self.pid, process_list.prove_mut());
+        self.pgroup(process_list.prove())
+            .remove_member(self, &mut process_list);
+
+        let session = Session::new(self, &mut process_list);
+        let pgroup = ProcessGroup::new(self, &session, &mut process_list);
+
+        let old_session =
+            unsafe { self.session.swap(Some(session.clone())) }.unwrap();
+        let old_pgroup =
+            unsafe { self.pgroup.swap(Some(pgroup.clone())) }.unwrap();
 
         call_rcu(move || {
             drop(old_session);
@@ -417,47 +469,56 @@ impl Process {
     /// Set the process group id of the process to `pgid`.
     ///
     /// This function does the actual work.
-    fn do_setpgid(self: &Arc<Self>, pgid: u32, procs: &mut ProcessList) -> KResult<()> {
+    fn do_setpgid(
+        self: &Arc<Self>,
+        pgid: u32,
+        procs: &mut ProcessList,
+    ) -> KResult<()> {
         // SAFETY: We are holding the process list lock.
         let session = unsafe { self.session.load_locked().unwrap() };
-        let pgroup = unsafe { self.pgroup.load_locked().unwrap() };
 
         // Changing the process group of a session leader is not allowed.
         if session.sid == self.pid {
             return Err(EPERM);
         }
 
-        let new_pgroup = if let Some(new_pgroup) = procs.try_find_pgroup(pgid) {
+        let cur_pgroup = self.pgroup(procs.prove()).clone();
+        let existing_pgroup = procs.try_find_pgroup(pgid);
+
+        if let Some(new_pgroup) = &existing_pgroup {
             // Move us to an existing process group.
             // Check that the two groups are in the same session.
-            if new_pgroup.session.upgrade().unwrap().sid != session.sid {
+            if new_pgroup.session.sid != session.sid {
                 return Err(EPERM);
             }
 
             // If we are already in the process group, we are done.
-            if new_pgroup.pgid == pgroup.pgid {
+            if new_pgroup.pgid == cur_pgroup.pgid {
                 return Ok(());
             }
-
-            new_pgroup.add_member(self, procs.prove_mut());
-
-            new_pgroup
         } else {
             // Create a new process group only if `pgid` matches our `pid`.
             if pgid != self.pid {
                 return Err(EPERM);
             }
+        }
 
-            ProcessGroupBuilder::new()
-                .leader(self)
-                .session(session.clone())
-                .build(procs)
-        };
+        // Permission checks done. Let's do the actual work.
+        cur_pgroup.remove_member(self, procs);
 
-        pgroup.remove_member(self.pid, procs.prove_mut());
+        let new_pgroup;
+        if let Some(pgroup) = existing_pgroup {
+            pgroup.add_member(self, procs.prove_mut());
+            new_pgroup = pgroup;
+        } else {
+            new_pgroup = ProcessGroup::new(self, &session, procs);
+        }
 
-        let old_pgroup = unsafe { self.pgroup.swap(Some(new_pgroup)) }.unwrap();
-        call_rcu(move || drop(old_pgroup));
+        unsafe {
+            // SAFETY: `cur_pgroup` held above.
+            self.pgroup.swap(Some(new_pgroup));
+        }
+        call_rcu(move || drop(cur_pgroup));
 
         Ok(())
     }
@@ -475,15 +536,14 @@ impl Process {
             let child = {
                 // If `pid` refers to one of our children, the thread leaders must be
                 // in out children list.
-                let children = &self.inner.access(procs.prove()).children;
-                let child = {
-                    let child = children.get(&pid);
-                    child.and_then(Weak::upgrade).ok_or(ESRCH)?
-                };
+                let children = self.children.access(procs.prove());
+                let child = children.find(&pid).clone_pointer().ok_or(ESRCH)?;
 
                 // Changing the process group of a child is only allowed
                 // if we are in the same session.
-                if child.session(procs.prove()).sid != self.session(procs.prove()).sid {
+                if child.session(procs.prove()).sid
+                    != self.session(procs.prove()).sid
+                {
                     return Err(EPERM);
                 }
 
@@ -497,19 +557,28 @@ impl Process {
     }
 
     /// Provide locked (consistent) access to the session.
-    pub fn session<'r>(&'r self, _procs: Proof<'r, ProcessList>) -> BorrowedArc<'r, Session> {
+    pub fn session<'r>(
+        &'r self,
+        _procs: Proof<'r, ProcessList>,
+    ) -> BorrowedArc<'r, Session> {
         // SAFETY: We are holding the process list lock.
         unsafe { self.session.load_locked() }.unwrap()
     }
 
     /// Provide locked (consistent) access to the process group.
-    pub fn pgroup<'r>(&'r self, _procs: Proof<'r, ProcessList>) -> BorrowedArc<'r, ProcessGroup> {
+    pub fn pgroup<'r>(
+        &'r self,
+        _procs: Proof<'r, ProcessList>,
+    ) -> BorrowedArc<'r, ProcessGroup> {
         // SAFETY: We are holding the process list lock.
         unsafe { self.pgroup.load_locked() }.unwrap()
     }
 
     /// Provide locked (consistent) access to the parent process.
-    pub fn parent<'r>(&'r self, _procs: Proof<'r, ProcessList>) -> BorrowedArc<'r, Process> {
+    pub fn parent<'r>(
+        &'r self,
+        _procs: Proof<'r, ProcessList>,
+    ) -> BorrowedArc<'r, Process> {
         // SAFETY: We are holding the process list lock.
         unsafe { self.parent.load_locked() }.unwrap()
     }
@@ -520,16 +589,25 @@ impl Process {
     }
 
     /// Provide RCU locked (maybe inconsistent) access to the process group.
-    pub fn pgroup_rcu(&self) -> RCUReadGuard<'_, BorrowedArc<'_, ProcessGroup>> {
+    pub fn pgroup_rcu(
+        &self,
+    ) -> RCUReadGuard<'_, BorrowedArc<'_, ProcessGroup>> {
         self.pgroup.load().unwrap()
     }
 
     /// Provide RCU locked (maybe inconsistent) access to the parent process.
-    pub fn parent_rcu(&self) -> Option<RCUReadGuard<'_, BorrowedArc<'_, Process>>> {
+    pub fn parent_rcu(
+        &self,
+    ) -> Option<RCUReadGuard<'_, BorrowedArc<'_, Process>>> {
         self.parent.load()
     }
 
-    pub fn notify(&self, signal: Option<Signal>, wait: WaitObject, procs: Proof<'_, ProcessList>) {
+    pub fn notify(
+        &self,
+        signal: Option<Signal>,
+        wait: WaitObject,
+        procs: Proof<'_, ProcessList>,
+    ) {
         self.wait_list.notify(wait);
 
         if let Some(signal) = signal {
@@ -607,8 +685,11 @@ impl Entry<'_, '_, '_> {
                 WaitId::Any => true,
                 WaitId::Pid(pid) => item.pid == pid,
                 WaitId::Pgid(pgid) => {
-                    if let Some(process) = self.process_list.try_find_process(item.pid) {
-                        return process.pgroup(self.process_list.prove()).pgid == pgid;
+                    if let Some(process) =
+                        self.process_list.try_find_process(item.pid)
+                    {
+                        return process.pgroup(self.process_list.prove()).pgid
+                            == pgid;
                     }
                     false
                 }
@@ -622,7 +703,10 @@ impl Entry<'_, '_, '_> {
         }
     }
 
-    pub fn wait(self, no_block: bool) -> impl core::future::Future<Output = KResult<Self>> + Send {
+    pub fn wait(
+        self,
+        no_block: bool,
+    ) -> impl core::future::Future<Output = KResult<Self>> + Send {
         let wait_procs = self.wait_procs.unlock();
 
         async move {

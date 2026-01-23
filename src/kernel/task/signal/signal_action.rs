@@ -1,22 +1,24 @@
-use super::{KResult, SAVED_DATA_SIZE};
-use crate::{
-    io::BufferFill as _,
-    kernel::{
-        constants::{EFAULT, EINVAL},
-        syscall::UserMut,
-        user::UserBuffer,
-    },
-};
-use alloc::{collections::btree_map::BTreeMap, sync::Arc};
+use alloc::collections::btree_map::BTreeMap;
+use alloc::sync::Arc;
 use core::arch::naked_asm;
-use eonix_hal::{fpu::FpuState, traits::trap::RawTrapContext, trap::TrapContext};
+
+use eonix_hal::fpu::FpuState;
+use eonix_hal::traits::trap::RawTrapContext;
+use eonix_hal::trap::TrapContext;
 use eonix_mm::address::{Addr as _, AddrOps as _, VAddr};
 use eonix_sync::Spin;
-use posix_types::{
-    ctypes::Long,
-    signal::{SigAction, SigActionHandler, SigActionRestorer, SigSet, Signal, TryFromSigAction},
-    SIGNAL_NOW,
+use posix_types::ctypes::Long;
+use posix_types::signal::{
+    SigAction, SigActionHandler, SigActionRestorer, SigSet, Signal,
+    TryFromSigAction,
 };
+use posix_types::SIGNAL_NOW;
+
+use super::{KResult, SAVED_DATA_SIZE};
+use crate::io::BufferFill as _;
+use crate::kernel::constants::{EFAULT, EINVAL};
+use crate::kernel::syscall::UserMut;
+use crate::kernel::user::UserBuffer;
 
 #[cfg(target_arch = "x86_64")]
 #[unsafe(naked)]
@@ -139,7 +141,9 @@ impl SignalAction {
             handler, restorer, ..
         } = self
         else {
-            unreachable!("Default and Ignore actions should not be handled here");
+            unreachable!(
+                "Default and Ignore actions should not be handled here"
+            );
         };
 
         let current_sp = VAddr::from(trap_ctx.get_stack_pointer());
@@ -167,7 +171,9 @@ impl SignalAction {
                 target_arch = "riscv64",
                 target_arch = "loongarch64"
             )))]
-            compile_error!("`vdso_sigreturn` is not implemented for this architecture");
+            compile_error!(
+                "`vdso_sigreturn` is not implemented for this architecture"
+            );
 
             #[cfg(target_arch = "x86_64")]
             {
@@ -178,19 +184,22 @@ impl SignalAction {
                 unsafe {
                     // SAFETY: To prevent the compiler from optimizing this into `la` instructions
                     //         and causing a linking error.
-                    (VDSO_SIGRETURN_ADDR as *const _ as *const usize).read_volatile()
+                    (VDSO_SIGRETURN_ADDR as *const _ as *const usize)
+                        .read_volatile()
                 }
             }
 
             #[cfg(any(target_arch = "riscv64", target_arch = "loongarch64"))]
             {
-                static VDSO_RT_SIGRETURN_ADDR: &'static unsafe extern "C" fn() =
+                static VDSO_RT_SIGRETURN_ADDR:
+                    &'static unsafe extern "C" fn() =
                     &(vdso_rt_sigreturn as unsafe extern "C" fn());
 
                 unsafe {
                     // SAFETY: To prevent the compiler from optimizing this into `la` instructions
                     //         and causing a linking error.
-                    (VDSO_RT_SIGRETURN_ADDR as *const _ as *const usize).read_volatile()
+                    (VDSO_RT_SIGRETURN_ADDR as *const _ as *const usize)
+                        .read_volatile()
                 }
             }
         };
@@ -201,7 +210,8 @@ impl SignalAction {
             Some(return_address),
             &[Long::new_val(signal.into_raw() as _).get()],
             |vaddr, data| -> Result<(), u32> {
-                let mut buffer = UserBuffer::new(UserMut::new(vaddr), data.len())?;
+                let mut buffer =
+                    UserBuffer::new(UserMut::new(vaddr), data.len())?;
                 for ch in data.iter() {
                     buffer.copy(&ch)?.ok_or(EFAULT)?;
                 }

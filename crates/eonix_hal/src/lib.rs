@@ -11,7 +11,9 @@ pub mod mm;
 pub mod trap;
 
 pub mod fence {
-    pub use crate::arch::fence::{memory_barrier, read_memory_barrier, write_memory_barrier};
+    pub use crate::arch::fence::{
+        memory_barrier, read_memory_barrier, write_memory_barrier,
+    };
 }
 
 pub mod fpu {

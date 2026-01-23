@@ -19,7 +19,8 @@ fn setup_kernel_page_array(alloc: BasicPageAllocRef, count_pages: usize) {
     // Map kernel page array.
     const V_KERNEL_PAGE_ARRAY_START: VAddr = VAddr::from(0xffffff8040000000);
 
-    let range = VRange::from(V_KERNEL_PAGE_ARRAY_START).grow(PAGE_SIZE * count_pages);
+    let range =
+        VRange::from(V_KERNEL_PAGE_ARRAY_START).grow(PAGE_SIZE * count_pages);
     for pte in global_page_table.iter_kernel(range) {
         let attr = PageAttribute::PRESENT
             | PageAttribute::WRITE

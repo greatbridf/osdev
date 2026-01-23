@@ -274,30 +274,7 @@ impl Memory for ArchMemory {
     }
 
     fn free_ram() -> impl Iterator<Item = PRange> {
-        unsafe extern "C" {
-            fn __kernel_start();
-            fn __kernel_end();
-        }
-
-        let kernel_end = PAddr::from(__kernel_end as usize - KIMAGE_OFFSET);
-        let paddr_after_kimage_aligned = kernel_end.ceil_to(0x200000);
-
-        core::iter::once(PRange::new(kernel_end, paddr_after_kimage_aligned))
-            .chain(
-                Self::present_ram()
-                    .filter(move |range| {
-                        range.end() > paddr_after_kimage_aligned
-                    })
-                    .map(move |range| {
-                        if range.start() < paddr_after_kimage_aligned {
-                            let (_, right) =
-                                range.split_at(paddr_after_kimage_aligned);
-                            right
-                        } else {
-                            range
-                        }
-                    }),
-            )
+        FDT.present_ram().free_ram()
     }
 }
 

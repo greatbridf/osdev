@@ -81,10 +81,12 @@ INSERT AFTER .rodata;
 SECTIONS {
     .vdso ALIGN(0x1000) : ALIGN(0x1000)
     {
+        VDSO_START = ABSOLUTE(.);
+
         KEEP(*(.vdso .vdso.*));
 
         . = ALIGN(0x1000);
-    } > VDSO AT> RAM
+    } > REGION_DATA AT> RAM
 
     VDSO_PADDR = LOADADDR(.vdso);
 }

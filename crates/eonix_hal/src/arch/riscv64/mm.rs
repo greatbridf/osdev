@@ -16,6 +16,7 @@ use riscv::register::satp;
 use super::config::mm::{PHYS_MAP_VIRT, ROOT_PAGE_TABLE_PFN};
 use super::fdt::{FdtExt, FDT};
 use crate::arch::riscv64::config::mm::KIMAGE_OFFSET;
+use crate::extern_symbol_addr;
 use crate::mm::BasicPageAlloc;
 
 const PAGE_TABLE_BASE: PFN = PFN::from_val(ROOT_PAGE_TABLE_PFN);
@@ -291,12 +292,9 @@ where
     T: PresentRam,
 {
     fn free_ram(self) -> impl Iterator<Item = PRange> {
-        unsafe extern "C" {
-            fn __kernel_start();
-            fn __kernel_end();
-        }
+        let kernel_end = extern_symbol_addr!(__kernel_end) - KIMAGE_OFFSET;
+        let kernel_end = PAddr::from(kernel_end).ceil();
 
-        let kernel_end = PAddr::from(__kernel_end as usize - KIMAGE_OFFSET);
         let paddr_after_kimage_aligned = kernel_end.ceil_to(0x200000);
 
         core::iter::once(PRange::new(kernel_end, paddr_after_kimage_aligned))

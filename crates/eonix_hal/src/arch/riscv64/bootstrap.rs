@@ -36,6 +36,7 @@ use crate::bootstrap::BootStrapData;
 use crate::mm::{
     ArchMemory, BasicPageAlloc, BasicPageAllocRef, ScopedAllocator,
 };
+use crate::{extern_symbol_addr, extern_symbol_value};
 
 #[unsafe(link_section = ".bootstrap.stack")]
 static BOOT_STACK: [u8; 4096 * 16] = [0; 4096 * 16];
@@ -156,10 +157,6 @@ pub unsafe extern "C" fn riscv64_start(hart_id: usize, dtb_addr: PAddr) -> ! {
     }
 }
 
-unsafe extern "C" {
-    fn BSS_LENGTH();
-}
-
 /// TODO:
 /// 对kernel image添加更细的控制，或者不加也行
 fn setup_kernel_page_table(alloc: BasicPageAllocRef) {
@@ -171,17 +168,17 @@ fn setup_kernel_page_table(alloc: BasicPageAllocRef) {
 
     let attr = PageAttribute::WRITE
         | PageAttribute::READ
-        | PageAttribute::EXECUTE
         | PageAttribute::GLOBAL
         | PageAttribute::PRESENT;
 
     const KERNEL_BSS_START: VAddr = VAddr::from(0xffffffff40000000);
 
+    let bss_length = extern_symbol_addr!(BSS_LENGTH);
+
     // Map kernel BSS
-    let bss_range = VRange::from(KERNEL_BSS_START).grow(BSS_LENGTH as usize);
+    let bss_range = VRange::from(KERNEL_BSS_START).grow(bss_length);
     for pte in global_page_table.iter_kernel(bss_range) {
         let page = alloc.alloc().unwrap();
-        let attr = attr.difference(PageAttribute::EXECUTE);
 
         pte.set(page.into_raw(), attr.into());
     }
@@ -192,7 +189,7 @@ fn setup_kernel_page_table(alloc: BasicPageAllocRef) {
         core::ptr::write_bytes(
             KERNEL_BSS_START.addr() as *mut (),
             0,
-            BSS_LENGTH as usize,
+            bss_length,
         );
     }
 
@@ -247,15 +244,6 @@ fn setup_cpu(alloc: impl FrameAlloc, hart_id: usize) {
     percpu_area.register(cpu.cpuid());
 }
 
-fn get_ap_start_addr() -> usize {
-    unsafe extern "C" {
-        fn _ap_start();
-    }
-    static AP_START_VALUE: &'static unsafe extern "C" fn() =
-        &(_ap_start as unsafe extern "C" fn());
-    unsafe { (AP_START_VALUE as *const _ as *const usize).read_volatile() }
-}
-
 fn bootstrap_smp(alloc: impl Allocator, page_alloc: &RefCell<BasicPageAlloc>) {
     let local_hart_id = CPU::local().cpuid();
     let mut ap_count = 0;
@@ -286,7 +274,11 @@ fn bootstrap_smp(alloc: impl Allocator, page_alloc: &RefCell<BasicPageAlloc>) {
         }
 
         unsafe {
-            hart_start(hart_id, PhysicalAddress::new(get_ap_start_addr()), 0);
+            hart_start(
+                hart_id,
+                PhysicalAddress::new(extern_symbol_value!(_ap_start)),
+                0,
+            );
         }
 
         while AP_COUNT.load(Ordering::Acquire) == ap_count {

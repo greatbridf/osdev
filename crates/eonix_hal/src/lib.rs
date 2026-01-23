@@ -69,3 +69,17 @@ macro_rules! extern_symbol_addr {
         $crate::symbol_addr!($sym, $type)
     }};
 }
+
+#[macro_export]
+macro_rules! extern_symbol_value {
+    ($sym:ident) => {{
+        unsafe extern "C" {
+            fn $sym();
+        }
+
+        static SYMBOL_ADDR: &'static unsafe extern "C" fn() =
+            &($sym as unsafe extern "C" fn());
+
+        unsafe { (SYMBOL_ADDR as *const _ as *const usize).read_volatile() }
+    }};
+}

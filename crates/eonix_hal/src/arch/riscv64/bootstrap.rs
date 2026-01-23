@@ -29,7 +29,7 @@ use super::time::set_next_timer;
 use crate::arch::cpu::CPU;
 use crate::arch::fdt::{init_dtb_and_fdt, FdtExt, FDT};
 use crate::arch::mm::{
-    ArchPagingMode, ArchPhysAccess, FreeRam, PageAccessImpl, PageAttribute64,
+    ArchPagingMode, ArchPhysAccess, PageAccessImpl, PageAttribute64,
     RawPageTableSv48, GLOBAL_PAGE_TABLE,
 };
 use crate::bootstrap::BootStrapData;
@@ -113,13 +113,12 @@ unsafe extern "C" fn _start(hart_id: usize, dtb_addr: usize) {
 }
 
 pub unsafe extern "C" fn riscv64_start(hart_id: usize, dtb_addr: PAddr) -> ! {
-    let fdt = Fdt::from_ptr(ArchPhysAccess::as_ptr(dtb_addr).as_ptr())
-        .expect("Failed to parse DTB from static memory.");
+    let fdt = unsafe { FdtExt::new(dtb_addr) };
 
     let real_allocator = RefCell::new(BasicPageAlloc::new());
     let alloc = BasicPageAllocRef::new(&real_allocator);
 
-    for range in fdt.present_ram().free_ram() {
+    for range in fdt.free_ram() {
         real_allocator.borrow_mut().add_range(range);
     }
 

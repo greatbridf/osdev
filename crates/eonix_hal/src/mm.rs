@@ -41,9 +41,8 @@ impl BasicPageAlloc {
     fn alloc_one(&mut self) -> PFN {
         assert_ne!(self.head, self.tail, "No free pages available");
         let mut range = self.ranges[self.head].take().unwrap();
-        range = range.shrink(PAGE_SIZE);
-
-        let pfn = PFN::from(range.end());
+        let pfn = PFN::from(range.start());
+        range = PRange::new(range.start() + PAGE_SIZE, range.end());
 
         if range.len() != 0 {
             self.ranges[self.head] = Some(range);

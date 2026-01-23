@@ -186,7 +186,7 @@ fn setup_kernel_page_table(alloc: BasicPageAllocRef) {
 
     unsafe {
         core::ptr::write_bytes(
-            KERNEL_BSS_START.addr() as *mut (),
+            KERNEL_BSS_START.addr() as *mut u8,
             0,
             bss_length,
         );

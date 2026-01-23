@@ -41,7 +41,7 @@ fn setup_kernel_page_array(alloc: BasicPageAllocRef, count_pages: usize) {
     unsafe {
         // SAFETY: We've just mapped the area with sufficient length.
         core::ptr::write_bytes(
-            V_KERNEL_PAGE_ARRAY_START.addr() as *mut (),
+            V_KERNEL_PAGE_ARRAY_START.addr() as *mut u8,
             0,
             count_pages * PAGE_SIZE,
         );

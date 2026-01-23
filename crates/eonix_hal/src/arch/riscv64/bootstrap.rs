@@ -7,8 +7,12 @@ use core::sync::atomic::{AtomicBool, AtomicPtr, AtomicUsize, Ordering};
 
 use eonix_hal_traits::mm::Memory;
 use eonix_mm::address::{Addr as _, PAddr, PRange, PhysAccess, VAddr, VRange};
-use eonix_mm::page_table::{PageAttribute, PageTable, PagingMode, TableAttribute, PTE as _};
-use eonix_mm::paging::{Folio, FrameAlloc, PageAccess, PageBlock, PAGE_SIZE, PFN};
+use eonix_mm::page_table::{
+    PageAttribute, PageTable, PagingMode, TableAttribute, PTE as _,
+};
+use eonix_mm::paging::{
+    Folio, FrameAlloc, PageAccess, PageBlock, PAGE_SIZE, PFN,
+};
 use eonix_percpu::PercpuArea;
 use fdt::Fdt;
 use riscv::asm::sfence_vma_all;
@@ -25,11 +29,13 @@ use super::time::set_next_timer;
 use crate::arch::cpu::CPU;
 use crate::arch::fdt::{init_dtb_and_fdt, FdtExt, FDT};
 use crate::arch::mm::{
-    ArchPagingMode, ArchPhysAccess, FreeRam, PageAccessImpl, PageAttribute64, RawPageTableSv48,
-    GLOBAL_PAGE_TABLE,
+    ArchPagingMode, ArchPhysAccess, FreeRam, PageAccessImpl, PageAttribute64,
+    RawPageTableSv48, GLOBAL_PAGE_TABLE,
 };
 use crate::bootstrap::BootStrapData;
-use crate::mm::{ArchMemory, BasicPageAlloc, BasicPageAllocRef, ScopedAllocator};
+use crate::mm::{
+    ArchMemory, BasicPageAlloc, BasicPageAllocRef, ScopedAllocator,
+};
 
 #[unsafe(link_section = ".bootstrap.stack")]
 static BOOT_STACK: [u8; 4096 * 16] = [0; 4096 * 16];
@@ -64,7 +70,8 @@ static PT1: BootPageTable = {
     BootPageTable(arr)
 };
 
-static BSP_PAGE_ALLOC: AtomicPtr<RefCell<BasicPageAlloc>> = AtomicPtr::new(core::ptr::null_mut());
+static BSP_PAGE_ALLOC: AtomicPtr<RefCell<BasicPageAlloc>> =
+    AtomicPtr::new(core::ptr::null_mut());
 
 static AP_COUNT: AtomicUsize = AtomicUsize::new(0);
 static AP_STACK: AtomicUsize = AtomicUsize::new(0);
@@ -130,11 +137,14 @@ pub unsafe extern "C" fn riscv64_start(hart_id: usize, dtb_addr: PAddr) -> ! {
     }
 
     let start = unsafe {
-        ((&BOOT_STACK_START) as *const &'static [u8; 4096 * 16]).read_volatile() as *const _
-            as usize
+        ((&BOOT_STACK_START) as *const &'static [u8; 4096 * 16]).read_volatile()
+            as *const _ as usize
     };
     let bootstrap_data = BootStrapData {
-        early_stack: PRange::new(PAddr::from(start), PAddr::from(start + 4096 * 16)),
+        early_stack: PRange::new(
+            PAddr::from(start),
+            PAddr::from(start + 4096 * 16),
+        ),
         allocator: Some(real_allocator),
     };
 
@@ -179,7 +189,11 @@ fn setup_kernel_page_table(alloc: BasicPageAllocRef) {
     sfence_vma_all();
 
     unsafe {
-        core::ptr::write_bytes(KERNEL_BSS_START.addr() as *mut (), 0, BSS_LENGTH as usize);
+        core::ptr::write_bytes(
+            KERNEL_BSS_START.addr() as *mut (),
+            0,
+            BSS_LENGTH as usize,
+        );
     }
 
     unsafe {
@@ -255,7 +269,8 @@ fn bootstrap_smp(alloc: impl Allocator, page_alloc: &RefCell<BasicPageAlloc>) {
             stack_range
         };
 
-        let old = BSP_PAGE_ALLOC.swap((&raw const *page_alloc) as *mut _, Ordering::Release);
+        let old = BSP_PAGE_ALLOC
+            .swap((&raw const *page_alloc) as *mut _, Ordering::Release);
         assert!(old.is_null());
 
         while AP_STACK
@@ -324,7 +339,12 @@ unsafe extern "C" fn _ap_start(hart_id: usize) {
 
 fn get_ap_stack() -> usize {
     while AP_SEM
-        .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
+        .compare_exchange_weak(
+            false,
+            true,
+            Ordering::Acquire,
+            Ordering::Relaxed,
+        )
         .is_err()
     {
         core::hint::spin_loop();
@@ -344,12 +364,14 @@ fn get_ap_stack() -> usize {
 }
 
 fn ap_entry(hart_id: usize, stack_bottom: PAddr) -> ! {
-    let stack_range = PRange::new(stack_bottom - (1 << 3) * PAGE_SIZE, stack_bottom);
+    let stack_range =
+        PRange::new(stack_bottom - (1 << 3) * PAGE_SIZE, stack_bottom);
 
     {
         // SAFETY: Acquire all the work done by the BSP and other APs.
         let alloc = loop {
-            let alloc = BSP_PAGE_ALLOC.swap(core::ptr::null_mut(), Ordering::AcqRel);
+            let alloc =
+                BSP_PAGE_ALLOC.swap(core::ptr::null_mut(), Ordering::AcqRel);
 
             if !alloc.is_null() {
                 break alloc;

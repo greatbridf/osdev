@@ -4,8 +4,8 @@ use core::ptr::NonNull;
 use eonix_hal_traits::mm::Memory;
 use eonix_mm::address::{Addr as _, AddrOps, PAddr, PRange, PhysAccess, VAddr};
 use eonix_mm::page_table::{
-    PageAttribute, PageTable, PageTableLevel, PagingMode, RawAttribute, RawPageTable,
-    TableAttribute, PTE,
+    PageAttribute, PageTable, PageTableLevel, PagingMode, RawAttribute,
+    RawPageTable, TableAttribute, PTE,
 };
 use eonix_mm::paging::{BasicFolio, Folio, PageAccess, PageBlock, PFN};
 use eonix_sync_base::LazyLock;
@@ -115,7 +115,9 @@ impl RawAttribute for PageAttribute64 {
             table_attr |= TableAttribute::PRESENT;
         }
 
-        if table_attr.contains(TableAttribute::PRESENT) && self.0 & (PA_R | PA_W | PA_X) != 0 {
+        if table_attr.contains(TableAttribute::PRESENT)
+            && self.0 & (PA_R | PA_W | PA_X) != 0
+        {
             return None;
         }
 
@@ -139,7 +141,9 @@ impl RawAttribute for PageAttribute64 {
             page_attr |= PageAttribute::PRESENT;
         }
 
-        if page_attr.contains(PageAttribute::PRESENT) && (self.0 & (PA_R | PA_W | PA_X) == 0) {
+        if page_attr.contains(PageAttribute::PRESENT)
+            && (self.0 & (PA_R | PA_W | PA_X) == 0)
+        {
             return None;
         }
 
@@ -278,18 +282,22 @@ impl Memory for ArchMemory {
         let kernel_end = PAddr::from(__kernel_end as usize - KIMAGE_OFFSET);
         let paddr_after_kimage_aligned = kernel_end.ceil_to(0x200000);
 
-        core::iter::once(PRange::new(kernel_end, paddr_after_kimage_aligned)).chain(
-            Self::present_ram()
-                .filter(move |range| range.end() > paddr_after_kimage_aligned)
-                .map(move |range| {
-                    if range.start() < paddr_after_kimage_aligned {
-                        let (_, right) = range.split_at(paddr_after_kimage_aligned);
-                        right
-                    } else {
-                        range
-                    }
-                }),
-        )
+        core::iter::once(PRange::new(kernel_end, paddr_after_kimage_aligned))
+            .chain(
+                Self::present_ram()
+                    .filter(move |range| {
+                        range.end() > paddr_after_kimage_aligned
+                    })
+                    .map(move |range| {
+                        if range.start() < paddr_after_kimage_aligned {
+                            let (_, right) =
+                                range.split_at(paddr_after_kimage_aligned);
+                            right
+                        } else {
+                            range
+                        }
+                    }),
+            )
     }
 }
 
@@ -314,17 +322,21 @@ where
         let kernel_end = PAddr::from(__kernel_end as usize - KIMAGE_OFFSET);
         let paddr_after_kimage_aligned = kernel_end.ceil_to(0x200000);
 
-        core::iter::once(PRange::new(kernel_end, paddr_after_kimage_aligned)).chain(
-            self.filter(move |range| range.end() > paddr_after_kimage_aligned)
+        core::iter::once(PRange::new(kernel_end, paddr_after_kimage_aligned))
+            .chain(
+                self.filter(move |range| {
+                    range.end() > paddr_after_kimage_aligned
+                })
                 .map(move |range| {
                     if range.start() < paddr_after_kimage_aligned {
-                        let (_, right) = range.split_at(paddr_after_kimage_aligned);
+                        let (_, right) =
+                            range.split_at(paddr_after_kimage_aligned);
                         right
                     } else {
                         range
                     }
                 }),
-        )
+            )
     }
 }
 

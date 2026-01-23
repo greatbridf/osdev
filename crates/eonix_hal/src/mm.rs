@@ -7,8 +7,8 @@ use eonix_mm::page_table::PageTableAlloc;
 use eonix_mm::paging::{BasicFolio, FrameAlloc, PAGE_SIZE, PFN};
 
 pub use crate::arch::mm::{
-    flush_tlb, flush_tlb_all, get_root_page_table_pfn, set_root_page_table_pfn, ArchMemory,
-    ArchPhysAccess, GLOBAL_PAGE_TABLE,
+    flush_tlb, flush_tlb_all, get_root_page_table_pfn, set_root_page_table_pfn,
+    ArchMemory, ArchPhysAccess, GLOBAL_PAGE_TABLE,
 };
 
 pub struct BasicPageAlloc {
@@ -87,7 +87,8 @@ impl BasicPageAlloc {
             panic!("Page allocator is full");
         }
 
-        self.ranges[tail] = Some(PRange::new(range.start().ceil(), range.end().floor()));
+        self.ranges[tail] =
+            Some(PRange::new(range.start().ceil(), range.end().floor()));
     }
 
     pub fn alloc(&mut self, order: u32) -> PFN {
@@ -147,7 +148,10 @@ impl<'a> ScopedAllocator<'a> {
         }
     }
 
-    pub fn with_alloc<'b, 'r, O>(&'r self, func: impl FnOnce(&'b ScopedAllocator<'a>) -> O) -> O
+    pub fn with_alloc<'b, 'r, O>(
+        &'r self,
+        func: impl FnOnce(&'b ScopedAllocator<'a>) -> O,
+    ) -> O
     where
         'a: 'b,
         'r: 'b,

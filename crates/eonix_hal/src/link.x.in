@@ -18,7 +18,7 @@ SECTIONS {
         __srodata = .;
 
         *(.rodata .rodata.*);
-        
+
         . = ALIGN(8);
 
         PROVIDE(__eh_frame = .);
@@ -41,7 +41,7 @@ SECTIONS {
 
     } > REGION_DATA AT> LINK_REGION_DATA
 
-    .data.after :
+    .data.after : ALIGN(0x1000)
     {
         __data_after = .;
     } > REGION_DATA AT> LINK_REGION_DATA

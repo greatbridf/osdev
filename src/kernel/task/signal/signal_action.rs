@@ -20,6 +20,16 @@ use crate::kernel::constants::{EFAULT, EINVAL};
 use crate::kernel::syscall::UserMut;
 use crate::kernel::user::UserBuffer;
 
+macro_rules! vdso_sym_addr {
+    ($sym:expr) => {{
+        const VDSO_START_VADDR: VAddr = VAddr::from(0x7f00_0000_0000);
+        let vdso_link_start = eonix_hal::extern_symbol_addr!(VDSO_START);
+
+        eonix_hal::symbol_addr!($sym) - vdso_link_start
+            + VDSO_START_VADDR.addr()
+    }};
+}
+
 #[cfg(target_arch = "x86_64")]
 #[unsafe(naked)]
 #[unsafe(link_section = ".vdso.sigreturn")]
@@ -178,29 +188,12 @@ impl SignalAction {
             #[cfg(target_arch = "x86_64")]
             {
                 // TODO: Check and use `vdso_rt_sigreturn` for x86 as well.
-                static VDSO_SIGRETURN_ADDR: &'static unsafe extern "C" fn() =
-                    &(vdso_rt_sigreturn as unsafe extern "C" fn());
-
-                unsafe {
-                    // SAFETY: To prevent the compiler from optimizing this into `la` instructions
-                    //         and causing a linking error.
-                    (VDSO_SIGRETURN_ADDR as *const _ as *const usize)
-                        .read_volatile()
-                }
+                vdso_sym_addr!(vdso_rt_sigreturn)
             }
 
             #[cfg(any(target_arch = "riscv64", target_arch = "loongarch64"))]
             {
-                static VDSO_RT_SIGRETURN_ADDR:
-                    &'static unsafe extern "C" fn() =
-                    &(vdso_rt_sigreturn as unsafe extern "C" fn());
-
-                unsafe {
-                    // SAFETY: To prevent the compiler from optimizing this into `la` instructions
-                    //         and causing a linking error.
-                    (VDSO_RT_SIGRETURN_ADDR as *const _ as *const usize)
-                        .read_volatile()
-                }
+                vdso_sym_addr!(vdso_rt_sigreturn)
             }
         };
 

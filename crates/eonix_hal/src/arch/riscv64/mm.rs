@@ -275,45 +275,11 @@ impl Memory for ArchMemory {
     }
 
     fn free_ram() -> impl Iterator<Item = PRange> {
-        FDT.present_ram().free_ram()
+        FDT.free_ram()
     }
 }
 
 pub type DefaultPagingMode = PagingModeSv48;
-
-pub trait PresentRam: Iterator<Item = PRange> {}
-
-pub trait FreeRam: PresentRam {
-    fn free_ram(self) -> impl Iterator<Item = PRange>;
-}
-
-impl<T> FreeRam for T
-where
-    T: PresentRam,
-{
-    fn free_ram(self) -> impl Iterator<Item = PRange> {
-        let kernel_end = extern_symbol_addr!(__kernel_end) - KIMAGE_OFFSET;
-        let kernel_end = PAddr::from(kernel_end).ceil();
-
-        let paddr_after_kimage_aligned = kernel_end.ceil_to(0x200000);
-
-        core::iter::once(PRange::new(kernel_end, paddr_after_kimage_aligned))
-            .chain(
-                self.filter(move |range| {
-                    range.end() > paddr_after_kimage_aligned
-                })
-                .map(move |range| {
-                    if range.start() < paddr_after_kimage_aligned {
-                        let (_, right) =
-                            range.split_at(paddr_after_kimage_aligned);
-                        right
-                    } else {
-                        range
-                    }
-                }),
-            )
-    }
-}
 
 #[inline(always)]
 pub fn flush_tlb(vaddr: usize) {

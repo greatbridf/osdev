@@ -1,0 +1,125 @@
+#!/bin/sh
+
+KB=1024
+MB=$((1024 * KB))
+
+OS=$(uname -s)
+SUDO=$(which sudo || :)
+
+ARCH=
+IMAGE=
+MOUNTPOINT="$(mktemp -d)"
+
+die() {
+    echo "error: $1" >&2
+    exit 1
+}
+
+usage() {
+    cat >&2 <<EOF
+Usage: $0 -a <ARCH> -o <OUTPUT> [-h]
+
+Options
+    -a          The arch building image for [available: riscv64 x86 loongarch64]
+    -o          Output image path
+    -h          Show help message
+EOF
+
+    exit "$1"
+}
+
+sudo() {
+    "$SUDO" "$@"
+}
+
+ensure_mount_macos() {
+    hdiutil detach "$MOUNTPOINT" > /dev/null 2>&1 || :
+    hdiutil attach "$IMAGE" -mountpoint "$MOUNTPOINT"
+}
+
+ensure_mount_linux() {
+    DEV=$(sudo losetup -f "$IMAGE" --show)
+    sudo mount "$DEV" "$MOUNTPOINT"
+}
+
+ensure_mount() {
+    if [ "$OS" = Darwin ]; then
+        ensure_mount_macos
+        return
+    fi
+
+    ensure_mount_linux
+}
+
+copy_to_image() {
+    _prefix=sudo
+    [ "$OS" = Darwin ] && _prefix=
+
+    $_prefix cp "$1" "$MOUNTPOINT/$2"
+}
+
+unmount_macos() {
+    hdiutil detach "$MOUNTPOINT"
+}
+
+unmount_linux() {
+    sudo umount "$MOUNTPOINT"
+    sudo losetup -d "$DEV"
+}
+
+cleanup() {
+    case "$OS" in
+        Darwin)
+            unmount_macos
+            ;;
+        *)
+            unmount_linux
+            ;;
+    esac
+}
+
+set -eu
+
+while getopts "a:o:h" opt; do
+    case "$opt" in
+        a) ARCH="$OPTARG";;
+        o) IMAGE="$OPTARG";;
+        h) usage 0;;
+        ?) usage 1;;
+    esac
+done
+
+shift $((OPTIND - 1))
+
+[ -z "$ARCH" ] && die "ARCH is not set"
+[ -z "$IMAGE" ] && die "output image path is not set"
+
+echo "Build image with ARCH=$ARCH OUTPUT=$IMAGE MOUNTPOINT=$MOUNTPOINT"
+
+dd if=/dev/zero of="$IMAGE" bs=$((1 * MB)) count=$((1024 - 4))
+mkfs.fat -n SYSTEM "$IMAGE"
+
+ensure_mount
+trap cleanup EXIT
+
+if [ "$ARCH" = "x86_64" ]; then
+    copy_to_image ./user-programs/init.out init
+    copy_to_image ./user-programs/int.out int
+    copy_to_image ./user-programs/dynamic_test dynamic_test
+    copy_to_image ./user-programs/busybox busybox
+    copy_to_image ./user-programs/busybox-minimal busybox_
+    copy_to_image ./user-programs/ld-musl-i386.so.1 ld-musl-i386.so.1
+    copy_to_image ./user-programs/pthread_test pthread_test
+    copy_to_image ./user-programs/init_script_x86_64.sh initsh
+elif [ "$ARCH" = "riscv64" ]; then
+    copy_to_image ./user-programs/busybox.static busybox
+    copy_to_image ./user-programs/init_script_riscv64.sh initsh
+elif [ "$ARCH" = "loongarch64" ]; then
+    copy_to_image ./user-programs/busybox.la64 busybox
+    copy_to_image ./user-programs/init_script_loongarch64.sh initsh
+fi
+
+# Add your custom files here
+
+
+# End of custom files

@@ -173,8 +173,8 @@ $(BINARY_DIR)/eonix_kernel: $(KERNEL_DEPS)
 build/kernel.sym: $(BINARY_DIR)/eonix_kernel
 	CARGO_TARGET_DIR=build cargo objcopy -q $(CARGO_FLAGS) -- --only-keep-debug build/kernel.sym
 
-build/fs-%.img: user-programs/init_script_%.sh script/build-img.sh $(USER_PROGRAMS)
-	ARCH=$* OUTPUT=$@ sh script/build-img.sh
+build/fs-%.img: user-programs/init_script_%.sh script/build-img/build-img $(USER_PROGRAMS)
+	script/build-img/build-img -a $* -o $@
 
 build/mbr.bin: $(BINARY_DIR)/eonix_kernel
 	CARGO_TARGET_DIR=build cargo objcopy -q $(CARGO_FLAGS) -- -O binary -j .mbr build/mbr.bin

@@ -1,13 +1,12 @@
 mod trap_context;
 
-use super::context::TaskContext;
 use core::arch::{asm, global_asm, naked_asm};
-use eonix_hal_traits::{
-    context::RawTaskContext,
-    trap::{IrqState as IrqStateTrait, TrapReturn},
-};
 
+use eonix_hal_traits::context::RawTaskContext;
+use eonix_hal_traits::trap::{IrqState as IrqStateTrait, TrapReturn};
 pub use trap_context::TrapContext;
+
+use super::context::TaskContext;
 
 unsafe extern "C" {
     fn _default_trap_handler(trap_context: &mut TrapContext);
@@ -147,7 +146,7 @@ global_asm!(
             build_isr_no_err %i
             .set i, i+1
         .endr
-    
+
     .globl _raw_trap_entry
     .type  _raw_trap_entry @function
     _raw_trap_entry:
@@ -157,10 +156,10 @@ global_asm!(
         .cfi_offset %rsp, 0x10
 
         cfi_all_same_value
-        
+
         sub $0x78, %rsp
         .cfi_def_cfa_offset CS
-        
+
         mov %rax, RAX(%rsp)
         .cfi_rel_offset %rax, RAX
         mov %rbx, RBX(%rsp)
@@ -191,24 +190,24 @@ global_asm!(
         .cfi_rel_offset %r15, R15
         mov %rbp, RBP(%rsp)
         .cfi_rel_offset %rbp, RBP
-        
+
         mov INT_NO(%rsp), %rcx
         sub ${trap_stubs_start}, %rcx
         shr $3, %rcx
         mov %rcx, INT_NO(%rsp)
-        
+
         cmpq $0x08, CS(%rsp)
         je 2f
         swapgs
-        
+
         2:
         mov %gs:0, %rcx
         add ${handler}, %rcx
         mov (%rcx), %rcx
-        
+
         jmp *%rcx
         .cfi_endproc
-    
+
     _raw_trap_return:
         .cfi_startproc
         .cfi_def_cfa %rsp, CS
@@ -228,7 +227,7 @@ global_asm!(
         .cfi_rel_offset %r15, R15
         .cfi_rel_offset %rbp, RBP
         .cfi_rel_offset %rsp, RSP
-        
+
         mov RAX(%rsp), %rax
         .cfi_restore %rax
         mov RBX(%rsp), %rbx
@@ -259,16 +258,16 @@ global_asm!(
         .cfi_restore %r15
         mov RBP(%rsp), %rbp
         .cfi_restore %rbp
-        
+
         cmpq $0x08, CS(%rsp)
         je 2f
         swapgs
-        
+
         2:
         lea RIP(%rsp), %rsp
         .cfi_def_cfa %rsp, 0x08
         .cfi_offset %rsp, 0x10
-        
+
         iretq
         .cfi_endproc
     ",

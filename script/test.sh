@@ -9,7 +9,7 @@ die() {
 }
 
 runcmd() {
-    printf -v _cmd "%q" "$*"
+    _cmd=$(printf "%q" "$*")
 
     cat <<EOF
     expect {

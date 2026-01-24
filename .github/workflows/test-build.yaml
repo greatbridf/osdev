@@ -31,7 +31,7 @@ jobs:
       - name: Setup QEMU
         run: |
           sudo apt-get update
-          sudo apt-get install -y qemu-system-${{ matrix.arch }} qemu-kvm
+          sudo apt-get install -y qemu-system-${{ matrix.arch }} qemu-kvm expect
 
       - name: Configure
         run: ./configure

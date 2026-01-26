@@ -12,6 +12,7 @@ use posix_types::signal::{
     SigAction, SigActionHandler, SigActionRestorer, SigSet, Signal,
     TryFromSigAction,
 };
+use posix_types::syscall_no::SYS_RT_SIGRETURN;
 use posix_types::SIGNAL_NOW;
 
 use super::{KResult, SAVED_DATA_SIZE};
@@ -57,21 +58,21 @@ unsafe extern "C" fn vdso_rt_sigreturn() {
     naked_asm!(
         "li a7, {sys_rt_sigreturn}",
         "ecall",
-        sys_rt_sigreturn = const posix_types::syscall_no::SYS_RT_SIGRETURN,
+        sys_rt_sigreturn = const SYS_RT_SIGRETURN,
     );
 
     #[cfg(target_arch = "loongarch64")]
     naked_asm!(
         "li.d $a7, {sys_rt_sigreturn}",
         "syscall 0",
-        sys_rt_sigreturn = const posix_types::syscall_no::SYS_RT_SIGRETURN,
+        sys_rt_sigreturn = const SYS_RT_SIGRETURN,
     );
 
     #[cfg(target_arch = "x86_64")]
     naked_asm!(
         "mov ${sys_rt_sigreturn}, %eax",
         "int $0x80",
-        sys_rt_sigreturn = const posix_types::syscall_no::SYS_RT_SIGRETURN,
+        sys_rt_sigreturn = const SYS_RT_SIGRETURN,
         options(att_syntax),
     );
 }

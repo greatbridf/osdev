@@ -538,3 +538,14 @@ pub unsafe extern "C" fn start_64bit() {
         options(att_syntax)
     )
 }
+
+pub fn shutdown() -> ! {
+    unsafe {
+        core::arch::asm!(
+            "mov $0x2000, %ax",
+            "mov $0x604, %dx",
+            "outw %ax, %dx",
+            options(att_syntax, nomem, noreturn)
+        );
+    }
+}

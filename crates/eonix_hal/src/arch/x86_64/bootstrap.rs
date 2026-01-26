@@ -409,17 +409,38 @@ global_asm!(
         mov ${KERNEL_PD_KIMAGE}, %esi
         call fill_pxe
 
-        # PDE 0xff0
+        # PDE 0xfc0 ~ ?
         mov ${KERNEL_PD_KIMAGE}, %edi
-        lea 0xff0(%edi), %edi
-        mov ${KERNEL_PT_KIMAGE}, %esi # 0x104000
+        mov ${KERNEL_IMAGE_PADDR}, %esi
+        lea 0xfc0(%edi), %edi
+
+        mov ${KIMAGE_PAGES}, %ecx
+        shr $9, %ecx                # 2M blocks
+
+        or ${PA_PS}, %ebx
+
+    2:
+        test %ecx, %ecx
+        jz 2f
+
+        call fill_pxe
+        lea 8(%edi), %edi
+        add $0x200000, %esi
+        dec %ecx
+        jmp 2b
+
+    2:
+        and $(~{PA_PS}), %ebx
+        push %esi
+        mov ${KERNEL_PT_KIMAGE}, %esi
         call fill_pxe
 
         # fill PT (kernel image)
         mov ${KERNEL_PT_KIMAGE}, %edi
-        mov ${KERNEL_IMAGE_PADDR}, %esi
+        pop %esi
 
         mov ${KIMAGE_PAGES}, %ecx
+        and $511, %ecx
 
     2:
         call fill_pxe
@@ -454,10 +475,12 @@ global_asm!(
     # %esi: page physical address
     # %edi: page x entry address
     fill_pxe:
+        push %eax
         lea (%ebx, %esi, 1), %eax
         mov %eax, (%edi)
         mov %edx, 4(%edi)
 
+        pop %eax
         ret
 
     .code64

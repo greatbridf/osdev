@@ -9,17 +9,20 @@ use acpi::{AcpiHandler, AcpiTables, PhysicalMapping, PlatformInfo};
 use eonix_hal_traits::mm::Memory;
 use eonix_mm::address::{Addr as _, PAddr, PRange, PhysAccess, VRange};
 use eonix_mm::page_table::{PageAttribute, PagingMode, PTE as _};
-use eonix_mm::paging::{Page, PageAccess, PageAlloc, PAGE_SIZE};
+use eonix_mm::paging::{Folio, FrameAlloc, PageAccess, PAGE_SIZE};
 use eonix_percpu::PercpuArea;
 
 use crate::arch::bootstrap::{EARLY_GDT_DESCRIPTOR, KERNEL_PML4};
 use crate::arch::cpu::{wrmsr, CPU};
 use crate::arch::io::Port8;
-use crate::arch::mm::{ArchPhysAccess, GLOBAL_PAGE_TABLE, V_KERNEL_BSS_START};
+use crate::arch::mm::{
+    with_global_page_table, ArchPhysAccess, PageAccessImpl, GLOBAL_PAGE_TABLE,
+    V_KERNEL_BSS_START,
+};
 use crate::bootstrap::BootStrapData;
+use crate::extern_symbol_value;
 use crate::mm::{
-    ArchMemory, ArchPagingMode, BasicPageAlloc, BasicPageAllocRef,
-    ScopedAllocator,
+    ArchMemory, BasicPageAlloc, BasicPageAllocRef, ScopedAllocator,
 };
 
 static BSP_PAGE_ALLOC: AtomicPtr<RefCell<BasicPageAlloc>> =
@@ -122,14 +125,17 @@ fn enable_sse() {
     }
 }
 
-fn setup_cpu(alloc: impl PageAlloc) {
+fn setup_cpu(alloc: impl FrameAlloc) {
     let mut percpu_area = PercpuArea::new(|layout| {
         // TODO: Use page size defined in `arch`.
         let page_count = layout.size().div_ceil(PAGE_SIZE);
-        let page = Page::alloc_at_least_in(page_count, alloc);
+        let folio = alloc.alloc_at_least(page_count).unwrap();
 
-        let ptr = ArchPhysAccess::get_ptr_for_page(&page).cast();
-        page.into_raw();
+        let ptr = unsafe {
+            // TODO: safety
+            ArchPhysAccess::as_ptr(folio.start())
+        };
+        folio.into_raw();
 
         ptr
     });
@@ -225,7 +231,7 @@ fn bootstrap_smp(alloc: impl Allocator, page_alloc: &RefCell<BasicPageAlloc>) {
         let stack_range = {
             let page_alloc = BasicPageAllocRef::new(&page_alloc);
 
-            let ap_stack = Page::alloc_order_in(4, page_alloc);
+            let ap_stack = page_alloc.alloc_order(4).unwrap();
             let stack_range = ap_stack.range();
             ap_stack.into_raw();
 
@@ -269,44 +275,38 @@ fn bootstrap_smp(alloc: impl Allocator, page_alloc: &RefCell<BasicPageAlloc>) {
 }
 
 pub extern "C" fn kernel_init() -> ! {
-    let global_page_table = &GLOBAL_PAGE_TABLE;
-    let paging_levels = ArchPagingMode::LEVELS;
-
     enable_sse();
 
     let real_allocator = RefCell::new(BasicPageAlloc::new());
     let alloc = BasicPageAllocRef::new(&real_allocator);
 
-    unsafe extern "C" {
-        fn BSS_LENGTH();
-    }
+    let bss_length = extern_symbol_value!(BSS_LENGTH);
+    let bss_range = VRange::from(V_KERNEL_BSS_START).grow(bss_length);
 
     for range in ArchMemory::free_ram() {
         real_allocator.borrow_mut().add_range(range);
     }
 
     // Map kernel BSS
-    for pte in global_page_table.iter_kernel_in(
-        VRange::from(V_KERNEL_BSS_START).grow(BSS_LENGTH as usize),
-        paging_levels,
-        &alloc,
-    ) {
-        let attr = PageAttribute::PRESENT
-            | PageAttribute::WRITE
-            | PageAttribute::READ
-            | PageAttribute::HUGE
-            | PageAttribute::GLOBAL;
+    with_global_page_table(alloc.clone(), PageAccessImpl, |table| {
+        for pte in table.iter_kernel(bss_range) {
+            let attr = PageAttribute::PRESENT
+                | PageAttribute::WRITE
+                | PageAttribute::READ
+                | PageAttribute::HUGE
+                | PageAttribute::GLOBAL;
 
-        let page = Page::alloc_in(&alloc);
-        pte.set(page.into_raw(), attr.into());
-    }
+            let page = alloc.alloc().unwrap();
+            pte.set(page.into_raw(), attr.into());
+        }
+    });
 
     unsafe {
         // SAFETY: We've just mapped the area with sufficient length.
         core::ptr::write_bytes(
-            V_KERNEL_BSS_START.addr() as *mut (),
+            bss_range.start().addr() as *mut u8,
             0,
-            BSS_LENGTH as usize,
+            bss_length,
         );
     }
 

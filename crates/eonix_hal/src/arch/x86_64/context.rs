@@ -1,4 +1,5 @@
 use core::arch::naked_asm;
+
 use eonix_hal_traits::context::RawTaskContext;
 
 /// Necessary hardware states of task for doing context switches.
@@ -36,7 +37,7 @@ impl TaskContext {
     }
 
     #[unsafe(naked)]
-    unsafe extern "C" fn do_call() -> ! {
+    unsafe extern "C" fn do_call() {
         naked_asm!(
             "mov %r12, %rdi",
             "push %rbp", // NULL return address.

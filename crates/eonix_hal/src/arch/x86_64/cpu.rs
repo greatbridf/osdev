@@ -1,12 +1,14 @@
-use super::gdt::{GDTEntry, GDT};
-use super::interrupt::InterruptControl;
-use super::trap::TrapContext;
 use core::arch::asm;
 use core::marker::PhantomPinned;
 use core::mem::size_of;
 use core::pin::Pin;
+
 use eonix_preempt::PreemptGuard;
 use eonix_sync_base::LazyLock;
+
+use super::gdt::{GDTEntry, GDT};
+use super::interrupt::InterruptControl;
+use super::trap::TrapContext;
 
 #[eonix_percpu::define_percpu]
 static LOCAL_CPU: LazyLock<CPU> = LazyLock::new(CPU::new);
@@ -55,7 +57,9 @@ pub struct CPU {
 impl UserTLS {
     /// # Return
     /// Returns the TLS descriptor and the index of the TLS segment.
-    pub fn new32(base: u32, limit: u32, is_limit_in_pages: bool) -> (Self, u32) {
+    pub fn new32(
+        base: u32, limit: u32, is_limit_in_pages: bool,
+    ) -> (Self, u32) {
         let flags = if is_limit_in_pages { 0xc } else { 0x4 };
 
         (

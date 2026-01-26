@@ -141,10 +141,7 @@ impl SignalActionList {
 impl SignalAction {
     /// # Might Sleep
     pub(super) fn handle(
-        self,
-        signal: Signal,
-        old_mask: SigSet,
-        trap_ctx: &mut TrapContext,
+        self, signal: Signal, old_mask: SigSet, trap_ctx: &mut TrapContext,
         fpu_state: &mut FpuState,
     ) -> KResult<()> {
         let SignalAction::SimpleHandler {

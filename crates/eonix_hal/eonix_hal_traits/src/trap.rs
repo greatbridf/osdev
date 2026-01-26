@@ -1,6 +1,9 @@
-use crate::{context::RawTaskContext, fault::Fault};
 use core::marker::PhantomData;
+
 use eonix_mm::address::VAddr;
+
+use crate::context::RawTaskContext;
+use crate::fault::Fault;
 
 /// A raw trap context.
 ///
@@ -30,12 +33,8 @@ pub trait RawTrapContext: Copy {
     fn set_user_return_value(&mut self, retval: usize);
 
     fn set_user_call_frame<E>(
-        &mut self,
-        pc: usize,
-        sp: Option<usize>,
-        ra: Option<usize>,
-        args: &[usize],
-        write_memory: impl Fn(VAddr, &[u8]) -> Result<(), E>,
+        &mut self, pc: usize, sp: Option<usize>, ra: Option<usize>,
+        args: &[usize], write_memory: impl Fn(VAddr, &[u8]) -> Result<(), E>,
     ) -> Result<(), E>;
 }
 

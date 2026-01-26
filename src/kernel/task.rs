@@ -13,12 +13,14 @@ mod user_tls;
 pub use clone::{do_clone, CloneArgs, CloneFlags};
 use eonix_hal::symbol_addr;
 pub use futex::{
-    futex_exec, futex_exit, futex_wait, futex_wake, parse_futexop, FutexFlags, FutexOp,
-    RobustListHead,
+    futex_exec, futex_exit, futex_wait, futex_wake, parse_futexop, FutexFlags,
+    FutexOp, RobustListHead,
 };
 pub use kernel_stack::KernelStack;
 pub use loader::ProgramLoader;
-pub use process::{alloc_pid, Process, ProcessBuilder, WaitId, WaitObject, WaitType};
+pub use process::{
+    alloc_pid, Process, ProcessBuilder, WaitId, WaitObject, WaitType,
+};
 pub use process_group::ProcessGroup;
 pub use process_list::ProcessList;
 pub use session::Session;
@@ -101,12 +103,16 @@ where
     use eonix_runtime::task::Task;
     use thread::wait_for_wakeups;
 
-    use crate::kernel::interrupt::{default_fault_handler, default_irq_handler};
+    use crate::kernel::interrupt::{
+        default_fault_handler, default_irq_handler,
+    };
     use crate::kernel::timer::{should_reschedule, timer_interrupt};
 
     let stack = KernelStack::new();
 
-    fn execute<F>(mut future: Pin<&mut F>, output_ptr: NonNull<Option<F::Output>>) -> !
+    fn execute<F>(
+        mut future: Pin<&mut F>, output_ptr: NonNull<Option<F::Output>>,
+    ) -> !
     where
         F: Future,
     {
@@ -139,7 +145,9 @@ where
             match future.as_mut().poll(&mut cx) {
                 Poll::Ready(output) => break output,
                 Poll::Pending => {
-                    assert_preempt_enabled!("Blocking in stackful futures is not allowed.");
+                    assert_preempt_enabled!(
+                        "Blocking in stackful futures is not allowed."
+                    );
 
                     if Task::current().is_ready() {
                         continue;
@@ -203,7 +211,9 @@ where
 
         match trap_ctx.trap_type() {
             TrapType::Syscall { .. } => {}
-            TrapType::Fault(fault) => default_fault_handler(fault, &mut trap_ctx),
+            TrapType::Fault(fault) => {
+                default_fault_handler(fault, &mut trap_ctx)
+            }
             TrapType::Irq { callback } => callback(default_irq_handler),
             TrapType::Timer { callback } => {
                 callback(timer_interrupt);
@@ -220,10 +230,12 @@ where
                 }
 
                 #[cfg(target_arch = "riscv64")]
-                trap_ctx.set_program_counter(trap_ctx.get_program_counter() + 2);
+                trap_ctx
+                    .set_program_counter(trap_ctx.get_program_counter() + 2);
 
                 #[cfg(target_arch = "loongarch64")]
-                trap_ctx.set_program_counter(trap_ctx.get_program_counter() + 4);
+                trap_ctx
+                    .set_program_counter(trap_ctx.get_program_counter() + 4);
             }
         }
     }

@@ -1,19 +1,17 @@
-use crate::{arch::time::set_next_timer, processor::CPU};
-use core::{arch::asm, mem::offset_of};
-use eonix_hal_traits::{
-    fault::{Fault, PageFaultErrorCode},
-    trap::{RawTrapContext, TrapType},
-};
+use core::arch::asm;
+use core::mem::offset_of;
+
+use eonix_hal_traits::fault::{Fault, PageFaultErrorCode};
+use eonix_hal_traits::trap::{RawTrapContext, TrapType};
 use eonix_mm::address::VAddr;
-use riscv::{
-    interrupt::{Exception, Interrupt, Trap},
-    register::{
-        scause::{self, Scause},
-        sstatus::{self, Sstatus, FS, SPP},
-        stval,
-    },
-    ExceptionNumber, InterruptNumber,
-};
+use riscv::interrupt::{Exception, Interrupt, Trap};
+use riscv::register::scause::{self, Scause};
+use riscv::register::sstatus::{self, Sstatus, FS, SPP};
+use riscv::register::stval;
+use riscv::{ExceptionNumber, InterruptNumber};
+
+use crate::arch::time::set_next_timer;
+use crate::processor::CPU;
 
 #[repr(C)]
 #[derive(Default, Clone, Copy)]
@@ -151,10 +149,13 @@ impl RawTrapContext for TrapContext {
                     Interrupt::SupervisorExternal => TrapType::Irq {
                         callback: |handler| {
                             let mut cpu = CPU::local();
-                            match cpu.as_mut().interrupt.plic.claim_interrupt() {
+                            match cpu.as_mut().interrupt.plic.claim_interrupt()
+                            {
                                 None => {}
                                 Some(irqno) => {
-                                    cpu.interrupt.plic.complete_interrupt(irqno);
+                                    cpu.interrupt
+                                        .plic
+                                        .complete_interrupt(irqno);
                                     handler(irqno);
                                 }
                             }
@@ -172,18 +173,25 @@ impl RawTrapContext for TrapContext {
                     | Exception::InstructionFault
                     | Exception::LoadFault
                     | Exception::StoreFault
-                    | Exception::StoreMisaligned => TrapType::Fault(Fault::BadAccess),
-                    Exception::IllegalInstruction => TrapType::Fault(Fault::InvalidOp),
+                    | Exception::StoreMisaligned => {
+                        TrapType::Fault(Fault::BadAccess)
+                    }
+                    Exception::IllegalInstruction => {
+                        TrapType::Fault(Fault::InvalidOp)
+                    }
                     Exception::UserEnvCall => TrapType::Syscall {
                         no: self.syscall_no(),
                         args: self.syscall_args(),
                     },
                     exception @ (Exception::InstructionPageFault
                     | Exception::LoadPageFault
-                    | Exception::StorePageFault) => TrapType::Fault(Fault::PageFault {
-                        error_code: self.get_page_fault_error_code(exception),
-                        address: VAddr::from(self.stval),
-                    }),
+                    | Exception::StorePageFault) => {
+                        TrapType::Fault(Fault::PageFault {
+                            error_code: self
+                                .get_page_fault_error_code(exception),
+                            address: VAddr::from(self.stval),
+                        })
+                    }
                     // breakpoint and supervisor env call
                     _ => TrapType::Fault(Fault::Unknown(e)),
                 }
@@ -239,12 +247,8 @@ impl RawTrapContext for TrapContext {
     }
 
     fn set_user_call_frame<E>(
-        &mut self,
-        pc: usize,
-        sp: Option<usize>,
-        ra: Option<usize>,
-        args: &[usize],
-        _write_memory: impl Fn(VAddr, &[u8]) -> Result<(), E>,
+        &mut self, pc: usize, sp: Option<usize>, ra: Option<usize>,
+        args: &[usize], _write_memory: impl Fn(VAddr, &[u8]) -> Result<(), E>,
     ) -> Result<(), E> {
         self.set_program_counter(pc);
 
@@ -275,7 +279,9 @@ impl RawTrapContext for TrapContext {
 
 impl TrapContext {
     /// TODO: get PageFaultErrorCode also need check pagetable
-    fn get_page_fault_error_code(&self, exception: Exception) -> PageFaultErrorCode {
+    fn get_page_fault_error_code(
+        &self, exception: Exception,
+    ) -> PageFaultErrorCode {
         let mut error_code = PageFaultErrorCode::empty();
 
         match exception {

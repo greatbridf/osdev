@@ -1,5 +1,7 @@
+use core::arch::asm;
+use core::marker::PhantomPinned;
+
 use super::cpu::TSS;
-use core::{arch::asm, marker::PhantomPinned};
 
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy)]

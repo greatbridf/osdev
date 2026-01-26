@@ -37,10 +37,12 @@ SECTIONS {
 SECTIONS {
     .vdso ALIGN(0x1000) : ALIGN(0x1000)
     {
+        VDSO_START = .;
+
         KEEP(*(.vdso .vdso.*));
 
         . = ALIGN(0x1000);
-    } > VDSO AT> REGION_TEXT
+    } > REGION_DATA AT> REGION_DATA
 
     VDSO_PADDR = LOADADDR(.vdso);
 }

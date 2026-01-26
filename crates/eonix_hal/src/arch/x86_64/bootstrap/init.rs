@@ -1,30 +1,29 @@
-use crate::{
-    arch::{
-        bootstrap::{EARLY_GDT_DESCRIPTOR, KERNEL_PML4},
-        cpu::{wrmsr, CPU},
-        io::Port8,
-        mm::{ArchPhysAccess, GLOBAL_PAGE_TABLE, V_KERNEL_BSS_START},
-    },
-    bootstrap::BootStrapData,
-    mm::{ArchMemory, ArchPagingMode, BasicPageAlloc, BasicPageAllocRef, ScopedAllocator},
-};
-use acpi::{platform::ProcessorState, AcpiHandler, AcpiTables, PhysicalMapping, PlatformInfo};
-use core::{
-    alloc::Allocator,
-    arch::{asm, global_asm},
-    cell::RefCell,
-    hint::spin_loop,
-    sync::atomic::{AtomicBool, AtomicPtr, AtomicUsize, Ordering},
-};
+use core::alloc::Allocator;
+use core::arch::{asm, global_asm};
+use core::cell::RefCell;
+use core::hint::spin_loop;
+use core::sync::atomic::{AtomicBool, AtomicPtr, AtomicUsize, Ordering};
+
+use acpi::platform::ProcessorState;
+use acpi::{AcpiHandler, AcpiTables, PhysicalMapping, PlatformInfo};
 use eonix_hal_traits::mm::Memory;
-use eonix_mm::{
-    address::{Addr as _, PAddr, PRange, PhysAccess, VRange},
-    page_table::{PageAttribute, PagingMode, PTE as _},
-    paging::{Page, PageAccess, PageAlloc, PAGE_SIZE},
-};
+use eonix_mm::address::{Addr as _, PAddr, PRange, PhysAccess, VRange};
+use eonix_mm::page_table::{PageAttribute, PagingMode, PTE as _};
+use eonix_mm::paging::{Page, PageAccess, PageAlloc, PAGE_SIZE};
 use eonix_percpu::PercpuArea;
 
-static BSP_PAGE_ALLOC: AtomicPtr<RefCell<BasicPageAlloc>> = AtomicPtr::new(core::ptr::null_mut());
+use crate::arch::bootstrap::{EARLY_GDT_DESCRIPTOR, KERNEL_PML4};
+use crate::arch::cpu::{wrmsr, CPU};
+use crate::arch::io::Port8;
+use crate::arch::mm::{ArchPhysAccess, GLOBAL_PAGE_TABLE, V_KERNEL_BSS_START};
+use crate::bootstrap::BootStrapData;
+use crate::mm::{
+    ArchMemory, ArchPagingMode, BasicPageAlloc, BasicPageAllocRef,
+    ScopedAllocator,
+};
+
+static BSP_PAGE_ALLOC: AtomicPtr<RefCell<BasicPageAlloc>> =
+    AtomicPtr::new(core::ptr::null_mut());
 
 static AP_COUNT: AtomicUsize = AtomicUsize::new(0);
 static AP_STACK: AtomicUsize = AtomicUsize::new(0);
@@ -188,9 +187,7 @@ fn bootstrap_smp(alloc: impl Allocator, page_alloc: &RefCell<BasicPageAlloc>) {
 
     impl AcpiHandler for Handler {
         unsafe fn map_physical_region<T>(
-            &self,
-            physical_address: usize,
-            size: usize,
+            &self, physical_address: usize, size: usize,
         ) -> PhysicalMapping<Self, T> {
             unsafe {
                 PhysicalMapping::new(
@@ -236,7 +233,8 @@ fn bootstrap_smp(alloc: impl Allocator, page_alloc: &RefCell<BasicPageAlloc>) {
         };
 
         // SAFETY: All the APs can see the allocator work done before this point.
-        let old = BSP_PAGE_ALLOC.swap((&raw const *page_alloc) as *mut _, Ordering::Release);
+        let old = BSP_PAGE_ALLOC
+            .swap((&raw const *page_alloc) as *mut _, Ordering::Release);
         assert!(
             old.is_null(),
             "BSP_PAGE_ALLOC should be null before we release it"
@@ -305,7 +303,11 @@ pub extern "C" fn kernel_init() -> ! {
 
     unsafe {
         // SAFETY: We've just mapped the area with sufficient length.
-        core::ptr::write_bytes(V_KERNEL_BSS_START.addr() as *mut (), 0, BSS_LENGTH as usize);
+        core::ptr::write_bytes(
+            V_KERNEL_BSS_START.addr() as *mut (),
+            0,
+            BSS_LENGTH as usize,
+        );
     }
 
     setup_cpu(&alloc);
@@ -329,12 +331,14 @@ pub extern "C" fn kernel_init() -> ! {
 }
 
 pub extern "C" fn ap_entry(stack_bottom: PAddr) -> ! {
-    let stack_range = PRange::new(stack_bottom - (1 << 3) * PAGE_SIZE, stack_bottom);
+    let stack_range =
+        PRange::new(stack_bottom - (1 << 3) * PAGE_SIZE, stack_bottom);
 
     {
         // SAFETY: Acquire all the work done by the BSP and other APs.
         let alloc = loop {
-            let alloc = BSP_PAGE_ALLOC.swap(core::ptr::null_mut(), Ordering::AcqRel);
+            let alloc =
+                BSP_PAGE_ALLOC.swap(core::ptr::null_mut(), Ordering::AcqRel);
 
             if !alloc.is_null() {
                 break alloc;

@@ -1,14 +1,18 @@
-use crate::traits::mm::Memory;
-use core::{arch::asm, marker::PhantomData, ptr::NonNull};
-use eonix_mm::{
-    address::{Addr as _, AddrOps as _, PAddr, PRange, PhysAccess, VAddr},
-    page_table::{
-        PageAttribute, PageTable, PageTableLevel, PagingMode, RawAttribute, RawPageTable,
-        TableAttribute, PTE,
-    },
-    paging::{NoAlloc, Page, PageBlock, PAGE_SIZE, PFN},
+use core::arch::asm;
+use core::marker::PhantomData;
+use core::ptr::NonNull;
+
+use eonix_mm::address::{
+    Addr as _, AddrOps as _, PAddr, PRange, PhysAccess, VAddr,
 };
+use eonix_mm::page_table::{
+    PageAttribute, PageTable, PageTableLevel, PagingMode, RawAttribute,
+    RawPageTable, TableAttribute, PTE,
+};
+use eonix_mm::paging::{NoAlloc, Page, PageBlock, PAGE_SIZE, PFN};
 use eonix_sync_base::LazyLock;
+
+use crate::traits::mm::Memory;
 
 pub const PA_P: u64 = 0x001;
 pub const PA_RW: u64 = 0x002;
@@ -32,12 +36,13 @@ pub const V_KERNEL_BSS_START: VAddr = VAddr::from(0xffffffffc0200000);
 
 const KERNEL_PML4_PFN: PFN = PFN::from_val(0x1000 >> 12);
 
-pub static GLOBAL_PAGE_TABLE: LazyLock<PageTable<ArchPagingMode, NoAlloc, ArchPhysAccess>> =
-    LazyLock::new(|| unsafe {
-        Page::with_raw(KERNEL_PML4_PFN, |root_table_page| {
-            PageTable::with_root_table(root_table_page.clone())
-        })
-    });
+pub static GLOBAL_PAGE_TABLE: LazyLock<
+    PageTable<ArchPagingMode, NoAlloc, ArchPhysAccess>,
+> = LazyLock::new(|| unsafe {
+    Page::with_raw(KERNEL_PML4_PFN, |root_table_page| {
+        PageTable::with_root_table(root_table_page.clone())
+    })
+});
 
 #[repr(transparent)]
 pub struct PTE64(u64);

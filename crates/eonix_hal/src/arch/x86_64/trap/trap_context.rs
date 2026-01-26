@@ -1,10 +1,10 @@
-use crate::processor::CPU;
 use core::arch::asm;
-use eonix_hal_traits::{
-    fault::{Fault, PageFaultErrorCode},
-    trap::{RawTrapContext, TrapType},
-};
+
+use eonix_hal_traits::fault::{Fault, PageFaultErrorCode};
+use eonix_hal_traits::trap::{RawTrapContext, TrapType};
 use eonix_mm::address::VAddr;
+
+use crate::processor::CPU;
 
 #[derive(Clone, Copy, Default)]
 #[repr(C, align(16))]
@@ -169,12 +169,8 @@ impl RawTrapContext for TrapContext {
     }
 
     fn set_user_call_frame<E>(
-        &mut self,
-        pc: usize,
-        sp: Option<usize>,
-        ra: Option<usize>,
-        args: &[usize],
-        write_memory: impl Fn(VAddr, &[u8]) -> Result<(), E>,
+        &mut self, pc: usize, sp: Option<usize>, ra: Option<usize>,
+        args: &[usize], write_memory: impl Fn(VAddr, &[u8]) -> Result<(), E>,
     ) -> Result<(), E> {
         self.set_program_counter(pc);
 

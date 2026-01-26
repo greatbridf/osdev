@@ -1,5 +1,9 @@
+use core::arch::asm;
+use core::marker::PhantomPinned;
+use core::pin::Pin;
+use core::ptr::NonNull;
+
 use crate::arch::cpu::rdmsr;
-use core::{arch::asm, marker::PhantomPinned, pin::Pin, ptr::NonNull};
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -121,7 +125,8 @@ impl InterruptControl {
             let apic_base = rdmsr(0x1b);
             assert_eq!(apic_base & 0x800, 0x800, "LAPIC not enabled");
 
-            let apic_base = ((apic_base & !0xfff) + 0xffffff00_00000000) as *mut u32;
+            let apic_base =
+                ((apic_base & !0xfff) + 0xffffff00_00000000) as *mut u32;
             APICRegs {
                 // TODO: A better way to convert to physical address
                 base: NonNull::new(apic_base).expect("Invalid APIC base"),

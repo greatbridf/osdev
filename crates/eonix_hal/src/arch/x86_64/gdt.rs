@@ -33,6 +33,14 @@ impl GDTEntry {
         GDTEntry(entry)
     }
 
+    pub const fn new_tls(base: u32, limit_in_bytes: u32) -> Self {
+        Self::new(base, limit_in_bytes, 0xf2, 0x4)
+    }
+
+    pub const fn new_tls_page_limit(base: u32, limit_in_pages: u32) -> Self {
+        Self::new(base, limit_in_pages, 0xf2, 0xc)
+    }
+
     pub const fn new_ldt(base: u64, limit: u32) -> [Self; 2] {
         let first = Self::new(base as u32, limit, 0x82, 0x0);
         let second = Self(base >> 32);
@@ -48,7 +56,7 @@ impl GDTEntry {
 
 impl GDT {
     const LEN: usize = 10;
-    const TLS32_INDEX: usize = 7;
+    pub const TLS32_INDEX: usize = 7;
     const TSS_INDEX: usize = 8;
 
     pub fn new() -> Self {

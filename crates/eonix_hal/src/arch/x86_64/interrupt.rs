@@ -4,6 +4,8 @@ use core::pin::Pin;
 use core::ptr::NonNull;
 
 use crate::arch::cpu::rdmsr;
+use crate::arch::trap::trap_stubs;
+use crate::symbol_addr;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -113,7 +115,7 @@ impl InterruptControl {
     /// # Return
     /// Returns a tuple of InterruptControl and the cpu id of the current cpu.
     pub fn new() -> (Self, usize) {
-        let trap_stubs_base = super::trap::trap_stubs_start as usize;
+        let trap_stubs_base = symbol_addr!(trap_stubs);
 
         let idt = core::array::from_fn(|idx| match idx {
             0..0x80 => IDTEntry::new(trap_stubs_base + 8 * idx, 0x08, 0x8e),

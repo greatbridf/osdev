@@ -3,55 +3,26 @@ mod trap_context;
 use core::arch::{asm, global_asm, naked_asm};
 
 use eonix_hal_traits::context::RawTaskContext;
-use eonix_hal_traits::trap::{IrqState as IrqStateTrait, TrapReturn};
+use eonix_hal_traits::trap::{
+    IrqState as IrqStateTrait, RawTrapContext, TrapReturn,
+};
 pub use trap_context::TrapContext;
 
 use super::context::TaskContext;
+use super::cpu::CPU;
 
 unsafe extern "C" {
+    /// Default handler handles the trap on the current stack and returns
+    /// to the context before interrut.
     fn _default_trap_handler(trap_context: &mut TrapContext);
-    pub fn trap_stubs_start();
-    fn _raw_trap_return();
 }
-
-#[eonix_percpu::define_percpu]
-static TRAP_HANDLER: unsafe extern "C" fn() = default_trap_handler;
-
-#[eonix_percpu::define_percpu]
-static CAPTURER_CONTEXT: TaskContext = TaskContext::new();
-
-/// This value will never be used.
-static mut DIRTY_TRAP_CONTEXT: TaskContext = TaskContext::new();
 
 /// State of the interrupt flag.
 pub struct IrqState(u64);
 
-global_asm!(
-    r"
-    .set RAX, 0x00
-    .set RBX, 0x08
-    .set RCX, 0x10
-    .set RDX, 0x18
-    .set RDI, 0x20
-    .set RSI, 0x28
-    .set R8, 0x30
-    .set R9, 0x38
-    .set R10, 0x40
-    .set R11, 0x48
-    .set R12, 0x50
-    .set R13, 0x58
-    .set R14, 0x60
-    .set R15, 0x68
-    .set RBP, 0x70
-    .set INT_NO, 0x78
-    .set ERRCODE, 0x80
-    .set RIP, 0x88
-    .set CS, 0x90
-    .set FLAGS, 0x98
-    .set RSP, 0xa0
-    .set SS, 0xa8
-
-    .macro cfi_all_same_value
+macro_rules! cfi_all_same_value {
+    () => {
+        "
         .cfi_same_value %rax
         .cfi_same_value %rbx
         .cfi_same_value %rcx
@@ -67,44 +38,50 @@ global_asm!(
         .cfi_same_value %r14
         .cfi_same_value %r15
         .cfi_same_value %rbp
-    .endm
+        "
+    };
+}
 
-    .globl {trap_stubs_start}
-    {trap_stubs_start}:
+#[unsafe(naked)]
+pub unsafe extern "C" fn trap_stubs() {
+    naked_asm!(
+        "
         .altmacro
         .macro build_isr_no_err name
             .align 8
-            .globl ISR\name
-            .type  ISR\name @function
-            ISR\name:
+            .globl ISR\\name
+            .type  ISR\\name @function
+            ISR\\name:
                 .cfi_startproc
                 .cfi_signal_frame
                 .cfi_def_cfa_offset 0x08
                 .cfi_offset %rsp, 0x10
-
-                cfi_all_same_value
+            ",
+                cfi_all_same_value!(),
+            "
 
                 push %rbp # push placeholder for error code
                 .cfi_def_cfa_offset 0x10
 
-                call _raw_trap_entry
+                call {entry}
                 .cfi_endproc
         .endm
 
         .altmacro
         .macro build_isr_err name
             .align 8
-            .globl ISR\name
-            .type  ISR\name @function
-            ISR\name:
+            .globl ISR\\name
+            .type  ISR\\name @function
+            ISR\\name:
                 .cfi_startproc
                 .cfi_signal_frame
                 .cfi_def_cfa_offset 0x10
                 .cfi_offset %rsp, 0x10
+            ",
+                cfi_all_same_value!(),
+            "
 
-                cfi_all_same_value
-
-                call _raw_trap_entry
+                call {entry}
                 .cfi_endproc
         .endm
 
@@ -146,185 +123,442 @@ global_asm!(
             build_isr_no_err %i
             .set i, i+1
         .endr
+        ",
+        entry = sym raw_trap_entry,
+        options(att_syntax),
+    )
+}
 
-    .globl _raw_trap_entry
-    .type  _raw_trap_entry @function
-    _raw_trap_entry:
-        .cfi_startproc
-        .cfi_signal_frame
-        .cfi_def_cfa %rsp, 0x18
-        .cfi_offset %rsp, 0x10
+/// Offset of the capturer trap context in the percpu area.
+const OFFSET_CAPTURER: usize = 8;
 
-        cfi_all_same_value
-
-        sub $0x78, %rsp
-        .cfi_def_cfa_offset CS
-
-        mov %rax, RAX(%rsp)
-        .cfi_rel_offset %rax, RAX
-        mov %rbx, RBX(%rsp)
-        .cfi_rel_offset %rbx, RBX
-        mov %rcx, RCX(%rsp)
-        .cfi_rel_offset %rcx, RCX
-        mov %rdx, RDX(%rsp)
-        .cfi_rel_offset %rdx, RDX
-        mov %rdi, RDI(%rsp)
-        .cfi_rel_offset %rdi, RDI
-        mov %rsi, RSI(%rsp)
-        .cfi_rel_offset %rsi, RSI
-        mov %r8, R8(%rsp)
-        .cfi_rel_offset %r8, R8
-        mov %r9, R9(%rsp)
-        .cfi_rel_offset %r9, R9
-        mov %r10, R10(%rsp)
-        .cfi_rel_offset %r10, R10
-        mov %r11, R11(%rsp)
-        .cfi_rel_offset %r11, R11
-        mov %r12, R12(%rsp)
-        .cfi_rel_offset %r12, R12
-        mov %r13, R13(%rsp)
-        .cfi_rel_offset %r13, R13
-        mov %r14, R14(%rsp)
-        .cfi_rel_offset %r14, R14
-        mov %r15, R15(%rsp)
-        .cfi_rel_offset %r15, R15
-        mov %rbp, RBP(%rsp)
-        .cfi_rel_offset %rbp, RBP
-
-        mov INT_NO(%rsp), %rcx
-        sub ${trap_stubs_start}, %rcx
-        shr $3, %rcx
-        mov %rcx, INT_NO(%rsp)
-
-        cmpq $0x08, CS(%rsp)
-        je 2f
-        swapgs
-
-        2:
-        mov %gs:0, %rcx
-        add ${handler}, %rcx
-        mov (%rcx), %rcx
-
-        jmp *%rcx
-        .cfi_endproc
-
-    _raw_trap_return:
-        .cfi_startproc
-        .cfi_def_cfa %rsp, CS
-        .cfi_rel_offset %rax, RAX
-        .cfi_rel_offset %rbx, RBX
-        .cfi_rel_offset %rcx, RCX
-        .cfi_rel_offset %rdx, RDX
-        .cfi_rel_offset %rdi, RDI
-        .cfi_rel_offset %rsi, RSI
-        .cfi_rel_offset %r8, R8
-        .cfi_rel_offset %r9, R9
-        .cfi_rel_offset %r10, R10
-        .cfi_rel_offset %r11, R11
-        .cfi_rel_offset %r12, R12
-        .cfi_rel_offset %r13, R13
-        .cfi_rel_offset %r14, R14
-        .cfi_rel_offset %r15, R15
-        .cfi_rel_offset %rbp, RBP
-        .cfi_rel_offset %rsp, RSP
-
-        mov RAX(%rsp), %rax
-        .cfi_restore %rax
-        mov RBX(%rsp), %rbx
-        .cfi_restore %rbx
-        mov RCX(%rsp), %rcx
-        .cfi_restore %rcx
-        mov RDX(%rsp), %rdx
-        .cfi_restore %rdx
-        mov RDI(%rsp), %rdi
-        .cfi_restore %rdi
-        mov RSI(%rsp), %rsi
-        .cfi_restore %rsi
-        mov R8(%rsp), %r8
-        .cfi_restore %r8
-        mov R9(%rsp), %r9
-        .cfi_restore %r9
-        mov R10(%rsp), %r10
-        .cfi_restore %r10
-        mov R11(%rsp), %r11
-        .cfi_restore %r11
-        mov R12(%rsp), %r12
-        .cfi_restore %r12
-        mov R13(%rsp), %r13
-        .cfi_restore %r13
-        mov R14(%rsp), %r14
-        .cfi_restore %r14
-        mov R15(%rsp), %r15
-        .cfi_restore %r15
-        mov RBP(%rsp), %rbp
-        .cfi_restore %rbp
-
-        cmpq $0x08, CS(%rsp)
-        je 2f
-        swapgs
-
-        2:
-        lea RIP(%rsp), %rsp
-        .cfi_def_cfa %rsp, 0x08
-        .cfi_offset %rsp, 0x10
-
-        iretq
-        .cfi_endproc
-    ",
-    trap_stubs_start = sym trap_stubs_start,
-    handler = sym _percpu_inner_TRAP_HANDLER,
-    options(att_syntax),
-);
-
-/// Default handler handles the trap on the current stack and returns
-/// to the context before interrut.
 #[unsafe(naked)]
-unsafe extern "C" fn default_trap_handler() {
+unsafe extern "C" fn raw_trap_entry() {
     naked_asm!(
         ".cfi_startproc",
+        ".cfi_signal_frame",
+        ".cfi_def_cfa %rsp, 0x18",
+        ".cfi_offset %rsp, 0x10",
+        cfi_all_same_value!(),
+        "",
+        "cmpq $0x08, 0x18(%rsp)",
+        "je 2f",
+        "swapgs",
+        "",
+        "2:",
+        "subq ${trap_stubs}, (%rsp)",
+        "shrq $3, (%rsp)",
+        "",
+        "cmpq $0, %gs:{offset_capturer}",
+        "je {default_entry}",
+        "",
+        "cmpq $0x08, 0x18(%rsp)",
+        "je {captured_kernel_entry}",
+        "jmp {captured_user_entry}",
+        ".cfi_endproc",
+        trap_stubs = sym trap_stubs,
+        default_entry = sym default_trap_entry,
+        captured_kernel_entry = sym captured_trap_entry_kernel,
+        captured_user_entry = sym captured_trap_entry_user,
+        offset_capturer = const OFFSET_CAPTURER,
+        options(att_syntax),
+    )
+}
+
+#[unsafe(naked)]
+unsafe extern "C" fn default_trap_entry() {
+    naked_asm!(
+        ".cfi_startproc",
+        ".cfi_signal_frame",
+        ".cfi_def_cfa %rsp, 0x18",
+        ".cfi_offset %rsp, 0x10",
+        cfi_all_same_value!(),
+        "",
+        "sub ${INT_NO}, %rsp",
+        ".cfi_def_cfa_offset {CS}",
+        "",
+        "mov %rcx, {RCX}(%rsp)",
+        ".cfi_rel_offset %rcx, {RCX}",
+        "mov %rdx, {RDX}(%rsp)",
+        ".cfi_rel_offset %rdx, {RDX}",
+        "mov %rdi, {RDI}(%rsp)",
+        ".cfi_rel_offset %rdi, {RDI}",
+        "mov %rsi, {RSI}(%rsp)",
+        ".cfi_rel_offset %rsi, {RSI}",
+        "mov %r8, {R8}(%rsp)",
+        ".cfi_rel_offset %r8, {R8}",
+        "mov %r9, {R9}(%rsp)",
+        ".cfi_rel_offset %r9, {R9}",
+        "mov %r10, {R10}(%rsp)",
+        ".cfi_rel_offset %r10, {R10}",
+        "mov %r11, {R11}(%rsp)",
+        ".cfi_rel_offset %r11, {R11}",
+        "mov %rbx, {RBX}(%rsp)",
+        ".cfi_rel_offset %rbx, {RBX}",
+        "mov %r12, {R12}(%rsp)",
+        ".cfi_rel_offset %r12, {R12}",
+        "",
+        "mov %rax, %r12",
+        ".cfi_register %rax, %r12",
         "mov %rsp, %rbx",
         ".cfi_def_cfa_register %rbx",
         "",
-        "and $~0xf, %rsp",
-        "",
+        "and $-0x10, %rsp",
         "mov %rbx, %rdi",
-        "call {handle_trap}",
+        "",
+        "call {default_entry}",
         "",
         "mov %rbx, %rsp",
         ".cfi_def_cfa_register %rsp",
+        "mov %r12, %rax",
+        ".cfi_restore %rax",
         "",
-        "jmp {trap_return}",
+        "mov {RCX}(%rsp), %rcx",
+        ".cfi_restore %rcx",
+        "mov {RDX}(%rsp), %rdx",
+        ".cfi_restore %rdx",
+        "mov {RDI}(%rsp), %rdi",
+        ".cfi_restore %rdi",
+        "mov {RSI}(%rsp), %rsi",
+        ".cfi_restore %rsi",
+        "mov {R8}(%rsp), %r8",
+        ".cfi_restore %r8",
+        "mov {R9}(%rsp), %r9",
+        ".cfi_restore %r9",
+        "mov {R10}(%rsp), %r10",
+        ".cfi_restore %r10",
+        "mov {R11}(%rsp), %r11",
+        ".cfi_restore %r11",
+        "mov {RBX}(%rsp), %rbx",
+        ".cfi_restore %rbx",
+        "mov {R12}(%rsp), %r12",
+        ".cfi_restore %r12",
+        "",
+        "cmpq $0x08, {CS}(%rsp)",
+        "je 2f",
+        "swapgs",
+        "",
+        "2:",
+        "lea {RIP}(%rsp), %rsp",
+        ".cfi_def_cfa %rsp, 0x08",
+        ".cfi_offset %rsp, 0x10",
+        "",
+        "iretq",
         ".cfi_endproc",
-        handle_trap = sym _default_trap_handler,
-        trap_return = sym _raw_trap_return,
+        default_entry = sym _default_trap_handler,
+        RBX = const TrapContext::OFFSET_RBX,
+        RCX = const TrapContext::OFFSET_RCX,
+        RDX = const TrapContext::OFFSET_RDX,
+        RDI = const TrapContext::OFFSET_RDI,
+        RSI = const TrapContext::OFFSET_RSI,
+        R8 = const TrapContext::OFFSET_R8,
+        R9 = const TrapContext::OFFSET_R9,
+        R10 = const TrapContext::OFFSET_R10,
+        R11 = const TrapContext::OFFSET_R11,
+        R12 = const TrapContext::OFFSET_R12,
+        INT_NO = const TrapContext::OFFSET_INT_NO,
+        RIP = const TrapContext::OFFSET_RIP,
+        CS = const TrapContext::OFFSET_CS,
+        options(att_syntax),
+    )
+}
+
+#[unsafe(naked)]
+unsafe extern "C" fn captured_trap_entry_kernel() {
+    naked_asm!(
+        ".cfi_startproc",
+        ".cfi_signal_frame",
+        ".cfi_def_cfa %rsp, 0x18",
+        ".cfi_offset %rsp, 0x10",
+        cfi_all_same_value!(),
+        "",
+        "mov %rsi, %gs:0x10",
+        ".cfi_undefined %rsi",
+        "mov %rsp, %rsi",
+        ".cfi_def_cfa_register %rsi",
+        ".cfi_register %rsp, %rsi",
+
+        "mov %gs:0x08, %rsp",
+        // Save and load registers.
+        "mov %rcx, {RCX}(%rsp)",
+        ".cfi_rel_offset %rcx, {RCX}",
+        "",
+        "mov %gs:0x10, %rcx",
+        ".cfi_register %rsi, %rcx",
+        "",
+        "mov %rdx, {RDX}(%rsp)",
+        ".cfi_rel_offset %rdx, {RDX}",
+        "mov %rdi, {RDI}(%rsp)",
+        ".cfi_rel_offset %rdi, {RDI}",
+        "mov %rcx, {RSI}(%rsp)",
+        ".cfi_rel_offset %rsi, {RSI}",
+        "mov %r8, {R8}(%rsp)",
+        ".cfi_rel_offset %r8, {R8}",
+        "mov %r9, {R9}(%rsp)",
+        ".cfi_rel_offset %r9, {R9}",
+        "mov %r10, {R10}(%rsp)",
+        ".cfi_rel_offset %r10, {R10}",
+        "mov %r11, {R11}(%rsp)",
+        ".cfi_rel_offset %r11, {R11}",
+        "",
+        "xchg %rax, {RAX}(%rsp)",
+        ".cfi_rel_offset %rax, {RAX}",
+        "xchg %rbx, {RBX}(%rsp)",
+        ".cfi_rel_offset %rbx, {RBX}",
+        "xchg %r12, {R12}(%rsp)",
+        ".cfi_rel_offset %r12, {R12}",
+        "xchg %r13, {R13}(%rsp)",
+        ".cfi_rel_offset %r13, {R13}",
+        "xchg %r14, {R14}(%rsp)",
+        ".cfi_rel_offset %r14, {R14}",
+        "xchg %r15, {R15}(%rsp)",
+        ".cfi_rel_offset %r15, {R15}",
+        "xchg %rbp, {RBP}(%rsp)",
+        ".cfi_rel_offset %rbp, {RBP}",
+        "",
+        "lea {INT_NO}(%rsp), %rdi",
+        "mov $7, %rcx",
+        "cld",
+        "rep movsq",
+        "",
+        "mov %rax, %rsp",
+        ".cfi_def_cfa %rsp, 0x10",
+        ".cfi_undefined %rax",
+        ".cfi_restore %rbx",
+        ".cfi_undefined %rcx",
+        ".cfi_undefined %rdx",
+        ".cfi_undefined %rdi",
+        ".cfi_undefined %rsi",
+        ".cfi_undefined %r8",
+        ".cfi_undefined %r9",
+        ".cfi_undefined %r10",
+        ".cfi_undefined %r11",
+        ".cfi_restore %r12",
+        ".cfi_restore %r13",
+        ".cfi_restore %r14",
+        ".cfi_restore %r15",
+        ".cfi_restore %rbp",
+        "",
+        "popf",
+        ".cfi_def_cfa_offset 0x08",
+        "",
+        "ret",
+        ".cfi_endproc",
+        RAX = const TrapContext::OFFSET_RAX,
+        RBX = const TrapContext::OFFSET_RBX,
+        RCX = const TrapContext::OFFSET_RCX,
+        RDX = const TrapContext::OFFSET_RDX,
+        RDI = const TrapContext::OFFSET_RDI,
+        RSI = const TrapContext::OFFSET_RSI,
+        R8 = const TrapContext::OFFSET_R8,
+        R9 = const TrapContext::OFFSET_R9,
+        R10 = const TrapContext::OFFSET_R10,
+        R11 = const TrapContext::OFFSET_R11,
+        R12 = const TrapContext::OFFSET_R12,
+        R13 = const TrapContext::OFFSET_R13,
+        R14 = const TrapContext::OFFSET_R14,
+        R15 = const TrapContext::OFFSET_R15,
+        RBP = const TrapContext::OFFSET_RBP,
+        INT_NO = const TrapContext::OFFSET_INT_NO,
+        options(att_syntax),
+    )
+}
+
+#[unsafe(naked)]
+unsafe extern "C" fn captured_trap_entry_user() {
+    naked_asm!(
+        ".cfi_startproc",
+        ".cfi_signal_frame",
+        ".cfi_def_cfa %rsp, 0x18",
+        ".cfi_offset %rsp, 0x10",
+        cfi_all_same_value!(),
+        "",
+        "sub ${INT_NO}, %rsp",
+        ".cfi_def_cfa_offset {CS}",
+        "",
+        // Save and load registers.
+        "mov %rcx, {RCX}(%rsp)",
+        ".cfi_rel_offset %rcx, {RCX}",
+        "mov %rdx, {RDX}(%rsp)",
+        ".cfi_rel_offset %rdx, {RDX}",
+        "mov %rdi, {RDI}(%rsp)",
+        ".cfi_rel_offset %rdi, {RDI}",
+        "mov %rsi, {RSI}(%rsp)",
+        ".cfi_rel_offset %rsi, {RSI}",
+        "mov %r8,  {R8}(%rsp)",
+        ".cfi_rel_offset %r8, {R8}",
+        "mov %r9,  {R9}(%rsp)",
+        ".cfi_rel_offset %r9, {R9}",
+        "mov %r10, {R10}(%rsp)",
+        ".cfi_rel_offset %r10, {R10}",
+        "mov %r11, {R11}(%rsp)",
+        ".cfi_rel_offset %r11, {R11}",
+        "",
+        "xchg %rax, {RAX}(%rsp)",
+        ".cfi_rel_offset %rax, {RAX}",
+        "xchg %rbx, {RBX}(%rsp)",
+        ".cfi_rel_offset %rbx, {RBX}",
+        "xchg %r12, {R12}(%rsp)",
+        ".cfi_rel_offset %r12, {R12}",
+        "xchg %r13, {R13}(%rsp)",
+        ".cfi_rel_offset %r13, {R13}",
+        "xchg %r14, {R14}(%rsp)",
+        ".cfi_rel_offset %r14, {R14}",
+        "xchg %r15, {R15}(%rsp)",
+        ".cfi_rel_offset %r15, {R15}",
+        "xchg %rbp, {RBP}(%rsp)",
+        ".cfi_rel_offset %rbp, {RBP}",
+        "",
+        "mov %rax, %rsp",
+        ".cfi_def_cfa %rsp, 0x10",
+        ".cfi_undefined %rax",
+        ".cfi_restore %rbx",
+        ".cfi_undefined %rcx",
+        ".cfi_undefined %rdx",
+        ".cfi_undefined %rdi",
+        ".cfi_undefined %rsi",
+        ".cfi_undefined %r8",
+        ".cfi_undefined %r9",
+        ".cfi_undefined %r10",
+        ".cfi_undefined %r11",
+        ".cfi_restore %r12",
+        ".cfi_restore %r13",
+        ".cfi_restore %r14",
+        ".cfi_restore %r15",
+        ".cfi_restore %rbp",
+        "",
+        "popf",
+        ".cfi_def_cfa_offset 0x08",
+        "",
+        "ret",
+        ".cfi_endproc",
+        RAX = const TrapContext::OFFSET_RAX,
+        RBX = const TrapContext::OFFSET_RBX,
+        RCX = const TrapContext::OFFSET_RCX,
+        RDX = const TrapContext::OFFSET_RDX,
+        RDI = const TrapContext::OFFSET_RDI,
+        RSI = const TrapContext::OFFSET_RSI,
+        R8 = const TrapContext::OFFSET_R8,
+        R9 = const TrapContext::OFFSET_R9,
+        R10 = const TrapContext::OFFSET_R10,
+        R11 = const TrapContext::OFFSET_R11,
+        R12 = const TrapContext::OFFSET_R12,
+        R13 = const TrapContext::OFFSET_R13,
+        R14 = const TrapContext::OFFSET_R14,
+        R15 = const TrapContext::OFFSET_R15,
+        RBP = const TrapContext::OFFSET_RBP,
+        INT_NO = const TrapContext::OFFSET_INT_NO,
+        CS = const TrapContext::OFFSET_CS,
+        options(att_syntax),
+    )
+}
+
+#[unsafe(naked)]
+unsafe extern "C" fn captured_trap_return(trap_context: &mut TrapContext) {
+    naked_asm!(
+        ".cfi_startproc",
+        ".cfi_signal_frame",
+        ".cfi_def_cfa %rsp, 0x08",
+        "",
+        "pushf",
+        ".cfi_def_cfa_offset 0x10",
+        "",
+        "mov %rdi, %rax",
+        ".cfi_def_cfa %rax, {CS}",
+        ".cfi_rel_offset %rcx, {RCX}",
+        ".cfi_rel_offset %rdx, {RDX}",
+        ".cfi_rel_offset %rdi, {RDI}",
+        ".cfi_rel_offset %rsi, {RSI}",
+        ".cfi_rel_offset %r8, {R8}",
+        ".cfi_rel_offset %r9, {R9}",
+        ".cfi_rel_offset %r10, {R10}",
+        ".cfi_rel_offset %r11, {R11}",
+        ".cfi_rel_offset %rax, {RAX}",
+        ".cfi_rel_offset %rbx, {RBX}",
+        ".cfi_rel_offset %r12, {R12}",
+        ".cfi_rel_offset %r13, {R13}",
+        ".cfi_rel_offset %r14, {R14}",
+        ".cfi_rel_offset %r15, {R15}",
+        ".cfi_rel_offset %rbp, {RBP}",
+        ".cfi_rel_offset %rflags, {FLAGS}",
+        ".cfi_rel_offset %rsp, {RSP}",
+        "",
+        "mov {RCX}(%rax), %rcx",
+        ".cfi_restore %rcx",
+        "mov {RDX}(%rax), %rdx",
+        ".cfi_restore %rdx",
+        "mov {RDI}(%rax), %rdi",
+        ".cfi_restore %rdi",
+        "mov {RSI}(%rax), %rsi",
+        ".cfi_restore %rsi",
+        "mov  {R8}(%rax), %r8",
+        ".cfi_restore %r8",
+        "mov  {R9}(%rax), %r9",
+        ".cfi_restore %r9",
+        "mov {R10}(%rax), %r10",
+        ".cfi_restore %r10",
+        "mov {R11}(%rax), %r11",
+        ".cfi_restore %r11",
+        "",
+        "xchg %rax, %rsp",
+        "xchg %rax, {RAX}(%rsp)",
+        ".cfi_restore %rax",
+        "xchg %rbx, {RBX}(%rsp)",
+        ".cfi_restore %rbx",
+        "xchg %r12, {R12}(%rsp)",
+        ".cfi_restore %r12",
+        "xchg %r13, {R13}(%rsp)",
+        ".cfi_restore %r13",
+        "xchg %r14, {R14}(%rsp)",
+        ".cfi_restore %r14",
+        "xchg %r15, {R15}(%rsp)",
+        ".cfi_restore %r15",
+        "xchg %rbp, {RBP}(%rsp)",
+        ".cfi_restore %rbp",
+        "",
+        "cmpq $0x08, {CS}(%rsp)",
+        "je 2f",
+        "swapgs",
+        "",
+        "2:",
+        "lea {RIP}(%rsp), %rsp",
+        ".cfi_def_cfa %rsp, 0x08",
+        "iretq",
+        ".cfi_endproc",
+        RAX = const TrapContext::OFFSET_RAX,
+        RBX = const TrapContext::OFFSET_RBX,
+        RCX = const TrapContext::OFFSET_RCX,
+        RDX = const TrapContext::OFFSET_RDX,
+        RDI = const TrapContext::OFFSET_RDI,
+        RSI = const TrapContext::OFFSET_RSI,
+        R8 = const TrapContext::OFFSET_R8,
+        R9 = const TrapContext::OFFSET_R9,
+        R10 = const TrapContext::OFFSET_R10,
+        R11 = const TrapContext::OFFSET_R11,
+        R12 = const TrapContext::OFFSET_R12,
+        R13 = const TrapContext::OFFSET_R13,
+        R14 = const TrapContext::OFFSET_R14,
+        R15 = const TrapContext::OFFSET_R15,
+        RBP = const TrapContext::OFFSET_RBP,
+        RIP = const TrapContext::OFFSET_RIP,
+        CS = const TrapContext::OFFSET_CS,
+        FLAGS = const TrapContext::OFFSET_FLAGS,
+        RSP = const TrapContext::OFFSET_RSP,
         options(att_syntax),
     );
 }
 
-#[unsafe(naked)]
-unsafe extern "C" fn captured_trap_handler() {
-    naked_asm!(
-        "mov ${from_context}, %rdi",
-        "mov %gs:0, %rsi",
-        "add ${to_context}, %rsi",
-        "",
-        "mov %rdi, %rsp", // We need a temporary stack to use `switch()`.
-        "",
-        "jmp {switch}",
-        from_context = sym DIRTY_TRAP_CONTEXT,
-        to_context = sym _percpu_inner_CAPTURER_CONTEXT,
-        switch = sym TaskContext::switch,
+unsafe fn swap_percpu_capturer(new_capturer: usize) -> usize {
+    let old_capturer: usize;
+    asm!(
+        "mov %gs:0x08, {old}",
+        "mov {new}, %gs:0x08",
+        new = in(reg) new_capturer,
+        old = out(reg) old_capturer,
         options(att_syntax),
     );
-}
 
-#[unsafe(naked)]
-unsafe extern "C" fn captured_trap_return(trap_context: usize) -> ! {
-    naked_asm!(
-        "jmp {trap_return}",
-        trap_return = sym _raw_trap_return,
-        options(att_syntax),
-    );
+    old_capturer
 }
 
 impl TrapReturn for TrapContext {
@@ -332,18 +566,17 @@ impl TrapReturn for TrapContext {
 
     unsafe fn trap_return(&mut self) {
         let irq_states = disable_irqs_save();
-        let old_handler = TRAP_HANDLER.swap(captured_trap_handler);
-
-        let mut to_ctx = TaskContext::new();
-        to_ctx.set_program_counter(captured_trap_return as _);
-        to_ctx.set_stack_pointer(&raw mut *self as usize);
-        to_ctx.set_interrupt_enabled(false);
+        let old_handler = swap_percpu_capturer(self as *mut _ as usize);
 
         unsafe {
-            TaskContext::switch(CAPTURER_CONTEXT.as_mut(), &mut to_ctx);
+            CPU::local()
+                .as_mut()
+                .load_interrupt_stack(self as *mut _ as usize as u64);
         }
 
-        TRAP_HANDLER.set(old_handler);
+        captured_trap_return(self);
+
+        swap_percpu_capturer(old_handler);
         irq_states.restore();
     }
 }

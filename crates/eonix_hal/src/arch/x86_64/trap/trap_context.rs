@@ -1,4 +1,5 @@
 use core::arch::asm;
+use core::mem::offset_of;
 
 use eonix_hal_traits::fault::{Fault, PageFaultErrorCode};
 use eonix_hal_traits::trap::{RawTrapContext, TrapType};
@@ -6,11 +7,9 @@ use eonix_mm::address::VAddr;
 
 use crate::processor::CPU;
 
-#[derive(Clone, Copy, Default)]
 #[repr(C, align(16))]
+#[derive(Clone, Copy, Default)]
 pub struct TrapContext {
-    rax: u64,
-    rbx: u64,
     rcx: u64,
     rdx: u64,
     rdi: u64,
@@ -19,11 +18,17 @@ pub struct TrapContext {
     r9: u64,
     r10: u64,
     r11: u64,
+
+    /// on `trap_return`: save capturer %rsp, load %rax
+    /// on `trap_entry`: save %rax, load capturer %rsp
+    rax: u64,
+    rbx: u64,
     r12: u64,
     r13: u64,
     r14: u64,
     r15: u64,
     rbp: u64,
+
     int_no: u64,
     errcode: u64,
     rip: u64,
@@ -34,6 +39,29 @@ pub struct TrapContext {
 }
 
 impl TrapContext {
+    pub const OFFSET_RAX: usize = offset_of!(TrapContext, rax);
+    pub const OFFSET_RBX: usize = offset_of!(TrapContext, rbx);
+    pub const OFFSET_RCX: usize = offset_of!(TrapContext, rcx);
+    pub const OFFSET_RDX: usize = offset_of!(TrapContext, rdx);
+    pub const OFFSET_RDI: usize = offset_of!(TrapContext, rdi);
+    pub const OFFSET_RSI: usize = offset_of!(TrapContext, rsi);
+    pub const OFFSET_R8: usize = offset_of!(TrapContext, r8);
+    pub const OFFSET_R9: usize = offset_of!(TrapContext, r9);
+    pub const OFFSET_R10: usize = offset_of!(TrapContext, r10);
+    pub const OFFSET_R11: usize = offset_of!(TrapContext, r11);
+    pub const OFFSET_R12: usize = offset_of!(TrapContext, r12);
+    pub const OFFSET_R13: usize = offset_of!(TrapContext, r13);
+    pub const OFFSET_R14: usize = offset_of!(TrapContext, r14);
+    pub const OFFSET_R15: usize = offset_of!(TrapContext, r15);
+    pub const OFFSET_RBP: usize = offset_of!(TrapContext, rbp);
+    pub const OFFSET_INT_NO: usize = offset_of!(TrapContext, int_no);
+    pub const OFFSET_ERRCODE: usize = offset_of!(TrapContext, errcode);
+    pub const OFFSET_RIP: usize = offset_of!(TrapContext, rip);
+    pub const OFFSET_CS: usize = offset_of!(TrapContext, cs);
+    pub const OFFSET_FLAGS: usize = offset_of!(TrapContext, flags);
+    pub const OFFSET_RSP: usize = offset_of!(TrapContext, rsp);
+    pub const OFFSET_SS: usize = offset_of!(TrapContext, ss);
+
     fn get_fault_type(&self) -> Fault {
         match self.int_no {
             6 | 8 => Fault::InvalidOp,

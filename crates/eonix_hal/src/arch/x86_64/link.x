@@ -91,6 +91,10 @@ SECTIONS {
         __spercpu = .;
 
         QUAD(0); /* Reserved for x86 percpu pointer */
+        QUAD(0); /* Reserved for x86 percpu capturer trap context */
+
+        QUAD(0); /* Reserved for x86 percpu capturer scratch */
+        QUAD(0); /* Reserved for x86 percpu capturer scratch */
 
         . = ALIGN(16);
 

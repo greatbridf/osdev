@@ -35,41 +35,12 @@ pub(crate) struct TSS {
     _pinned: PhantomPinned,
 }
 
-#[derive(Debug, Clone)]
-pub enum UserTLS {
-    /// TODO: This is not used yet.
-    #[allow(dead_code)]
-    TLS64(u64),
-    TLS32 {
-        base: u64,
-        desc: GDTEntry,
-    },
-}
-
 /// Architecture-specific cpu status data.
 pub struct CPU {
     cpuid: usize,
     gdt: GDT,
     tss: TSS,
     interrupt: InterruptControl,
-}
-
-impl UserTLS {
-    /// # Return
-    /// Returns the TLS descriptor and the index of the TLS segment.
-    pub fn new32(
-        base: u32, limit: u32, is_limit_in_pages: bool,
-    ) -> (Self, u32) {
-        let flags = if is_limit_in_pages { 0xc } else { 0x4 };
-
-        (
-            Self::TLS32 {
-                base: base as u64,
-                desc: GDTEntry::new(base, limit, 0xf2, flags),
-            },
-            7,
-        )
-    }
 }
 
 impl CPU {
@@ -126,18 +97,14 @@ impl CPU {
         }
     }
 
-    pub fn set_tls32(self: Pin<&mut Self>, user_tls: &UserTLS) {
-        let UserTLS::TLS32 { desc, base } = user_tls else {
-            unimplemented!("TLS64 is not supported yet")
-        };
-
+    pub fn set_tls32(self: Pin<&mut Self>, desc: GDTEntry, base: u64) {
         unsafe {
             // SAFETY: We don't move the GDT object.
-            self.get_unchecked_mut().gdt.set_tls32(*desc);
+            self.get_unchecked_mut().gdt.set_tls32(desc);
         }
 
         const IA32_KERNEL_GS_BASE: u32 = 0xc0000102;
-        wrmsr(IA32_KERNEL_GS_BASE, *base);
+        wrmsr(IA32_KERNEL_GS_BASE, base);
     }
 
     pub fn cpuid(&self) -> usize {

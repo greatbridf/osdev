@@ -1,7 +1,8 @@
 pub(crate) mod init;
 
-use super::mm::{E820_MEM_MAP_DATA, PA_G, PA_NXE, PA_P, PA_PS, PA_RW};
 use core::arch::{global_asm, naked_asm};
+
+use super::mm::{E820_MEM_MAP_DATA, PA_G, PA_NXE, PA_P, PA_PS, PA_RW};
 
 const KERNEL_IMAGE_PADDR: usize = 0x200000;
 const KERNEL_PML4: usize = 0x1000;
@@ -171,7 +172,7 @@ global_asm!(
     .Lhalt:
         hlt
         jmp .
-    
+
     # scratch %eax
     # return address should be of 2 bytes, and will be zero extended to 4 bytes
     .Lgo_32bit:
@@ -462,7 +463,7 @@ global_asm!(
     .code64
     2:
         jmp {start_64bit}
-    
+
     .popsection
     "#,
     EARLY_GDT = sym EARLY_GDT,

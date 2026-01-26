@@ -876,7 +876,7 @@ async fn sigreturn() -> KResult<SyscallNoReturn> {
             "`sigreturn` failed in thread {} with error {err}!",
             thread.tid
         );
-        thread.force_kill(Signal::SIGSEGV).await;
+        thread.force_kill(Signal::SIGSEGV);
         return Err(err);
     }
 

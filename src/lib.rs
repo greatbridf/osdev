@@ -13,9 +13,6 @@ extern crate alloc;
 #[macro_use]
 extern crate static_assertions;
 
-#[cfg(any(target_arch = "riscv64", target_arch = "x86_64"))]
-extern crate unwinding;
-
 mod driver;
 mod fs;
 mod hash;
@@ -23,7 +20,6 @@ mod io;
 mod kernel;
 mod kernel_init;
 mod net;
-#[cfg(any(target_arch = "riscv64", target_arch = "x86_64"))]
 mod panic;
 mod path;
 mod prelude;
@@ -47,47 +43,15 @@ use eonix_runtime::scheduler::RUNTIME;
 use kernel::mem::GlobalPageAlloc;
 use kernel::task::{KernelStack, ProcessList, ProgramLoader};
 use kernel::vfs::dentry::Dentry;
-use kernel::vfs::mount::{do_mount, MS_NOATIME, MS_NODEV, MS_NOSUID, MS_RDONLY};
+use kernel::vfs::mount::{
+    do_mount, MS_NOATIME, MS_NODEV, MS_NOSUID, MS_RDONLY,
+};
 use kernel::vfs::types::Permission;
 use kernel::vfs::FsContext;
 use kernel::CharDevice;
 use kernel_init::setup_memory;
 use path::Path;
 use prelude::*;
-
-#[cfg(any(target_arch = "riscv64", target_arch = "loongarch64"))]
-fn do_panic() -> ! {
-    #[cfg(target_arch = "riscv64")]
-    panic::stack_trace();
-
-    shutdown();
-}
-
-#[cfg(not(any(target_arch = "riscv64", target_arch = "loongarch64")))]
-fn do_panic() -> ! {
-    // Spin forever.
-    loop {
-        spin_loop();
-    }
-}
-
-#[panic_handler]
-fn panic(info: &core::panic::PanicInfo) -> ! {
-    if let Some(location) = info.location() {
-        println_fatal!(
-            "panicked at {}:{}:{}",
-            location.file(),
-            location.line(),
-            location.column()
-        );
-    } else {
-        println_fatal!("panicked at <UNKNOWN>");
-    }
-    println_fatal!();
-    println_fatal!("{}", info.message());
-
-    do_panic()
-}
 
 static BSP_OK: AtomicBool = AtomicBool::new(false);
 static CPU_SHUTTING_DOWN: AtomicUsize = AtomicUsize::new(0);
@@ -220,9 +184,10 @@ async fn init_process(early_kstack: PRange) {
     let load_info = {
         // mount fat32 /mnt directory
         let fs_context = FsContext::global();
-        let mnt_dir = Dentry::open(fs_context, Path::new(b"/mnt/").unwrap(), true)
-            .await
-            .unwrap();
+        let mnt_dir =
+            Dentry::open(fs_context, Path::new(b"/mnt/").unwrap(), true)
+                .await
+                .unwrap();
 
         mnt_dir
             .mkdir(Permission::new(0o755))
@@ -239,12 +204,15 @@ async fn init_process(early_kstack: PRange) {
         .await
         .unwrap();
 
-        let init_names = [&b"/init"[..], &b"/sbin/init"[..], &b"/mnt/initsh"[..]];
+        let init_names =
+            [&b"/init"[..], &b"/sbin/init"[..], &b"/mnt/initsh"[..]];
 
         let mut init_name = None;
         let mut init = None;
         for name in init_names {
-            if let Ok(dentry) = Dentry::open(fs_context, Path::new(name).unwrap(), true).await {
+            if let Ok(dentry) =
+                Dentry::open(fs_context, Path::new(name).unwrap(), true).await
+            {
                 if dentry.is_valid() {
                     init_name = Some(CString::new(name).unwrap());
                     init = Some(dentry);

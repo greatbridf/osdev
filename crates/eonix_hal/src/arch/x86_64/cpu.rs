@@ -2,6 +2,7 @@ use core::arch::asm;
 use core::marker::PhantomPinned;
 use core::mem::size_of;
 use core::pin::Pin;
+use core::sync::atomic::AtomicUsize;
 
 use eonix_preempt::PreemptGuard;
 use eonix_sync_base::LazyLock;
@@ -9,6 +10,8 @@ use eonix_sync_base::LazyLock;
 use super::gdt::{GDTEntry, GDT};
 use super::interrupt::InterruptControl;
 use super::trap::TrapContext;
+
+pub static CPU_COUNT: AtomicUsize = AtomicUsize::new(0);
 
 #[eonix_percpu::define_percpu]
 static LOCAL_CPU: LazyLock<CPU> = LazyLock::new(CPU::new);

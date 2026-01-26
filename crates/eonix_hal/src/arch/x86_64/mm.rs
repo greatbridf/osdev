@@ -6,10 +6,10 @@ use eonix_mm::address::{
     Addr as _, AddrOps as _, PAddr, PRange, PhysAccess, VAddr,
 };
 use eonix_mm::page_table::{
-    PageAttribute, PageTable, PageTableLevel, PagingMode, RawAttribute,
-    RawPageTable, TableAttribute, PTE,
+    PageAttribute, PageTable, PageTableAlloc, PageTableLevel, PagingMode,
+    RawAttribute, RawPageTable, TableAttribute, PTE,
 };
-use eonix_mm::paging::{NoAlloc, Page, PageBlock, PAGE_SIZE, PFN};
+use eonix_mm::paging::{BasicFolio, PageAccess, PageBlock, PAGE_SIZE, PFN};
 use eonix_sync_base::LazyLock;
 
 use crate::traits::mm::Memory;
@@ -35,14 +35,7 @@ pub const P_KIMAGE_START: PAddr = PAddr::from_val(0x200000);
 pub const V_KERNEL_BSS_START: VAddr = VAddr::from(0xffffffffc0200000);
 
 const KERNEL_PML4_PFN: PFN = PFN::from_val(0x1000 >> 12);
-
-pub static GLOBAL_PAGE_TABLE: LazyLock<
-    PageTable<ArchPagingMode, NoAlloc, ArchPhysAccess>,
-> = LazyLock::new(|| unsafe {
-    Page::with_raw(KERNEL_PML4_PFN, |root_table_page| {
-        PageTable::with_root_table(root_table_page.clone())
-    })
-});
+pub const GLOBAL_PAGE_TABLE: BasicFolio = BasicFolio::new(KERNEL_PML4_PFN, 0);
 
 #[repr(transparent)]
 pub struct PTE64(u64);
@@ -55,6 +48,9 @@ pub struct RawPageTable4Levels<'a>(NonNull<PTE64>, PhantomData<&'a ()>);
 pub struct PagingMode4Levels;
 
 pub struct ArchPhysAccess;
+
+#[derive(Clone)]
+pub struct PageAccessImpl;
 
 pub struct ArchMemory;
 
@@ -123,6 +119,9 @@ impl<'a> RawPageTable<'a> for RawPageTable4Levels<'a> {
         Self(ptr.cast(), PhantomData)
     }
 }
+
+unsafe impl Send for RawPageTable4Levels<'_> {}
+unsafe impl Sync for RawPageTable4Levels<'_> {}
 
 impl RawAttribute for PageAttribute64 {
     fn null() -> Self {
@@ -278,6 +277,12 @@ impl PhysAccess for ArchPhysAccess {
     }
 }
 
+impl PageAccess for PageAccessImpl {
+    unsafe fn get_ptr_for_pfn(&self, pfn: PFN) -> NonNull<PageBlock> {
+        unsafe { ArchPhysAccess::as_ptr(PAddr::from(pfn)) }
+    }
+}
+
 impl E820MemMapEntry {
     const ENTRY_FREE: u32 = 1;
     // const ENTRY_USED: u32 = 2;
@@ -424,4 +429,19 @@ pub fn set_root_page_table_pfn(pfn: PFN) {
             options(att_syntax)
         );
     }
+}
+
+pub fn with_global_page_table<A, X>(
+    alloc: A, access: X,
+    func: impl FnOnce(&mut PageTable<ArchPagingMode, A, X>),
+) where
+    A: PageTableAlloc<Folio = BasicFolio>,
+    X: PageAccess,
+{
+    let mut global_page_table =
+        PageTable::new(GLOBAL_PAGE_TABLE.clone(), alloc, access);
+
+    func(&mut global_page_table);
+
+    core::mem::forget(global_page_table);
 }

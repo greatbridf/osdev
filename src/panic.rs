@@ -2,6 +2,8 @@ use core::panic::PanicInfo;
 
 use eonix_log::println_fatal;
 
+use crate::kernel::shutdown_system;
+
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
     if let Some(location) = info.location() {
@@ -20,21 +22,7 @@ fn panic(info: &PanicInfo) -> ! {
     #[cfg(arch_has_stacktrace)]
     stacktrace::print_stacktrace();
 
-    panic_forever();
-}
-
-fn panic_forever() -> ! {
-    #[cfg(arch_has_shutdown)]
-    {
-        eonix_hal::arch_exported::bootstrap::shutdown();
-    }
-    #[cfg(not(arch_has_shutdown))]
-    {
-        // Spin forever
-        loop {
-            core::hint::spin_loop();
-        }
-    }
+    shutdown_system();
 }
 
 #[cfg(arch_has_stacktrace)]

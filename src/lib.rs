@@ -28,11 +28,10 @@ mod sync;
 
 use alloc::ffi::CString;
 use core::hint::spin_loop;
-use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicBool, Ordering};
 
-use eonix_hal::arch_exported::bootstrap::shutdown;
 use eonix_hal::context::TaskContext;
-use eonix_hal::processor::{halt, CPU, CPU_COUNT};
+use eonix_hal::processor::CPU;
 use eonix_hal::symbol_addr;
 use eonix_hal::traits::context::RawTaskContext;
 use eonix_hal::traits::trap::IrqState;
@@ -48,31 +47,12 @@ use kernel::vfs::mount::{
 };
 use kernel::vfs::types::Permission;
 use kernel::vfs::FsContext;
-use kernel::CharDevice;
+use kernel::{shutdown_system, CharDevice};
 use kernel_init::setup_memory;
 use path::Path;
 use prelude::*;
 
 static BSP_OK: AtomicBool = AtomicBool::new(false);
-static CPU_SHUTTING_DOWN: AtomicUsize = AtomicUsize::new(0);
-
-fn shutdown_system() -> ! {
-    let cpu_count = CPU_COUNT.load(Ordering::Relaxed);
-
-    if CPU_SHUTTING_DOWN.fetch_add(1, Ordering::AcqRel) + 1 == cpu_count {
-        println_info!("All CPUs are shutting down. Gracefully powering off...");
-        shutdown();
-    } else {
-        println_info!(
-            "CPU {} is shutting down. Waiting for other CPUs...",
-            CPU::local().cpuid()
-        );
-
-        loop {
-            halt();
-        }
-    }
-}
 
 #[eonix_hal::main]
 fn kernel_init(mut data: eonix_hal::bootstrap::BootStrapData) -> ! {

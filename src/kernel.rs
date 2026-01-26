@@ -12,8 +12,10 @@ pub mod user;
 pub mod vfs;
 
 mod chardev;
+mod power;
 mod terminal;
 
 #[allow(unused_imports)]
 pub use chardev::{CharDevice, CharDeviceType, VirtualCharDevice};
+pub use power::shutdown_system;
 pub use terminal::{Terminal, TerminalDevice};

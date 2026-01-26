@@ -32,6 +32,7 @@ fn set_arch_config(config: &str) {
 
 fn set_arch_configs_x86() {
     set_arch_config("has_stacktrace");
+    set_arch_config("has_shutdown");
 }
 
 fn set_arch_configs_riscv64() {

@@ -37,7 +37,6 @@ use eonix_hal::traits::context::RawTaskContext;
 use eonix_hal::traits::trap::IrqState;
 use eonix_hal::trap::disable_irqs_save;
 use eonix_mm::address::PRange;
-use eonix_runtime::executor::Stack;
 use eonix_runtime::scheduler::RUNTIME;
 use kernel::mem::GlobalPageAlloc;
 use kernel::task::{KernelStack, ProcessList, ProgramLoader};

@@ -1,7 +1,5 @@
 use core::ptr::NonNull;
 
-use eonix_runtime::executor::Stack;
-
 use crate::kernel::mem::FolioOwned;
 
 #[derive(Debug)]
@@ -19,14 +17,8 @@ impl KernelStack {
             folio: FolioOwned::alloc_order(Self::KERNEL_STACK_ORDER),
         }
     }
-}
 
-impl Stack for KernelStack {
-    fn new() -> Self {
-        Self::new()
-    }
-
-    fn get_bottom(&self) -> NonNull<()> {
+    pub fn get_bottom(&self) -> NonNull<()> {
         let ptr = self.folio.get_bytes_ptr();
         let len = ptr.len();
 

@@ -1,26 +1,33 @@
-// mod builder;
-mod output_handle;
-mod stack;
+use alloc::boxed::Box;
+use alloc::sync::{Arc, Weak};
+use core::marker::PhantomData;
+use core::pin::Pin;
+use core::task::{Context, Poll, Waker};
 
-use alloc::{
-    boxed::Box,
-    sync::{Arc, Weak},
-};
-use core::{
-    marker::PhantomData,
-    pin::Pin,
-    task::{Context, Poll},
-};
 use eonix_sync::Spin;
-
-pub use output_handle::OutputHandle;
-pub use stack::Stack;
 
 /// An `Executor` executes a Future object in a separate thread of execution.
 ///
-/// When the Future is finished, the `Executor` will call the `OutputHandle` to commit the output.
-/// Then the `Executor` will release the resources associated with the Future.
+/// When the Future is finished, the `Executor` will call the `OutputHandle` to
+/// commit the output.  Then the `Executor` will release the resources
+/// associated with the Future.
 pub struct Executor(Option<Pin<Box<dyn TypeErasedExecutor>>>);
+
+enum OutputState<Output>
+where
+    Output: Send,
+{
+    Waiting(Option<Waker>),
+    Finished(Option<Output>),
+    TakenOut,
+}
+
+pub struct OutputHandle<Output>
+where
+    Output: Send,
+{
+    inner: OutputState<Output>,
+}
 
 trait TypeErasedExecutor: Send {
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()>;
@@ -89,6 +96,51 @@ impl Executor {
             })
         } else {
             Poll::Ready(())
+        }
+    }
+}
+
+impl<Output> OutputHandle<Output>
+where
+    Output: Send,
+{
+    pub fn new() -> Arc<Spin<Self>> {
+        Arc::new(Spin::new(Self {
+            inner: OutputState::Waiting(None),
+        }))
+    }
+
+    pub fn try_resolve(&mut self) -> Option<Output> {
+        let output = match &mut self.inner {
+            OutputState::Waiting(_) => return None,
+            OutputState::Finished(output) => output.take(),
+            OutputState::TakenOut => panic!("Output already taken out"),
+        };
+
+        self.inner = OutputState::TakenOut;
+        if let Some(output) = output {
+            Some(output)
+        } else {
+            unreachable!("Output should be present")
+        }
+    }
+
+    pub fn register_waiter(&mut self, waker: Waker) {
+        if let OutputState::Waiting(inner_waker) = &mut self.inner {
+            inner_waker.replace(waker);
+        } else {
+            panic!("Output is not waiting");
+        }
+    }
+
+    pub fn commit_output(&mut self, output: Output) {
+        if let OutputState::Waiting(inner_waker) = &mut self.inner {
+            if let Some(waker) = inner_waker.take() {
+                waker.wake();
+            }
+            self.inner = OutputState::Finished(Some(output));
+        } else {
+            panic!("Output is not waiting");
         }
     }
 }

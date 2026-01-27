@@ -2,13 +2,11 @@ mod trap_context;
 
 use core::arch::{asm, global_asm, naked_asm};
 
-use eonix_hal_traits::context::RawTaskContext;
 use eonix_hal_traits::trap::{
     IrqState as IrqStateTrait, RawTrapContext, TrapReturn,
 };
 pub use trap_context::TrapContext;
 
-use super::context::TaskContext;
 use super::cpu::CPU;
 
 unsafe extern "C" {
@@ -562,8 +560,6 @@ unsafe fn swap_percpu_capturer(new_capturer: usize) -> usize {
 }
 
 impl TrapReturn for TrapContext {
-    type TaskContext = TaskContext;
-
     unsafe fn trap_return(&mut self) {
         let irq_states = disable_irqs_save();
         let old_handler = swap_percpu_capturer(self as *mut _ as usize);
@@ -578,6 +574,20 @@ impl TrapReturn for TrapContext {
 
         swap_percpu_capturer(old_handler);
         irq_states.restore();
+    }
+
+    unsafe fn trap_return_noreturn(&mut self) -> ! {
+        disable_irqs();
+
+        unsafe {
+            CPU::local()
+                .as_mut()
+                .load_interrupt_stack(self as *mut _ as usize as u64);
+        }
+
+        captured_trap_return(self);
+
+        unreachable!("trap_return_noreturn should not return");
     }
 }
 

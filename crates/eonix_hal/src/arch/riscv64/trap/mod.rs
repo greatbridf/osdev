@@ -2,32 +2,25 @@ mod captured;
 mod default;
 mod trap_context;
 
-use super::config::platform::virt::*;
-use super::context::TaskContext;
-use captured::{_captured_trap_entry, _captured_trap_return};
 use core::arch::{global_asm, naked_asm};
 use core::mem::{offset_of, size_of};
 use core::num::NonZero;
 use core::ptr::NonNull;
-use default::_default_trap_entry;
-use eonix_hal_traits::{
-    context::RawTaskContext,
-    trap::{IrqState as IrqStateTrait, TrapReturn},
-};
-use riscv::register::sstatus::{self, Sstatus};
-use riscv::register::stvec::TrapMode;
-use riscv::register::{scause, sepc, sscratch, stval};
-use riscv::{
-    asm::sfence_vma_all,
-    register::stvec::{self, Stvec},
-};
-use sbi::SbiError;
 
+use captured::{_captured_trap_entry, _captured_trap_return};
+use default::_default_trap_entry;
+use eonix_hal_traits::context::RawTaskContext;
+use eonix_hal_traits::trap::{IrqState as IrqStateTrait, TrapReturn};
+use riscv::asm::sfence_vma_all;
+use riscv::register::sstatus::{self, Sstatus};
+use riscv::register::stvec::{self, Stvec, TrapMode};
+use riscv::register::{scause, sepc, sscratch, stval};
+use sbi::SbiError;
 pub use trap_context::*;
 
-impl TrapReturn for TrapContext {
-    type TaskContext = TaskContext;
+use super::config::platform::virt::*;
 
+impl TrapReturn for TrapContext {
     unsafe fn trap_return(&mut self) {
         let irq_states = disable_irqs_save();
 
@@ -42,20 +35,24 @@ impl TrapReturn for TrapContext {
         let old_trap_ctx = sscratch::read();
         sscratch::write(&raw mut *self as usize);
 
-        let mut from_ctx = TaskContext::new();
-        let mut to_ctx = TaskContext::new();
-        to_ctx.set_program_counter(_captured_trap_return as usize);
-        to_ctx.set_stack_pointer(&raw mut from_ctx as usize);
-        to_ctx.set_interrupt_enabled(false);
-
         unsafe {
-            TaskContext::switch(&mut from_ctx, &mut to_ctx);
+            _captured_trap_return(self);
         }
 
         sscratch::write(old_trap_ctx);
         stvec::write(old_stvec);
 
         irq_states.restore();
+    }
+
+    unsafe fn trap_return_noreturn(&mut self) -> ! {
+        disable_irqs();
+
+        unsafe {
+            _captured_trap_return(self);
+        }
+
+        unreachable!("trap_return_noreturn should not return");
     }
 }
 

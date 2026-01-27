@@ -1,61 +1,110 @@
-use crate::{arch::trap::Registers, context::TaskContext, trap::TrapContext};
-use core::{arch::naked_asm, mem::MaybeUninit};
-use eonix_hal_traits::context::RawTaskContext;
+use core::arch::naked_asm;
+use core::mem::MaybeUninit;
 
-static mut DIRTY_TASK_CONTEXT: MaybeUninit<TaskContext> = MaybeUninit::uninit();
+use crate::arch::trap::Registers;
+use crate::trap::TrapContext;
 
 // If captured trap context is present, we use it directly.
-// We need to restore the kernel tp from that TrapContext but sp is
-// fine since we will use TaskContext::switch.
+// We need to restore the callee saved registers from that TrapContext.
 #[unsafe(naked)]
 pub(super) unsafe extern "C" fn _captured_trap_entry() -> ! {
     naked_asm!(
-        "csrrw t0, sscratch, t0",
-        "sd    tp, {tp}(t0)",
-        "ld    tp, {ra}(t0)", // Load kernel tp from trap_ctx.ra
-        "sd    ra, {ra}(t0)",
-        "ld    ra, {sp}(t0)", // Load capturer task context from trap_ctx.sp
-        "sd    sp, {sp}(t0)",
-        "sd    gp, {gp}(t0)",
-        "sd    a0, {a0}(t0)",
-        "sd    a1, {a1}(t0)",
-        "sd    a2, {a2}(t0)",
-        "sd    a3, {a3}(t0)",
-        "sd    a4, {a4}(t0)",
-        "sd    t1, {t1}(t0)",
-        "sd    a5, {a5}(t0)",
-        "sd    a6, {a6}(t0)",
-        "sd    a7, {a7}(t0)",
-        "sd    t3, {t3}(t0)",
-        "sd    t4, {t4}(t0)",
-        "sd    t5, {t5}(t0)",
-        "sd    t2, {t2}(t0)",
-        "sd    t6, {t6}(t0)",
-        "sd    s0, {s0}(t0)",
-        "sd    s1, {s1}(t0)",
-        "sd    s2, {s2}(t0)",
-        "sd    s3, {s3}(t0)",
-        "sd    s4, {s4}(t0)",
-        "sd    s5, {s5}(t0)",
-        "sd    s6, {s6}(t0)",
-        "sd    s7, {s7}(t0)",
-        "sd    s8, {s8}(t0)",
-        "sd    s9, {s9}(t0)",
-        "sd    s10, {s10}(t0)",
-        "sd    s11, {s11}(t0)",
-        "csrr  t2, sstatus",
-        "csrr  t3, sepc",
-        "csrr  t4, scause",
-        "csrr  t5, stval",
-        "csrrw t6, sscratch, t0",
-        "sd    t6, {t0}(t0)",
-        "sd    t2, {sstatus}(t0)",
-        "sd    t3, {sepc}(t0)",
-        "sd    t4, {scause}(t0)",
-        "sd    t5, {stval}(t0)",
-        "la    a0, {dirty_task_context}",
-        "mv    a1, ra",
-        "j     {task_context_switch}",
+        "csrrw gp, sscratch, gp",
+
+        "sd    a0, {a0}(gp)",
+        "mv    a0, s0",
+        "ld    s0, {s0}(gp)",
+        "sd    a0, {s0}(gp)",
+
+        "sd    a1, {a1}(gp)",
+        "mv    a1, s1",
+        "ld    s1, {s1}(gp)",
+        "sd    a1, {s1}(gp)",
+
+        "sd    a2, {a2}(gp)",
+        "mv    a2, s2",
+        "ld    s2, {s2}(gp)",
+        "sd    a2, {s2}(gp)",
+
+        "sd    a3, {a3}(gp)",
+        "mv    a3, s3",
+        "ld    s3, {s3}(gp)",
+        "sd    a3, {s3}(gp)",
+
+        "sd    a4, {a4}(gp)",
+        "mv    a4, s4",
+        "ld    s4, {s4}(gp)",
+        "sd    a4, {s4}(gp)",
+
+        "sd    a5, {a5}(gp)",
+        "mv    a5, s5",
+        "ld    s5, {s5}(gp)",
+        "sd    a5, {s5}(gp)",
+
+        "sd    a6, {a6}(gp)",
+        "mv    a6, s6",
+        "ld    s6, {s6}(gp)",
+        "sd    a6, {s6}(gp)",
+
+        "sd    a7, {a7}(gp)",
+        "mv    a7, s7",
+        "ld    s7, {s7}(gp)",
+        "sd    a7, {s7}(gp)",
+
+        "sd    t0, {t0}(gp)",
+        "mv    t0, s8",
+        "ld    s8, {s8}(gp)",
+        "sd    t0, {s8}(gp)",
+
+        "sd    t1, {t1}(gp)",
+        "mv    t1, s9",
+        "ld    s9, {s9}(gp)",
+        "sd    t1, {s9}(gp)",
+
+        "sd    t2, {t2}(gp)",
+        "mv    t2, s10",
+        "ld    s10, {s10}(gp)",
+        "sd    t2, {s10}(gp)",
+
+        "sd    t3, {t3}(gp)",
+        "mv    t3, s11",
+        "ld    s11, {s11}(gp)",
+        "sd    t3, {s11}(gp)",
+
+        "sd    t4, {t4}(gp)",
+        "mv    t4, ra",
+        "ld    ra, {ra}(gp)",
+        "sd    t4, {ra}(gp)",
+
+        "sd    t5, {t5}(gp)",
+        "mv    t5, tp",
+        "ld    tp, {tp}(gp)",
+        "sd    t5, {tp}(gp)",
+
+        "sd    t6, {t6}(gp)",
+        "mv    t6, sp",
+        "ld    sp, {sp}(gp)",
+        "sd    t6, {sp}(gp)",
+
+        "ld    t5, {sstatus}(gp)",
+
+        "csrrw t0, sscratch, gp",
+        "sd    t0, {gp}(gp)",
+
+        "csrr  t1, sstatus",
+        "sd    t1, {sstatus}(gp)",
+
+        "csrr  t2, sepc",
+        "sd    t2, {sepc}(gp)",
+
+        "csrr  t3, scause",
+        "sd    t3, {scause}(gp)",
+
+        "csrr  t4, stval",
+        "sd    t4, {stval}(gp)",
+
+        "csrw  sstatus, t5",
+        "ret",
         ra = const Registers::OFFSET_RA,
         sp = const Registers::OFFSET_SP,
         gp = const Registers::OFFSET_GP,
@@ -91,54 +140,99 @@ pub(super) unsafe extern "C" fn _captured_trap_entry() -> ! {
         sepc = const TrapContext::OFFSET_SEPC,
         scause = const TrapContext::OFFSET_SCAUSE,
         stval = const TrapContext::OFFSET_STVAL,
-        dirty_task_context = sym DIRTY_TASK_CONTEXT,
-        task_context_switch = sym TaskContext::switch,
     );
 }
 
 #[unsafe(naked)]
-pub(super) unsafe extern "C" fn _captured_trap_return(ctx: &mut TrapContext) -> ! {
+pub(super) unsafe extern "C" fn _captured_trap_return(ctx: &mut TrapContext) {
     naked_asm!(
-        "csrr   t0,  sscratch",
-        "ld     t1,  {sstatus}(t0)",
-        "ld     t2,  {sepc}(t0)",
-        "csrw   sstatus, t1",
-        "csrw   sepc, t2",
-        "mv     t4,  tp",
-        "mv     t5,  sp",
-        "ld     tp,  {tp}(t0)",
-        "ld     ra,  {ra}(t0)",
-        "ld     sp,  {sp}(t0)",
-        "sd     t4,  {ra}(t0)", // Store kernel tp to trap_ctx.ra
-        "sd     t5,  {sp}(t0)", // Store capturer task context to trap_ctx.sp
-        "ld     gp,  {gp}(t0)",
-        "ld     a0,  {a0}(t0)",
-        "ld     a1,  {a1}(t0)",
-        "ld     a2,  {a2}(t0)",
-        "ld     a3,  {a3}(t0)",
-        "ld     a4,  {a4}(t0)",
-        "ld     t1,  {t1}(t0)",
-        "ld     a5,  {a5}(t0)",
-        "ld     a6,  {a6}(t0)",
-        "ld     a7,  {a7}(t0)",
-        "ld     t3,  {t3}(t0)",
-        "ld     t4,  {t4}(t0)",
-        "ld     t5,  {t5}(t0)",
-        "ld     t2,  {t2}(t0)",
-        "ld     t6,  {t6}(t0)",
-        "ld     s0,  {s0}(t0)",
-        "ld     s1,  {s1}(t0)",
-        "ld     s2,  {s2}(t0)",
-        "ld     s3,  {s3}(t0)",
-        "ld     s4,  {s4}(t0)",
-        "ld     s5,  {s5}(t0)",
-        "ld     s6,  {s6}(t0)",
-        "ld     s7,  {s7}(t0)",
-        "ld     s8,  {s8}(t0)",
-        "ld     s9,  {s9}(t0)",
-        "ld     s10, {s10}(t0)",
-        "ld     s11, {s11}(t0)",
-        "ld     t0,  {t0}(t0)",
+        "mv    t6, a0",
+
+        "mv    a0, s0",
+        "ld    s0, {s0}(t6)",
+        "sd    a0, {s0}(t6)",
+
+        "mv    a1, s1",
+        "ld    s1, {s1}(t6)",
+        "sd    a1, {s1}(t6)",
+
+        "mv    a2, s2",
+        "ld    s2, {s2}(t6)",
+        "sd    a2, {s2}(t6)",
+
+        "mv    a3, s3",
+        "ld    s3, {s3}(t6)",
+        "sd    a3, {s3}(t6)",
+
+        "mv    a4, s4",
+        "ld    s4, {s4}(t6)",
+        "sd    a4, {s4}(t6)",
+
+        "mv    a5, s5",
+        "ld    s5, {s5}(t6)",
+        "sd    a5, {s5}(t6)",
+
+        "mv    a6, s6",
+        "ld    s6, {s6}(t6)",
+        "sd    a6, {s6}(t6)",
+
+        "mv    a7, s7",
+        "ld    s7, {s7}(t6)",
+        "sd    a7, {s7}(t6)",
+
+        "mv    t0, s8",
+        "ld    s8, {s8}(t6)",
+        "sd    t0, {s8}(t6)",
+
+        "mv    t1, s9",
+        "ld    s9, {s9}(t6)",
+        "sd    t1, {s9}(t6)",
+
+        "mv     t2, s10",
+        "ld    s10, {s10}(t6)",
+        "sd     t2, {s10}(t6)",
+
+        "mv     t3, s11",
+        "ld    s11, {s11}(t6)",
+        "sd     t3, {s11}(t6)",
+
+        "mv     t4, ra",
+        "ld     ra, {ra}(t6)",
+        "sd     t4, {ra}(t6)",
+
+        "mv     t5, tp",
+        "ld     tp, {tp}(t6)",
+        "sd     t5, {tp}(t6)",
+
+        "mv     a0, sp",
+        "ld     sp, {sp}(t6)",
+        "sd     a0, {sp}(t6)",
+
+        "csrr   t4, sstatus",
+        "ld     t5, {sstatus}(t6)",
+        "sd     t4, {sstatus}(t6)",
+        "ld     t4, {sepc}(t6)",
+
+        "ld     gp, {gp}(t6)",
+        "ld     a0, {a0}(t6)",
+        "ld     a1, {a1}(t6)",
+        "ld     a2, {a2}(t6)",
+        "ld     a3, {a3}(t6)",
+        "ld     a4, {a4}(t6)",
+        "ld     a5, {a5}(t6)",
+        "ld     a6, {a6}(t6)",
+        "ld     a7, {a7}(t6)",
+
+        "csrw   sstatus, t5",
+        "csrw      sepc, t4",
+
+        "ld     t0, {t0}(t6)",
+        "ld     t1, {t1}(t6)",
+        "ld     t2, {t2}(t6)",
+        "ld     t3, {t3}(t6)",
+        "ld     t4, {t4}(t6)",
+        "ld     t5, {t5}(t6)",
+        "ld     t6, {t6}(t6)",
         "sret",
         ra = const Registers::OFFSET_RA,
         sp = const Registers::OFFSET_SP,

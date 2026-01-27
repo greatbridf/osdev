@@ -9,7 +9,6 @@ use core::ptr::NonNull;
 
 use captured::{_captured_trap_entry, _captured_trap_return};
 use default::_default_trap_entry;
-use eonix_hal_traits::context::RawTaskContext;
 use eonix_hal_traits::trap::{IrqState as IrqStateTrait, TrapReturn};
 use riscv::asm::sfence_vma_all;
 use riscv::register::sstatus::{self, Sstatus};

@@ -30,12 +30,10 @@ use alloc::ffi::CString;
 use core::hint::spin_loop;
 use core::sync::atomic::{AtomicBool, Ordering};
 
-use eonix_hal::context::TaskContext;
 use eonix_hal::processor::CPU;
 use eonix_hal::symbol_addr;
-use eonix_hal::traits::context::RawTaskContext;
-use eonix_hal::traits::trap::IrqState;
-use eonix_hal::trap::disable_irqs_save;
+use eonix_hal::traits::trap::{IrqState, RawTrapContext, TrapReturn};
+use eonix_hal::trap::{disable_irqs_save, TrapContext};
 use eonix_mm::address::PRange;
 use eonix_runtime::scheduler::RUNTIME;
 use kernel::mem::GlobalPageAlloc;
@@ -68,7 +66,7 @@ fn kernel_init(mut data: eonix_hal::bootstrap::BootStrapData) -> ! {
 
     drop(data);
 
-    let mut ctx = TaskContext::new();
+    let mut ctx = TrapContext::new();
     let stack_bottom = {
         let stack = KernelStack::new();
         let bottom = stack.get_bottom().addr().get();
@@ -77,11 +75,12 @@ fn kernel_init(mut data: eonix_hal::bootstrap::BootStrapData) -> ! {
         bottom
     };
     ctx.set_interrupt_enabled(true);
+    ctx.set_user_mode(false);
     ctx.set_program_counter(symbol_addr!(standard_main));
     ctx.set_stack_pointer(stack_bottom);
 
     unsafe {
-        TaskContext::switch_to_noreturn(&mut ctx);
+        ctx.trap_return_noreturn();
     }
 }
 
@@ -94,7 +93,7 @@ fn kernel_ap_main(_stack_range: PRange) -> ! {
 
     println_debug!("AP{} started", CPU::local().cpuid());
 
-    let mut ctx = TaskContext::new();
+    let mut ctx = TrapContext::new();
     let stack_bottom = {
         let stack = KernelStack::new();
         let bottom = stack.get_bottom().addr().get();
@@ -103,11 +102,12 @@ fn kernel_ap_main(_stack_range: PRange) -> ! {
         bottom
     };
     ctx.set_interrupt_enabled(true);
+    ctx.set_user_mode(false);
     ctx.set_program_counter(symbol_addr!(standard_main));
     ctx.set_stack_pointer(stack_bottom);
 
     unsafe {
-        TaskContext::switch_to_noreturn(&mut ctx);
+        ctx.trap_return_noreturn();
     }
 }
 

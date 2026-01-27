@@ -2,7 +2,6 @@ use core::marker::PhantomData;
 
 use eonix_mm::address::VAddr;
 
-use crate::context::RawTaskContext;
 use crate::fault::Fault;
 
 /// A raw trap context.
@@ -40,8 +39,6 @@ pub trait RawTrapContext: Copy {
 
 #[doc(notable_trait)]
 pub trait TrapReturn {
-    type TaskContext: RawTaskContext;
-
     /// Return to the context before the trap occurred.
     ///
     /// # Safety
@@ -50,6 +47,17 @@ pub trait TrapReturn {
     /// points to a valid stack frame and the program counter points to some
     /// valid instruction.
     unsafe fn trap_return(&mut self);
+
+    /// Switch to the context before the trap occurred.
+    /// This function will NOT capture traps and will never return.
+    ///
+    /// # Safety
+    /// This function is unsafe because the caller MUST ensure that the
+    /// context before the trap is valid, that is, that the stack pointer
+    /// points to a valid stack frame and the program counter points to some
+    /// valid instruction. Besides, the caller MUST ensure that all variables
+    /// in the current context are released.
+    unsafe fn trap_return_noreturn(&mut self) -> !;
 }
 
 pub trait IrqState {

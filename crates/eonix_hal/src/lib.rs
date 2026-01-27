@@ -6,7 +6,6 @@
 pub(crate) mod arch;
 
 pub mod bootstrap;
-pub mod context;
 pub mod mm;
 pub mod trap;
 

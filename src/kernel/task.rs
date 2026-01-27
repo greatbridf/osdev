@@ -99,7 +99,6 @@ where
     use eonix_hal::traits::trap::{RawTrapContext, TrapReturn, TrapType};
     use eonix_hal::trap::TrapContext;
     use eonix_preempt::assert_preempt_enabled;
-    use eonix_runtime::executor::Stack;
     use eonix_runtime::task::Task;
     use thread::wait_for_wakeups;
 

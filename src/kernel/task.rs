@@ -164,6 +164,9 @@ where
 
                         #[cfg(target_arch = "loongarch64")]
                         core::arch::asm!("break 1");
+
+                        #[cfg(target_arch = "x86_64")]
+                        core::arch::asm!("int 3");
                     }
                 }
             }
@@ -183,6 +186,9 @@ where
 
             #[cfg(target_arch = "loongarch64")]
             core::arch::asm!("break 1");
+
+            #[cfg(target_arch = "x86_64")]
+            core::arch::asm!("int 3");
         }
 
         unreachable!()

@@ -2,7 +2,7 @@ use core::arch::asm;
 use core::mem::offset_of;
 
 use eonix_hal_traits::fault::{Fault, PageFaultErrorCode};
-use eonix_hal_traits::trap::{RawTrapContext, TrapType};
+use eonix_hal_traits::trap::{RawTrapContext, Stack, TrapType};
 use eonix_mm::address::VAddr;
 use riscv::interrupt::{Exception, Interrupt, Trap};
 use riscv::register::scause::{self, Scause};
@@ -275,6 +275,31 @@ impl RawTrapContext for TrapContext {
         }
 
         Ok(())
+    }
+
+    fn set_kernel_call_frame(
+        &mut self, pc: usize, sp: &impl Stack, ra: Option<usize>,
+        args: &[usize],
+    ) {
+        self.set_program_counter(pc);
+        self.set_stack_pointer(sp.get_bottom().addr());
+
+        if let Some(ra) = ra {
+            self.regs.ra = ra as u64;
+        }
+
+        let arg_regs = [
+            &mut self.regs.a0,
+            &mut self.regs.a1,
+            &mut self.regs.a2,
+            &mut self.regs.a3,
+            &mut self.regs.a4,
+            &mut self.regs.a5,
+        ];
+
+        for (&arg, reg) in args.iter().zip(arg_regs.into_iter()) {
+            *reg = arg as u64;
+        }
     }
 }
 

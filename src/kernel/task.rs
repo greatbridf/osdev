@@ -109,7 +109,7 @@ where
 
     let stack = KernelStack::new();
 
-    fn execute<F>(
+    unsafe extern "C" fn execute<F>(
         mut future: Pin<&mut F>, output_ptr: NonNull<Option<F::Output>>,
     ) -> !
     where
@@ -194,19 +194,17 @@ where
         unreachable!()
     }
 
-    let sp = stack.get_bottom();
     let mut output = UnsafeCell::new(None);
 
     let mut trap_ctx = TrapContext::new();
 
     trap_ctx.set_user_mode(false);
     trap_ctx.set_interrupt_enabled(true);
-    let _ = trap_ctx.set_user_call_frame(
+    trap_ctx.set_kernel_call_frame(
         symbol_addr!(execute::<F>),
-        Some(sp.addr().get()),
+        &stack,
         None,
         &[(&raw mut future) as usize, output.get() as usize],
-        |_, _| Ok::<(), u32>(()),
     );
 
     loop {

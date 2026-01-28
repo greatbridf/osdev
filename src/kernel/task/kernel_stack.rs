@@ -1,5 +1,7 @@
 use core::ptr::NonNull;
 
+use eonix_hal::traits::trap::Stack;
+
 use crate::kernel::mem::FolioOwned;
 
 #[derive(Debug)]
@@ -24,5 +26,11 @@ impl KernelStack {
 
         // SAFETY: The vaddr of the folio is guaranteed to be non-zero.
         unsafe { ptr.cast().byte_add(len) }
+    }
+}
+
+impl Stack for KernelStack {
+    fn get_bottom(&self) -> *mut usize {
+        self.get_bottom().cast().as_ptr()
     }
 }

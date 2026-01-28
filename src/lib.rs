@@ -67,17 +67,13 @@ fn kernel_init(mut data: eonix_hal::bootstrap::BootStrapData) -> ! {
     drop(data);
 
     let mut ctx = TrapContext::new();
-    let stack_bottom = {
-        let stack = KernelStack::new();
-        let bottom = stack.get_bottom().addr().get();
-        core::mem::forget(stack);
+    let stack = KernelStack::new();
 
-        bottom
-    };
     ctx.set_interrupt_enabled(true);
     ctx.set_user_mode(false);
-    ctx.set_program_counter(symbol_addr!(standard_main));
-    ctx.set_stack_pointer(stack_bottom);
+    ctx.set_kernel_call_frame(symbol_addr!(standard_main), &stack, None, &[]);
+
+    core::mem::forget(stack);
 
     unsafe {
         ctx.trap_return_noreturn();
@@ -94,17 +90,13 @@ fn kernel_ap_main(_stack_range: PRange) -> ! {
     println_debug!("AP{} started", CPU::local().cpuid());
 
     let mut ctx = TrapContext::new();
-    let stack_bottom = {
-        let stack = KernelStack::new();
-        let bottom = stack.get_bottom().addr().get();
-        core::mem::forget(stack);
+    let stack = KernelStack::new();
 
-        bottom
-    };
     ctx.set_interrupt_enabled(true);
     ctx.set_user_mode(false);
-    ctx.set_program_counter(symbol_addr!(standard_main));
-    ctx.set_stack_pointer(stack_bottom);
+    ctx.set_kernel_call_frame(symbol_addr!(standard_main), &stack, None, &[]);
+
+    core::mem::forget(stack);
 
     unsafe {
         ctx.trap_return_noreturn();

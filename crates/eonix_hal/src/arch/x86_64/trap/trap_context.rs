@@ -2,7 +2,7 @@ use core::arch::asm;
 use core::mem::offset_of;
 
 use eonix_hal_traits::fault::{Fault, PageFaultErrorCode};
-use eonix_hal_traits::trap::{RawTrapContext, TrapType};
+use eonix_hal_traits::trap::{RawTrapContext, Stack, TrapType};
 use eonix_mm::address::VAddr;
 
 use crate::processor::CPU;
@@ -220,5 +220,31 @@ impl RawTrapContext for TrapContext {
 
         self.set_stack_pointer(sp);
         Ok(())
+    }
+
+    fn set_kernel_call_frame(
+        &mut self, pc: usize, stack: &impl Stack, ra: Option<usize>,
+        args: &[usize],
+    ) {
+        let sp = stack.get_bottom().wrapping_sub(1);
+
+        self.set_program_counter(pc);
+        self.set_stack_pointer(sp.addr());
+
+        unsafe {
+            sp.write(ra.map(|f| f as usize).unwrap_or(0));
+        }
+
+        if let Some(&arg) = args.get(0) {
+            self.rdi = arg as _;
+        }
+
+        if let Some(&arg) = args.get(1) {
+            self.rsi = arg as _;
+        }
+
+        if args.len() > 2 {
+            unimplemented!("More than 2 arguments are not supported for now");
+        }
     }
 }

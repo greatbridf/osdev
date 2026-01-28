@@ -17,7 +17,26 @@ pub trait RawTrapContext: Copy {
     type FIrq: FnOnce(fn(irqno: usize));
     type FTimer: FnOnce(fn());
 
-    fn new() -> Self;
+    /// **Don't use this function unless you know what you're doing**
+    ///
+    /// Create a blank trap context.
+    ///
+    /// The context should be in a state that is ready to be used but whether
+    /// the interrupt is enabled or the context is in user mode is unspecified.
+    fn blank() -> Self;
+
+    /// Create a new trap context.
+    ///
+    /// The context will be in a state that is ready to be used. Whether the
+    /// interrupt is enabled or the context is in user mode is specified by
+    /// the arguments.
+    fn new(int_enabled: bool, user: bool) -> Self {
+        let mut me = Self::blank();
+        me.set_interrupt_enabled(int_enabled);
+        me.set_user_mode(user);
+
+        me
+    }
 
     fn trap_type(&self) -> TrapType<Self::FIrq, Self::FTimer>;
 

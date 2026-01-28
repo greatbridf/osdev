@@ -200,11 +200,9 @@ impl ThreadBuilder {
     }
 
     pub fn entry(mut self, entry: VAddr, stack_pointer: VAddr) -> Self {
-        let mut trap_ctx = TrapContext::new();
-        trap_ctx.set_user_mode(true);
+        let mut trap_ctx = TrapContext::new(true, true);
         trap_ctx.set_program_counter(entry.addr());
         trap_ctx.set_stack_pointer(stack_pointer.addr());
-        trap_ctx.set_interrupt_enabled(true);
 
         self.trap_ctx = Some(trap_ctx);
         self

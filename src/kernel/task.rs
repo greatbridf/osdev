@@ -196,10 +196,8 @@ where
 
     let mut output = UnsafeCell::new(None);
 
-    let mut trap_ctx = TrapContext::new();
+    let mut trap_ctx = TrapContext::new(true, false);
 
-    trap_ctx.set_user_mode(false);
-    trap_ctx.set_interrupt_enabled(true);
     trap_ctx.set_kernel_call_frame(
         symbol_addr!(execute::<F>),
         &stack,

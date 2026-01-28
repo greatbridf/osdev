@@ -66,11 +66,9 @@ fn kernel_init(mut data: eonix_hal::bootstrap::BootStrapData) -> ! {
 
     drop(data);
 
-    let mut ctx = TrapContext::new();
+    let mut ctx = TrapContext::new(true, false);
     let stack = KernelStack::new();
 
-    ctx.set_interrupt_enabled(true);
-    ctx.set_user_mode(false);
     ctx.set_kernel_call_frame(symbol_addr!(standard_main), &stack, None, &[]);
 
     core::mem::forget(stack);
@@ -89,11 +87,9 @@ fn kernel_ap_main(_stack_range: PRange) -> ! {
 
     println_debug!("AP{} started", CPU::local().cpuid());
 
-    let mut ctx = TrapContext::new();
+    let mut ctx = TrapContext::new(true, false);
     let stack = KernelStack::new();
 
-    ctx.set_interrupt_enabled(true);
-    ctx.set_user_mode(false);
     ctx.set_kernel_call_frame(symbol_addr!(standard_main), &stack, None, &[]);
 
     core::mem::forget(stack);

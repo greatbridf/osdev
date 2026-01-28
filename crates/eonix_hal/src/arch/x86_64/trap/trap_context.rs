@@ -109,7 +109,7 @@ impl RawTrapContext for TrapContext {
     type FIrq = impl FnOnce(fn(irqno: usize));
     type FTimer = fn(handler: fn());
 
-    fn new() -> Self {
+    fn blank() -> Self {
         Self {
             ..Default::default()
         }

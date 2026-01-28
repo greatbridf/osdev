@@ -122,7 +122,7 @@ impl RawTrapContext for TrapContext {
     type FIrq = fn(handler: fn(irqno: usize));
     type FTimer = fn(handler: fn());
 
-    fn new() -> Self {
+    fn blank() -> Self {
         let mut sstatus = Sstatus::from_bits(0);
         sstatus.set_fs(FS::Initial);
         sstatus.set_sum(true);

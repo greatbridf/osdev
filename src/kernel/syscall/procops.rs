@@ -245,10 +245,8 @@ async fn execve(
     thread.set_name(dentry.get_name());
 
     let mut trap_ctx = thread.trap_ctx.borrow();
-    *trap_ctx = TrapContext::new();
+    *trap_ctx = TrapContext::new(true, true);
 
-    trap_ctx.set_user_mode(true);
-    trap_ctx.set_interrupt_enabled(true);
     trap_ctx.set_program_counter(load_info.entry_ip.addr());
     trap_ctx.set_stack_pointer(load_info.sp.addr());
 

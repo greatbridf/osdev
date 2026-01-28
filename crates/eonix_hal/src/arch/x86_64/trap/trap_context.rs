@@ -117,6 +117,7 @@ impl RawTrapContext for TrapContext {
 
     fn trap_type(&self) -> TrapType<Self::FIrq, Self::FTimer> {
         match self.int_no {
+            3 => TrapType::Breakpoint,
             0..0x20 => TrapType::Fault(self.get_fault_type()),
             0x40 => TrapType::Timer {
                 callback: |handler| {

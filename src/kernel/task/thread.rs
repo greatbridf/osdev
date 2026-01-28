@@ -176,16 +176,14 @@ impl ThreadBuilder {
     }
 
     pub fn set_child_tid(
-        mut self,
-        set_child_tid: Option<UserMut<u32>>,
+        mut self, set_child_tid: Option<UserMut<u32>>,
     ) -> Self {
         self.set_child_tid = set_child_tid;
         self
     }
 
     pub fn clear_child_tid(
-        mut self,
-        clear_child_tid: Option<UserMut<u32>>,
+        mut self, clear_child_tid: Option<UserMut<u32>>,
     ) -> Self {
         self.clear_child_tid = clear_child_tid;
         self
@@ -214,9 +212,7 @@ impl ThreadBuilder {
 
     /// Clone the thread from another thread.
     pub fn clone_from(
-        self,
-        thread: &Thread,
-        clone_args: &CloneArgs,
+        self, thread: &Thread, clone_args: &CloneArgs,
     ) -> KResult<Self> {
         let inner = thread.inner.lock();
 
@@ -331,8 +327,7 @@ impl Thread {
     }
 
     pub fn set_robust_list(
-        &self,
-        robust_list_address: Option<User<RobustListHead>>,
+        &self, robust_list_address: Option<User<RobustListHead>>,
     ) {
         self.inner.lock().robust_list_address = robust_list_address;
     }
@@ -365,10 +360,7 @@ impl Thread {
     }
 
     pub async fn handle_syscall(
-        &self,
-        thd_alloc: ThreadAlloc<'_>,
-        no: usize,
-        args: [usize; 6],
+        &self, thd_alloc: ThreadAlloc<'_>, no: usize, args: [usize; 6],
     ) -> Option<usize> {
         match syscall_handlers().get(no) {
             Some(Some(SyscallHandler {
@@ -549,8 +541,7 @@ impl Thread {
 
 unsafe impl Allocator for ThreadAlloc<'_> {
     fn allocate(
-        &self,
-        layout: core::alloc::Layout,
+        &self, layout: core::alloc::Layout,
     ) -> Result<NonNull<[u8]>, alloc::alloc::AllocError> {
         self.0.allocate(layout)
     }
@@ -569,8 +560,7 @@ pub async fn yield_now() {
         type Output = ();
 
         fn poll(
-            mut self: Pin<&mut Self>,
-            cx: &mut Context<'_>,
+            mut self: Pin<&mut Self>, cx: &mut Context<'_>,
         ) -> Poll<Self::Output> {
             if self.as_mut().yielded {
                 Poll::Ready(())

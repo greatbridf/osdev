@@ -20,9 +20,9 @@ jobs:
           - arch: riscv64
             target: riscv64gc-unknown-none-elf
             platform: virt
-          - arch: loongarch64
-            target: loongarch64-unknown-none-softfloat
-            platform: virt
+          - arch: x86_64
+            target: x86_64-unknown-none
+            platform: acpi_compat
     steps:
       - name: Checkout code
         uses: actions/checkout@v4

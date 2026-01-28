@@ -4,6 +4,10 @@ use eonix_mm::address::VAddr;
 
 use crate::fault::Fault;
 
+pub trait Stack {
+    fn get_bottom(&self) -> *mut usize;
+}
+
 /// A raw trap context.
 ///
 /// This should be implemented by the architecture-specific trap context
@@ -35,6 +39,11 @@ pub trait RawTrapContext: Copy {
         &mut self, pc: usize, sp: Option<usize>, ra: Option<usize>,
         args: &[usize], write_memory: impl Fn(VAddr, &[u8]) -> Result<(), E>,
     ) -> Result<(), E>;
+
+    fn set_kernel_call_frame(
+        &mut self, pc: usize, stack: &impl Stack, ra: Option<usize>,
+        args: &[usize],
+    );
 }
 
 #[doc(notable_trait)]

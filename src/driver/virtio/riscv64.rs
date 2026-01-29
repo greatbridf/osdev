@@ -1,8 +1,5 @@
 use super::virtio_blk::HAL;
-use crate::kernel::{
-    block::{make_device, BlockDevice},
-    task::block_on,
-};
+use crate::kernel::{block::BlockDevice, task::block_on, vfs::types::DeviceId};
 use alloc::{sync::Arc, vec::Vec};
 use eonix_hal::arch_exported::fdt::FDT;
 use eonix_hal::mm::ArchPhysAccess;
@@ -43,7 +40,7 @@ pub fn init() {
                         .expect("Failed to initialize VirtIO Block device");
 
                     let block_device = BlockDevice::register_disk(
-                        make_device(8, 16 * disk_id),
+                        DeviceId::new(8, 16 * disk_id),
                         2147483647,
                         Arc::new(Spin::new(block_device)),
                     )

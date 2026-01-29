@@ -1,14 +1,16 @@
-use super::mem::handle_kernel_page_fault;
-use super::task::block_on;
-use super::timer::timer_interrupt;
-use crate::kernel::constants::EINVAL;
-use crate::prelude::*;
 use alloc::sync::Arc;
+
 use eonix_hal::traits::fault::Fault;
 use eonix_hal::traits::trap::{RawTrapContext, TrapType};
 use eonix_hal::trap::TrapContext;
 use eonix_mm::address::{Addr as _, VAddr};
 use eonix_sync::SpinIrq as _;
+
+use super::mem::handle_kernel_page_fault;
+use super::task::block_on;
+use super::timer::timer_interrupt;
+use crate::kernel::constants::EINVAL;
+use crate::prelude::*;
 
 static IRQ_HANDLERS: Spin<[Vec<Arc<dyn Fn() + Send + Sync>>; 16]> =
     Spin::new([const { Vec::new() }; 16]);

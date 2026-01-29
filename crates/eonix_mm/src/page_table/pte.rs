@@ -1,5 +1,6 @@
-use crate::paging::PFN;
 use bitflags::bitflags;
+
+use crate::paging::PFN;
 
 bitflags! {
     #[derive(Clone, Copy, PartialEq)]

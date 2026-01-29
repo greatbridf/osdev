@@ -1,6 +1,8 @@
+use core::mem::MaybeUninit;
+use core::ops::{Add, AddAssign, Sub};
+
 use crate::kernel::constants::EFAULT;
 use crate::prelude::*;
-use core::{cmp, mem::MaybeUninit};
 
 #[must_use]
 #[derive(Debug)]
@@ -236,18 +238,26 @@ impl Buffer for ByteBuffer<'_> {
     }
 }
 
+pub trait Integer:
+    Add<Output = Self> + Sub<Output = Self> + AddAssign + Copy + PartialOrd + Ord
+{
+}
+
+impl Integer for u64 {}
+impl Integer for usize {}
+
 /// Iterator that generates chunks of a given length from a start index
 /// until the end of the total length.
 ///
 /// The iterator returns a tuple of (start, len) for each chunk.
-pub struct Chunks {
-    end: usize,
-    cur: usize,
-    chunk_len: usize,
+pub struct Chunks<T: Integer> {
+    end: T,
+    cur: T,
+    chunk_len: T,
 }
 
-impl Chunks {
-    pub const fn new(start: usize, total_len: usize, chunk_len: usize) -> Self {
+impl<T: Integer> Chunks<T> {
+    pub fn new(start: T, total_len: T, chunk_len: T) -> Self {
         Self {
             end: start + total_len,
             cur: start,
@@ -256,8 +266,8 @@ impl Chunks {
     }
 }
 
-impl Iterator for Chunks {
-    type Item = (usize, usize);
+impl<T: Integer> Iterator for Chunks<T> {
+    type Item = (T, T);
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.cur >= self.end {
@@ -265,7 +275,7 @@ impl Iterator for Chunks {
         }
 
         let start = self.cur;
-        let len = cmp::min(self.chunk_len, self.end - start);
+        let len = self.chunk_len.min(self.end - start);
 
         self.cur += self.chunk_len;
         Some((start, len))

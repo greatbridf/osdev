@@ -11,7 +11,9 @@ pub mod mm;
 pub mod trap;
 
 pub mod fence {
-    pub use crate::arch::fence::{memory_barrier, read_memory_barrier, write_memory_barrier};
+    pub use crate::arch::fence::{
+        memory_barrier, read_memory_barrier, write_memory_barrier,
+    };
 }
 
 pub mod fpu {
@@ -19,7 +21,7 @@ pub mod fpu {
 }
 
 pub mod processor {
-    pub use crate::arch::cpu::{halt, UserTLS, CPU, CPU_COUNT};
+    pub use crate::arch::cpu::{halt, CPU, CPU_COUNT};
 }
 
 /// Re-export the arch module for use in other crates
@@ -43,3 +45,43 @@ pub mod arch_exported {
 
 pub use eonix_hal_macros::{ap_main, default_trap_handler, main};
 pub use eonix_hal_traits as traits;
+
+#[macro_export]
+macro_rules! symbol_addr {
+    ($sym:expr) => {{
+        ($sym) as *const () as usize
+    }};
+    ($sym:expr, $type:ty) => {{
+        ($sym) as *const () as *const $type
+    }};
+}
+
+#[macro_export]
+macro_rules! extern_symbol_addr {
+    ($sym:ident) => {{
+        unsafe extern "C" {
+            fn $sym();
+        }
+        $crate::symbol_addr!($sym)
+    }};
+    ($sym:ident, $type:ty) => {{
+        unsafe extern "C" {
+            fn $sym();
+        }
+        $crate::symbol_addr!($sym, $type)
+    }};
+}
+
+#[macro_export]
+macro_rules! extern_symbol_value {
+    ($sym:ident) => {{
+        unsafe extern "C" {
+            fn $sym();
+        }
+
+        static SYMBOL_ADDR: &'static unsafe extern "C" fn() =
+            &($sym as unsafe extern "C" fn());
+
+        unsafe { (SYMBOL_ADDR as *const _ as *const usize).read_volatile() }
+    }};
+}

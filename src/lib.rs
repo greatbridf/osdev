@@ -2,12 +2,16 @@
 #![no_main]
 #![feature(allocator_api)]
 #![feature(c_size_t)]
-#![feature(concat_idents)]
+#![feature(coerce_unsized)]
 #![feature(arbitrary_self_types)]
 #![feature(get_mut_unchecked)]
 #![feature(macro_metavar_expr)]
+#![feature(unsize)]
 
 extern crate alloc;
+
+#[macro_use]
+extern crate static_assertions;
 
 #[cfg(any(target_arch = "riscv64", target_arch = "x86_64"))]
 extern crate unwinding;
@@ -26,32 +30,27 @@ mod prelude;
 mod rcu;
 mod sync;
 
-use crate::kernel::task::alloc_pid;
-use alloc::{ffi::CString, sync::Arc};
-use core::{
-    hint::spin_loop,
-    sync::atomic::{AtomicBool, AtomicUsize, Ordering},
-};
-use eonix_hal::{
-    arch_exported::bootstrap::shutdown,
-    context::TaskContext,
-    processor::{halt, CPU, CPU_COUNT},
-    traits::{context::RawTaskContext, trap::IrqState},
-    trap::disable_irqs_save,
-};
+use alloc::ffi::CString;
+use core::hint::spin_loop;
+use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+use eonix_hal::arch_exported::bootstrap::shutdown;
+use eonix_hal::context::TaskContext;
+use eonix_hal::processor::{halt, CPU, CPU_COUNT};
+use eonix_hal::symbol_addr;
+use eonix_hal::traits::context::RawTaskContext;
+use eonix_hal::traits::trap::IrqState;
+use eonix_hal::trap::disable_irqs_save;
 use eonix_mm::address::PRange;
-use eonix_runtime::{executor::Stack, scheduler::RUNTIME};
-use kernel::{
-    mem::GlobalPageAlloc,
-    task::{KernelStack, ProcessBuilder, ProcessList, ProgramLoader, ThreadBuilder},
-    vfs::{
-        dentry::Dentry,
-        inode::Mode,
-        mount::{do_mount, MS_NOATIME, MS_NODEV, MS_NOSUID, MS_RDONLY},
-        FsContext,
-    },
-    CharDevice,
-};
+use eonix_runtime::executor::Stack;
+use eonix_runtime::scheduler::RUNTIME;
+use kernel::mem::GlobalPageAlloc;
+use kernel::task::{KernelStack, ProcessList, ProgramLoader};
+use kernel::vfs::dentry::Dentry;
+use kernel::vfs::mount::{do_mount, MS_NOATIME, MS_NODEV, MS_NOSUID, MS_RDONLY};
+use kernel::vfs::types::Permission;
+use kernel::vfs::FsContext;
+use kernel::CharDevice;
 use kernel_init::setup_memory;
 use path::Path;
 use prelude::*;
@@ -135,7 +134,7 @@ fn kernel_init(mut data: eonix_hal::bootstrap::BootStrapData) -> ! {
         bottom
     };
     ctx.set_interrupt_enabled(true);
-    ctx.set_program_counter(standard_main as usize);
+    ctx.set_program_counter(symbol_addr!(standard_main));
     ctx.set_stack_pointer(stack_bottom);
 
     unsafe {
@@ -161,7 +160,7 @@ fn kernel_ap_main(_stack_range: PRange) -> ! {
         bottom
     };
     ctx.set_interrupt_enabled(true);
-    ctx.set_program_counter(standard_main as usize);
+    ctx.set_program_counter(symbol_addr!(standard_main));
     ctx.set_stack_pointer(stack_bottom);
 
     unsafe {
@@ -192,16 +191,16 @@ async fn init_process(early_kstack: PRange) {
     {
         // We might want the serial initialized as soon as possible.
         driver::serial::init().unwrap();
-        driver::e1000e::register_e1000e_driver();
-        driver::ahci::register_ahci_driver();
+        driver::e1000e::register_e1000e_driver().await;
+        driver::ahci::register_ahci_driver().await;
     }
 
     #[cfg(target_arch = "riscv64")]
     {
         driver::serial::init().unwrap();
         driver::virtio::init_virtio_devices();
-        driver::e1000e::register_e1000e_driver();
-        driver::ahci::register_ahci_driver();
+        driver::e1000e::register_e1000e_driver().await;
+        driver::ahci::register_ahci_driver().await;
         driver::goldfish_rtc::probe();
     }
 
@@ -209,21 +208,26 @@ async fn init_process(early_kstack: PRange) {
     {
         driver::serial::init().unwrap();
         driver::virtio::init_virtio_devices();
-        driver::e1000e::register_e1000e_driver();
-        driver::ahci::register_ahci_driver();
+        driver::e1000e::register_e1000e_driver().await;
+        driver::ahci::register_ahci_driver().await;
     }
 
     fs::tmpfs::init();
-    fs::procfs::init();
+    fs::procfs::init().await;
     fs::fat32::init();
-    fs::ext4::init();
+    // fs::ext4::init();
 
     let load_info = {
         // mount fat32 /mnt directory
         let fs_context = FsContext::global();
-        let mnt_dir = Dentry::open(fs_context, Path::new(b"/mnt/").unwrap(), true).unwrap();
+        let mnt_dir = Dentry::open(fs_context, Path::new(b"/mnt/").unwrap(), true)
+            .await
+            .unwrap();
 
-        mnt_dir.mkdir(Mode::new(0o755)).unwrap();
+        mnt_dir
+            .mkdir(Permission::new(0o755))
+            .await
+            .expect("Failed to create /mnt directory");
 
         do_mount(
             &mnt_dir,
@@ -232,6 +236,7 @@ async fn init_process(early_kstack: PRange) {
             "fat32",
             MS_RDONLY | MS_NOATIME | MS_NODEV | MS_NOSUID,
         )
+        .await
         .unwrap();
 
         let init_names = [&b"/init"[..], &b"/sbin/init"[..], &b"/mnt/initsh"[..]];
@@ -239,7 +244,7 @@ async fn init_process(early_kstack: PRange) {
         let mut init_name = None;
         let mut init = None;
         for name in init_names {
-            if let Ok(dentry) = Dentry::open(fs_context, Path::new(name).unwrap(), true) {
+            if let Ok(dentry) = Dentry::open(fs_context, Path::new(name).unwrap(), true).await {
                 if dentry.is_valid() {
                     init_name = Some(CString::new(name).unwrap());
                     init = Some(dentry);
@@ -261,27 +266,12 @@ async fn init_process(early_kstack: PRange) {
         ];
 
         ProgramLoader::parse(fs_context, init_name, init.clone(), argv, envp)
+            .await
             .expect("Failed to parse init program")
             .load()
             .await
             .expect("Failed to load init program")
     };
 
-    let thread_builder = ThreadBuilder::new()
-        .name(Arc::from(&b"busybox"[..]))
-        .entry(load_info.entry_ip, load_info.sp);
-
-    let mut process_list = ProcessList::get().write().await;
-    let (thread, process) = ProcessBuilder::new()
-        .pid(alloc_pid())
-        .mm_list(load_info.mm_list)
-        .thread_builder(thread_builder)
-        .build(&mut process_list);
-
-    process_list.set_init_process(process);
-
-    // TODO!!!: Remove this.
-    thread.files.open_console();
-
-    RUNTIME.spawn(thread.run());
+    ProcessList::sys_init(load_info).await;
 }

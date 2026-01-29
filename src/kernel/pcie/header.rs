@@ -1,10 +1,9 @@
+use core::marker::PhantomData;
+use core::num::NonZero;
+use core::ops::{BitAnd, BitOr, Deref, Not};
+use core::sync::atomic::{AtomicU16, AtomicU32, Ordering};
+
 use bitflags::bitflags;
-use core::{
-    marker::PhantomData,
-    num::NonZero,
-    ops::{BitAnd, BitOr, Deref, Not},
-    sync::atomic::{AtomicU16, AtomicU32, Ordering},
-};
 use eonix_hal::fence::memory_barrier;
 
 pub trait BitFlag: Sized + Copy {
@@ -215,14 +214,14 @@ where
 }
 
 impl CommonHeader {
-    pub fn command(&self) -> Register<Command> {
+    pub fn command(&self) -> Register<'_, Command> {
         Register {
             register: unsafe { AtomicU16::from_ptr((&raw const self._command) as *mut u16) },
             _phantom: PhantomData,
         }
     }
 
-    pub fn status(&self) -> Register<Status> {
+    pub fn status(&self) -> Register<'_, Status> {
         Register {
             register: unsafe { AtomicU16::from_ptr((&raw const self._status) as *mut u16) },
             _phantom: PhantomData,
@@ -231,7 +230,7 @@ impl CommonHeader {
 }
 
 impl Bars<'_> {
-    pub fn iter(&self) -> impl Iterator<Item = BarsEntry> + '_ {
+    pub fn iter(&self) -> impl Iterator<Item = BarsEntry<'_>> + use<'_> {
         struct BarsIterator<'a> {
             bars: &'a [AtomicU32],
             pos: usize,

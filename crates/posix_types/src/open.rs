@@ -11,6 +11,8 @@ bitflags! {
         const O_CREAT = 0x40;
         /// Exclusive access, fail if file exists
         const O_EXCL = 0x80;
+        /// Don't set controlling terminal.
+        const O_NOCTTY = 0x100;
         /// Truncate file to zero length if it exists
         const O_TRUNC = 0x200;
         /// Open file in append mode
@@ -116,6 +118,8 @@ impl AtFlags {
     }
 
     pub fn statx_default_sync(&self) -> bool {
-        !self.intersects(AtFlags::AT_STATX_FORCE_SYNC | AtFlags::AT_STATX_DONT_SYNC)
+        !self.intersects(
+            AtFlags::AT_STATX_FORCE_SYNC | AtFlags::AT_STATX_DONT_SYNC,
+        )
     }
 }

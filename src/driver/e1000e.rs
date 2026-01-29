@@ -1,18 +1,19 @@
+use alloc::boxed::Box;
+use alloc::sync::Arc;
+use core::ptr::NonNull;
+
+use async_trait::async_trait;
+use eonix_hal::fence::memory_barrier;
+use eonix_mm::address::{Addr, PAddr};
+use eonix_mm::paging::Folio as _;
+use eonix_sync::SpinIrq;
+
 use crate::kernel::constants::{EAGAIN, EFAULT, EINVAL, EIO};
 use crate::kernel::interrupt::register_irq_handler;
-use crate::kernel::mem::paging::{self, AllocZeroed};
-use crate::kernel::mem::{AsMemoryBlock, PhysAccess};
+use crate::kernel::mem::{FolioOwned, PhysAccess};
 use crate::kernel::pcie::{self, Header, PCIDevice, PCIDriver, PciError};
 use crate::net::netdev;
 use crate::prelude::*;
-use alloc::boxed::Box;
-use alloc::sync::Arc;
-use alloc::vec::Vec;
-use core::ptr::NonNull;
-use eonix_hal::fence::memory_barrier;
-use eonix_mm::address::{Addr, PAddr};
-use eonix_sync::SpinIrq;
-use paging::Page;
 
 mod defs;
 
@@ -54,13 +55,15 @@ struct E1000eDev {
     id: u32,
 
     regs: Registers,
-    rt_desc_page: Page,
+    rt_desc_page: FolioOwned,
     rx_head: Option<u32>,
     rx_tail: Option<u32>,
     tx_tail: Option<u32>,
 
-    rx_buffers: Option<Box<Vec<Page>>>,
-    tx_buffers: Option<Box<Vec<Page>>>,
+    rx_buffers: Box<[FolioOwned; RX_DESC_SIZE]>,
+    // TODO: Implement E1000e send
+    #[allow(unused)]
+    tx_buffers: Box<[Option<FolioOwned>; TX_DESC_SIZE]>,
 }
 
 fn test(val: u32, bit: u32) -> bool {
@@ -195,7 +198,7 @@ impl netdev::Netdev for E1000eDev {
                 break;
             }
 
-            let ref mut desc = self.rx_desc_table()[next_tail as usize];
+            let desc = unsafe { &mut self.rx_desc_table()[next_tail as usize] };
             if !test(desc.status as u32, defs::RXD_STAT_DD as u32) {
                 Err(EIO)?;
             }
@@ -203,11 +206,8 @@ impl netdev::Netdev for E1000eDev {
             desc.status = 0;
             let len = desc.length as usize;
 
-            let buffers = self.rx_buffers.as_mut().ok_or(EIO)?;
-            let data = unsafe {
-                // SAFETY: No one could be writing to the buffer at this point.
-                &buffers[next_tail as usize].as_memblk().as_bytes()[..len]
-            };
+            let buffer = &self.rx_buffers[next_tail as usize];
+            let data = &buffer.as_bytes()[..len];
 
             println_debug!("e1000e: received {len} bytes, {:?}", PrintableBytes(data));
             self.rx_tail = Some(next_tail);
@@ -225,20 +225,17 @@ impl netdev::Netdev for E1000eDev {
             return Err(EAGAIN);
         }
 
-        let ref mut desc = self.tx_desc_table()[tail as usize];
+        let desc = unsafe { &mut self.tx_desc_table()[tail as usize] };
         if !test(desc.status as u32, defs::TXD_STAT_DD as u32) {
             return Err(EIO);
         }
 
-        let buffer_page = Page::alloc();
+        let mut buffer_page = FolioOwned::alloc();
         if buf.len() > buffer_page.len() {
             return Err(EFAULT);
         }
 
-        unsafe {
-            // SAFETY: We are the only one writing to this memory block.
-            buffer_page.as_memblk().as_bytes_mut()[..buf.len()].copy_from_slice(buf);
-        }
+        buffer_page.as_bytes_mut()[..buf.len()].copy_from_slice(buf);
 
         desc.buffer = PAddr::from(buffer_page.pfn()).addr() as u64;
         desc.length = buf.len() as u16;
@@ -248,9 +245,8 @@ impl netdev::Netdev for E1000eDev {
         self.tx_tail = Some(next_tail);
         self.regs.write(defs::REG_TDT, next_tail);
 
-        // TODO: check if the packets are sent and update self.tx_head state
-
-        Ok(())
+        unimplemented!("Check if the packets are sent and update self.tx_head state");
+        // Ok(())
     }
 }
 
@@ -323,26 +319,26 @@ impl E1000eDev {
         Ok(())
     }
 
-    fn reset(&self) -> Result<(), u32> {
+    fn reset(regs: &Registers) -> Result<(), u32> {
         // disable interrupts so we won't mess things up
-        self.regs.write(defs::REG_IMC, 0xffffffff);
+        regs.write(defs::REG_IMC, 0xffffffff);
 
-        let ctrl = self.regs.read(defs::REG_CTRL);
-        self.regs.write(defs::REG_CTRL, ctrl | defs::CTRL_GIOD);
+        let ctrl = regs.read(defs::REG_CTRL);
+        regs.write(defs::REG_CTRL, ctrl | defs::CTRL_GIOD);
 
-        while self.regs.read(defs::REG_STAT) & defs::STAT_GIOE != 0 {
+        while regs.read(defs::REG_STAT) & defs::STAT_GIOE != 0 {
             // wait for link up
         }
 
-        let ctrl = self.regs.read(defs::REG_CTRL);
-        self.regs.write(defs::REG_CTRL, ctrl | defs::CTRL_RST);
+        let ctrl = regs.read(defs::REG_CTRL);
+        regs.write(defs::REG_CTRL, ctrl | defs::CTRL_RST);
 
-        while self.regs.read(defs::REG_CTRL) & defs::CTRL_RST != 0 {
+        while regs.read(defs::REG_CTRL) & defs::CTRL_RST != 0 {
             // wait for reset
         }
 
         // disable interrupts again
-        self.regs.write(defs::REG_IMC, 0xffffffff);
+        regs.write(defs::REG_IMC, 0xffffffff);
 
         Ok(())
     }
@@ -359,64 +355,49 @@ impl E1000eDev {
         Ok(())
     }
 
-    pub fn new(base: PAddr, irq_no: usize) -> Result<Self, u32> {
-        let page = Page::zeroed();
+    pub fn new(base: PAddr, irq_no: usize) -> KResult<Self> {
+        let regs = Registers::new(base);
+        Self::reset(&regs)?;
 
-        let mut dev = Self {
+        let dev = Self {
             irq_no,
-            mac: [0; 6],
+            mac: regs.read_as(0x5400),
             status: netdev::LinkStatus::Down,
             speed: netdev::LinkSpeed::SpeedUnknown,
             id: netdev::alloc_id(),
-            regs: Registers::new(base),
-            rt_desc_page: page,
+            regs,
+            rt_desc_page: {
+                let mut folio = FolioOwned::alloc();
+                folio.as_bytes_mut().fill(0);
+                folio
+            },
             rx_head: None,
             rx_tail: None,
             tx_tail: None,
-            rx_buffers: None,
-            tx_buffers: None,
+            rx_buffers: Box::new(core::array::from_fn(|_| FolioOwned::alloc_order(2))),
+            tx_buffers: Box::new([const { None }; 32]),
         };
 
-        dev.reset()?;
+        unsafe {
+            for (desc, page) in dev.rx_desc_table().into_iter().zip(dev.rx_buffers.iter()) {
+                desc.buffer = page.start().addr() as u64;
+                desc.status = 0;
+            }
 
-        dev.mac = dev.regs.read_as(0x5400);
-        dev.tx_buffers = Some(Box::new(Vec::with_capacity(TX_DESC_SIZE)));
-
-        let mut rx_buffers = Box::new(Vec::with_capacity(RX_DESC_SIZE));
-
-        for index in 0..RX_DESC_SIZE {
-            let page = Page::alloc_order(2);
-
-            let ref mut desc = dev.rx_desc_table()[index];
-            desc.buffer = PAddr::from(page.pfn()).addr() as u64;
-            desc.status = 0;
-
-            rx_buffers.push(page);
+            for desc in dev.tx_desc_table() {
+                desc.status = defs::TXD_STAT_DD;
+            }
         }
-
-        for index in 0..TX_DESC_SIZE {
-            let ref mut desc = dev.tx_desc_table()[index];
-            desc.status = defs::TXD_STAT_DD;
-        }
-
-        dev.rx_buffers = Some(rx_buffers);
 
         Ok(dev)
     }
 
-    fn rx_desc_table(&self) -> &mut [RxDescriptor; RX_DESC_SIZE] {
-        unsafe {
-            // SAFETY: TODO
-            self.rt_desc_page.as_memblk().as_ptr().as_mut()
-        }
+    unsafe fn rx_desc_table(&self) -> &mut [RxDescriptor; RX_DESC_SIZE] {
+        self.rt_desc_page.get_ptr().cast().as_mut()
     }
 
-    fn tx_desc_table(&self) -> &mut [TxDescriptor; TX_DESC_SIZE] {
-        let (_, right) = self.rt_desc_page.as_memblk().split_at(0x200);
-        unsafe {
-            // SAFETY: TODO
-            right.as_ptr().as_mut()
-        }
+    unsafe fn tx_desc_table(&self) -> &mut [TxDescriptor; TX_DESC_SIZE] {
+        self.rt_desc_page.get_ptr().add(0x200).cast().as_mut()
     }
 }
 
@@ -424,12 +405,8 @@ impl Drop for E1000eDev {
     fn drop(&mut self) {
         assert_eq!(self.status, netdev::LinkStatus::Down);
 
-        if let Some(_) = self.rx_buffers.take() {}
-
-        // TODO: we should wait until all packets are sent
-        if let Some(_) = self.tx_buffers.take() {}
-
-        let _ = self.rt_desc_page;
+        // TODO: we should wait until all packets are sent before dropping
+        //       tx buffers.
     }
 }
 
@@ -437,6 +414,7 @@ struct Driver {
     dev_id: u16,
 }
 
+#[async_trait]
 impl PCIDriver for Driver {
     fn vendor_id(&self) -> u16 {
         0x8086
@@ -446,7 +424,7 @@ impl PCIDriver for Driver {
         self.dev_id
     }
 
-    fn handle_device(&self, device: Arc<PCIDevice<'static>>) -> Result<(), PciError> {
+    async fn handle_device(&self, device: Arc<PCIDevice<'static>>) -> Result<(), PciError> {
         let Header::Endpoint(header) = device.header else {
             Err(EINVAL)?
         };
@@ -473,10 +451,10 @@ impl PCIDriver for Driver {
     }
 }
 
-pub fn register_e1000e_driver() {
+pub async fn register_e1000e_driver() {
     let dev_ids = [0x100e, 0x10d3, 0x10ea, 0x153a];
 
     for id in dev_ids.into_iter() {
-        pcie::register_driver(Driver { dev_id: id }).unwrap();
+        pcie::register_driver(Driver { dev_id: id }).await.unwrap();
     }
 }

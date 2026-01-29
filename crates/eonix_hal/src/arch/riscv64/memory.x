@@ -3,7 +3,6 @@ ENTRY(_start)
 
 MEMORY {
     RAM    : org = 0x0000000080200000, len = 8M
-    VDSO   : org = 0x00007f0000000000, len = 4K
     KBSS   : org = 0xffffffff40000000, len = 2M
     KIMAGE : org = 0xffffffff80200000, len = 8M
 }

@@ -1,11 +1,11 @@
+use core::fmt;
+use core::ops::{Add, Sub};
+use core::ptr::NonNull;
+
 use super::addr::Addr;
 use crate::paging::{PAGE_SIZE_BITS, PFN};
-use core::{
-    fmt,
-    ops::{Add, Sub},
-    ptr::NonNull,
-};
 
+/// Convert PAddr to VAddr.
 pub trait PhysAccess {
     /// Translate the data that this address is pointing to into kernel
     /// accessible pointer. Use it with care.

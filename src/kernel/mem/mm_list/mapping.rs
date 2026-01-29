@@ -1,22 +1,16 @@
-use core::fmt::Debug;
-
-use crate::kernel::vfs::inode::Inode;
 use alloc::sync::Arc;
+
 use eonix_mm::paging::PAGE_SIZE;
+
+use crate::kernel::mem::PageCache;
 
 #[derive(Debug, Clone)]
 pub struct FileMapping {
-    pub file: Arc<dyn Inode>,
+    pub page_cache: Arc<PageCache>,
     /// Offset in the file, aligned to 4KB boundary.
     pub offset: usize,
     /// Length of the mapping. Exceeding part will be zeroed.
     pub length: usize,
-}
-
-impl Debug for dyn Inode {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "Inode()")
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -28,10 +22,10 @@ pub enum Mapping {
 }
 
 impl FileMapping {
-    pub fn new(file: Arc<dyn Inode>, offset: usize, length: usize) -> Self {
+    pub fn new(page_cache: Arc<PageCache>, offset: usize, length: usize) -> Self {
         assert_eq!(offset & (PAGE_SIZE - 1), 0);
         Self {
-            file,
+            page_cache,
             offset,
             length,
         }
@@ -39,10 +33,10 @@ impl FileMapping {
 
     pub fn offset(&self, offset: usize) -> Self {
         if self.length <= offset {
-            Self::new(self.file.clone(), self.offset + self.length, 0)
+            Self::new(self.page_cache.clone(), self.offset + self.length, 0)
         } else {
             Self::new(
-                self.file.clone(),
+                self.page_cache.clone(),
                 self.offset + offset,
                 self.length - offset,
             )

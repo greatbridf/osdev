@@ -1,23 +1,22 @@
-use crate::{
-    fs::procfs,
-    io::Buffer as _,
-    kernel::{
-        block::{make_device, BlockDevice},
-        constants::{EINVAL, EIO},
-        interrupt::register_irq_handler,
-        pcie::{self, Header, PCIDevice, PCIDriver, PciError},
-        task::block_on,
-    },
-    prelude::*,
-};
-use alloc::{format, sync::Arc};
+use alloc::format;
+use alloc::sync::Arc;
+
+use async_trait::async_trait;
 use control::AdapterControl;
 use defs::*;
 use eonix_mm::address::{AddrOps as _, PAddr};
 use eonix_sync::SpinIrq as _;
 use port::AdapterPort;
-
 pub(self) use register::Register;
+
+use crate::fs::procfs;
+use crate::io::Buffer as _;
+use crate::kernel::block::BlockDevice;
+use crate::kernel::constants::{EINVAL, EIO};
+use crate::kernel::interrupt::register_irq_handler;
+use crate::kernel::pcie::{self, Header, PCIDevice, PCIDriver, PciError};
+use crate::kernel::vfs::types::DeviceId;
+use crate::prelude::*;
 
 mod command;
 mod command_table;
@@ -29,7 +28,7 @@ pub(self) mod slot;
 mod stats;
 
 pub struct AHCIDriver {
-    devices: Spin<Vec<Arc<Device<'static>>>>,
+    devices: Spin<Vec<Arc<Device>>>,
 }
 
 pub struct BitsIterator {
@@ -63,22 +62,22 @@ impl Iterator for BitsIterator {
     }
 }
 
-struct Device<'a> {
+struct Device {
     control_base: PAddr,
     control: AdapterControl,
     _pcidev: Arc<PCIDevice<'static>>,
     /// # Lock
     /// Might be accessed from irq handler, use with `lock_irq()`
-    ports: Spin<[Option<Arc<AdapterPort<'a>>>; 32]>,
+    ports: Spin<[Option<Arc<AdapterPort>>; 32]>,
 }
 
 /// # Safety
 /// `pcidev` is never accessed from Rust code
 /// TODO!!!: place *mut pci_device in a safe wrapper
-unsafe impl Send for Device<'_> {}
-unsafe impl Sync for Device<'_> {}
+unsafe impl Send for Device {}
+unsafe impl Sync for Device {}
 
-impl Device<'_> {
+impl Device {
     fn handle_interrupt(&self) {
         // Safety
         // `self.ports` is accessed inside irq handler
@@ -107,8 +106,31 @@ impl Device<'_> {
     }
 }
 
-impl Device<'static> {
-    fn probe_ports(&self) -> KResult<()> {
+impl Device {
+    async fn probe_port(&self, port: Arc<AdapterPort>) -> KResult<()> {
+        port.init().await?;
+
+        {
+            let port = port.clone();
+            let name = format!("ahci-p{}-stats", port.nport);
+            procfs::populate_root(name.into_bytes().into(), move |buffer| {
+                port.print_stats(&mut buffer.get_writer())
+            })
+            .await;
+        }
+
+        let port = BlockDevice::register_disk(
+            DeviceId::new(8, port.nport as u16 * 16),
+            2147483647, // TODO: get size from device
+            port,
+        )?;
+
+        port.partprobe().await?;
+
+        Ok(())
+    }
+
+    async fn probe_ports(&self) -> KResult<()> {
         for nport in self.control.implemented_ports() {
             let port = Arc::new(AdapterPort::new(self.control_base, nport));
             if !port.status_ok() {
@@ -116,27 +138,7 @@ impl Device<'static> {
             }
 
             self.ports.lock_irq()[nport as usize] = Some(port.clone());
-            if let Err(e) = (|| -> KResult<()> {
-                port.init()?;
-
-                {
-                    let port = port.clone();
-                    let name = format!("ahci-p{}-stats", port.nport);
-                    procfs::populate_root(name.into_bytes().into(), move |buffer| {
-                        port.print_stats(&mut buffer.get_writer())
-                    })?;
-                }
-
-                let port = BlockDevice::register_disk(
-                    make_device(8, nport * 16),
-                    2147483647, // TODO: get size from device
-                    port,
-                )?;
-
-                block_on(port.partprobe())?;
-
-                Ok(())
-            })() {
+            if let Err(e) = self.probe_port(port).await {
                 self.ports.lock_irq()[nport as usize] = None;
                 println_warn!("probe port {nport} failed with {e}");
             }
@@ -154,6 +156,7 @@ impl AHCIDriver {
     }
 }
 
+#[async_trait]
 impl PCIDriver for AHCIDriver {
     fn vendor_id(&self) -> u16 {
         VENDOR_INTEL
@@ -163,7 +166,7 @@ impl PCIDriver for AHCIDriver {
         DEVICE_AHCI
     }
 
-    fn handle_device(&self, pcidev: Arc<PCIDevice<'static>>) -> Result<(), PciError> {
+    async fn handle_device(&self, pcidev: Arc<PCIDevice<'static>>) -> Result<(), PciError> {
         let Header::Endpoint(header) = pcidev.header else {
             Err(EINVAL)?
         };
@@ -200,7 +203,7 @@ impl PCIDriver for AHCIDriver {
         let device_irq = device.clone();
         register_irq_handler(irqno as i32, move || device_irq.handle_interrupt())?;
 
-        device.probe_ports()?;
+        device.probe_ports().await?;
 
         self.devices.lock().push(device);
 
@@ -208,6 +211,8 @@ impl PCIDriver for AHCIDriver {
     }
 }
 
-pub fn register_ahci_driver() {
-    pcie::register_driver(AHCIDriver::new()).expect("Register ahci driver failed");
+pub async fn register_ahci_driver() {
+    pcie::register_driver(AHCIDriver::new())
+        .await
+        .expect("Register ahci driver failed");
 }

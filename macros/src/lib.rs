@@ -123,7 +123,7 @@ fn define_syscall_impl(attrs: TokenStream, item: TokenStream) -> TokenStream {
                     Box::new_in(
                         async move {
                             eonix_log::println_trace!(
-                                "trace_syscall",
+                                feat: "trace_syscall",
                                 "tid{}: {}({}) => {{",
                                 thd.tid,
                                 #syscall_name_str,
@@ -133,7 +133,7 @@ fn define_syscall_impl(attrs: TokenStream, item: TokenStream) -> TokenStream {
                             let retval = #real_fn(thd, #(#args_call),*).await.into_retval();
 
                             eonix_log::println_trace!(
-                                "trace_syscall",
+                                feat: "trace_syscall",
                                 "}} => {:x?}",
                                 retval,
                             );

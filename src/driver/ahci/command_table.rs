@@ -1,45 +1,55 @@
-use super::{command::Command, PRDTEntry, FISH2D};
-use crate::kernel::mem::{AsMemoryBlock as _, Page};
+use core::ptr::NonNull;
+
 use eonix_mm::address::PAddr;
+use eonix_mm::paging::Folio as _;
 
-pub struct CommandTable<'a> {
-    page: Page,
-    command_fis: &'a mut FISH2D,
+use super::command::Command;
+use super::{PRDTEntry, FISH2D};
+use crate::kernel::mem::FolioOwned;
 
-    prdt: &'a mut [PRDTEntry; 248],
-    prdt_entries: Option<u16>,
+pub struct CommandTable {
+    page: FolioOwned,
+    cmd_fis: NonNull<FISH2D>,
+    prdt: NonNull<[PRDTEntry; 248]>,
+    prdt_entries: usize,
 }
 
-impl CommandTable<'_> {
+unsafe impl Send for CommandTable {}
+unsafe impl Sync for CommandTable {}
+
+impl CommandTable {
     pub fn new() -> Self {
-        let page = Page::alloc();
-        let memory = page.as_memblk();
+        let page = FolioOwned::alloc();
+        let base = page.get_ptr();
 
-        let (lhs, prdt) = memory.split_at(0x80);
-
-        let (command_fis, _) = lhs.split_at(size_of::<FISH2D>());
-        let command_fis = unsafe { command_fis.as_ptr().as_mut() };
-        let prdt = unsafe { prdt.as_ptr().as_mut() };
-
-        Self {
-            page,
-            command_fis,
-            prdt,
-            prdt_entries: None,
+        unsafe {
+            Self {
+                page,
+                cmd_fis: base.cast(),
+                prdt: base.byte_add(0x80).cast(),
+                prdt_entries: 0,
+            }
         }
     }
 
     pub fn setup(&mut self, cmd: &impl Command) {
-        self.command_fis.setup(cmd.cmd(), cmd.lba(), cmd.count());
-        self.prdt_entries = Some(cmd.pages().len() as u16);
+        unsafe {
+            self.cmd_fis
+                .as_mut()
+                .setup(cmd.cmd(), cmd.lba(), cmd.count());
+        }
+
+        self.prdt_entries = cmd.pages().len();
 
         for (idx, page) in cmd.pages().iter().enumerate() {
-            self.prdt[idx].setup(page);
+            unsafe {
+                self.prdt.as_mut()[idx].setup(page);
+            }
         }
     }
 
-    pub fn prdt_len(&self) -> u16 {
-        self.prdt_entries.unwrap()
+    pub fn prdt_len(&self) -> usize {
+        self.prdt_entries
     }
 
     pub fn base(&self) -> PAddr {

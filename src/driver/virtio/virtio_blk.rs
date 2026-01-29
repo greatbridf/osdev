@@ -1,19 +1,19 @@
-use crate::{
-    io::Chunks,
-    kernel::{
-        block::{BlockDeviceRequest, BlockRequestQueue},
-        constants::EIO,
-        mem::{AsMemoryBlock, Page},
-    },
-    prelude::KResult,
-};
+use alloc::boxed::Box;
+
+use async_trait::async_trait;
 use eonix_hal::mm::ArchPhysAccess;
-use eonix_mm::{
-    address::{Addr, PAddr, PhysAccess},
-    paging::PFN,
-};
+use eonix_mm::address::{Addr, PAddr, PhysAccess};
+use eonix_mm::paging::{Folio as _, PFN};
 use eonix_sync::Spin;
-use virtio_drivers::{device::blk::VirtIOBlk, transport::Transport, Hal};
+use virtio_drivers::device::blk::VirtIOBlk;
+use virtio_drivers::transport::Transport;
+use virtio_drivers::Hal;
+
+use crate::io::Chunks;
+use crate::kernel::block::{BlockDeviceRequest, BlockRequestQueue};
+use crate::kernel::constants::EIO;
+use crate::kernel::mem::Folio;
+use crate::prelude::KResult;
 
 pub struct HAL;
 
@@ -22,13 +22,12 @@ unsafe impl Hal for HAL {
         pages: usize,
         _direction: virtio_drivers::BufferDirection,
     ) -> (virtio_drivers::PhysAddr, core::ptr::NonNull<u8>) {
-        let page = Page::alloc_at_least(pages);
+        let page = Folio::alloc_at_least(pages);
 
-        let paddr = page.start().addr();
-        let ptr = page.as_memblk().as_byte_ptr();
-        page.into_raw();
+        let ptr = page.get_ptr();
+        let pfn = page.into_raw();
 
-        (paddr, ptr)
+        (PAddr::from(pfn).addr(), ptr)
     }
 
     unsafe fn dma_dealloc(
@@ -41,7 +40,7 @@ unsafe impl Hal for HAL {
         unsafe {
             // SAFETY: The caller ensures that the pfn corresponds to a valid
             //         page allocated by `dma_alloc`.
-            Page::from_raw(pfn);
+            Folio::from_raw(pfn);
         }
 
         0
@@ -74,6 +73,7 @@ unsafe impl Hal for HAL {
     }
 }
 
+#[async_trait]
 impl<T> BlockRequestQueue for Spin<VirtIOBlk<HAL, T>>
 where
     T: Transport + Send,
@@ -82,7 +82,7 @@ where
         1024
     }
 
-    fn submit(&self, req: BlockDeviceRequest) -> KResult<()> {
+    async fn submit<'a>(&'a self, req: BlockDeviceRequest<'a>) -> KResult<()> {
         match req {
             BlockDeviceRequest::Write {
                 sector,
@@ -90,15 +90,14 @@ where
                 buffer,
             } => {
                 let mut dev = self.lock();
-                for ((start, len), buffer_page) in
+                for ((start, sectors), buffer_page) in
                     Chunks::new(sector as usize, count as usize, 8).zip(buffer.iter())
                 {
-                    let buffer = unsafe {
-                        // SAFETY: Pages in `req.buffer` are guaranteed to be exclusively owned by us.
-                        &buffer_page.as_memblk().as_bytes()[..len as usize * 512]
-                    };
+                    let len = sectors * 512;
+                    let pg = buffer_page.lock();
 
-                    dev.write_blocks(start, buffer).map_err(|_| EIO)?;
+                    dev.write_blocks(start, &pg.as_bytes()[..len])
+                        .map_err(|_| EIO)?;
                 }
             }
             BlockDeviceRequest::Read {
@@ -107,15 +106,14 @@ where
                 buffer,
             } => {
                 let mut dev = self.lock();
-                for ((start, len), buffer_page) in
+                for ((start, sectors), buffer_page) in
                     Chunks::new(sector as usize, count as usize, 8).zip(buffer.iter())
                 {
-                    let buffer = unsafe {
-                        // SAFETY: Pages in `req.buffer` are guaranteed to be exclusively owned by us.
-                        &mut buffer_page.as_memblk().as_bytes_mut()[..len as usize * 512]
-                    };
+                    let len = sectors * 512;
+                    let mut pg = buffer_page.lock();
 
-                    dev.read_blocks(start, buffer).map_err(|_| EIO)?;
+                    dev.read_blocks(start, &mut pg.as_bytes_mut()[..len])
+                        .map_err(|_| EIO)?;
                 }
             }
         }

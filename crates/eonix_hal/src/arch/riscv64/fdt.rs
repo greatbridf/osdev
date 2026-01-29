@@ -1,62 +1,95 @@
-use super::mm::{ArchPhysAccess, PresentRam};
-use crate::arch::riscv64::config::mm::KIMAGE_OFFSET;
-use core::sync::atomic::{AtomicPtr, Ordering};
-use eonix_mm::address::{PAddr, PRange, PhysAccess};
+use core::ops::Deref;
+use core::sync::atomic::{AtomicPtr, AtomicUsize, Ordering};
+
+use eonix_mm::address::{Addr, AddrOps, PAddr, PRange, PhysAccess};
 use eonix_sync_base::LazyLock;
 use fdt::Fdt;
 
-static DTB_VIRT_PTR: AtomicPtr<u8> = AtomicPtr::new(core::ptr::null_mut());
-pub static FDT: LazyLock<Fdt<'static>> = LazyLock::new(|| unsafe {
-    Fdt::from_ptr(DTB_VIRT_PTR.load(Ordering::Acquire))
-        .expect("Failed to parse DTB from static memory.")
+use super::mm::ArchPhysAccess;
+use crate::arch::riscv64::config::mm::KIMAGE_OFFSET;
+use crate::extern_symbol_addr;
+
+static DTB_PADDR: AtomicUsize = AtomicUsize::new(0);
+pub static FDT: LazyLock<FdtExt> = LazyLock::new(|| unsafe {
+    FdtExt::new(PAddr::from_val(DTB_PADDR.load(Ordering::Relaxed)))
 });
 
-pub trait FdtExt {
-    fn harts(&self) -> impl Iterator<Item = usize>;
-
-    fn hart_count(&self) -> usize {
-        self.harts().count()
-    }
-
-    fn present_ram(&self) -> impl Iterator<Item = PRange>;
+pub struct FdtExt {
+    fdt: Fdt<'static>,
+    range: PRange,
 }
 
-impl FdtExt for Fdt<'_> {
-    fn harts(&self) -> impl Iterator<Item = usize> {
+impl FdtExt {
+    /// # Safety
+    /// The caller MUST ensure that [`addr`] points to valid FDT.
+    pub unsafe fn new(addr: PAddr) -> Self {
+        let fdt = unsafe {
+            Fdt::from_ptr(ArchPhysAccess::as_ptr(addr).as_ptr())
+                .expect("Failed to parse DTB from static memory.")
+        };
+
+        Self {
+            range: PRange::from(addr).grow(fdt.total_size()),
+            fdt,
+        }
+    }
+
+    pub fn harts(&self) -> impl Iterator<Item = usize> {
         self.cpus().map(|cpu| cpu.ids().all()).flatten()
     }
 
-    fn present_ram(&self) -> impl Iterator<Item = PRange> + PresentRam {
-        struct Present<I>(I);
-        impl<I> PresentRam for Present<I> where I: Iterator<Item = PRange> {}
-        impl<I> Iterator for Present<I>
-        where
-            I: Iterator<Item = PRange>,
-        {
-            type Item = PRange;
+    pub fn hart_count(&self) -> usize {
+        self.harts().count()
+    }
 
-            fn next(&mut self) -> Option<Self::Item> {
-                self.0.next()
-            }
-        }
-
+    pub fn present_ram(&self) -> impl Iterator<Item = PRange> {
         let mut index = 0;
-        Present(core::iter::from_fn(move || {
-            self.memory()
+
+        core::iter::from_fn(move || {
+            let item = self
+                .memory()
                 .regions()
                 .filter_map(|region| {
-                    region.size.map(|len| {
-                        PRange::from(PAddr::from(region.starting_address as usize)).grow(len)
-                    })
+                    let start = PAddr::from(region.starting_address as usize);
+                    Some(start).zip(region.size)
                 })
-                .skip(index)
-                .next()
-                .inspect(|_| index += 1)
-        }))
+                .map(|(start, len)| PRange::from(start).grow(len))
+                .nth(index);
+
+            index += 1;
+            item
+        })
+    }
+
+    pub fn free_ram(&self) -> impl Iterator<Item = PRange> {
+        let kernel_end = extern_symbol_addr!(__kernel_end) - KIMAGE_OFFSET;
+        let kernel_end = PAddr::from(kernel_end).ceil();
+
+        // TODO: move this to some platform-specific crate
+        self.present_ram().map(move |mut range| {
+            // Strip out parts before __kernel_end
+            if range.overlap_with(&PRange::from(kernel_end)) {
+                (_, range) = range.split_at(kernel_end);
+            }
+
+            // Strip out part after the FDT
+            if range.overlap_with(&self.range) {
+                (range, _) = range.split_at(self.range.start());
+            }
+
+            range
+        })
+    }
+}
+
+impl Deref for FdtExt {
+    type Target = Fdt<'static>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.fdt
     }
 }
 
 pub unsafe fn init_dtb_and_fdt(dtb_paddr: PAddr) {
-    let dtb_virt_ptr = ArchPhysAccess::as_ptr(dtb_paddr);
-    DTB_VIRT_PTR.store(dtb_virt_ptr.as_ptr(), Ordering::Release);
+    DTB_PADDR.store(dtb_paddr.addr(), Ordering::Relaxed);
 }

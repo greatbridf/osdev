@@ -1,11 +1,16 @@
-use super::file::ClusterReadIterator;
+use core::pin::Pin;
+
+use alloc::{boxed::Box, string::String};
+use futures::{Stream, StreamExt};
+use posix_types::result::PosixError;
+
 use crate::kernel::constants::EINVAL;
 use crate::prelude::*;
-use alloc::{string::String, sync::Arc};
-use itertools::Itertools;
+
+use super::{Cluster, RawCluster};
 
 #[repr(C, packed)]
-pub(super) struct RawDirEntry {
+pub struct RawDirEntry {
     name: [u8; 8],
     extension: [u8; 3],
     attr: u8,
@@ -21,9 +26,9 @@ pub(super) struct RawDirEntry {
     size: u32,
 }
 
-pub(super) struct FatDirectoryEntry {
-    pub filename: Arc<[u8]>,
-    pub cluster: u32,
+pub struct FatDirectoryEntry {
+    pub filename: Box<[u8]>,
+    pub cluster: Cluster,
     pub size: u32,
     pub entry_offset: u32,
     pub is_directory: bool,
@@ -79,7 +84,7 @@ impl RawDirEntry {
         self.attr & Self::ATTR_DIRECTORY != 0
     }
 
-    fn long_filename(&self) -> Option<[u16; 13]> {
+    fn as_raw_long_filename(&self) -> Option<[u16; 13]> {
         if !self.is_long_filename() {
             return None;
         }
@@ -103,137 +108,114 @@ impl RawDirEntry {
     }
 }
 
-impl<'data, I> RawDirs<'data> for I where I: ClusterReadIterator<'data> {}
-trait RawDirs<'data>: ClusterReadIterator<'data> {
-    fn raw_dirs(self) -> impl Iterator<Item = KResult<&'data RawDirEntry>> + 'data
-    where
-        Self: Sized,
-    {
-        const ENTRY_SIZE: usize = size_of::<RawDirEntry>();
+pub fn as_raw_dirents(data: &[u8]) -> KResult<&[RawDirEntry]> {
+    let len = data.len();
+    if len % size_of::<RawDirEntry>() != 0 {
+        return Err(EINVAL);
+    }
 
-        self.map(|result| {
-            let data = result?;
-            if data.len() % ENTRY_SIZE != 0 {
-                return Err(EINVAL);
-            }
-
-            Ok(unsafe {
-                core::slice::from_raw_parts(
-                    data.as_ptr() as *const RawDirEntry,
-                    data.len() / ENTRY_SIZE,
-                )
-            })
-        })
-        .flatten_ok()
+    unsafe {
+        Ok(core::slice::from_raw_parts(
+            data.as_ptr() as *const RawDirEntry,
+            len / size_of::<RawDirEntry>(),
+        ))
     }
 }
 
-pub(super) trait Dirs<'data>: ClusterReadIterator<'data> {
-    fn dirs(self) -> impl Iterator<Item = KResult<FatDirectoryEntry>> + 'data
-    where
-        Self: Sized;
+pub trait ParseDirent {
+    async fn next_dirent(&mut self) -> Option<KResult<FatDirectoryEntry>>;
 }
 
-impl<'data, I> Dirs<'data> for I
+impl<'a, T> ParseDirent for T
 where
-    I: ClusterReadIterator<'data>,
+    T: Stream<Item = KResult<&'a RawDirEntry>>,
 {
-    fn dirs(self) -> impl Iterator<Item = KResult<FatDirectoryEntry>> + 'data
-    where
-        Self: Sized,
-    {
-        self.raw_dirs().real_dirs()
-    }
-}
+    async fn next_dirent(&mut self) -> Option<KResult<FatDirectoryEntry>> {
+        let mut me = unsafe { Pin::new_unchecked(self) };
 
-trait RealDirs<'data>: Iterator<Item = KResult<&'data RawDirEntry>> + 'data {
-    fn real_dirs(self) -> DirsIter<'data, Self>
-    where
-        Self: Sized;
-}
+        // The long filename entries are stored in reverse order.
+        // So we reverse all filename segments and then reverse the whole string at the end.
+        let mut filename_rev = String::new();
 
-impl<'data, I> RealDirs<'data> for I
-where
-    I: Iterator<Item = KResult<&'data RawDirEntry>> + 'data,
-{
-    fn real_dirs(self) -> DirsIter<'data, Self>
-    where
-        Self: Sized,
-    {
-        DirsIter { iter: self }
-    }
-}
+        let mut is_lfn = false;
+        let mut nr_entry_scanned = 0;
+        let mut cur_entry;
 
-pub(super) struct DirsIter<'data, I>
-where
-    I: Iterator<Item = KResult<&'data RawDirEntry>> + 'data,
-{
-    iter: I,
-}
-
-impl<'data, I> Iterator for DirsIter<'data, I>
-where
-    I: Iterator<Item = KResult<&'data RawDirEntry>> + 'data,
-{
-    type Item = KResult<FatDirectoryEntry>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let mut filename = String::new();
-        let mut entry_offset = 0;
-        let entry = loop {
-            let entry = match self.iter.next()? {
-                Ok(entry) => entry,
-                Err(err) => return Some(Err(err)),
-            };
-            entry_offset += 1;
-
-            let long_filename = entry.long_filename();
-            if entry.is_invalid() {
-                if let Some(long_filename) = long_filename {
-                    let long_filename = long_filename
-                        .iter()
-                        .position(|&ch| ch == 0)
-                        .map(|pos| &long_filename[..pos])
-                        .unwrap_or(&long_filename);
-
-                    filename.extend(
-                        long_filename
-                            .into_iter()
-                            .map(|&ch| char::from_u32(ch as u32).unwrap_or('?'))
-                            .rev(),
-                    );
+        loop {
+            match me.as_mut().next().await {
+                Some(Err(err)) => return Some(Err(err)),
+                Some(Ok(ent)) => {
+                    cur_entry = ent;
+                    nr_entry_scanned += 1;
                 }
+                None => {
+                    if is_lfn {
+                        // Unterminated long filename entries are invalid.
+                        return Some(Err(PosixError::EINVAL.into()));
+                    } else {
+                        return None;
+                    }
+                }
+            };
+
+            if !cur_entry.is_invalid() {
+                break;
+            }
+
+            let Some(raw_long_filename) = cur_entry.as_raw_long_filename() else {
                 continue;
-            }
-            break entry;
+            };
+
+            // We are processing a long filename entry.
+            is_lfn = true;
+
+            let real_len = raw_long_filename
+                .iter()
+                .position(|&ch| ch == 0)
+                .unwrap_or(raw_long_filename.len());
+
+            let name_codes_rev = raw_long_filename.into_iter().take(real_len).rev();
+            let name_chars_rev = char::decode_utf16(name_codes_rev).map(|r| r.unwrap_or('?'));
+
+            filename_rev.extend(name_chars_rev);
+        }
+
+        // From now on, `entry` represents a valid directory entry.
+
+        let raw_cluster =
+            RawCluster(cur_entry.cluster_low as u32 | ((cur_entry.cluster_high as u32) << 16));
+
+        let Some(cluster) = raw_cluster.parse() else {
+            return Some(Err(PosixError::EINVAL.into()));
         };
 
-        let filename: Arc<[u8]> = if filename.is_empty() {
-            let mut filename = entry.filename().to_vec();
-            let extension = entry.extension();
+        let filename;
+
+        if filename_rev.is_empty() {
+            let mut name = cur_entry.filename().to_vec();
+            let extension = cur_entry.extension();
             if !extension.is_empty() {
-                filename.push(b'.');
-                filename.extend_from_slice(extension);
+                name.push(b'.');
+                name.extend_from_slice(extension);
             }
 
-            if entry.is_filename_lowercase() {
-                filename.make_ascii_lowercase();
+            if cur_entry.is_filename_lowercase() {
+                name.make_ascii_lowercase();
             }
 
-            filename.into()
+            filename = name.into_boxed_slice();
         } else {
-            let mut bytes = filename.into_bytes();
-            bytes.reverse();
-
-            bytes.into()
-        };
+            let mut name = filename_rev.into_bytes();
+            name.reverse();
+            filename = name.into_boxed_slice();
+        }
 
         Some(Ok(FatDirectoryEntry {
-            size: entry.size,
-            entry_offset,
+            size: cur_entry.size,
+            entry_offset: nr_entry_scanned * size_of::<RawDirEntry>() as u32,
             filename,
-            cluster: entry.cluster_low as u32 | (((entry.cluster_high & !0xF000) as u32) << 16),
-            is_directory: entry.is_directory(),
+            cluster,
+            is_directory: cur_entry.is_directory(),
         }))
     }
 }

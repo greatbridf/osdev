@@ -7,6 +7,9 @@ edition = "2021"
 crate-type = ["bin"]
 
 [dependencies]
+arcref = { path = "./crates/arcref", default-features = false, features = [
+    "alloc",
+] }
 atomic_unique_refcell = { path = "./crates/atomic_unique_refcell", features = [
     "no_std",
 ] }
@@ -24,8 +27,10 @@ pointers = { path = "./crates/pointers" }
 posix_types = { path = "./crates/posix_types" }
 slab_allocator = { path = "./crates/slab_allocator" }
 
+intrusive-collections = { version = "0.9.8", features = [
+    "nightly",
+], git = "https://github.com/greatbridf/intrusive-rs" }
 bitflags = "2.6.0"
-intrusive-collections = { version = "0.9.8", git = "https://github.com/greatbridf/intrusive-rs" }
 itertools = { version = "0.13.0", default-features = false }
 acpi = "5.2.0"
 align_ext = "0.1.0"
@@ -34,6 +39,13 @@ another_ext4 = { git = "https://github.com/SMS-Derfflinger/another_ext4", branch
 stalloc = { version = "0.6.1", default-features = false, features = [
     "allocator-api",
 ] }
+async-trait = "0.1.89"
+futures = { version = "0.3.31", features = [
+    "alloc",
+    "async-await",
+], default-features = false }
+static_assertions = "1.1.0"
+cfg-if = "1.0.4"
 
 [target.'cfg(any(target_arch = "riscv64", target_arch = "loongarch64"))'.dependencies]
 virtio-drivers = { version = "0.11.0" }

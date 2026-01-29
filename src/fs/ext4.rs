@@ -1,5 +1,3 @@
-use core::sync::atomic::{AtomicU32, AtomicU64, Ordering};
-
 use crate::kernel::mem::{CachePage, CachePageStream, PageCache, PageCacheBackend};
 use crate::kernel::task::block_on;
 use crate::kernel::timer::Ticks;
@@ -31,6 +29,8 @@ use alloc::{
 use another_ext4::{
     Block, BlockDevice as Ext4BlockDeviceTrait, Ext4, FileType, InodeMode, PBlockId,
 };
+use async_trait::async_trait;
+use core::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use eonix_sync::RwLock;
 
 pub struct Ext4BlockDevice {
@@ -194,7 +194,7 @@ impl Ext4Fs {
                         root_inode.inode.mtime_extra() as _,
                     )),
                     rwsem: RwLock::new(()),
-                    vfs: Arc::downgrade(&ext4fs) as _,
+                    sb: Arc::downgrade(&ext4fs) as _,
                 },
             )
         };
@@ -290,7 +290,7 @@ impl Inode for FileInode {
     }
 
     fn read_direct(&self, buffer: &mut dyn Buffer, offset: usize) -> KResult<usize> {
-        let vfs = self.vfs.upgrade().ok_or(EIO)?;
+        let vfs = self.sb.upgrade().ok_or(EIO)?;
         let ext4fs = vfs.as_any().downcast_ref::<Ext4Fs>().unwrap();
 
         let mut temp_buf = vec![0u8; buffer.total()];
@@ -334,7 +334,7 @@ impl Inode for FileInode {
     fn write_direct(&self, stream: &mut dyn Stream, offset: usize) -> KResult<usize> {
         //let _lock = Task::block_on(self.rwsem.write());
 
-        let vfs = self.vfs.upgrade().ok_or(EIO)?;
+        let vfs = self.sb.upgrade().ok_or(EIO)?;
         let ext4fs = vfs.as_any().downcast_ref::<Ext4Fs>().unwrap();
 
         let mut temp_buf = vec![0u8; 4096];
@@ -363,7 +363,7 @@ impl Inode for FileInode {
     fn chmod(&self, mode: Mode) -> KResult<()> {
         let _lock = block_on(self.rwsem.write());
 
-        let vfs = self.vfs.upgrade().ok_or(EIO)?;
+        let vfs = self.sb.upgrade().ok_or(EIO)?;
         let ext4fs = vfs.as_any().downcast_ref::<Ext4Fs>().unwrap();
         let old_mode = self.mode.load();
         let new_mode = old_mode.perm(mode.bits());
@@ -428,7 +428,7 @@ impl DirInode {
 
 impl Inode for DirInode {
     fn lookup(&self, dentry: &Arc<Dentry>) -> KResult<Option<Arc<dyn Inode>>> {
-        let vfs = self.vfs.upgrade().ok_or(EIO)?;
+        let vfs = self.sb.upgrade().ok_or(EIO)?;
         let ext4fs = vfs.as_any().downcast_ref::<Ext4Fs>().unwrap();
 
         let name = dentry.get_name();
@@ -477,7 +477,7 @@ impl Inode for DirInode {
                 ctime: Spin::new(Instant::new(attr.ctime as _, 0)),
                 mtime: Spin::new(Instant::new(attr.mtime as _, 0)),
                 rwsem: RwLock::new(()),
-                vfs: self.vfs.clone(),
+                sb: self.sb.clone(),
             },
         );
 
@@ -489,7 +489,7 @@ impl Inode for DirInode {
         offset: usize,
         callback: &mut dyn FnMut(&[u8], Ino) -> KResult<core::ops::ControlFlow<(), ()>>,
     ) -> KResult<usize> {
-        let vfs = self.vfs.upgrade().ok_or(EIO)?;
+        let vfs = self.sb.upgrade().ok_or(EIO)?;
         let ext4fs = vfs.as_any().downcast_ref::<Ext4Fs>().unwrap();
 
         let entries = ext4fs
@@ -519,7 +519,7 @@ impl Inode for DirInode {
     fn creat(&self, at: &Arc<Dentry>, mode: Mode) -> KResult<()> {
         let _lock = block_on(self.rwsem.write());
 
-        let vfs = self.vfs.upgrade().ok_or(EIO)?;
+        let vfs = self.sb.upgrade().ok_or(EIO)?;
         let ext4fs = vfs.as_any().downcast_ref::<Ext4Fs>().unwrap();
 
         let name = at.get_name();
@@ -534,7 +534,7 @@ impl Inode for DirInode {
             )
             .unwrap();
 
-        let file = FileInode::new(new_ino as u64, self.vfs.clone(), mode);
+        let file = FileInode::new(new_ino as u64, self.sb.clone(), mode);
         let now = Instant::now();
         self.update_child_time(file.as_ref(), now);
         self.link_file();
@@ -547,7 +547,7 @@ impl Inode for DirInode {
     fn mkdir(&self, at: &Dentry, mode: Mode) -> KResult<()> {
         let _lock = block_on(self.rwsem.write());
 
-        let vfs = self.vfs.upgrade().ok_or(EIO)?;
+        let vfs = self.sb.upgrade().ok_or(EIO)?;
         let ext4fs = vfs.as_any().downcast_ref::<Ext4Fs>().unwrap();
 
         let name = at.get_name();
@@ -562,7 +562,7 @@ impl Inode for DirInode {
             )
             .unwrap();
 
-        let new_dir = DirInode::new(new_ino as u64, self.vfs.clone(), mode);
+        let new_dir = DirInode::new(new_ino as u64, self.sb.clone(), mode);
         let now = Instant::now();
         self.update_child_time(new_dir.as_ref(), now);
         self.link_dir();
@@ -575,7 +575,7 @@ impl Inode for DirInode {
     fn unlink(&self, at: &Arc<Dentry>) -> KResult<()> {
         let _dir_lock = block_on(self.rwsem.write());
 
-        let vfs = self.vfs.upgrade().ok_or(EIO)?;
+        let vfs = self.sb.upgrade().ok_or(EIO)?;
         let ext4fs = vfs.as_any().downcast_ref::<Ext4Fs>().unwrap();
 
         let file = at.get_inode()?;
@@ -602,7 +602,7 @@ impl Inode for DirInode {
     fn chmod(&self, mode: Mode) -> KResult<()> {
         let _lock = block_on(self.rwsem.write());
 
-        let vfs = self.vfs.upgrade().ok_or(EIO)?;
+        let vfs = self.sb.upgrade().ok_or(EIO)?;
         let ext4fs = vfs.as_any().downcast_ref::<Ext4Fs>().unwrap();
         let old_mode = self.mode.load();
         let new_mode = old_mode.perm(mode.bits());
@@ -638,7 +638,7 @@ impl Inode for DirInode {
 
         // TODO: may need another lock
         let _lock = block_on(self.rwsem.write());
-        let vfs = self.vfs.upgrade().ok_or(EIO)?;
+        let vfs = self.sb.upgrade().ok_or(EIO)?;
         let ext4fs = vfs.as_any().downcast_ref::<Ext4Fs>().unwrap();
 
         let old_file = old_dentry.get_inode()?;
@@ -698,6 +698,7 @@ impl From<InodeMode> for Mode {
 
 struct Ext4MountCreator;
 
+#[async_trait]
 impl MountCreator for Ext4MountCreator {
     fn check_signature(&self, mut first_block: &[u8]) -> KResult<bool> {
         match first_block.split_off(1080..) {
@@ -707,7 +708,7 @@ impl MountCreator for Ext4MountCreator {
         }
     }
 
-    fn create_mount(&self, source: &str, _flags: u64, mp: &Arc<Dentry>) -> KResult<Mount> {
+    async fn create_mount(&self, source: &str, _flags: u64, mp: &Arc<Dentry>) -> KResult<Mount> {
         let source = source.as_bytes();
 
         let path = Path::new(source)?;

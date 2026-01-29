@@ -1,14 +1,17 @@
-use super::mm_list::EMPTY_PAGE;
-use super::paging::AllocZeroed as _;
-use super::{AsMemoryBlock, Mapping, Page, Permission};
-use crate::kernel::constants::EINVAL;
-use crate::prelude::KResult;
 use core::borrow::Borrow;
 use core::cell::UnsafeCell;
 use core::cmp;
+use core::sync::atomic::Ordering;
+
 use eonix_mm::address::{AddrOps as _, VAddr, VRange};
 use eonix_mm::page_table::{PageAttribute, RawAttribute, PTE};
-use eonix_mm::paging::{PAGE_SIZE, PFN};
+use eonix_mm::paging::{Folio as _, PFN};
+
+use super::mm_list::EMPTY_PAGE;
+use super::{Mapping, Permission};
+use crate::kernel::mem::folio::Folio;
+use crate::kernel::mem::{CachePage, FolioOwned, PageOffset};
+use crate::prelude::KResult;
 
 #[derive(Debug)]
 pub struct MMArea {
@@ -96,8 +99,10 @@ impl MMArea {
         attr.remove(PageAttribute::COPY_ON_WRITE);
         attr.set(PageAttribute::WRITE, self.permission.write);
 
-        let page = unsafe { Page::from_raw(*pfn) };
-        if page.is_exclusive() {
+        let page = unsafe { Folio::from_raw(*pfn) };
+
+        // XXX: Change me!!!
+        if page.refcount.load(Ordering::Relaxed) == 1 {
             // SAFETY: This is actually safe. If we read `1` here and we have `MMList` lock
             // held, there couldn't be neither other processes sharing the page, nor other
             // threads making the page COW at the same time.
@@ -105,25 +110,27 @@ impl MMArea {
             return;
         }
 
-        let new_page;
+        let mut new_page;
         if *pfn == EMPTY_PAGE.pfn() {
-            new_page = Page::zeroed();
+            new_page = {
+                let mut folio = FolioOwned::alloc();
+                folio.as_bytes_mut().fill(0);
+                folio
+            };
         } else {
-            new_page = Page::alloc();
+            new_page = FolioOwned::alloc();
 
             unsafe {
                 // SAFETY: `page` is CoW, which means that others won't write to it.
-                let old_page_data = page.as_memblk().as_bytes();
-
-                // SAFETY: `new_page` is exclusive owned by us.
-                let new_page_data = new_page.as_memblk().as_bytes_mut();
+                let old_page_data = page.get_bytes_ptr().as_ref();
+                let new_page_data = new_page.as_bytes_mut();
 
                 new_page_data.copy_from_slice(old_page_data);
             };
         }
 
         attr.remove(PageAttribute::ACCESSED);
-        *pfn = new_page.into_raw();
+        *pfn = new_page.share().into_raw();
     }
 
     /// # Arguments
@@ -141,61 +148,48 @@ impl MMArea {
 
         assert!(offset < file_mapping.length, "Offset out of range");
 
-        let Some(page_cache) = file_mapping.file.page_cache() else {
-            panic!("Mapping file should have pagecache");
+        let file_offset = file_mapping.offset + offset;
+
+        let map_page = |cache_page: &CachePage| {
+            if !self.permission.write {
+                assert!(!write, "Write fault on read-only mapping");
+
+                *pfn = cache_page.add_mapping();
+                return;
+            }
+
+            if self.is_shared {
+                // We don't process dirty flags in write faults.
+                // Simply assume that page will eventually be dirtied.
+                // So here we can set the dirty flag now.
+                cache_page.set_dirty(true);
+                attr.insert(PageAttribute::WRITE);
+                *pfn = cache_page.add_mapping();
+                return;
+            }
+
+            if !write {
+                // Delay the copy-on-write until write fault happens.
+                attr.insert(PageAttribute::COPY_ON_WRITE);
+                *pfn = cache_page.add_mapping();
+                return;
+            }
+
+            // XXX: Change this. Let's handle mapped pages before CoW pages.
+            // Nah, we are writing to a mapped private mapping...
+            let mut new_page = FolioOwned::alloc();
+            new_page
+                .as_bytes_mut()
+                .copy_from_slice(cache_page.lock().as_bytes());
+
+            attr.insert(PageAttribute::WRITE);
+            *pfn = new_page.share().into_raw();
         };
 
-        let file_offset = file_mapping.offset + offset;
-        let cnt_to_read = (file_mapping.length - offset).min(0x1000);
-
-        page_cache
-            .with_page(file_offset, |page, cache_page| {
-                // Non-write faults: we find page in pagecache and do mapping
-                // Write fault: we need to care about shared or private mapping.
-                if !write {
-                    // Bss is embarrassing in pagecache!
-                    // We have to assume cnt_to_read < PAGE_SIZE all bss
-                    if cnt_to_read < PAGE_SIZE {
-                        let new_page = Page::zeroed();
-                        unsafe {
-                            let page_data = new_page.as_memblk().as_bytes_mut();
-                            page_data[..cnt_to_read]
-                                .copy_from_slice(&page.as_memblk().as_bytes()[..cnt_to_read]);
-                        }
-                        *pfn = new_page.into_raw();
-                    } else {
-                        *pfn = page.clone().into_raw();
-                    }
-
-                    if self.permission.write {
-                        if self.is_shared {
-                            // The page may will not be written,
-                            // But we simply assume page will be dirty
-                            cache_page.set_dirty();
-                            attr.insert(PageAttribute::WRITE);
-                        } else {
-                            attr.insert(PageAttribute::COPY_ON_WRITE);
-                        }
-                    }
-                } else {
-                    if self.is_shared {
-                        cache_page.set_dirty();
-                        *pfn = page.clone().into_raw();
-                    } else {
-                        let new_page = Page::zeroed();
-                        unsafe {
-                            let page_data = new_page.as_memblk().as_bytes_mut();
-                            page_data[..cnt_to_read]
-                                .copy_from_slice(&page.as_memblk().as_bytes()[..cnt_to_read]);
-                        }
-                        *pfn = new_page.into_raw();
-                    }
-
-                    attr.insert(PageAttribute::WRITE);
-                }
-            })
-            .await?
-            .ok_or(EINVAL)?;
+        file_mapping
+            .page_cache
+            .with_page(PageOffset::from_byte_floor(file_offset), map_page)
+            .await?;
 
         attr.insert(PageAttribute::PRESENT);
         attr.remove(PageAttribute::MAPPED);

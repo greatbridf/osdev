@@ -30,7 +30,7 @@ impl FillResult {
     }
 }
 
-pub trait Buffer {
+pub trait Buffer: Send {
     fn total(&self) -> usize;
     fn wrote(&self) -> usize;
 
@@ -49,7 +49,7 @@ pub trait Buffer {
     }
 }
 
-pub trait Stream {
+pub trait Stream: Send {
     fn poll_data<'a>(&mut self, buf: &'a mut [u8]) -> KResult<Option<&'a mut [u8]>>;
     fn ignore(&mut self, len: usize) -> KResult<Option<usize>>;
 }
@@ -130,6 +130,8 @@ pub struct UninitBuffer<'lt, T: Copy + Sized> {
     data: Box<MaybeUninit<T>>,
     buffer: ByteBuffer<'lt>,
 }
+
+unsafe impl<'lt, T: Copy> Send for UninitBuffer<'lt, T> {}
 
 impl<'lt, T: Copy + Sized> UninitBuffer<'lt, T> {
     pub fn new() -> Self {

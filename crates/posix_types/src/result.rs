@@ -13,3 +13,13 @@ impl From<PosixError> for u32 {
         }
     }
 }
+
+impl core::fmt::Debug for PosixError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::EFAULT => write!(f, "EFAULT"),
+            Self::EXDEV => write!(f, "EXDEV"),
+            Self::EINVAL => write!(f, "EINVAL"),
+        }
+    }
+}

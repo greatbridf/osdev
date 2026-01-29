@@ -11,7 +11,7 @@ use crate::{
 };
 use core::{marker::PhantomData, ptr::NonNull};
 
-pub trait RawPageTable<'a>: 'a {
+pub trait RawPageTable<'a>: Send + 'a {
     type Entry: PTE + 'a;
 
     /// Return the entry at the given index.

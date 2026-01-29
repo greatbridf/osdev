@@ -1,10 +1,7 @@
 use crate::{
     kernel::{
-        syscall::procops::parse_user_tls,
-        task::{
-            alloc_pid, new_thread_runnable, KernelStack, ProcessBuilder, ProcessList, Thread,
-            ThreadBuilder,
-        },
+        syscall::{procops::parse_user_tls, UserMut},
+        task::{alloc_pid, ProcessBuilder, ProcessList, Thread, ThreadBuilder},
         user::UserPointerMut,
     },
     KResult,
@@ -12,7 +9,7 @@ use crate::{
 use bitflags::bitflags;
 use core::num::NonZero;
 use eonix_hal::processor::UserTLS;
-use eonix_runtime::{scheduler::Scheduler, task::Task};
+use eonix_runtime::scheduler::RUNTIME;
 use eonix_sync::AsProof;
 use posix_types::signal::Signal;
 
@@ -51,9 +48,9 @@ pub struct CloneArgs {
     pub flags: CloneFlags,
     pub sp: Option<NonZero<usize>>, // Stack pointer for the new thread.
     pub exit_signal: Option<Signal>, // Signal to send to the parent on exit.
-    pub set_tid_ptr: Option<usize>, // Pointer to set child TID in user space.
-    pub clear_tid_ptr: Option<usize>, // Pointer to clear child TID in user space.
-    pub parent_tid_ptr: Option<usize>, // Pointer to parent TID in user space.
+    pub set_tid_ptr: Option<UserMut<u32>>, // Pointer to set child TID in user space.
+    pub clear_tid_ptr: Option<UserMut<u32>>, // Pointer to clear child TID in user space.
+    pub parent_tid_ptr: Option<UserMut<u32>>, // Pointer to parent TID in user space.
     pub tls: Option<UserTLS>,       // Pointer to TLS information.
 }
 
@@ -63,8 +60,8 @@ impl CloneArgs {
     pub fn for_clone(
         flags: usize,
         sp: usize,
-        child_tid_ptr: usize,
-        parent_tid_ptr: usize,
+        child_tid_ptr: UserMut<u32>,
+        parent_tid_ptr: UserMut<u32>,
         tls: usize,
     ) -> KResult<Self> {
         let clone_flags = CloneFlags::from_bits_truncate(flags & !Self::MASK);
@@ -133,8 +130,8 @@ impl CloneArgs {
     }
 }
 
-pub fn do_clone(thread: &Thread, clone_args: CloneArgs) -> KResult<u32> {
-    let mut procs = Task::block_on(ProcessList::get().write());
+pub async fn do_clone(thread: &Thread, clone_args: CloneArgs) -> KResult<u32> {
+    let mut procs = ProcessList::get().write().await;
 
     let thread_builder = ThreadBuilder::new().clone_from(&thread, &clone_args)?;
     let current_process = thread.process.clone();
@@ -154,6 +151,7 @@ pub fn do_clone(thread: &Thread, clone_args: CloneArgs) -> KResult<u32> {
 
         let (new_thread, _) = ProcessBuilder::new()
             .clone_from(current_process, &clone_args)
+            .await
             .pid(new_pid)
             .pgroup(current_pgroup)
             .session(current_session)
@@ -163,10 +161,10 @@ pub fn do_clone(thread: &Thread, clone_args: CloneArgs) -> KResult<u32> {
     };
 
     if let Some(parent_tid_ptr) = clone_args.parent_tid_ptr {
-        UserPointerMut::new(parent_tid_ptr as *mut u32)?.write(new_pid)?
+        UserPointerMut::new(parent_tid_ptr)?.write(new_pid)?
     }
 
-    Scheduler::get().spawn::<KernelStack, _>(new_thread_runnable(new_thread));
+    RUNTIME.spawn(new_thread.run());
 
     Ok(new_pid)
 }

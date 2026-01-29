@@ -106,9 +106,9 @@ impl ProgramLoader {
         })
     }
 
-    pub fn load(self) -> KResult<LoadInfo> {
+    pub async fn load(self) -> KResult<LoadInfo> {
         match self.object {
-            Object::ELF(elf) => elf.load(self.args, self.envs),
+            Object::ELF(elf) => elf.load(self.args, self.envs).await,
         }
     }
 }

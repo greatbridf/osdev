@@ -18,6 +18,11 @@ fn define_syscall_impl(attrs: TokenStream, item: TokenStream) -> TokenStream {
     let args = item.sig.inputs.iter();
     let ty_ret = item.sig.output;
 
+    assert!(
+        item.sig.asyncness.is_some(),
+        "Syscall must be async function"
+    );
+
     let args_mapped = item
         .sig
         .inputs
@@ -100,36 +105,50 @@ fn define_syscall_impl(attrs: TokenStream, item: TokenStream) -> TokenStream {
             };
 
         #[link_section = #syscall_fn_section]
-        fn #helper_fn (
-            thd: &crate::kernel::task::Thread,
+        fn #helper_fn <'thd, 'alloc>(
+            thd: &'thd crate::kernel::task::Thread,
+            thd_alloc: crate::kernel::task::ThreadAlloc<'alloc>,
             args: [usize; 6]
-        ) -> Option<usize> {
+        ) -> core::pin::Pin<Box<
+            dyn core::future::Future<Output = Option<usize>> + Send + 'thd,
+            crate::kernel::task::ThreadAlloc<'alloc>
+        >> {
             use crate::kernel::syscall::{FromSyscallArg, SyscallRetVal};
+            use alloc::boxed::Box;
 
             #(#args_mapped)*
 
-            eonix_log::println_trace!(
-                "trace_syscall",
-                "tid{}: {}({}) => {{",
-                thd.tid,
-                #syscall_name_str,
-                format_args!(#trace_format_string, #trace_format_args),
-            );
+            unsafe {
+                core::pin::Pin::new_unchecked(
+                    Box::new_in(
+                        async move {
+                            eonix_log::println_trace!(
+                                "trace_syscall",
+                                "tid{}: {}({}) => {{",
+                                thd.tid,
+                                #syscall_name_str,
+                                format_args!(#trace_format_string, #trace_format_args),
+                            );
 
-            let retval = #real_fn(thd, #(#args_call),*).into_retval();
+                            let retval = #real_fn(thd, #(#args_call),*).await.into_retval();
 
-            eonix_log::println_trace!(
-                "trace_syscall",
-                "}} => {:x?}",
-                retval,
-            );
+                            eonix_log::println_trace!(
+                                "trace_syscall",
+                                "}} => {:x?}",
+                                retval,
+                            );
 
-            retval
+                            retval
+                        },
+                        thd_alloc
+                    )
+                )
+            }
         }
 
         #(#attrs)*
         #[link_section = #syscall_fn_section]
-        #vis fn #real_fn(
+        #vis async fn #real_fn(
             thread: &crate::kernel::task::Thread,
             #(#args),*
         ) #ty_ret #body

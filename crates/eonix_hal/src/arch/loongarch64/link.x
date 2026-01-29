@@ -91,6 +91,6 @@ SECTIONS {
     } > VDSO AT> RAM
 
     VDSO_PADDR = LOADADDR(.vdso);
-    __kernel_end = ABSOLUTE(LOADADDR(.vdso) + SIZEOF(.vdso));
+    __kernel_end = __edata;
 }
-INSERT BEFORE .bss;
+INSERT BEFORE .data.after;

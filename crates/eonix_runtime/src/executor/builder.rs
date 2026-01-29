@@ -1,8 +1,5 @@
 use super::{Executor, OutputHandle, RealExecutor, Stack};
-use crate::{
-    context::ExecutionContext,
-    run::{Contexted, Run},
-};
+use crate::context::ExecutionContext;
 use alloc::{boxed::Box, sync::Arc};
 use core::{pin::Pin, sync::atomic::AtomicBool};
 use eonix_sync::Spin;
@@ -15,7 +12,6 @@ pub struct ExecutorBuilder<S, R> {
 impl<S, R> ExecutorBuilder<S, R>
 where
     S: Stack,
-    R: Run + Contexted + Send + 'static,
     R::Output: Send,
 {
     pub fn new() -> Self {

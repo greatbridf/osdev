@@ -4,7 +4,6 @@ use eonix_hal::mm::flush_tlb;
 use eonix_hal::traits::fault::PageFaultErrorCode;
 use eonix_mm::address::{Addr as _, AddrOps as _, VRange};
 use eonix_mm::paging::PAGE_SIZE;
-use eonix_runtime::task::Task;
 use posix_types::signal::Signal;
 
 #[repr(C)]
@@ -95,6 +94,7 @@ impl MMList {
             addr.floor() - area.range().start(),
             error.contains(PageFaultErrorCode::Write),
         )
+        .await
         .map_err(|_| Signal::SIGBUS)?;
 
         flush_tlb(addr.floor().addr());
@@ -129,7 +129,7 @@ fn kernel_page_fault_die(vaddr: VAddr, pc: VAddr) -> ! {
     )
 }
 
-pub fn handle_kernel_page_fault(
+pub async fn handle_kernel_page_fault(
     fault_pc: VAddr,
     addr: VAddr,
     error: PageFaultErrorCode,
@@ -149,7 +149,7 @@ pub fn handle_kernel_page_fault(
 
     let mms = &Thread::current().process.mm_list;
     let inner = mms.inner.borrow();
-    let inner = Task::block_on(inner.lock());
+    let inner = inner.lock().await;
 
     let area = match inner.areas.get(&VRange::from(addr)) {
         Some(area) => area,
@@ -164,11 +164,14 @@ pub fn handle_kernel_page_fault(
         .next()
         .expect("If we can find the mapped area, we should be able to find the PTE");
 
-    if let Err(_) = area.handle(
-        pte,
-        addr.floor() - area.range().start(),
-        error.contains(PageFaultErrorCode::Write),
-    ) {
+    if let Err(_) = area
+        .handle(
+            pte,
+            addr.floor() - area.range().start(),
+            error.contains(PageFaultErrorCode::Write),
+        )
+        .await
+    {
         return Some(try_page_fault_fix(fault_pc, addr));
     }
 

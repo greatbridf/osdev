@@ -1,5 +1,5 @@
 use crate::{arch::time::set_next_timer, processor::CPU};
-use core::arch::asm;
+use core::{arch::asm, mem::offset_of};
 use eonix_hal_traits::{
     fault::{Fault, PageFaultErrorCode},
     trap::{RawTrapContext, TrapType},
@@ -18,24 +18,23 @@ use riscv::{
 #[repr(C)]
 #[derive(Default, Clone, Copy)]
 pub struct Registers {
+    tp: u64,
     ra: u64,
     sp: u64,
     gp: u64,
-    tp: u64,
-    t1: u64,
-    t2: u64,
-    t0: u64,
     a0: u64,
     a1: u64,
     a2: u64,
     a3: u64,
     a4: u64,
+    t1: u64,
     a5: u64,
     a6: u64,
     a7: u64,
     t3: u64,
     t4: u64,
     t5: u64,
+    t2: u64,
     t6: u64,
     s0: u64,
     s1: u64,
@@ -49,10 +48,11 @@ pub struct Registers {
     s9: u64,
     s10: u64,
     s11: u64,
+    t0: u64,
 }
 
 /// Saved CPU context when a trap (interrupt or exception) occurs on RISC-V 64.
-#[repr(C)]
+#[repr(C, align(16))]
 #[derive(Clone, Copy)]
 pub struct TrapContext {
     regs: Registers,
@@ -60,46 +60,48 @@ pub struct TrapContext {
     sstatus: Sstatus,
     sepc: usize,
     scause: Scause,
+    stval: usize,
 }
 
 impl Registers {
-    pub const OFFSET_RA: usize = 0 * 8;
-    pub const OFFSET_SP: usize = 1 * 8;
-    pub const OFFSET_GP: usize = 2 * 8;
-    pub const OFFSET_TP: usize = 3 * 8;
-    pub const OFFSET_T1: usize = 4 * 8;
-    pub const OFFSET_T2: usize = 5 * 8;
-    pub const OFFSET_T0: usize = 6 * 8;
-    pub const OFFSET_A0: usize = 7 * 8;
-    pub const OFFSET_A1: usize = 8 * 8;
-    pub const OFFSET_A2: usize = 9 * 8;
-    pub const OFFSET_A3: usize = 10 * 8;
-    pub const OFFSET_A4: usize = 11 * 8;
-    pub const OFFSET_A5: usize = 12 * 8;
-    pub const OFFSET_A6: usize = 13 * 8;
-    pub const OFFSET_A7: usize = 14 * 8;
-    pub const OFFSET_T3: usize = 15 * 8;
-    pub const OFFSET_T4: usize = 16 * 8;
-    pub const OFFSET_T5: usize = 17 * 8;
-    pub const OFFSET_T6: usize = 18 * 8;
-    pub const OFFSET_S0: usize = 19 * 8;
-    pub const OFFSET_S1: usize = 20 * 8;
-    pub const OFFSET_S2: usize = 21 * 8;
-    pub const OFFSET_S3: usize = 22 * 8;
-    pub const OFFSET_S4: usize = 23 * 8;
-    pub const OFFSET_S5: usize = 24 * 8;
-    pub const OFFSET_S6: usize = 25 * 8;
-    pub const OFFSET_S7: usize = 26 * 8;
-    pub const OFFSET_S8: usize = 27 * 8;
-    pub const OFFSET_S9: usize = 28 * 8;
-    pub const OFFSET_S10: usize = 29 * 8;
-    pub const OFFSET_S11: usize = 30 * 8;
+    pub const OFFSET_TP: usize = offset_of!(Registers, tp);
+    pub const OFFSET_SP: usize = offset_of!(Registers, sp);
+    pub const OFFSET_RA: usize = offset_of!(Registers, ra);
+    pub const OFFSET_GP: usize = offset_of!(Registers, gp);
+    pub const OFFSET_T1: usize = offset_of!(Registers, t1);
+    pub const OFFSET_T2: usize = offset_of!(Registers, t2);
+    pub const OFFSET_T0: usize = offset_of!(Registers, t0);
+    pub const OFFSET_A0: usize = offset_of!(Registers, a0);
+    pub const OFFSET_A1: usize = offset_of!(Registers, a1);
+    pub const OFFSET_A2: usize = offset_of!(Registers, a2);
+    pub const OFFSET_A3: usize = offset_of!(Registers, a3);
+    pub const OFFSET_A4: usize = offset_of!(Registers, a4);
+    pub const OFFSET_A5: usize = offset_of!(Registers, a5);
+    pub const OFFSET_A6: usize = offset_of!(Registers, a6);
+    pub const OFFSET_A7: usize = offset_of!(Registers, a7);
+    pub const OFFSET_T3: usize = offset_of!(Registers, t3);
+    pub const OFFSET_T4: usize = offset_of!(Registers, t4);
+    pub const OFFSET_T5: usize = offset_of!(Registers, t5);
+    pub const OFFSET_T6: usize = offset_of!(Registers, t6);
+    pub const OFFSET_S0: usize = offset_of!(Registers, s0);
+    pub const OFFSET_S1: usize = offset_of!(Registers, s1);
+    pub const OFFSET_S2: usize = offset_of!(Registers, s2);
+    pub const OFFSET_S3: usize = offset_of!(Registers, s3);
+    pub const OFFSET_S4: usize = offset_of!(Registers, s4);
+    pub const OFFSET_S5: usize = offset_of!(Registers, s5);
+    pub const OFFSET_S6: usize = offset_of!(Registers, s6);
+    pub const OFFSET_S7: usize = offset_of!(Registers, s7);
+    pub const OFFSET_S8: usize = offset_of!(Registers, s8);
+    pub const OFFSET_S9: usize = offset_of!(Registers, s9);
+    pub const OFFSET_S10: usize = offset_of!(Registers, s10);
+    pub const OFFSET_S11: usize = offset_of!(Registers, s11);
 }
 
 impl TrapContext {
-    pub const OFFSET_SSTATUS: usize = 31 * 8;
-    pub const OFFSET_SEPC: usize = 32 * 8;
-    pub const OFFSET_SCAUSE: usize = 33 * 8;
+    pub const OFFSET_SSTATUS: usize = offset_of!(TrapContext, sstatus);
+    pub const OFFSET_SEPC: usize = offset_of!(TrapContext, sepc);
+    pub const OFFSET_SCAUSE: usize = offset_of!(TrapContext, scause);
+    pub const OFFSET_STVAL: usize = offset_of!(TrapContext, stval);
 
     fn syscall_no(&self) -> usize {
         self.regs.a7 as usize
@@ -131,6 +133,7 @@ impl RawTrapContext for TrapContext {
             sstatus,
             sepc: 0,
             scause: Scause::from_bits(0),
+            stval: 0,
         }
     }
 
@@ -163,6 +166,7 @@ impl RawTrapContext for TrapContext {
             }
             Trap::Exception(e) => {
                 match Exception::from_number(e).unwrap() {
+                    Exception::Breakpoint => TrapType::Breakpoint,
                     Exception::InstructionMisaligned
                     | Exception::LoadMisaligned
                     | Exception::InstructionFault
@@ -176,16 +180,10 @@ impl RawTrapContext for TrapContext {
                     },
                     exception @ (Exception::InstructionPageFault
                     | Exception::LoadPageFault
-                    | Exception::StorePageFault) => {
-                        #[inline(always)]
-                        fn get_page_fault_address() -> VAddr {
-                            VAddr::from(stval::read())
-                        }
-                        TrapType::Fault(Fault::PageFault {
-                            error_code: self.get_page_fault_error_code(exception),
-                            address: get_page_fault_address(),
-                        })
-                    }
+                    | Exception::StorePageFault) => TrapType::Fault(Fault::PageFault {
+                        error_code: self.get_page_fault_error_code(exception),
+                        address: VAddr::from(self.stval),
+                    }),
                     // breakpoint and supervisor env call
                     _ => TrapType::Fault(Fault::Unknown(e)),
                 }
@@ -224,7 +222,15 @@ impl RawTrapContext for TrapContext {
     fn set_user_mode(&mut self, user: bool) {
         match user {
             true => self.sstatus.set_spp(SPP::User),
-            false => self.sstatus.set_spp(SPP::Supervisor),
+            false => {
+                unsafe {
+                    core::arch::asm!(
+                        "mv {}, tp",
+                        out(reg) self.regs.tp,
+                    );
+                };
+                self.sstatus.set_spp(SPP::Supervisor);
+            }
         }
     }
 

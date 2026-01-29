@@ -25,6 +25,9 @@ where
     _phantom: PhantomData<&'pos ()>,
 }
 
+unsafe impl<T: ?Sized> Send for Proof<'_, T> {}
+unsafe impl<T: ?Sized> Send for ProofMut<'_, T> {}
+
 /// A trait for types that can be converted to a proof of mutable access.
 ///
 /// This is used to prove that a mutable reference is valid for the lifetime `'pos`

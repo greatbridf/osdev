@@ -2,12 +2,9 @@ use super::{
     block::make_device,
     console::get_console,
     constants::{EEXIST, EIO},
-    task::{ProcessList, Thread},
+    task::{block_on, ProcessList, Thread},
     terminal::Terminal,
-    vfs::{
-        file::{File, FileType, TerminalFile},
-        DevId,
-    },
+    vfs::{DevId, File, FileType, TerminalFile},
 };
 use crate::{
     io::{Buffer, Stream, StreamRead},
@@ -18,7 +15,6 @@ use alloc::{
     collections::btree_map::{BTreeMap, Entry},
     sync::Arc,
 };
-use eonix_runtime::task::Task;
 use eonix_sync::AsProof as _;
 use posix_types::open::OpenFlags;
 
@@ -43,7 +39,7 @@ static CHAR_DEVICES: Spin<BTreeMap<DevId, Arc<CharDevice>>> = Spin::new(BTreeMap
 impl CharDevice {
     pub fn read(&self, buffer: &mut dyn Buffer) -> KResult<usize> {
         match &self.device {
-            CharDeviceType::Terminal(terminal) => Task::block_on(terminal.read(buffer)),
+            CharDeviceType::Terminal(terminal) => block_on(terminal.read(buffer)),
             CharDeviceType::Virtual(device) => device.read(buffer),
         }
     }
@@ -72,16 +68,16 @@ impl CharDevice {
         }
     }
 
-    pub fn open(self: &Arc<Self>, flags: OpenFlags) -> KResult<Arc<File>> {
+    pub fn open(self: &Arc<Self>, flags: OpenFlags) -> KResult<File> {
         Ok(match &self.device {
             CharDeviceType::Terminal(terminal) => {
-                let procs = Task::block_on(ProcessList::get().read());
+                let procs = block_on(ProcessList::get().read());
                 let current = Thread::current();
                 let session = current.process.session(procs.prove());
                 // We only set the control terminal if the process is the session leader.
                 if session.sid == Thread::current().process.pid {
                     // Silently fail if we can't set the control terminal.
-                    dont_check!(Task::block_on(session.set_control_terminal(
+                    dont_check!(block_on(session.set_control_terminal(
                         &terminal,
                         false,
                         procs.prove()
@@ -123,7 +119,7 @@ struct ConsoleDevice;
 impl VirtualCharDevice for ConsoleDevice {
     fn read(&self, buffer: &mut dyn Buffer) -> KResult<usize> {
         let console_terminal = get_console().ok_or(EIO)?;
-        Task::block_on(console_terminal.read(buffer))
+        block_on(console_terminal.read(buffer))
     }
 
     fn write(&self, stream: &mut dyn Stream) -> KResult<usize> {

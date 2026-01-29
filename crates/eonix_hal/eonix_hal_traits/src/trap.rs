@@ -66,6 +66,7 @@ where
 {
     Syscall { no: usize, args: [usize; 6] },
     Fault(Fault),
+    Breakpoint,
     Irq { callback: FIrq },
     Timer { callback: FTimer },
 }

@@ -10,7 +10,6 @@ use alloc::{
 };
 use bitflags::bitflags;
 use eonix_log::ConsoleWrite;
-use eonix_runtime::task::Task;
 use eonix_sync::{AsProof as _, Mutex};
 use posix_types::signal::Signal;
 
@@ -447,18 +446,18 @@ impl Terminal {
         }
     }
 
-    fn signal(&self, inner: &mut TerminalInner, signal: Signal) {
+    async fn signal(&self, inner: &mut TerminalInner, signal: Signal) {
         if let Some(session) = inner.session.upgrade() {
-            Task::block_on(session.raise_foreground(signal));
+            session.raise_foreground(signal).await;
         }
         if !inner.termio.noflsh() {
             self.clear_read_buffer(inner);
         }
     }
 
-    fn echo_and_signal(&self, inner: &mut TerminalInner, ch: u8, signal: Signal) {
+    async fn echo_and_signal(&self, inner: &mut TerminalInner, ch: u8, signal: Signal) {
         self.echo_char(inner, ch);
-        self.signal(inner, signal);
+        self.signal(inner, signal).await;
     }
 
     fn do_commit_char(&self, inner: &mut TerminalInner, ch: u8) {
@@ -482,13 +481,13 @@ impl Terminal {
             match ch {
                 0xff => {}
                 ch if ch == inner.termio.vintr() => {
-                    return self.echo_and_signal(&mut inner, ch, Signal::SIGINT)
+                    return self.echo_and_signal(&mut inner, ch, Signal::SIGINT).await
                 }
                 ch if ch == inner.termio.vquit() => {
-                    return self.echo_and_signal(&mut inner, ch, Signal::SIGQUIT)
+                    return self.echo_and_signal(&mut inner, ch, Signal::SIGQUIT).await
                 }
                 ch if ch == inner.termio.vsusp() => {
-                    return self.echo_and_signal(&mut inner, ch, Signal::SIGTSTP)
+                    return self.echo_and_signal(&mut inner, ch, Signal::SIGTSTP).await
                 }
                 _ => {}
             }
@@ -623,12 +622,12 @@ impl Terminal {
                 ptr.write(window_size)
             }
             TerminalIORequest::GetTermios(ptr) => {
-                let termios = Task::block_on(self.inner.lock()).termio.get_user();
+                let termios = self.inner.lock().await.termio.get_user();
                 ptr.write(termios)
             }
             TerminalIORequest::SetTermios(ptr) => {
                 let user_termios = ptr.read()?;
-                let mut inner = Task::block_on(self.inner.lock());
+                let mut inner = self.inner.lock().await;
 
                 // TODO: We ignore unknown bits for now.
                 inner.termio.iflag = TermioIFlags::from_bits_truncate(user_termios.iflag as u16);
@@ -644,13 +643,13 @@ impl Terminal {
     }
 
     /// Assign the `session` to this terminal. Drop the previous session if `forced` is true.
-    pub fn set_session(&self, session: &Arc<Session>, forced: bool) -> KResult<()> {
-        let mut inner = Task::block_on(self.inner.lock());
+    pub async fn set_session(&self, session: &Arc<Session>, forced: bool) -> KResult<()> {
+        let mut inner = self.inner.lock().await;
         if let Some(session) = inner.session.upgrade() {
             if !forced {
                 Err(EPERM)
             } else {
-                Task::block_on(session.drop_control_terminal());
+                session.drop_control_terminal().await;
                 inner.session = Arc::downgrade(&session);
                 Ok(())
             }
@@ -661,12 +660,12 @@ impl Terminal {
         }
     }
 
-    pub fn drop_session(&self) {
-        Task::block_on(self.inner.lock()).session = Weak::new();
+    pub async fn drop_session(&self) {
+        self.inner.lock().await.session = Weak::new();
     }
 
-    pub fn session(&self) -> Option<Arc<Session>> {
-        Task::block_on(self.inner.lock()).session.upgrade()
+    pub async fn session(&self) -> Option<Arc<Session>> {
+        self.inner.lock().await.session.upgrade()
     }
 }
 

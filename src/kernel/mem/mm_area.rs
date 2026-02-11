@@ -36,7 +36,10 @@ impl Clone for MMArea {
 }
 
 impl MMArea {
-    pub fn new(range: VRange, mapping: Mapping, permission: Permission, is_shared: bool) -> Self {
+    pub fn new(
+        range: VRange, mapping: Mapping, permission: Permission,
+        is_shared: bool,
+    ) -> Self {
         Self {
             range: range.into(),
             mapping,
@@ -80,12 +83,15 @@ impl MMArea {
                     permission: self.permission,
                     mapping: match &self.mapping {
                         Mapping::Anonymous => Mapping::Anonymous,
-                        Mapping::File(mapping) => Mapping::File(mapping.offset(diff)),
+                        Mapping::File(mapping) => {
+                            Mapping::File(mapping.offset(diff))
+                        }
                     },
                     is_shared: self.is_shared,
                 };
 
-                let new_range = self.range_borrow().shrink(self.range_borrow().end() - at);
+                let new_range =
+                    self.range_borrow().shrink(self.range_borrow().end() - at);
 
                 *self.range.get_mut() = new_range;
                 (Some(self), Some(right))
@@ -136,10 +142,7 @@ impl MMArea {
     /// # Arguments
     /// * `offset`: The offset from the start of the mapping, aligned to 4KB boundary.
     pub async fn handle_mmap(
-        &self,
-        pfn: &mut PFN,
-        attr: &mut PageAttribute,
-        offset: usize,
+        &self, pfn: &mut PFN, attr: &mut PageAttribute, offset: usize,
         write: bool,
     ) -> KResult<()> {
         let Mapping::File(file_mapping) = &self.mapping else {
@@ -196,8 +199,11 @@ impl MMArea {
         Ok(())
     }
 
-    pub async fn handle(&self, pte: &mut impl PTE, offset: usize, write: bool) -> KResult<()> {
-        let mut attr = pte.get_attr().as_page_attr().expect("Not a page attribute");
+    pub async fn handle(
+        &self, pte: &mut impl PTE, offset: usize, write: bool,
+    ) -> KResult<()> {
+        let mut attr =
+            pte.get_attr().as_page_attr().expect("Not a page attribute");
         let mut pfn = pte.get_pfn();
 
         if attr.contains(PageAttribute::COPY_ON_WRITE) {

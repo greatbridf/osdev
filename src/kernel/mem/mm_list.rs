@@ -7,7 +7,8 @@ use core::fmt;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
 use eonix_hal::mm::{
-    flush_tlb_all, get_root_page_table_pfn, set_root_page_table_pfn, GLOBAL_PAGE_TABLE,
+    flush_tlb_all, get_root_page_table_pfn, set_root_page_table_pfn,
+    GLOBAL_PAGE_TABLE,
 };
 use eonix_mm::address::{Addr as _, AddrOps as _, PAddr, VAddr, VRange};
 use eonix_mm::page_table::{PageAttribute, RawAttribute, PTE};
@@ -59,7 +60,9 @@ impl MMListInner {
         addr.is_user() && self.overlapping_addr(addr).is_none()
     }
 
-    fn overlapping_range(&self, range: VRange) -> impl DoubleEndedIterator<Item = &MMArea> + '_ {
+    fn overlapping_range(
+        &self, range: VRange,
+    ) -> impl DoubleEndedIterator<Item = &MMArea> + '_ {
         self.areas.range(range.into_bounds())
     }
 
@@ -112,7 +115,9 @@ impl MMListInner {
         // TODO: Write back dirty pages.
 
         self.areas.retain(|area| {
-            let Some((left, mid, right)) = area.range().mask_with_checked(&range_to_unmap) else {
+            let Some((left, mid, right)) =
+                area.range().mask_with_checked(&range_to_unmap)
+            else {
                 return true;
             };
 
@@ -136,7 +141,8 @@ impl MMListInner {
                 }
                 (None, Some(right)) => {
                     assert!(right_remaining.is_none());
-                    let (_, Some(right)) = area.clone().split(right.start()) else {
+                    let (_, Some(right)) = area.clone().split(right.start())
+                    else {
                         unreachable!("`right.start()` is within the area");
                     };
 
@@ -145,7 +151,9 @@ impl MMListInner {
                 (Some(left), Some(right)) => {
                     assert!(left_remaining.is_none());
                     assert!(right_remaining.is_none());
-                    let (Some(left), Some(mid)) = area.clone().split(left.end()) else {
+                    let (Some(left), Some(mid)) =
+                        area.clone().split(left.end())
+                    else {
                         unreachable!("`left.end()` is within the area");
                     };
 
@@ -171,7 +179,9 @@ impl MMListInner {
         Ok(pages_to_free)
     }
 
-    fn protect(&mut self, start: VAddr, len: usize, permission: Permission) -> KResult<()> {
+    fn protect(
+        &mut self, start: VAddr, len: usize, permission: Permission,
+    ) -> KResult<()> {
         assert_eq!(start.floor(), start);
         assert!(len != 0);
 
@@ -184,7 +194,9 @@ impl MMListInner {
         let mut found = false;
         let old_areas = core::mem::take(&mut self.areas);
         for mut area in old_areas {
-            let Some((left, mid, right)) = area.range().mask_with_checked(&range_to_protect) else {
+            let Some((left, mid, right)) =
+                area.range().mask_with_checked(&range_to_protect)
+            else {
                 self.areas.insert(area);
                 continue;
             };
@@ -201,7 +213,8 @@ impl MMListInner {
             }
 
             if let Some(right) = right {
-                let (Some(left), Some(right)) = area.split(right.start()) else {
+                let (Some(left), Some(right)) = area.split(right.start())
+                else {
                     unreachable!("`right.start()` is within the area");
                 };
 
@@ -210,9 +223,13 @@ impl MMListInner {
             }
 
             for pte in self.page_table.iter_user(mid) {
-                let mut page_attr = pte.get_attr().as_page_attr().expect("Not a page attribute");
+                let mut page_attr = pte
+                    .get_attr()
+                    .as_page_attr()
+                    .expect("Not a page attribute");
 
-                if !permission.read && !permission.write && !permission.execute {
+                if !permission.read && !permission.write && !permission.execute
+                {
                     // If no permissions are set, we just remove the page.
                     page_attr.remove(
                         PageAttribute::PRESENT
@@ -248,24 +265,24 @@ impl MMListInner {
     }
 
     fn mmap(
-        &mut self,
-        at: VAddr,
-        len: usize,
-        mapping: Mapping,
-        permission: Permission,
-        is_shared: bool,
+        &mut self, at: VAddr, len: usize, mapping: Mapping,
+        permission: Permission, is_shared: bool,
     ) -> KResult<()> {
         assert_eq!(at.floor(), at);
         assert_eq!(len & (PAGE_SIZE - 1), 0);
         let range = VRange::new(at, at + len);
 
         // We are doing a area marker insertion.
-        if len == 0 && !self.check_overlapping_addr(at) || !self.check_overlapping_range(range) {
+        if len == 0 && !self.check_overlapping_addr(at)
+            || !self.check_overlapping_range(range)
+        {
             return Err(EEXIST);
         }
 
         match &mapping {
-            Mapping::Anonymous => self.page_table.set_anonymous(range, permission),
+            Mapping::Anonymous => {
+                self.page_table.set_anonymous(range, permission)
+            }
             Mapping::File(_) => self.page_table.set_mmapped(range, permission),
         }
 
@@ -462,7 +479,8 @@ impl MMList {
 
     /// No need to do invalidation manually, `PageTable` already does it.
     pub async fn unmap(&self, start: VAddr, len: usize) -> KResult<()> {
-        let pages_to_free = self.inner.borrow().lock().await.unmap(start, len)?;
+        let pages_to_free =
+            self.inner.borrow().lock().await.unmap(start, len)?;
 
         // We need to assure that the pages are not accessed anymore.
         // The ones having these pages in their TLB could read from or write to them.
@@ -475,7 +493,9 @@ impl MMList {
         Ok(())
     }
 
-    pub async fn protect(&self, start: VAddr, len: usize, prot: Permission) -> KResult<()> {
+    pub async fn protect(
+        &self, start: VAddr, len: usize, prot: Permission,
+    ) -> KResult<()> {
         self.inner.borrow().lock().await.protect(start, len, prot)?;
 
         // flush the tlb due to the pte attribute changes
@@ -526,12 +546,8 @@ impl MMList {
     }
 
     pub async fn mmap_hint(
-        &self,
-        hint: VAddr,
-        len: usize,
-        mapping: Mapping,
-        permission: Permission,
-        is_shared: bool,
+        &self, hint: VAddr, len: usize, mapping: Mapping,
+        permission: Permission, is_shared: bool,
     ) -> KResult<VAddr> {
         let inner = self.inner.borrow();
         let mut inner = inner.lock().await;
@@ -554,11 +570,7 @@ impl MMList {
     }
 
     pub async fn mmap_fixed(
-        &self,
-        at: VAddr,
-        len: usize,
-        mapping: Mapping,
-        permission: Permission,
+        &self, at: VAddr, len: usize, mapping: Mapping, permission: Permission,
         is_shared: bool,
     ) -> KResult<VAddr> {
         self.inner
@@ -614,14 +626,11 @@ impl MMList {
 
         program_break.grow(len);
 
-        inner.page_table.set_anonymous(
-            range_to_grow,
-            Permission {
-                read: true,
-                write: true,
-                execute: false,
-            },
-        );
+        inner.page_table.set_anonymous(range_to_grow, Permission {
+            read: true,
+            write: true,
+            execute: false,
+        });
 
         inner.break_pos = Some(pos);
         pos
@@ -639,7 +648,9 @@ impl MMList {
 
     /// Access the memory area with the given function.
     /// The function will be called with the offset of the area and the slice of the area.
-    pub async fn access_mut<F>(&self, start: VAddr, len: usize, func: F) -> KResult<()>
+    pub async fn access_mut<F>(
+        &self, start: VAddr, len: usize, func: F,
+    ) -> KResult<()>
     where
         F: Fn(usize, &mut [u8]),
     {
@@ -695,7 +706,8 @@ impl MMList {
                     // SAFETY: We are sure that the page is valid and we have the right to access it.
                     Folio::with_raw(pte.get_pfn(), |page| {
                         let mut pg = page.lock();
-                        let page_data = &mut pg.as_bytes_mut()[start_offset..end_offset];
+                        let page_data =
+                            &mut pg.as_bytes_mut()[start_offset..end_offset];
 
                         func(offset + idx * 0x1000, page_data);
                     });
@@ -784,7 +796,8 @@ where
     fn set_mapped(&mut self, execute: bool) {
         // Writable flag is set during page fault handling while executable flag is
         // preserved across page faults, so we set executable flag now.
-        let mut attr = PageAttribute::READ | PageAttribute::USER | PageAttribute::MAPPED;
+        let mut attr =
+            PageAttribute::READ | PageAttribute::USER | PageAttribute::MAPPED;
         attr.set(PageAttribute::EXECUTE, execute);
 
         self.set(EMPTY_PAGE.clone().into_raw(), T::Attr::from(attr));
@@ -796,7 +809,8 @@ where
             .as_page_attr()
             .expect("Not a page attribute");
 
-        if !from_attr.intersects(PageAttribute::PRESENT | PageAttribute::MAPPED) {
+        if !from_attr.intersects(PageAttribute::PRESENT | PageAttribute::MAPPED)
+        {
             return;
         }
 

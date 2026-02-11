@@ -7,8 +7,7 @@ use eonix_mm::address::{AddrOps as _, VAddr, VRange};
 use eonix_mm::page_table::{PageAttribute, RawAttribute, PTE};
 use eonix_mm::paging::{Folio as _, PFN};
 
-use super::mm_list::EMPTY_PAGE;
-use super::{Mapping, Permission};
+use super::{Mapping, Permission, EMPTY_PAGE};
 use crate::kernel::mem::folio::Folio;
 use crate::kernel::mem::{CachePage, FolioOwned, PageOffset};
 use crate::prelude::KResult;

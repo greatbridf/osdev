@@ -1,4 +1,5 @@
 mod mapping;
+mod mm_area;
 mod page_fault;
 mod page_table;
 
@@ -14,12 +15,13 @@ use eonix_mm::address::{Addr as _, AddrOps as _, PAddr, VAddr, VRange};
 use eonix_mm::page_table::{PageAttribute, RawAttribute, PTE};
 use eonix_mm::paging::{Folio as _, PAGE_SIZE, PFN};
 use eonix_sync::{LazyLock, Mutex};
-pub use mapping::{FileMapping, Mapping};
-pub use page_fault::handle_kernel_page_fault;
 use page_table::KernelPageTable;
 
+pub use self::mapping::{FileMapping, Mapping};
+use self::mm_area::MMArea;
+pub use self::page_fault::handle_kernel_page_fault;
 use super::address::{VAddrExt as _, VRangeExt as _};
-use super::{Folio, FolioOwned, MMArea};
+use super::{Folio, FolioOwned};
 use crate::kernel::constants::{EEXIST, EFAULT, EINVAL, ENOMEM};
 use crate::prelude::*;
 use crate::sync::ArcSwap;

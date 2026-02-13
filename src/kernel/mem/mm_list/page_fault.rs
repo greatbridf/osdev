@@ -30,7 +30,8 @@ impl FixEntry {
     }
 
     fn entries() -> &'static [FixEntry] {
-        let fix_seg_len_bytes = extern_symbol_addr!(FIX_END) - extern_symbol_addr!(FIX_START);
+        let fix_seg_len_bytes =
+            extern_symbol_addr!(FIX_END) - extern_symbol_addr!(FIX_START);
 
         unsafe {
             // SAFETY: `FIX_START` and `FIX_END` are defined in the linker script
@@ -46,9 +47,7 @@ impl FixEntry {
 impl MMList {
     /// Handle a user page fault.
     pub async fn handle_user_page_fault(
-        &self,
-        addr: VAddr,
-        error: PageFaultErrorCode,
+        &self, addr: VAddr, error: PageFaultErrorCode,
     ) -> Result<(), Signal> {
         debug_assert!(
             error.contains(PageFaultErrorCode::UserAccess),
@@ -58,7 +57,8 @@ impl MMList {
         let inner = self.inner.borrow();
         let inner = inner.lock().await;
 
-        let area = inner.areas.get(&VRange::from(addr)).ok_or(Signal::SIGBUS)?;
+        let area =
+            inner.areas.get(&VRange::from(addr)).ok_or(Signal::SIGBUS)?;
 
         // Check user access permission.
         if error.contains(PageFaultErrorCode::Read) && !area.permission.read {
@@ -73,7 +73,9 @@ impl MMList {
             Err(Signal::SIGSEGV)?
         }
 
-        if error.contains(PageFaultErrorCode::InstructionFetch) && !area.permission.execute {
+        if error.contains(PageFaultErrorCode::InstructionFetch)
+            && !area.permission.execute
+        {
             Err(Signal::SIGSEGV)?
         }
 
@@ -124,9 +126,7 @@ fn kernel_page_fault_die(vaddr: VAddr, pc: VAddr) -> ! {
 }
 
 pub async fn handle_kernel_page_fault(
-    fault_pc: VAddr,
-    addr: VAddr,
-    error: PageFaultErrorCode,
+    fault_pc: VAddr, addr: VAddr, error: PageFaultErrorCode,
 ) -> Option<VAddr> {
     debug_assert!(
         !error.contains(PageFaultErrorCode::UserAccess),
@@ -156,7 +156,9 @@ pub async fn handle_kernel_page_fault(
         .page_table
         .iter_user(VRange::from(addr.floor()).grow(PAGE_SIZE))
         .next()
-        .expect("If we can find the mapped area, we should be able to find the PTE");
+        .expect(
+            "If we can find the mapped area, we should be able to find the PTE",
+        );
 
     if let Err(_) = area
         .handle(

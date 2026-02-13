@@ -57,11 +57,10 @@ impl MMList {
         let inner = self.inner.borrow();
         let inner = inner.lock().await;
 
-        let area =
-            inner.areas.get(&VRange::from(addr)).ok_or(Signal::SIGBUS)?;
+        let area = inner.areas.get(addr).ok_or(Signal::SIGBUS)?;
 
         // Check user access permission.
-        if error.contains(PageFaultErrorCode::Read) && !area.permission.read {
+        if error.contains(PageFaultErrorCode::Read) && !area.can_read() {
             // Under x86_64, we don't have a way to distinguish
             // between a read fault and a non-present fault. But it should be OK
             // since non-readable pages are not allowed under x86 and if we read
@@ -69,12 +68,12 @@ impl MMList {
             Err(Signal::SIGSEGV)?
         }
 
-        if error.contains(PageFaultErrorCode::Write) && !area.permission.write {
+        if error.contains(PageFaultErrorCode::Write) && !area.can_write() {
             Err(Signal::SIGSEGV)?
         }
 
         if error.contains(PageFaultErrorCode::InstructionFetch)
-            && !area.permission.execute
+            && !area.can_execute()
         {
             Err(Signal::SIGSEGV)?
         }
@@ -87,7 +86,7 @@ impl MMList {
 
         area.handle(
             pte,
-            addr.floor() - area.range().start(),
+            addr.floor() - area.range.as_ref(&inner).start(),
             error.contains(PageFaultErrorCode::Write),
         )
         .await
@@ -145,11 +144,8 @@ pub async fn handle_kernel_page_fault(
     let inner = mms.inner.borrow();
     let inner = inner.lock().await;
 
-    let area = match inner.areas.get(&VRange::from(addr)) {
-        Some(area) => area,
-        None => {
-            return Some(try_page_fault_fix(fault_pc, addr));
-        }
+    let Some(area) = inner.areas.get(addr) else {
+        return Some(try_page_fault_fix(fault_pc, addr));
     };
 
     let pte = inner
@@ -163,7 +159,7 @@ pub async fn handle_kernel_page_fault(
     if let Err(_) = area
         .handle(
             pte,
-            addr.floor() - area.range().start(),
+            addr.floor() - area.range.as_ref(&inner).start(),
             error.contains(PageFaultErrorCode::Write),
         )
         .await

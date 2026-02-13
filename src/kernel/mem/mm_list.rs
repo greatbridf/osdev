@@ -3,7 +3,7 @@ mod mm_area;
 mod page_fault;
 mod page_table;
 
-use alloc::collections::btree_set::BTreeSet;
+use alloc::sync::Arc;
 use core::fmt;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
@@ -15,10 +15,11 @@ use eonix_mm::address::{Addr as _, AddrOps as _, PAddr, VAddr, VRange};
 use eonix_mm::page_table::{PageAttribute, RawAttribute, PTE};
 use eonix_mm::paging::{Folio as _, PAGE_SIZE, PFN};
 use eonix_sync::{LazyLock, Mutex};
+use mm_area::AreaList;
 use page_table::KernelPageTable;
 
 pub use self::mapping::{FileMapping, Mapping};
-use self::mm_area::MMArea;
+pub use self::mm_area::{AreaFlags, MemArea};
 pub use self::page_fault::handle_kernel_page_fault;
 use super::address::{VAddrExt as _, VRangeExt as _};
 use super::{Folio, FolioOwned};
@@ -39,8 +40,8 @@ pub struct Permission {
     pub execute: bool,
 }
 
-struct MMListInner {
-    areas: BTreeSet<MMArea>,
+pub struct MMListInner {
+    areas: AreaList,
     page_table: KernelPageTable,
     break_start: Option<VRange>,
     break_pos: Option<VAddr>,
@@ -54,22 +55,16 @@ pub struct MMList {
 }
 
 impl MMListInner {
-    fn overlapping_addr(&self, addr: VAddr) -> Option<&MMArea> {
-        self.areas.get(&VRange::from(addr))
+    fn overlapping_addr(&self, addr: VAddr) -> Option<Arc<MemArea>> {
+        self.areas.get(addr)
     }
 
     fn check_overlapping_addr(&self, addr: VAddr) -> bool {
-        addr.is_user() && self.overlapping_addr(addr).is_none()
-    }
-
-    fn overlapping_range(
-        &self, range: VRange,
-    ) -> impl DoubleEndedIterator<Item = &MMArea> + '_ {
-        self.areas.range(range.into_bounds())
+        addr.is_user() && !self.areas.contains(addr)
     }
 
     fn check_overlapping_range(&self, range: VRange) -> bool {
-        range.is_user() && self.overlapping_range(range).next().is_none()
+        range.is_user() && !self.areas.contains_range(&range)
     }
 
     fn random_start(&self) -> VAddr {
@@ -85,19 +80,23 @@ impl MMListInner {
             hint = hint.floor();
         }
 
-        let mut range = VRange::from(hint).grow(len);
-
         loop {
-            if !range.is_user() {
+            let end = hint + len;
+
+            if !VRange::new(hint, end).is_user() {
                 return None;
             }
 
-            match self.overlapping_range(range).next_back() {
-                None => return Some(range.start()),
-                Some(area) => {
-                    range = VRange::from(area.range().end().ceil()).grow(len);
-                }
+            let Some(ub) = self.areas.upper_bound(end) else {
+                return Some(hint);
+            };
+
+            let ub_end = ub.range.as_ref(self).end().ceil();
+            if ub_end <= hint {
+                return Some(hint);
             }
+
+            hint = ub_end;
         }
     }
 
@@ -117,8 +116,10 @@ impl MMListInner {
         // TODO: Write back dirty pages.
 
         self.areas.retain(|area| {
+            let range = unsafe { area.range.as_ref_unchecked() };
+
             let Some((left, mid, right)) =
-                area.range().mask_with_checked(&range_to_unmap)
+                range.mask_with_checked(&range_to_unmap)
             else {
                 return true;
             };
@@ -194,10 +195,12 @@ impl MMListInner {
         }
 
         let mut found = false;
-        let old_areas = core::mem::take(&mut self.areas);
-        for mut area in old_areas {
+        let old_areas = self.areas.take();
+        for area in old_areas {
+            let mut area = area.as_ref().clone();
+
             let Some((left, mid, right)) =
-                area.range().mask_with_checked(&range_to_protect)
+                area.range.as_ref(self).mask_with_checked(&range_to_protect)
             else {
                 self.areas.insert(area);
                 continue;
@@ -255,7 +258,7 @@ impl MMListInner {
                 pte.set_attr(page_attr.into());
             }
 
-            area.permission = permission;
+            area.set_permission(permission);
             self.areas.insert(area);
         }
 
@@ -288,8 +291,12 @@ impl MMListInner {
             Mapping::File(_) => self.page_table.set_mmapped(range, permission),
         }
 
-        self.areas
-            .insert(MMArea::new(range, mapping, permission, is_shared));
+        self.areas.insert(MemArea::new(
+            range,
+            AreaFlags::from_old(permission, is_shared),
+            mapping,
+        ));
+
         Ok(())
     }
 }
@@ -297,9 +304,11 @@ impl MMListInner {
 impl Drop for MMListInner {
     fn drop(&mut self) {
         // May buggy
-        for area in &self.areas {
-            if area.is_shared {
-                for pte in self.page_table.iter_user(area.range()) {
+        for area in self.areas.iter() {
+            let range = area.range.as_ref(self).clone();
+
+            if area.is_shared() {
+                for pte in self.page_table.iter_user(range) {
                     // XXX: Fix me
                     let _ = pte.take();
                     // let raw_page = RawPagePtr::from(pfn);
@@ -308,7 +317,7 @@ impl Drop for MMListInner {
                     // }
                 }
             } else {
-                for pte in self.page_table.iter_user(area.range()) {
+                for pte in self.page_table.iter_user(range) {
                     let (pfn, _) = pte.take();
                     unsafe { Folio::from_raw(pfn) };
                 }
@@ -351,7 +360,7 @@ impl MMList {
             root_page_table: AtomicUsize::from(page_table.addr().addr()),
             user_count: AtomicUsize::new(0),
             inner: ArcSwap::new(Mutex::new(MMListInner {
-                areas: BTreeSet::new(),
+                areas: AreaList::new(),
                 page_table,
                 break_start: None,
                 break_pos: None,
@@ -368,7 +377,7 @@ impl MMList {
             root_page_table: AtomicUsize::from(page_table.addr().addr()),
             user_count: AtomicUsize::new(0),
             inner: ArcSwap::new(Mutex::new(MMListInner {
-                areas: inner.areas.clone(),
+                areas: inner.areas.deep_clone(),
                 page_table,
                 break_start: inner.break_start,
                 break_pos: inner.break_pos,
@@ -379,15 +388,15 @@ impl MMList {
             let list_inner = list.inner.borrow();
             let list_inner = list_inner.lock().await;
 
+            let pgtable = &list_inner.page_table;
+
             for area in list_inner.areas.iter() {
-                if !area.is_shared {
-                    list_inner
-                        .page_table
-                        .set_copy_on_write(&mut inner.page_table, area.range());
+                let range = area.range.as_ref(&list_inner).clone();
+
+                if !area.is_shared() {
+                    pgtable.set_copy_on_write(&mut inner.page_table, range);
                 } else {
-                    list_inner
-                        .page_table
-                        .set_copied(&mut inner.page_table, area.range());
+                    pgtable.set_copied(&mut inner.page_table, range);
                 }
             }
         }
@@ -605,26 +614,25 @@ impl MMList {
             return current_break;
         }
 
-        if !inner.areas.contains(&break_start) {
-            inner.areas.insert(MMArea::new(
-                break_start,
-                Mapping::Anonymous,
-                Permission {
-                    read: true,
-                    write: true,
-                    execute: false,
-                },
-                false,
-            ));
-        }
-
-        let program_break = inner
-            .areas
-            .get(&break_start)
-            .expect("Program break area should be valid");
+        let program_break =
+            inner.areas.get_or_insert(break_start.start(), || {
+                MemArea::new(
+                    break_start,
+                    AreaFlags::from_old(
+                        Permission {
+                            read: true,
+                            write: true,
+                            execute: false,
+                        },
+                        false,
+                    ),
+                    Mapping::Anonymous,
+                )
+            });
 
         let len = pos - current_break;
-        let range_to_grow = VRange::from(program_break.range().end()).grow(len);
+        let range_to_grow =
+            VRange::from(program_break.range.as_ref(&inner).end()).grow(len);
 
         program_break.grow(len);
 
@@ -672,8 +680,9 @@ impl MMList {
         while remaining > 0 {
             let area = inner.overlapping_addr(current).ok_or(EFAULT)?;
 
-            let area_start = area.range().start();
-            let area_end = area.range().end();
+            let range = area.range.as_ref(&inner);
+            let area_start = range.start();
+            let area_end = range.end();
             let area_remaining = area_end - current;
 
             let access_len = remaining.min(area_remaining);

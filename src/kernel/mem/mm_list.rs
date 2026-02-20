@@ -1,3 +1,4 @@
+mod brk;
 mod mapping;
 mod mm_area;
 mod page_fault;
@@ -24,6 +25,7 @@ pub use self::page_fault::handle_kernel_page_fault;
 use super::address::{VAddrExt as _, VRangeExt as _};
 use super::{Folio, FolioOwned};
 use crate::kernel::constants::{EEXIST, EFAULT, EINVAL, ENOMEM};
+use crate::kernel::mem::mm_list::brk::ProgramBreak;
 use crate::prelude::*;
 use crate::sync::ArcSwap;
 
@@ -43,8 +45,7 @@ pub struct Permission {
 pub struct MMListInner {
     areas: AreaList,
     page_table: KernelPageTable,
-    break_start: Option<VRange>,
-    break_pos: Option<VAddr>,
+    prog_break: ProgramBreak,
 }
 
 pub struct MMList {
@@ -361,9 +362,8 @@ impl MMList {
             user_count: AtomicUsize::new(0),
             inner: ArcSwap::new(Mutex::new(MMListInner {
                 areas: AreaList::new(),
+                prog_break: ProgramBreak::null(),
                 page_table,
-                break_start: None,
-                break_pos: None,
             })),
         }
     }
@@ -379,8 +379,7 @@ impl MMList {
             inner: ArcSwap::new(Mutex::new(MMListInner {
                 areas: inner.areas.deep_clone(),
                 page_table,
-                break_start: inner.break_start,
-                break_pos: inner.break_pos,
+                prog_break: inner.prog_break.clone(),
             })),
         };
 
@@ -590,70 +589,6 @@ impl MMList {
             .await
             .mmap(at, len, mapping.clone(), permission, is_shared)
             .map(|_| at)
-    }
-
-    pub async fn set_break(&self, pos: Option<VAddr>) -> VAddr {
-        let inner = self.inner.borrow();
-        let mut inner = inner.lock().await;
-
-        // SAFETY: `set_break` is only called in syscalls, where program break should be valid.
-        assert!(inner.break_start.is_some() && inner.break_pos.is_some());
-        let break_start = inner.break_start.unwrap();
-        let current_break = inner.break_pos.unwrap();
-        let pos = match pos {
-            None => return current_break,
-            Some(pos) => pos.ceil(),
-        };
-
-        if current_break > pos {
-            return current_break;
-        }
-
-        let range = VRange::new(current_break, pos);
-        if !inner.check_overlapping_range(range) {
-            return current_break;
-        }
-
-        let program_break =
-            inner.areas.get_or_insert(break_start.start(), || {
-                MemArea::new(
-                    break_start,
-                    AreaFlags::from_old(
-                        Permission {
-                            read: true,
-                            write: true,
-                            execute: false,
-                        },
-                        false,
-                    ),
-                    Mapping::Anonymous,
-                )
-            });
-
-        let len = pos - current_break;
-        let range_to_grow =
-            VRange::from(program_break.range.as_ref(&inner).end()).grow(len);
-
-        program_break.grow(len);
-
-        inner.page_table.set_anonymous(range_to_grow, Permission {
-            read: true,
-            write: true,
-            execute: false,
-        });
-
-        inner.break_pos = Some(pos);
-        pos
-    }
-
-    /// This should be called only **once** for every thread.
-    pub async fn register_break(&self, start: VAddr) {
-        let inner = self.inner.borrow();
-        let mut inner = inner.lock().await;
-        assert!(inner.break_start.is_none() && inner.break_pos.is_none());
-
-        inner.break_start = Some(start.into());
-        inner.break_pos = Some(start);
     }
 
     /// Access the memory area with the given function.

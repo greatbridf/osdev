@@ -133,6 +133,16 @@ impl AreaList {
         }
     }
 
+    pub fn insert_new(&mut self, area: Arc<MemArea>) {
+        let range = unsafe { area.range.as_ref_unchecked() };
+        match self.areas.entry(range) {
+            Entry::Occupied(_) => panic!("Overlapping mem area: {range:?}."),
+            Entry::Vacant(insert_cursor) => {
+                insert_cursor.insert(area);
+            }
+        }
+    }
+
     pub fn get_or_insert(
         &mut self, addr: VAddr, insert: impl FnOnce() -> MemArea,
     ) -> Arc<MemArea> {

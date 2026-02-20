@@ -39,7 +39,9 @@ pub fn default_fault_handler(fault_type: Fault, trap_ctx: &mut TrapContext) {
         } => {
             let fault_pc = VAddr::from(trap_ctx.get_program_counter());
 
-            if let Some(new_pc) = block_on(handle_kernel_page_fault(fault_pc, vaddr, error_code)) {
+            if let Some(new_pc) =
+                block_on(handle_kernel_page_fault(fault_pc, vaddr, error_code))
+            {
                 trap_ctx.set_program_counter(new_pc.addr());
             }
         }
@@ -50,7 +52,9 @@ pub fn default_fault_handler(fault_type: Fault, trap_ctx: &mut TrapContext) {
 #[eonix_hal::default_trap_handler]
 pub fn interrupt_handler(trap_ctx: &mut TrapContext) {
     match trap_ctx.trap_type() {
-        TrapType::Syscall { no, .. } => unreachable!("Syscall {} in kernel space.", no),
+        TrapType::Syscall { no, .. } => {
+            unreachable!("Syscall {} in kernel space.", no)
+        }
         TrapType::Breakpoint => unreachable!("Breakpoint in kernel space."),
         TrapType::Fault(fault) => default_fault_handler(fault, trap_ctx),
         TrapType::Irq { callback } => callback(default_irq_handler),

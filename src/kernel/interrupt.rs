@@ -19,7 +19,7 @@ pub fn default_irq_handler(irqno: usize) {
     assert!(irqno < 16);
 
     {
-        let handlers = IRQ_HANDLERS.lock();
+        let handlers = IRQ_HANDLERS.lock_irq();
 
         for handler in handlers[irqno].iter() {
             handler();

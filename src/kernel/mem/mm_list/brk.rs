@@ -89,7 +89,7 @@ fn set_break(
         return expand_create_area(areas, brk, page_table, new_range);
     }
 
-    area.grow(new_range.len());
+    area.grow(new_range.len(), areas);
     map_break_area(page_table, new_range);
 
     brk.set(newbrk);

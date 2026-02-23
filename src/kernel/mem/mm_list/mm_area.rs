@@ -143,21 +143,6 @@ impl AreaList {
         }
     }
 
-    pub fn get_or_insert(
-        &mut self, addr: VAddr, insert: impl FnOnce() -> MemArea,
-    ) -> Arc<MemArea> {
-        match self.areas.entry(&VRange::from(addr)) {
-            Entry::Vacant(entry) => {
-                let area = Arc::new(insert());
-                entry.insert(area.clone());
-                area
-            }
-            Entry::Occupied(cursor) => {
-                cursor.as_cursor().clone_pointer().unwrap()
-            }
-        }
-    }
-
     pub fn get(&self, addr: VAddr) -> Option<Arc<MemArea>> {
         self.areas.find(&VRange::from(addr)).clone_pointer()
     }

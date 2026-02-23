@@ -149,7 +149,9 @@ impl MMListInner {
                 (None, None) => {}
                 (Some(left), None) => {
                     assert!(left_remaining.is_none());
-                    let (Some(left), _) = area.clone().split(left.end()) else {
+                    let (Some(left), _) =
+                        area.clone(&self.lock).split(left.end())
+                    else {
                         unreachable!("`left.end()` is within the area");
                     };
 
@@ -157,7 +159,8 @@ impl MMListInner {
                 }
                 (None, Some(right)) => {
                     assert!(right_remaining.is_none());
-                    let (_, Some(right)) = area.clone().split(right.start())
+                    let (_, Some(right)) =
+                        area.clone(&self.lock).split(right.start())
                     else {
                         unreachable!("`right.start()` is within the area");
                     };
@@ -168,7 +171,7 @@ impl MMListInner {
                     assert!(left_remaining.is_none());
                     assert!(right_remaining.is_none());
                     let (Some(left), Some(mid)) =
-                        area.clone().split(left.end())
+                        area.clone(&self.lock).split(left.end())
                     else {
                         unreachable!("`left.end()` is within the area");
                     };
@@ -210,7 +213,7 @@ impl MMListInner {
         let mut found = false;
         let old_areas = self.areas.take();
         for area in old_areas {
-            let mut area = area.as_ref().clone();
+            let mut area = area.as_ref().clone(&self.lock);
             let range = area.range.as_ref(&self.lock);
 
             let Some((left, mid, right)) =
@@ -392,7 +395,7 @@ impl MMList {
             user_count: AtomicUsize::new(0),
             inner: ArcSwap::new(Mutex::new(MMListInner {
                 lock: MemListLock::_new(),
-                areas: inner.areas.deep_clone(),
+                areas: inner.areas.deep_clone(&inner.lock),
                 page_table,
                 prog_break: inner.prog_break.clone(),
             })),

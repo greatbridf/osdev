@@ -34,16 +34,6 @@ pub struct RangeProtected(UnsafeCell<VRange>);
 unsafe impl Send for RangeProtected {}
 unsafe impl Sync for RangeProtected {}
 
-impl Clone for RangeProtected {
-    fn clone(&self) -> Self {
-        // TODO: CHANGE THIS
-        let range = unsafe { self.as_ref_unchecked().clone() };
-
-        Self(UnsafeCell::new(range))
-    }
-}
-
-#[derive(Clone)]
 pub struct MemArea {
     /// # Lock
     /// Protected by [`MMListInner`] lock.
@@ -200,11 +190,11 @@ impl AreaList {
     }
 
     // TODO: For backwards compatibility. Remove this.
-    pub fn deep_clone(&self) -> Self {
+    pub fn deep_clone(&self, lock: &MemListLock) -> Self {
         let mut areas = RBTree::new(AreasAdapter::NEW);
 
         for area in self.areas.iter() {
-            areas.insert(Arc::new(area.clone()));
+            areas.insert(Arc::new(area.clone(lock)));
         }
 
         Self { areas }
@@ -259,6 +249,15 @@ impl MemArea {
 
     pub fn can_execute(&self) -> bool {
         self.flags.contains(AreaFlags::EXECUTE)
+    }
+
+    pub fn clone(&self, lock: &MemListLock) -> Self {
+        Self {
+            range: RangeProtected::new(self.range.as_ref(lock).clone()),
+            flags: self.flags,
+            areas_link: self.areas_link.clone(),
+            mapping: self.mapping.clone(),
+        }
     }
 
     /// # Safety

@@ -97,10 +97,6 @@ impl RangeProtected {
         unsafe { &*self.0.get() }
     }
 
-    pub unsafe fn as_mut_unchecked<'a>(&self) -> &'a mut VRange {
-        unsafe { &mut *self.0.get() }
-    }
-
     pub fn as_ref(&self, _list_read_lock: &MMListInner) -> &VRange {
         unsafe {
             // SAFETY: If we are holding the list's read lock, we won't modify
@@ -111,13 +107,13 @@ impl RangeProtected {
     }
 
     pub fn as_mut<'a>(
-        &self, _list_write_lock: &'a mut MMListInner,
+        &self, _list_write_lock: &'a mut AreaList,
     ) -> &'a mut VRange {
         unsafe {
             // SAFETY: If we are holding the list's write lock, we can guarantee
             // that no one else is reading or writing the areas, so it's safe to
             // return a mutable reference.
-            self.as_mut_unchecked()
+            &mut *self.0.get()
         }
     }
 
@@ -262,10 +258,10 @@ impl MemArea {
     /// # Safety
     /// This function should be called only when we can guarantee that the range
     /// won't overlap with any other range in some scope.
-    pub fn grow(&self, count: usize) {
+    pub fn grow(&self, count: usize, areas: &mut AreaList) {
         // TODO: Remove this.
-        let range = unsafe { self.range.as_mut_unchecked() };
-        range.clone_from(&range.grow(count));
+        let range = self.range.as_mut(areas);
+        *range = range.grow(count);
     }
 
     pub fn split(mut self, at: VAddr) -> (Option<Self>, Option<Self>) {

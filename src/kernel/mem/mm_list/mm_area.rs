@@ -27,6 +27,19 @@ bitflags::bitflags! {
     }
 }
 
+mod sealed {
+    pub trait RangeReadLock {}
+}
+
+/// Some lock that can provide read protection for the area range, including a
+/// reference to the MemList, its lock and the area list lock.
+pub trait RangeReadLock: sealed::RangeReadLock {}
+
+impl RangeReadLock for &MemListLock {}
+impl RangeReadLock for &AreaList {}
+impl sealed::RangeReadLock for &MemListLock {}
+impl sealed::RangeReadLock for &AreaList {}
+
 /// # Lock
 /// Protected by [`MMListInner`] lock.
 pub struct RangeProtected(UnsafeCell<VRange>);
@@ -56,7 +69,7 @@ impl<'a> KeyAdapter<'a> for AreasAdapter {
             // SAFETY: The [`AreaList`] is within the [`MMListInner`].
             //         References to the areas list implies holding the lock of
             //         [`MMListInner`], so it's safe to read the range.
-            *value.range.as_ref_unchecked()
+            value.range.as_ref_unchecked().clone()
         }
     }
 }
@@ -87,20 +100,9 @@ impl RangeProtected {
         unsafe { &*self.0.get() }
     }
 
-    pub fn as_ref<'a>(&self, _list_read_lock: &'a MemListLock) -> &'a VRange {
+    pub fn as_ref<'a>(&self, _lock: impl RangeReadLock + 'a) -> &'a VRange {
         unsafe {
-            // SAFETY: If we are holding the list's read lock, we won't modify
-            // the areas and so won't the range, so it's safe to return a
-            // reference.
-            self.as_ref_unchecked()
-        }
-    }
-
-    pub fn as_ref_list<'a>(&self, _list_read_lock: &'a AreaList) -> &'a VRange {
-        unsafe {
-            // SAFETY: `self.range` is write protected by both the list's lock
-            // and the area's lock, so it's safe to return an immutable
-            // reference to the range with any of them held.
+            // SAFETY: We are holding some kind of read safety lock.
             self.as_ref_unchecked()
         }
     }
@@ -129,7 +131,7 @@ impl AreaList {
     }
 
     pub fn insert_new(&mut self, area: Arc<MemArea>) {
-        let range = area.range.as_ref_list(self).clone();
+        let range = area.range.as_ref(&*self).clone();
 
         match self.areas.entry(&range) {
             Entry::Occupied(_) => panic!("Overlapping mem area: {range:?}."),
@@ -160,7 +162,7 @@ impl AreaList {
             return false;
         };
 
-        let range = ub.range.as_ref_list(self);
+        let range = ub.range.as_ref(self);
         range.end() <= range.start()
     }
 
@@ -179,7 +181,7 @@ impl AreaList {
 
     // TODO: For backwards compatibility. Remove this.
     pub fn insert(&mut self, area: MemArea) {
-        let range = area.range.as_ref_list(self).clone();
+        let range = area.range.as_ref(&*self).clone();
 
         match self.areas.entry(&range) {
             Entry::Occupied(_) => panic!("Overlapping mem area: {:?}.", range),

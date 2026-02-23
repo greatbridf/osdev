@@ -79,10 +79,7 @@ fn set_break(
         return expand_create_area(areas, brk, page_table, new_range);
     };
 
-    let range = unsafe {
-        // SAFETY: We have a reference to `area`.
-        area.range.as_ref_unchecked().clone()
-    };
+    let range = area.range.as_ref_list(areas);
 
     if range.end() != curbrk {
         // Someone might have unmapped the brk area.

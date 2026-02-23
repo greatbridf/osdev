@@ -13,7 +13,7 @@ use intrusive_collections::{
 
 use super::{Mapping, EMPTY_PAGE};
 use crate::kernel::mem::folio::Folio;
-use crate::kernel::mem::mm_list::MMListInner;
+use crate::kernel::mem::mm_list::MemListLock;
 use crate::kernel::mem::{CachePage, FolioOwned, PageOffset, Permission};
 use crate::prelude::KResult;
 
@@ -93,15 +93,24 @@ impl RangeProtected {
         Self(UnsafeCell::new(range))
     }
 
-    pub unsafe fn as_ref_unchecked<'a>(&self) -> &'a VRange {
+    unsafe fn as_ref_unchecked<'a>(&self) -> &'a VRange {
         unsafe { &*self.0.get() }
     }
 
-    pub fn as_ref(&self, _list_read_lock: &MMListInner) -> &VRange {
+    pub fn as_ref<'a>(&self, _list_read_lock: &'a MemListLock) -> &'a VRange {
         unsafe {
             // SAFETY: If we are holding the list's read lock, we won't modify
             // the areas and so won't the range, so it's safe to return a
             // reference.
+            self.as_ref_unchecked()
+        }
+    }
+
+    pub fn as_ref_list<'a>(&self, _list_read_lock: &'a AreaList) -> &'a VRange {
+        unsafe {
+            // SAFETY: `self.range` is write protected by both the list's lock
+            // and the area's lock, so it's safe to return an immutable
+            // reference to the range with any of them held.
             self.as_ref_unchecked()
         }
     }
@@ -130,8 +139,9 @@ impl AreaList {
     }
 
     pub fn insert_new(&mut self, area: Arc<MemArea>) {
-        let range = unsafe { area.range.as_ref_unchecked() };
-        match self.areas.entry(range) {
+        let range = area.range.as_ref_list(self).clone();
+
+        match self.areas.entry(&range) {
             Entry::Occupied(_) => panic!("Overlapping mem area: {range:?}."),
             Entry::Vacant(insert_cursor) => {
                 insert_cursor.insert(area);
@@ -160,11 +170,7 @@ impl AreaList {
             return false;
         };
 
-        let range = unsafe {
-            // SAFETY: Check `KeyAdapter` impl above.
-            ub.range.as_ref_unchecked()
-        };
-
+        let range = ub.range.as_ref_list(self);
         range.end() <= range.start()
     }
 
@@ -183,9 +189,9 @@ impl AreaList {
 
     // TODO: For backwards compatibility. Remove this.
     pub fn insert(&mut self, area: MemArea) {
-        let range = unsafe { area.range.as_ref_unchecked() };
+        let range = area.range.as_ref_list(self).clone();
 
-        match self.areas.entry(range) {
+        match self.areas.entry(&range) {
             Entry::Occupied(_) => panic!("Overlapping mem area: {:?}.", range),
             Entry::Vacant(insert_cursor) => {
                 insert_cursor.insert(Arc::new(area));

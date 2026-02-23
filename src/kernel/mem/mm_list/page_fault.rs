@@ -86,7 +86,7 @@ impl MMList {
 
         area.handle(
             pte,
-            addr.floor() - area.range.as_ref(&inner).start(),
+            addr.floor() - area.range.as_ref(&inner.lock).start(),
             error.contains(PageFaultErrorCode::Write),
         )
         .await
@@ -159,7 +159,7 @@ pub async fn handle_kernel_page_fault(
     if let Err(_) = area
         .handle(
             pte,
-            addr.floor() - area.range.as_ref(&inner).start(),
+            addr.floor() - area.range.as_ref(&inner.lock).start(),
             error.contains(PageFaultErrorCode::Write),
         )
         .await

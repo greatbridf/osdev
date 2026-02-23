@@ -42,7 +42,12 @@ pub struct Permission {
     pub execute: bool,
 }
 
+pub struct MemListLock {
+    _phantom: (),
+}
+
 pub struct MMListInner {
+    pub lock: MemListLock,
     areas: AreaList,
     page_table: KernelPageTable,
     prog_break: ProgramBreak,
@@ -53,6 +58,12 @@ pub struct MMList {
     user_count: AtomicUsize,
     /// Only used in kernel space to switch page tables on context switch.
     root_page_table: AtomicUsize,
+}
+
+impl MemListLock {
+    const fn _new() -> Self {
+        Self { _phantom: () }
+    }
 }
 
 impl MMListInner {
@@ -92,7 +103,8 @@ impl MMListInner {
                 return Some(hint);
             };
 
-            let ub_end = ub.range.as_ref(self).end().ceil();
+            let ub_range = ub.range.as_ref(&self.lock);
+            let ub_end = ub_range.end().ceil();
             if ub_end <= hint {
                 return Some(hint);
             }
@@ -117,7 +129,7 @@ impl MMListInner {
         // TODO: Write back dirty pages.
 
         self.areas.retain(|area| {
-            let range = unsafe { area.range.as_ref_unchecked() };
+            let range = area.range.as_ref(&self.lock);
 
             let Some((left, mid, right)) =
                 range.mask_with_checked(&range_to_unmap)
@@ -199,9 +211,10 @@ impl MMListInner {
         let old_areas = self.areas.take();
         for area in old_areas {
             let mut area = area.as_ref().clone();
+            let range = area.range.as_ref(&self.lock);
 
             let Some((left, mid, right)) =
-                area.range.as_ref(self).mask_with_checked(&range_to_protect)
+                range.mask_with_checked(&range_to_protect)
             else {
                 self.areas.insert(area);
                 continue;
@@ -306,7 +319,7 @@ impl Drop for MMListInner {
     fn drop(&mut self) {
         // May buggy
         for area in self.areas.iter() {
-            let range = area.range.as_ref(self).clone();
+            let range = area.range.as_ref(&self.lock).clone();
 
             if area.is_shared() {
                 for pte in self.page_table.iter_user(range) {
@@ -361,6 +374,7 @@ impl MMList {
             root_page_table: AtomicUsize::from(page_table.addr().addr()),
             user_count: AtomicUsize::new(0),
             inner: ArcSwap::new(Mutex::new(MMListInner {
+                lock: MemListLock::_new(),
                 areas: AreaList::new(),
                 prog_break: ProgramBreak::null(),
                 page_table,
@@ -377,6 +391,7 @@ impl MMList {
             root_page_table: AtomicUsize::from(page_table.addr().addr()),
             user_count: AtomicUsize::new(0),
             inner: ArcSwap::new(Mutex::new(MMListInner {
+                lock: MemListLock::_new(),
                 areas: inner.areas.deep_clone(),
                 page_table,
                 prog_break: inner.prog_break.clone(),
@@ -390,7 +405,7 @@ impl MMList {
             let pgtable = &list_inner.page_table;
 
             for area in list_inner.areas.iter() {
-                let range = area.range.as_ref(&list_inner).clone();
+                let range = area.range.as_ref(&list_inner.lock).clone();
 
                 if !area.is_shared() {
                     pgtable.set_copy_on_write(&mut inner.page_table, range);
@@ -615,7 +630,7 @@ impl MMList {
         while remaining > 0 {
             let area = inner.overlapping_addr(current).ok_or(EFAULT)?;
 
-            let range = area.range.as_ref(&inner);
+            let range = area.range.as_ref(&inner.lock);
             let area_start = range.start();
             let area_end = range.end();
             let area_remaining = area_end - current;

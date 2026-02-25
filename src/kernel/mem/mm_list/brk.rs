@@ -5,7 +5,9 @@ use eonix_mm::address::{VAddr, VRange};
 use crate::kernel::mem::address::VRangeExt;
 use crate::kernel::mem::mm_list::mm_area::AreaList;
 use crate::kernel::mem::mm_list::page_table::KernelPageTable;
-use crate::kernel::mem::mm_list::{AreaFlags, MemArea, PageTableExt};
+use crate::kernel::mem::mm_list::{
+    AreaFlags, MemArea, MemListLock, PageTableExt,
+};
 use crate::kernel::mem::{MMList, Mapping, Permission};
 
 #[derive(Clone)]
@@ -44,8 +46,8 @@ impl ProgramBreak {
     }
 }
 
-fn set_break(
-    areas: &mut AreaList, brk: &mut ProgramBreak,
+async fn set_break(
+    areas: &mut AreaList, brk: &mut ProgramBreak, mm_lock: &mut MemListLock,
     page_table: &mut KernelPageTable, newbrk: Option<VAddr>,
 ) -> VAddr {
     assert!(
@@ -86,7 +88,10 @@ fn set_break(
         return expand_create_area(areas, brk, page_table, new_range);
     }
 
-    area.grow(new_range.len(), areas);
+    let mut area_lock = area.lock.lock().await;
+    let range = area.range.as_mut(mm_lock, areas, &mut area_lock);
+    *range = range.grow(new_range.len());
+
     map_break_area(page_table, new_range);
 
     brk.set(newbrk);
@@ -135,9 +140,11 @@ impl MMList {
         set_break(
             &mut inner.areas,
             &mut inner.prog_break,
+            &mut inner.lock,
             &mut inner.page_table,
             newbrk,
         )
+        .await
     }
 
     /// This should be called only **once** for every thread.

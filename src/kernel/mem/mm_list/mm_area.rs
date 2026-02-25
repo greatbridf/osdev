@@ -6,6 +6,7 @@ use core::sync::atomic::Ordering;
 use eonix_mm::address::{AddrOps as _, VAddr, VRange};
 use eonix_mm::page_table::{PageAttribute, RawAttribute, PTE};
 use eonix_mm::paging::{Folio as _, PFN};
+use eonix_sync::Mutex;
 use intrusive_collections::rbtree::Entry;
 use intrusive_collections::{
     intrusive_adapter, Bound, KeyAdapter, PointerOps, RBTree, RBTreeAtomicLink,
@@ -32,13 +33,15 @@ mod sealed {
 }
 
 /// Some lock that can provide read protection for the area range, including a
-/// reference to the MemList, its lock and the area list lock.
+/// reference to the MemList, its lock, the area list lock and the area lock.
 pub trait RangeReadLock: sealed::RangeReadLock {}
 
 impl RangeReadLock for &MemListLock {}
 impl RangeReadLock for &AreaList {}
+impl RangeReadLock for &AreaLock {}
 impl sealed::RangeReadLock for &MemListLock {}
 impl sealed::RangeReadLock for &AreaList {}
+impl sealed::RangeReadLock for &AreaLock {}
 
 /// # Lock
 /// Protected by [`MMListInner`] lock.
@@ -47,11 +50,16 @@ pub struct RangeProtected(UnsafeCell<VRange>);
 unsafe impl Send for RangeProtected {}
 unsafe impl Sync for RangeProtected {}
 
+pub struct AreaLock {
+    _phantom: (),
+}
+
 pub struct MemArea {
     /// # Lock
     /// Protected by [`MMListInner`] lock.
     pub range: RangeProtected,
     pub flags: AreaFlags,
+    pub lock: Mutex<AreaLock>,
     areas_link: RBTreeAtomicLink,
 
     mapping: Mapping,
@@ -76,6 +84,12 @@ impl<'a> KeyAdapter<'a> for AreasAdapter {
 
 pub struct AreaList {
     areas: RBTree<AreasAdapter>,
+}
+
+impl AreaLock {
+    const fn _new() -> Self {
+        Self { _phantom: () }
+    }
 }
 
 impl AreaFlags {
@@ -108,7 +122,8 @@ impl RangeProtected {
     }
 
     pub fn as_mut<'a>(
-        &self, _list_write_lock: &'a mut AreaList,
+        &self, _mm_list_lock: &'a mut MemListLock,
+        _list_write_lock: &'a mut AreaList, _area_lock: &'a mut AreaLock,
     ) -> &'a mut VRange {
         unsafe {
             // SAFETY: If we are holding the list's write lock, we can guarantee
@@ -226,6 +241,7 @@ impl MemArea {
         Self {
             range: RangeProtected::new(range),
             flags,
+            lock: Mutex::new(AreaLock::_new()),
             areas_link: RBTreeAtomicLink::new(),
             mapping,
         }
@@ -257,18 +273,10 @@ impl MemArea {
         Self {
             range: RangeProtected::new(self.range.as_ref(lock).clone()),
             flags: self.flags,
+            lock: Mutex::new(AreaLock::_new()),
             areas_link: self.areas_link.clone(),
             mapping: self.mapping.clone(),
         }
-    }
-
-    /// # Safety
-    /// This function should be called only when we can guarantee that the range
-    /// won't overlap with any other range in some scope.
-    pub fn grow(&self, count: usize, areas: &mut AreaList) {
-        // TODO: Remove this.
-        let range = self.range.as_mut(areas);
-        *range = range.grow(count);
     }
 
     pub fn split(mut self, at: VAddr) -> (Option<Self>, Option<Self>) {
@@ -287,6 +295,7 @@ impl MemArea {
                 let right = Self {
                     range: RangeProtected::new(VRange::new(at, range.end())),
                     flags: self.flags.clone(),
+                    lock: Mutex::new(AreaLock::_new()),
                     areas_link: RBTreeAtomicLink::new(),
                     mapping: match &self.mapping {
                         Mapping::Anonymous => Mapping::Anonymous,
@@ -407,6 +416,14 @@ impl MemArea {
     pub async fn handle(
         &self, pte: &mut impl PTE, offset: usize, write: bool,
     ) -> KResult<()> {
+        // Exclude concurrent modifications and faults.
+        // TODO: concurrent faults should be acceptable...
+        let lock = self.lock.lock().await;
+        assert!(
+            offset < self.range.as_ref(&*lock).len(),
+            "Offset out of range"
+        );
+
         let mut attr =
             pte.get_attr().as_page_attr().expect("Not a page attribute");
         let mut pfn = pte.get_pfn();

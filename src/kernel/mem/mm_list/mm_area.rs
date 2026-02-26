@@ -37,10 +37,10 @@ mod sealed {
 pub trait RangeReadLock: sealed::RangeReadLock {}
 
 impl RangeReadLock for &MemListLock {}
-impl RangeReadLock for &AreaList {}
+impl RangeReadLock for &AreaListLock {}
 impl RangeReadLock for &AreaLock {}
 impl sealed::RangeReadLock for &MemListLock {}
-impl sealed::RangeReadLock for &AreaList {}
+impl sealed::RangeReadLock for &AreaListLock {}
 impl sealed::RangeReadLock for &AreaLock {}
 
 /// # Lock
@@ -51,6 +51,10 @@ unsafe impl Send for RangeProtected {}
 unsafe impl Sync for RangeProtected {}
 
 pub struct AreaLock {
+    _phantom: (),
+}
+
+pub struct AreaListLock {
     _phantom: (),
 }
 
@@ -84,6 +88,7 @@ impl<'a> KeyAdapter<'a> for AreasAdapter {
 
 pub struct AreaList {
     areas: RBTree<AreasAdapter>,
+    pub lock: AreaListLock,
 }
 
 impl AreaLock {
@@ -123,7 +128,7 @@ impl RangeProtected {
 
     pub fn as_mut<'a>(
         &self, _mm_list_lock: &'a mut MemListLock,
-        _list_write_lock: &'a mut AreaList, _area_lock: &'a mut AreaLock,
+        _list_write_lock: &'a mut AreaListLock, _area_lock: &'a mut AreaLock,
     ) -> &'a mut VRange {
         unsafe {
             // SAFETY: If we are holding the list's write lock, we can guarantee
@@ -142,11 +147,12 @@ impl AreaList {
     pub const fn new() -> Self {
         Self {
             areas: RBTree::new(AreasAdapter::NEW),
+            lock: AreaListLock { _phantom: () },
         }
     }
 
     pub fn insert_new(&mut self, area: Arc<MemArea>) {
-        let range = area.range.as_ref(&*self).clone();
+        let range = area.range.as_ref(&self.lock).clone();
 
         match self.areas.entry(&range) {
             Entry::Occupied(_) => panic!("Overlapping mem area: {range:?}."),
@@ -177,7 +183,7 @@ impl AreaList {
             return false;
         };
 
-        let range = ub.range.as_ref(self);
+        let range = ub.range.as_ref(&self.lock);
         range.end() <= range.start()
     }
 
@@ -196,7 +202,7 @@ impl AreaList {
 
     // TODO: For backwards compatibility. Remove this.
     pub fn insert(&mut self, area: MemArea) {
-        let range = area.range.as_ref(&*self).clone();
+        let range = area.range.as_ref(&self.lock).clone();
 
         match self.areas.entry(&range) {
             Entry::Occupied(_) => panic!("Overlapping mem area: {:?}.", range),
@@ -214,7 +220,10 @@ impl AreaList {
             areas.insert(Arc::new(area.clone(lock)));
         }
 
-        Self { areas }
+        Self {
+            areas,
+            lock: AreaListLock { _phantom: () },
+        }
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &MemArea> {

@@ -81,7 +81,7 @@ async fn set_break(
         return expand_create_area(areas, brk, page_table, new_range);
     };
 
-    let range = area.range.as_ref(&*areas);
+    let range = area.range.as_ref(&areas.lock);
 
     if range.end() != curbrk {
         // Someone might have unmapped the brk area.
@@ -89,7 +89,7 @@ async fn set_break(
     }
 
     let mut area_lock = area.lock.lock().await;
-    let range = area.range.as_mut(mm_lock, areas, &mut area_lock);
+    let range = area.range.as_mut(mm_lock, &mut areas.lock, &mut area_lock);
     *range = range.grow(new_range.len());
 
     map_break_area(page_table, new_range);

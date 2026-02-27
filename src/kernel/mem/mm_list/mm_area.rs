@@ -300,19 +300,6 @@ impl AreaList {
     }
 
     // TODO: For backwards compatibility. Remove this.
-    pub fn retain(&mut self, mut pred: impl FnMut(&MemArea) -> bool) {
-        let mut cursor = self.areas.front_mut();
-
-        while let Some(area) = cursor.get() {
-            if !pred(area) {
-                cursor.remove();
-            }
-
-            cursor.move_next();
-        }
-    }
-
-    // TODO: For backwards compatibility. Remove this.
     pub fn insert(&mut self, area: MemArea) {
         let range = area.range.as_ref(&self.lock).clone();
 

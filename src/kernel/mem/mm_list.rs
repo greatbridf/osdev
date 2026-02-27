@@ -113,7 +113,7 @@ impl MMListInner {
         }
     }
 
-    fn unmap(&mut self, start: VAddr, len: usize) -> KResult<Vec<Folio>> {
+    async fn unmap(&mut self, start: VAddr, len: usize) -> KResult<Vec<Folio>> {
         assert_eq!(start.floor(), start);
         let end = (start + len).ceil();
         let range_to_unmap = VRange::new(start, end);
@@ -121,78 +121,22 @@ impl MMListInner {
             return Err(EINVAL);
         }
 
-        let mut left_remaining = None;
-        let mut right_remaining = None;
-
+        // TODO: Write back dirty pages.
         let mut pages_to_free = Vec::new();
 
-        // TODO: Write back dirty pages.
+        let isolated_areas =
+            self.areas.isolate(&range_to_unmap, &mut self.lock).await;
 
-        self.areas.retain(|area| {
+        for area in isolated_areas {
             let range = area.range.as_ref(&self.lock);
 
-            let Some((left, mid, right)) =
-                range.mask_with_checked(&range_to_unmap)
-            else {
-                return true;
-            };
-
-            for pte in self.page_table.iter_user(mid) {
+            for pte in self.page_table.iter_user(*range) {
                 let (pfn, _) = pte.take();
                 pages_to_free.push(unsafe {
                     // SAFETY: We got the pfn from a valid page table entry, so it should be valid.
                     Folio::from_raw(pfn)
                 });
             }
-
-            match (left, right) {
-                (None, None) => {}
-                (Some(left), None) => {
-                    assert!(left_remaining.is_none());
-                    let (Some(left), _) =
-                        area.clone(&self.lock).split(left.end())
-                    else {
-                        unreachable!("`left.end()` is within the area");
-                    };
-
-                    left_remaining = Some(left);
-                }
-                (None, Some(right)) => {
-                    assert!(right_remaining.is_none());
-                    let (_, Some(right)) =
-                        area.clone(&self.lock).split(right.start())
-                    else {
-                        unreachable!("`right.start()` is within the area");
-                    };
-
-                    right_remaining = Some(right);
-                }
-                (Some(left), Some(right)) => {
-                    assert!(left_remaining.is_none());
-                    assert!(right_remaining.is_none());
-                    let (Some(left), Some(mid)) =
-                        area.clone(&self.lock).split(left.end())
-                    else {
-                        unreachable!("`left.end()` is within the area");
-                    };
-
-                    let (_, Some(right)) = mid.split(right.start()) else {
-                        unreachable!("`right.start()` is within the area");
-                    };
-
-                    left_remaining = Some(left);
-                    right_remaining = Some(right);
-                }
-            }
-
-            false
-        });
-
-        if let Some(front) = left_remaining {
-            self.areas.insert(front);
-        }
-        if let Some(back) = right_remaining {
-            self.areas.insert(back);
         }
 
         Ok(pages_to_free)
@@ -507,8 +451,12 @@ impl MMList {
 
     /// No need to do invalidation manually, `PageTable` already does it.
     pub async fn unmap(&self, start: VAddr, len: usize) -> KResult<()> {
-        let pages_to_free =
-            self.inner.borrow().lock().await.unmap(start, len)?;
+        let pages_to_free = {
+            let inner = self.inner.borrow();
+            let mut inner = inner.lock().await;
+
+            inner.unmap(start, len).await?
+        };
 
         // We need to assure that the pages are not accessed anymore.
         // The ones having these pages in their TLB could read from or write to them.

@@ -1,6 +1,7 @@
 use alloc::sync::Arc;
 use core::cell::UnsafeCell;
 use core::cmp;
+use core::mem::ManuallyDrop;
 use core::sync::atomic::Ordering;
 
 use eonix_mm::address::{AddrOps as _, VAddr, VRange};
@@ -59,20 +60,25 @@ pub struct AreaListLock {
     _phantom: (),
 }
 
+union Link {
+    rbtree: ManuallyDrop<RBTreeAtomicLink>,
+    list: ManuallyDrop<LinkedListAtomicLink>,
+}
+
 pub struct MemArea {
     /// # Lock
     /// Protected by [`MMListInner`] lock.
     pub range: RangeProtected,
     pub flags: AreaFlags,
     pub lock: Mutex<AreaLock>,
-    areas_link: RBTreeAtomicLink,
+    link: Link,
 
     mapping: Mapping,
 }
 
 // SAFETY: `areas_link` is larger in size than `LinkedListAtomicLink`.
-intrusive_adapter!(ListAdapter = Arc<MemArea>: MemArea { areas_link: LinkedListAtomicLink });
-intrusive_adapter!(AreasAdapter = Arc<MemArea>: MemArea { areas_link: RBTreeAtomicLink });
+intrusive_adapter!(ListAdapter = Arc<MemArea>: MemArea { link: LinkedListAtomicLink });
+intrusive_adapter!(AreasAdapter = Arc<MemArea>: MemArea { link: RBTreeAtomicLink });
 
 impl<'a> KeyAdapter<'a> for AreasAdapter {
     type Key = VRange;
@@ -251,6 +257,9 @@ impl AreaList {
                 (None, None) => {
                     // Fully covered, just remove it.
                     let area = cursor.remove().unwrap();
+                    unsafe {
+                        area.link.to_list();
+                    }
                     ret_areas.push_back(area);
                     continue;
                 }
@@ -275,12 +284,19 @@ impl AreaList {
 
             let ret_range = area.clone_and_modify(lock, |area| {
                 area.range = RangeProtected::new(m);
+                area.link = Link::list();
             });
 
             ret_areas.push_back(ret_range);
         }
 
-        ret_areas.into_iter()
+        // We are returning the area, and the area should be by default
+        // in rbtrees, so we need to convert the link back to rbtree
+        // link so the caller won't be surprised.
+        ret_areas.into_iter().inspect(|area| unsafe {
+            // SAFETY: `into_iter()` removes the area from the list.
+            area.link.to_rbtree()
+        })
     }
 
     // TODO: For backwards compatibility. Remove this.
@@ -347,7 +363,7 @@ impl MemArea {
             range: RangeProtected::new(range),
             flags,
             lock: Mutex::new(AreaLock::_new()),
-            areas_link: RBTreeAtomicLink::new(),
+            link: Link::rbtree(),
             mapping,
         }
     }
@@ -379,7 +395,7 @@ impl MemArea {
             range: RangeProtected::new(self.range.as_ref(lock).clone()),
             flags: self.flags,
             lock: Mutex::new(AreaLock::_new()),
-            areas_link: self.areas_link.clone(),
+            link: Link::rbtree(),
             mapping: self.mapping.clone(),
         }
     }
@@ -413,7 +429,7 @@ impl MemArea {
                     range: RangeProtected::new(VRange::new(at, range.end())),
                     flags: self.flags.clone(),
                     lock: Mutex::new(AreaLock::_new()),
-                    areas_link: RBTreeAtomicLink::new(),
+                    link: Link::rbtree(),
                     mapping: match &self.mapping {
                         Mapping::Anonymous => Mapping::Anonymous,
                         Mapping::File(mapping) => {
@@ -562,5 +578,41 @@ impl MemArea {
         pte.set(pfn, attr.into());
 
         Ok(())
+    }
+}
+
+impl Link {
+    const fn rbtree() -> Self {
+        Self {
+            rbtree: ManuallyDrop::new(RBTreeAtomicLink::new()),
+        }
+    }
+
+    const fn list() -> Self {
+        Self {
+            list: ManuallyDrop::new(LinkedListAtomicLink::new()),
+        }
+    }
+
+    /// Convert from RBTree link to LinkedList link.
+    ///
+    /// # Safety
+    /// The caller must guarantee that the link is currently not linked.
+    /// Otherwise, this is an undefined behavior.
+    unsafe fn to_list(&self) {
+        unsafe {
+            self.list.force_unlink();
+        }
+    }
+
+    /// Convert from LinkedList link to RBTree link.
+    ///
+    /// # Safety
+    /// The caller must guarantee that the link is currently not linked.
+    /// Otherwise, this is an undefined behavior.
+    unsafe fn to_rbtree(&self) {
+        unsafe {
+            self.rbtree.force_unlink();
+        }
     }
 }

@@ -195,6 +195,29 @@ impl AreaList {
     pub async fn isolate(
         &mut self, isolate_range: &VRange, lock: &mut MemListLock,
     ) -> impl Iterator<Item = Arc<MemArea>> {
+        struct SendFuture<F>(F);
+        unsafe impl<F> Send for SendFuture<F> {}
+        unsafe impl<F> Sync for SendFuture<F> {}
+        impl<F> core::future::Future for SendFuture<F>
+        where
+            F: core::future::Future,
+        {
+            type Output = F::Output;
+
+            fn poll(
+                self: core::pin::Pin<&mut Self>,
+                cx: &mut core::task::Context<'_>,
+            ) -> core::task::Poll<Self::Output> {
+                unsafe { self.map_unchecked_mut(|s| &mut s.0).poll(cx) }
+            }
+        }
+
+        SendFuture(self.isolate_(isolate_range, lock)).await
+    }
+
+    async fn isolate_(
+        &mut self, isolate_range: &VRange, lock: &mut MemListLock,
+    ) -> impl Iterator<Item = Arc<MemArea>> {
         let mut ret_areas = LinkedList::new(ListAdapter::NEW);
         let begin = VRange::from(isolate_range.start());
 

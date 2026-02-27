@@ -9,7 +9,8 @@ use eonix_mm::paging::{Folio as _, PFN};
 use eonix_sync::Mutex;
 use intrusive_collections::rbtree::Entry;
 use intrusive_collections::{
-    intrusive_adapter, Bound, KeyAdapter, PointerOps, RBTree, RBTreeAtomicLink,
+    intrusive_adapter, Bound, KeyAdapter, LinkedList, LinkedListAtomicLink,
+    PointerOps, RBTree, RBTreeAtomicLink,
 };
 
 use super::{Mapping, EMPTY_PAGE};
@@ -69,6 +70,8 @@ pub struct MemArea {
     mapping: Mapping,
 }
 
+// SAFETY: `areas_link` is larger in size than `LinkedListAtomicLink`.
+intrusive_adapter!(ListAdapter = Arc<MemArea>: MemArea { areas_link: LinkedListAtomicLink });
 intrusive_adapter!(AreasAdapter = Arc<MemArea>: MemArea { areas_link: RBTreeAtomicLink });
 
 impl<'a> KeyAdapter<'a> for AreasAdapter {
@@ -187,6 +190,76 @@ impl AreaList {
         range.end() <= range.start()
     }
 
+    /// Isolate the given range by splitting the areas that overlap with it, and
+    /// return the areas that are fully covered by the range and removed.
+    pub async fn isolate(
+        &mut self, isolate_range: &VRange, lock: &mut MemListLock,
+    ) -> impl Iterator<Item = Arc<MemArea>> {
+        let mut ret_areas = LinkedList::new(ListAdapter::NEW);
+        let begin = VRange::from(isolate_range.start());
+
+        let mut cursor = self.areas.upper_bound_mut(Bound::Included(&begin));
+
+        while !cursor.is_null() {
+            let range = {
+                let area = cursor.get().unwrap();
+                let range = area.range.as_ref(&*lock);
+
+                if range.start() >= isolate_range.end() {
+                    break;
+                }
+
+                if range.end() <= isolate_range.start() {
+                    cursor.move_next();
+                    continue;
+                }
+
+                range.clone()
+            };
+
+            let area = cursor.as_cursor().clone_pointer().unwrap();
+            let list_lock = &mut self.lock;
+            let mut area_lock = area.lock.lock().await;
+            let area_lock = &mut area_lock;
+
+            let (l, m, r) = range.mask_with_checked(isolate_range).unwrap();
+
+            match (l, r) {
+                (None, None) => {
+                    // Fully covered, just remove it.
+                    let area = cursor.remove().unwrap();
+                    ret_areas.push_back(area);
+                    continue;
+                }
+                (None, Some(rem)) | (Some(rem), None) => {
+                    // Overflow on one side, change the old area's range and
+                    // return the newly created area.
+                    let range = area.range.as_mut(lock, list_lock, area_lock);
+                    *range = rem;
+                }
+                (Some(left), Some(right)) => {
+                    // Overflow on both sides, change the old area's range to
+                    // the left part, create a new area for the right part and
+                    // return the middle part.
+                    let range = area.range.as_mut(lock, list_lock, area_lock);
+                    *range = left;
+
+                    cursor.insert_after(area.clone_and_modify(lock, |area| {
+                        area.range = RangeProtected::new(right);
+                    }));
+                }
+            }
+
+            let ret_range = area.clone_and_modify(lock, |area| {
+                area.range = RangeProtected::new(m);
+            });
+
+            ret_areas.push_back(ret_range);
+        }
+
+        ret_areas.into_iter()
+    }
+
     // TODO: For backwards compatibility. Remove this.
     pub fn retain(&mut self, mut pred: impl FnMut(&MemArea) -> bool) {
         let mut cursor = self.areas.front_mut();
@@ -286,6 +359,18 @@ impl MemArea {
             areas_link: self.areas_link.clone(),
             mapping: self.mapping.clone(),
         }
+    }
+
+    fn clone_and_modify(
+        &self, lock: &MemListLock, modify: impl FnOnce(&mut MemArea),
+    ) -> Arc<Self> {
+        let mut arc = Arc::new(self.clone(lock));
+        let arc_mut = unsafe {
+            // SAFETY: We are the only owner.
+            Arc::get_mut(&mut arc).unwrap_unchecked()
+        };
+        modify(arc_mut);
+        arc
     }
 
     pub fn split(mut self, at: VAddr) -> (Option<Self>, Option<Self>) {

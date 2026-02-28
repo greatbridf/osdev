@@ -1,10 +1,9 @@
 use alloc::sync::Arc;
 use core::cell::UnsafeCell;
-use core::cmp;
 use core::mem::ManuallyDrop;
 use core::sync::atomic::{AtomicU32, Ordering};
 
-use eonix_mm::address::{AddrOps as _, VAddr, VRange};
+use eonix_mm::address::{VAddr, VRange};
 use eonix_mm::page_table::{PageAttribute, RawAttribute, PTE};
 use eonix_mm::paging::{Folio as _, PFN};
 use eonix_sync::Mutex;
@@ -187,10 +186,6 @@ impl RangeProtected {
             // return a mutable reference.
             &mut *self.0.get()
         }
-    }
-
-    pub fn get_mut(&mut self) -> &mut VRange {
-        self.0.get_mut()
     }
 }
 
@@ -377,11 +372,6 @@ impl AreaList {
             Some(area)
         })
     }
-
-    // TODO: For backwards compatibility. Remove this.
-    pub fn take(&mut self) -> impl IntoIterator<Item = Arc<MemArea>> {
-        self.areas.take()
-    }
 }
 
 impl MemArea {
@@ -452,40 +442,6 @@ impl MemArea {
         };
         modify(arc_mut);
         arc
-    }
-
-    pub fn split(mut self, at: VAddr) -> (Option<Self>, Option<Self>) {
-        assert!(at.is_page_aligned());
-        let range = self.range.get_mut();
-
-        match (*range).cmp(&VRange::from(at)) {
-            cmp::Ordering::Less => (Some(self), None),
-            cmp::Ordering::Greater => (None, Some(self)),
-            cmp::Ordering::Equal => {
-                let diff = at - range.start();
-                if diff == 0 {
-                    return (None, Some(self));
-                }
-
-                let right = Self {
-                    range: RangeProtected::new(VRange::new(at, range.end())),
-                    flags: self.flags.clone(),
-                    lock: Mutex::new(AreaLock::_new()),
-                    link: Link::rbtree(),
-                    mapping: match &self.mapping {
-                        Mapping::Anonymous => Mapping::Anonymous,
-                        Mapping::File(mapping) => {
-                            Mapping::File(mapping.offset(diff))
-                        }
-                    },
-                };
-
-                let new_range = range.shrink(range.end() - at);
-
-                *self.range.get_mut() = new_range;
-                (Some(self), Some(right))
-            }
-        }
     }
 
     pub fn handle_cow(&self, pfn: &mut PFN, attr: &mut PageAttribute) {

@@ -142,7 +142,7 @@ impl MMListInner {
         Ok(pages_to_free)
     }
 
-    fn protect(
+    async fn protect(
         &mut self, start: VAddr, len: usize, permission: Permission,
     ) -> KResult<()> {
         assert_eq!(start.floor(), start);
@@ -154,41 +154,15 @@ impl MMListInner {
             return Err(EINVAL);
         }
 
+        let isolated_areas =
+            self.areas.isolate(&range_to_protect, &mut self.lock).await;
+
         let mut found = false;
-        let old_areas = self.areas.take();
-        for area in old_areas {
-            let mut area = area.as_ref().clone(&self.lock);
+        for area in isolated_areas {
             let range = area.range.as_ref(&self.lock);
-
-            let Some((left, mid, right)) =
-                range.mask_with_checked(&range_to_protect)
-            else {
-                self.areas.insert(area);
-                continue;
-            };
-
             found = true;
 
-            if let Some(left) = left {
-                let (Some(left), Some(right)) = area.split(left.end()) else {
-                    unreachable!("`left.end()` is within the area");
-                };
-
-                self.areas.insert(left);
-                area = right;
-            }
-
-            if let Some(right) = right {
-                let (Some(left), Some(right)) = area.split(right.start())
-                else {
-                    unreachable!("`right.start()` is within the area");
-                };
-
-                self.areas.insert(right);
-                area = left;
-            }
-
-            for pte in self.page_table.iter_user(mid) {
+            for pte in self.page_table.iter_user(*range) {
                 let mut page_attr = pte
                     .get_attr()
                     .as_page_attr()
@@ -220,7 +194,9 @@ impl MMListInner {
             }
 
             area.set_permission(permission);
-            self.areas.insert(area);
+
+            // Insert it back.
+            self.areas.insert_new(area);
         }
 
         if !found {
@@ -472,7 +448,9 @@ impl MMList {
     pub async fn protect(
         &self, start: VAddr, len: usize, prot: Permission,
     ) -> KResult<()> {
-        self.inner.borrow().lock().await.protect(start, len, prot)?;
+        let inner = self.inner.borrow();
+        let mut inner = inner.lock().await;
+        inner.protect(start, len, prot).await?;
 
         // flush the tlb due to the pte attribute changes
         self.flush_user_tlbs().await;

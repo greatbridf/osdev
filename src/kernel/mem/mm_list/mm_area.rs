@@ -2,7 +2,7 @@ use alloc::sync::Arc;
 use core::cell::UnsafeCell;
 use core::cmp;
 use core::mem::ManuallyDrop;
-use core::sync::atomic::Ordering;
+use core::sync::atomic::{AtomicU32, Ordering};
 
 use eonix_mm::address::{AddrOps as _, VAddr, VRange};
 use eonix_mm::page_table::{PageAttribute, RawAttribute, PTE};
@@ -29,6 +29,8 @@ bitflags::bitflags! {
         const SHARED = 1 << 3;
     }
 }
+
+struct AtomicFlags(AtomicU32);
 
 mod sealed {
     pub trait RangeReadLock {}
@@ -69,7 +71,7 @@ pub struct MemArea {
     /// # Lock
     /// Protected by [`MMListInner`] lock.
     pub range: RangeProtected,
-    pub flags: AreaFlags,
+    flags: AtomicFlags,
     pub lock: Mutex<AreaLock>,
     link: Link,
 
@@ -107,6 +109,8 @@ impl AreaLock {
 }
 
 impl AreaFlags {
+    const RWX: Self = Self::READ.union(Self::WRITE).union(Self::EXECUTE);
+
     pub fn from_old(perm: Permission, is_shared: bool) -> Self {
         let mut flags = AreaFlags::empty();
 
@@ -116,6 +120,44 @@ impl AreaFlags {
         flags.set(AreaFlags::SHARED, is_shared);
 
         flags
+    }
+}
+
+impl AtomicFlags {
+    const fn new(flags: AreaFlags) -> Self {
+        Self(AtomicU32::new(flags.bits()))
+    }
+
+    /// Load with Acquire semantics.
+    fn load(&self) -> AreaFlags {
+        AreaFlags::from_bits_retain(self.0.load(Ordering::Acquire))
+    }
+
+    /// Do atomic read-modify-write with AcqRel semantics on success and
+    /// Relaxed semantics on failure.
+    fn update(
+        &self, mut try_modify: impl FnMut(AreaFlags) -> AreaFlags,
+    ) -> AreaFlags {
+        loop {
+            let Ok(old_raw) = self.0.fetch_update(
+                Ordering::AcqRel,
+                Ordering::Relaxed,
+                |raw| {
+                    let flags = AreaFlags::from_bits_retain(raw);
+                    Some(try_modify(flags).bits())
+                },
+            ) else {
+                continue;
+            };
+
+            return AreaFlags::from_bits_retain(old_raw);
+        }
+    }
+}
+
+impl Clone for AtomicFlags {
+    fn clone(&self) -> Self {
+        Self::new(self.load())
     }
 }
 
@@ -348,39 +390,52 @@ impl MemArea {
     ) -> Self {
         Self {
             range: RangeProtected::new(range),
-            flags,
+            flags: AtomicFlags::new(flags),
             lock: Mutex::new(AreaLock::_new()),
             link: Link::rbtree(),
             mapping,
         }
     }
 
-    pub fn set_permission(&mut self, perm: Permission) {
-        self.flags.set(AreaFlags::READ, perm.read);
-        self.flags.set(AreaFlags::WRITE, perm.write);
-        self.flags.set(AreaFlags::EXECUTE, perm.execute);
+    pub fn set_permission(&self, perm: Permission) {
+        let mut new_flags = AreaFlags::empty();
+
+        if perm.read {
+            new_flags.insert(AreaFlags::READ);
+        }
+
+        if perm.write {
+            new_flags.insert(AreaFlags::WRITE);
+        }
+
+        if perm.execute {
+            new_flags.insert(AreaFlags::EXECUTE);
+        }
+
+        self.flags
+            .update(|flags| (flags & !AreaFlags::RWX) | new_flags);
     }
 
     pub fn is_shared(&self) -> bool {
-        self.flags.contains(AreaFlags::SHARED)
+        self.flags.load().contains(AreaFlags::SHARED)
     }
 
     pub fn can_read(&self) -> bool {
-        self.flags.contains(AreaFlags::READ)
+        self.flags.load().contains(AreaFlags::READ)
     }
 
     pub fn can_write(&self) -> bool {
-        self.flags.contains(AreaFlags::WRITE)
+        self.flags.load().contains(AreaFlags::WRITE)
     }
 
     pub fn can_execute(&self) -> bool {
-        self.flags.contains(AreaFlags::EXECUTE)
+        self.flags.load().contains(AreaFlags::EXECUTE)
     }
 
     pub fn clone(&self, lock: &MemListLock) -> Self {
         Self {
             range: RangeProtected::new(self.range.as_ref(lock).clone()),
-            flags: self.flags,
+            flags: self.flags.clone(),
             lock: Mutex::new(AreaLock::_new()),
             link: Link::rbtree(),
             mapping: self.mapping.clone(),

@@ -33,11 +33,9 @@ static CHAR_DEVICES: Spin<BTreeMap<DeviceId, Arc<CharDevice>>> =
     Spin::new(BTreeMap::new());
 
 impl CharDevice {
-    pub fn read(&self, buffer: &mut dyn Buffer) -> KResult<usize> {
+    pub async fn read(&self, buffer: &mut dyn Buffer) -> KResult<usize> {
         match &self.device {
-            CharDeviceType::Terminal(terminal) => {
-                block_on(terminal.read(buffer))
-            }
+            CharDeviceType::Terminal(terminal) => terminal.read(buffer).await,
             CharDeviceType::Virtual(device) => device.read(buffer),
         }
     }

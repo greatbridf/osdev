@@ -59,9 +59,7 @@ impl CharDevice {
     }
 
     pub fn register(
-        devid: DeviceId,
-        name: Arc<str>,
-        device: CharDeviceType,
+        devid: DeviceId, name: Arc<str>, device: CharDeviceType,
     ) -> KResult<()> {
         match CHAR_DEVICES.lock().entry(devid) {
             Entry::Vacant(entry) => {
@@ -73,9 +71,7 @@ impl CharDevice {
     }
 
     pub async fn open(
-        self: &Arc<Self>,
-        thread: &Thread,
-        flags: OpenFlags,
+        self: &Arc<Self>, thread: &Thread, flags: OpenFlags,
     ) -> KResult<File> {
         let file = match &self.device {
             CharDeviceType::Virtual(_) => {

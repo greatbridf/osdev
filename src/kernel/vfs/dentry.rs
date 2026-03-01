@@ -21,7 +21,9 @@ use super::FsContext;
 use crate::hash::KernelHasher;
 use crate::io::{Buffer, Stream};
 use crate::kernel::block::BlockDevice;
-use crate::kernel::constants::{EEXIST, EINVAL, EISDIR, ELOOP, ENOENT, EPERM, ERANGE};
+use crate::kernel::constants::{
+    EEXIST, EINVAL, EISDIR, ELOOP, ENOENT, EPERM, ERANGE,
+};
 use crate::kernel::CharDevice;
 use crate::path::Path;
 use crate::prelude::*;
@@ -201,7 +203,9 @@ impl Dentry {
         self.inode.load().is_some()
     }
 
-    pub async fn open_check(self: &Arc<Self>, flags: OpenFlags, perm: Permission) -> KResult<()> {
+    pub async fn open_check(
+        self: &Arc<Self>, flags: OpenFlags, perm: Permission,
+    ) -> KResult<()> {
         match self.inode.load() {
             Some(_) => {
                 if flags.contains(OpenFlags::O_CREAT | OpenFlags::O_EXCL) {
@@ -224,19 +228,14 @@ impl Dentry {
 
 impl Dentry {
     pub async fn open(
-        context: &FsContext,
-        path: &Path,
-        follow_symlinks: bool,
+        context: &FsContext, path: &Path, follow_symlinks: bool,
     ) -> KResult<Arc<Self>> {
         let cwd = context.cwd.lock().clone();
         Self::open_at(context, &cwd, path, follow_symlinks).await
     }
 
     pub async fn open_at(
-        context: &FsContext,
-        at: &Arc<Self>,
-        path: &Path,
-        follow_symlinks: bool,
+        context: &FsContext, at: &Arc<Self>, path: &Path, follow_symlinks: bool,
     ) -> KResult<Arc<Self>> {
         let mut found = context.start_recursive_walk(at, path).await?;
 
@@ -245,16 +244,17 @@ impl Dentry {
         }
 
         loop {
-            match found.inode.load() {
-                Some((DentryKind::Symlink, inode)) => {
-                    found = context.follow_symlink(found.aref(), inode, 0).await?;
-                }
-                _ => return Ok(found),
-            }
+            let Some((DentryKind::Symlink, inode)) = found.inode.load() else {
+                return Ok(found);
+            };
+
+            found = context.follow_symlink(found.aref(), inode, 0).await?;
         }
     }
 
-    pub fn get_path(self: &Arc<Self>, context: &FsContext, buffer: &mut dyn Buffer) -> KResult<()> {
+    pub fn get_path(
+        self: &Arc<Self>, context: &FsContext, buffer: &mut dyn Buffer,
+    ) -> KResult<()> {
         let rcu_read = rcu_read_lock();
 
         let mut path = vec![];
@@ -285,7 +285,9 @@ impl Dentry {
 }
 
 impl Dentry {
-    pub async fn read(&self, buffer: &mut dyn Buffer, offset: usize) -> KResult<usize> {
+    pub async fn read(
+        &self, buffer: &mut dyn Buffer, offset: usize,
+    ) -> KResult<usize> {
         let inode = self.get_inode()?;
 
         // Safety: Changing mode alone will have no effect on the file's contents
@@ -304,19 +306,25 @@ impl Dentry {
         }
     }
 
-    pub async fn write(&self, stream: &mut dyn Stream, offset: WriteOffset<'_>) -> KResult<usize> {
+    pub async fn write(
+        &self, stream: &mut dyn Stream, offset: WriteOffset<'_>,
+    ) -> KResult<usize> {
         let inode = self.get_inode()?;
         // Safety: Changing mode alone will have no effect on the file's contents
         match inode.format {
             Format::DIR => Err(EISDIR),
             Format::REG => inode.write(stream, offset).await,
             Format::BLK => Err(EINVAL), // TODO
-            Format::CHR => CharDevice::get(inode.devid()?).ok_or(EPERM)?.write(stream),
+            Format::CHR => {
+                CharDevice::get(inode.devid()?).ok_or(EPERM)?.write(stream)
+            }
             _ => Err(EINVAL),
         }
     }
 
-    pub async fn readdir<F>(&self, offset: usize, mut for_each_entry: F) -> KResult<KResult<usize>>
+    pub async fn readdir<F>(
+        &self, offset: usize, mut for_each_entry: F,
+    ) -> KResult<KResult<usize>>
     where
         F: FnMut(&[u8], Ino) -> KResult<bool> + Send,
     {
@@ -380,7 +388,9 @@ impl Dentry {
         self.get_inode()?.chown(uid, gid).await
     }
 
-    pub async fn rename(self: &Arc<Self>, new: &Arc<Self>, flags: RenameFlags) -> KResult<()> {
+    pub async fn rename(
+        self: &Arc<Self>, new: &Arc<Self>, flags: RenameFlags,
+    ) -> KResult<()> {
         if Arc::ptr_eq(self, new) {
             return Ok(());
         }
@@ -423,8 +433,13 @@ impl DentryKind {
         Self::from_raw(Self::as_atomic(me).load(Ordering::Acquire))
     }
 
-    fn atomic_swap_acqrel(me: &UnsafeCell<Option<Self>>, kind: Option<Self>) -> Option<Self> {
-        Self::from_raw(Self::as_atomic(me).swap(kind.map_or(0, Self::into_raw), Ordering::AcqRel))
+    fn atomic_swap_acqrel(
+        me: &UnsafeCell<Option<Self>>, kind: Option<Self>,
+    ) -> Option<Self> {
+        Self::from_raw(
+            Self::as_atomic(me)
+                .swap(kind.map_or(0, Self::into_raw), Ordering::AcqRel),
+        )
     }
 }
 

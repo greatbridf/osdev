@@ -51,7 +51,9 @@ bitflags! {
 }
 
 impl FileType {
-    pub async fn read(&self, buffer: &mut dyn Buffer, offset: Option<usize>) -> KResult<usize> {
+    pub async fn read(
+        &self, buffer: &mut dyn Buffer, offset: Option<usize>,
+    ) -> KResult<usize> {
         match self {
             FileType::Inode(inode) => inode.read(buffer, offset).await,
             FileType::PipeRead(pipe) => pipe.read(buffer).await,
@@ -76,7 +78,9 @@ impl FileType {
     //     }
     // }
 
-    pub async fn write(&self, stream: &mut dyn Stream, offset: Option<usize>) -> KResult<usize> {
+    pub async fn write(
+        &self, stream: &mut dyn Stream, offset: Option<usize>,
+    ) -> KResult<usize> {
         match self {
             FileType::Inode(inode) => inode.write(stream, offset).await,
             FileType::PipeWrite(pipe) => pipe.write(stream).await,
@@ -93,7 +97,9 @@ impl FileType {
         }
     }
 
-    pub async fn sendfile(&self, dest_file: &Self, count: usize) -> KResult<usize> {
+    pub async fn sendfile(
+        &self, dest_file: &Self, count: usize,
+    ) -> KResult<usize> {
         let mut buffer_page = FolioOwned::alloc();
         let buffer = buffer_page.as_bytes_mut();
 
@@ -126,7 +132,9 @@ impl FileType {
 
     pub async fn ioctl(&self, request: usize, arg3: usize) -> KResult<usize> {
         match self {
-            FileType::Terminal(tty) => tty.ioctl(request, arg3).await.map(|_| 0),
+            FileType::Terminal(tty) => {
+                tty.ioctl(request, arg3).await.map(|_| 0)
+            }
             _ => Err(ENOTTY),
         }
     }

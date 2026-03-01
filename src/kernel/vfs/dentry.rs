@@ -300,7 +300,7 @@ impl Dentry {
             }
             Format::CHR => {
                 let device = CharDevice::get(inode.devid()?).ok_or(EPERM)?;
-                device.read(buffer)
+                device.read(buffer).await
             }
             _ => Err(EINVAL),
         }

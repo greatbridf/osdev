@@ -58,7 +58,7 @@ impl FileType {
             FileType::Inode(inode) => inode.read(buffer, offset).await,
             FileType::PipeRead(pipe) => pipe.read(buffer).await,
             FileType::Terminal(tty) => tty.read(buffer).await,
-            FileType::CharDev(device) => device.read(buffer),
+            FileType::CharDev(device) => device.read(buffer).await,
             _ => Err(EBADF),
         }
     }

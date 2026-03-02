@@ -24,6 +24,7 @@ use crate::extern_symbol_value;
 use crate::mm::{
     ArchMemory, BasicPageAlloc, BasicPageAllocRef, ScopedAllocator,
 };
+use crate::processor::CPU_COUNT;
 
 static BSP_PAGE_ALLOC: AtomicPtr<RefCell<BasicPageAlloc>> =
     AtomicPtr::new(core::ptr::null_mut());
@@ -126,6 +127,8 @@ fn enable_sse() {
 }
 
 fn setup_cpu(alloc: impl FrameAlloc) {
+    CPU_COUNT.fetch_add(1, Ordering::AcqRel);
+
     let mut percpu_area = PercpuArea::new(|layout| {
         // TODO: Use page size defined in `arch`.
         let page_count = layout.size().div_ceil(PAGE_SIZE);

@@ -1,15 +1,16 @@
-use crate::{kernel::task::block_on, prelude::*};
 use alloc::sync::Arc;
+use core::ops::Deref;
+use core::ptr::NonNull;
+use core::sync::atomic::{AtomicPtr, Ordering};
+
 use arcref::ArcRef;
-use core::{
-    ops::Deref,
-    ptr::NonNull,
-    sync::atomic::{AtomicPtr, Ordering},
-};
 use eonix_preempt::PreemptGuard;
 use eonix_runtime::scheduler::RUNTIME;
 use eonix_sync::{RwLock, RwLockReadGuard};
 use pointers::BorrowedArc;
+
+use crate::kernel::task::block_on;
+use crate::prelude::*;
 
 /// The RCU Read Lock. Holding a reference to an instance of the struct assures
 /// you that any RCU protected data would not be dropped.
@@ -90,9 +91,10 @@ impl<T: RCUNode<T>> RCUList<T> {
         new_node.rcu_next().store(old_head, Ordering::Release);
 
         if let Some(old_head) = unsafe { old_head.as_ref() } {
-            old_head
-                .rcu_prev()
-                .store(Arc::into_raw(new_node.clone()) as *mut _, Ordering::Release);
+            old_head.rcu_prev().store(
+                Arc::into_raw(new_node.clone()) as *mut _,
+                Ordering::Release,
+            );
         }
 
         self.head
@@ -112,8 +114,8 @@ impl<T: RCUNode<T>> RCUList<T> {
         }
 
         {
-            let prev_next =
-                unsafe { prev.as_ref().map(|rcu| rcu.rcu_next()) }.unwrap_or(&self.head);
+            let prev_next = unsafe { prev.as_ref().map(|rcu| rcu.rcu_next()) }
+                .unwrap_or(&self.head);
 
             let me = prev_next.swap(next, Ordering::AcqRel);
             debug_assert!(me == Arc::as_ptr(&node) as *mut _);
@@ -136,19 +138,23 @@ impl<T: RCUNode<T>> RCUList<T> {
         new_node.rcu_next().store(next, Ordering::Release);
 
         {
-            let prev_next =
-                unsafe { prev.as_ref().map(|rcu| rcu.rcu_next()) }.unwrap_or(&self.head);
+            let prev_next = unsafe { prev.as_ref().map(|rcu| rcu.rcu_next()) }
+                .unwrap_or(&self.head);
 
-            let old = prev_next.swap(Arc::into_raw(new_node.clone()) as *mut _, Ordering::AcqRel);
+            let old = prev_next.swap(
+                Arc::into_raw(new_node.clone()) as *mut _,
+                Ordering::AcqRel,
+            );
 
             debug_assert!(old == Arc::as_ptr(&old_node) as *mut _);
             unsafe { Arc::from_raw(old) };
         }
 
         if let Some(next) = unsafe { next.as_ref() } {
-            let old = next
-                .rcu_prev()
-                .swap(Arc::into_raw(new_node.clone()) as *mut _, Ordering::AcqRel);
+            let old = next.rcu_prev().swap(
+                Arc::into_raw(new_node.clone()) as *mut _,
+                Ordering::AcqRel,
+            );
 
             debug_assert!(old == Arc::as_ptr(&old_node) as *mut _);
             unsafe { Arc::from_raw(old) };
@@ -162,7 +168,9 @@ impl<T: RCUNode<T>> RCUList<T> {
             .store(core::ptr::null_mut(), Ordering::Release);
     }
 
-    pub fn iter<'a, 'r>(&'a self, _lock: &'r RCUReadLock) -> RCUIterator<'a, 'r, T> {
+    pub fn iter<'a, 'r>(
+        &'a self, _lock: &'r RCUReadLock,
+    ) -> RCUIterator<'a, 'r, T> {
         RCUIterator {
             cur: NonNull::new(self.head.load(Ordering::Acquire)),
             _phantom: PhantomData,
@@ -185,7 +193,8 @@ impl<'rcu, T: RCUNode<T>> Iterator for RCUIterator<'_, 'rcu, T> {
                 pointer.as_ref()
             };
 
-            self.cur = NonNull::new(reference.rcu_next().load(Ordering::Acquire));
+            self.cur =
+                NonNull::new(reference.rcu_next().load(Ordering::Acquire));
 
             unsafe {
                 // SAFETY: We have the read lock so the node is still alive.
@@ -234,7 +243,9 @@ where
             .map(|p| RCUReadGuard::lock(unsafe { BorrowedArc::from_raw(p) }))
     }
 
-    pub fn dereference<'r, 'a: 'r>(&self, _lock: &'a RCUReadLock) -> Option<ArcRef<'r, T>> {
+    pub fn dereference<'r, 'a: 'r>(
+        &self, _lock: &'a RCUReadLock,
+    ) -> Option<ArcRef<'r, T>> {
         NonNull::new(self.0.load(Ordering::Acquire)).map(|p| unsafe {
             // SAFETY: We have a read lock, so the node is still alive.
             ArcRef::new_unchecked(p.as_ptr())
@@ -244,7 +255,8 @@ where
     /// # Safety
     /// Caller must ensure no writers are updating the pointer.
     pub unsafe fn load_locked<'lt>(&self) -> Option<BorrowedArc<'lt, T>> {
-        NonNull::new(self.0.load(Ordering::Acquire)).map(|p| unsafe { BorrowedArc::from_raw(p) })
+        NonNull::new(self.0.load(Ordering::Acquire))
+            .map(|p| unsafe { BorrowedArc::from_raw(p) })
     }
 
     /// # Safety

@@ -212,8 +212,6 @@ impl ThreadBuilder {
     pub fn clone_from(
         self, thread: &Thread, clone_args: &CloneArgs,
     ) -> KResult<Self> {
-        let inner = thread.inner.lock();
-
         let mut trap_ctx = thread.trap_ctx.borrow().clone();
         trap_ctx.set_user_return_value(0);
 
@@ -250,7 +248,7 @@ impl ThreadBuilder {
             .files(files)
             .fs_context(fs_context)
             .signal_list(signal_list)
-            .name(inner.name.clone())
+            .name(thread.inner.lock().name.clone())
             .tls(clone_args.tls.clone())
             .set_child_tid(clone_args.set_tid_ptr)
             .clear_child_tid(clone_args.clear_tid_ptr)

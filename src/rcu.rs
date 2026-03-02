@@ -26,7 +26,7 @@ pub struct RCUReadGuardNew {
 
 pub struct RCUReadGuard<'data, T: 'data> {
     value: T,
-    _guard: RwLockReadGuard<'static, RCUReadLock>,
+    _guard: RCUReadGuardNew,
     _phantom: PhantomData<&'data T>,
 }
 
@@ -36,7 +36,7 @@ impl<'data, T> RCUReadGuard<'data, BorrowedArc<'data, T>> {
     fn lock(value: BorrowedArc<'data, T>) -> Self {
         Self {
             value,
-            _guard: block_on(GLOBAL_RCU_SEM.read()),
+            _guard: rcu_read_lock(),
             _phantom: PhantomData,
         }
     }

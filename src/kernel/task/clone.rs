@@ -148,7 +148,6 @@ pub async fn do_clone(thread: &Thread, clone_args: CloneArgs) -> KResult<u32> {
         let new_thread = thread_builder
             .process(current_process)
             .tid(new_pid)
-            .tls(clone_args.tls)
             .build(&mut procs);
         new_thread
     } else {

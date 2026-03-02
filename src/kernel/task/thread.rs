@@ -244,12 +244,19 @@ impl ThreadBuilder {
                 SignalList::new_cloned(&thread.signal_list)
             };
 
+        let mut tls = clone_args.tls.clone();
+
+        // Respect `clone_args`'s TLS if given. Otherwise, clone from the thread.
+        if tls.is_none() {
+            tls = thread.inner.lock().tls.clone();
+        }
+
         Ok(self
             .files(files)
             .fs_context(fs_context)
             .signal_list(signal_list)
             .name(thread.inner.lock().name.clone())
-            .tls(clone_args.tls.clone())
+            .tls(tls)
             .set_child_tid(clone_args.set_tid_ptr)
             .clear_child_tid(clone_args.clear_tid_ptr)
             .trap_ctx(trap_ctx)

@@ -8,7 +8,9 @@ use posix_types::signal::Signal;
 
 use super::{UserTLS, UserTLSDescriptor};
 use crate::kernel::syscall::UserMut;
-use crate::kernel::task::{alloc_pid, ProcessBuilder, ProcessList, Thread, ThreadBuilder};
+use crate::kernel::task::{
+    alloc_pid, ProcessBuilder, ProcessList, Thread, ThreadBuilder,
+};
 use crate::kernel::user::UserPointerMut;
 use crate::KResult;
 
@@ -63,11 +65,8 @@ impl CloneArgs {
     const MASK: usize = 0xff;
 
     pub fn for_clone(
-        flags: usize,
-        sp: usize,
-        child_tid_ptr: UserMut<u32>,
-        parent_tid_ptr: UserMut<u32>,
-        tls: PtrT,
+        flags: usize, sp: usize, child_tid_ptr: UserMut<u32>,
+        parent_tid_ptr: UserMut<u32>, tls: PtrT,
     ) -> KResult<Self> {
         let clone_flags = CloneFlags::from_bits_truncate(flags & !Self::MASK);
         let exit_signal = flags & Self::MASK;
@@ -139,7 +138,8 @@ impl CloneArgs {
 pub async fn do_clone(thread: &Thread, clone_args: CloneArgs) -> KResult<u32> {
     let mut procs = ProcessList::get().write().await;
 
-    let thread_builder = ThreadBuilder::new().clone_from(&thread, &clone_args)?;
+    let thread_builder =
+        ThreadBuilder::new().clone_from(&thread, &clone_args)?;
     let current_process = thread.process.clone();
 
     let new_pid = alloc_pid();

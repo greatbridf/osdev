@@ -6,7 +6,9 @@ use syn::{parse2, FnArg, Ident, ItemFn, LitStr};
 
 fn define_syscall_impl(attrs: TokenStream, item: TokenStream) -> TokenStream {
     if attrs.is_empty() {
-        panic!("`define_syscall` attribute should take one argument: `syscall_no`");
+        panic!(
+            "`define_syscall` attribute should take one argument: `syscall_no`"
+        );
     }
 
     let syscall_no = parse2::<Ident>(attrs).expect("Invalid syscall number");
@@ -37,37 +39,43 @@ fn define_syscall_impl(attrs: TokenStream, item: TokenStream) -> TokenStream {
             }
         });
 
-    let args_call = item
-        .sig
-        .inputs
-        .iter()
-        .enumerate()
-        .map(|(idx, arg)| match arg {
-            FnArg::Receiver(_) => panic!("&self is not permitted."),
-            FnArg::Typed(_) => {
-                let arg_ident = Ident::new(&format!("arg_{}", idx), Span::call_site());
-                quote! { #arg_ident }
-            }
-        });
+    let args_call =
+        item.sig
+            .inputs
+            .iter()
+            .enumerate()
+            .map(|(idx, arg)| match arg {
+                FnArg::Receiver(_) => panic!("&self is not permitted."),
+                FnArg::Typed(_) => {
+                    let arg_ident =
+                        Ident::new(&format!("arg_{}", idx), Span::call_site());
+                    quote! { #arg_ident }
+                }
+            });
 
     let syscall_name = item.sig.ident;
-    let syscall_name_str = LitStr::new(&syscall_name.to_string(), Span::call_site());
+    let syscall_name_str =
+        LitStr::new(&syscall_name.to_string(), Span::call_site());
     let body = item.block;
 
-    let helper_fn = Ident::new(&format!("_do_syscall_{}", syscall_name), Span::call_site());
+    let helper_fn =
+        Ident::new(&format!("_do_syscall_{}", syscall_name), Span::call_site());
     let helper_fn_pointer = Ident::new(
         &format!("_SYSCALL_ENTRY_{}", syscall_name.to_string().to_uppercase()),
         Span::call_site(),
     );
 
-    let real_fn = Ident::new(&format!("sys_{}", syscall_name), Span::call_site());
+    let real_fn =
+        Ident::new(&format!("sys_{}", syscall_name), Span::call_site());
 
     let raw_syscall_section = LitStr::new(
         &format!(".raw_syscalls.{}", syscall_name),
         Span::call_site(),
     );
-    let syscall_fn_section =
-        LitStr::new(&format!(".syscall_fns.{}", syscall_name), Span::call_site());
+    let syscall_fn_section = LitStr::new(
+        &format!(".syscall_fns.{}", syscall_name),
+        Span::call_site(),
+    );
 
     let trace_format_string = {
         let arg_count = item.sig.inputs.len();
@@ -84,7 +92,8 @@ fn define_syscall_impl(attrs: TokenStream, item: TokenStream) -> TokenStream {
         let args = args.enumerate().map(|(idx, arg)| match arg {
             FnArg::Receiver(_) => panic!("&self is not permitted."),
             FnArg::Typed(_) => {
-                let arg_ident = Ident::new(&format!("arg_{}", idx), Span::call_site());
+                let arg_ident =
+                    Ident::new(&format!("arg_{}", idx), Span::call_site());
                 quote! { #arg_ident }
             }
         });
@@ -175,8 +184,47 @@ fn define_syscall_impl(attrs: TokenStream, item: TokenStream) -> TokenStream {
 /// ```
 #[proc_macro_attribute]
 pub fn define_syscall(
-    attrs: proc_macro::TokenStream,
-    item: proc_macro::TokenStream,
+    attrs: proc_macro::TokenStream, item: proc_macro::TokenStream,
 ) -> proc_macro::TokenStream {
     define_syscall_impl(attrs.into(), item.into()).into()
+}
+
+fn define_late_init_impl(attrs: TokenStream, func: TokenStream) -> TokenStream {
+    if !attrs.is_empty() {
+        panic!("attributes not allowed here");
+    }
+
+    let func_parsed =
+        parse2::<ItemFn>(func.clone()).expect("expected function definition");
+
+    let func_ident = &func_parsed.sig.ident;
+    let func_name = func_parsed.sig.ident.to_string();
+
+    let static_ident = Ident::new(
+        &format!("__LATE_INIT_{}", func_name.to_uppercase()),
+        Span::call_site(),
+    );
+
+    quote! {
+        #func
+
+        #[used]
+        #[doc(hidden)]
+        #[link_section = ".late_init"]
+        static #static_ident : fn() = #func_ident;
+    }
+}
+
+/// Define a function to run after kernel initialization.
+///
+/// # Note
+/// Keep in mind that all the functions defined with this macro may be run in
+/// **ANY** order.
+///
+/// So if order matters, try another way other than this!
+#[proc_macro_attribute]
+pub fn define_late_init(
+    attrs: proc_macro::TokenStream, func: proc_macro::TokenStream,
+) -> proc_macro::TokenStream {
+    define_late_init_impl(attrs.into(), func.into()).into()
 }

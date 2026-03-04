@@ -49,6 +49,8 @@ use kernel_init::setup_memory;
 use path::Path;
 use prelude::*;
 
+use crate::kernel::run_late_init;
+
 static BSP_OK: AtomicBool = AtomicBool::new(false);
 
 #[eonix_hal::main]
@@ -147,6 +149,8 @@ async fn init_process(early_kstack: PRange) {
     fs::procfs::init().await;
     fs::fat32::init();
     // fs::ext4::init();
+
+    run_late_init();
 
     let load_info = {
         // mount fat32 /mnt directory

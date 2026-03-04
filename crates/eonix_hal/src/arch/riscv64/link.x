@@ -62,6 +62,20 @@ SECTIONS {
         RAW_SYSCALL_HANDLERS_SIZE =
             ABSOLUTE(__raw_syscall_handlers_end - __raw_syscall_handlers_start);
     } > REGION_RODATA AT> RAM
+
+    .rodata.late_init :
+    {
+        . = ALIGN(16);
+        __raw_late_init_start = .;
+
+        LATE_INIT_FUNCTIONS = .;
+        KEEP(*(.late_init));
+
+        __raw_late_init_end = .;
+
+        LATE_INIT_FUNCTION_COUNT =
+            ABSOLUTE((__raw_late_init_end - __raw_late_init_start) / 8);
+    } > REGION_RODATA AT> RAM
 }
 INSERT AFTER .rodata;
 

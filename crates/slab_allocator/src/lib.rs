@@ -114,8 +114,14 @@ where
     alloc: P,
 }
 
-unsafe impl<P, const COUNT: usize> Send for SlabAlloc<P, COUNT> where P: SlabPageAlloc {}
-unsafe impl<P, const COUNT: usize> Sync for SlabAlloc<P, COUNT> where P: SlabPageAlloc {}
+unsafe impl<P, const COUNT: usize> Send for SlabAlloc<P, COUNT> where
+    P: SlabPageAlloc
+{
+}
+unsafe impl<P, const COUNT: usize> Sync for SlabAlloc<P, COUNT> where
+    P: SlabPageAlloc
+{
+}
 
 impl<L, const COUNT: usize> SlabAlloc<L, COUNT>
 where
@@ -124,7 +130,9 @@ where
 {
     pub fn new_in(alloc: L) -> Self {
         Self {
-            slabs: core::array::from_fn(|i| Spin::new(SlabList::new(1 << (i + 3)))),
+            slabs: core::array::from_fn(|i| {
+                Spin::new(SlabList::new(1 << (i + 3)))
+            }),
             alloc,
         }
     }
@@ -199,7 +207,9 @@ where
         self.empty_list.push_tail(slab);
     }
 
-    fn alloc(&mut self, alloc: &impl SlabPageAlloc<Page = T::Folio>) -> NonNull<u8> {
+    fn alloc(
+        &mut self, alloc: &impl SlabPageAlloc<Page = T::Folio>,
+    ) -> NonNull<u8> {
         if !self.partial_list.is_empty() {
             return self.alloc_from_partial();
         }
@@ -211,7 +221,9 @@ where
         self.alloc_from_empty()
     }
 
-    unsafe fn dealloc(&mut self, ptr: NonNull<u8>, _alloc: &impl SlabPageAlloc) {
+    unsafe fn dealloc(
+        &mut self, ptr: NonNull<u8>, _alloc: &impl SlabPageAlloc,
+    ) {
         let slab_page = unsafe {
             // SAFETY:
             <T::Folio>::from_allocated(ptr)
@@ -249,7 +261,9 @@ where
     }
 }
 
-pub fn make_slab_page(page_ptr: NonNull<[u8]>, slot_size: usize) -> NonNull<SlabSlot> {
+fn make_slab_page(
+    page_ptr: NonNull<[u8]>, slot_size: usize,
+) -> NonNull<SlabSlot> {
     assert!(
         slot_size >= core::mem::size_of::<usize>(),
         "The minimum slot size is of a pointer's width"

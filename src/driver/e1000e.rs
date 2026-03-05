@@ -152,7 +152,9 @@ impl netdev::Netdev for E1000eDev {
         match status & defs::STAT_SPEED_MASK {
             defs::STAT_SPEED_10M => self.speed = netdev::LinkSpeed::Speed10M,
             defs::STAT_SPEED_100M => self.speed = netdev::LinkSpeed::Speed100M,
-            defs::STAT_SPEED_1000M => self.speed = netdev::LinkSpeed::Speed1000M,
+            defs::STAT_SPEED_1000M => {
+                self.speed = netdev::LinkSpeed::Speed1000M
+            }
             _ => return Err(EINVAL),
         }
 
@@ -209,7 +211,10 @@ impl netdev::Netdev for E1000eDev {
             let buffer = &self.rx_buffers[next_tail as usize];
             let data = &buffer.as_bytes()[..len];
 
-            println_debug!("e1000e: received {len} bytes, {:?}", PrintableBytes(data));
+            println_debug!(
+                "e1000e: received {len} bytes, {:?}",
+                PrintableBytes(data)
+            );
             self.rx_tail = Some(next_tail);
         }
 
@@ -245,7 +250,9 @@ impl netdev::Netdev for E1000eDev {
         self.tx_tail = Some(next_tail);
         self.regs.write(defs::REG_TDT, next_tail);
 
-        unimplemented!("Check if the packets are sent and update self.tx_head state");
+        unimplemented!(
+            "Check if the packets are sent and update self.tx_head state"
+        );
         // Ok(())
     }
 }
@@ -374,12 +381,16 @@ impl E1000eDev {
             rx_head: None,
             rx_tail: None,
             tx_tail: None,
-            rx_buffers: Box::new(core::array::from_fn(|_| FolioOwned::alloc_order(2))),
+            rx_buffers: Box::new(core::array::from_fn(|_| {
+                FolioOwned::alloc_order(2)
+            })),
             tx_buffers: Box::new([const { None }; 32]),
         };
 
         unsafe {
-            for (desc, page) in dev.rx_desc_table().into_iter().zip(dev.rx_buffers.iter()) {
+            for (desc, page) in
+                dev.rx_desc_table().into_iter().zip(dev.rx_buffers.iter())
+            {
                 desc.buffer = page.start().addr() as u64;
                 desc.status = 0;
             }
@@ -424,7 +435,9 @@ impl PCIDriver for Driver {
         self.dev_id
     }
 
-    async fn handle_device(&self, device: Arc<PCIDevice<'static>>) -> Result<(), PciError> {
+    async fn handle_device(
+        &self, device: Arc<PCIDevice<'static>>,
+    ) -> Result<(), PciError> {
         let Header::Endpoint(header) = device.header else {
             Err(EINVAL)?
         };

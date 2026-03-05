@@ -10,7 +10,9 @@ use crate::kernel::mem::paging::PageBuffer;
 use crate::kernel::timer::Instant;
 use crate::kernel::vfs::dentry::Dentry;
 use crate::kernel::vfs::inode::{Ino, InodeInfo, InodeOps, InodeUse};
-use crate::kernel::vfs::mount::{dump_mounts, register_filesystem, Mount, MountCreator};
+use crate::kernel::vfs::mount::{
+    dump_mounts, register_filesystem, Mount, MountCreator,
+};
 use crate::kernel::vfs::types::{DeviceId, Format, Permission};
 use crate::kernel::vfs::{SbRef, SbUse, SuperBlock, SuperBlockInfo};
 use crate::prelude::*;
@@ -39,11 +41,8 @@ impl InodeOps for Node {
     type SuperBlock = ProcFs;
 
     async fn read(
-        &self,
-        _: SbUse<Self::SuperBlock>,
-        _: &InodeUse,
-        buffer: &mut dyn Buffer,
-        offset: usize,
+        &self, _: SbUse<Self::SuperBlock>, _: &InodeUse,
+        buffer: &mut dyn Buffer, offset: usize,
     ) -> KResult<usize> {
         let NodeKind::File(file_inode) = &self.kind else {
             return Err(EISDIR);
@@ -56,7 +55,8 @@ impl InodeOps for Node {
         let mut page_buffer = PageBuffer::new();
         read_fn(&mut page_buffer)?;
 
-        let Some((_, data)) = page_buffer.data().split_at_checked(offset) else {
+        let Some((_, data)) = page_buffer.data().split_at_checked(offset)
+        else {
             return Ok(0);
         };
 
@@ -64,10 +64,7 @@ impl InodeOps for Node {
     }
 
     async fn lookup(
-        &self,
-        _: SbUse<Self::SuperBlock>,
-        _: &InodeUse,
-        dentry: &Arc<Dentry>,
+        &self, _: SbUse<Self::SuperBlock>, _: &InodeUse, dentry: &Arc<Dentry>,
     ) -> KResult<Option<InodeUse>> {
         let NodeKind::Dir(dir) = &self.kind else {
             return Err(ENOTDIR);
@@ -86,10 +83,7 @@ impl InodeOps for Node {
     }
 
     async fn readdir(
-        &self,
-        _: SbUse<Self::SuperBlock>,
-        _: &InodeUse,
-        offset: usize,
+        &self, _: SbUse<Self::SuperBlock>, _: &InodeUse, offset: usize,
         callback: &mut (dyn FnMut(&[u8], Ino) -> KResult<bool> + Send),
     ) -> KResult<KResult<usize>> {
         let NodeKind::Dir(dir) = &self.kind else {
@@ -113,8 +107,7 @@ impl InodeOps for Node {
 
 impl Node {
     pub fn new_file(
-        ino: Ino,
-        sb: SbRef<ProcFs>,
+        ino: Ino, sb: SbRef<ProcFs>,
         read: impl Fn(&mut PageBuffer) -> KResult<()> + Send + Sync + 'static,
     ) -> InodeUse {
         InodeUse::new(
@@ -160,7 +153,9 @@ impl Node {
 }
 
 impl FileInode {
-    fn new(read: Box<dyn Fn(&mut PageBuffer) -> KResult<()> + Send + Sync>) -> Self {
+    fn new(
+        read: Box<dyn Fn(&mut PageBuffer) -> KResult<()> + Send + Sync>,
+    ) -> Self {
         Self {
             read: Some(read),
             write: None,
@@ -206,7 +201,9 @@ struct ProcFsMountCreator;
 
 #[async_trait]
 impl MountCreator for ProcFsMountCreator {
-    async fn create_mount(&self, _source: &str, _flags: u64, mp: &Arc<Dentry>) -> KResult<Mount> {
+    async fn create_mount(
+        &self, _source: &str, _flags: u64, mp: &Arc<Dentry>,
+    ) -> KResult<Mount> {
         let fs = GLOBAL_PROCFS.clone();
         let root_inode = fs.backend.root.clone();
 
@@ -232,7 +229,11 @@ where
     let mut entries = root.entries.write().await;
     entries.push((
         name.clone(),
-        Node::new_file(procfs.assign_ino(), SbRef::from(&GLOBAL_PROCFS), read_fn),
+        Node::new_file(
+            procfs.assign_ino(),
+            SbRef::from(&GLOBAL_PROCFS),
+            read_fn,
+        ),
     ));
 }
 

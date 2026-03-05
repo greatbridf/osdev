@@ -10,9 +10,7 @@ use crate::kernel::mem::paging::PageBuffer;
 use crate::kernel::timer::Instant;
 use crate::kernel::vfs::dentry::Dentry;
 use crate::kernel::vfs::inode::{Ino, InodeInfo, InodeOps, InodeUse};
-use crate::kernel::vfs::mount::{
-    dump_mounts, register_filesystem, Mount, MountCreator,
-};
+use crate::kernel::vfs::mount::{register_filesystem, Mount, MountCreator};
 use crate::kernel::vfs::types::{DeviceId, Format, Permission};
 use crate::kernel::vfs::{SbRef, SbUse, SuperBlock, SuperBlockInfo};
 use crate::prelude::*;
@@ -228,7 +226,7 @@ where
 
     let mut entries = root.entries.write().await;
     entries.push((
-        name.clone(),
+        name,
         Node::new_file(
             procfs.assign_ino(),
             SbRef::from(&GLOBAL_PROCFS),
@@ -239,10 +237,4 @@ where
 
 pub async fn init() {
     register_filesystem("procfs", Arc::new(ProcFsMountCreator)).unwrap();
-
-    populate_root(Arc::from(b"mounts".as_slice()), |buffer| {
-        dump_mounts(&mut buffer.get_writer());
-        Ok(())
-    })
-    .await;
 }

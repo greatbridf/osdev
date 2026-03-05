@@ -3,12 +3,15 @@ use alloc::string::ToString as _;
 use alloc::sync::Arc;
 
 use async_trait::async_trait;
+use eonix_macros::define_late_init;
 use eonix_sync::LazyLock;
 
 use super::dentry::{dcache, Dentry, DROOT};
 use super::inode::InodeUse;
 use super::{SbUse, SuperBlock};
-use crate::kernel::constants::{EEXIST, ENODEV, ENOTDIR};
+use crate::fs::procfs::populate_root;
+use crate::io::Buffer;
+use crate::kernel::constants::{EEXIST, ENODEV, ENOTDIR, ERANGE};
 use crate::kernel::task::block_on;
 use crate::prelude::*;
 
@@ -148,17 +151,27 @@ fn mount_opts(flags: u64) -> String {
     out
 }
 
-pub fn dump_mounts(buffer: &mut dyn core::fmt::Write) {
-    for (_, mpdata) in MOUNTS.lock().iter() {
-        dont_check!(writeln!(
-            buffer,
-            "{} {} {} {} 0 0",
-            mpdata.source,
-            mpdata.mountpoint,
-            mpdata.fstype,
-            mount_opts(mpdata.flags)
-        ))
-    }
+#[define_late_init]
+async fn populate_mounts_file() {
+    populate_root(Arc::from(b"mounts".as_slice()), |buffer| {
+        let mut writer = buffer.get_writer();
+
+        for (_, mpdata) in MOUNTS.lock().iter() {
+            let result = writeln!(
+                writer,
+                "{} {} {} {} 0 0",
+                mpdata.source,
+                mpdata.mountpoint,
+                mpdata.fstype,
+                mount_opts(mpdata.flags)
+            );
+
+            result.map_err(|_| ERANGE)?;
+        }
+
+        Ok(())
+    })
+    .await;
 }
 
 impl Dentry {

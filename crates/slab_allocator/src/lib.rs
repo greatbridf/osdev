@@ -104,6 +104,12 @@ where
     partial_list: T,
     full_list: T,
     object_size: usize,
+
+    total_objects: usize,
+    active_objects: usize,
+
+    total_folios: usize,
+    active_folios: usize,
 }
 
 pub struct SlabAlloc<P, const COUNT: usize>
@@ -164,6 +170,10 @@ where
             partial_list: T::NEW,
             full_list: T::NEW,
             object_size,
+            total_objects: 0,
+            active_objects: 0,
+            total_folios: 0,
+            active_folios: 0,
         }
     }
 }
@@ -195,6 +205,8 @@ where
             self.partial_list.push_tail(head);
         }
 
+        self.active_folios += 1;
+
         slot
     }
 
@@ -204,12 +216,18 @@ where
 
         slab.set_free_slot(Some(free_slot));
 
+        self.total_folios += 1;
+        self.total_objects += slab.get_data_ptr().len() / self.object_size;
+
         self.empty_list.push_tail(slab);
     }
 
     fn alloc(
         &mut self, alloc: &impl SlabPageAlloc<Page = T::Folio>,
     ) -> NonNull<u8> {
+        // Increase active count here, since we won't fail for now...
+        self.active_objects += 1;
+
         if !self.partial_list.is_empty() {
             return self.alloc_from_partial();
         }
@@ -255,6 +273,12 @@ where
                 self.empty_list.push_tail(slab_page);
             }
         }
+
+        if is_empty {
+            self.active_folios -= 1;
+        }
+
+        self.active_objects -= 1;
 
         // TODO: Check whether we should place some pages back with `alloc` if
         //       the global free page count is below the watermark.

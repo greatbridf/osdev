@@ -9,6 +9,4 @@ pub(crate) use core::fmt::Write;
 pub(crate) use core::marker::PhantomData;
 pub(crate) use core::str;
 
-pub(crate) use eonix_log::println_warn;
-
 pub use crate::sync::Spin;

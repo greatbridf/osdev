@@ -12,6 +12,7 @@ use eonix_hal::traits::fault::Fault;
 use eonix_hal::traits::fpu::RawFpuState as _;
 use eonix_hal::traits::trap::{RawTrapContext, TrapReturn, TrapType};
 use eonix_hal::trap::TrapContext;
+use eonix_log::println_warn;
 use eonix_mm::address::{Addr as _, VAddr};
 use eonix_sync::AsProofMut as _;
 use intrusive_collections::{intrusive_adapter, KeyAdapter, RBTreeAtomicLink};

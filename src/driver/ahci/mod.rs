@@ -4,6 +4,7 @@ use alloc::sync::Arc;
 use async_trait::async_trait;
 use control::AdapterControl;
 use defs::*;
+use eonix_log::println_warn;
 use eonix_mm::address::{AddrOps as _, PAddr};
 use eonix_sync::SpinIrq as _;
 use port::AdapterPort;

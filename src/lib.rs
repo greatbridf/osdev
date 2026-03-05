@@ -34,6 +34,7 @@ use eonix_hal::processor::CPU;
 use eonix_hal::symbol_addr;
 use eonix_hal::traits::trap::{IrqState, RawTrapContext, TrapReturn};
 use eonix_hal::trap::{disable_irqs_save, TrapContext};
+use eonix_log::println_debug;
 use eonix_mm::address::PRange;
 use eonix_runtime::scheduler::RUNTIME;
 use kernel::mem::GlobalPageAlloc;

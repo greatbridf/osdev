@@ -132,7 +132,9 @@ where
 
     pub fn alloc_order(&mut self, order: u32) -> Option<&'static mut Z::Page> {
         for current_order in order..AREAS as u32 {
-            let Some(folio) = self.free_areas[current_order as usize].get_free_folio() else {
+            let area = &mut self.free_areas[current_order as usize];
+
+            let Some(folio) = area.get_free_folio() else {
                 continue;
             };
 
@@ -176,7 +178,9 @@ where
     /// - the buddy is within the same [`Zone`] as us.
     /// - the buddy is a free buddy (in some [`FreeArea`])
     /// - the buddy has order [`order`]
-    fn try_get_buddy<'a>(&mut self, buddy_pfn: PFN, order: u32) -> Option<&'a mut F> {
+    fn try_get_buddy<'a>(
+        &mut self, buddy_pfn: PFN, order: u32,
+    ) -> Option<&'a mut F> {
         let mut buddy = self.zone.get_page(buddy_pfn)?;
 
         unsafe {

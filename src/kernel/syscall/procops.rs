@@ -5,6 +5,7 @@ use core::time::Duration;
 use bitflags::bitflags;
 use eonix_hal::traits::trap::RawTrapContext;
 use eonix_hal::trap::TrapContext;
+use eonix_log::println_warn;
 use eonix_mm::address::Addr as _;
 use eonix_sync::AsProof as _;
 use posix_types::ctypes::PtrT;

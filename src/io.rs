@@ -52,7 +52,9 @@ pub trait Buffer: Send {
 }
 
 pub trait Stream: Send {
-    fn poll_data<'a>(&mut self, buf: &'a mut [u8]) -> KResult<Option<&'a mut [u8]>>;
+    fn poll_data<'a>(
+        &mut self, buf: &'a mut [u8],
+    ) -> KResult<Option<&'a mut [u8]>>;
     fn ignore(&mut self, len: usize) -> KResult<Option<usize>>;
 }
 
@@ -64,9 +66,7 @@ pub trait IntoStream {
 
 pub trait StreamRead {
     fn read_till_end(
-        &mut self,
-        buffer: &mut [u8],
-        func: impl Fn(&mut [u8]) -> KResult<()>,
+        &mut self, buffer: &mut [u8], func: impl Fn(&mut [u8]) -> KResult<()>,
     ) -> KResult<usize>;
 
     fn ignore_all(&mut self) -> KResult<usize>;
@@ -77,9 +77,7 @@ where
     T: Stream + ?Sized,
 {
     fn read_till_end(
-        &mut self,
-        buffer: &mut [u8],
-        func: impl Fn(&mut [u8]) -> KResult<()>,
+        &mut self, buffer: &mut [u8], func: impl Fn(&mut [u8]) -> KResult<()>,
     ) -> KResult<usize> {
         let mut total = 0;
         while let Some(data) = self.poll_data(buffer)? {
@@ -143,7 +141,10 @@ impl<'lt, T: Copy + Sized> UninitBuffer<'lt, T> {
         Self {
             data,
             buffer: ByteBuffer::from(unsafe {
-                core::slice::from_raw_parts_mut(ptr as *mut u8, core::mem::size_of::<T>())
+                core::slice::from_raw_parts_mut(
+                    ptr as *mut u8,
+                    core::mem::size_of::<T>(),
+                )
             }),
         }
     }
@@ -294,7 +295,9 @@ impl<'a> ByteStream<'a> {
 }
 
 impl<'a> Stream for ByteStream<'a> {
-    fn poll_data<'b>(&mut self, buf: &'b mut [u8]) -> KResult<Option<&'b mut [u8]>> {
+    fn poll_data<'b>(
+        &mut self, buf: &'b mut [u8],
+    ) -> KResult<Option<&'b mut [u8]>> {
         if self.cur >= self.data.len() {
             return Ok(None);
         }

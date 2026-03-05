@@ -23,6 +23,8 @@ where
     L: FolioList,
 {
     free_list: L,
+
+    alloced: usize,
     count: usize,
 }
 
@@ -142,6 +144,7 @@ where
                 self.break_folio(folio, current_order, order);
             }
 
+            self.free_areas[order as usize].alloced += 1;
             return Some(folio);
         }
 
@@ -156,6 +159,8 @@ where
             !folio.is_buddy(),
             "Trying to free a folio that is already in the buddy system: {pfn:?}",
         );
+
+        self.free_areas[order as usize].alloced -= 1;
 
         while order < MAX_ORDER {
             let buddy_pfn = pfn.buddy_pfn(order);
@@ -210,6 +215,7 @@ where
     const fn new() -> Self {
         Self {
             free_list: L::NEW,
+            alloced: 0,
             count: 0,
         }
     }

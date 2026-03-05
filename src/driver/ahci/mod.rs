@@ -166,7 +166,9 @@ impl PCIDriver for AHCIDriver {
         DEVICE_AHCI
     }
 
-    async fn handle_device(&self, pcidev: Arc<PCIDevice<'static>>) -> Result<(), PciError> {
+    async fn handle_device(
+        &self, pcidev: Arc<PCIDevice<'static>>,
+    ) -> Result<(), PciError> {
         let Header::Endpoint(header) = pcidev.header else {
             Err(EINVAL)?
         };
@@ -201,7 +203,9 @@ impl PCIDriver for AHCIDriver {
         device.control.enable_interrupts();
 
         let device_irq = device.clone();
-        register_irq_handler(irqno as i32, move || device_irq.handle_interrupt())?;
+        register_irq_handler(irqno as i32, move || {
+            device_irq.handle_interrupt()
+        })?;
 
         device.probe_ports().await?;
 

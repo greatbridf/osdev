@@ -1,7 +1,10 @@
+use alloc::format;
+use alloc::sync::Arc;
 use core::alloc::{GlobalAlloc, Layout};
 use core::ptr::NonNull;
 
 use eonix_hal::mm::ArchPhysAccess;
+use eonix_macros::define_late_init;
 use eonix_mm::address::PhysAccess;
 use eonix_mm::paging::{Folio as _, PAGE_SIZE_BITS, PFN};
 use eonix_sync::LazyLock;
@@ -9,6 +12,8 @@ use slab_allocator::SlabAlloc;
 
 use super::folio::Folio;
 use super::GlobalPageAlloc;
+use crate::fs::procfs::populate_root;
+use crate::io::{buf_writeln, Buffer};
 
 static SLAB_ALLOCATOR: LazyLock<SlabAlloc<GlobalPageAlloc, 9>> =
     LazyLock::new(|| SlabAlloc::new_in(GlobalPageAlloc));
@@ -50,3 +55,34 @@ unsafe impl GlobalAlloc for Allocator {
 
 #[global_allocator]
 static ALLOCATOR: Allocator = Allocator;
+
+#[define_late_init]
+async fn slabinfo_file() {
+    populate_root(Arc::from(&b"slabinfo"[..]), |buf| {
+        let stats = SLAB_ALLOCATOR.dump_stats();
+
+        buf_writeln!(buf, "slabinfo - version: 2.1")?;
+        buf_writeln!(
+            buf,
+            "# name\t<active_objs>\t<num_objs>\t<objsize>\t<active_slabs>\t<num_slabs>"
+        )?;
+
+        for (i, stat) in stats.iter().enumerate() {
+            let name = format!("kmalloc[{i}]");
+
+            buf_writeln!(
+                buf,
+                "{:15}\t{}\t{}\t{}\t{}\t{}",
+                name,
+                stat.active_objects,
+                stat.total_objects,
+                stat.object_size,
+                stat.active_slabs,
+                stat.total_slabs
+            )?;
+        }
+
+        Ok(())
+    })
+    .await;
+}

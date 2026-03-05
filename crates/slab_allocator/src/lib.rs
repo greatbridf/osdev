@@ -1,5 +1,7 @@
 #![no_std]
 
+pub mod debug;
+
 use core::ptr::NonNull;
 
 use eonix_mm::paging::{FolioList, FolioListSized};

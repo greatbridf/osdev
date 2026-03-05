@@ -4,6 +4,7 @@ use core::ptr::NonNull;
 
 use async_trait::async_trait;
 use eonix_hal::fence::memory_barrier;
+use eonix_log::println_debug;
 use eonix_mm::address::{Addr, PAddr};
 use eonix_mm::paging::Folio as _;
 use eonix_sync::SpinIrq;

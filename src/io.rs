@@ -333,3 +333,13 @@ impl<'a> IntoStream for &'a [u8] {
         ByteStream::new(self)
     }
 }
+
+macro_rules! buf_writeln {
+    ($buf:ident, $($args:expr),*) => {{
+        use core::fmt::Write;
+        writeln!($buf.get_writer(), $($args),*)
+            .map_err(|_| $crate::kernel::constants::ERANGE)
+    }};
+}
+
+pub(crate) use buf_writeln;

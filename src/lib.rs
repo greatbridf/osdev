@@ -49,7 +49,7 @@ use kernel_init::setup_memory;
 use path::Path;
 use prelude::*;
 
-use crate::kernel::run_late_init;
+use crate::kernel::{run_late_init, run_late_init_async};
 
 static BSP_OK: AtomicBool = AtomicBool::new(false);
 
@@ -151,6 +151,7 @@ async fn init_process(early_kstack: PRange) {
     // fs::ext4::init();
 
     run_late_init();
+    run_late_init_async().await;
 
     let load_info = {
         // mount fat32 /mnt directory

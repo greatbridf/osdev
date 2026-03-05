@@ -78,8 +78,18 @@ SECTIONS {
 
         __raw_late_init_end = .;
 
+        __raw_late_init_async_start = .;
+
+        LATE_INIT_ASYNC_FUNCTIONS = .;
+        KEEP(*(.late_init_async));
+
+        __raw_late_init_async_end = .;
+
         LATE_INIT_FUNCTION_COUNT =
             ABSOLUTE((__raw_late_init_end - __raw_late_init_start) / 8);
+
+        LATE_INIT_ASYNC_FUNCTION_COUNT =
+            ABSOLUTE((__raw_late_init_async_end - __raw_late_init_async_start) / 8);
     } > REGION_RODATA AT> RAM
 }
 INSERT AFTER .rodata;

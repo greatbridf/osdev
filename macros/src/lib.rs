@@ -2,7 +2,7 @@ extern crate proc_macro;
 
 use proc_macro2::{Span, TokenStream};
 use quote::quote;
-use syn::{parse2, FnArg, Ident, ItemFn, LitStr};
+use syn::{parse2, FnArg, Ident, ItemFn, LitStr, ReturnType, Signature};
 
 fn define_syscall_impl(attrs: TokenStream, item: TokenStream) -> TokenStream {
     if attrs.is_empty() {
@@ -189,14 +189,30 @@ pub fn define_syscall(
     define_syscall_impl(attrs.into(), item.into()).into()
 }
 
-fn define_late_init_impl(attrs: TokenStream, func: TokenStream) -> TokenStream {
-    if !attrs.is_empty() {
-        panic!("attributes not allowed here");
+fn check_late_init_sig(sig: &Signature) {
+    assert!(sig.constness.is_none(), "no const function allowed");
+    assert!(sig.inputs.is_empty(), "no arguments allowed");
+
+    if let Some(abi) = &sig.abi {
+        if let Some(name) = &abi.name {
+            assert_eq!(name.value(), "Rust", "expected Rust ABI");
+        }
     }
 
-    let func_parsed =
-        parse2::<ItemFn>(func.clone()).expect("expected function definition");
+    assert!(
+        matches!(&sig.output, ReturnType::Default),
+        "no return types allowed"
+    );
 
+    let generics = &sig.generics;
+
+    assert_eq!(generics.const_params().count(), 0, "no generics allowed");
+    assert_eq!(generics.type_params().count(), 0, "no generics allowed")
+}
+
+fn define_late_init_normal(
+    func: &TokenStream, func_parsed: &ItemFn,
+) -> TokenStream {
     let func_ident = &func_parsed.sig.ident;
     let func_name = func_parsed.sig.ident.to_string();
 
@@ -212,6 +228,59 @@ fn define_late_init_impl(attrs: TokenStream, func: TokenStream) -> TokenStream {
         #[doc(hidden)]
         #[link_section = ".late_init"]
         static #static_ident : fn() = #func_ident;
+    }
+}
+
+fn define_late_init_async(
+    func: &TokenStream, func_parsed: &ItemFn,
+) -> TokenStream {
+    let func_ident = &func_parsed.sig.ident;
+    let func_name = func_parsed.sig.ident.to_string();
+
+    let helper_ident = Ident::new(
+        &format!("__late_init_async_wrapper_{}", func_name.to_uppercase()),
+        Span::call_site(),
+    );
+
+    let static_ident = Ident::new(
+        &format!("__LATE_INIT_ASYNC_{}", func_name.to_uppercase()),
+        Span::call_site(),
+    );
+
+    let pin_t = quote!(core::pin::Pin);
+    let box_t = quote!(alloc::boxed::Box);
+    let future_t = quote!(core::future::Future);
+
+    quote! {
+        #func
+
+        fn #helper_ident() ->
+            #pin_t<#box_t<dyn #future_t<Output = ()> + Send>> {
+            #box_t::pin(#func_ident())
+        }
+
+        #[used]
+        #[doc(hidden)]
+        #[link_section = ".late_init_async"]
+        static #static_ident: fn() ->
+            #pin_t<#box_t<dyn #future_t<Output = ()> + Send>> = #helper_ident;
+    }
+}
+
+fn define_late_init_impl(attrs: TokenStream, func: TokenStream) -> TokenStream {
+    if !attrs.is_empty() {
+        panic!("attributes not allowed here");
+    }
+
+    let func_parsed =
+        parse2::<ItemFn>(func.clone()).expect("expected function definition");
+
+    check_late_init_sig(&func_parsed.sig);
+
+    if func_parsed.sig.asyncness.is_some() {
+        define_late_init_async(&func, &func_parsed)
+    } else {
+        define_late_init_normal(&func, &func_parsed)
     }
 }
 

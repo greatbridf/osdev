@@ -1,5 +1,7 @@
 #![no_std]
 
+pub mod debug;
+
 use core::hint::unreachable_unchecked;
 
 use eonix_mm::address::{AddrOps as _, PAddr, PRange};

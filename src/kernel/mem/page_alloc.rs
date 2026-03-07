@@ -1,18 +1,24 @@
 mod raw_page;
 mod zones;
 
+use alloc::sync::Arc;
 use core::sync::atomic::Ordering;
 
 use buddy_allocator::BuddyAllocator;
+use eonix_macros::define_late_init;
 use eonix_mm::address::PRange;
 use eonix_mm::page_table::PageTableAlloc;
-use eonix_mm::paging::{FolioList, FolioListSized as _, FrameAlloc, GlobalFrameAlloc, PFN};
+use eonix_mm::paging::{
+    FolioList, FolioListSized as _, FrameAlloc, GlobalFrameAlloc, PFN,
+};
 use eonix_preempt::PreemptGuard;
 use eonix_sync::{NoContext, Spin};
 pub use raw_page::{PageFlags, RawPage, RawPageList};
 pub use zones::{GlobalZone, ZONE};
 
 use super::folio::Folio;
+use crate::fs::procfs::populate_root;
+use crate::io::buf_write;
 
 const COSTLY_ORDER: u32 = 3;
 const AREAS: usize = COSTLY_ORDER as usize + 1;
@@ -110,7 +116,8 @@ impl GlobalPageAlloc {
             let order = raw_page.order;
 
             unsafe {
-                PreemptGuard::new(PERCPU_PAGE_ALLOC.as_mut()).free_pages(raw_page, order);
+                PreemptGuard::new(PERCPU_PAGE_ALLOC.as_mut())
+                    .free_pages(raw_page, order);
             }
         }
     }
@@ -144,4 +151,28 @@ impl PageTableAlloc for GlobalPageAlloc {
     unsafe fn from_raw(&self, pfn: PFN) -> Self::Folio {
         unsafe { Folio::from_raw(pfn) }
     }
+}
+
+#[define_late_init]
+async fn buddyinfo_file() {
+    populate_root(Arc::from(&b"buddyinfo"[..]), |buffer| {
+        let stats = BUDDY_ALLOC.lock().dump_stat();
+
+        buf_write!(buffer, "Node 0, zone {:>10}", "Normal")?;
+
+        for stat in &stats {
+            buf_write!(buffer, " {:>6}", stat.free_count)?;
+        }
+
+        buf_write!(buffer, "\nNode 0, zone {:>10}", "Alloced")?;
+
+        for stat in &stats {
+            buf_write!(buffer, " {:>6}", stat.alloced_count)?;
+        }
+
+        buf_write!(buffer, "\n")?;
+
+        Ok(())
+    })
+    .await;
 }

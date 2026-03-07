@@ -1,5 +1,6 @@
 use alloc::sync::Arc;
 use alloc::task::Wake;
+use core::hint::assert_unchecked;
 use core::ops::{Deref, DerefMut};
 use core::ptr::NonNull;
 use core::task::{Context, Poll, Waker};
@@ -39,6 +40,21 @@ impl Task {
                 CURRENT_TASK.get().expect("Current task should be present"),
             )
         }
+    }
+
+    #[inline(always)]
+    fn _swap_current(current: Option<Arc<Task>>) -> Option<Arc<Task>> {
+        let current_ptr = current.map(|arc| unsafe {
+            // SAFETY: `into_raw` always returns a valid pointer.
+            NonNull::new_unchecked(Arc::into_raw(arc) as *mut _)
+        });
+
+        let old = CURRENT_TASK.swap(current_ptr);
+
+        old.map(|ptr| unsafe {
+            // SAFETY: The pointer always comes from Arc::into_raw
+            Arc::from_raw(ptr.as_ptr())
+        })
     }
 }
 
@@ -97,10 +113,7 @@ impl Runtime {
     fn remove_and_enqueue_current(
         &self, rq: &mut impl DerefMut<Target = dyn ReadyQueue>,
     ) {
-        let Some(current) = CURRENT_TASK
-            .swap(None)
-            .map(|cur| unsafe { Arc::from_raw(cur.as_ptr()) })
-        else {
+        let Some(current) = Task::_swap_current(None) else {
             return;
         };
 
@@ -198,10 +211,10 @@ impl Runtime {
                 "Next task should be in READY state"
             );
 
+            let _old_current = Task::_swap_current(Some(next));
+            debug_assert!(_old_current.is_none());
             unsafe {
-                CURRENT_TASK.set(Some(NonNull::new_unchecked(
-                    Arc::into_raw(next) as *mut _,
-                )));
+                assert_unchecked(_old_current.is_none());
             }
 
             drop(rq);
@@ -222,7 +235,7 @@ impl Runtime {
 
                 self.remove_task(&Task::current());
 
-                CURRENT_TASK.set(None);
+                Task::_swap_current(None);
             }
         }
     }

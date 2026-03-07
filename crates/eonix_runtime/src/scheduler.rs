@@ -31,11 +31,13 @@ where
 impl Task {
     pub fn current<'a>() -> BorrowedArc<'a, Task> {
         unsafe {
-            // SAFETY:
-            // We should never "inspect" a change in `current`.
-            // The change of `CURRENT` will only happen in the scheduler. And if we are preempted,
-            // when we DO return, the `CURRENT` will be the same and remain valid.
-            BorrowedArc::from_raw(CURRENT_TASK.get().expect("Current task should be present"))
+            // SAFETY: We should never "inspect" a change in `current`:
+            // The change of `CURRENT` will only happen in the scheduler.
+            // And if we are preempted outside of the scheduler's context, when
+            // we return, `CURRENT` will be the same and remain valid.
+            BorrowedArc::from_raw(
+                CURRENT_TASK.get().expect("Current task should be present"),
+            )
         }
     }
 }
@@ -92,7 +94,9 @@ impl Runtime {
         }
     }
 
-    fn remove_and_enqueue_current(&self, rq: &mut impl DerefMut<Target = dyn ReadyQueue>) {
+    fn remove_and_enqueue_current(
+        &self, rq: &mut impl DerefMut<Target = dyn ReadyQueue>,
+    ) {
         let Some(current) = CURRENT_TASK
             .swap(None)
             .map(|cur| unsafe { Arc::from_raw(cur.as_ptr()) })
@@ -129,7 +133,9 @@ impl Runtime {
         }
     }
 
-    pub fn block_till_woken(set_waker: impl FnOnce(&Waker)) -> impl Future<Output = ()> {
+    pub fn block_till_woken(
+        set_waker: impl FnOnce(&Waker),
+    ) -> impl Future<Output = ()> {
         struct BlockTillWoken<F: FnOnce(&Waker)> {
             set_waker: Option<F>,
             slept: bool,
@@ -138,7 +144,9 @@ impl Runtime {
         impl<F: FnOnce(&Waker)> Future for BlockTillWoken<F> {
             type Output = ();
 
-            fn poll(self: core::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
+            fn poll(
+                self: core::pin::Pin<&mut Self>, cx: &mut Context<'_>,
+            ) -> Poll<()> {
                 if self.slept {
                     Poll::Ready(())
                 } else {
@@ -191,7 +199,9 @@ impl Runtime {
             );
 
             unsafe {
-                CURRENT_TASK.set(Some(NonNull::new_unchecked(Arc::into_raw(next) as *mut _)));
+                CURRENT_TASK.set(Some(NonNull::new_unchecked(
+                    Arc::into_raw(next) as *mut _,
+                )));
             }
 
             drop(rq);

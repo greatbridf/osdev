@@ -241,9 +241,7 @@ impl ProcessBuilder {
     }
 
     pub async fn clone_from(
-        mut self,
-        process: Arc<Process>,
-        clone_args: &CloneArgs,
+        mut self, process: Arc<Process>, clone_args: &CloneArgs,
     ) -> Self {
         let mm_list = if clone_args.flags.contains(CloneFlags::CLONE_VM) {
             process.mm_list.new_shared().await
@@ -294,8 +292,7 @@ impl ProcessBuilder {
     }
 
     pub fn build(
-        self,
-        process_list: &mut ProcessList,
+        self, process_list: &mut ProcessList,
     ) -> (Arc<Thread>, Arc<Process>) {
         let mm_list = self.mm_list.unwrap_or_else(|| MMList::new());
 
@@ -368,28 +365,21 @@ impl Process {
     }
 
     pub fn add_child(
-        &self,
-        child: &Arc<Process>,
-        procs: ProofMut<'_, ProcessList>,
+        &self, child: &Arc<Process>, procs: ProofMut<'_, ProcessList>,
     ) {
         assert!(self.all_procs_link.is_linked(), "Dead process");
         self.children.access_mut(procs).insert(child.clone());
     }
 
     pub fn add_thread(
-        &self,
-        thread: &Arc<Thread>,
-        procs: ProofMut<'_, ProcessList>,
+        &self, thread: &Arc<Thread>, procs: ProofMut<'_, ProcessList>,
     ) {
         assert!(self.all_procs_link.is_linked(), "Dead process");
         self.threads.access_mut(procs).insert(thread.clone());
     }
 
     pub async fn wait(
-        &self,
-        wait_id: WaitId,
-        no_block: bool,
-        trace_stop: bool,
+        &self, wait_id: WaitId, no_block: bool, trace_stop: bool,
         trace_continue: bool,
     ) -> KResult<Option<WaitObject>> {
         let wait_object = {
@@ -470,9 +460,7 @@ impl Process {
     ///
     /// This function does the actual work.
     fn do_setpgid(
-        self: &Arc<Self>,
-        pgid: u32,
-        procs: &mut ProcessList,
+        self: &Arc<Self>, pgid: u32, procs: &mut ProcessList,
     ) -> KResult<()> {
         // SAFETY: We are holding the process list lock.
         let session = unsafe { self.session.load_locked().unwrap() };
@@ -558,8 +546,7 @@ impl Process {
 
     /// Provide locked (consistent) access to the session.
     pub fn session<'r>(
-        &'r self,
-        _procs: Proof<'r, ProcessList>,
+        &'r self, _procs: Proof<'r, ProcessList>,
     ) -> BorrowedArc<'r, Session> {
         // SAFETY: We are holding the process list lock.
         unsafe { self.session.load_locked() }.unwrap()
@@ -567,8 +554,7 @@ impl Process {
 
     /// Provide locked (consistent) access to the process group.
     pub fn pgroup<'r>(
-        &'r self,
-        _procs: Proof<'r, ProcessList>,
+        &'r self, _procs: Proof<'r, ProcessList>,
     ) -> BorrowedArc<'r, ProcessGroup> {
         // SAFETY: We are holding the process list lock.
         unsafe { self.pgroup.load_locked() }.unwrap()
@@ -576,8 +562,7 @@ impl Process {
 
     /// Provide locked (consistent) access to the parent process.
     pub fn parent<'r>(
-        &'r self,
-        _procs: Proof<'r, ProcessList>,
+        &'r self, _procs: Proof<'r, ProcessList>,
     ) -> BorrowedArc<'r, Process> {
         // SAFETY: We are holding the process list lock.
         unsafe { self.parent.load_locked() }.unwrap()
@@ -603,9 +588,7 @@ impl Process {
     }
 
     pub fn notify(
-        &self,
-        signal: Option<Signal>,
-        wait: WaitObject,
+        &self, signal: Option<Signal>, wait: WaitObject,
         procs: Proof<'_, ProcessList>,
     ) {
         self.wait_list.notify(wait);
@@ -650,10 +633,7 @@ impl WaitList {
     /// Locks `ProcessList` and `WaitList` at the same time. When `wait` is called,
     /// releases the lock on `ProcessList` and `WaitList` and waits on `cv_wait_procs`.
     pub async fn entry(
-        &self,
-        wait_id: WaitId,
-        want_stop: bool,
-        want_continue: bool,
+        &self, wait_id: WaitId, want_stop: bool, want_continue: bool,
     ) -> Entry<'_, '_, '_> {
         Entry {
             process_list: ProcessList::get().read().await,
@@ -704,8 +684,7 @@ impl Entry<'_, '_, '_> {
     }
 
     pub fn wait(
-        self,
-        no_block: bool,
+        self, no_block: bool,
     ) -> impl core::future::Future<Output = KResult<Self>> + Send {
         let wait_procs = self.wait_procs.unlock();
 

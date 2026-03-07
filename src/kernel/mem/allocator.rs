@@ -13,7 +13,7 @@ use slab_allocator::SlabAlloc;
 use super::folio::Folio;
 use super::GlobalPageAlloc;
 use crate::fs::procfs::populate_root;
-use crate::io::{buf_writeln, Buffer};
+use crate::io::buf_writeln;
 
 static SLAB_ALLOCATOR: LazyLock<SlabAlloc<GlobalPageAlloc, 9>> =
     LazyLock::new(|| SlabAlloc::new_in(GlobalPageAlloc));

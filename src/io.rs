@@ -337,6 +337,7 @@ impl<'a> IntoStream for &'a [u8] {
 macro_rules! buf_writeln {
     ($buf:ident, $($args:expr),*) => {{
         use core::fmt::Write;
+        use $crate::io::Buffer;
         writeln!($buf.get_writer(), $($args),*)
             .map_err(|_| $crate::kernel::constants::ERANGE)
     }};

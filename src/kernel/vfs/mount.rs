@@ -10,7 +10,7 @@ use super::dentry::{dcache, Dentry, DROOT};
 use super::inode::InodeUse;
 use super::{SbUse, SuperBlock};
 use crate::fs::procfs::populate_root;
-use crate::io::{buf_writeln, Buffer};
+use crate::io::buf_writeln;
 use crate::kernel::constants::{EEXIST, ENODEV, ENOTDIR};
 use crate::kernel::task::block_on;
 use crate::prelude::*;

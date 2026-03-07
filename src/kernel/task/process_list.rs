@@ -60,14 +60,16 @@ impl ProcessList {
     }
 
     pub fn remove_process(&mut self, pid: u32) {
-        // Thread group leader has the same tid as the pid.
-        let Some(_) = self.threads.find_mut(&pid).remove() else {
-            panic!("Thread {} not found", pid);
-        };
-
         let Some(proc) = self.procs.find_mut(&pid).remove() else {
             panic!("Process {} not found", pid);
         };
+
+        // Thread group leader has the same tid as the pid.
+        let Some(thd) = self.threads.find_mut(&pid).remove() else {
+            panic!("Thread {} not found", pid);
+        };
+
+        proc.remove_thread(&thd, self.prove_mut());
 
         // SAFETY: `call_rcu` below.
         let session = unsafe { proc.session.swap(None) }.unwrap();

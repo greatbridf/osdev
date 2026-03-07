@@ -378,6 +378,17 @@ impl Process {
         self.threads.access_mut(procs).insert(thread.clone());
     }
 
+    pub fn remove_thread(
+        &self, thread: &Arc<Thread>, procs: ProofMut<'_, ProcessList>,
+    ) {
+        let threads = self.threads.access_mut(procs);
+
+        assert!(
+            threads.find_mut(&thread.tid).remove().is_some(),
+            "Not a member"
+        );
+    }
+
     pub async fn wait(
         &self, wait_id: WaitId, no_block: bool, trace_stop: bool,
         trace_continue: bool,

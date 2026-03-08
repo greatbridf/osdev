@@ -245,19 +245,23 @@ impl Drop for MMListInner {
             let range = area.range.as_ref(&self.lock).clone();
 
             if area.is_shared() {
-                for pte in self.page_table.iter_user(range) {
-                    // XXX: Fix me
-                    let _ = pte.take();
-                    // let raw_page = RawPagePtr::from(pfn);
-                    // if raw_page.refcount().fetch_sub(1, Ordering::Relaxed) == 1 {
-                    //     unsafe { Page::from_raw(pfn) };
-                    // }
+                unimplemented!("Shared mapping is not yet implemented");
+            }
+
+            for pte in self.page_table.iter_user(range) {
+                let (pfn, raw_attr) = pte.take();
+                let attr = raw_attr.as_page_attr().expect("Not a page");
+
+                if !attr.contains(PageAttribute::PRESENT) {
+                    continue;
                 }
-            } else {
-                for pte in self.page_table.iter_user(range) {
-                    let (pfn, _) = pte.take();
-                    unsafe { Folio::from_raw(pfn) };
-                }
+
+                unsafe {
+                    // SAFETY: Present PTEs always corresponding to a valid
+                    //         Folio that was previously installed through
+                    //         `Folio::into_raw()`.
+                    Folio::from_raw(pfn)
+                };
             }
         }
 
@@ -699,9 +703,17 @@ where
             .as_page_attr()
             .expect("Not a page attribute");
 
-        if !from_attr.intersects(PageAttribute::PRESENT | PageAttribute::MAPPED)
-        {
+        if from_attr.intersects(PageAttribute::MAPPED) {
+            // Copy non-installed mapped PTEs directly to the new PTE and delay
+            // its handling till the page fault.
+            let (pfn, attr) = from.get();
+            self.set(pfn, attr);
             return;
+        }
+
+        if !from_attr.intersects(PageAttribute::PRESENT) {
+            // Shouldn't really see this happen...
+            unreachable!("Non present PTE");
         }
 
         from_attr.remove(PageAttribute::WRITE | PageAttribute::DIRTY);

@@ -16,7 +16,9 @@ use intrusive_collections::{
 use super::{Mapping, EMPTY_PAGE};
 use crate::kernel::mem::folio::Folio;
 use crate::kernel::mem::mm_list::MemListLock;
-use crate::kernel::mem::{CachePage, FolioOwned, PageOffset, Permission};
+use crate::kernel::mem::{
+    CachePage, FileMapping, FolioOwned, PageOffset, Permission,
+};
 use crate::prelude::KResult;
 
 bitflags::bitflags! {
@@ -488,13 +490,15 @@ impl MemArea {
     /// * `offset`: The offset from the start of the mapping, aligned to 4KB boundary.
     pub async fn handle_mmap(
         &self, pfn: &mut PFN, attr: &mut PageAttribute, offset: usize,
-        write: bool,
+        write: bool, file_mapping: &FileMapping,
     ) -> KResult<()> {
-        let Mapping::File(file_mapping) = &self.mapping else {
-            panic!("Anonymous mapping should not be PA_MMAP");
-        };
-
         assert!(offset < file_mapping.length, "Offset out of range");
+
+        if attr.contains(PageAttribute::PRESENT) {
+            // Nothing we can do... Possibly race with another threads to try
+            // installing the PTE, or on some arch, fault to set accessed bit.
+            return Ok(());
+        }
 
         let file_offset = file_mapping.offset + offset;
 
@@ -540,7 +544,6 @@ impl MemArea {
             .await?;
 
         attr.insert(PageAttribute::PRESENT);
-        attr.remove(PageAttribute::MAPPED);
         Ok(())
     }
 
@@ -563,8 +566,9 @@ impl MemArea {
             self.handle_cow(&mut pfn, &mut attr);
         }
 
-        if attr.contains(PageAttribute::MAPPED) {
-            self.handle_mmap(&mut pfn, &mut attr, offset, write).await?;
+        if let Mapping::File(mapping) = &self.mapping {
+            self.handle_mmap(&mut pfn, &mut attr, offset, write, mapping)
+                .await?;
         }
 
         attr.insert(PageAttribute::ACCESSED);

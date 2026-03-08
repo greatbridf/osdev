@@ -690,8 +690,7 @@ where
     fn set_mapped(&mut self, execute: bool) {
         // Writable flag is set during page fault handling while executable flag is
         // preserved across page faults, so we set executable flag now.
-        let mut attr =
-            PageAttribute::READ | PageAttribute::USER | PageAttribute::MAPPED;
+        let mut attr = PageAttribute::READ | PageAttribute::USER;
         attr.set(PageAttribute::EXECUTE, execute);
 
         // Set an obviously invalid PFN to help debugging...
@@ -704,17 +703,12 @@ where
             .as_page_attr()
             .expect("Not a page attribute");
 
-        if from_attr.intersects(PageAttribute::MAPPED) {
+        if !from_attr.intersects(PageAttribute::PRESENT) {
             // Copy non-installed mapped PTEs directly to the new PTE and delay
             // its handling till the page fault.
             let (pfn, attr) = from.get();
             self.set(pfn, attr);
             return;
-        }
-
-        if !from_attr.intersects(PageAttribute::PRESENT) {
-            // Shouldn't really see this happen...
-            unreachable!("Non present PTE");
         }
 
         from_attr.remove(PageAttribute::WRITE | PageAttribute::DIRTY);

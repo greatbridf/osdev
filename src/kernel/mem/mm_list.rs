@@ -131,11 +131,11 @@ impl MMListInner {
             let range = area.range.as_ref(&self.lock);
 
             for pte in self.page_table.iter_user(*range) {
-                let (pfn, _) = pte.take();
-                pages_to_free.push(unsafe {
-                    // SAFETY: We got the pfn from a valid page table entry, so it should be valid.
-                    Folio::from_raw(pfn)
-                });
+                let Some(folio) = pte.take_if_present() else {
+                    continue;
+                };
+
+                pages_to_free.push(folio);
             }
         }
 
@@ -168,17 +168,15 @@ impl MMListInner {
                     .as_page_attr()
                     .expect("Not a page attribute");
 
+                if !page_attr.contains(PageAttribute::PRESENT) {
+                    // Skip PTEs that are not installed yet.
+                    continue;
+                }
+
                 if !permission.read && !permission.write && !permission.execute
                 {
                     // If no permissions are set, we just remove the page.
-                    page_attr.remove(
-                        PageAttribute::PRESENT
-                            | PageAttribute::READ
-                            | PageAttribute::WRITE
-                            | PageAttribute::EXECUTE,
-                    );
-
-                    pte.set_attr(page_attr.into());
+                    pte.release();
                     continue;
                 }
 
@@ -221,13 +219,6 @@ impl MMListInner {
             return Err(EEXIST);
         }
 
-        match &mapping {
-            Mapping::Anonymous => {
-                self.page_table.set_anonymous(range, permission)
-            }
-            Mapping::File(_) => self.page_table.set_mmapped(range, permission),
-        }
-
         self.areas.insert(MemArea::new(
             range,
             AreaFlags::from_old(permission, is_shared),
@@ -249,19 +240,7 @@ impl Drop for MMListInner {
             }
 
             for pte in self.page_table.iter_user(range) {
-                let (pfn, raw_attr) = pte.take();
-                let attr = raw_attr.as_page_attr().expect("Not a page");
-
-                if !attr.contains(PageAttribute::PRESENT) {
-                    continue;
-                }
-
-                unsafe {
-                    // SAFETY: Present PTEs always corresponding to a valid
-                    //         Folio that was previously installed through
-                    //         `Folio::into_raw()`.
-                    Folio::from_raw(pfn)
-                };
+                pte.release();
             }
         }
 
@@ -332,13 +311,15 @@ impl MMList {
             let pgtable = &list_inner.page_table;
 
             for area in list_inner.areas.iter() {
+                // Skip shared areas because they can be filled just as new
+                // entries in page faults.
+                if area.is_shared() {
+                    continue;
+                }
+
                 let range = area.range.as_ref(&list_inner.lock).clone();
 
-                if !area.is_shared() {
-                    pgtable.set_copy_on_write(&mut inner.page_table, range);
-                } else {
-                    pgtable.set_copied(&mut inner.page_table, range);
-                }
+                pgtable.set_copy_on_write(&mut inner.page_table, range);
             }
         }
 
@@ -669,6 +650,8 @@ trait PTEExt {
     // file mapped or shared anonymous
     fn set_mapped(&mut self, execute: bool);
     fn set_copy_on_write(&mut self, from: &mut Self);
+    fn take_if_present(&mut self) -> Option<Folio>;
+    fn release(&mut self);
 }
 
 impl<T> PTEExt for T
@@ -698,12 +681,10 @@ where
     }
 
     fn set_copy_on_write(&mut self, from: &mut Self) {
-        let mut from_attr = from
-            .get_attr()
-            .as_page_attr()
-            .expect("Not a page attribute");
+        let (pfn, raw_attr) = from.get();
+        let mut attr = raw_attr.as_page_attr().expect("Not a page attribute");
 
-        if !from_attr.intersects(PageAttribute::PRESENT) {
+        if !attr.contains(PageAttribute::PRESENT) {
             // Copy non-installed mapped PTEs directly to the new PTE and delay
             // its handling till the page fault.
             let (pfn, attr) = from.get();
@@ -711,16 +692,32 @@ where
             return;
         }
 
-        from_attr.remove(PageAttribute::WRITE | PageAttribute::DIRTY);
-        from_attr.insert(PageAttribute::COPY_ON_WRITE);
+        attr.remove(PageAttribute::WRITE | PageAttribute::DIRTY);
+        attr.insert(PageAttribute::COPY_ON_WRITE);
 
         let pfn = unsafe {
-            // SAFETY: We get the pfn from a valid page table entry, so it should be valid as well.
-            Folio::with_raw(from.get_pfn(), |page| page.clone().into_raw())
+            // SAFETY: We get the pfn from a valid page table entry, so it
+            //         should be valid as well.
+            Folio::with_raw(pfn, |page| page.clone().into_raw())
         };
 
-        self.set(pfn, T::Attr::from(from_attr & !PageAttribute::ACCESSED));
+        self.set(pfn, T::Attr::from(attr & !PageAttribute::ACCESSED));
+        from.set_attr(T::Attr::from(attr));
+    }
 
-        from.set_attr(T::Attr::from(from_attr));
+    fn take_if_present(&mut self) -> Option<Folio> {
+        let (pfn, raw_attr) = self.take();
+        let attr = raw_attr.as_page_attr().expect("Not a page");
+
+        attr.contains(PageAttribute::PRESENT).then(|| unsafe {
+            // SAFETY: Present PTEs always corresponding to a valid Folio that
+            //         was previously installed through `Folio::into_raw()`.
+            Folio::from_raw(pfn)
+        })
+    }
+
+    fn release(&mut self) {
+        // Drop the returned folio.
+        let _ = self.take_if_present();
     }
 }

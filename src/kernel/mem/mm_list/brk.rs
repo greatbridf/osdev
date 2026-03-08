@@ -4,10 +4,7 @@ use eonix_mm::address::{VAddr, VRange};
 
 use crate::kernel::mem::address::VRangeExt;
 use crate::kernel::mem::mm_list::mm_area::AreaList;
-use crate::kernel::mem::mm_list::page_table::KernelPageTable;
-use crate::kernel::mem::mm_list::{
-    AreaFlags, MemArea, MemListLock, PageTableExt,
-};
+use crate::kernel::mem::mm_list::{AreaFlags, MemArea, MemListLock};
 use crate::kernel::mem::{MMList, Mapping, Permission};
 
 #[derive(Clone)]
@@ -48,7 +45,7 @@ impl ProgramBreak {
 
 async fn set_break(
     areas: &mut AreaList, brk: &mut ProgramBreak, mm_lock: &mut MemListLock,
-    page_table: &mut KernelPageTable, newbrk: Option<VAddr>,
+    newbrk: Option<VAddr>,
 ) -> VAddr {
     assert!(
         !brk.is_null(),
@@ -78,29 +75,26 @@ async fn set_break(
     }
 
     let Some(area) = areas.upper_bound(curbrk) else {
-        return expand_create_area(areas, brk, page_table, new_range);
+        return expand_create_area(areas, brk, new_range);
     };
 
     let range = area.range.as_ref(&areas.lock);
 
     if range.end() != curbrk {
         // Someone might have unmapped the brk area.
-        return expand_create_area(areas, brk, page_table, new_range);
+        return expand_create_area(areas, brk, new_range);
     }
 
     let mut area_lock = area.lock.lock().await;
     let range = area.range.as_mut(mm_lock, &mut areas.lock, &mut area_lock);
     *range = range.grow(new_range.len());
 
-    map_break_area(page_table, new_range);
-
     brk.set(newbrk);
     newbrk
 }
 
 fn expand_create_area(
-    areas: &mut AreaList, brk: &mut ProgramBreak,
-    page_table: &mut KernelPageTable, new_range: VRange,
+    areas: &mut AreaList, brk: &mut ProgramBreak, new_range: VRange,
 ) -> VAddr {
     let area = Arc::new(MemArea::new(
         new_range,
@@ -117,18 +111,8 @@ fn expand_create_area(
 
     areas.insert_new(area);
 
-    map_break_area(page_table, new_range);
-
     brk.set(new_range.end());
     new_range.end()
-}
-
-fn map_break_area(page_table: &mut KernelPageTable, range: VRange) {
-    page_table.set_anonymous(range, Permission {
-        read: true,
-        write: true,
-        execute: false,
-    });
 }
 
 impl MMList {
@@ -141,7 +125,6 @@ impl MMList {
             &mut inner.areas,
             &mut inner.prog_break,
             &mut inner.lock,
-            &mut inner.page_table,
             newbrk,
         )
         .await

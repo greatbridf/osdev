@@ -27,7 +27,6 @@ pub const PA_PS: u64 = 0x080;
 pub const PA_G: u64 = 0x100;
 pub const PA_COW: u64 = 0x200;
 pub const PA_MMAP: u64 = 0x400;
-pub const PA_ANON: u64 = 0x800;
 pub const PA_NXE: u64 = 0x8000_0000_0000_0000;
 pub const PA_MASK: u64 = 0xfff0_0000_0000_0fff;
 
@@ -190,10 +189,6 @@ impl RawAttribute for PageAttribute64 {
             page_attr |= PageAttribute::MAPPED;
         }
 
-        if self.0 & PA_ANON != 0 {
-            page_attr |= PageAttribute::ANONYMOUS;
-        }
-
         if self.0 & PA_PS != 0 {
             page_attr |= PageAttribute::HUGE;
         }
@@ -218,7 +213,6 @@ impl From<PageAttribute> for PageAttribute64 {
                 PageAttribute::GLOBAL => raw_attr |= PA_G,
                 PageAttribute::COPY_ON_WRITE => raw_attr |= PA_COW,
                 PageAttribute::MAPPED => raw_attr |= PA_MMAP,
-                PageAttribute::ANONYMOUS => raw_attr |= PA_ANON,
                 PageAttribute::HUGE => raw_attr |= PA_PS,
                 _ => unreachable!("Invalid page attribute"),
             }

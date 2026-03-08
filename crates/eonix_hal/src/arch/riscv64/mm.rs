@@ -184,10 +184,6 @@ impl RawAttribute for PageAttribute64 {
             page_attr |= PageAttribute::MAPPED;
         }
 
-        /*if self.0 & PA_ANON != 0 {
-            page_attr |= PageAttribute::ANONYMOUS;
-        }*/
-
         Some(page_attr)
     }
 }
@@ -208,7 +204,6 @@ impl From<PageAttribute> for PageAttribute64 {
                 PageAttribute::GLOBAL => raw_attr |= PA_G,
                 PageAttribute::COPY_ON_WRITE => raw_attr |= PA_COW,
                 PageAttribute::MAPPED => raw_attr |= PA_MMAP,
-                PageAttribute::ANONYMOUS => {}
                 _ => unreachable!("Invalid page attribute"),
             }
         }

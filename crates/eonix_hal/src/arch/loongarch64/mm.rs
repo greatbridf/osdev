@@ -185,7 +185,7 @@ impl From<PageAttribute> for PageAttribute64 {
                 PageAttribute::GLOBAL => raw_attr |= PA_G,
                 PageAttribute::COPY_ON_WRITE => raw_attr |= PA_COW,
                 PageAttribute::MAPPED => raw_attr |= PA_MMAP,
-                PageAttribute::ACCESSED | PageAttribute::ANONYMOUS => {}
+                PageAttribute::ACCESSED => {}
                 _ => unreachable!("Invalid page attribute"),
             }
         }

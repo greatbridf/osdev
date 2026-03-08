@@ -605,25 +605,10 @@ impl fmt::Debug for MMList {
 }
 
 trait PageTableExt {
-    fn set_anonymous(&self, range: VRange, permission: Permission);
-    fn set_mmapped(&self, range: VRange, permission: Permission);
     fn set_copy_on_write(&self, from: &Self, range: VRange);
-    fn set_copied(&self, from: &Self, range: VRange);
 }
 
 impl PageTableExt for KernelPageTable {
-    fn set_anonymous(&self, range: VRange, permission: Permission) {
-        for pte in self.iter_user(range) {
-            pte.set_anonymous(permission.execute);
-        }
-    }
-
-    fn set_mmapped(&self, range: VRange, permission: Permission) {
-        for pte in self.iter_user(range) {
-            pte.set_mapped(permission.execute);
-        }
-    }
-
     fn set_copy_on_write(&self, from: &Self, range: VRange) {
         let to_iter = self.iter_user(range);
         let from_iter = from.iter_user(range);
@@ -632,23 +617,9 @@ impl PageTableExt for KernelPageTable {
             to.set_copy_on_write(from);
         }
     }
-
-    fn set_copied(&self, from: &Self, range: VRange) {
-        let to_iter = self.iter_user(range);
-        let from_iter = from.iter_user(range);
-
-        for (to, from) in to_iter.zip(from_iter) {
-            let (pfn, attr) = from.get();
-            to.set(pfn, attr);
-        }
-    }
 }
 
 trait PTEExt {
-    // private anonymous
-    fn set_anonymous(&mut self, execute: bool);
-    // file mapped or shared anonymous
-    fn set_mapped(&mut self, execute: bool);
     fn set_copy_on_write(&mut self, from: &mut Self);
     fn take_if_present(&mut self) -> Option<Folio>;
     fn release(&mut self);
@@ -658,28 +629,6 @@ impl<T> PTEExt for T
 where
     T: PTE,
 {
-    fn set_anonymous(&mut self, execute: bool) {
-        // Writable flag is set during page fault handling while executable flag is
-        // preserved across page faults, so we set executable flag now.
-        let mut attr = PageAttribute::PRESENT
-            | PageAttribute::READ
-            | PageAttribute::USER
-            | PageAttribute::COPY_ON_WRITE;
-        attr.set(PageAttribute::EXECUTE, execute);
-
-        self.set(EMPTY_PAGE.clone().into_raw(), T::Attr::from(attr));
-    }
-
-    fn set_mapped(&mut self, execute: bool) {
-        // Writable flag is set during page fault handling while executable flag is
-        // preserved across page faults, so we set executable flag now.
-        let mut attr = PageAttribute::READ | PageAttribute::USER;
-        attr.set(PageAttribute::EXECUTE, execute);
-
-        // Set an obviously invalid PFN to help debugging...
-        self.set(PFN::from_val(0), T::Attr::from(attr));
-    }
-
     fn set_copy_on_write(&mut self, from: &mut Self) {
         let (pfn, raw_attr) = from.get();
         let mut attr = raw_attr.as_page_attr().expect("Not a page attribute");

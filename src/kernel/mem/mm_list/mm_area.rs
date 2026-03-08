@@ -13,7 +13,7 @@ use intrusive_collections::{
     PointerOps, RBTree, RBTreeAtomicLink,
 };
 
-use super::{Mapping, EMPTY_PAGE};
+use super::Mapping;
 use crate::kernel::mem::folio::Folio;
 use crate::kernel::mem::mm_list::MemListLock;
 use crate::kernel::mem::{
@@ -466,24 +466,15 @@ impl MemArea {
             return;
         }
 
-        let mut new_page;
-        if *pfn == EMPTY_PAGE.pfn() {
-            new_page = {
-                let mut folio = FolioOwned::alloc();
-                folio.as_bytes_mut().fill(0);
-                folio
-            };
-        } else {
-            new_page = FolioOwned::alloc();
+        let mut new_page = FolioOwned::alloc();
 
-            unsafe {
-                // SAFETY: `page` is CoW, which means that others won't write to it.
-                let old_page_data = page.get_bytes_ptr().as_ref();
-                let new_page_data = new_page.as_bytes_mut();
+        unsafe {
+            // SAFETY: `page` is CoW, which means that others won't write to it.
+            let old_page_data = page.get_bytes_ptr().as_ref();
+            let new_page_data = new_page.as_bytes_mut();
 
-                new_page_data.copy_from_slice(old_page_data);
-            };
-        }
+            new_page_data.copy_from_slice(old_page_data);
+        };
 
         attr.remove(PageAttribute::ACCESSED);
         *pfn = new_page.share().into_raw();

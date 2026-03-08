@@ -452,7 +452,10 @@ impl MemArea {
         attr.remove(PageAttribute::COPY_ON_WRITE);
         attr.set(PageAttribute::WRITE, self.can_write());
 
-        let page = unsafe { Folio::from_raw(*pfn) };
+        let page = unsafe {
+            // SAFETY: CoW PTEs always have a valid PFN.
+            Folio::from_raw(*pfn)
+        };
 
         // XXX: Change me!!!
         if page.refcount.load(Ordering::Relaxed) == 1 {
@@ -488,17 +491,12 @@ impl MemArea {
 
     /// # Arguments
     /// * `offset`: The offset from the start of the mapping, aligned to 4KB boundary.
-    pub async fn handle_mmap(
+    async fn missing_file(
         &self, pfn: &mut PFN, attr: &mut PageAttribute, offset: usize,
         write: bool, file_mapping: &FileMapping,
     ) -> KResult<()> {
         assert!(offset < file_mapping.length, "Offset out of range");
-
-        if attr.contains(PageAttribute::PRESENT) {
-            // Nothing we can do... Possibly race with another threads to try
-            // installing the PTE, or on some arch, fault to set accessed bit.
-            return Ok(());
-        }
+        assert!(!attr.contains(PageAttribute::PRESENT));
 
         let file_offset = file_mapping.offset + offset;
 
@@ -544,6 +542,68 @@ impl MemArea {
             .await?;
 
         attr.insert(PageAttribute::PRESENT);
+
+        if self.can_read() {
+            attr.insert(PageAttribute::READ);
+        }
+
+        if self.can_execute() {
+            attr.insert(PageAttribute::EXECUTE);
+        }
+
+        Ok(())
+    }
+
+    fn missing_anon(&self, pfn: &mut PFN, attr: &mut PageAttribute) {
+        let mut folio = FolioOwned::alloc();
+        folio.as_bytes_mut().fill(0);
+
+        *pfn = folio.share().into_raw();
+
+        attr.insert(PageAttribute::PRESENT);
+
+        if self.can_read() {
+            attr.insert(PageAttribute::READ);
+        }
+
+        if self.can_execute() {
+            attr.insert(PageAttribute::EXECUTE);
+        }
+
+        if self.can_write() {
+            attr.insert(PageAttribute::WRITE);
+        }
+    }
+
+    async fn handle_missing(
+        &self, pfn: &mut PFN, attr: &mut PageAttribute, offset: usize,
+        write: bool,
+    ) -> KResult<()> {
+        assert!(
+            !attr.contains(PageAttribute::COPY_ON_WRITE),
+            "Missing PTEs should not have CoW set"
+        );
+
+        attr.insert(PageAttribute::USER);
+
+        if let Mapping::File(mapping) = &self.mapping {
+            self.missing_file(pfn, attr, offset, write, mapping).await?;
+        } else {
+            self.missing_anon(pfn, attr);
+        }
+
+        assert!(attr.contains(PageAttribute::PRESENT));
+
+        Ok(())
+    }
+
+    fn handle_non_missing(
+        &self, pfn: &mut PFN, attr: &mut PageAttribute,
+    ) -> KResult<()> {
+        if attr.contains(PageAttribute::COPY_ON_WRITE) {
+            self.handle_cow(pfn, attr);
+        }
+
         Ok(())
     }
 
@@ -558,17 +618,14 @@ impl MemArea {
             "Offset out of range"
         );
 
-        let mut attr =
-            pte.get_attr().as_page_attr().expect("Not a page attribute");
-        let mut pfn = pte.get_pfn();
+        let (mut pfn, raw_attr) = pte.get();
+        let mut attr = raw_attr.as_page_attr().expect("Not a page");
 
-        if attr.contains(PageAttribute::COPY_ON_WRITE) {
-            self.handle_cow(&mut pfn, &mut attr);
-        }
-
-        if let Mapping::File(mapping) = &self.mapping {
-            self.handle_mmap(&mut pfn, &mut attr, offset, write, mapping)
+        if !attr.contains(PageAttribute::PRESENT) {
+            self.handle_missing(&mut pfn, &mut attr, offset, write)
                 .await?;
+        } else {
+            self.handle_non_missing(&mut pfn, &mut attr)?;
         }
 
         attr.insert(PageAttribute::ACCESSED);

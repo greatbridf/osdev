@@ -1,30 +1,29 @@
-use crate::traits::mm::Memory;
-use core::{
-    arch::asm,
-    marker::PhantomData,
-    ptr::NonNull,
-    sync::atomic::{compiler_fence, Ordering},
+use core::arch::asm;
+use core::marker::PhantomData;
+use core::ptr::NonNull;
+use core::sync::atomic::{compiler_fence, Ordering};
+
+use eonix_mm::address::{Addr as _, AddrOps, PAddr, PRange, PhysAccess, VAddr};
+use eonix_mm::page_table::{
+    PageAttribute, PageTable, PageTableLevel, PagingMode, RawAttribute,
+    RawPageTable, TableAttribute, PTE,
 };
-use eonix_mm::{
-    address::{Addr as _, AddrOps, PAddr, PRange, PhysAccess, VAddr},
-    page_table::{
-        PageAttribute, PageTable, PageTableLevel, PagingMode, RawAttribute, RawPageTable,
-        TableAttribute, PTE,
-    },
-    paging::{NoAlloc, Page, PageBlock, PAGE_SIZE, PFN},
-};
+use eonix_mm::paging::{NoAlloc, Page, PageBlock, PAGE_SIZE, PFN};
 use eonix_sync_base::LazyLock;
 use loongArch64::register::pgdl;
+
+use crate::traits::mm::Memory;
 
 pub const KIMAGE_OFFSET: usize = 0xffff_ffff_0000_0000;
 pub const ROOT_PAGE_TABLE_PFN: usize = 0x8000_1000 >> 12;
 pub const PAGE_TABLE_BASE: PFN = PFN::from_val(ROOT_PAGE_TABLE_PFN);
-pub static GLOBAL_PAGE_TABLE: LazyLock<PageTable<ArchPagingMode, NoAlloc, ArchPhysAccess>> =
-    LazyLock::new(|| unsafe {
-        Page::with_raw(PAGE_TABLE_BASE, |root_table_page| {
-            PageTable::with_root_table(root_table_page.clone())
-        })
-    });
+pub static GLOBAL_PAGE_TABLE: LazyLock<
+    PageTable<ArchPagingMode, NoAlloc, ArchPhysAccess>,
+> = LazyLock::new(|| unsafe {
+    Page::with_raw(PAGE_TABLE_BASE, |root_table_page| {
+        PageTable::with_root_table(root_table_page.clone())
+    })
+});
 
 pub const PA_VP: u64 = ((1 << 0) | (1 << 7));
 pub const PA_D: u64 = 1 << 1;
@@ -243,8 +242,12 @@ impl PhysAccess for ArchPhysAccess {
 
 impl Memory for ArchMemory {
     fn present_ram() -> impl Iterator<Item = PRange> {
-        let range1 = core::iter::once(PRange::from(PAddr::from_val(0)).grow(0x1000_0000));
-        let range2 = core::iter::once(PRange::from(PAddr::from_val(0x8000_0000)).grow(0x3000_0000));
+        let range1 = core::iter::once(
+            PRange::from(PAddr::from_val(0)).grow(0x1000_0000),
+        );
+        let range2 = core::iter::once(
+            PRange::from(PAddr::from_val(0x8000_0000)).grow(0x3000_0000),
+        );
 
         range2.chain(range1)
     }
@@ -261,7 +264,8 @@ impl Memory for ArchMemory {
 
         Self::present_ram()
             .filter(move |range| {
-                range.end() <= kernel_start || range.end() > paddr_after_kimage_aligned
+                range.end() <= kernel_start
+                    || range.end() > paddr_after_kimage_aligned
             })
             .map(move |range| {
                 if range.end() > paddr_after_kimage_aligned

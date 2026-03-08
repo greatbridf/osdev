@@ -694,7 +694,8 @@ where
             PageAttribute::READ | PageAttribute::USER | PageAttribute::MAPPED;
         attr.set(PageAttribute::EXECUTE, execute);
 
-        self.set(EMPTY_PAGE.clone().into_raw(), T::Attr::from(attr));
+        // Set an obviously invalid PFN to help debugging...
+        self.set(PFN::from_val(0), T::Attr::from(attr));
     }
 
     fn set_copy_on_write(&mut self, from: &mut Self) {

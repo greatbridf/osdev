@@ -15,7 +15,7 @@ use eonix_hal::mm::{
 use eonix_mm::address::{Addr as _, AddrOps as _, PAddr, VAddr, VRange};
 use eonix_mm::page_table::{PageAttribute, RawAttribute, PTE};
 use eonix_mm::paging::{Folio as _, PAGE_SIZE, PFN};
-use eonix_sync::{LazyLock, Mutex};
+use eonix_sync::Mutex;
 use mm_area::AreaList;
 use page_table::KernelPageTable;
 
@@ -23,17 +23,11 @@ pub use self::mapping::{FileMapping, Mapping};
 pub use self::mm_area::{AreaFlags, MemArea};
 pub use self::page_fault::handle_kernel_page_fault;
 use super::address::{VAddrExt as _, VRangeExt as _};
-use super::{Folio, FolioOwned};
+use super::Folio;
 use crate::kernel::constants::{EEXIST, EFAULT, EINVAL, ENOMEM};
 use crate::kernel::mem::mm_list::brk::ProgramBreak;
 use crate::prelude::*;
 use crate::sync::ArcSwap;
-
-pub static EMPTY_PAGE: LazyLock<Folio> = LazyLock::new(|| {
-    let mut folio = FolioOwned::alloc();
-    folio.as_bytes_mut().fill(0);
-    folio.share()
-});
 
 #[derive(Debug, Clone, Copy)]
 pub struct Permission {

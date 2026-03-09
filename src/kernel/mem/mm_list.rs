@@ -19,7 +19,9 @@ use eonix_sync::Mutex;
 use mm_area::AreaList;
 use page_table::KernelPageTable;
 
-pub use self::mapping::{FileMapping, Mapping};
+pub use self::mapping::{
+    add_mapping, duplicate_mapping, remove_mapping, FileMapping, Mapping,
+};
 pub use self::mm_area::{AreaFlags, MemArea};
 pub use self::page_fault::handle_kernel_page_fault;
 use super::address::{VAddrExt as _, VRangeExt as _};
@@ -639,9 +641,9 @@ where
         attr.insert(PageAttribute::COPY_ON_WRITE);
 
         let pfn = unsafe {
-            // SAFETY: We get the pfn from a valid page table entry, so it
-            //         should be valid as well.
-            Folio::with_raw(pfn, |page| page.clone().into_raw())
+            // SAFETY: We get the pfn from a valid page table entry, which
+            //         should have been created via `add_mapping`.
+            duplicate_mapping(pfn)
         };
 
         self.set(pfn, T::Attr::from(attr & !PageAttribute::ACCESSED));
@@ -653,9 +655,8 @@ where
         let attr = raw_attr.as_page_attr().expect("Not a page");
 
         attr.contains(PageAttribute::PRESENT).then(|| unsafe {
-            // SAFETY: Present PTEs always corresponding to a valid Folio that
-            //         was previously installed through `Folio::into_raw()`.
-            Folio::from_raw(pfn)
+            // SAFETY: Present PTEs are always created via `add_mapping`.
+            remove_mapping(pfn)
         })
     }
 

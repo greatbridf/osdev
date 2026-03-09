@@ -1,8 +1,8 @@
 use alloc::sync::Arc;
 
-use eonix_mm::paging::PAGE_SIZE;
+use eonix_mm::paging::{Folio as _, PAGE_SIZE, PFN};
 
-use crate::kernel::mem::PageCache;
+use crate::kernel::mem::{Folio, PageCache};
 
 #[derive(Debug, Clone)]
 pub struct FileMapping {
@@ -22,7 +22,9 @@ pub enum Mapping {
 }
 
 impl FileMapping {
-    pub fn new(page_cache: Arc<PageCache>, offset: usize, length: usize) -> Self {
+    pub fn new(
+        page_cache: Arc<PageCache>, offset: usize, length: usize,
+    ) -> Self {
         assert_eq!(offset & (PAGE_SIZE - 1), 0);
         Self {
             page_cache,
@@ -41,5 +43,37 @@ impl FileMapping {
                 self.length - offset,
             )
         }
+    }
+}
+
+/// Turn the folio together with its refcount into a raw [`PFN`] that can be
+/// mapped into some page table.
+pub fn add_mapping(folio: Folio) -> PFN {
+    folio.into_raw()
+}
+
+/// Duplicate the mapping in page tables.
+///
+/// # Safety
+/// `pfn` must be previously created via [`add_mapping`].
+///
+/// Otherwise this is undefined behavior.
+pub unsafe fn duplicate_mapping(pfn: PFN) -> PFN {
+    unsafe {
+        // SAFETY: `pfn` is created via `add_mapping`, which uses `into_raw`.
+        Folio::with_raw(pfn, |folio| add_mapping(folio.clone()))
+    }
+}
+
+/// Remove mappings in page tables.
+///
+/// # Safety
+/// `pfn` must be previously created via [`add_mapping`].
+///
+/// Otherwise this is undefined behavior.
+pub unsafe fn remove_mapping(pfn: PFN) -> Folio {
+    unsafe {
+        // SAFETY: `pfn` is created via `add_mapping`, which uses `into_raw`.
+        Folio::from_raw(pfn)
     }
 }

@@ -2,13 +2,14 @@ use alloc::collections::btree_map::{BTreeMap, Entry};
 use core::future::Future;
 use core::ops::{Deref, DerefMut};
 
-use eonix_mm::paging::{Folio as _, PAGE_SIZE, PAGE_SIZE_BITS, PFN};
+use eonix_mm::paging::{PAGE_SIZE, PAGE_SIZE_BITS, PFN};
 use eonix_sync::{atomic, Mutex};
 
 use super::page_alloc::PageFlags;
 use super::{Folio, FolioOwned};
 use crate::io::{Buffer, Stream};
 use crate::kernel::constants::EINVAL;
+use crate::kernel::mem::mm_list::add_mapping;
 use crate::kernel::vfs::inode::InodeUse;
 use crate::prelude::KResult;
 
@@ -74,8 +75,7 @@ impl CachePage {
     }
 
     pub fn add_mapping(&self) -> PFN {
-        // TODO: Increase map_count
-        self.0.clone().into_raw()
+        add_mapping(self.0.clone())
     }
 }
 

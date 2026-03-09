@@ -5,6 +5,7 @@ use buddy_allocator::BuddyFolio;
 use eonix_hal::mm::ArchPhysAccess;
 use eonix_mm::address::{PAddr, PhysAccess as _};
 use eonix_mm::paging::{FolioList, FolioListSized, Zone, PFN};
+use eonix_sync::atomic;
 use intrusive_list::{container_of, Link, List};
 use slab_allocator::{SlabPage, SlabPageAlloc, SlabSlot};
 
@@ -55,16 +56,16 @@ impl PageFlags {
     pub const DIRTY: u32 = 1 << 4;
     pub const LOCAL: u32 = 1 << 6;
 
-    pub fn has(&self, flag: u32) -> bool {
-        (self.0.load(Ordering::Relaxed) & flag) == flag
+    pub fn has(&self, flag: u32, order: Ordering) -> bool {
+        (self.0.load(order) & flag) == flag
     }
 
-    pub fn set(&self, flag: u32) {
-        self.0.fetch_or(flag, Ordering::Relaxed);
+    pub fn set(&self, flag: u32, order: Ordering) {
+        self.0.fetch_or(flag, order);
     }
 
-    pub fn clear(&self, flag: u32) {
-        self.0.fetch_and(!flag, Ordering::Relaxed);
+    pub fn clear(&self, flag: u32, order: Ordering) {
+        self.0.fetch_and(!flag, order);
     }
 
     /// Set the flag and return whether it was already set.
@@ -85,7 +86,8 @@ impl BuddyFolio for RawPage {
     }
 
     fn is_buddy(&self) -> bool {
-        self.flags.has(PageFlags::BUDDY)
+        // Check below `set_buddy`.
+        atomic!(@Relaxed, self.flags, has, PageFlags::BUDDY)
     }
 
     fn set_order(&mut self, order: u32) {
@@ -93,10 +95,12 @@ impl BuddyFolio for RawPage {
     }
 
     fn set_buddy(&mut self, val: bool) {
+        // Ordering can be Relaxed since all these operations are performed with
+        // the allocator's mutable reference. So they are sequenced.
         if val {
-            self.flags.set(PageFlags::BUDDY);
+            atomic!(@Relaxed, self.flags, set, PageFlags::BUDDY);
         } else {
-            self.flags.clear(PageFlags::BUDDY)
+            atomic!(@Relaxed, self.flags, clear, PageFlags::BUDDY);
         }
     }
 }
@@ -160,10 +164,11 @@ impl SlabPage for RawPage {
 
 impl PerCpuPage for RawPage {
     fn set_local(&mut self, val: bool) {
+        // Per cpu variables need no synchronization.
         if val {
-            self.flags.set(PageFlags::LOCAL)
+            atomic!(@Relaxed, self.flags, set, PageFlags::LOCAL);
         } else {
-            self.flags.clear(PageFlags::LOCAL)
+            atomic!(@Relaxed, self.flags, clear, PageFlags::LOCAL);
         }
     }
 }
@@ -216,7 +221,7 @@ unsafe impl SlabPageAlloc for GlobalPageAlloc {
 
     fn alloc_slab_page(&self) -> &'static mut RawPage {
         let raw_page = self.alloc_raw_order(0).expect("Out of memory");
-        raw_page.flags.set(PageFlags::SLAB);
+        atomic!(@Relaxed, raw_page.flags, set, PageFlags::SLAB);
         raw_page.shared_data.slab = SlabPageData::new();
 
         raw_page

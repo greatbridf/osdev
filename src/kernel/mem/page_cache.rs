@@ -3,7 +3,7 @@ use core::future::Future;
 use core::ops::{Deref, DerefMut};
 
 use eonix_mm::paging::{Folio as _, PAGE_SIZE, PAGE_SIZE_BITS, PFN};
-use eonix_sync::Mutex;
+use eonix_sync::{atomic, Mutex};
 
 use super::page_alloc::PageFlags;
 use super::{Folio, FolioOwned};
@@ -62,14 +62,14 @@ impl CachePage {
     }
 
     pub fn is_dirty(&self) -> bool {
-        self.flags.has(PageFlags::DIRTY)
+        atomic!(self.flags, has, PageFlags::DIRTY)
     }
 
     pub fn set_dirty(&self, dirty: bool) {
         if dirty {
-            self.flags.set(PageFlags::DIRTY);
+            atomic!(self.flags, set, PageFlags::DIRTY);
         } else {
-            self.flags.clear(PageFlags::DIRTY);
+            atomic!(self.flags, clear, PageFlags::DIRTY);
         }
     }
 

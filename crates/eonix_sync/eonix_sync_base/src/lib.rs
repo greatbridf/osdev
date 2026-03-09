@@ -1,5 +1,6 @@
 #![no_std]
 
+mod atomic;
 mod guard;
 mod lazy_lock;
 mod locked;

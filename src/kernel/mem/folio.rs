@@ -4,10 +4,14 @@ use core::ops::Deref;
 use core::ptr::NonNull;
 use core::sync::atomic::Ordering;
 
-use eonix_mm::paging::{Folio as FolioTrait, FrameAlloc, GlobalFrameAlloc, Zone, PFN};
+use eonix_mm::paging::{
+    Folio as FolioTrait, FrameAlloc, GlobalFrameAlloc, Zone, PFN,
+};
+use eonix_sync::atomic;
 
 use super::page_alloc::ZONE;
 use super::{GlobalPageAlloc, PhysAccess as _, RawPage};
+use crate::kernel::mem::page_alloc::PageFlags;
 
 #[repr(transparent)]
 pub struct Folio(NonNull<RawPage>);
@@ -79,8 +83,26 @@ impl Folio {
         }
     }
 
+    pub fn try_lock(&self) -> Option<LockedFolio<'_>> {
+        if !atomic!(@AcqRel, self.flags, test_and_set, PageFlags::LOCKED) {
+            return Some(LockedFolio(self));
+        }
+
+        None
+    }
+
     pub fn lock(&self) -> LockedFolio<'_> {
-        // TODO: actually perform the lock...
+        if let Some(locked) = self.try_lock() {
+            return locked;
+        }
+
+        // XXX: Spinlock based folio locks may suffer severe contention.
+        //      Find a way to optimize this.
+
+        while atomic!(@AcqRel, self.flags, test_and_set, PageFlags::LOCKED) {
+            core::hint::spin_loop();
+        }
+
         LockedFolio(self)
     }
 
@@ -123,7 +145,9 @@ impl Drop for Folio {
     fn drop(&mut self) {
         match self.refcount.fetch_sub(1, Ordering::AcqRel) {
             0 => unreachable!("Refcount for an in-use page is 0"),
-            1 => unsafe { GlobalPageAlloc::GLOBAL.dealloc_raw(self.0.as_mut()) },
+            1 => unsafe {
+                GlobalPageAlloc::GLOBAL.dealloc_raw(self.0.as_mut())
+            },
             _ => {}
         }
     }
@@ -149,14 +173,20 @@ impl LockedFolio<'_> {
     pub fn as_bytes(&self) -> &[u8] {
         unsafe {
             // SAFETY: `self.start()` points to valid memory of length `self.len()`.
-            core::slice::from_raw_parts(self.start().as_ptr().as_ptr(), self.len())
+            core::slice::from_raw_parts(
+                self.start().as_ptr().as_ptr(),
+                self.len(),
+            )
         }
     }
 
     pub fn as_bytes_mut(&mut self) -> &mut [u8] {
         unsafe {
             // SAFETY: `self.start()` points to valid memory of length `self.len()`.
-            core::slice::from_raw_parts_mut(self.start().as_ptr().as_ptr(), self.len())
+            core::slice::from_raw_parts_mut(
+                self.start().as_ptr().as_ptr(),
+                self.len(),
+            )
         }
     }
 }
@@ -166,6 +196,12 @@ impl Deref for LockedFolio<'_> {
 
     fn deref(&self) -> &Self::Target {
         self.0
+    }
+}
+
+impl Drop for LockedFolio<'_> {
+    fn drop(&mut self) {
+        atomic!(@AcqRel, self.0.flags, clear, PageFlags::LOCKED);
     }
 }
 

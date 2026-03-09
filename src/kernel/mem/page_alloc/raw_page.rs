@@ -71,8 +71,8 @@ impl PageFlags {
     /// Set the flag and return whether it was already set.
     ///
     /// If multiple flags are given, returns true if any of them were already set.
-    pub fn test_and_set(&self, flag: u32) -> bool {
-        (self.0.fetch_or(flag, Ordering::Relaxed) & flag) != 0
+    pub fn test_and_set(&self, flag: u32, order: Ordering) -> bool {
+        (self.0.fetch_or(flag, order) & flag) != 0
     }
 }
 

@@ -5,7 +5,7 @@ use core::sync::atomic::{AtomicU32, Ordering};
 
 use eonix_mm::address::{VAddr, VRange};
 use eonix_mm::page_table::{PageAttribute, RawAttribute, PTE};
-use eonix_mm::paging::{Folio as _, PFN};
+use eonix_mm::paging::PFN;
 use eonix_sync::Mutex;
 use intrusive_collections::rbtree::Entry;
 use intrusive_collections::{
@@ -15,7 +15,8 @@ use intrusive_collections::{
 
 use super::Mapping;
 use crate::kernel::mem::folio::Folio;
-use crate::kernel::mem::mm_list::MemListLock;
+use crate::kernel::mem::mm_list::mapping::add_mapping;
+use crate::kernel::mem::mm_list::{remove_mapping, MemListLock};
 use crate::kernel::mem::{
     CachePage, FileMapping, FolioOwned, PageOffset, Permission,
 };
@@ -452,32 +453,32 @@ impl MemArea {
         attr.remove(PageAttribute::COPY_ON_WRITE);
         attr.set(PageAttribute::WRITE, self.can_write());
 
-        let page = unsafe {
-            // SAFETY: CoW PTEs always have a valid PFN.
-            Folio::from_raw(*pfn)
+        let folio = unsafe {
+            // SAFETY: `pfn` is a mapping taken from some page table.
+            remove_mapping(*pfn)
         };
 
         // XXX: Change me!!!
-        if page.refcount.load(Ordering::Relaxed) == 1 {
+        if folio.refcount.load(Ordering::Relaxed) == 1 {
             // SAFETY: This is actually safe. If we read `1` here and we have `MMList` lock
             // held, there couldn't be neither other processes sharing the page, nor other
             // threads making the page COW at the same time.
-            core::mem::forget(page);
+            *pfn = add_mapping(folio);
             return;
         }
 
         let mut new_page = FolioOwned::alloc();
 
         unsafe {
-            // SAFETY: `page` is CoW, which means that others won't write to it.
-            let old_page_data = page.get_bytes_ptr().as_ref();
+            // SAFETY: `folio` is CoW, which means that others won't write to it.
+            let old_page_data = folio.get_bytes_ptr().as_ref();
             let new_page_data = new_page.as_bytes_mut();
 
             new_page_data.copy_from_slice(old_page_data);
         };
 
         attr.remove(PageAttribute::ACCESSED);
-        *pfn = new_page.share().into_raw();
+        *pfn = add_mapping(new_page.share());
     }
 
     /// # Arguments
@@ -524,7 +525,7 @@ impl MemArea {
                 .copy_from_slice(cache_page.lock().as_bytes());
 
             attr.insert(PageAttribute::WRITE);
-            *pfn = new_page.share().into_raw();
+            *pfn = add_mapping(new_page.share());
         };
 
         file_mapping
@@ -549,7 +550,7 @@ impl MemArea {
         let mut folio = FolioOwned::alloc();
         folio.as_bytes_mut().fill(0);
 
-        *pfn = folio.share().into_raw();
+        *pfn = add_mapping(folio.share());
 
         attr.insert(PageAttribute::PRESENT);
 

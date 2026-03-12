@@ -1,6 +1,6 @@
 use alloc::collections::btree_map::{BTreeMap, Entry};
 use core::future::Future;
-use core::ops::{Deref, DerefMut};
+use core::ops::Deref;
 
 use eonix_mm::paging::{PAGE_SIZE, PAGE_SIZE_BITS, PFN};
 use eonix_sync::{atomic, Mutex};
@@ -84,12 +84,6 @@ impl Deref for CachePage {
 
     fn deref(&self) -> &Self::Target {
         &self.0
-    }
-}
-
-impl DerefMut for CachePage {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
     }
 }
 

@@ -180,9 +180,11 @@ impl<E: ElfArch> Elf<E> {
         let ph_offset = self.ph_offset();
         for program_header in &self.program_headers {
             if program_header.offset() <= ph_offset
-                && ph_offset < program_header.offset() + program_header.file_size()
+                && ph_offset
+                    < program_header.offset() + program_header.file_size()
             {
-                return Ok(ph_offset - program_header.offset() + program_header.virtual_addr());
+                return Ok(ph_offset - program_header.offset()
+                    + program_header.virtual_addr());
             }
         }
         Err(ENOEXEC)
@@ -212,7 +214,9 @@ impl<E: ElfArch> Elf<E> {
         })
     }
 
-    async fn load(&self, args: Vec<CString>, envs: Vec<CString>) -> KResult<LoadInfo> {
+    async fn load(
+        &self, args: Vec<CString>, envs: Vec<CString>,
+    ) -> KResult<LoadInfo> {
         let mm_list = MMList::new();
 
         // Load Segments
@@ -258,10 +262,7 @@ impl<E: ElfArch> Elf<E> {
     }
 
     async fn create_and_init_stack(
-        &self,
-        mm_list: &MMList,
-        args: Vec<CString>,
-        envs: Vec<CString>,
+        &self, mm_list: &MMList, args: Vec<CString>, envs: Vec<CString>,
         aux_vec: AuxVec<E::Ea>,
     ) -> KResult<VAddr> {
         mm_list
@@ -283,7 +284,9 @@ impl<E: ElfArch> Elf<E> {
             .await
     }
 
-    fn init_aux_vec(&self, elf_base: VAddr, ldso_base: Option<VAddr>) -> KResult<AuxVec<E::Ea>> {
+    fn init_aux_vec(
+        &self, elf_base: VAddr, ldso_base: Option<VAddr>,
+    ) -> KResult<AuxVec<E::Ea>> {
         let mut aux_vec: AuxVec<E::Ea> = AuxVec::new();
         let ph_addr = if self.is_shared_object() {
             elf_base.addr() + self.ph_addr()?
@@ -294,7 +297,8 @@ impl<E: ElfArch> Elf<E> {
         aux_vec.set(AuxKey::AT_PAGESZ, E::Ea::from_usize(PAGE_SIZE))?;
         aux_vec.set(AuxKey::AT_PHDR, E::Ea::from_usize(ph_addr))?;
         aux_vec.set(AuxKey::AT_PHNUM, E::Ea::from_usize(self.ph_count()))?;
-        aux_vec.set(AuxKey::AT_PHENT, E::Ea::from_usize(self.ph_entry_size()))?;
+        aux_vec
+            .set(AuxKey::AT_PHENT, E::Ea::from_usize(self.ph_entry_size()))?;
         let elf_entry = if self.is_shared_object() {
             elf_base.addr() + self.entry_point()
         } else {
@@ -307,13 +311,15 @@ impl<E: ElfArch> Elf<E> {
         )?;
 
         if let Some(ldso_base) = ldso_base {
-            aux_vec.set(AuxKey::AT_BASE, E::Ea::from_usize(ldso_base.addr()))?;
+            aux_vec
+                .set(AuxKey::AT_BASE, E::Ea::from_usize(ldso_base.addr()))?;
         }
         Ok(aux_vec)
     }
 
     async fn load_segments(&self, mm_list: &MMList) -> KResult<(VAddr, VAddr)> {
-        let base: VAddr = if self.is_shared_object() { E::DYN_BASE_ADDR } else { 0 }.into();
+        let base: VAddr =
+            if self.is_shared_object() { E::DYN_BASE_ADDR } else { 0 }.into();
 
         let mut segments_end = VAddr::NULL;
 
@@ -321,7 +327,8 @@ impl<E: ElfArch> Elf<E> {
             let type_ = program_header.type_().map_err(|_| ENOEXEC)?;
 
             if type_ == program::Type::Load {
-                let segment_end = self.load_segment(program_header, mm_list, base).await?;
+                let segment_end =
+                    self.load_segment(program_header, mm_list, base).await?;
 
                 if segment_end > segments_end {
                     segments_end = segment_end;
@@ -333,10 +340,7 @@ impl<E: ElfArch> Elf<E> {
     }
 
     async fn load_segment(
-        &self,
-        program_header: &E::Ph,
-        mm_list: &MMList,
-        base_addr: VAddr,
+        &self, program_header: &E::Ph, mm_list: &MMList, base_addr: VAddr,
     ) -> KResult<VAddr> {
         let virtual_addr = base_addr + program_header.virtual_addr();
         let vmem_vaddr_end = virtual_addr + program_header.mem_size();
@@ -377,7 +381,9 @@ impl<E: ElfArch> Elf<E> {
                 zero_len = zero_len.min(vmem_vaddr_end - load_vaddr_end);
 
                 mm_list
-                    .access_mut(load_vaddr_end, zero_len, |_, data| data.fill(0))
+                    .access_mut(load_vaddr_end, zero_len, |_, data| {
+                        data.fill(0)
+                    })
                     .await?;
             }
 
@@ -397,13 +403,19 @@ impl<E: ElfArch> Elf<E> {
         Ok(vmap_start + vmem_len)
     }
 
-    async fn load_ldso(&self, mm_list: &MMList) -> KResult<Option<LdsoLoadInfo>> {
+    async fn load_ldso(
+        &self, mm_list: &MMList,
+    ) -> KResult<Option<LdsoLoadInfo>> {
         let ldso_path = self.ldso_path().await?;
 
         if let Some(ldso_path) = ldso_path {
             let fs_context = FsContext::global();
-            let ldso_file =
-                Dentry::open(fs_context, Path::new(ldso_path.as_bytes())?, true).await?;
+            let ldso_file = Dentry::open(
+                fs_context,
+                Path::new(ldso_path.as_bytes())?,
+                true,
+            )
+            .await?;
             let ldso_elf = Elf::<E>::parse(ldso_file).await?;
 
             let base = VAddr::from(E::LDSO_BASE_ADDR);
@@ -412,7 +424,9 @@ impl<E: ElfArch> Elf<E> {
                 let type_ = program_header.type_().map_err(|_| ENOEXEC)?;
 
                 if type_ == program::Type::Load {
-                    ldso_elf.load_segment(program_header, mm_list, base).await?;
+                    ldso_elf
+                        .load_segment(program_header, mm_list, base)
+                        .await?;
                 }
             }
 
@@ -439,9 +453,13 @@ impl<E: ElfArch> Elf<E> {
 
                 let mut ldso_vec = vec![0u8; file_size - 1]; // -1 due to '\0'
                 self.file
-                    .read(&mut ByteBuffer::from(ldso_vec.as_mut_slice()), file_offset)
+                    .read(
+                        &mut ByteBuffer::from(ldso_vec.as_mut_slice()),
+                        file_offset,
+                    )
                     .await?;
-                let ldso_path = String::from_utf8(ldso_vec).map_err(|_| ENOEXEC)?;
+                let ldso_path =
+                    String::from_utf8(ldso_vec).map_err(|_| ENOEXEC)?;
                 return Ok(Some(ldso_path));
             }
         }
@@ -469,7 +487,9 @@ impl ELF {
         }
     }
 
-    pub async fn load(&self, args: Vec<CString>, envs: Vec<CString>) -> KResult<LoadInfo> {
+    pub async fn load(
+        &self, args: Vec<CString>, envs: Vec<CString>,
+    ) -> KResult<LoadInfo> {
         match &self {
             ELF::Elf32(elf32) => elf32.load(args, envs).await,
             ELF::Elf64(elf64) => elf64.load(args, envs).await,
@@ -487,10 +507,7 @@ struct StackInitializer<'a, T> {
 
 impl<'a, T: ElfAddr + Clone + Copy> StackInitializer<'a, T> {
     fn new(
-        mm_list: &'a MMList,
-        sp: usize,
-        args: Vec<CString>,
-        envs: Vec<CString>,
+        mm_list: &'a MMList, sp: usize, args: Vec<CString>, envs: Vec<CString>,
         aux_vec: AuxVec<T>,
     ) -> Self {
         Self {
@@ -524,7 +541,10 @@ impl<'a, T: ElfAddr + Clone + Copy> StackInitializer<'a, T> {
             self.sp -= len;
             self.mm_list
                 .access_mut(VAddr::from(self.sp), len, |offset, data| {
-                    data.copy_from_slice(&string.as_bytes_with_nul()[offset..offset + data.len()])
+                    data.copy_from_slice(
+                        &string.as_bytes_with_nul()
+                            [offset..offset + data.len()],
+                    )
                 })
                 .await?;
             addrs.push(T::from_usize(self.sp));
@@ -540,7 +560,10 @@ impl<'a, T: ElfAddr + Clone + Copy> StackInitializer<'a, T> {
             self.sp -= len;
             self.mm_list
                 .access_mut(VAddr::from(self.sp), len, |offset, data| {
-                    data.copy_from_slice(&string.as_bytes_with_nul()[offset..offset + data.len()])
+                    data.copy_from_slice(
+                        &string.as_bytes_with_nul()
+                            [offset..offset + data.len()],
+                    )
                 })
                 .await?;
             addrs.push(T::from_usize(self.sp));
@@ -550,11 +573,13 @@ impl<'a, T: ElfAddr + Clone + Copy> StackInitializer<'a, T> {
     }
 
     fn stack_alignment(&mut self) {
-        let aux_vec_size = (self.aux_vec.table().len() + 1) * (size_of::<T>() * 2);
+        let aux_vec_size =
+            (self.aux_vec.table().len() + 1) * (size_of::<T>() * 2);
         let envp_pointers_size = (self.envs.len() + 1) * size_of::<T>();
         let argv_pointers_size = (self.args.len() + 1) * size_of::<T>();
         let argc_size = size_of::<T>();
-        let all_size = aux_vec_size + envp_pointers_size + argv_pointers_size + argc_size;
+        let all_size =
+            aux_vec_size + envp_pointers_size + argv_pointers_size + argc_size;
 
         let align_sp = (self.sp - all_size).align_down(16);
         self.sp = align_sp + all_size;
@@ -588,7 +613,10 @@ impl<'a, T: ElfAddr + Clone + Copy> StackInitializer<'a, T> {
         self.mm_list
             .access_mut(VAddr::from(self.sp), size_of::<u32>(), |_, data| {
                 data.copy_from_slice(unsafe {
-                    core::slice::from_raw_parts(&val as *const _ as *const u8, data.len())
+                    core::slice::from_raw_parts(
+                        &val as *const _ as *const u8,
+                        data.len(),
+                    )
                 })
             })
             .await?;

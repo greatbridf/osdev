@@ -14,7 +14,6 @@ use intrusive_collections::{
 };
 
 use super::Mapping;
-use crate::kernel::mem::folio::Folio;
 use crate::kernel::mem::mm_list::mapping::add_mapping;
 use crate::kernel::mem::mm_list::{remove_mapping, MemListLock};
 use crate::kernel::mem::{

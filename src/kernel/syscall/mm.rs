@@ -4,7 +4,9 @@ use eonix_mm::paging::PAGE_SIZE;
 use posix_types::syscall_no::*;
 
 use super::FromSyscallArg;
-use crate::kernel::constants::{UserMmapFlags, UserMmapProtocol, EBADF, EINVAL};
+use crate::kernel::constants::{
+    UserMmapFlags, UserMmapProtocol, EBADF, EINVAL,
+};
 use crate::kernel::mem::{FileMapping, Mapping, Permission};
 use crate::kernel::task::Thread;
 use crate::kernel::vfs::filearray::FD;
@@ -34,13 +36,8 @@ fn check_impl(condition: bool, err: u32) -> KResult<()> {
 }
 
 async fn do_mmap2(
-    thread: &Thread,
-    addr: usize,
-    len: usize,
-    prot: UserMmapProtocol,
-    flags: UserMmapFlags,
-    fd: FD,
-    pgoffset: usize,
+    thread: &Thread, addr: usize, len: usize, prot: UserMmapProtocol,
+    flags: UserMmapFlags, fd: FD, pgoffset: usize,
 ) -> KResult<usize> {
     let addr = VAddr::from(addr);
     if !addr.is_page_aligned() || pgoffset % PAGE_SIZE != 0 || len == 0 {
@@ -97,12 +94,8 @@ async fn do_mmap2(
 #[cfg(any(target_arch = "riscv64", target_arch = "loongarch64"))]
 #[eonix_macros::define_syscall(SYS_MMAP)]
 async fn mmap(
-    addr: usize,
-    len: usize,
-    prot: UserMmapProtocol,
-    flags: UserMmapFlags,
-    fd: FD,
-    offset: usize,
+    addr: usize, len: usize, prot: UserMmapProtocol, flags: UserMmapFlags,
+    fd: FD, offset: usize,
 ) -> KResult<usize> {
     do_mmap2(thread, addr, len, prot, flags, fd, offset).await
 }
@@ -110,12 +103,8 @@ async fn mmap(
 #[cfg(target_arch = "x86_64")]
 #[eonix_macros::define_syscall(SYS_MMAP2)]
 async fn mmap2(
-    addr: usize,
-    len: usize,
-    prot: UserMmapProtocol,
-    flags: UserMmapFlags,
-    fd: FD,
-    pgoffset: usize,
+    addr: usize, len: usize, prot: UserMmapProtocol, flags: UserMmapFlags,
+    fd: FD, pgoffset: usize,
 ) -> KResult<usize> {
     do_mmap2(thread, addr, len, prot, flags, fd, pgoffset).await
 }
@@ -143,7 +132,9 @@ async fn madvise(_addr: usize, _len: usize, _advice: u32) -> KResult<()> {
 }
 
 #[eonix_macros::define_syscall(SYS_MPROTECT)]
-async fn mprotect(addr: usize, len: usize, prot: UserMmapProtocol) -> KResult<()> {
+async fn mprotect(
+    addr: usize, len: usize, prot: UserMmapProtocol,
+) -> KResult<()> {
     let addr = VAddr::from(addr);
     if !addr.is_page_aligned() || len == 0 {
         return Err(EINVAL);
@@ -154,15 +145,11 @@ async fn mprotect(addr: usize, len: usize, prot: UserMmapProtocol) -> KResult<()
     thread
         .process
         .mm_list
-        .protect(
-            addr,
-            len,
-            Permission {
-                read: prot.contains(UserMmapProtocol::PROT_READ),
-                write: prot.contains(UserMmapProtocol::PROT_WRITE),
-                execute: prot.contains(UserMmapProtocol::PROT_EXEC),
-            },
-        )
+        .protect(addr, len, Permission {
+            read: prot.contains(UserMmapProtocol::PROT_READ),
+            write: prot.contains(UserMmapProtocol::PROT_WRITE),
+            execute: prot.contains(UserMmapProtocol::PROT_EXEC),
+        })
         .await
 }
 

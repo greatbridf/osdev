@@ -14,11 +14,20 @@ pub struct FileMapping {
 }
 
 #[derive(Debug, Clone)]
+pub struct AnonMapping();
+
+#[derive(Debug, Clone)]
 pub enum Mapping {
     // private anonymous memory
-    Anonymous,
+    Anonymous(AnonMapping),
     // file-backed memory or shared anonymous memory(tmp file)
     File(FileMapping),
+}
+
+impl AnonMapping {
+    pub const fn new() -> Mapping {
+        Mapping::Anonymous(Self())
+    }
 }
 
 impl FileMapping {

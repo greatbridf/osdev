@@ -199,12 +199,15 @@ impl AreaList {
         }
     }
 
-    pub fn insert_new(&mut self, area: Arc<MemArea>) {
-        let range = area.range.as_ref(&self.lock).clone();
+    pub fn insert(&mut self, area: Arc<MemArea>) {
+        let lock = area.lock.try_lock().expect("Insert called on busy area");
 
-        match self.areas.entry(&range) {
-            Entry::Occupied(_) => panic!("Overlapping mem area: {range:?}."),
+        match self.areas.entry(area.range.as_ref(&*lock)) {
+            Entry::Occupied(_) => {
+                panic!("Overlapping mem area: {:?}.", area.range.as_ref(&*lock))
+            }
             Entry::Vacant(insert_cursor) => {
+                drop(lock);
                 insert_cursor.insert(area);
             }
         }
@@ -339,18 +342,6 @@ impl AreaList {
     }
 
     // TODO: For backwards compatibility. Remove this.
-    pub fn insert(&mut self, area: MemArea) {
-        let range = area.range.as_ref(&self.lock).clone();
-
-        match self.areas.entry(&range) {
-            Entry::Occupied(_) => panic!("Overlapping mem area: {:?}.", range),
-            Entry::Vacant(insert_cursor) => {
-                insert_cursor.insert(Arc::new(area));
-            }
-        }
-    }
-
-    // TODO: For backwards compatibility. Remove this.
     pub fn deep_clone(&self, lock: &MemListLock) -> Self {
         let mut areas = RBTree::new(AreasAdapter::NEW);
 
@@ -377,16 +368,14 @@ impl AreaList {
 }
 
 impl MemArea {
-    pub const fn new(
-        range: VRange, flags: AreaFlags, mapping: Mapping,
-    ) -> Self {
-        Self {
+    pub fn new(range: VRange, flags: AreaFlags, mapping: Mapping) -> Arc<Self> {
+        Arc::new(Self {
             range: RangeProtected::new(range),
             flags: AtomicFlags::new(flags),
             lock: Mutex::new(AreaLock::_new()),
             link: Link::rbtree(),
             mapping,
-        }
+        })
     }
 
     pub fn set_permission(&self, perm: Permission) {

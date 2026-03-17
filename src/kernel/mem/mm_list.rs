@@ -191,7 +191,7 @@ impl MMListInner {
             area.set_permission(permission);
 
             // Insert it back.
-            self.areas.insert_new(area);
+            self.areas.insert(area);
         }
 
         if !found {

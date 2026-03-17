@@ -1,5 +1,3 @@
-use alloc::sync::Arc;
-
 use eonix_mm::address::{VAddr, VRange};
 
 use crate::kernel::mem::address::VRangeExt;
@@ -96,7 +94,7 @@ async fn set_break(
 fn expand_create_area(
     areas: &mut AreaList, brk: &mut ProgramBreak, new_range: VRange,
 ) -> VAddr {
-    let area = Arc::new(MemArea::new(
+    let area = MemArea::new(
         new_range,
         AreaFlags::from_old(
             Permission {
@@ -107,9 +105,9 @@ fn expand_create_area(
             false,
         ),
         AnonMapping::new(),
-    ));
+    );
 
-    areas.insert_new(area);
+    areas.insert(area);
 
     brk.set(new_range.end());
     new_range.end()

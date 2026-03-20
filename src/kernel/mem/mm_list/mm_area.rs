@@ -267,9 +267,9 @@ impl AreaList {
         &mut self, isolate_range: &VRange, lock: &mut MemListLock,
     ) -> impl Iterator<Item = Arc<MemArea>> {
         let mut ret_areas = LinkedList::new(ListAdapter::NEW);
-        let begin = VRange::from(isolate_range.start());
-
-        let mut cursor = self.areas.upper_bound_mut(Bound::Included(&begin));
+        let mut cursor = self.areas.upper_bound_mut(Bound::Included(
+            &VRange::from(isolate_range.start()),
+        ));
 
         while !cursor.is_null() {
             let range = {
@@ -288,48 +288,44 @@ impl AreaList {
                 range.clone()
             };
 
-            let area = cursor.as_cursor().clone_pointer().unwrap();
-            let list_lock = &mut self.lock;
-            let mut area_lock = area.lock.lock().await;
-            let area_lock = &mut area_lock;
+            let mut area = cursor.remove().unwrap();
 
-            let (l, m, r) = range.mask_with_checked(isolate_range).unwrap();
+            {
+                // Exclude all concurrent faulters.
+                area.lock.lock().await;
 
-            match (l, r) {
-                (None, None) => {
-                    // Fully covered, just remove it.
-                    let area = cursor.remove().unwrap();
-                    unsafe {
-                        area.link.to_list();
-                    }
-                    ret_areas.push_back(area);
-                    continue;
-                }
-                (None, Some(rem)) | (Some(rem), None) => {
-                    // Overflow on one side, change the old area's range and
-                    // return the newly created area.
-                    let range = area.range.as_mut(lock, list_lock, area_lock);
-                    *range = rem;
-                }
-                (Some(left), Some(right)) => {
-                    // Overflow on both sides, change the old area's range to
-                    // the left part, create a new area for the right part and
-                    // return the middle part.
-                    let range = area.range.as_mut(lock, list_lock, area_lock);
-                    *range = left;
-
-                    cursor.insert_after(area.clone_and_modify(lock, |area| {
-                        area.range = RangeProtected::new(right);
-                    }));
-                }
+                // XXX: This is slightly racy and the assertion may not hold if
+                //      one hasn't dropped the arc after releasing the lock.
+                //      Let's observe if we can actually trigger this...
+                assert_eq!(Arc::strong_count(&area), 1, "Shared isolated area");
             }
 
-            let ret_range = area.clone_and_modify(lock, |area| {
-                area.range = RangeProtected::new(m);
-                area.link = Link::list();
-            });
+            let left_overflow = range.start() < isolate_range.start();
+            let right_overflow = range.end() > isolate_range.end();
 
-            ret_areas.push_back(ret_range);
+            if left_overflow {
+                let left;
+                let offset = isolate_range.start() - range.start();
+
+                (left, area) = area.split(offset, lock);
+
+                cursor.insert_before(left);
+            }
+
+            if right_overflow {
+                let right;
+                let offset = isolate_range.end() - range.start();
+
+                (area, right) = area.split(offset, lock);
+
+                cursor.insert_before(right);
+            }
+
+            unsafe {
+                // SAFETY: The area is unlinked and exclusive to us.
+                area.link.to_list();
+            }
+            ret_areas.push_back(area);
         }
 
         // We are returning the area, and the area should be by default
@@ -423,16 +419,37 @@ impl MemArea {
         }
     }
 
-    fn clone_and_modify(
-        &self, lock: &MemListLock, modify: impl FnOnce(&mut MemArea),
-    ) -> Arc<Self> {
-        let mut arc = Arc::new(self.clone(lock));
-        let arc_mut = unsafe {
-            // SAFETY: We are the only owner.
-            Arc::get_mut(&mut arc).unwrap_unchecked()
+    fn split(
+        &self, offset: usize, lock: &MemListLock,
+    ) -> (Arc<Self>, Arc<Self>) {
+        let (begin, mid, end) = {
+            let range = self.range.as_ref(lock);
+            let begin = range.start();
+            let mid = begin + offset;
+            let end = range.end();
+
+            (begin, mid, end)
         };
-        modify(arc_mut);
-        arc
+
+        let (left_mapping, right_mapping) = self.mapping.split(offset);
+
+        let left = Arc::new(Self {
+            range: RangeProtected::new(VRange::new(begin, mid)),
+            flags: self.flags.clone(),
+            lock: Mutex::new(AreaLock::_new()),
+            link: Link::rbtree(),
+            mapping: left_mapping,
+        });
+
+        let right = Arc::new(Self {
+            range: RangeProtected::new(VRange::new(mid, end)),
+            flags: self.flags.clone(),
+            lock: Mutex::new(AreaLock::_new()),
+            link: Link::rbtree(),
+            mapping: right_mapping,
+        });
+
+        (left, right)
     }
 
     pub fn handle_cow(&self, pfn: &mut PFN, attr: &mut PageAttribute) {

@@ -25,8 +25,12 @@ pub enum Mapping {
 }
 
 impl AnonMapping {
+    const fn _new() -> Self {
+        Self()
+    }
+
     pub const fn new() -> Mapping {
-        Mapping::Anonymous(Self())
+        Mapping::Anonymous(Self::_new())
     }
 }
 

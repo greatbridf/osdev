@@ -32,6 +32,10 @@ impl AnonMapping {
     pub const fn new() -> Mapping {
         Mapping::Anonymous(Self::_new())
     }
+
+    fn split(&self, _offset: usize) -> (Self, Self) {
+        (Self::_new(), Self::_new())
+    }
 }
 
 impl FileMapping {
@@ -46,15 +50,35 @@ impl FileMapping {
         }
     }
 
-    pub fn offset(&self, offset: usize) -> Self {
-        if self.length <= offset {
-            Self::new(self.page_cache.clone(), self.offset + self.length, 0)
+    fn split(&self, offset: usize) -> (Self, Self) {
+        let (left_len, right_len);
+
+        if offset >= self.length {
+            left_len = self.length;
+            right_len = 0;
         } else {
-            Self::new(
-                self.page_cache.clone(),
-                self.offset + offset,
-                self.length - offset,
-            )
+            left_len = offset;
+            right_len = self.length - offset;
+        }
+
+        (
+            Self::new(self.page_cache.clone(), self.offset, left_len),
+            Self::new(self.page_cache.clone(), self.offset + offset, right_len),
+        )
+    }
+}
+
+impl Mapping {
+    pub(super) fn split(&self, offset: usize) -> (Self, Self) {
+        match self {
+            Mapping::Anonymous(anon_mapping) => {
+                let (l, r) = anon_mapping.split(offset);
+                (Self::Anonymous(l), Self::Anonymous(r))
+            }
+            Mapping::File(file_mapping) => {
+                let (l, r) = file_mapping.split(offset);
+                (Self::File(l), Self::File(r))
+            }
         }
     }
 }

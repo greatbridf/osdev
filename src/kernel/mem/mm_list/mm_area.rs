@@ -438,7 +438,7 @@ impl MemArea {
         (left, right)
     }
 
-    pub fn handle_cow(&self, pfn: &mut PFN, attr: &mut PageAttribute) {
+    fn handle_cow(&self, pfn: &mut PFN, attr: &mut PageAttribute) {
         assert!(attr.contains(PageAttribute::COPY_ON_WRITE));
 
         attr.remove(PageAttribute::COPY_ON_WRITE);

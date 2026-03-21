@@ -271,35 +271,39 @@ impl MMList {
         }
     }
 
-    pub fn new() -> Self {
-        let page_table = KernelPageTable::new();
+    #[inline(always)]
+    fn _new(
+        areas: AreaList, page_table: KernelPageTable, prog_break: ProgramBreak,
+    ) -> Self {
         Self {
             root_page_table: AtomicUsize::from(page_table.addr().addr()),
             user_count: AtomicUsize::new(0),
             inner: ArcSwap::new(Mutex::new(MMListInner {
                 lock: MemListLock::_new(),
-                areas: AreaList::new(),
-                prog_break: ProgramBreak::null(),
+                areas,
                 page_table,
+                prog_break,
             })),
         }
+    }
+
+    pub fn new() -> Self {
+        Self::_new(
+            AreaList::new(),
+            KernelPageTable::new(),
+            ProgramBreak::null(),
+        )
     }
 
     pub async fn new_cloned(&self) -> Self {
         let inner = self.inner.borrow();
         let mut inner = inner.lock().await;
 
-        let page_table = KernelPageTable::new();
-        let list = Self {
-            root_page_table: AtomicUsize::from(page_table.addr().addr()),
-            user_count: AtomicUsize::new(0),
-            inner: ArcSwap::new(Mutex::new(MMListInner {
-                lock: MemListLock::_new(),
-                areas: inner.areas.deep_clone(&inner.lock),
-                page_table,
-                prog_break: inner.prog_break.clone(),
-            })),
-        };
+        let list = Self::_new(
+            inner.areas.deep_clone(&inner.lock),
+            KernelPageTable::new(),
+            inner.prog_break.clone(),
+        );
 
         {
             let list_inner = list.inner.borrow();

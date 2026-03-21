@@ -15,7 +15,8 @@ use intrusive_collections::{
 
 use super::Mapping;
 use crate::kernel::mem::mm_list::mapping::add_mapping;
-use crate::kernel::mem::mm_list::{remove_mapping, MemListLock};
+use crate::kernel::mem::mm_list::page_table::KernelPageTable;
+use crate::kernel::mem::mm_list::{remove_mapping, MemListLock, PageTableExt};
 use crate::kernel::mem::{
     CachePage, FileMapping, FolioOwned, PageOffset, Permission,
 };
@@ -337,20 +338,6 @@ impl AreaList {
         })
     }
 
-    // TODO: For backwards compatibility. Remove this.
-    pub fn deep_clone(&self, lock: &MemListLock) -> Self {
-        let mut areas = RBTree::new(AreasAdapter::NEW);
-
-        for area in self.areas.iter() {
-            areas.insert(area.clone(lock));
-        }
-
-        Self {
-            areas,
-            lock: AreaListLock { _phantom: () },
-        }
-    }
-
     pub fn iter(&self) -> impl Iterator<Item = &MemArea> {
         let mut cursor = self.areas.front();
 
@@ -657,4 +644,33 @@ impl Link {
             self.rbtree.force_unlink();
         }
     }
+}
+
+fn dup_area_shared<'a, 'b: 'a>(
+    area: &'a MemArea, list: &mut AreaList, from_lock: &'b MemListLock,
+) {
+    // Shared areas can be filled in faults anyway.
+    // Just cloning the area is enough.
+    list.insert(area.clone(from_lock));
+}
+
+fn dup_area_private<'a, 'b: 'a>(
+    area: &'a MemArea, list: &mut AreaList, from_lock: &'b MemListLock,
+    from_pgtable: &KernelPageTable, to_pgtable: &KernelPageTable,
+) {
+    list.insert(area.clone(from_lock));
+
+    to_pgtable.set_copy_on_write(from_pgtable, *area.range.as_ref(from_lock));
+}
+
+pub fn dup_area_to_list<'a, 'b: 'a>(
+    area: &'a MemArea, list: &mut AreaList, from_lock: &'b MemListLock,
+    from_pgtable: &KernelPageTable, to_pgtable: &KernelPageTable,
+) {
+    if area.is_shared() {
+        dup_area_shared(area, list, from_lock);
+        return;
+    }
+
+    dup_area_private(area, list, from_lock, from_pgtable, to_pgtable);
 }

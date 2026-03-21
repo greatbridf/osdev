@@ -29,6 +29,7 @@ use super::address::{VAddrExt as _, VRangeExt as _};
 use super::Folio;
 use crate::kernel::constants::{EEXIST, EFAULT, EINVAL, ENOMEM};
 use crate::kernel::mem::mm_list::brk::ProgramBreak;
+use crate::kernel::mem::mm_list::mm_area::dup_area_to_list;
 use crate::prelude::*;
 use crate::sync::ArcSwap;
 
@@ -297,37 +298,25 @@ impl MMList {
 
     pub async fn new_cloned(&self) -> Self {
         let inner = self.inner.borrow();
-        let mut inner = inner.lock().await;
+        let inner = inner.lock().await;
 
-        let list = Self::_new(
-            inner.areas.deep_clone(&inner.lock),
-            KernelPageTable::new(),
-            inner.prog_break.clone(),
-        );
+        let mut new_areas = AreaList::new();
+        let new_pgtable = KernelPageTable::new();
 
-        {
-            let list_inner = list.inner.borrow();
-            let list_inner = list_inner.lock().await;
-
-            let pgtable = &list_inner.page_table;
-
-            for area in list_inner.areas.iter() {
-                // Skip shared areas because they can be filled just as new
-                // entries in page faults.
-                if area.is_shared() {
-                    continue;
-                }
-
-                let range = area.range.as_ref(&list_inner.lock).clone();
-
-                pgtable.set_copy_on_write(&mut inner.page_table, range);
-            }
+        for area in inner.areas.iter() {
+            dup_area_to_list(
+                area,
+                &mut new_areas,
+                &inner.lock,
+                &inner.page_table,
+                &new_pgtable,
+            );
         }
 
         // We've set some pages as CoW, so we need to invalidate all our users' TLB.
         self.flush_user_tlbs().await;
 
-        list
+        Self::_new(new_areas, new_pgtable, inner.prog_break.clone())
     }
 
     pub async fn new_shared(&self) -> Self {

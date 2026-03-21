@@ -342,7 +342,7 @@ impl AreaList {
         let mut areas = RBTree::new(AreasAdapter::NEW);
 
         for area in self.areas.iter() {
-            areas.insert(Arc::new(area.clone(lock)));
+            areas.insert(area.clone(lock));
         }
 
         Self {
@@ -409,14 +409,12 @@ impl MemArea {
         self.flags.load().contains(AreaFlags::EXECUTE)
     }
 
-    pub fn clone(&self, lock: &MemListLock) -> Self {
-        Self {
-            range: RangeProtected::new(self.range.as_ref(lock).clone()),
-            flags: self.flags.clone(),
-            lock: Mutex::new(AreaLock::_new()),
-            link: Link::rbtree(),
-            mapping: self.mapping.clone(),
-        }
+    pub fn clone(&self, lock: &MemListLock) -> Arc<Self> {
+        Self::new(
+            self.range.as_ref(lock).clone(),
+            self.flags.load(),
+            self.mapping.clone(),
+        )
     }
 
     fn split(
@@ -431,23 +429,11 @@ impl MemArea {
             (begin, mid, end)
         };
 
+        let flags = self.flags.load();
         let (left_mapping, right_mapping) = self.mapping.split(offset);
 
-        let left = Arc::new(Self {
-            range: RangeProtected::new(VRange::new(begin, mid)),
-            flags: self.flags.clone(),
-            lock: Mutex::new(AreaLock::_new()),
-            link: Link::rbtree(),
-            mapping: left_mapping,
-        });
-
-        let right = Arc::new(Self {
-            range: RangeProtected::new(VRange::new(mid, end)),
-            flags: self.flags.clone(),
-            lock: Mutex::new(AreaLock::_new()),
-            link: Link::rbtree(),
-            mapping: right_mapping,
-        });
+        let left = Self::new(VRange::new(begin, mid), flags, left_mapping);
+        let right = Self::new(VRange::new(mid, end), flags, right_mapping);
 
         (left, right)
     }

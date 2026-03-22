@@ -16,10 +16,10 @@ use intrusive_collections::{
 use super::Mapping;
 use crate::kernel::mem::mm_list::mapping::add_mapping;
 use crate::kernel::mem::mm_list::page_table::KernelPageTable;
-use crate::kernel::mem::mm_list::{remove_mapping, MemListLock, PageTableExt};
-use crate::kernel::mem::{
-    CachePage, FileMapping, FolioOwned, PageOffset, Permission,
+use crate::kernel::mem::mm_list::{
+    remove_mapping, FileMapping, MemListLock, PageTableExt,
 };
+use crate::kernel::mem::{CachePage, FolioOwned, PageOffset, Permission};
 use crate::prelude::KResult;
 
 bitflags::bitflags! {

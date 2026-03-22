@@ -7,7 +7,7 @@ use super::FromSyscallArg;
 use crate::kernel::constants::{
     UserMmapFlags, UserMmapProtocol, EBADF, EINVAL,
 };
-use crate::kernel::mem::{AnonMapping, FileMapping, Mapping, Permission};
+use crate::kernel::mem::{FileMapping, Mapping, Permission};
 use crate::kernel::task::Thread;
 use crate::kernel::vfs::filearray::FD;
 use crate::prelude::*;
@@ -54,7 +54,7 @@ async fn do_mmap2(
         }
 
         if !is_shared {
-            AnonMapping::new()
+            Mapping::new_anon()
         } else {
             unimplemented!("mmap MAP_ANONYMOUS | MAP_SHARED");
         }

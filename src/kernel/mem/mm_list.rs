@@ -20,8 +20,7 @@ use mm_area::AreaList;
 use page_table::KernelPageTable;
 
 pub use self::mapping::{
-    add_mapping, duplicate_mapping, remove_mapping, AnonMapping, FileMapping,
-    Mapping,
+    add_mapping, duplicate_mapping, remove_mapping, FileMapping, Mapping,
 };
 pub use self::mm_area::{AreaFlags, MemArea};
 pub use self::page_fault::handle_kernel_page_fault;

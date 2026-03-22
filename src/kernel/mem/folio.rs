@@ -4,6 +4,7 @@ use core::ops::Deref;
 use core::ptr::NonNull;
 use core::sync::atomic::Ordering;
 
+use eonix_macros::TransparentDeref;
 use eonix_mm::paging::{
     Folio as FolioTrait, FrameAlloc, GlobalFrameAlloc, Zone, PFN,
 };
@@ -16,7 +17,7 @@ use crate::kernel::mem::page_alloc::PageFlags;
 #[repr(transparent)]
 pub struct Folio(NonNull<RawPage>);
 
-#[derive(Debug)]
+#[derive(Debug, TransparentDeref)]
 #[repr(transparent)]
 pub struct FolioOwned(Folio);
 
@@ -234,13 +235,5 @@ impl FolioOwned {
 
     pub fn share(self) -> Folio {
         self.0
-    }
-}
-
-impl Deref for FolioOwned {
-    type Target = Folio;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
     }
 }

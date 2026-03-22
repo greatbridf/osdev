@@ -1,7 +1,7 @@
 use alloc::collections::btree_map::{BTreeMap, Entry};
 use core::future::Future;
-use core::ops::Deref;
 
+use eonix_macros::TransparentDeref;
 use eonix_mm::paging::{PAGE_SIZE, PAGE_SIZE_BITS, PFN};
 use eonix_sync::{atomic, Mutex};
 
@@ -22,6 +22,8 @@ pub struct PageCache {
     inode: InodeUse,
 }
 
+#[repr(transparent)]
+#[derive(TransparentDeref)]
 pub struct CachePage(Folio);
 
 impl PageOffset {
@@ -76,14 +78,6 @@ impl CachePage {
 
     pub fn add_mapping(&self) -> PFN {
         add_mapping(self.0.clone())
-    }
-}
-
-impl Deref for CachePage {
-    type Target = Folio;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
     }
 }
 

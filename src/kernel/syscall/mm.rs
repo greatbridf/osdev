@@ -7,7 +7,7 @@ use super::FromSyscallArg;
 use crate::kernel::constants::{
     UserMmapFlags, UserMmapProtocol, EBADF, EINVAL,
 };
-use crate::kernel::mem::{FileMapping, Mapping, Permission};
+use crate::kernel::mem::{Mapping, Permission};
 use crate::kernel::task::Thread;
 use crate::kernel::vfs::filearray::FD;
 use crate::prelude::*;
@@ -66,7 +66,7 @@ async fn do_mmap2(
             .get_inode()?
             .ok_or(EBADF)?;
 
-        Mapping::File(FileMapping::new(file.get_page_cache(), pgoffset, len))
+        Mapping::new_file(file.get_page_cache(), pgoffset, len)
     };
 
     let permission = Permission {

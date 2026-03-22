@@ -2,7 +2,9 @@ extern crate proc_macro;
 
 use proc_macro2::{Span, TokenStream};
 use quote::quote;
-use syn::{parse2, FnArg, Ident, ItemFn, LitStr, ReturnType, Signature};
+use syn::{
+    parse2, FnArg, Ident, ItemFn, ItemStruct, LitStr, ReturnType, Signature,
+};
 
 fn define_syscall_impl(attrs: TokenStream, item: TokenStream) -> TokenStream {
     if attrs.is_empty() {
@@ -296,4 +298,35 @@ pub fn define_late_init(
     attrs: proc_macro::TokenStream, func: proc_macro::TokenStream,
 ) -> proc_macro::TokenStream {
     define_late_init_impl(attrs.into(), func.into()).into()
+}
+
+fn define_transparent_deref_impl(items: TokenStream) -> TokenStream {
+    let def = parse2::<ItemStruct>(items).expect("expected struct definition");
+
+    let ident = &def.ident;
+
+    assert!(def.fields.len() == 1, "expected only 1 field");
+
+    let field = def.fields.iter().next().unwrap();
+
+    assert!(field.ident.is_none(), "expected tuple structs");
+
+    let inner = &field.ty;
+
+    quote! {
+        impl core::ops::Deref for #ident {
+            type Target = #inner;
+
+            fn deref(&self) -> &Self::Target {
+                &self.0
+            }
+        }
+    }
+}
+
+#[proc_macro_derive(TransparentDeref)]
+pub fn define_transparent_deref(
+    items: proc_macro::TokenStream,
+) -> proc_macro::TokenStream {
+    define_transparent_deref_impl(items.into()).into()
 }

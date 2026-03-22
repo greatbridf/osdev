@@ -459,13 +459,14 @@ impl MemArea {
         *pfn = add_mapping(new_page.share());
     }
 
-    /// # Arguments
-    /// * `offset`: The offset from the start of the mapping, aligned to 4KB boundary.
     async fn missing_file(
-        &self, pfn: &mut PFN, attr: &mut PageAttribute, offset: usize,
+        &self, pfn: &mut PFN, attr: &mut PageAttribute, offset: PageOffset,
         write: bool, file_mapping: &FileMapping,
     ) -> KResult<()> {
-        assert!(offset < file_mapping.length, "Offset out of range");
+        assert!(
+            offset.byte_count() < file_mapping.length,
+            "Offset out of range"
+        );
         assert!(!attr.contains(PageAttribute::PRESENT));
 
         let file_offset = file_mapping.offset + offset;
@@ -508,7 +509,7 @@ impl MemArea {
 
         file_mapping
             .page_cache
-            .with_page(PageOffset::from_byte_floor(file_offset), map_page)
+            .with_page(file_offset, map_page)
             .await?;
 
         attr.insert(PageAttribute::PRESENT);
@@ -546,7 +547,7 @@ impl MemArea {
     }
 
     async fn handle_missing(
-        &self, pfn: &mut PFN, attr: &mut PageAttribute, offset: usize,
+        &self, pfn: &mut PFN, attr: &mut PageAttribute, offset: PageOffset,
         write: bool,
     ) -> KResult<()> {
         assert!(
@@ -580,11 +581,13 @@ impl MemArea {
     pub async fn handle(
         &self, pte: &mut impl PTE, offset: usize, write: bool,
     ) -> KResult<()> {
+        let offset = PageOffset::from_byte_aligned(offset);
+
         // Exclude concurrent modifications and faults.
         // TODO: concurrent faults should be acceptable...
         let lock = self.lock.lock().await;
         assert!(
-            offset < self.range.as_ref(&*lock).len(),
+            offset.byte_count() < self.range.as_ref(&*lock).len(),
             "Offset out of range"
         );
 

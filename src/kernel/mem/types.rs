@@ -7,6 +7,16 @@ use eonix_mm::paging::{PAGE_SIZE, PAGE_SIZE_BITS};
 pub struct PageOffset(usize);
 
 impl PageOffset {
+    /// Convert the byte offset into page offset.
+    ///
+    /// # Panics
+    /// The function call panics if `offset` is not aligned to page size.
+    pub fn from_byte_aligned(offset: usize) -> Self {
+        assert!((offset & (PAGE_SIZE - 1)) == 0, "Unaligned offset");
+
+        Self::from_byte_floor(offset)
+    }
+
     pub const fn from_byte_floor(offset: usize) -> Self {
         Self(offset >> PAGE_SIZE_BITS)
     }

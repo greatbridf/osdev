@@ -2,7 +2,7 @@ use alloc::sync::Arc;
 
 use eonix_mm::paging::{Folio as _, PAGE_SIZE, PFN};
 
-use crate::kernel::mem::{Folio, PageCache};
+use crate::kernel::mem::{Folio, PageCache, PageOffset};
 
 #[derive(Debug, Clone)]
 pub struct FileMapping {
@@ -29,35 +29,44 @@ impl AnonMapping {
         Self()
     }
 
-    fn split(&self, _offset: usize) -> (Self, Self) {
+    fn split(&self, _offset: PageOffset) -> (Self, Self) {
         (Self::new(), Self::new())
     }
 }
 
 impl FileMapping {
-    fn new(page_cache: Arc<PageCache>, offset: usize, length: usize) -> Self {
-        assert_eq!(offset & (PAGE_SIZE - 1), 0);
+    fn new(
+        page_cache: Arc<PageCache>, offset: PageOffset, length: usize,
+    ) -> Self {
         Self {
             page_cache,
-            offset,
+            offset: offset.byte_count(),
             length,
         }
     }
 
-    fn split(&self, offset: usize) -> (Self, Self) {
+    fn split(&self, offset: PageOffset) -> (Self, Self) {
         let (left_len, right_len);
 
-        if offset >= self.length {
+        if offset.byte_count() >= self.length {
             left_len = self.length;
             right_len = 0;
         } else {
-            left_len = offset;
-            right_len = self.length - offset;
+            left_len = offset.byte_count();
+            right_len = self.length - offset.byte_count();
         }
 
         (
-            Self::new(self.page_cache.clone(), self.offset, left_len),
-            Self::new(self.page_cache.clone(), self.offset + offset, right_len),
+            Self::new(
+                self.page_cache.clone(),
+                PageOffset::from_byte_floor(self.offset),
+                left_len,
+            ),
+            Self::new(
+                self.page_cache.clone(),
+                PageOffset::from_byte_floor(self.offset + offset.byte_count()),
+                right_len,
+            ),
         )
     }
 }
@@ -70,10 +79,16 @@ impl Mapping {
     pub fn new_file(
         page_cache: Arc<PageCache>, offset: usize, length: usize,
     ) -> Self {
-        Self::File(FileMapping::new(page_cache, offset, length))
+        Self::File(FileMapping::new(
+            page_cache,
+            PageOffset::from_byte_aligned(offset),
+            length,
+        ))
     }
 
     pub(super) fn split(&self, offset: usize) -> (Self, Self) {
+        let offset = PageOffset::from_byte_aligned(offset);
+
         match self {
             Mapping::Anonymous(anon_mapping) => {
                 let (l, r) = anon_mapping.split(offset);

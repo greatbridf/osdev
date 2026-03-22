@@ -11,9 +11,7 @@ mod types;
 
 pub use access::PhysAccess;
 pub use folio::{Folio, FolioOwned, LockedFolio};
-pub use mm_list::{
-    handle_kernel_page_fault, FileMapping, MMList, Mapping, Permission,
-};
+pub use mm_list::{handle_kernel_page_fault, MMList, Mapping, Permission};
 pub use page_alloc::{GlobalPageAlloc, RawPage};
 pub use page_cache::{CachePage, PageCache};
 pub use paging::PageBuffer;

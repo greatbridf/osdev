@@ -35,9 +35,7 @@ impl AnonMapping {
 }
 
 impl FileMapping {
-    pub fn new(
-        page_cache: Arc<PageCache>, offset: usize, length: usize,
-    ) -> Self {
+    fn new(page_cache: Arc<PageCache>, offset: usize, length: usize) -> Self {
         assert_eq!(offset & (PAGE_SIZE - 1), 0);
         Self {
             page_cache,
@@ -67,6 +65,12 @@ impl FileMapping {
 impl Mapping {
     pub fn new_anon() -> Self {
         Self::Anonymous(AnonMapping::new())
+    }
+
+    pub fn new_file(
+        page_cache: Arc<PageCache>, offset: usize, length: usize,
+    ) -> Self {
+        Self::File(FileMapping::new(page_cache, offset, length))
     }
 
     pub(super) fn split(&self, offset: usize) -> (Self, Self) {

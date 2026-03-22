@@ -11,7 +11,7 @@ use xmas_elf::program::{self, ProgramHeader32, ProgramHeader64};
 use super::{LoadInfo, ELF_MAGIC};
 use crate::io::{ByteBuffer, UninitBuffer};
 use crate::kernel::constants::ENOEXEC;
-use crate::kernel::mem::{FileMapping, MMList, Mapping, Permission};
+use crate::kernel::mem::{MMList, Mapping, Permission};
 use crate::kernel::task::loader::aux_vec::{AuxKey, AuxVec};
 use crate::kernel::vfs::dentry::Dentry;
 use crate::kernel::vfs::FsContext;
@@ -364,11 +364,11 @@ impl<E: ElfArch> Elf<E> {
                 .mmap_fixed(
                     vmap_start,
                     file_len,
-                    Mapping::File(FileMapping::new(
+                    Mapping::new_file(
                         self.file.get_inode()?.get_page_cache(),
                         file_offset,
                         real_file_length,
-                    )),
+                    ),
                     permission,
                     false,
                 )

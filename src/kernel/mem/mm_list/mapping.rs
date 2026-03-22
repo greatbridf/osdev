@@ -1,6 +1,6 @@
 use alloc::sync::Arc;
 
-use eonix_mm::paging::{Folio as _, PAGE_SIZE, PFN};
+use eonix_mm::paging::{Folio as _, PFN};
 
 use crate::kernel::mem::{Folio, PageCache, PageOffset};
 
@@ -8,7 +8,7 @@ use crate::kernel::mem::{Folio, PageCache, PageOffset};
 pub struct FileMapping {
     pub page_cache: Arc<PageCache>,
     /// Offset in the file, aligned to 4KB boundary.
-    pub offset: usize,
+    pub offset: PageOffset,
     /// Length of the mapping. Exceeding part will be zeroed.
     pub length: usize,
 }
@@ -40,7 +40,7 @@ impl FileMapping {
     ) -> Self {
         Self {
             page_cache,
-            offset: offset.byte_count(),
+            offset,
             length,
         }
     }
@@ -57,16 +57,8 @@ impl FileMapping {
         }
 
         (
-            Self::new(
-                self.page_cache.clone(),
-                PageOffset::from_byte_floor(self.offset),
-                left_len,
-            ),
-            Self::new(
-                self.page_cache.clone(),
-                PageOffset::from_byte_floor(self.offset + offset.byte_count()),
-                right_len,
-            ),
+            Self::new(self.page_cache.clone(), self.offset, left_len),
+            Self::new(self.page_cache.clone(), self.offset + offset, right_len),
         )
     }
 }

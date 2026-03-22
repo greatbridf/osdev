@@ -1,4 +1,5 @@
 use core::fmt::Debug;
+use core::ops::Add;
 
 use eonix_mm::paging::{PAGE_SIZE, PAGE_SIZE_BITS};
 
@@ -37,6 +38,14 @@ impl PageOffset {
 
     pub fn byte_count(self) -> usize {
         self.page_count() * PAGE_SIZE
+    }
+}
+
+impl Add for PageOffset {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        Self(self.0 + rhs.0)
     }
 }
 

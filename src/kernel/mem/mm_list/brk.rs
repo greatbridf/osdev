@@ -3,7 +3,7 @@ use eonix_mm::address::{VAddr, VRange};
 use crate::kernel::mem::address::VRangeExt;
 use crate::kernel::mem::mm_list::mm_area::AreaList;
 use crate::kernel::mem::mm_list::{AreaFlags, MemArea, MemListLock};
-use crate::kernel::mem::{AnonMapping, MMList, Permission};
+use crate::kernel::mem::{MMList, Mapping, Permission};
 
 #[derive(Clone)]
 pub struct ProgramBreak {
@@ -104,7 +104,7 @@ fn expand_create_area(
             },
             false,
         ),
-        AnonMapping::new(),
+        Mapping::new_anon(),
     );
 
     areas.insert(area);

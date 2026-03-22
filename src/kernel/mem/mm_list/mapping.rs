@@ -25,16 +25,12 @@ pub enum Mapping {
 }
 
 impl AnonMapping {
-    const fn _new() -> Self {
+    const fn new() -> Self {
         Self()
     }
 
-    pub const fn new() -> Mapping {
-        Mapping::Anonymous(Self::_new())
-    }
-
     fn split(&self, _offset: usize) -> (Self, Self) {
-        (Self::_new(), Self::_new())
+        (Self::new(), Self::new())
     }
 }
 
@@ -69,6 +65,10 @@ impl FileMapping {
 }
 
 impl Mapping {
+    pub fn new_anon() -> Self {
+        Self::Anonymous(AnonMapping::new())
+    }
+
     pub(super) fn split(&self, offset: usize) -> (Self, Self) {
         match self {
             Mapping::Anonymous(anon_mapping) => {

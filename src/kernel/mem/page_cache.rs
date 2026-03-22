@@ -2,7 +2,7 @@ use alloc::collections::btree_map::{BTreeMap, Entry};
 use core::future::Future;
 
 use eonix_macros::TransparentDeref;
-use eonix_mm::paging::{PAGE_SIZE, PAGE_SIZE_BITS, PFN};
+use eonix_mm::paging::{PAGE_SIZE, PFN};
 use eonix_sync::{atomic, Mutex};
 
 use super::page_alloc::PageFlags;
@@ -10,12 +10,9 @@ use super::{Folio, FolioOwned};
 use crate::io::{Buffer, Stream};
 use crate::kernel::constants::EINVAL;
 use crate::kernel::mem::mm_list::add_mapping;
+use crate::kernel::mem::PageOffset;
 use crate::kernel::vfs::inode::InodeUse;
 use crate::prelude::KResult;
-
-#[repr(transparent)]
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct PageOffset(usize);
 
 pub struct PageCache {
     pages: Mutex<BTreeMap<PageOffset, CachePage>>,
@@ -25,30 +22,6 @@ pub struct PageCache {
 #[repr(transparent)]
 #[derive(TransparentDeref)]
 pub struct CachePage(Folio);
-
-impl PageOffset {
-    pub const fn from_byte_floor(offset: usize) -> Self {
-        Self(offset >> PAGE_SIZE_BITS)
-    }
-
-    pub const fn from_byte_ceil(offset: usize) -> Self {
-        Self((offset + PAGE_SIZE - 1) >> PAGE_SIZE_BITS)
-    }
-
-    pub fn iter_till(
-        self, end: PageOffset,
-    ) -> impl Iterator<Item = PageOffset> {
-        (self.0..end.0).map(PageOffset)
-    }
-
-    pub fn page_count(self) -> usize {
-        self.0
-    }
-
-    pub fn byte_count(self) -> usize {
-        self.page_count() * PAGE_SIZE
-    }
-}
 
 impl CachePage {
     pub fn new() -> Self {

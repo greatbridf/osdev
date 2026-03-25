@@ -625,8 +625,7 @@ where
         if !attr.contains(PageAttribute::PRESENT) {
             // Copy non-installed mapped PTEs directly to the new PTE and delay
             // its handling till the page fault.
-            let (pfn, attr) = from.get();
-            self.set(pfn, attr);
+            self.set(pfn, attr.into());
             return;
         }
 

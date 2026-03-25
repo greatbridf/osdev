@@ -2,7 +2,7 @@ use alloc::sync::Arc;
 
 use eonix_mm::paging::{Folio as _, PFN};
 
-use crate::kernel::mem::{Folio, PageCache, PageOffset};
+use crate::kernel::mem::{Folio, FolioOwned, PageCache, PageOffset};
 
 #[derive(Debug, Clone)]
 pub struct FileMapping {
@@ -42,6 +42,10 @@ impl AnonMapping {
 
     fn split(&self, _offset: PageOffset) -> (Self, Self) {
         (Self::new(), Self::new())
+    }
+
+    pub fn alloc_folio(&self) -> FolioOwned {
+        FolioOwned::alloc()
     }
 }
 

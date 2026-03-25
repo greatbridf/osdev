@@ -451,6 +451,12 @@ impl MemArea {
             MapFolio::remove_mapping(*pfn)
         };
 
+        let anon_mapping = match &self.mapping {
+            Mapping::Anonymous(anon) => anon,
+            Mapping::PrivateFile { anon, .. } => anon,
+            Mapping::SharedFile(_) => unreachable!("CoW PTE of shared areas?"),
+        };
+
         let mut new_folio = FolioOwned::alloc();
 
         unsafe {
@@ -462,7 +468,7 @@ impl MemArea {
         };
 
         attr.remove(PageAttribute::ACCESSED);
-        *pfn = new_folio.into_mappable().add_mapping();
+        *pfn = anon_mapping.add_folio(new_folio).add_mapping();
     }
 
     async fn missing_file(
@@ -504,13 +510,13 @@ impl MemArea {
             }
 
             // Nah, we are writing to a mapped private mapping...
-            let mut new_page = anon_mapping.alloc_folio();
-            new_page
+            let mut new_folio = FolioOwned::alloc();
+            new_folio
                 .as_bytes_mut()
                 .copy_from_slice(cache_page.lock().as_bytes());
 
             attr.insert(PageAttribute::WRITE);
-            *pfn = new_page.into_mappable().add_mapping();
+            *pfn = anon_mapping.add_folio(new_folio).add_mapping();
         };
 
         file_mapping
@@ -535,10 +541,10 @@ impl MemArea {
         &self, pfn: &mut PFN, attr: &mut PageAttribute,
         anon_mapping: &AnonMapping,
     ) {
-        let mut folio = anon_mapping.alloc_folio();
+        let mut folio = FolioOwned::alloc();
         folio.as_bytes_mut().fill(0);
 
-        *pfn = folio.into_mappable().add_mapping();
+        *pfn = anon_mapping.add_folio(folio).add_mapping();
 
         attr.insert(PageAttribute::PRESENT);
 

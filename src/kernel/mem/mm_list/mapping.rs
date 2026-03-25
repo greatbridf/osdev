@@ -18,10 +18,21 @@ pub struct AnonMapping();
 
 #[derive(Debug, Clone)]
 pub enum Mapping {
-    // private anonymous memory
+    /// Anonymous mappings that reside in memory only.
+    ///
+    /// All anonymous mappings are private. If shared mappings are needed, use
+    /// tmpfs together with shared file mappings.
     Anonymous(AnonMapping),
-    // file-backed memory or shared anonymous memory(tmp file)
-    File(FileMapping),
+    /// File backed mappings that is copy on write across duplications and not
+    /// written back to the underlying [Inode].
+    ///
+    /// [Inode]: crate::kernel::vfs::inode::Inode
+    PrivateFile {
+        anon: AnonMapping,
+        file: FileMapping,
+    },
+    /// Shared file mappings.
+    SharedFile(FileMapping),
 }
 
 impl AnonMapping {
@@ -68,14 +79,17 @@ impl Mapping {
         Self::Anonymous(AnonMapping::new())
     }
 
-    pub fn new_file(
+    pub fn new_file_priv(
         page_cache: Arc<PageCache>, offset: usize, length: usize,
     ) -> Self {
-        Self::File(FileMapping::new(
-            page_cache,
-            PageOffset::from_byte_aligned(offset),
-            length,
-        ))
+        Self::PrivateFile {
+            file: FileMapping::new(
+                page_cache,
+                PageOffset::from_byte_aligned(offset),
+                length,
+            ),
+            anon: AnonMapping::new(),
+        }
     }
 
     pub(super) fn split(&self, offset: usize) -> (Self, Self) {
@@ -86,9 +100,25 @@ impl Mapping {
                 let (l, r) = anon_mapping.split(offset);
                 (Self::Anonymous(l), Self::Anonymous(r))
             }
-            Mapping::File(file_mapping) => {
+            Mapping::PrivateFile { file, anon } => {
+                let (l_file, r_file) = file.split(offset);
+                let (l_anon, r_anon) = anon.split(offset);
+
+                (
+                    Self::PrivateFile {
+                        file: l_file,
+                        anon: l_anon,
+                    },
+                    Self::PrivateFile {
+                        file: r_file,
+                        anon: r_anon,
+                    },
+                )
+            }
+            Mapping::SharedFile(file_mapping) => {
                 let (l, r) = file_mapping.split(offset);
-                (Self::File(l), Self::File(r))
+
+                (Self::SharedFile(l), Self::SharedFile(r))
             }
         }
     }

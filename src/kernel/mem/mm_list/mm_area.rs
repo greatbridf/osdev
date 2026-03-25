@@ -14,7 +14,7 @@ use intrusive_collections::{
 };
 
 use super::Mapping;
-use crate::kernel::mem::mm_list::mapping::add_mapping;
+use crate::kernel::mem::mm_list::mapping::{add_mapping, AnonMapping};
 use crate::kernel::mem::mm_list::page_table::KernelPageTable;
 use crate::kernel::mem::mm_list::{
     remove_mapping, FileMapping, MemListLock, PageTableExt,
@@ -462,6 +462,7 @@ impl MemArea {
     async fn missing_file(
         &self, pfn: &mut PFN, attr: &mut PageAttribute, offset: PageOffset,
         write: bool, file_mapping: &FileMapping,
+        anon_mapping: Option<&AnonMapping>,
     ) -> KResult<()> {
         assert!(
             offset.byte_count() < file_mapping.length,
@@ -479,7 +480,7 @@ impl MemArea {
                 return;
             }
 
-            if self.is_shared() {
+            let Some(anon_mapping) = anon_mapping else {
                 // We don't process dirty flags in write faults.
                 // Simply assume that page will eventually be dirtied.
                 // So here we can set the dirty flag now.
@@ -487,7 +488,7 @@ impl MemArea {
                 attr.insert(PageAttribute::WRITE);
                 *pfn = cache_page.add_mapping();
                 return;
-            }
+            };
 
             if !write {
                 // Delay the copy-on-write until write fault happens.
@@ -496,9 +497,8 @@ impl MemArea {
                 return;
             }
 
-            // XXX: Change this. Let's handle mapped pages before CoW pages.
             // Nah, we are writing to a mapped private mapping...
-            let mut new_page = FolioOwned::alloc();
+            let mut new_page = anon_mapping.alloc_folio();
             new_page
                 .as_bytes_mut()
                 .copy_from_slice(cache_page.lock().as_bytes());
@@ -525,8 +525,11 @@ impl MemArea {
         Ok(())
     }
 
-    fn missing_anon(&self, pfn: &mut PFN, attr: &mut PageAttribute) {
-        let mut folio = FolioOwned::alloc();
+    fn missing_anon(
+        &self, pfn: &mut PFN, attr: &mut PageAttribute,
+        anon_mapping: &AnonMapping,
+    ) {
+        let mut folio = anon_mapping.alloc_folio();
         folio.as_bytes_mut().fill(0);
 
         *pfn = add_mapping(folio.share());
@@ -558,12 +561,16 @@ impl MemArea {
         attr.insert(PageAttribute::USER);
 
         match &self.mapping {
-            Mapping::Anonymous(_) => {
-                self.missing_anon(pfn, attr);
+            Mapping::Anonymous(anon_mapping) => {
+                self.missing_anon(pfn, attr, anon_mapping);
             }
-            Mapping::PrivateFile { file: mapping, .. }
-            | Mapping::SharedFile(mapping) => {
-                self.missing_file(pfn, attr, offset, write, mapping).await?;
+            Mapping::PrivateFile { file, anon } => {
+                self.missing_file(pfn, attr, offset, write, file, Some(anon))
+                    .await?;
+            }
+            Mapping::SharedFile(file_mapping) => {
+                self.missing_file(pfn, attr, offset, write, file_mapping, None)
+                    .await?;
             }
         }
 

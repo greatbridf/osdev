@@ -46,28 +46,27 @@ async fn do_mmap2(
 
     let len = len.align_up(PAGE_SIZE);
     let mm_list = &thread.process.mm_list;
-    let is_shared = flags.contains(UserMmapFlags::MAP_SHARED);
+    let mapping;
 
-    let mapping = if flags.contains(UserMmapFlags::MAP_ANONYMOUS) {
+    let is_shared = flags.contains(UserMmapFlags::MAP_SHARED);
+    let is_anonymous = flags.contains(UserMmapFlags::MAP_ANONYMOUS);
+
+    if is_shared {
+        unimplemented!("Shared mappings");
+    }
+
+    if is_anonymous {
         if pgoffset != 0 {
             return Err(EINVAL);
         }
 
-        if !is_shared {
-            Mapping::new_anon()
-        } else {
-            unimplemented!("mmap MAP_ANONYMOUS | MAP_SHARED");
-        }
+        mapping = Mapping::new_anon();
     } else {
-        let file = thread
-            .files
-            .get(fd)
-            .ok_or(EBADF)?
-            .get_inode()?
-            .ok_or(EBADF)?;
+        let fd = thread.files.get(fd).ok_or(EBADF)?;
+        let file = fd.get_inode()?.ok_or(EBADF)?;
 
-        Mapping::new_file(file.get_page_cache(), pgoffset, len)
-    };
+        mapping = Mapping::new_file_priv(file.get_page_cache(), pgoffset, len);
+    }
 
     let permission = Permission {
         read: prot.contains(UserMmapProtocol::PROT_READ),

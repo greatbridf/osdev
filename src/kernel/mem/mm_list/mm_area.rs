@@ -445,18 +445,24 @@ impl MemArea {
             return;
         }
 
-        let mut new_page = FolioOwned::alloc();
+        let anon_mapping = match &self.mapping {
+            Mapping::Anonymous(anon) => anon,
+            Mapping::PrivateFile { anon, .. } => anon,
+            Mapping::SharedFile(_) => unreachable!("CoW PTE of shared areas?"),
+        };
+
+        let mut new_folio = FolioOwned::alloc();
 
         unsafe {
             // SAFETY: `folio` is CoW, which means that others won't write to it.
             let old_page_data = folio.get_bytes_ptr().as_ref();
-            let new_page_data = new_page.as_bytes_mut();
+            let new_page_data = new_folio.as_bytes_mut();
 
             new_page_data.copy_from_slice(old_page_data);
         };
 
         attr.remove(PageAttribute::ACCESSED);
-        *pfn = add_mapping(new_page.share());
+        *pfn = add_mapping(anon_mapping.add_folio(new_folio));
     }
 
     async fn missing_file(
@@ -498,13 +504,13 @@ impl MemArea {
             }
 
             // Nah, we are writing to a mapped private mapping...
-            let mut new_page = anon_mapping.alloc_folio();
-            new_page
+            let mut new_folio = FolioOwned::alloc();
+            new_folio
                 .as_bytes_mut()
                 .copy_from_slice(cache_page.lock().as_bytes());
 
             attr.insert(PageAttribute::WRITE);
-            *pfn = add_mapping(new_page.share());
+            *pfn = add_mapping(anon_mapping.add_folio(new_folio));
         };
 
         file_mapping
@@ -529,10 +535,10 @@ impl MemArea {
         &self, pfn: &mut PFN, attr: &mut PageAttribute,
         anon_mapping: &AnonMapping,
     ) {
-        let mut folio = anon_mapping.alloc_folio();
+        let mut folio = FolioOwned::alloc();
         folio.as_bytes_mut().fill(0);
 
-        *pfn = add_mapping(folio.share());
+        *pfn = add_mapping(anon_mapping.add_folio(folio));
 
         attr.insert(PageAttribute::PRESENT);
 

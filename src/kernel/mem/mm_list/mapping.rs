@@ -44,8 +44,8 @@ impl AnonMapping {
         (Self::new(), Self::new())
     }
 
-    pub fn alloc_folio(&self) -> FolioOwned {
-        FolioOwned::alloc()
+    pub fn add_folio(&self, folio: FolioOwned) -> Folio {
+        folio.share()
     }
 }
 

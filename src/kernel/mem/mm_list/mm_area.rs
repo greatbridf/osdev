@@ -557,10 +557,14 @@ impl MemArea {
 
         attr.insert(PageAttribute::USER);
 
-        if let Mapping::File(mapping) = &self.mapping {
-            self.missing_file(pfn, attr, offset, write, mapping).await?;
-        } else {
-            self.missing_anon(pfn, attr);
+        match &self.mapping {
+            Mapping::Anonymous(_) => {
+                self.missing_anon(pfn, attr);
+            }
+            Mapping::PrivateFile { file: mapping, .. }
+            | Mapping::SharedFile(mapping) => {
+                self.missing_file(pfn, attr, offset, write, mapping).await?;
+            }
         }
 
         assert!(attr.contains(PageAttribute::PRESENT));

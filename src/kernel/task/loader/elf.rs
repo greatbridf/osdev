@@ -364,7 +364,7 @@ impl<E: ElfArch> Elf<E> {
                 .mmap_fixed(
                     vmap_start,
                     file_len,
-                    Mapping::new_file(
+                    Mapping::new_file_priv(
                         self.file.get_inode()?.get_page_cache(),
                         file_offset,
                         real_file_length,

@@ -6,7 +6,7 @@ use eonix_mm::paging::{PAGE_SIZE, PFN};
 use eonix_sync::{atomic, Mutex};
 
 use super::page_alloc::PageFlags;
-use super::{Folio, FolioOwned};
+use super::Folio;
 use crate::io::{Buffer, Stream};
 use crate::kernel::constants::EINVAL;
 use crate::kernel::mem::mm_list::add_mapping;
@@ -26,15 +26,6 @@ pub struct CachePage(Folio);
 impl CachePage {
     pub fn new() -> Self {
         CachePage(Folio::alloc())
-    }
-
-    pub fn new_zeroed() -> Self {
-        CachePage({
-            let mut folio = FolioOwned::alloc();
-            folio.as_bytes_mut().fill(0);
-
-            folio.share()
-        })
     }
 
     pub fn is_dirty(&self) -> bool {

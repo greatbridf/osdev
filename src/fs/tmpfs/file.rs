@@ -5,7 +5,9 @@ use super::TmpFs;
 use crate::io::{Buffer, Stream};
 use crate::kernel::mem::{CachePage, PageCache, PageOffset};
 use crate::kernel::timer::Instant;
-use crate::kernel::vfs::inode::{Ino, InodeInfo, InodeOps, InodeUse, WriteOffset};
+use crate::kernel::vfs::inode::{
+    Ino, InodeInfo, InodeOps, InodeUse, WriteOffset,
+};
 use crate::kernel::vfs::types::{DeviceId, Format, Mode, Permission};
 use crate::kernel::vfs::{SbRef, SbUse};
 use crate::prelude::KResult;
@@ -13,7 +15,9 @@ use crate::prelude::KResult;
 pub struct FileInode;
 
 impl FileInode {
-    pub fn new(ino: Ino, sb: SbRef<TmpFs>, size: usize, perm: Permission) -> InodeUse {
+    pub fn new(
+        ino: Ino, sb: SbRef<TmpFs>, size: usize, perm: Permission,
+    ) -> InodeUse {
         let now = Instant::now();
 
         InodeUse::new(
@@ -39,22 +43,16 @@ impl InodeOps for FileInode {
     type SuperBlock = TmpFs;
 
     async fn read(
-        &self,
-        _: SbUse<Self::SuperBlock>,
-        inode: &InodeUse,
-        buffer: &mut dyn Buffer,
-        offset: usize,
+        &self, _: SbUse<Self::SuperBlock>, inode: &InodeUse,
+        buffer: &mut dyn Buffer, offset: usize,
     ) -> KResult<usize> {
         let _lock = inode.rwsem.read().await;
         inode.get_page_cache().read(buffer, offset).await
     }
 
     async fn write(
-        &self,
-        _: SbUse<Self::SuperBlock>,
-        inode: &InodeUse,
-        stream: &mut dyn Stream,
-        offset: WriteOffset<'_>,
+        &self, _: SbUse<Self::SuperBlock>, inode: &InodeUse,
+        stream: &mut dyn Stream, offset: WriteOffset<'_>,
     ) -> KResult<usize> {
         let _lock = inode.rwsem.write().await;
 
@@ -88,10 +86,7 @@ impl InodeOps for FileInode {
     }
 
     async fn truncate(
-        &self,
-        _: SbUse<Self::SuperBlock>,
-        inode: &InodeUse,
-        length: usize,
+        &self, _: SbUse<Self::SuperBlock>, inode: &InodeUse, length: usize,
     ) -> KResult<()> {
         let _lock = inode.rwsem.write().await;
 
@@ -105,10 +100,7 @@ impl InodeOps for FileInode {
     }
 
     async fn chmod(
-        &self,
-        _sb: SbUse<Self::SuperBlock>,
-        inode: &InodeUse,
-        perm: Permission,
+        &self, _sb: SbUse<Self::SuperBlock>, inode: &InodeUse, perm: Permission,
     ) -> KResult<()> {
         let mut info = inode.info.lock();
 
@@ -119,10 +111,7 @@ impl InodeOps for FileInode {
     }
 
     async fn read_page(
-        &self,
-        _: SbUse<Self::SuperBlock>,
-        _: &InodeUse,
-        page: &mut CachePage,
+        &self, _: SbUse<Self::SuperBlock>, _: &InodeUse, page: &mut CachePage,
         _: PageOffset,
     ) -> KResult<()> {
         page.lock().as_bytes_mut().fill(0);
@@ -130,10 +119,7 @@ impl InodeOps for FileInode {
     }
 
     async fn write_page(
-        &self,
-        _: SbUse<Self::SuperBlock>,
-        _: &InodeUse,
-        _: &mut CachePage,
+        &self, _: SbUse<Self::SuperBlock>, _: &InodeUse, _: &mut CachePage,
         _: PageOffset,
     ) -> KResult<()> {
         // XXX: actually we should refuse to do the writeback.
@@ -142,13 +128,9 @@ impl InodeOps for FileInode {
     }
 
     async fn write_begin<'a>(
-        &self,
-        _: SbUse<Self::SuperBlock>,
-        _: &InodeUse,
-        page_cache: &PageCache,
-        pages: &'a mut BTreeMap<PageOffset, CachePage>,
-        offset: usize,
-        _: usize,
+        &self, _: SbUse<Self::SuperBlock>, _: &InodeUse,
+        page_cache: &PageCache, pages: &'a mut BTreeMap<PageOffset, CachePage>,
+        offset: usize, _: usize,
     ) -> KResult<&'a mut CachePage> {
         // TODO: Remove dependency on `page_cache`.
         page_cache
@@ -157,13 +139,8 @@ impl InodeOps for FileInode {
     }
 
     async fn write_end(
-        &self,
-        _: SbUse<Self::SuperBlock>,
-        inode: &InodeUse,
-        _: &PageCache,
-        _: &mut BTreeMap<PageOffset, CachePage>,
-        offset: usize,
-        _: usize,
+        &self, _: SbUse<Self::SuperBlock>, inode: &InodeUse, _: &PageCache,
+        _: &mut BTreeMap<PageOffset, CachePage>, offset: usize, _: usize,
         copied: usize,
     ) -> KResult<()> {
         let now = Instant::now();
@@ -181,7 +158,9 @@ pub struct DeviceInode {
 }
 
 impl DeviceInode {
-    pub fn new(ino: Ino, sb: SbRef<TmpFs>, mode: Mode, devid: DeviceId) -> InodeUse {
+    pub fn new(
+        ino: Ino, sb: SbRef<TmpFs>, mode: Mode, devid: DeviceId,
+    ) -> InodeUse {
         let now = Instant::now();
 
         InodeUse::new(
@@ -207,10 +186,7 @@ impl InodeOps for DeviceInode {
     type SuperBlock = TmpFs;
 
     async fn chmod(
-        &self,
-        _sb: SbUse<Self::SuperBlock>,
-        inode: &InodeUse,
-        perm: Permission,
+        &self, _sb: SbUse<Self::SuperBlock>, inode: &InodeUse, perm: Permission,
     ) -> KResult<()> {
         let mut info = inode.info.lock();
         info.perm = perm;
@@ -219,7 +195,9 @@ impl InodeOps for DeviceInode {
         Ok(())
     }
 
-    fn devid(&self, _: SbUse<Self::SuperBlock>, _: &InodeUse) -> KResult<DeviceId> {
+    fn devid(
+        &self, _: SbUse<Self::SuperBlock>, _: &InodeUse,
+    ) -> KResult<DeviceId> {
         Ok(self.devid)
     }
 }
@@ -255,9 +233,7 @@ impl InodeOps for SymlinkInode {
     type SuperBlock = TmpFs;
 
     async fn readlink(
-        &self,
-        _sb: SbUse<Self::SuperBlock>,
-        _inode: &InodeUse,
+        &self, _sb: SbUse<Self::SuperBlock>, _inode: &InodeUse,
         buffer: &mut dyn Buffer,
     ) -> KResult<usize> {
         buffer

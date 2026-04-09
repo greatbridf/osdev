@@ -462,7 +462,7 @@ impl MemArea {
         };
 
         attr.remove(PageAttribute::ACCESSED);
-        *pfn = add_mapping(anon_mapping.add_folio(new_folio));
+        *pfn = anon_mapping.add_folio(new_folio).add_mapping();
     }
 
     async fn missing_file(
@@ -510,7 +510,7 @@ impl MemArea {
                 .copy_from_slice(cache_page.lock().as_bytes());
 
             attr.insert(PageAttribute::WRITE);
-            *pfn = add_mapping(anon_mapping.add_folio(new_folio));
+            *pfn = anon_mapping.add_folio(new_folio).add_mapping();
         };
 
         file_mapping
@@ -538,7 +538,7 @@ impl MemArea {
         let mut folio = FolioOwned::alloc();
         folio.as_bytes_mut().fill(0);
 
-        *pfn = add_mapping(anon_mapping.add_folio(folio));
+        *pfn = anon_mapping.add_folio(folio).add_mapping();
 
         attr.insert(PageAttribute::PRESENT);
 

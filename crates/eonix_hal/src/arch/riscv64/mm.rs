@@ -33,6 +33,7 @@ pub const PA_D: u64 = 0b1 << 7;
 
 // in RSW
 pub const PA_COW: u64 = 0b1 << 8;
+pub const PA_U_TABLE: u64 = 0b1 << 8;
 pub const PA_MMAP: u64 = 0b1 << 9;
 
 #[allow(dead_code)]
@@ -125,11 +126,8 @@ impl RawAttribute for PageAttribute64 {
         if self.0 & PA_G != 0 {
             table_attr |= TableAttribute::GLOBAL;
         }
-        if self.0 & PA_U != 0 {
+        if self.0 & PA_U_TABLE != 0 {
             table_attr |= TableAttribute::USER;
-        }
-        if self.0 & PA_A != 0 {
-            table_attr |= TableAttribute::ACCESSED;
         }
 
         Some(table_attr)
@@ -220,7 +218,8 @@ impl From<TableAttribute> for PageAttribute64 {
             match attr {
                 TableAttribute::PRESENT => raw_attr |= PA_V,
                 TableAttribute::GLOBAL => raw_attr |= PA_G,
-                TableAttribute::USER | TableAttribute::ACCESSED => {}
+                TableAttribute::USER => raw_attr |= PA_U_TABLE,
+                TableAttribute::ACCESSED => {}
                 _ => unreachable!("Invalid table attribute"),
             }
         }

@@ -190,22 +190,10 @@ define_inode_ops! {
         Err(EINVAL)
     }
 
-    async fn read_direct(&self, buffer: &mut dyn Buffer, offset: usize) -> KResult<usize> {
-        Err(EINVAL)
-    }
-
     async fn write(
         &self,
         stream: &mut dyn Stream,
         offset: WriteOffset<'_>
-    ) -> KResult<usize> {
-        Err(EINVAL)
-    }
-
-    async fn write_direct(
-        &self,
-        stream: &mut dyn Stream,
-        offset: usize,
     ) -> KResult<usize> {
         Err(EINVAL)
     }

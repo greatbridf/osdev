@@ -12,7 +12,7 @@ use itertools::Itertools;
 use crate::io::{Buffer, ByteBuffer, UninitBuffer};
 use crate::kernel::block::{BlockDevice, BlockDeviceRequest};
 use crate::kernel::constants::{EINVAL, EIO};
-use crate::kernel::mem::{CachePage, Folio, FolioOwned, PageOffset};
+use crate::kernel::mem::{Folio, FolioOwned, PageOffset};
 use crate::kernel::timer::Instant;
 use crate::kernel::vfs::dentry::Dentry;
 use crate::kernel::vfs::inode::{Ino, InodeInfo, InodeOps, InodeUse};
@@ -259,7 +259,7 @@ impl InodeOps for FileInode {
 
     async fn read_page(
         &self, sb: SbUse<Self::SuperBlock>, inode: &InodeUse,
-        page: &mut CachePage, offset: PageOffset,
+        page: &mut FolioOwned, offset: PageOffset,
     ) -> KResult<()> {
         let fs = &sb.backend;
         let fat = sb.backend.fat.read().await;
@@ -285,7 +285,6 @@ impl InodeOps for FileInode {
 
         let real_len = (inode.info.lock().size as usize) - offset.byte_count();
         if real_len < PAGE_SIZE {
-            let mut page = page.lock();
             page.as_bytes_mut()[real_len..].fill(0);
         }
 

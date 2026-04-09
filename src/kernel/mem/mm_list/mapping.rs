@@ -1,6 +1,6 @@
 use alloc::sync::Arc;
 
-use crate::kernel::mem::{FolioOwned, MapFolio, PageCache, PageOffset};
+use crate::kernel::mem::{AnonFolio, FolioOwned, PageCache, PageOffset};
 
 #[derive(Debug, Clone)]
 pub struct FileMapping {
@@ -42,8 +42,8 @@ impl AnonMapping {
         (Self::new(), Self::new())
     }
 
-    pub fn add_folio(&self, folio: FolioOwned) -> MapFolio {
-        folio.into_mappable()
+    pub fn add_folio(&self, folio: FolioOwned) -> AnonFolio {
+        AnonFolio::new(folio)
     }
 }
 

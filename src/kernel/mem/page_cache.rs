@@ -10,7 +10,7 @@ use super::Folio;
 use crate::io::{Buffer, Stream};
 use crate::kernel::constants::EINVAL;
 use crate::kernel::mem::mm_list::add_mapping;
-use crate::kernel::mem::PageOffset;
+use crate::kernel::mem::{FolioOwned, PageOffset};
 use crate::kernel::vfs::inode::InodeUse;
 use crate::prelude::KResult;
 
@@ -24,8 +24,8 @@ pub struct PageCache {
 pub struct CachePage(Folio);
 
 impl CachePage {
-    pub fn new() -> Self {
-        CachePage(Folio::alloc())
+    fn new(folio: FolioOwned) -> Self {
+        CachePage(folio.share())
     }
 
     pub fn is_dirty(&self) -> bool {
@@ -62,10 +62,10 @@ impl PageCache {
             match pages.entry(pgoff) {
                 Entry::Occupied(ent) => Ok(ent.into_mut()),
                 Entry::Vacant(vacant_entry) => {
-                    let mut new_page = CachePage::new();
+                    let mut new_page = FolioOwned::alloc();
                     self.inode.read_page(&mut new_page, pgoff).await?;
 
-                    Ok(vacant_entry.insert(new_page))
+                    Ok(vacant_entry.insert(CachePage::new(new_page)))
                 }
             }
         }

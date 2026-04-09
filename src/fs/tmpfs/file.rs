@@ -3,7 +3,7 @@ use alloc::sync::Arc;
 
 use super::TmpFs;
 use crate::io::{Buffer, Stream};
-use crate::kernel::mem::{CachePage, PageCache, PageOffset};
+use crate::kernel::mem::{CachePage, FolioOwned, PageCache, PageOffset};
 use crate::kernel::timer::Instant;
 use crate::kernel::vfs::inode::{
     Ino, InodeInfo, InodeOps, InodeUse, WriteOffset,
@@ -111,10 +111,10 @@ impl InodeOps for FileInode {
     }
 
     async fn read_page(
-        &self, _: SbUse<Self::SuperBlock>, _: &InodeUse, page: &mut CachePage,
+        &self, _: SbUse<Self::SuperBlock>, _: &InodeUse, page: &mut FolioOwned,
         _: PageOffset,
     ) -> KResult<()> {
-        page.lock().as_bytes_mut().fill(0);
+        page.as_bytes_mut().fill(0);
         Ok(())
     }
 

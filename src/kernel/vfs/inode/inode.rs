@@ -11,7 +11,7 @@ use eonix_sync::{RwLock, Spin};
 use super::{Ino, RenameData, WriteOffset};
 use crate::io::{Buffer, Stream};
 use crate::kernel::constants::{EINVAL, EPERM};
-use crate::kernel::mem::{CachePage, PageCache, PageOffset};
+use crate::kernel::mem::{CachePage, FolioOwned, PageCache, PageOffset};
 use crate::kernel::timer::Instant;
 use crate::kernel::vfs::dentry::Dentry;
 use crate::kernel::vfs::types::{DeviceId, Format, Mode, Permission};
@@ -215,7 +215,7 @@ define_inode_ops! {
     }
 
     // PAGE CACHE OPERATIONS
-    async fn read_page(&self, page: &mut CachePage, offset: PageOffset) -> KResult<()> {
+    async fn read_page(&self, page: &mut FolioOwned, offset: PageOffset) -> KResult<()> {
         Err(EINVAL)
     }
 

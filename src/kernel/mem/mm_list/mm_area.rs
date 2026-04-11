@@ -17,7 +17,7 @@ use super::Mapping;
 use crate::kernel::mem::mm_list::mapping::{add_mapping, AnonMapping};
 use crate::kernel::mem::mm_list::page_table::KernelPageTable;
 use crate::kernel::mem::mm_list::{
-    remove_mapping, FileMapping, MemListLock, PageTableExt,
+    duplicate_mapping, remove_mapping, FileMapping, MemListLock,
 };
 use crate::kernel::mem::{CachePage, FolioOwned, PageOffset, Permission};
 use crate::prelude::KResult;
@@ -680,7 +680,14 @@ fn dup_area_private<'a, 'b: 'a>(
 ) {
     list.insert(area.clone(from_lock));
 
-    to_pgtable.set_copy_on_write(from_pgtable, *area.range.as_ref(from_lock));
+    let range = area.range.as_ref(from_lock);
+
+    let to_iter = to_pgtable.iter_user(*range);
+    let from_iter = from_pgtable.iter_user(*range);
+
+    for (to, from) in to_iter.zip(from_iter) {
+        set_pte_cow(to, from);
+    }
 }
 
 pub fn dup_area_to_list<'a, 'b: 'a>(
@@ -693,4 +700,31 @@ pub fn dup_area_to_list<'a, 'b: 'a>(
     }
 
     dup_area_private(area, list, from_lock, from_pgtable, to_pgtable);
+}
+
+fn set_pte_cow<Ent>(to: &mut Ent, from: &mut Ent)
+where
+    Ent: PTE,
+{
+    let (pfn, raw_attr) = from.get();
+    let mut attr = raw_attr.as_page_attr().expect("Not a page attribute");
+
+    if !attr.contains(PageAttribute::PRESENT) {
+        // Copy non-installed mapped PTEs directly to the new PTE and delay
+        // its handling till the page fault.
+        to.set(pfn, attr.into());
+        return;
+    }
+
+    attr.remove(PageAttribute::WRITE | PageAttribute::DIRTY);
+    attr.insert(PageAttribute::COPY_ON_WRITE);
+
+    let pfn = unsafe {
+        // SAFETY: We get the pfn from a valid page table entry, which
+        //         should have been created via `add_mapping`.
+        duplicate_mapping(pfn)
+    };
+
+    to.set(pfn, Ent::Attr::from(attr & !PageAttribute::ACCESSED));
+    from.set_attr(Ent::Attr::from(attr));
 }

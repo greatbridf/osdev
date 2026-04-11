@@ -593,23 +593,7 @@ impl fmt::Debug for MMList {
     }
 }
 
-trait PageTableExt {
-    fn set_copy_on_write(&self, from: &Self, range: VRange);
-}
-
-impl PageTableExt for KernelPageTable {
-    fn set_copy_on_write(&self, from: &Self, range: VRange) {
-        let to_iter = self.iter_user(range);
-        let from_iter = from.iter_user(range);
-
-        for (to, from) in to_iter.zip(from_iter) {
-            to.set_copy_on_write(from);
-        }
-    }
-}
-
 trait PTEExt {
-    fn set_copy_on_write(&mut self, from: &mut Self);
     fn take_if_present(&mut self) -> Option<Folio>;
     fn release(&mut self);
 }
@@ -618,30 +602,6 @@ impl<T> PTEExt for T
 where
     T: PTE,
 {
-    fn set_copy_on_write(&mut self, from: &mut Self) {
-        let (pfn, raw_attr) = from.get();
-        let mut attr = raw_attr.as_page_attr().expect("Not a page attribute");
-
-        if !attr.contains(PageAttribute::PRESENT) {
-            // Copy non-installed mapped PTEs directly to the new PTE and delay
-            // its handling till the page fault.
-            self.set(pfn, attr.into());
-            return;
-        }
-
-        attr.remove(PageAttribute::WRITE | PageAttribute::DIRTY);
-        attr.insert(PageAttribute::COPY_ON_WRITE);
-
-        let pfn = unsafe {
-            // SAFETY: We get the pfn from a valid page table entry, which
-            //         should have been created via `add_mapping`.
-            duplicate_mapping(pfn)
-        };
-
-        self.set(pfn, T::Attr::from(attr & !PageAttribute::ACCESSED));
-        from.set_attr(T::Attr::from(attr));
-    }
-
     fn take_if_present(&mut self) -> Option<Folio> {
         let (pfn, raw_attr) = self.take();
         let attr = raw_attr.as_page_attr().expect("Not a page");

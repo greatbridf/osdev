@@ -6,11 +6,9 @@ use eonix_mm::paging::{PAGE_SIZE, PFN};
 use eonix_sync::{atomic, Mutex};
 
 use super::page_alloc::PageFlags;
-use super::Folio;
 use crate::io::{Buffer, Stream};
 use crate::kernel::constants::EINVAL;
-use crate::kernel::mem::mm_list::add_mapping;
-use crate::kernel::mem::{FolioOwned, PageOffset};
+use crate::kernel::mem::{FolioOwned, MapFolio, PageOffset};
 use crate::kernel::vfs::inode::InodeUse;
 use crate::prelude::KResult;
 
@@ -21,11 +19,11 @@ pub struct PageCache {
 
 #[repr(transparent)]
 #[derive(TransparentDeref)]
-pub struct CachePage(Folio);
+pub struct CachePage(MapFolio);
 
 impl CachePage {
     fn new(folio: FolioOwned) -> Self {
-        CachePage(folio.share())
+        CachePage(folio.into_mappable())
     }
 
     pub fn is_dirty(&self) -> bool {
@@ -41,7 +39,7 @@ impl CachePage {
     }
 
     pub fn add_mapping(&self) -> PFN {
-        add_mapping(self.0.clone())
+        self.0.clone().add_mapping()
     }
 }
 

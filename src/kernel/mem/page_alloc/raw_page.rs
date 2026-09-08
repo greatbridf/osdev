@@ -1,3 +1,6 @@
+mod map_page;
+
+use core::mem::ManuallyDrop;
 use core::ptr::NonNull;
 use core::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 
@@ -9,6 +12,7 @@ use eonix_sync::atomic;
 use intrusive_list::{container_of, Link, List};
 use slab_allocator::{SlabPage, SlabPageAlloc, SlabSlot};
 
+use self::map_page::MapRawPageData;
 use super::zones::ZONE;
 use super::{GlobalPageAlloc, PerCpuPage};
 use crate::kernel::mem::PhysAccess;
@@ -33,6 +37,7 @@ impl SlabPageData {
 #[repr(C)]
 union PageData {
     slab: SlabPageData,
+    map: ManuallyDrop<MapRawPageData>,
 }
 
 pub struct RawPage {
@@ -55,6 +60,7 @@ impl PageFlags {
     pub const SLAB: u32 = 1 << 3;
     pub const DIRTY: u32 = 1 << 4;
     pub const LOCAL: u32 = 1 << 6;
+    pub const MAPPED: u32 = 1 << 7;
 
     pub fn has(&self, flag: u32, order: Ordering) -> bool {
         (self.0.load(order) & flag) == flag

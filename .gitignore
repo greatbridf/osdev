@@ -2,6 +2,7 @@ build/
 
 .idea/
 .vscode/settings.json
+.vim/
 
 test/
 

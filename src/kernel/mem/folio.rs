@@ -147,6 +147,10 @@ impl Drop for Folio {
         match self.refcount.fetch_sub(1, Ordering::AcqRel) {
             0 => unreachable!("Refcount for an in-use page is 0"),
             1 => unsafe {
+                if self.is_map() {
+                    Self::_drop_map(self);
+                }
+
                 GlobalPageAlloc::GLOBAL.dealloc_raw(self.0.as_mut())
             },
             _ => {}

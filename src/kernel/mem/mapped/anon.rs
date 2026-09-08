@@ -1,19 +1,18 @@
 use eonix_macros::TransparentDeref;
 use eonix_mm::paging::PFN;
 
-use crate::kernel::mem::mm_list::add_mapping;
-use crate::kernel::mem::{Folio, FolioOwned};
+use crate::kernel::mem::{FolioOwned, MapFolio};
 
 #[repr(transparent)]
 #[derive(TransparentDeref)]
-pub struct AnonFolio(Folio);
+pub struct AnonFolio(MapFolio);
 
 impl AnonFolio {
     pub fn new(folio: FolioOwned) -> Self {
-        Self(folio.share())
+        Self(folio.into_mappable())
     }
 
     pub fn add_mapping(self) -> PFN {
-        add_mapping(self.0)
+        self.0.clone().add_mapping()
     }
 }

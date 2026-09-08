@@ -19,9 +19,7 @@ use eonix_sync::Mutex;
 use mm_area::AreaList;
 use page_table::KernelPageTable;
 
-pub use self::mapping::{
-    add_mapping, duplicate_mapping, remove_mapping, FileMapping, Mapping,
-};
+pub use self::mapping::{FileMapping, Mapping};
 pub use self::mm_area::{AreaFlags, MemArea};
 pub use self::page_fault::handle_kernel_page_fault;
 use super::address::{VAddrExt as _, VRangeExt as _};
@@ -29,6 +27,7 @@ use super::Folio;
 use crate::kernel::constants::{EEXIST, EFAULT, EINVAL, ENOMEM};
 use crate::kernel::mem::mm_list::brk::ProgramBreak;
 use crate::kernel::mem::mm_list::mm_area::dup_area_to_list;
+use crate::kernel::mem::MapFolio;
 use crate::prelude::*;
 use crate::sync::ArcSwap;
 
@@ -608,7 +607,7 @@ where
 
         attr.contains(PageAttribute::PRESENT).then(|| unsafe {
             // SAFETY: Present PTEs are always created via `add_mapping`.
-            remove_mapping(pfn)
+            MapFolio::remove_mapping(pfn).into_inner()
         })
     }
 

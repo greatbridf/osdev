@@ -14,12 +14,12 @@ use intrusive_collections::{
 };
 
 use super::Mapping;
-use crate::kernel::mem::mm_list::mapping::{add_mapping, AnonMapping};
+use crate::kernel::mem::mm_list::mapping::AnonMapping;
 use crate::kernel::mem::mm_list::page_table::KernelPageTable;
-use crate::kernel::mem::mm_list::{
-    duplicate_mapping, remove_mapping, FileMapping, MemListLock,
+use crate::kernel::mem::mm_list::{FileMapping, MemListLock};
+use crate::kernel::mem::{
+    CachePage, FolioOwned, MapFolio, PageOffset, Permission,
 };
-use crate::kernel::mem::{CachePage, FolioOwned, PageOffset, Permission};
 use crate::prelude::KResult;
 
 bitflags::bitflags! {
@@ -431,19 +431,25 @@ impl MemArea {
         attr.remove(PageAttribute::COPY_ON_WRITE);
         attr.set(PageAttribute::WRITE, self.can_write());
 
-        let folio = unsafe {
+        // XXX: Lock the page here to exclude concurrent faulting threads.
+        //      Multiple threads could be here even if the page's mapcount is 1.
+        let is_exclusive = unsafe {
             // SAFETY: `pfn` is a mapping taken from some page table.
-            remove_mapping(*pfn)
+            MapFolio::with_mapping(*pfn, |map_folio| map_folio.is_exclusive())
         };
 
-        // XXX: Change me!!!
-        if folio.refcount.load(Ordering::Relaxed) == 1 {
-            // SAFETY: This is actually safe. If we read `1` here and we have `MMList` lock
-            // held, there couldn't be neither other processes sharing the page, nor other
-            // threads making the page COW at the same time.
-            *pfn = add_mapping(folio);
+        if is_exclusive {
+            // SAFETY: This is actually safe. If we read `1` here and we have
+            //         `MMList` lock held, there couldn't be neither other
+            //         processes sharing the page, nor other threads making the
+            //         page CoW at the same time.
             return;
         }
+
+        let folio = unsafe {
+            // SAFETY: `pfn` is a mapping taken from some page table.
+            MapFolio::remove_mapping(*pfn)
+        };
 
         let anon_mapping = match &self.mapping {
             Mapping::Anonymous(anon) => anon,
@@ -722,7 +728,7 @@ where
     let pfn = unsafe {
         // SAFETY: We get the pfn from a valid page table entry, which
         //         should have been created via `add_mapping`.
-        duplicate_mapping(pfn)
+        MapFolio::duplicate_mapping(pfn)
     };
 
     to.set(pfn, Ent::Attr::from(attr & !PageAttribute::ACCESSED));

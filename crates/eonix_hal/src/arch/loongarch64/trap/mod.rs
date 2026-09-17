@@ -249,6 +249,7 @@ static DIRTY_TASK_CONTEXT: TaskContext = unsafe { core::mem::zeroed() };
 #[unsafe(naked)]
 unsafe extern "C" fn captured_trap_handler() {
     naked_asm!(
+        "move    $s8, $t0",
         "la.global $a0, {dirty_task_context}",
         "b         {switch}",
         dirty_task_context = sym DIRTY_TASK_CONTEXT,

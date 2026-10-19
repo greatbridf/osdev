@@ -334,7 +334,7 @@ async fn do_futex_exit(thread: &Thread) -> KResult<()> {
 pub async fn futex_exit(thread: &Thread) {
     // We don't care about any error happened inside.
     // If they've set up a wrong pointer, good luck to them...
-    let _ = do_futex_exit(thread);
+    let _ = do_futex_exit(thread).await;
 }
 
 async fn do_futex_exec(thread: &Thread) -> KResult<()> {

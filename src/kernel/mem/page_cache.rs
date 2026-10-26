@@ -1,21 +1,22 @@
-use super::{paging::AllocZeroed, Page};
-use crate::{
-    io::{Buffer, FillResult, Stream},
-    kernel::mem::page_alloc::RawPagePtr,
-    prelude::KResult,
-    GlobalPageAlloc,
-};
-use align_ext::AlignExt;
 use alloc::boxed::Box;
-use alloc::{collections::btree_map::BTreeMap, sync::Weak};
+use alloc::collections::btree_map::BTreeMap;
+use alloc::sync::Weak;
+use core::future::Future;
+use core::mem::ManuallyDrop;
+
+use align_ext::AlignExt;
 use async_trait::async_trait;
-use core::{future::Future, mem::ManuallyDrop};
 use eonix_hal::mm::ArchPhysAccess;
-use eonix_mm::{
-    address::{PAddr, PhysAccess},
-    paging::{PageAlloc, RawPage, PAGE_SIZE, PAGE_SIZE_BITS, PFN},
-};
+use eonix_mm::address::{PAddr, PhysAccess};
+use eonix_mm::paging::{PageAlloc, RawPage, PAGE_SIZE, PAGE_SIZE_BITS, PFN};
 use eonix_sync::Mutex;
+
+use super::paging::AllocZeroed;
+use super::Page;
+use crate::io::{Buffer, FillResult, Stream};
+use crate::kernel::mem::page_alloc::RawPagePtr;
+use crate::prelude::KResult;
+use crate::GlobalPageAlloc;
 
 pub struct PageCache {
     pages: Mutex<BTreeMap<usize, CachePage>>,

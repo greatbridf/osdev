@@ -1,6 +1,8 @@
-use super::{command::Command, PRDTEntry, FISH2D};
-use crate::kernel::mem::{AsMemoryBlock as _, Page};
 use eonix_mm::address::PAddr;
+
+use super::command::Command;
+use super::{PRDTEntry, FISH2D};
+use crate::kernel::mem::{Page, PageExt};
 
 pub struct CommandTable<'a> {
     page: Page,

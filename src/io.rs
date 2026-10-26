@@ -1,6 +1,8 @@
+use core::mem::MaybeUninit;
+use core::cmp;
+
 use crate::kernel::constants::EFAULT;
 use crate::prelude::*;
-use core::{cmp, mem::MaybeUninit};
 
 #[must_use]
 #[derive(Debug)]

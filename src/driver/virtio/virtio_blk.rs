@@ -1,21 +1,19 @@
-use crate::{
-    io::Chunks,
-    kernel::{
-        block::{BlockDeviceRequest, BlockRequestQueue},
-        constants::EIO,
-        mem::{AsMemoryBlock, Page},
-    },
-    prelude::KResult,
-};
 use alloc::boxed::Box;
+
 use async_trait::async_trait;
 use eonix_hal::mm::ArchPhysAccess;
-use eonix_mm::{
-    address::{Addr, PAddr, PhysAccess},
-    paging::PFN,
-};
+use eonix_mm::address::{Addr, PAddr, PhysAccess};
+use eonix_mm::paging::PFN;
 use eonix_sync::Spin;
-use virtio_drivers::{device::blk::VirtIOBlk, transport::Transport, Hal};
+use virtio_drivers::device::blk::VirtIOBlk;
+use virtio_drivers::transport::Transport;
+use virtio_drivers::Hal;
+
+use crate::io::Chunks;
+use crate::kernel::block::{BlockDeviceRequest, BlockRequestQueue};
+use crate::kernel::constants::EIO;
+use crate::kernel::mem::{AsMemoryBlock, Page};
+use crate::prelude::KResult;
 
 pub struct HAL;
 

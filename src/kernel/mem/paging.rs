@@ -1,6 +1,9 @@
-use super::{access::AsMemoryBlock, page_alloc::GlobalPageAlloc, MemoryBlock, PhysAccess};
-use crate::io::{Buffer, FillResult};
 use eonix_mm::paging::{Page as GenericPage, PageAlloc};
+
+use super::access::AsMemoryBlock;
+use super::page_alloc::GlobalPageAlloc;
+use super::{MemoryBlock, PhysAccess};
+use crate::io::{Buffer, FillResult};
 
 pub type Page = GenericPage<GlobalPageAlloc>;
 

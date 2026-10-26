@@ -1,38 +1,32 @@
 mod dir;
 mod file;
 
+use alloc::sync::{Arc, Weak};
 use core::future::Future;
 use core::ops::Deref;
 
-use alloc::sync::{Arc, Weak};
 use async_trait::async_trait;
 use dir::{as_raw_dirents, ParseDirent};
 use eonix_sync::RwLock;
 use itertools::Itertools;
 
+use crate::io::{Buffer, ByteBuffer, UninitBuffer};
+use crate::kernel::block::{BlockDevice, BlockDeviceRequest};
 use crate::kernel::constants::{EINVAL, EIO};
-use crate::kernel::mem::{AsMemoryBlock, CachePageStream};
+use crate::kernel::mem::{
+    AsMemoryBlock, CachePage, CachePageStream, Page, PageCache,
+    PageCacheBackendOps,
+};
 use crate::kernel::timer::Instant;
-use crate::kernel::vfs::inode::{InodeDirOps, InodeFileOps, InodeInfo, InodeOps, InodeUse};
+use crate::kernel::vfs::dentry::Dentry;
+use crate::kernel::vfs::inode::{
+    Ino, Inode, InodeDirOps, InodeFileOps, InodeInfo, InodeOps, InodeUse,
+};
+use crate::kernel::vfs::mount::{register_filesystem, Mount, MountCreator};
 use crate::kernel::vfs::types::{DeviceId, Format, Permission};
 use crate::kernel::vfs::{SbRef, SbUse, SuperBlock, SuperBlockInfo};
 use crate::prelude::*;
-use crate::{
-    io::{Buffer, ByteBuffer, UninitBuffer},
-    kernel::{
-        block::{BlockDevice, BlockDeviceRequest},
-        mem::{
-            paging::Page,
-            {CachePage, PageCache, PageCacheBackendOps},
-        },
-        vfs::{
-            dentry::Dentry,
-            inode::{Ino, Inode},
-            mount::{register_filesystem, Mount, MountCreator},
-        },
-    },
-    KResult,
-};
+use crate::KResult;
 
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]

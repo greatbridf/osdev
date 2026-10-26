@@ -1,14 +1,16 @@
+use core::borrow::Borrow;
+use core::cell::UnsafeCell;
+use core::cmp;
+
+use eonix_mm::address::{AddrOps as _, VAddr, VRange};
+use eonix_mm::page_table::{PageAttribute, RawAttribute, PTE};
+use eonix_mm::paging::{PAGE_SIZE, PFN};
+
 use super::mm_list::EMPTY_PAGE;
 use super::paging::AllocZeroed as _;
 use super::{AsMemoryBlock, Mapping, Page, Permission};
 use crate::kernel::constants::EINVAL;
 use crate::prelude::KResult;
-use core::borrow::Borrow;
-use core::cell::UnsafeCell;
-use core::cmp;
-use eonix_mm::address::{AddrOps as _, VAddr, VRange};
-use eonix_mm::page_table::{PageAttribute, RawAttribute, PTE};
-use eonix_mm::paging::{PAGE_SIZE, PFN};
 
 #[derive(Debug)]
 pub struct MMArea {

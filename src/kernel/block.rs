@@ -1,22 +1,19 @@
 mod mbr;
 
-use super::{
-    constants::ENOENT,
-    mem::{paging::Page, AsMemoryBlock as _},
-    vfs::types::DeviceId,
-};
-use crate::kernel::constants::{EEXIST, EINVAL};
-use crate::{
-    io::{Buffer, FillResult},
-    prelude::*,
-};
-use alloc::{
-    collections::btree_map::{BTreeMap, Entry},
-    sync::Arc,
-};
-use async_trait::async_trait;
+use alloc::collections::btree_map::{BTreeMap, Entry};
+use alloc::sync::Arc;
 use core::cmp::Ordering;
+
+use async_trait::async_trait;
 use mbr::MBRPartTable;
+
+use super::constants::ENOENT;
+use super::mem::paging::Page;
+use super::mem::AsMemoryBlock as _;
+use super::vfs::types::DeviceId;
+use crate::io::{Buffer, FillResult};
+use crate::kernel::constants::{EEXIST, EINVAL};
+use crate::prelude::*;
 
 pub struct Partition {
     pub lba_offset: u64,

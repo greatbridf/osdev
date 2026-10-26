@@ -28,35 +28,32 @@ mod prelude;
 mod rcu;
 mod sync;
 
-use crate::kernel::task::alloc_pid;
-use alloc::{ffi::CString, sync::Arc};
-use core::{
-    hint::spin_loop,
-    sync::atomic::{AtomicBool, AtomicUsize, Ordering},
-};
-use eonix_hal::{
-    arch_exported::bootstrap::shutdown,
-    context::TaskContext,
-    processor::{halt, CPU, CPU_COUNT},
-    traits::{context::RawTaskContext, trap::IrqState},
-    trap::disable_irqs_save,
-};
+use alloc::ffi::CString;
+use alloc::sync::Arc;
+use core::hint::spin_loop;
+use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+use eonix_hal::arch_exported::bootstrap::shutdown;
+use eonix_hal::context::TaskContext;
+use eonix_hal::processor::{halt, CPU, CPU_COUNT};
+use eonix_hal::traits::context::RawTaskContext;
+use eonix_hal::traits::trap::IrqState;
+use eonix_hal::trap::disable_irqs_save;
 use eonix_mm::address::PRange;
-use eonix_runtime::{executor::Stack, scheduler::RUNTIME};
-use kernel::{
-    mem::GlobalPageAlloc,
-    task::{KernelStack, ProcessBuilder, ProcessList, ProgramLoader, ThreadBuilder},
-    vfs::{
-        dentry::Dentry,
-        mount::{do_mount, MS_NOATIME, MS_NODEV, MS_NOSUID, MS_RDONLY},
-        types::Permission,
-        FsContext,
-    },
-    CharDevice,
-};
+use eonix_runtime::executor::Stack;
+use eonix_runtime::scheduler::RUNTIME;
+use kernel::mem::GlobalPageAlloc;
+use kernel::task::{KernelStack, ProcessBuilder, ProcessList, ProgramLoader, ThreadBuilder};
+use kernel::vfs::dentry::Dentry;
+use kernel::vfs::mount::{do_mount, MS_NOATIME, MS_NODEV, MS_NOSUID, MS_RDONLY};
+use kernel::vfs::types::Permission;
+use kernel::vfs::FsContext;
+use kernel::CharDevice;
 use kernel_init::setup_memory;
 use path::Path;
 use prelude::*;
+
+use crate::kernel::task::alloc_pid;
 
 #[cfg(any(target_arch = "riscv64", target_arch = "loongarch64"))]
 fn do_panic() -> ! {

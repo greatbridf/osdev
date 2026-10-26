@@ -1,19 +1,20 @@
-use crate::kernel::constants::{EAGAIN, EFAULT, EINVAL, EIO};
-use crate::kernel::interrupt::register_irq_handler;
-use crate::kernel::mem::paging::{self, AllocZeroed};
-use crate::kernel::mem::{AsMemoryBlock, PhysAccess};
-use crate::kernel::pcie::{self, Header, PCIDevice, PCIDriver, PciError};
-use crate::net::netdev;
-use crate::prelude::*;
 use alloc::boxed::Box;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use async_trait::async_trait;
 use core::ptr::NonNull;
+
+use async_trait::async_trait;
 use eonix_hal::fence::memory_barrier;
 use eonix_mm::address::{Addr, PAddr};
 use eonix_sync::SpinIrq;
-use paging::Page;
+
+use crate::kernel::constants::{EAGAIN, EFAULT, EINVAL, EIO};
+use crate::kernel::interrupt::register_irq_handler;
+use crate::kernel::mem::{AsMemoryBlock, Page, PhysAccess};
+use crate::kernel::mem::paging::{self, AllocZeroed};
+use crate::kernel::pcie::{self, Header, PCIDevice, PCIDriver, PciError};
+use crate::net::netdev;
+use crate::prelude::*;
 
 mod defs;
 

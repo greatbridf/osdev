@@ -1,3 +1,10 @@
+use alloc::collections::vec_deque::VecDeque;
+use core::pin::pin;
+
+use async_trait::async_trait;
+use eonix_mm::address::{Addr as _, PAddr};
+use eonix_sync::{SpinIrq as _, WaitList};
+
 use super::command::{Command, IdentifyCommand, ReadLBACommand, WriteLBACommand};
 use super::slot::CommandSlot;
 use super::stats::AdapterPortStats;
@@ -10,11 +17,6 @@ use crate::kernel::constants::{EINVAL, EIO};
 use crate::kernel::mem::paging::Page;
 use crate::kernel::mem::AsMemoryBlock as _;
 use crate::prelude::*;
-use alloc::collections::vec_deque::VecDeque;
-use async_trait::async_trait;
-use core::pin::pin;
-use eonix_mm::address::{Addr as _, PAddr};
-use eonix_sync::{SpinIrq as _, WaitList};
 
 /// An `AdapterPort` is an HBA device in AHCI mode.
 ///

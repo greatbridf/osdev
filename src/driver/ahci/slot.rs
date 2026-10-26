@@ -1,8 +1,11 @@
-use super::{command_table::CommandTable, CommandHeader};
-use crate::KResult;
 use core::pin::pin;
+
 use eonix_mm::address::Addr as _;
 use eonix_sync::{Spin, SpinIrq as _, WaitList};
+
+use super::command_table::CommandTable;
+use super::CommandHeader;
+use crate::KResult;
 
 pub struct CommandSlot<'a> {
     /// # Usage

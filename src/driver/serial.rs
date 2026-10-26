@@ -249,7 +249,9 @@ pub fn init() -> KResult<()> {
 
         let serial = Serial::new(0, port)?;
         serial.register_as_char_device(
-            // 2 or 4 here, let's try 2 first!
+            // UART0 is wired to PCH-PIC line 2 on the QEMU virt machine
+            // (`interrupts = <2 4>` in the device tree). The HAL routes it
+            // to an EIOINTC vector and delivers it as an external IRQ.
             2,
         )?;
     }

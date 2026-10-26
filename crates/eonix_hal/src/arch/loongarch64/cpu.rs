@@ -38,6 +38,7 @@ impl CPU {
     pub unsafe fn init(mut self: Pin<&mut Self>) {
         let me = self.as_mut().get_unchecked_mut();
         setup_trap();
+        super::interrupt::init();
     }
 
     /// Boot all other hart.

@@ -65,5 +65,12 @@ where
     }
 
     IRQ_HANDLERS.lock_irq()[irqno as usize].push(Arc::new(handler));
+
+    // On LoongArch the IRQ lines are masked by default and must be unmasked
+    // once a handler is available, so that an interrupt cannot be delivered
+    // before anyone can service the device.
+    #[cfg(target_arch = "loongarch64")]
+    eonix_hal::arch_exported::interrupt::enable_irq(irqno as usize);
+
     Ok(())
 }

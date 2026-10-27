@@ -1,20 +1,18 @@
+use alloc::collections::vec_deque::VecDeque;
+use core::task::{Poll, Waker};
+
+use async_trait::async_trait;
+use eonix_mm::address::{Addr as _, PAddr};
+use eonix_sync::SpinIrq as _;
+
 use super::command::{Command, IdentifyCommand, ReadLBACommand, WriteLBACommand};
-use super::slot::CommandSlot;
+use super::slot::CommandList;
 use super::stats::AdapterPortStats;
-use super::{
-    CommandHeader, Register, PORT_CMD_CR, PORT_CMD_FR, PORT_CMD_FRE, PORT_CMD_ST, PORT_IE_DEFAULT,
-};
+use super::{Register, PORT_CMD_CR, PORT_CMD_FR, PORT_CMD_FRE, PORT_CMD_ST, PORT_IE_DEFAULT};
 use crate::driver::ahci::command_table::CommandTable;
 use crate::kernel::block::{BlockDeviceRequest, BlockRequestQueue};
 use crate::kernel::constants::{EINVAL, EIO};
-use crate::kernel::mem::paging::Page;
-use crate::kernel::mem::AsMemoryBlock as _;
-use crate::kernel::task::block_on;
 use crate::prelude::*;
-use alloc::collections::vec_deque::VecDeque;
-use core::pin::pin;
-use eonix_mm::address::{Addr as _, PAddr};
-use eonix_sync::{SpinIrq as _, WaitList};
 
 /// An `AdapterPort` is an HBA device in AHCI mode.
 ///
@@ -55,6 +53,8 @@ pub struct AdapterPortData {
 struct FreeList {
     free: VecDeque<u32>,
     working: VecDeque<u32>,
+
+    wakers: VecDeque<Waker>,
 }
 
 impl FreeList {
@@ -62,57 +62,32 @@ impl FreeList {
         Self {
             free: (0..32).collect(),
             working: VecDeque::new(),
+            wakers: VecDeque::new(),
         }
     }
 }
 
-pub struct AdapterPort<'a> {
+pub struct AdapterPort {
     pub nport: u32,
     regs_base: PAddr,
 
-    slots: [CommandSlot<'a>; 32],
+    cmdlist: CommandList,
     free_list: Spin<FreeList>,
-    free_list_wait: WaitList,
-
-    /// Holds the command list.
-    /// **DO NOT USE IT DIRECTLY**
-    _page: Page,
-
-    cmdlist_base: PAddr,
-    fis_base: PAddr,
 
     stats: AdapterPortStats,
 }
 
-impl<'a> AdapterPort<'a> {
+impl AdapterPort {
     pub fn new(base: PAddr, nport: u32) -> Self {
-        let page = Page::alloc();
-        let cmdlist_base = page.start();
-        let cmdlist_size = 32 * size_of::<CommandHeader>();
-        let fis_base = cmdlist_base + cmdlist_size;
-
-        let (mut cmdheaders, _) = page.as_memblk().split_at(cmdlist_size);
-        let slots = core::array::from_fn(move |_| {
-            let (cmdheader, next) = cmdheaders.split_at(size_of::<CommandHeader>());
-            cmdheaders = next;
-            CommandSlot::new(unsafe { cmdheader.as_ptr().as_mut() })
-        });
-
         Self {
             nport,
             regs_base: base + 0x100 + 0x80 * nport as usize,
-            slots,
+            cmdlist: CommandList::new(),
             free_list: Spin::new(FreeList::new()),
-            free_list_wait: WaitList::new(),
-            _page: page,
             stats: AdapterPortStats::new(),
-            cmdlist_base,
-            fis_base,
         }
     }
-}
 
-impl AdapterPort<'_> {
     fn command_list_base(&self) -> Register<u64> {
         Register::new(self.regs_base + 0x00)
     }
@@ -145,19 +120,17 @@ impl AdapterPort<'_> {
         self.sata_status().read_once() & 0xf == 0x3
     }
 
-    fn get_free_slot(&self) -> u32 {
-        loop {
+    async fn get_free_slot(&self) -> u32 {
+        core::future::poll_fn(|ctx| {
             let mut free_list = self.free_list.lock_irq();
-            let free_slot = free_list.free.pop_front();
-            if let Some(slot) = free_slot {
-                return slot;
+            if let Some(slot) = free_list.free.pop_front() {
+                return Poll::Ready(slot);
             }
-            let mut wait = pin!(self.free_list_wait.prepare_to_wait());
-            wait.as_mut().add_to_wait_list();
-            drop(free_list);
 
-            block_on(wait);
-        }
+            free_list.wakers.push_back(ctx.waker().clone());
+            Poll::Pending
+        })
+        .await
     }
 
     fn save_working(&self, slot: u32) {
@@ -165,8 +138,10 @@ impl AdapterPort<'_> {
     }
 
     fn release_free_slot(&self, slot: u32) {
-        self.free_list.lock_irq().free.push_back(slot);
-        self.free_list_wait.notify_one();
+        let mut free_list = self.free_list.lock_irq();
+
+        free_list.free.push_back(slot);
+        free_list.wakers.drain(..).for_each(|waker| waker.wake());
     }
 
     pub fn handle_interrupt(&self) {
@@ -180,7 +155,7 @@ impl AdapterPort<'_> {
                 return true;
             }
 
-            self.slots[n as usize].handle_irq();
+            self.cmdlist.get(n as usize).handle_irq();
             self.stats.inc_int_fired();
 
             false
@@ -204,12 +179,12 @@ impl AdapterPort<'_> {
         Ok(())
     }
 
-    fn send_command(&self, cmd: &impl Command) -> KResult<()> {
+    async fn send_command(&self, cmd: &impl Command) -> KResult<()> {
         let mut cmdtable = CommandTable::new();
         cmdtable.setup(cmd);
 
-        let slot_index = self.get_free_slot();
-        let slot = &self.slots[slot_index as usize];
+        let slot_index = self.get_free_slot().await;
+        let slot = self.cmdlist.get(slot_index as usize);
 
         slot.prepare_command(&cmdtable, cmd.write());
         self.save_working(slot_index);
@@ -222,36 +197,36 @@ impl AdapterPort<'_> {
 
         self.stats.inc_cmd_sent();
 
-        if let Err(_) = block_on(slot.wait_finish()) {
+        slot.wait_finish().await.inspect_err(|_| {
             self.stats.inc_cmd_error();
-            return Err(EIO);
-        };
+        })?;
 
         self.release_free_slot(slot_index);
         Ok(())
     }
 
-    fn identify(&self) -> KResult<()> {
+    async fn identify(&self) -> KResult<()> {
         let cmd = IdentifyCommand::new();
 
         // TODO: check returned data
-        self.send_command(&cmd)?;
+        self.send_command(&cmd).await?;
 
         Ok(())
     }
 
-    pub fn init(&self) -> KResult<()> {
+    pub async fn init(&self) -> KResult<()> {
         self.stop_command()?;
 
         self.command_list_base()
-            .write(self.cmdlist_base.addr() as u64);
-        self.fis_base().write(self.fis_base.addr() as u64);
+            .write(self.cmdlist.cmdlist_base().addr() as u64);
+        self.fis_base()
+            .write(self.cmdlist.recv_fis_base().addr() as u64);
 
         self.interrupt_enable().write_once(PORT_IE_DEFAULT);
 
         self.start_command()?;
 
-        match self.identify() {
+        match self.identify().await {
             Err(err) => {
                 self.stop_command()?;
                 Err(err)
@@ -269,12 +244,13 @@ impl AdapterPort<'_> {
     }
 }
 
-impl BlockRequestQueue for AdapterPort<'_> {
+#[async_trait]
+impl BlockRequestQueue for AdapterPort {
     fn max_request_pages(&self) -> u64 {
         1024
     }
 
-    fn submit(&self, req: BlockDeviceRequest) -> KResult<()> {
+    async fn submit<'a>(&'a self, req: BlockDeviceRequest<'a>) -> KResult<()> {
         match req {
             BlockDeviceRequest::Read {
                 sector,
@@ -287,7 +263,7 @@ impl BlockRequestQueue for AdapterPort<'_> {
 
                 let command = ReadLBACommand::new(buffer, sector, count as u16)?;
 
-                self.send_command(&command)
+                self.send_command(&command).await
             }
             BlockDeviceRequest::Write {
                 sector,
@@ -300,7 +276,7 @@ impl BlockRequestQueue for AdapterPort<'_> {
 
                 let command = WriteLBACommand::new(buffer, sector, count as u16)?;
 
-                self.send_command(&command)
+                self.send_command(&command).await
             }
         }
     }

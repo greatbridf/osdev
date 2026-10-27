@@ -1,12 +1,11 @@
-use super::{access::AsMemoryBlock, page_alloc::GlobalPageAlloc, MemoryBlock, PhysAccess};
-use crate::io::{Buffer, FillResult};
-use eonix_mm::paging::{Page as GenericPage, PageAlloc};
+use eonix_mm::paging::Folio as _;
 
-pub type Page = GenericPage<GlobalPageAlloc>;
+use super::folio::FolioOwned;
+use crate::io::{Buffer, FillResult};
 
 /// A buffer that wraps a page and provides a `Buffer` interface.
 pub struct PageBuffer {
-    page: Page,
+    page: FolioOwned,
     offset: usize,
 }
 
@@ -14,28 +13,16 @@ pub trait AllocZeroed {
     fn zeroed() -> Self;
 }
 
-impl<A: PageAlloc> AsMemoryBlock for GenericPage<A> {
-    fn as_memblk(&self) -> MemoryBlock {
-        unsafe {
-            // SAFETY: `self.start()` points to valid memory of length `self.len()`.
-            MemoryBlock::new(self.start().as_ptr::<()>().addr(), self.len())
-        }
-    }
-}
-
 impl PageBuffer {
     pub fn new() -> Self {
         Self {
-            page: Page::alloc(),
+            page: FolioOwned::alloc(),
             offset: 0,
         }
     }
 
     pub fn all(&self) -> &[u8] {
-        unsafe {
-            // SAFETY: The page is exclusivly owned by us.
-            self.page.as_memblk().as_bytes()
-        }
+        self.page.as_bytes()
     }
 
     pub fn data(&self) -> &[u8] {
@@ -43,10 +30,7 @@ impl PageBuffer {
     }
 
     pub fn available_mut(&mut self) -> &mut [u8] {
-        unsafe {
-            // SAFETY: The page is exclusivly owned by us.
-            &mut self.page.as_memblk().as_bytes_mut()[self.offset..]
-        }
+        &mut self.page.as_bytes_mut()[self.offset..]
     }
 }
 
@@ -74,16 +58,5 @@ impl Buffer for PageBuffer {
         } else {
             Ok(FillResult::Done(len))
         }
-    }
-}
-
-impl AllocZeroed for Page {
-    fn zeroed() -> Self {
-        let page = Self::alloc();
-        unsafe {
-            // SAFETY: The page is exclusivly owned by us.
-            page.as_memblk().as_bytes_mut().fill(0);
-        }
-        page
     }
 }

@@ -1,4 +1,4 @@
-use crate::{arch::trap::CSR_KERNEL_TP, processor::CPU};
+use crate::arch::trap::CSR_KERNEL_TP;
 use core::{arch::asm, mem::offset_of};
 use eonix_hal_traits::{
     fault::{Fault, PageFaultErrorCode},
@@ -151,18 +151,8 @@ impl RawTrapContext for TrapContext {
                 },
             },
             Trap::Interrupt(interrupt) => match interrupt as usize {
-                2..=7 => TrapType::Irq {
-                    callback: |handler| {
-                        todo!("handle IRQs");
-                        // let mut cpu = CPU::local();
-                        // match cpu.as_mut().interrupt.plic.claim_interrupt() {
-                        //     None => {}
-                        //     Some(irqno) => {
-                        //         cpu.interrupt.plic.complete_interrupt(irqno);
-                        //         handler(irqno);
-                        //     }
-                        // }
-                    },
+                2..=9 => TrapType::Irq {
+                    callback: |handler| crate::arch::interrupt::dispatch_irq(handler),
                 },
                 interrupt => TrapType::Fault(Fault::Unknown(interrupt)),
             },

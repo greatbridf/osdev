@@ -12,8 +12,12 @@ pub mod user;
 pub mod vfs;
 
 mod chardev;
+mod late_init;
+mod power;
 mod terminal;
 
 #[allow(unused_imports)]
 pub use chardev::{CharDevice, CharDeviceType, VirtualCharDevice};
+pub use late_init::{run_late_init, run_late_init_async};
+pub use power::shutdown_system;
 pub use terminal::{Terminal, TerminalDevice};

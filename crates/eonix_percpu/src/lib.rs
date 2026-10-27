@@ -1,28 +1,21 @@
 #![no_std]
 
 use core::alloc::Layout;
-use core::ptr::null_mut;
-use core::ptr::NonNull;
-use core::sync::atomic::AtomicPtr;
-use core::sync::atomic::Ordering;
-
-#[cfg(target_arch = "x86_64")]
-pub use eonix_percpu_macros::define_percpu_x86_64 as define_percpu;
-
-#[cfg(target_arch = "x86_64")]
-pub use eonix_percpu_macros::define_percpu_shared_x86_64 as define_percpu_shared;
-
-#[cfg(target_arch = "riscv64")]
-pub use eonix_percpu_macros::define_percpu_riscv64 as define_percpu;
-
-#[cfg(target_arch = "riscv64")]
-pub use eonix_percpu_macros::define_percpu_shared_riscv64 as define_percpu_shared;
+use core::ptr::{null_mut, NonNull};
+use core::sync::atomic::{AtomicPtr, Ordering};
 
 #[cfg(target_arch = "loongarch64")]
 pub use eonix_percpu_macros::define_percpu_loongarch64 as define_percpu;
-
+#[cfg(target_arch = "riscv64")]
+pub use eonix_percpu_macros::define_percpu_riscv64 as define_percpu;
 #[cfg(target_arch = "loongarch64")]
 pub use eonix_percpu_macros::define_percpu_shared_loongarch64 as define_percpu_shared;
+#[cfg(target_arch = "riscv64")]
+pub use eonix_percpu_macros::define_percpu_shared_riscv64 as define_percpu_shared;
+#[cfg(target_arch = "x86_64")]
+pub use eonix_percpu_macros::define_percpu_shared_x86_64 as define_percpu_shared;
+#[cfg(target_arch = "x86_64")]
+pub use eonix_percpu_macros::define_percpu_x86_64 as define_percpu;
 
 const MAX_CPUS: usize = 256;
 
@@ -41,7 +34,7 @@ impl PercpuArea {
         unsafe extern "C" {
             fn PERCPU_LENGTH();
         }
-        let len = PERCPU_LENGTH as usize;
+        let len = PERCPU_LENGTH as *const () as usize;
 
         assert_ne!(len, 0, "Percpu length should not be zero.");
         len
@@ -52,7 +45,7 @@ impl PercpuArea {
             fn PERCPU_DATA_START();
         }
 
-        let addr = PERCPU_DATA_START as usize;
+        let addr = PERCPU_DATA_START as *const () as usize;
         NonNull::new(addr as *mut _).expect("Percpu data should not be null.")
     }
 

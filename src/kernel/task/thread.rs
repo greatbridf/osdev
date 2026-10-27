@@ -1,42 +1,37 @@
-use super::{
-    signal::{RaiseResult, SignalList},
-    stackful, Process, ProcessList, WaitType,
-};
-use crate::{
-    kernel::{
-        interrupt::default_irq_handler,
-        syscall::{syscall_handlers, SyscallHandler, User, UserMut},
-        task::{clone::CloneArgs, futex::RobustListHead, CloneFlags},
-        timer::{should_reschedule, timer_interrupt},
-        user::{UserPointer, UserPointerMut},
-        vfs::{filearray::FileArray, FsContext},
-    },
-    prelude::*,
-};
-use alloc::{alloc::Allocator, sync::Arc};
+use alloc::alloc::Allocator;
+use alloc::sync::Arc;
+use core::future::{poll_fn, Future};
+use core::pin::Pin;
+use core::ptr::NonNull;
+use core::sync::atomic::{AtomicBool, Ordering};
+use core::task::{Context, Poll};
+
 use atomic_unique_refcell::AtomicUniqueRefCell;
-use core::{
-    future::{poll_fn, Future},
-    pin::Pin,
-    ptr::NonNull,
-    sync::atomic::{AtomicBool, Ordering},
-    task::{Context, Poll},
-};
-use eonix_hal::{
-    fpu::FpuState,
-    processor::{UserTLS, CPU},
-    traits::{
-        fault::Fault,
-        fpu::RawFpuState as _,
-        trap::{RawTrapContext, TrapReturn, TrapType},
-    },
-    trap::TrapContext,
-};
+use eonix_hal::fpu::FpuState;
+use eonix_hal::traits::fault::Fault;
+use eonix_hal::traits::fpu::RawFpuState as _;
+use eonix_hal::traits::trap::{RawTrapContext, TrapReturn, TrapType};
+use eonix_hal::trap::TrapContext;
+use eonix_log::println_warn;
 use eonix_mm::address::{Addr as _, VAddr};
 use eonix_sync::AsProofMut as _;
+use intrusive_collections::{intrusive_adapter, KeyAdapter, RBTreeAtomicLink};
 use pointers::BorrowedArc;
 use posix_types::signal::Signal;
 use stalloc::UnsafeStalloc;
+
+use super::signal::{RaiseResult, SignalList};
+use super::user_tls::UserTLS;
+use super::{stackful, Process, ProcessList, WaitType};
+use crate::kernel::interrupt::default_irq_handler;
+use crate::kernel::syscall::{syscall_handlers, SyscallHandler, User, UserMut};
+use crate::kernel::task::clone::CloneArgs;
+use crate::kernel::task::{futex_exit, CloneFlags, RobustListHead};
+use crate::kernel::timer::{should_reschedule, timer_interrupt};
+use crate::kernel::user::{UserPointer, UserPointerMut};
+use crate::kernel::vfs::filearray::FileArray;
+use crate::kernel::vfs::FsContext;
+use crate::prelude::*;
 
 #[eonix_percpu::define_percpu]
 static CURRENT_THREAD: Option<NonNull<Thread>> = None;
@@ -89,8 +84,44 @@ pub struct Thread {
     pub fpu_state: AtomicUniqueRefCell<FpuState>,
 
     pub dead: AtomicBool,
+    pub exit_status: Spin<Option<WaitType>>,
+
+    /// Link in the global thread list.
+    all_threads_link: RBTreeAtomicLink,
+
+    /// Link in the process's thread list.
+    process_threads_link: RBTreeAtomicLink,
 
     inner: Spin<ThreadInner>,
+}
+
+intrusive_adapter!(pub AllThreads = Arc<Thread>: Thread {
+    all_threads_link: RBTreeAtomicLink
+});
+intrusive_adapter!(pub ProcessThreads = Arc<Thread>: Thread {
+    process_threads_link: RBTreeAtomicLink
+});
+
+impl KeyAdapter<'_> for AllThreads {
+    type Key = u32;
+
+    fn get_key(
+        &self,
+        value: &'_ <Self::PointerOps as intrusive_collections::PointerOps>::Value,
+    ) -> Self::Key {
+        value.tid
+    }
+}
+
+impl KeyAdapter<'_> for ProcessThreads {
+    type Key = u32;
+
+    fn get_key(
+        &self,
+        value: &'_ <Self::PointerOps as intrusive_collections::PointerOps>::Value,
+    ) -> Self::Key {
+        value.tid
+    }
 }
 
 impl ThreadBuilder {
@@ -145,12 +176,16 @@ impl ThreadBuilder {
         self
     }
 
-    pub fn set_child_tid(mut self, set_child_tid: Option<UserMut<u32>>) -> Self {
+    pub fn set_child_tid(
+        mut self, set_child_tid: Option<UserMut<u32>>,
+    ) -> Self {
         self.set_child_tid = set_child_tid;
         self
     }
 
-    pub fn clear_child_tid(mut self, clear_child_tid: Option<UserMut<u32>>) -> Self {
+    pub fn clear_child_tid(
+        mut self, clear_child_tid: Option<UserMut<u32>>,
+    ) -> Self {
         self.clear_child_tid = clear_child_tid;
         self
     }
@@ -166,20 +201,18 @@ impl ThreadBuilder {
     }
 
     pub fn entry(mut self, entry: VAddr, stack_pointer: VAddr) -> Self {
-        let mut trap_ctx = TrapContext::new();
-        trap_ctx.set_user_mode(true);
+        let mut trap_ctx = TrapContext::new(true, true);
         trap_ctx.set_program_counter(entry.addr());
         trap_ctx.set_stack_pointer(stack_pointer.addr());
-        trap_ctx.set_interrupt_enabled(true);
 
         self.trap_ctx = Some(trap_ctx);
         self
     }
 
     /// Clone the thread from another thread.
-    pub fn clone_from(self, thread: &Thread, clone_args: &CloneArgs) -> KResult<Self> {
-        let inner = thread.inner.lock();
-
+    pub fn clone_from(
+        self, thread: &Thread, clone_args: &CloneArgs,
+    ) -> KResult<Self> {
         let mut trap_ctx = thread.trap_ctx.borrow().clone();
         trap_ctx.set_user_return_value(0);
 
@@ -205,18 +238,26 @@ impl ThreadBuilder {
             FileArray::new_cloned(&thread.files)
         };
 
-        let signal_list = if clone_args.flags.contains(CloneFlags::CLONE_SIGHAND) {
-            SignalList::new_shared(&thread.signal_list)
-        } else {
-            SignalList::new_cloned(&thread.signal_list)
-        };
+        let signal_list =
+            if clone_args.flags.contains(CloneFlags::CLONE_SIGHAND) {
+                SignalList::new_shared(&thread.signal_list)
+            } else {
+                SignalList::new_cloned(&thread.signal_list)
+            };
+
+        let mut tls = clone_args.tls.clone();
+
+        // Respect `clone_args`'s TLS if given. Otherwise, clone from the thread.
+        if tls.is_none() {
+            tls = thread.inner.lock().tls.clone();
+        }
 
         Ok(self
             .files(files)
             .fs_context(fs_context)
             .signal_list(signal_list)
-            .name(inner.name.clone())
-            .tls(clone_args.tls.clone())
+            .name(thread.inner.lock().name.clone())
+            .tls(tls)
             .set_child_tid(clone_args.set_tid_ptr)
             .clear_child_tid(clone_args.clear_tid_ptr)
             .trap_ctx(trap_ctx)
@@ -246,6 +287,9 @@ impl ThreadBuilder {
             trap_ctx: AtomicUniqueRefCell::new(trap_ctx),
             fpu_state: AtomicUniqueRefCell::new(fpu_state),
             dead: AtomicBool::new(false),
+            exit_status: Spin::new(None),
+            all_threads_link: RBTreeAtomicLink::new(),
+            process_threads_link: RBTreeAtomicLink::new(),
             inner: Spin::new(ThreadInner {
                 name,
                 tls: self.tls,
@@ -275,12 +319,9 @@ impl Thread {
         self.signal_list.raise(signal)
     }
 
-    /// # Safety
-    /// This function is unsafe because it accesses the `current_cpu()`, which needs
-    /// to be called in a preemption disabled context.
-    pub unsafe fn load_thread_area32(&self) {
+    pub fn activate_tls(&self) {
         if let Some(tls) = self.inner.lock().tls.as_ref() {
-            CPU::local().as_mut().set_tls32(tls);
+            tls.activate();
         }
     }
 
@@ -289,7 +330,9 @@ impl Thread {
         Ok(())
     }
 
-    pub fn set_robust_list(&self, robust_list_address: Option<User<RobustListHead>>) {
+    pub fn set_robust_list(
+        &self, robust_list_address: Option<User<RobustListHead>>,
+    ) {
         self.inner.lock().robust_list_address = robust_list_address;
     }
 
@@ -321,10 +364,7 @@ impl Thread {
     }
 
     pub async fn handle_syscall(
-        &self,
-        thd_alloc: ThreadAlloc<'_>,
-        no: usize,
-        args: [usize; 6],
+        &self, thd_alloc: ThreadAlloc<'_>, no: usize, args: [usize; 6],
     ) -> Option<usize> {
         match syscall_handlers().get(no) {
             Some(Some(SyscallHandler {
@@ -340,18 +380,26 @@ impl Thread {
         }
     }
 
-    pub async fn force_kill(&self, signal: Signal) {
-        let mut proc_list = ProcessList::get().write().await;
-        unsafe {
-            // SAFETY: Preemption is disabled.
-            proc_list
-                .do_exit(self, WaitType::Signaled(signal), false)
-                .await;
+    pub fn exit(&self, exit_status: WaitType) {
+        {
+            let mut self_status = self.exit_status.lock();
+            if self_status.is_some() {
+                // Someone has got here before us.
+                return;
+            }
+
+            *self_status = Some(exit_status);
         }
+
+        self.dead.store(true, Ordering::Release);
+    }
+
+    pub fn force_kill(&self, signal: Signal) {
+        self.exit(WaitType::Signaled(signal));
     }
 
     pub fn is_dead(&self) -> bool {
-        self.dead.load(Ordering::SeqCst)
+        self.dead.load(Ordering::Acquire)
     }
 
     async fn real_run(&self) {
@@ -371,7 +419,10 @@ impl Thread {
         while !self.is_dead() {
             if self.signal_list.has_pending_signal() {
                 self.signal_list
-                    .handle(&mut self.trap_ctx.borrow(), &mut self.fpu_state.borrow())
+                    .handle(
+                        &mut self.trap_ctx.borrow(),
+                        &mut self.fpu_state.borrow(),
+                    )
                     .await;
             }
 
@@ -394,8 +445,14 @@ impl Thread {
                     error_code,
                     address: addr,
                 }) => {
+                    if self.is_dead() {
+                        return;
+                    }
+
                     let mms = &self.process.mm_list;
-                    if let Err(signal) = mms.handle_user_page_fault(addr, error_code).await {
+                    if let Err(signal) =
+                        mms.handle_user_page_fault(addr, error_code).await
+                    {
                         self.signal_list.raise(signal);
                     }
                 }
@@ -405,8 +462,12 @@ impl Thread {
                 TrapType::Fault(Fault::InvalidOp) => {
                     self.signal_list.raise(Signal::SIGILL);
                 }
-                TrapType::Fault(Fault::Unknown(_)) => unimplemented!("Unhandled fault"),
-                TrapType::Breakpoint => unimplemented!("Breakpoint in user space"),
+                TrapType::Fault(Fault::Unknown(_)) => {
+                    unimplemented!("Unhandled fault")
+                }
+                TrapType::Breakpoint => {
+                    unimplemented!("Breakpoint in user space")
+                }
                 TrapType::Irq { callback } => callback(default_irq_handler),
                 TrapType::Timer { callback } => {
                     callback(timer_interrupt);
@@ -416,11 +477,20 @@ impl Thread {
                     }
                 }
                 TrapType::Syscall { no, args } => {
-                    if let Some(retval) = self.handle_syscall(thd_alloc, no, args).await {
+                    if self.is_dead() {
+                        return;
+                    }
+
+                    if let Some(retval) =
+                        self.handle_syscall(thd_alloc, no, args).await
+                    {
                         let mut trap_ctx = self.trap_ctx.borrow();
                         trap_ctx.set_user_return_value(retval);
 
-                        #[cfg(any(target_arch = "riscv64", target_arch = "loongarch64"))]
+                        #[cfg(any(
+                            target_arch = "riscv64",
+                            target_arch = "loongarch64"
+                        ))]
                         {
                             let pc = trap_ctx.get_program_counter();
                             trap_ctx.set_program_counter(pc + 4);
@@ -442,14 +512,7 @@ impl Thread {
 
             CURRENT_THREAD.set(NonNull::new(&raw const *self as *mut _));
 
-            unsafe {
-                eonix_preempt::disable();
-
-                // SAFETY: Preemption is disabled.
-                self.load_thread_area32();
-
-                eonix_preempt::enable();
-            }
+            self.activate_tls();
 
             let result = future.as_mut().poll(cx);
 
@@ -463,14 +526,26 @@ impl Thread {
     }
 
     pub fn run(self: Arc<Thread>) -> impl Future<Output = ()> + Send + 'static {
-        async move { self.contexted(stackful(self.real_run())).await }
+        async move {
+            self.contexted(async {
+                stackful(self.real_run()).await;
+
+                futex_exit(&self).await;
+            })
+            .await;
+
+            assert!(
+                self.is_dead(),
+                "`real_run` returned before the thread die?"
+            );
+            ProcessList::send_to_reaper(self);
+        }
     }
 }
 
 unsafe impl Allocator for ThreadAlloc<'_> {
     fn allocate(
-        &self,
-        layout: core::alloc::Layout,
+        &self, layout: core::alloc::Layout,
     ) -> Result<NonNull<[u8]>, alloc::alloc::AllocError> {
         self.0.allocate(layout)
     }
@@ -488,7 +563,9 @@ pub async fn yield_now() {
     impl Future for Yield {
         type Output = ();
 
-        fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        fn poll(
+            mut self: Pin<&mut Self>, cx: &mut Context<'_>,
+        ) -> Poll<Self::Output> {
             if self.as_mut().yielded {
                 Poll::Ready(())
             } else {

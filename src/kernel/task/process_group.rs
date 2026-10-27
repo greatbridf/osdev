@@ -1,87 +1,121 @@
-use super::{Process, ProcessList, Session};
-use alloc::{
-    collections::btree_map::BTreeMap,
-    sync::{Arc, Weak},
+use alloc::sync::{Arc, Weak};
+
+use eonix_sync::{AsProofMut, Locked, Proof, ProofMut};
+use intrusive_collections::{
+    intrusive_adapter, KeyAdapter, RBTree, RBTreeAtomicLink,
 };
-use eonix_sync::{Locked, Proof, ProofMut};
 use posix_types::signal::Signal;
 
-pub struct ProcessGroupBuilder {
-    pgid: Option<u32>,
-    leader: Option<Weak<Process>>,
-    session: Option<Arc<Session>>,
-}
+use super::process::GroupProcs;
+use super::{Process, ProcessList, Session};
 
-#[derive(Debug)]
 pub struct ProcessGroup {
     pub pgid: u32,
-    pub _leader: Weak<Process>,
-    pub session: Weak<Session>,
+    pub leader: Weak<Process>,
+    pub session: Arc<Session>,
 
-    pub processes: Locked<BTreeMap<u32, Weak<Process>>, ProcessList>,
+    pub procs: Locked<RBTree<GroupProcs>, ProcessList>,
+
+    all_groups_link: RBTreeAtomicLink,
+    session_groups_link: RBTreeAtomicLink,
 }
 
-impl ProcessGroupBuilder {
-    pub const fn new() -> Self {
-        Self {
-            pgid: None,
-            leader: None,
-            session: None,
-        }
+intrusive_adapter!(pub AllGroups = Arc<ProcessGroup>: ProcessGroup {
+    all_groups_link: RBTreeAtomicLink
+});
+intrusive_adapter!(pub SessionGroups = Arc<ProcessGroup>: ProcessGroup {
+    session_groups_link: RBTreeAtomicLink
+});
+
+impl KeyAdapter<'_> for AllGroups {
+    type Key = u32;
+
+    fn get_key(
+        &self,
+        value: &'_ <Self::PointerOps as intrusive_collections::PointerOps>::Value,
+    ) -> Self::Key {
+        value.pgid
     }
+}
 
-    pub fn leader(mut self, leader: &Arc<Process>) -> Self {
-        self.pgid = Some(leader.pid);
-        self.leader = Some(Arc::downgrade(leader));
-        self
-    }
+impl KeyAdapter<'_> for SessionGroups {
+    type Key = u32;
 
-    pub fn session(mut self, session: Arc<Session>) -> Self {
-        self.session = Some(session);
-        self
-    }
-
-    pub fn build(self, process_list: &mut ProcessList) -> Arc<ProcessGroup> {
-        let pgid = self.pgid.expect("PGID is not set");
-        let leader = self.leader.expect("Leader is not set");
-        let session = self.session.expect("Session is not set");
-
-        let pgroup = Arc::new(ProcessGroup {
-            pgid,
-            session: Arc::downgrade(&session),
-            processes: Locked::new(BTreeMap::from([(pgid, leader.clone())]), process_list),
-            _leader: leader,
-        });
-
-        process_list.add_pgroup(&pgroup);
-        session.add_member(process_list, &pgroup);
-        pgroup
+    fn get_key(
+        &self,
+        value: &'_ <Self::PointerOps as intrusive_collections::PointerOps>::Value,
+    ) -> Self::Key {
+        value.pgid
     }
 }
 
 impl ProcessGroup {
-    pub(super) fn add_member(&self, process: &Arc<Process>, procs: ProofMut<'_, ProcessList>) {
-        assert!(self
-            .processes
-            .access_mut(procs)
-            .insert(process.pid, Arc::downgrade(process))
-            .is_none());
+    /// Create a pgroup and add it to the global pgroup list.
+    /// Add the pgroup to the session.
+    ///
+    /// # Panics
+    /// Panics if `leader` is already in some pgroup.
+    pub fn new(
+        leader: &Arc<Process>,
+        session: &Arc<Session>,
+        procs: &mut ProcessList,
+    ) -> Arc<Self> {
+        let pgid = leader.pid;
+        let pgroup_procs = {
+            let mut list = RBTree::new(GroupProcs::new());
+            list.insert(leader.clone());
+            list
+        };
+
+        let pgroup = Arc::new(ProcessGroup {
+            pgid,
+            session: session.clone(),
+            procs: Locked::new(pgroup_procs, procs),
+            leader: Arc::downgrade(leader),
+            all_groups_link: RBTreeAtomicLink::new(),
+            session_groups_link: RBTreeAtomicLink::new(),
+        });
+
+        procs.add_pgroup(&pgroup);
+        session.add_member(&pgroup, procs.prove_mut());
+        pgroup
     }
 
-    pub(super) fn remove_member(&self, pid: u32, procs: ProofMut<'_, ProcessList>) {
-        let processes = self.processes.access_mut(procs);
-        assert!(processes.remove(&pid).is_some());
-        if processes.is_empty() {
-            self.session
-                .upgrade()
-                .unwrap()
-                .remove_member(self.pgid, procs);
+    /// Add `process` to the pgroup.
+    ///
+    /// # Panics
+    /// Panics if `process` is already in some pgroup or the pgroup is dead.
+    pub fn add_member(
+        &self,
+        process: &Arc<Process>,
+        procs: ProofMut<'_, ProcessList>,
+    ) {
+        assert!(self.all_groups_link.is_linked(), "Dead pgroup");
+        self.procs.access_mut(procs).insert(process.clone());
+    }
+
+    pub fn remove_member(
+        self: &Arc<Self>,
+        process: &Arc<Process>,
+        procs: &mut ProcessList,
+    ) {
+        let members = self.procs.access_mut(procs.prove_mut());
+        assert!(
+            members.find_mut(&process.pid).remove().is_some(),
+            "Not a member"
+        );
+
+        if !members.is_empty() {
+            return;
         }
+
+        self.session.remove_member(self, procs);
+        procs.remove_pgroup(self);
     }
 
     pub fn raise(&self, signal: Signal, procs: Proof<'_, ProcessList>) {
-        let processes = self.processes.access(procs);
-        for process in processes.values().map(|p| p.upgrade().unwrap()) {
+        let members = self.procs.access(procs);
+        for process in members.iter() {
             process.raise(signal, procs);
         }
     }

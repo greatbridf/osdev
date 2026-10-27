@@ -1,19 +1,19 @@
-use crate::{
-    executor::OutputHandle,
-    ready_queue::{local_rq, ReadyQueue},
-    task::{Task, TaskAdapter, TaskHandle, TaskState},
-};
-use alloc::{sync::Arc, task::Wake};
-use core::{
-    ops::{Deref, DerefMut},
-    ptr::NonNull,
-    task::{Context, Poll, Waker},
-};
+use alloc::sync::Arc;
+use alloc::task::Wake;
+use core::hint::assert_unchecked;
+use core::ops::{Deref, DerefMut};
+use core::ptr::NonNull;
+use core::task::{Context, Poll, Waker};
+
 use eonix_hal::processor::halt;
 use eonix_log::println_trace;
 use eonix_sync::{LazyLock, Spin, SpinIrq as _};
 use intrusive_collections::RBTree;
 use pointers::BorrowedArc;
+
+use crate::executor::OutputHandle;
+use crate::ready_queue::{local_rq, ReadyQueue};
+use crate::task::{Task, TaskAdapter, TaskHandle, TaskState};
 
 #[eonix_percpu::define_percpu]
 static CURRENT_TASK: Option<NonNull<Task>> = None;
@@ -32,12 +32,29 @@ where
 impl Task {
     pub fn current<'a>() -> BorrowedArc<'a, Task> {
         unsafe {
-            // SAFETY:
-            // We should never "inspect" a change in `current`.
-            // The change of `CURRENT` will only happen in the scheduler. And if we are preempted,
-            // when we DO return, the `CURRENT` will be the same and remain valid.
-            BorrowedArc::from_raw(CURRENT_TASK.get().expect("Current task should be present"))
+            // SAFETY: We should never "inspect" a change in `current`:
+            // The change of `CURRENT` will only happen in the scheduler.
+            // And if we are preempted outside of the scheduler's context, when
+            // we return, `CURRENT` will be the same and remain valid.
+            BorrowedArc::from_raw(
+                CURRENT_TASK.get().expect("Current task should be present"),
+            )
         }
+    }
+
+    #[inline(always)]
+    fn _swap_current(current: Option<Arc<Task>>) -> Option<Arc<Task>> {
+        let current_ptr = current.map(|arc| unsafe {
+            // SAFETY: `into_raw` always returns a valid pointer.
+            NonNull::new_unchecked(Arc::into_raw(arc) as *mut _)
+        });
+
+        let old = CURRENT_TASK.swap(current_ptr);
+
+        old.map(|ptr| unsafe {
+            // SAFETY: The pointer always comes from Arc::into_raw
+            Arc::from_raw(ptr.as_ptr())
+        })
     }
 }
 
@@ -93,17 +110,10 @@ impl Runtime {
         }
     }
 
-    fn current(&self) -> Option<BorrowedArc<Task>> {
-        CURRENT_TASK
-            .get()
-            .map(|ptr| unsafe { BorrowedArc::from_raw(ptr) })
-    }
-
-    fn remove_and_enqueue_current(&self, rq: &mut impl DerefMut<Target = dyn ReadyQueue>) {
-        let Some(current) = CURRENT_TASK
-            .swap(None)
-            .map(|cur| unsafe { Arc::from_raw(cur.as_ptr()) })
-        else {
+    fn remove_and_enqueue_current(
+        &self, rq: &mut impl DerefMut<Target = dyn ReadyQueue>,
+    ) {
+        let Some(current) = Task::_swap_current(None) else {
             return;
         };
 
@@ -116,7 +126,7 @@ impl Runtime {
         }) {
             Ok(TaskState::READY_RUNNING) => {
                 println_trace!(
-                    "trace_scheduler",
+                    feat: "trace_scheduler",
                     "Re-enqueueing task {:?} (CPU{})",
                     current.id,
                     eonix_hal::processor::CPU::local().cpuid(),
@@ -126,7 +136,7 @@ impl Runtime {
             }
             Ok(_) => {
                 println_trace!(
-                    "trace_scheduler",
+                    feat: "trace_scheduler",
                     "Current task {:?} (CPU{}) is blocked, not re-enqueueing",
                     current.id,
                     eonix_hal::processor::CPU::local().cpuid(),
@@ -136,7 +146,9 @@ impl Runtime {
         }
     }
 
-    pub fn block_till_woken(set_waker: impl FnOnce(&Waker)) -> impl Future<Output = ()> {
+    pub fn block_till_woken(
+        set_waker: impl FnOnce(&Waker),
+    ) -> impl Future<Output = ()> {
         struct BlockTillWoken<F: FnOnce(&Waker)> {
             set_waker: Option<F>,
             slept: bool,
@@ -145,7 +157,9 @@ impl Runtime {
         impl<F: FnOnce(&Waker)> Future for BlockTillWoken<F> {
             type Output = ();
 
-            fn poll(self: core::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
+            fn poll(
+                self: core::pin::Pin<&mut Self>, cx: &mut Context<'_>,
+            ) -> Poll<()> {
                 if self.slept {
                     Poll::Ready(())
                 } else {
@@ -184,7 +198,7 @@ impl Runtime {
             };
 
             println_trace!(
-                "trace_scheduler",
+                feat: "trace_scheduler",
                 "Switching to task {:?} (CPU{})",
                 next.id,
                 eonix_hal::processor::CPU::local().cpuid(),
@@ -197,8 +211,10 @@ impl Runtime {
                 "Next task should be in READY state"
             );
 
+            let _old_current = Task::_swap_current(Some(next));
+            debug_assert!(_old_current.is_none());
             unsafe {
-                CURRENT_TASK.set(Some(NonNull::new_unchecked(Arc::into_raw(next) as *mut _)));
+                assert_unchecked(_old_current.is_none());
             }
 
             drop(rq);
@@ -212,14 +228,14 @@ impl Runtime {
                 );
 
                 println_trace!(
-                    "trace_scheduler",
+                    feat: "trace_scheduler",
                     "Task {:?} finished execution, removing...",
                     Task::current().id,
                 );
 
                 self.remove_task(&Task::current());
 
-                CURRENT_TASK.set(None);
+                Task::_swap_current(None);
             }
         }
     }

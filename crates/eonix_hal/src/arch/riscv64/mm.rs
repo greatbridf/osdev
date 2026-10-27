@@ -1,31 +1,26 @@
-use super::{
-    config::mm::{PHYS_MAP_VIRT, ROOT_PAGE_TABLE_PFN},
-    fdt::{FdtExt, FDT},
+use core::marker::PhantomData;
+use core::ptr::NonNull;
+
+use eonix_hal_traits::mm::Memory;
+use eonix_mm::address::{Addr as _, AddrOps, PAddr, PRange, PhysAccess, VAddr};
+use eonix_mm::page_table::{
+    PageAttribute, PageTable, PageTableLevel, PagingMode, RawAttribute,
+    RawPageTable, TableAttribute, PTE,
 };
-use crate::{arch::riscv64::config::mm::KIMAGE_OFFSET, traits::mm::Memory};
-use core::{marker::PhantomData, ptr::NonNull};
-use eonix_mm::{
-    address::{Addr as _, AddrOps, PAddr, PRange, PhysAccess, VAddr},
-    page_table::{
-        PageAttribute, PageTable, PageTableLevel, PagingMode, RawAttribute, RawPageTable,
-        TableAttribute, PTE,
-    },
-    paging::{NoAlloc, Page, PageBlock, PFN},
-};
+use eonix_mm::paging::{BasicFolio, Folio, PageAccess, PageBlock, PFN};
 use eonix_sync_base::LazyLock;
 use fdt::Fdt;
-use riscv::{
-    asm::{sfence_vma, sfence_vma_all},
-    register::satp,
-};
+use riscv::asm::{sfence_vma, sfence_vma_all};
+use riscv::register::satp;
 
-pub const PAGE_TABLE_BASE: PFN = PFN::from_val(ROOT_PAGE_TABLE_PFN);
-pub static GLOBAL_PAGE_TABLE: LazyLock<PageTable<ArchPagingMode, NoAlloc, ArchPhysAccess>> =
-    LazyLock::new(|| unsafe {
-        Page::with_raw(PAGE_TABLE_BASE, |root_table_page| {
-            PageTable::with_root_table(root_table_page.clone())
-        })
-    });
+use super::config::mm::{PHYS_MAP_VIRT, ROOT_PAGE_TABLE_PFN};
+use super::fdt::{FdtExt, FDT};
+use crate::arch::riscv64::config::mm::KIMAGE_OFFSET;
+use crate::extern_symbol_addr;
+use crate::mm::BasicPageAlloc;
+
+const PAGE_TABLE_BASE: PFN = PFN::from_val(ROOT_PAGE_TABLE_PFN);
+pub const GLOBAL_PAGE_TABLE: BasicFolio = BasicFolio::new(PAGE_TABLE_BASE, 0);
 
 pub const PA_V: u64 = 0b1 << 0;
 pub const PA_R: u64 = 0b1 << 1;
@@ -60,6 +55,9 @@ pub struct PagingModeSv48;
 pub struct ArchPhysAccess;
 
 pub struct ArchMemory;
+
+#[derive(Clone)]
+pub struct PageAccessImpl;
 
 impl PTE for PTE64 {
     type Attr = PageAttribute64;
@@ -118,7 +116,9 @@ impl RawAttribute for PageAttribute64 {
             table_attr |= TableAttribute::PRESENT;
         }
 
-        if table_attr.contains(TableAttribute::PRESENT) && self.0 & (PA_R | PA_W | PA_X) != 0 {
+        if table_attr.contains(TableAttribute::PRESENT)
+            && self.0 & (PA_R | PA_W | PA_X) != 0
+        {
             return None;
         }
 
@@ -142,7 +142,9 @@ impl RawAttribute for PageAttribute64 {
             page_attr |= PageAttribute::PRESENT;
         }
 
-        if page_attr.contains(PageAttribute::PRESENT) && (self.0 & (PA_R | PA_W | PA_X) == 0) {
+        if page_attr.contains(PageAttribute::PRESENT)
+            && (self.0 & (PA_R | PA_W | PA_X) == 0)
+        {
             return None;
         }
 
@@ -261,69 +263,23 @@ impl PhysAccess for ArchPhysAccess {
     }
 }
 
+impl PageAccess for PageAccessImpl {
+    unsafe fn get_ptr_for_pfn(&self, pfn: PFN) -> NonNull<PageBlock> {
+        unsafe { ArchPhysAccess::as_ptr(PAddr::from(pfn)) }
+    }
+}
+
 impl Memory for ArchMemory {
     fn present_ram() -> impl Iterator<Item = PRange> {
         FDT.present_ram()
     }
 
     fn free_ram() -> impl Iterator<Item = PRange> {
-        unsafe extern "C" {
-            fn __kernel_start();
-            fn __kernel_end();
-        }
-
-        let kernel_end = PAddr::from(__kernel_end as usize - KIMAGE_OFFSET);
-        let paddr_after_kimage_aligned = kernel_end.ceil_to(0x200000);
-
-        core::iter::once(PRange::new(kernel_end, paddr_after_kimage_aligned)).chain(
-            Self::present_ram()
-                .filter(move |range| range.end() > paddr_after_kimage_aligned)
-                .map(move |range| {
-                    if range.start() < paddr_after_kimage_aligned {
-                        let (_, right) = range.split_at(paddr_after_kimage_aligned);
-                        right
-                    } else {
-                        range
-                    }
-                }),
-        )
+        FDT.free_ram()
     }
 }
 
 pub type DefaultPagingMode = PagingModeSv48;
-
-pub trait PresentRam: Iterator<Item = PRange> {}
-
-pub trait FreeRam: PresentRam {
-    fn free_ram(self) -> impl Iterator<Item = PRange>;
-}
-
-impl<T> FreeRam for T
-where
-    T: PresentRam,
-{
-    fn free_ram(self) -> impl Iterator<Item = PRange> {
-        unsafe extern "C" {
-            fn __kernel_start();
-            fn __kernel_end();
-        }
-
-        let kernel_end = PAddr::from(__kernel_end as usize - KIMAGE_OFFSET);
-        let paddr_after_kimage_aligned = kernel_end.ceil_to(0x200000);
-
-        core::iter::once(PRange::new(kernel_end, paddr_after_kimage_aligned)).chain(
-            self.filter(move |range| range.end() > paddr_after_kimage_aligned)
-                .map(move |range| {
-                    if range.start() < paddr_after_kimage_aligned {
-                        let (_, right) = range.split_at(paddr_after_kimage_aligned);
-                        right
-                    } else {
-                        range
-                    }
-                }),
-        )
-    }
-}
 
 #[inline(always)]
 pub fn flush_tlb(vaddr: usize) {

@@ -76,6 +76,8 @@ impl Ticks {
 }
 
 impl Instant {
+    pub const UNIX_EPOCH: Self = Self::default();
+
     pub const fn default() -> Self {
         Instant {
             secs_since_epoch: 0,

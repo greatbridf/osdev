@@ -2,13 +2,11 @@
 
 mod guard;
 
-use core::{
-    cell::UnsafeCell,
-    marker::PhantomData,
-    sync::atomic::{AtomicBool, Ordering},
-};
-use eonix_sync_base::{Relax, SpinRelax};
+use core::cell::UnsafeCell;
+use core::marker::PhantomData;
+use core::sync::atomic::{AtomicBool, Ordering};
 
+use eonix_sync_base::{Relax, SpinRelax};
 pub use guard::{SpinGuard, UnlockedSpinGuard};
 
 pub trait SpinContext {
@@ -84,7 +82,7 @@ where
     T: ?Sized,
     R: Relax,
 {
-    pub fn lock_with_context<C>(&self, context: C) -> SpinGuard<T, C, R>
+    pub fn lock_with_context<C>(&self, context: C) -> SpinGuard<'_, T, C, R>
     where
         C: SpinContext,
     {
@@ -100,7 +98,7 @@ where
         )
     }
 
-    pub fn lock(&self) -> SpinGuard<T, DisablePreemption, R> {
+    pub fn lock(&self) -> SpinGuard<'_, T, DisablePreemption, R> {
         self.lock_with_context(DisablePreemption::save())
     }
 

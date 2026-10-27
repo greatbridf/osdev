@@ -2,8 +2,8 @@ mod io;
 
 use crate::{
     kernel::{
-        block::make_device, console::set_console, constants::EIO, interrupt::register_irq_handler,
-        CharDevice, CharDeviceType, Terminal, TerminalDevice,
+        console::set_console, constants::EIO, interrupt::register_irq_handler,
+        vfs::types::DeviceId, CharDevice, CharDeviceType, Terminal, TerminalDevice,
     },
     prelude::*,
 };
@@ -167,7 +167,7 @@ impl Serial {
         eonix_log::set_console(terminal.clone());
 
         CharDevice::register(
-            make_device(4, 64 + port.id),
+            DeviceId::new(4, 64 + port.id as u16),
             port.name.clone(),
             CharDeviceType::Terminal(terminal),
         )?;
@@ -249,7 +249,9 @@ pub fn init() -> KResult<()> {
 
         let serial = Serial::new(0, port)?;
         serial.register_as_char_device(
-            // 2 or 4 here, let's try 2 first!
+            // UART0 is wired to PCH-PIC line 2 on the QEMU virt machine
+            // (`interrupts = <2 4>` in the device tree). The HAL routes it
+            // to an EIOINTC vector and delivers it as an external IRQ.
             2,
         )?;
     }

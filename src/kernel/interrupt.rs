@@ -1,14 +1,16 @@
-use super::mem::handle_kernel_page_fault;
-use super::task::block_on;
-use super::timer::timer_interrupt;
-use crate::kernel::constants::EINVAL;
-use crate::prelude::*;
 use alloc::sync::Arc;
+
 use eonix_hal::traits::fault::Fault;
 use eonix_hal::traits::trap::{RawTrapContext, TrapType};
 use eonix_hal::trap::TrapContext;
 use eonix_mm::address::{Addr as _, VAddr};
 use eonix_sync::SpinIrq as _;
+
+use super::mem::handle_kernel_page_fault;
+use super::task::block_on;
+use super::timer::timer_interrupt;
+use crate::kernel::constants::EINVAL;
+use crate::prelude::*;
 
 static IRQ_HANDLERS: Spin<[Vec<Arc<dyn Fn() + Send + Sync>>; 16]> =
     Spin::new([const { Vec::new() }; 16]);
@@ -17,7 +19,7 @@ pub fn default_irq_handler(irqno: usize) {
     assert!(irqno < 16);
 
     {
-        let handlers = IRQ_HANDLERS.lock();
+        let handlers = IRQ_HANDLERS.lock_irq();
 
         for handler in handlers[irqno].iter() {
             handler();
@@ -37,7 +39,9 @@ pub fn default_fault_handler(fault_type: Fault, trap_ctx: &mut TrapContext) {
         } => {
             let fault_pc = VAddr::from(trap_ctx.get_program_counter());
 
-            if let Some(new_pc) = block_on(handle_kernel_page_fault(fault_pc, vaddr, error_code)) {
+            if let Some(new_pc) =
+                block_on(handle_kernel_page_fault(fault_pc, vaddr, error_code))
+            {
                 trap_ctx.set_program_counter(new_pc.addr());
             }
         }
@@ -48,7 +52,9 @@ pub fn default_fault_handler(fault_type: Fault, trap_ctx: &mut TrapContext) {
 #[eonix_hal::default_trap_handler]
 pub fn interrupt_handler(trap_ctx: &mut TrapContext) {
     match trap_ctx.trap_type() {
-        TrapType::Syscall { no, .. } => unreachable!("Syscall {} in kernel space.", no),
+        TrapType::Syscall { no, .. } => {
+            unreachable!("Syscall {} in kernel space.", no)
+        }
         TrapType::Breakpoint => unreachable!("Breakpoint in kernel space."),
         TrapType::Fault(fault) => default_fault_handler(fault, trap_ctx),
         TrapType::Irq { callback } => callback(default_irq_handler),
@@ -65,5 +71,12 @@ where
     }
 
     IRQ_HANDLERS.lock_irq()[irqno as usize].push(Arc::new(handler));
+
+    // On LoongArch the IRQ lines are masked by default and must be unmasked
+    // once a handler is available, so that an interrupt cannot be delivered
+    // before anyone can service the device.
+    #[cfg(target_arch = "loongarch64")]
+    eonix_hal::arch_exported::interrupt::enable_irq(irqno as usize);
+
     Ok(())
 }

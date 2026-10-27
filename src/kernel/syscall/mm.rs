@@ -1,21 +1,14 @@
-use super::FromSyscallArg;
-use crate::fs::shm::{gen_shm_id, ShmFlags, IPC_PRIVATE, SHM_MANAGER};
-use crate::kernel::constants::{EBADF, EEXIST, EINVAL, ENOENT};
-use crate::kernel::mem::FileMapping;
-use crate::kernel::task::Thread;
-use crate::kernel::vfs::filearray::FD;
-use crate::kernel::vfs::inode::Mode;
-use crate::{
-    kernel::{
-        constants::{UserMmapFlags, UserMmapProtocol},
-        mem::{Mapping, Permission},
-    },
-    prelude::*,
-};
 use align_ext::AlignExt;
 use eonix_mm::address::{Addr as _, AddrOps as _, VAddr};
 use eonix_mm::paging::PAGE_SIZE;
 use posix_types::syscall_no::*;
+
+use super::FromSyscallArg;
+use crate::kernel::constants::{UserMmapFlags, UserMmapProtocol, EBADF, EINVAL};
+use crate::kernel::mem::{FileMapping, Mapping, Permission};
+use crate::kernel::task::Thread;
+use crate::kernel::vfs::filearray::FD;
+use crate::prelude::*;
 
 impl FromSyscallArg for UserMmapProtocol {
     fn from_arg(value: usize) -> UserMmapProtocol {
@@ -66,13 +59,7 @@ async fn do_mmap2(
         if !is_shared {
             Mapping::Anonymous
         } else {
-            // The mode is unimportant here, since we are checking prot in mm_area.
-            let shared_area = SHM_MANAGER.lock().await.create_shared_area(
-                len,
-                thread.process.pid,
-                Mode::REG.perm(0o777),
-            );
-            Mapping::File(FileMapping::new(shared_area.area.clone(), 0, len))
+            unimplemented!("mmap MAP_ANONYMOUS | MAP_SHARED");
         }
     } else {
         let file = thread
@@ -82,7 +69,7 @@ async fn do_mmap2(
             .get_inode()?
             .ok_or(EBADF)?;
 
-        Mapping::File(FileMapping::new(file, pgoffset, len))
+        Mapping::File(FileMapping::new(file.get_page_cache(), pgoffset, len))
     };
 
     let permission = Permission {
@@ -177,116 +164,6 @@ async fn mprotect(addr: usize, len: usize, prot: UserMmapProtocol) -> KResult<()
             },
         )
         .await
-}
-
-#[eonix_macros::define_syscall(SYS_SHMGET)]
-async fn shmget(key: usize, size: usize, shmflg: u32) -> KResult<u32> {
-    let size = size.align_up(PAGE_SIZE);
-
-    let mut shm_manager = SHM_MANAGER.lock().await;
-    let shmid = gen_shm_id(key)?;
-
-    let mode = Mode::REG.perm(shmflg);
-    let shmflg = ShmFlags::from_bits_truncate(shmflg);
-
-    if key == IPC_PRIVATE {
-        let new_shm = shm_manager.create_shared_area(size, thread.process.pid, mode);
-        shm_manager.insert(shmid, new_shm);
-        return Ok(shmid);
-    }
-
-    if let Some(_) = shm_manager.get(shmid) {
-        if shmflg.contains(ShmFlags::IPC_CREAT | ShmFlags::IPC_EXCL) {
-            return Err(EEXIST);
-        }
-
-        return Ok(shmid);
-    }
-
-    if shmflg.contains(ShmFlags::IPC_CREAT) {
-        let new_shm = shm_manager.create_shared_area(size, thread.process.pid, mode);
-        shm_manager.insert(shmid, new_shm);
-        return Ok(shmid);
-    }
-
-    Err(ENOENT)
-}
-
-#[eonix_macros::define_syscall(SYS_SHMAT)]
-async fn shmat(shmid: u32, addr: usize, shmflg: u32) -> KResult<usize> {
-    let mm_list = &thread.process.mm_list;
-    let shm_manager = SHM_MANAGER.lock().await;
-    let shm_area = shm_manager.get(shmid).ok_or(EINVAL)?;
-
-    // Why is this not used?
-    let _mode = shmflg & 0o777;
-    let shmflg = ShmFlags::from_bits_truncate(shmflg);
-
-    let mut permission = Permission {
-        read: true,
-        write: true,
-        execute: false,
-    };
-
-    if shmflg.contains(ShmFlags::SHM_EXEC) {
-        permission.execute = true;
-    }
-    if shmflg.contains(ShmFlags::SHM_RDONLY) {
-        permission.write = false;
-    }
-
-    let size = shm_area.shmid_ds.shm_segsz;
-
-    let mapping = Mapping::File(FileMapping {
-        file: shm_area.area.clone(),
-        offset: 0,
-        length: size,
-    });
-
-    let addr = if addr != 0 {
-        if addr % PAGE_SIZE != 0 && !shmflg.contains(ShmFlags::SHM_RND) {
-            return Err(EINVAL);
-        }
-        let addr = VAddr::from(addr.align_down(PAGE_SIZE));
-        mm_list
-            .mmap_fixed(addr, size, mapping, permission, true)
-            .await
-    } else {
-        mm_list
-            .mmap_hint(VAddr::NULL, size, mapping, permission, true)
-            .await
-    }?;
-
-    thread.process.shm_areas.lock().insert(addr, size);
-
-    Ok(addr.addr())
-}
-
-#[eonix_macros::define_syscall(SYS_SHMDT)]
-async fn shmdt(addr: usize) -> KResult<()> {
-    let addr = VAddr::from(addr);
-
-    let size = {
-        let mut shm_areas = thread.process.shm_areas.lock();
-        let size = *shm_areas.get(&addr).ok_or(EINVAL)?;
-        shm_areas.remove(&addr);
-
-        size
-    };
-
-    thread.process.mm_list.unmap(addr, size).await
-}
-
-#[eonix_macros::define_syscall(SYS_SHMCTL)]
-async fn shmctl(_shmid: u32, _op: i32, _shmid_ds: usize) -> KResult<usize> {
-    // TODO
-    Ok(0)
-}
-
-#[eonix_macros::define_syscall(SYS_MEMBARRIER)]
-async fn membarrier(_cmd: usize, _flags: usize) -> KResult<()> {
-    // TODO
-    Ok(())
 }
 
 pub fn keep_alive() {}

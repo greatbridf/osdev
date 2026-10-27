@@ -1,15 +1,22 @@
-use super::page_alloc::RawPagePtr;
-use super::{AsMemoryBlock, GlobalPageAlloc, Page};
+use alloc::format;
+use alloc::sync::Arc;
 use core::alloc::{GlobalAlloc, Layout};
 use core::ptr::NonNull;
-use eonix_hal::mm::ArchPhysAccess;
-use eonix_mm::address::PhysAccess;
-use eonix_mm::paging::{PAGE_SIZE_BITS, PFN};
-use eonix_sync::LazyLock;
-use slab_allocator::SlabAllocator;
 
-static SLAB_ALLOCATOR: LazyLock<SlabAllocator<RawPagePtr, GlobalPageAlloc, 9>> =
-    LazyLock::new(|| SlabAllocator::new_in(GlobalPageAlloc));
+use eonix_hal::mm::ArchPhysAccess;
+use eonix_macros::define_late_init;
+use eonix_mm::address::PhysAccess;
+use eonix_mm::paging::{Folio as _, PAGE_SIZE_BITS, PFN};
+use eonix_sync::LazyLock;
+use slab_allocator::SlabAlloc;
+
+use super::folio::Folio;
+use super::GlobalPageAlloc;
+use crate::fs::procfs::populate_root;
+use crate::io::buf_writeln;
+
+static SLAB_ALLOCATOR: LazyLock<SlabAlloc<GlobalPageAlloc, 9>> =
+    LazyLock::new(|| SlabAlloc::new_in(GlobalPageAlloc));
 
 struct Allocator;
 
@@ -17,37 +24,65 @@ unsafe impl GlobalAlloc for Allocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         let size = layout.size().next_power_of_two();
 
-        let result = if size <= 2048 {
-            SLAB_ALLOCATOR.alloc(size)
+        if size <= 2048 {
+            SLAB_ALLOCATOR.alloc(size).as_ptr()
         } else {
-            let page_count = size >> PAGE_SIZE_BITS;
-            let page = Page::alloc_at_least(page_count);
-
-            let ptr = page.as_memblk().as_ptr();
-            page.into_raw();
+            let folio = Folio::alloc_at_least(size >> PAGE_SIZE_BITS);
+            let ptr = folio.get_ptr();
+            folio.into_raw();
 
             ptr.as_ptr()
-        };
-
-        if result.is_null() {
-            core::ptr::null_mut()
-        } else {
-            result as *mut u8
         }
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
         let size = layout.size().next_power_of_two();
+        let ptr = unsafe {
+            // SAFETY: The memory we've allocated MUST be non-null.
+            NonNull::new_unchecked(ptr)
+        };
 
         if size <= 2048 {
             SLAB_ALLOCATOR.dealloc(ptr, size)
         } else {
-            let paddr = ArchPhysAccess::from_ptr(NonNull::new_unchecked(ptr));
+            let paddr = ArchPhysAccess::from_ptr(ptr);
             let pfn = PFN::from(paddr);
-            Page::from_raw(pfn);
+
+            Folio::from_raw(pfn);
         };
     }
 }
 
 #[global_allocator]
 static ALLOCATOR: Allocator = Allocator;
+
+#[define_late_init]
+async fn slabinfo_file() {
+    populate_root(Arc::from(&b"slabinfo"[..]), |buf| {
+        let stats = SLAB_ALLOCATOR.dump_stats();
+
+        buf_writeln!(buf, "slabinfo - version: 2.1")?;
+        buf_writeln!(
+            buf,
+            "# name\t<active_objs>\t<num_objs>\t<objsize>\t<active_slabs>\t<num_slabs>"
+        )?;
+
+        for (i, stat) in stats.iter().enumerate() {
+            let name = format!("kmalloc[{i}]");
+
+            buf_writeln!(
+                buf,
+                "{:15}\t{}\t{}\t{}\t{}\t{}",
+                name,
+                stat.active_objects,
+                stat.total_objects,
+                stat.object_size,
+                stat.active_slabs,
+                stat.total_slabs
+            )?;
+        }
+
+        Ok(())
+    })
+    .await;
+}

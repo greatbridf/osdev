@@ -1,38 +1,42 @@
-use super::SyscallNoReturn;
-use crate::io::Buffer;
-use crate::kernel::constants::{
-    CLOCK_MONOTONIC, CLOCK_REALTIME, CLOCK_REALTIME_COARSE, EINVAL, ENOENT, ENOTDIR, ERANGE, ESRCH,
-};
-use crate::kernel::constants::{
-    ENOSYS, PR_GET_NAME, PR_SET_NAME, RLIMIT_STACK, SIG_BLOCK, SIG_SETMASK, SIG_UNBLOCK,
-};
-use crate::kernel::mem::PageBuffer;
-use crate::kernel::syscall::{User, UserMut};
-use crate::kernel::task::{
-    do_clone, futex_wait, futex_wake, yield_now, FutexFlags, FutexOp, ProcessList, ProgramLoader,
-    RobustListHead, SignalAction, Thread, WaitId, WaitType,
-};
-use crate::kernel::task::{parse_futexop, CloneArgs};
-use crate::kernel::timer::sleep;
-use crate::kernel::user::UserString;
-use crate::kernel::user::{UserPointer, UserPointerMut};
-use crate::kernel::vfs::inode::Mode;
-use crate::kernel::vfs::{self, dentry::Dentry};
-use crate::path::Path;
-use crate::{kernel::user::UserBuffer, prelude::*};
 use alloc::borrow::ToOwned;
 use alloc::ffi::CString;
-use bitflags::bitflags;
 use core::time::Duration;
-use eonix_hal::processor::UserTLS;
+
+use bitflags::bitflags;
 use eonix_hal::traits::trap::RawTrapContext;
 use eonix_hal::trap::TrapContext;
+use eonix_log::println_warn;
 use eonix_mm::address::Addr as _;
 use eonix_sync::AsProof as _;
 use posix_types::ctypes::PtrT;
 use posix_types::signal::{SigAction, SigInfo, SigSet, Signal};
-use posix_types::stat::TimeVal;
-use posix_types::{syscall_no::*, SIGNAL_NOW};
+use posix_types::stat::{TimeSpec, TimeVal};
+use posix_types::syscall_no::*;
+use posix_types::SIGNAL_NOW;
+
+use super::SyscallNoReturn;
+use crate::io::Buffer;
+use crate::kernel::constants::{
+    CLOCK_MONOTONIC, CLOCK_REALTIME, CLOCK_REALTIME_COARSE, EINVAL, ENOENT,
+    ENOSYS, ENOTDIR, ERANGE, ESRCH, PR_GET_NAME, PR_SET_NAME, RLIMIT_STACK,
+    SIG_BLOCK, SIG_SETMASK, SIG_UNBLOCK,
+};
+use crate::kernel::mem::PageBuffer;
+use crate::kernel::syscall::{User, UserMut};
+use crate::kernel::task::{
+    do_clone, futex_exec, futex_wait, futex_wake, parse_futexop, yield_now,
+    CloneArgs, FutexFlags, FutexOp, ProcessList, ProgramLoader, RobustListHead,
+    SignalAction, Thread, WaitId, WaitType,
+};
+use crate::kernel::timer::sleep;
+use crate::kernel::user::{
+    UserBuffer, UserPointer, UserPointerMut, UserString,
+};
+use crate::kernel::vfs::dentry::Dentry;
+use crate::kernel::vfs::types::Permission;
+use crate::kernel::vfs::{self};
+use crate::path::Path;
+use crate::prelude::*;
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
@@ -50,7 +54,9 @@ bitflags! {
 }
 
 #[eonix_macros::define_syscall(SYS_NANOSLEEP)]
-async fn nanosleep(req: User<(u32, u32)>, rem: UserMut<(u32, u32)>) -> KResult<usize> {
+async fn nanosleep(
+    req: User<(u32, u32)>, rem: UserMut<(u32, u32)>,
+) -> KResult<usize> {
     let req = UserPointer::new(req)?.read()?;
     let rem = if rem.is_null() {
         None
@@ -58,7 +64,8 @@ async fn nanosleep(req: User<(u32, u32)>, rem: UserMut<(u32, u32)>) -> KResult<u
         Some(UserPointerMut::new(rem)?)
     };
 
-    let duration = Duration::from_secs(req.0 as u64) + Duration::from_nanos(req.1 as u64);
+    let duration =
+        Duration::from_secs(req.0 as u64) + Duration::from_nanos(req.1 as u64);
     sleep(duration).await;
 
     if let Some(rem) = rem {
@@ -70,10 +77,7 @@ async fn nanosleep(req: User<(u32, u32)>, rem: UserMut<(u32, u32)>) -> KResult<u
 
 #[eonix_macros::define_syscall(SYS_CLOCK_NANOSLEEP)]
 async fn clock_nanosleep(
-    clock_id: u32,
-    _flags: u32,
-    req: User<(u32, u32)>,
-    rem: UserMut<(u32, u32)>,
+    clock_id: u32, _flags: u32, req: User<(u32, u32)>, rem: UserMut<(u32, u32)>,
 ) -> KResult<usize> {
     if clock_id != CLOCK_REALTIME
         && clock_id != CLOCK_REALTIME_COARSE
@@ -89,7 +93,8 @@ async fn clock_nanosleep(
         Some(UserPointerMut::new(rem)?)
     };
 
-    let duration = Duration::from_secs(req.0 as u64) + Duration::from_nanos(req.1 as u64);
+    let duration =
+        Duration::from_secs(req.0 as u64) + Duration::from_nanos(req.1 as u64);
     sleep(duration).await;
 
     if let Some(rem) = rem {
@@ -100,10 +105,12 @@ async fn clock_nanosleep(
 }
 
 #[eonix_macros::define_syscall(SYS_UMASK)]
-async fn umask(mask: Mode) -> KResult<Mode> {
-    let mut umask = thread.fs_context.umask.lock();
+async fn umask(raw_new_mask: u32) -> KResult<u32> {
+    let new_mask = Permission::new(!raw_new_mask);
+    let old_mask =
+        core::mem::replace(&mut *thread.fs_context.umask.lock(), new_mask);
 
-    Ok(core::mem::replace(&mut *umask, mask.non_format()))
+    Ok(!old_mask.bits())
 }
 
 #[eonix_macros::define_syscall(SYS_GETCWD)]
@@ -124,7 +131,7 @@ async fn chdir(path: User<u8>) -> KResult<()> {
     let path = UserString::new(path)?;
     let path = Path::new(path.as_cstr().to_bytes())?;
 
-    let dentry = Dentry::open(&thread.fs_context, path, true)?;
+    let dentry = Dentry::open(&thread.fs_context, path, true).await?;
     if !dentry.is_valid() {
         return Err(ENOENT);
     }
@@ -147,7 +154,9 @@ async fn umount(source: User<u8>) -> KResult<()> {
 }
 
 #[eonix_macros::define_syscall(SYS_MOUNT)]
-async fn mount(source: User<u8>, target: User<u8>, fstype: User<u8>, flags: usize) -> KResult<()> {
+async fn mount(
+    source: User<u8>, target: User<u8>, fstype: User<u8>, flags: usize,
+) -> KResult<()> {
     let source = UserString::new(source)?;
     if source.as_cstr().to_str().unwrap() == "/dev/vda2" {
         return Ok(());
@@ -159,7 +168,8 @@ async fn mount(source: User<u8>, target: User<u8>, fstype: User<u8>, flags: usiz
         &thread.fs_context,
         Path::new(target.as_cstr().to_bytes())?,
         true,
-    )?;
+    )
+    .await?;
 
     if !mountpoint.is_valid() {
         return Err(ENOENT);
@@ -172,9 +182,12 @@ async fn mount(source: User<u8>, target: User<u8>, fstype: User<u8>, flags: usiz
         fstype.as_cstr().to_str().map_err(|_| EINVAL)?,
         flags as u64,
     )
+    .await
 }
 
-fn get_strings(mut ptr_strings: UserPointer<'_, PtrT>) -> KResult<Vec<CString>> {
+fn get_strings(
+    mut ptr_strings: UserPointer<'_, PtrT>,
+) -> KResult<Vec<CString>> {
     let mut strings = Vec::new();
 
     loop {
@@ -192,28 +205,36 @@ fn get_strings(mut ptr_strings: UserPointer<'_, PtrT>) -> KResult<Vec<CString>> 
 }
 
 #[eonix_macros::define_syscall(SYS_EXECVE)]
-async fn execve(exec: User<u8>, argv: User<PtrT>, envp: User<PtrT>) -> KResult<SyscallNoReturn> {
+async fn execve(
+    exec: User<u8>, argv: User<PtrT>, envp: User<PtrT>,
+) -> KResult<SyscallNoReturn> {
     let exec = UserString::new(exec)?;
     let exec = exec.as_cstr().to_owned();
 
     let argv = get_strings(UserPointer::new(argv)?)?;
     let envp = get_strings(UserPointer::new(envp)?)?;
 
-    let dentry = Dentry::open(&thread.fs_context, Path::new(exec.as_bytes())?, true)?;
+    let dentry =
+        Dentry::open(&thread.fs_context, Path::new(exec.as_bytes())?, true)
+            .await?;
     if !dentry.is_valid() {
         Err(ENOENT)?;
     }
 
     // TODO: When `execve` is called by one of the threads in a process, the other threads
     //       should be terminated and `execve` is performed in the thread group leader.
-    let load_info = ProgramLoader::parse(&thread.fs_context, exec, dentry.clone(), argv, envp)?
-        .load()
-        .await?;
+    let load_info = ProgramLoader::parse(
+        &thread.fs_context,
+        exec,
+        dentry.clone(),
+        argv,
+        envp,
+    )
+    .await?
+    .load()
+    .await?;
 
-    if let Some(robust_list) = thread.get_robust_list() {
-        let _ = robust_list.wake_all().await;
-        thread.set_robust_list(None);
-    }
+    futex_exec(thread).await;
 
     unsafe {
         // SAFETY: We are doing execve, all other threads are terminated.
@@ -225,10 +246,8 @@ async fn execve(exec: User<u8>, argv: User<PtrT>, envp: User<PtrT>) -> KResult<S
     thread.set_name(dentry.get_name());
 
     let mut trap_ctx = thread.trap_ctx.borrow();
-    *trap_ctx = TrapContext::new();
+    *trap_ctx = TrapContext::new(true, true);
 
-    trap_ctx.set_user_mode(true);
-    trap_ctx.set_interrupt_enabled(true);
     trap_ctx.set_program_counter(load_info.entry_ip.addr());
     trap_ctx.set_stack_pointer(load_info.sp.addr());
 
@@ -237,24 +256,15 @@ async fn execve(exec: User<u8>, argv: User<PtrT>, envp: User<PtrT>) -> KResult<S
 
 #[eonix_macros::define_syscall(SYS_EXIT)]
 async fn exit(status: u32) -> SyscallNoReturn {
-    let mut procs = ProcessList::get().write().await;
-
-    unsafe {
-        procs
-            .do_exit(&thread, WaitType::Exited(status), false)
-            .await;
-    }
+    thread.exit(WaitType::Exited(status));
 
     SyscallNoReturn
 }
 
 #[eonix_macros::define_syscall(SYS_EXIT_GROUP)]
 async fn exit_group(status: u32) -> SyscallNoReturn {
-    let mut procs = ProcessList::get().write().await;
-
-    unsafe {
-        procs.do_exit(&thread, WaitType::Exited(status), true).await;
-    }
+    // XXX: Send SIGKILL to our sibling threads.
+    thread.exit(WaitType::Exited(status));
 
     SyscallNoReturn
 }
@@ -266,10 +276,7 @@ enum WaitInfo {
 }
 
 async fn do_waitid(
-    thread: &Thread,
-    wait_id: WaitId,
-    info: WaitInfo,
-    options: u32,
+    thread: &Thread, wait_id: WaitId, info: WaitInfo, options: u32,
     rusage: UserMut<RUsage>,
 ) -> KResult<u32> {
     if !rusage.is_null() {
@@ -309,7 +316,8 @@ async fn do_waitid(
             Ok(0)
         }
         WaitInfo::Status(status_ptr) => {
-            UserPointerMut::new(status_ptr)?.write(wait_object.code.to_wstatus())?;
+            UserPointerMut::new(status_ptr)?
+                .write(wait_object.code.to_wstatus())?;
             Ok(wait_object.pid)
         }
         WaitInfo::None => Ok(wait_object.pid),
@@ -318,10 +326,7 @@ async fn do_waitid(
 
 #[eonix_macros::define_syscall(SYS_WAITID)]
 async fn waitid(
-    id_type: u32,
-    id: u32,
-    info: UserMut<SigInfo>,
-    options: u32,
+    id_type: u32, id: u32, info: UserMut<SigInfo>, options: u32,
     rusage: UserMut<RUsage>,
 ) -> KResult<u32> {
     let wait_id = WaitId::from_type_and_id(id_type, id)?;
@@ -343,10 +348,7 @@ async fn waitid(
 
 #[eonix_macros::define_syscall(SYS_WAIT4)]
 async fn wait4(
-    wait_id: i32,
-    arg1: UserMut<u32>,
-    options: u32,
-    rusage: UserMut<RUsage>,
+    wait_id: i32, arg1: UserMut<u32>, options: u32, rusage: UserMut<RUsage>,
 ) -> KResult<u32> {
     let waitinfo = if arg1.is_null() {
         WaitInfo::None
@@ -361,8 +363,10 @@ async fn wait4(
 
 #[cfg(target_arch = "x86_64")]
 #[eonix_macros::define_syscall(SYS_WAITPID)]
-async fn waitpid(waitpid: i32, arg1: UserMut<u32>, options: u32) -> KResult<u32> {
-    sys_wait4(thread, waitpid, arg1, options, core::ptr::null_mut()).await
+async fn waitpid(
+    waitpid: i32, arg1: UserMut<u32>, options: u32,
+) -> KResult<u32> {
+    sys_wait4(thread, waitpid, arg1, options, UserMut::null()).await
 }
 
 #[eonix_macros::define_syscall(SYS_SETSID)]
@@ -489,51 +493,15 @@ async fn gettid() -> KResult<u32> {
     Ok(thread.tid)
 }
 
-pub fn parse_user_tls(arch_tls: usize) -> KResult<UserTLS> {
-    #[cfg(target_arch = "x86_64")]
-    {
-        let desc = arch_tls as *mut posix_types::x86_64::UserDescriptor;
-        let desc_pointer = UserPointerMut::new(desc)?;
-        let mut desc = desc_pointer.read()?;
-
-        // Clear the TLS area if it is not present.
-        if desc.flags.is_read_exec_only() && !desc.flags.is_present() {
-            if desc.limit != 0 && desc.base != 0 {
-                let len = if desc.flags.is_limit_in_pages() {
-                    (desc.limit as usize) << 12
-                } else {
-                    desc.limit as usize
-                };
-
-                CheckedUserPointer::new(desc.base as _, len)?.zero()?;
-            }
-        }
-
-        let (new_tls, entry) =
-            UserTLS::new32(desc.base, desc.limit, desc.flags.is_limit_in_pages());
-        desc.entry = entry;
-        desc_pointer.write(desc)?;
-
-        Ok(new_tls)
-    }
-
-    #[cfg(any(target_arch = "riscv64", target_arch = "loongarch64"))]
-    {
-        Ok(UserTLS::new(arch_tls as u64))
-    }
-}
-
 #[cfg(target_arch = "x86_64")]
 #[eonix_macros::define_syscall(SYS_SET_THREAD_AREA)]
-async fn set_thread_area(arch_tls: usize) -> KResult<()> {
-    thread.set_user_tls(parse_user_tls(arch_tls)?)?;
+async fn set_thread_area(tls: PtrT) -> KResult<()> {
+    use crate::kernel::task::UserTLSDescriptor;
 
-    // SAFETY: Preemption is disabled on calling `load_thread_area32()`.
-    unsafe {
-        eonix_preempt::disable();
-        thread.load_thread_area32();
-        eonix_preempt::enable();
-    }
+    let tls = UserTLSDescriptor::new(tls)?.read()?;
+
+    thread.set_user_tls(tls)?;
+    thread.activate_tls();
 
     Ok(())
 }
@@ -548,7 +516,9 @@ async fn set_tid_address(tidptr: UserMut<u32>) -> KResult<u32> {
 async fn prctl(option: u32, arg2: PtrT) -> KResult<()> {
     match option {
         PR_SET_NAME => {
-            let name = UserPointer::<[u8; 16]>::new(User::with_addr(arg2.addr()))?.read()?;
+            let name =
+                UserPointer::<[u8; 16]>::new(User::with_addr(arg2.addr()))?
+                    .read()?;
             let len = name.iter().position(|&c| c == 0).unwrap_or(15);
             thread.set_name(name[..len].into());
             Ok(())
@@ -556,8 +526,10 @@ async fn prctl(option: u32, arg2: PtrT) -> KResult<()> {
         PR_GET_NAME => {
             let name = thread.get_name();
             let len = name.len().min(15);
-            let name: [u8; 16] = core::array::from_fn(|i| if i < len { name[i] } else { 0 });
-            UserPointerMut::<[u8; 16]>::new(UserMut::with_addr(arg2.addr()))?.write(name)?;
+            let name: [u8; 16] =
+                core::array::from_fn(|i| if i < len { name[i] } else { 0 });
+            UserPointerMut::<[u8; 16]>::new(UserMut::with_addr(arg2.addr()))?
+                .write(name)?;
             Ok(())
         }
         _ => Err(EINVAL),
@@ -617,10 +589,7 @@ async fn tgkill(tgid: u32, tid: u32, sig: u32) -> KResult<()> {
 
 #[eonix_macros::define_syscall(SYS_RT_SIGPROCMASK)]
 async fn rt_sigprocmask(
-    how: u32,
-    set: UserMut<SigSet>,
-    oldset: UserMut<SigSet>,
-    sigsetsize: usize,
+    how: u32, set: UserMut<SigSet>, oldset: UserMut<SigSet>, sigsetsize: usize,
 ) -> KResult<()> {
     if sigsetsize != size_of::<SigSet>() {
         return Err(EINVAL);
@@ -647,18 +616,12 @@ async fn rt_sigprocmask(
     Ok(())
 }
 
-#[repr(C)]
-#[derive(Clone, Copy)]
-struct TimeSpec32 {
-    tv_sec: i32,
-    tv_nsec: i32,
-}
-
-#[eonix_macros::define_syscall(SYS_RT_SIGTIMEDWAIT_TIME32)]
-async fn rt_sigtimedwait_time32(
-    _uthese: User<SigSet>,
-    _uinfo: UserMut<SigInfo>,
-    _uts: User<TimeSpec32>,
+#[cfg_attr(
+    any(target_arch = "riscv64", target_arch = "loongarch64"),
+    eonix_macros::define_syscall(SYS_RT_SIGTIMEDWAIT)
+)]
+async fn rt_sigtimedwait(
+    _uthese: User<SigSet>, _uinfo: UserMut<SigInfo>, _uts: User<TimeSpec>,
 ) -> KResult<i32> {
     // TODO
     Ok(0)
@@ -666,9 +629,7 @@ async fn rt_sigtimedwait_time32(
 
 #[eonix_macros::define_syscall(SYS_RT_SIGACTION)]
 async fn rt_sigaction(
-    signum: u32,
-    act: User<SigAction>,
-    oldact: UserMut<SigAction>,
+    signum: u32, act: User<SigAction>, oldact: UserMut<SigAction>,
     sigsetsize: usize,
 ) -> KResult<()> {
     let signal = Signal::try_from_raw(signum)?;
@@ -698,9 +659,7 @@ async fn rt_sigaction(
 
 #[eonix_macros::define_syscall(SYS_PRLIMIT64)]
 async fn prlimit64(
-    pid: u32,
-    resource: u32,
-    new_limit: User<RLimit>,
+    pid: u32, resource: u32, new_limit: User<RLimit>,
     old_limit: UserMut<RLimit>,
 ) -> KResult<()> {
     if pid != 0 {
@@ -813,13 +772,16 @@ async fn fork() -> KResult<u32> {
 #[cfg(not(target_arch = "loongarch64"))]
 #[eonix_macros::define_syscall(SYS_CLONE)]
 async fn clone(
-    clone_flags: usize,
-    new_sp: usize,
-    parent_tidptr: UserMut<u32>,
-    tls: usize,
+    clone_flags: usize, new_sp: usize, parent_tidptr: UserMut<u32>, tls: PtrT,
     child_tidptr: UserMut<u32>,
 ) -> KResult<u32> {
-    let clone_args = CloneArgs::for_clone(clone_flags, new_sp, child_tidptr, parent_tidptr, tls)?;
+    let clone_args = CloneArgs::for_clone(
+        clone_flags,
+        new_sp,
+        child_tidptr,
+        parent_tidptr,
+        tls,
+    )?;
 
     do_clone(thread, clone_args).await
 }
@@ -827,24 +789,23 @@ async fn clone(
 #[cfg(target_arch = "loongarch64")]
 #[eonix_macros::define_syscall(SYS_CLONE)]
 async fn clone(
-    clone_flags: usize,
-    new_sp: usize,
-    parent_tidptr: UserMut<u32>,
-    child_tidptr: UserMut<u32>,
-    tls: usize,
+    clone_flags: usize, new_sp: usize, parent_tidptr: UserMut<u32>,
+    child_tidptr: UserMut<u32>, tls: usize,
 ) -> KResult<u32> {
-    let clone_args = CloneArgs::for_clone(clone_flags, new_sp, child_tidptr, parent_tidptr, tls)?;
+    let clone_args = CloneArgs::for_clone(
+        clone_flags,
+        new_sp,
+        child_tidptr,
+        parent_tidptr,
+        tls,
+    )?;
 
     do_clone(thread, clone_args).await
 }
 
 #[eonix_macros::define_syscall(SYS_FUTEX)]
 async fn futex(
-    uaddr: usize,
-    op: u32,
-    val: u32,
-    _time_out: usize,
-    _uaddr2: usize,
+    uaddr: usize, op: u32, val: u32, _time_out: usize, _uaddr2: usize,
     _val3: u32,
 ) -> KResult<usize> {
     let (futex_op, futex_flag) = parse_futexop(op)?;
@@ -873,7 +834,9 @@ async fn futex(
 }
 
 #[eonix_macros::define_syscall(SYS_SET_ROBUST_LIST)]
-async fn set_robust_list(head: User<RobustListHead>, len: usize) -> KResult<()> {
+async fn set_robust_list(
+    head: User<RobustListHead>, len: usize,
+) -> KResult<()> {
     if len != size_of::<RobustListHead>() {
         return Err(EINVAL);
     }
@@ -893,7 +856,7 @@ async fn rt_sigreturn() -> KResult<SyscallNoReturn> {
             "`rt_sigreturn` failed in thread {} with error {err}!",
             thread.tid
         );
-        thread.force_kill(Signal::SIGSEGV).await;
+        thread.force_kill(Signal::SIGSEGV);
         return Err(err);
     }
 
@@ -912,7 +875,7 @@ async fn sigreturn() -> KResult<SyscallNoReturn> {
             "`sigreturn` failed in thread {} with error {err}!",
             thread.tid
         );
-        thread.force_kill(Signal::SIGSEGV).await;
+        thread.force_kill(Signal::SIGSEGV);
         return Err(err);
     }
 
@@ -921,8 +884,27 @@ async fn sigreturn() -> KResult<SyscallNoReturn> {
 
 #[cfg(target_arch = "x86_64")]
 #[eonix_macros::define_syscall(SYS_ARCH_PRCTL)]
-async fn arch_prctl(option: u32, addr: u32) -> KResult<u32> {
-    sys_arch_prctl(thread, option, addr).await
+async fn arch_prctl(option: u32, addr: PtrT) -> KResult<u32> {
+    match option {
+        PR_SET_NAME => {
+            let name =
+                UserPointer::<[u8; 16]>::new(User::with_addr(addr.addr()))?
+                    .read()?;
+            let len = name.iter().position(|&c| c == 0).unwrap_or(15);
+            thread.set_name(name[..len].into());
+            Ok(0)
+        }
+        PR_GET_NAME => {
+            let name = thread.get_name();
+            let len = name.len().min(15);
+            let name: [u8; 16] =
+                core::array::from_fn(|i| if i < len { name[i] } else { 0 });
+            UserPointerMut::<[u8; 16]>::new(UserMut::with_addr(addr.addr()))?
+                .write(name)?;
+            Ok(0)
+        }
+        _ => Err(EINVAL),
+    }
 }
 
 pub fn keep_alive() {}

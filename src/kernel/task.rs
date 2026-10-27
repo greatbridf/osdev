@@ -8,17 +8,25 @@ mod process_list;
 mod session;
 mod signal;
 mod thread;
+mod user_tls;
 
 pub use clone::{do_clone, CloneArgs, CloneFlags};
-pub use futex::{futex_wait, futex_wake, parse_futexop, FutexFlags, FutexOp, RobustListHead};
+use eonix_hal::symbol_addr;
+pub use futex::{
+    futex_exec, futex_exit, futex_wait, futex_wake, parse_futexop, FutexFlags,
+    FutexOp, RobustListHead,
+};
 pub use kernel_stack::KernelStack;
 pub use loader::ProgramLoader;
-pub use process::{alloc_pid, Process, ProcessBuilder, WaitId, WaitObject, WaitType};
+pub use process::{
+    alloc_pid, Process, ProcessBuilder, WaitId, WaitObject, WaitType,
+};
 pub use process_group::ProcessGroup;
 pub use process_list::ProcessList;
 pub use session::Session;
 pub use signal::SignalAction;
 pub use thread::{yield_now, Thread, ThreadAlloc, ThreadBuilder};
+pub use user_tls::{UserTLS, UserTLSDescriptor};
 
 fn do_block_on<F>(mut future: core::pin::Pin<&mut F>) -> F::Output
 where
@@ -79,33 +87,31 @@ pub async fn stackful<F>(mut future: F) -> F::Output
 where
     F: core::future::Future,
 {
-    use crate::kernel::{
-        interrupt::{default_fault_handler, default_irq_handler},
-        timer::{should_reschedule, timer_interrupt},
-    };
     use alloc::sync::Arc;
     use alloc::task::Wake;
     use core::cell::UnsafeCell;
     use core::future::Future;
     use core::pin::Pin;
     use core::ptr::NonNull;
-    use core::sync::atomic::AtomicBool;
-    use core::sync::atomic::Ordering;
-    use core::task::Context;
-    use core::task::Poll;
-    use core::task::Waker;
-    use eonix_hal::traits::trap::RawTrapContext;
-    use eonix_hal::traits::trap::TrapReturn;
-    use eonix_hal::traits::trap::TrapType;
+    use core::sync::atomic::{AtomicBool, Ordering};
+    use core::task::{Context, Poll, Waker};
+
+    use eonix_hal::traits::trap::{RawTrapContext, TrapReturn, TrapType};
     use eonix_hal::trap::TrapContext;
     use eonix_preempt::assert_preempt_enabled;
-    use eonix_runtime::executor::Stack;
     use eonix_runtime::task::Task;
     use thread::wait_for_wakeups;
 
+    use crate::kernel::interrupt::{
+        default_fault_handler, default_irq_handler,
+    };
+    use crate::kernel::timer::{should_reschedule, timer_interrupt};
+
     let stack = KernelStack::new();
 
-    fn execute<F>(mut future: Pin<&mut F>, output_ptr: NonNull<Option<F::Output>>) -> !
+    unsafe extern "C" fn execute<F>(
+        mut future: Pin<&mut F>, output_ptr: NonNull<Option<F::Output>>,
+    ) -> !
     where
         F: Future,
     {
@@ -138,7 +144,9 @@ where
             match future.as_mut().poll(&mut cx) {
                 Poll::Ready(output) => break output,
                 Poll::Pending => {
-                    assert_preempt_enabled!("Blocking in stackful futures is not allowed.");
+                    assert_preempt_enabled!(
+                        "Blocking in stackful futures is not allowed."
+                    );
 
                     if Task::current().is_ready() {
                         continue;
@@ -156,6 +164,9 @@ where
 
                         #[cfg(target_arch = "loongarch64")]
                         core::arch::asm!("break 1");
+
+                        #[cfg(target_arch = "x86_64")]
+                        core::arch::asm!("int 3");
                     }
                 }
             }
@@ -175,24 +186,23 @@ where
 
             #[cfg(target_arch = "loongarch64")]
             core::arch::asm!("break 1");
+
+            #[cfg(target_arch = "x86_64")]
+            core::arch::asm!("int 3");
         }
 
         unreachable!()
     }
 
-    let sp = stack.get_bottom();
     let mut output = UnsafeCell::new(None);
 
-    let mut trap_ctx = TrapContext::new();
+    let mut trap_ctx = TrapContext::new(true, false);
 
-    trap_ctx.set_user_mode(false);
-    trap_ctx.set_interrupt_enabled(true);
-    let _ = trap_ctx.set_user_call_frame(
-        execute::<F> as usize,
-        Some(sp.addr().get()),
+    trap_ctx.set_kernel_call_frame(
+        symbol_addr!(execute::<F>),
+        &stack,
         None,
         &[(&raw mut future) as usize, output.get() as usize],
-        |_, _| Ok::<(), u32>(()),
     );
 
     loop {
@@ -202,7 +212,9 @@ where
 
         match trap_ctx.trap_type() {
             TrapType::Syscall { .. } => {}
-            TrapType::Fault(fault) => default_fault_handler(fault, &mut trap_ctx),
+            TrapType::Fault(fault) => {
+                default_fault_handler(fault, &mut trap_ctx)
+            }
             TrapType::Irq { callback } => callback(default_irq_handler),
             TrapType::Timer { callback } => {
                 callback(timer_interrupt);
@@ -219,10 +231,12 @@ where
                 }
 
                 #[cfg(target_arch = "riscv64")]
-                trap_ctx.set_program_counter(trap_ctx.get_program_counter() + 2);
+                trap_ctx
+                    .set_program_counter(trap_ctx.get_program_counter() + 2);
 
                 #[cfg(target_arch = "loongarch64")]
-                trap_ctx.set_program_counter(trap_ctx.get_program_counter() + 4);
+                trap_ctx
+                    .set_program_counter(trap_ctx.get_program_counter() + 4);
             }
         }
     }

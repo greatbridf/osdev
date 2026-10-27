@@ -1,6 +1,12 @@
-use crate::{context::RawTaskContext, fault::Fault};
 use core::marker::PhantomData;
+
 use eonix_mm::address::VAddr;
+
+use crate::fault::Fault;
+
+pub trait Stack {
+    fn get_bottom(&self) -> *mut usize;
+}
 
 /// A raw trap context.
 ///
@@ -11,7 +17,26 @@ pub trait RawTrapContext: Copy {
     type FIrq: FnOnce(fn(irqno: usize));
     type FTimer: FnOnce(fn());
 
-    fn new() -> Self;
+    /// **Don't use this function unless you know what you're doing**
+    ///
+    /// Create a blank trap context.
+    ///
+    /// The context should be in a state that is ready to be used but whether
+    /// the interrupt is enabled or the context is in user mode is unspecified.
+    fn blank() -> Self;
+
+    /// Create a new trap context.
+    ///
+    /// The context will be in a state that is ready to be used. Whether the
+    /// interrupt is enabled or the context is in user mode is specified by
+    /// the arguments.
+    fn new(int_enabled: bool, user: bool) -> Self {
+        let mut me = Self::blank();
+        me.set_interrupt_enabled(int_enabled);
+        me.set_user_mode(user);
+
+        me
+    }
 
     fn trap_type(&self) -> TrapType<Self::FIrq, Self::FTimer>;
 
@@ -30,19 +55,18 @@ pub trait RawTrapContext: Copy {
     fn set_user_return_value(&mut self, retval: usize);
 
     fn set_user_call_frame<E>(
-        &mut self,
-        pc: usize,
-        sp: Option<usize>,
-        ra: Option<usize>,
-        args: &[usize],
-        write_memory: impl Fn(VAddr, &[u8]) -> Result<(), E>,
+        &mut self, pc: usize, sp: Option<usize>, ra: Option<usize>,
+        args: &[usize], write_memory: impl Fn(VAddr, &[u8]) -> Result<(), E>,
     ) -> Result<(), E>;
+
+    fn set_kernel_call_frame(
+        &mut self, pc: usize, stack: &impl Stack, ra: Option<usize>,
+        args: &[usize],
+    );
 }
 
 #[doc(notable_trait)]
 pub trait TrapReturn {
-    type TaskContext: RawTaskContext;
-
     /// Return to the context before the trap occurred.
     ///
     /// # Safety
@@ -51,6 +75,17 @@ pub trait TrapReturn {
     /// points to a valid stack frame and the program counter points to some
     /// valid instruction.
     unsafe fn trap_return(&mut self);
+
+    /// Switch to the context before the trap occurred.
+    /// This function will NOT capture traps and will never return.
+    ///
+    /// # Safety
+    /// This function is unsafe because the caller MUST ensure that the
+    /// context before the trap is valid, that is, that the stack pointer
+    /// points to a valid stack frame and the program counter points to some
+    /// valid instruction. Besides, the caller MUST ensure that all variables
+    /// in the current context are released.
+    unsafe fn trap_return_noreturn(&mut self) -> !;
 }
 
 pub trait IrqState {

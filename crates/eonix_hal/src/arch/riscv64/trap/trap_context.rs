@@ -1,41 +1,21 @@
-use crate::{arch::time::set_next_timer, processor::CPU};
-use core::{arch::asm, mem::offset_of};
-use eonix_hal_traits::{
-    fault::{Fault, PageFaultErrorCode},
-    trap::{RawTrapContext, TrapType},
-};
+use core::arch::asm;
+use core::mem::offset_of;
+
+use eonix_hal_traits::fault::{Fault, PageFaultErrorCode};
+use eonix_hal_traits::trap::{RawTrapContext, Stack, TrapType};
 use eonix_mm::address::VAddr;
-use riscv::{
-    interrupt::{Exception, Interrupt, Trap},
-    register::{
-        scause::{self, Scause},
-        sstatus::{self, Sstatus, FS, SPP},
-        stval,
-    },
-    ExceptionNumber, InterruptNumber,
-};
+use riscv::interrupt::{Exception, Interrupt, Trap};
+use riscv::register::scause::{self, Scause};
+use riscv::register::sstatus::{self, Sstatus, FS, SPP};
+use riscv::register::stval;
+use riscv::{ExceptionNumber, InterruptNumber};
+
+use crate::arch::time::set_next_timer;
+use crate::processor::CPU;
 
 #[repr(C)]
 #[derive(Default, Clone, Copy)]
 pub struct Registers {
-    tp: u64,
-    ra: u64,
-    sp: u64,
-    gp: u64,
-    a0: u64,
-    a1: u64,
-    a2: u64,
-    a3: u64,
-    a4: u64,
-    t1: u64,
-    a5: u64,
-    a6: u64,
-    a7: u64,
-    t3: u64,
-    t4: u64,
-    t5: u64,
-    t2: u64,
-    t6: u64,
     s0: u64,
     s1: u64,
     s2: u64,
@@ -48,7 +28,26 @@ pub struct Registers {
     s9: u64,
     s10: u64,
     s11: u64,
+    ra: u64,
+    tp: u64,
+    sp: u64,
+    gp: u64,
+
+    a0: u64,
+    a1: u64,
+    a2: u64,
+    a3: u64,
+    a4: u64,
+    a5: u64,
+    a6: u64,
+    a7: u64,
     t0: u64,
+    t1: u64,
+    t2: u64,
+    t3: u64,
+    t4: u64,
+    t5: u64,
+    t6: u64,
 }
 
 /// Saved CPU context when a trap (interrupt or exception) occurs on RISC-V 64.
@@ -123,7 +122,7 @@ impl RawTrapContext for TrapContext {
     type FIrq = fn(handler: fn(irqno: usize));
     type FTimer = fn(handler: fn());
 
-    fn new() -> Self {
+    fn blank() -> Self {
         let mut sstatus = Sstatus::from_bits(0);
         sstatus.set_fs(FS::Initial);
         sstatus.set_sum(true);
@@ -151,10 +150,13 @@ impl RawTrapContext for TrapContext {
                     Interrupt::SupervisorExternal => TrapType::Irq {
                         callback: |handler| {
                             let mut cpu = CPU::local();
-                            match cpu.as_mut().interrupt.plic.claim_interrupt() {
+                            match cpu.as_mut().interrupt.plic.claim_interrupt()
+                            {
                                 None => {}
                                 Some(irqno) => {
-                                    cpu.interrupt.plic.complete_interrupt(irqno);
+                                    cpu.interrupt
+                                        .plic
+                                        .complete_interrupt(irqno);
                                     handler(irqno);
                                 }
                             }
@@ -172,18 +174,25 @@ impl RawTrapContext for TrapContext {
                     | Exception::InstructionFault
                     | Exception::LoadFault
                     | Exception::StoreFault
-                    | Exception::StoreMisaligned => TrapType::Fault(Fault::BadAccess),
-                    Exception::IllegalInstruction => TrapType::Fault(Fault::InvalidOp),
+                    | Exception::StoreMisaligned => {
+                        TrapType::Fault(Fault::BadAccess)
+                    }
+                    Exception::IllegalInstruction => {
+                        TrapType::Fault(Fault::InvalidOp)
+                    }
                     Exception::UserEnvCall => TrapType::Syscall {
                         no: self.syscall_no(),
                         args: self.syscall_args(),
                     },
                     exception @ (Exception::InstructionPageFault
                     | Exception::LoadPageFault
-                    | Exception::StorePageFault) => TrapType::Fault(Fault::PageFault {
-                        error_code: self.get_page_fault_error_code(exception),
-                        address: VAddr::from(self.stval),
-                    }),
+                    | Exception::StorePageFault) => {
+                        TrapType::Fault(Fault::PageFault {
+                            error_code: self
+                                .get_page_fault_error_code(exception),
+                            address: VAddr::from(self.stval),
+                        })
+                    }
                     // breakpoint and supervisor env call
                     _ => TrapType::Fault(Fault::Unknown(e)),
                 }
@@ -239,12 +248,8 @@ impl RawTrapContext for TrapContext {
     }
 
     fn set_user_call_frame<E>(
-        &mut self,
-        pc: usize,
-        sp: Option<usize>,
-        ra: Option<usize>,
-        args: &[usize],
-        _write_memory: impl Fn(VAddr, &[u8]) -> Result<(), E>,
+        &mut self, pc: usize, sp: Option<usize>, ra: Option<usize>,
+        args: &[usize], _write_memory: impl Fn(VAddr, &[u8]) -> Result<(), E>,
     ) -> Result<(), E> {
         self.set_program_counter(pc);
 
@@ -271,11 +276,38 @@ impl RawTrapContext for TrapContext {
 
         Ok(())
     }
+
+    fn set_kernel_call_frame(
+        &mut self, pc: usize, sp: &impl Stack, ra: Option<usize>,
+        args: &[usize],
+    ) {
+        self.set_program_counter(pc);
+        self.set_stack_pointer(sp.get_bottom().addr());
+
+        if let Some(ra) = ra {
+            self.regs.ra = ra as u64;
+        }
+
+        let arg_regs = [
+            &mut self.regs.a0,
+            &mut self.regs.a1,
+            &mut self.regs.a2,
+            &mut self.regs.a3,
+            &mut self.regs.a4,
+            &mut self.regs.a5,
+        ];
+
+        for (&arg, reg) in args.iter().zip(arg_regs.into_iter()) {
+            *reg = arg as u64;
+        }
+    }
 }
 
 impl TrapContext {
     /// TODO: get PageFaultErrorCode also need check pagetable
-    fn get_page_fault_error_code(&self, exception: Exception) -> PageFaultErrorCode {
+    fn get_page_fault_error_code(
+        &self, exception: Exception,
+    ) -> PageFaultErrorCode {
         let mut error_code = PageFaultErrorCode::empty();
 
         match exception {

@@ -1,39 +1,42 @@
-use super::{
-    config::{self, mm::*},
-    console::write_str,
-    cpu::{CPUID, CPU_COUNT},
-    time::set_next_timer,
-};
-use crate::{
-    arch::{
-        cpu::CPU,
-        fdt::{init_dtb_and_fdt, FdtExt, FDT},
-        mm::{ArchPhysAccess, FreeRam, PageAttribute64, GLOBAL_PAGE_TABLE},
-    },
-    bootstrap::BootStrapData,
-    mm::{ArchMemory, ArchPagingMode, BasicPageAlloc, BasicPageAllocRef, ScopedAllocator},
-};
-use core::{
-    alloc::Allocator,
-    arch::asm,
-    cell::RefCell,
-    sync::atomic::{AtomicBool, AtomicUsize},
-};
-use core::{
-    arch::{global_asm, naked_asm},
-    hint::spin_loop,
-    sync::atomic::{AtomicPtr, Ordering},
-};
+use core::alloc::Allocator;
+use core::arch::{asm, global_asm, naked_asm};
+use core::cell::RefCell;
+use core::hint::spin_loop;
+use core::ptr::NonNull;
+use core::sync::atomic::{AtomicBool, AtomicPtr, AtomicUsize, Ordering};
+
 use eonix_hal_traits::mm::Memory;
-use eonix_mm::{
-    address::{Addr as _, PAddr, PRange, PhysAccess, VAddr, VRange},
-    page_table::{PageAttribute, PagingMode, PTE as _},
-    paging::{Page, PageAccess, PageAlloc, PAGE_SIZE, PFN},
+use eonix_mm::address::{Addr as _, PAddr, PRange, PhysAccess, VAddr, VRange};
+use eonix_mm::page_table::{
+    PageAttribute, PageTable, PagingMode, TableAttribute, PTE as _,
+};
+use eonix_mm::paging::{
+    Folio, FrameAlloc, PageAccess, PageBlock, PAGE_SIZE, PFN,
 };
 use eonix_percpu::PercpuArea;
 use fdt::Fdt;
-use riscv::{asm::sfence_vma_all, register::satp};
-use sbi::{hsm::hart_start, legacy::console_putchar, PhysicalAddress};
+use riscv::asm::sfence_vma_all;
+use riscv::register::satp;
+use sbi::hsm::hart_start;
+use sbi::legacy::console_putchar;
+use sbi::PhysicalAddress;
+
+use super::config::mm::*;
+use super::config::{self};
+use super::console::write_str;
+use super::cpu::{CPUID, CPU_COUNT};
+use super::time::set_next_timer;
+use crate::arch::cpu::CPU;
+use crate::arch::fdt::{init_dtb_and_fdt, FdtExt, FDT};
+use crate::arch::mm::{
+    ArchPagingMode, ArchPhysAccess, PageAccessImpl, PageAttribute64,
+    RawPageTableSv48, GLOBAL_PAGE_TABLE,
+};
+use crate::bootstrap::BootStrapData;
+use crate::mm::{
+    ArchMemory, BasicPageAlloc, BasicPageAllocRef, ScopedAllocator,
+};
+use crate::{extern_symbol_addr, extern_symbol_value};
 
 #[unsafe(link_section = ".bootstrap.stack")]
 static BOOT_STACK: [u8; 4096 * 16] = [0; 4096 * 16];
@@ -46,29 +49,30 @@ static TEMP_AP_STACK: [u8; 256] = [0; 256];
 static TEMP_AP_STACK_START: &'static [u8; 256] = &TEMP_AP_STACK;
 
 #[repr(C, align(4096))]
-struct PageTable([u64; PTES_PER_PAGE]);
+struct BootPageTable([u64; PTES_PER_PAGE]);
 
 /// map 0x8000 0000 to itself and 0xffff ffff 8000 0000
 #[unsafe(link_section = ".bootstrap.page_table.1")]
-static BOOT_PAGE_TABLE: PageTable = {
+static BOOT_PAGE_TABLE: BootPageTable = {
     let mut arr: [u64; PTES_PER_PAGE] = [0; PTES_PER_PAGE];
     arr[0] = 0 | 0x2f;
     arr[510] = 0 | 0x2f;
     arr[511] = (0x80202 << 10) | 0x21;
 
-    PageTable(arr)
+    BootPageTable(arr)
 };
 
 #[unsafe(link_section = ".bootstrap.page_table.2")]
 #[used]
-static PT1: PageTable = {
+static PT1: BootPageTable = {
     let mut arr: [u64; PTES_PER_PAGE] = [0; PTES_PER_PAGE];
     arr[510] = (0x80000 << 10) | 0x2f;
 
-    PageTable(arr)
+    BootPageTable(arr)
 };
 
-static BSP_PAGE_ALLOC: AtomicPtr<RefCell<BasicPageAlloc>> = AtomicPtr::new(core::ptr::null_mut());
+static BSP_PAGE_ALLOC: AtomicPtr<RefCell<BasicPageAlloc>> =
+    AtomicPtr::new(core::ptr::null_mut());
 
 static AP_COUNT: AtomicUsize = AtomicUsize::new(0);
 static AP_STACK: AtomicUsize = AtomicUsize::new(0);
@@ -78,7 +82,7 @@ static AP_SEM: AtomicBool = AtomicBool::new(false);
 #[unsafe(naked)]
 #[unsafe(no_mangle)]
 #[unsafe(link_section = ".bootstrap.entry")]
-unsafe extern "C" fn _start(hart_id: usize, dtb_addr: usize) -> ! {
+unsafe extern "C" fn _start(hart_id: usize, dtb_addr: usize) {
     naked_asm!(
         "
             ld    sp, 2f
@@ -109,17 +113,16 @@ unsafe extern "C" fn _start(hart_id: usize, dtb_addr: usize) -> ! {
 }
 
 pub unsafe extern "C" fn riscv64_start(hart_id: usize, dtb_addr: PAddr) -> ! {
-    let fdt = Fdt::from_ptr(ArchPhysAccess::as_ptr(dtb_addr).as_ptr())
-        .expect("Failed to parse DTB from static memory.");
+    let fdt = unsafe { FdtExt::new(dtb_addr) };
 
     let real_allocator = RefCell::new(BasicPageAlloc::new());
     let alloc = BasicPageAllocRef::new(&real_allocator);
 
-    for range in fdt.present_ram().free_ram() {
+    for range in fdt.free_ram() {
         real_allocator.borrow_mut().add_range(range);
     }
 
-    setup_kernel_page_table(&alloc);
+    setup_kernel_page_table(alloc.clone());
     unsafe {
         init_dtb_and_fdt(dtb_addr);
     }
@@ -134,11 +137,14 @@ pub unsafe extern "C" fn riscv64_start(hart_id: usize, dtb_addr: PAddr) -> ! {
     }
 
     let start = unsafe {
-        ((&BOOT_STACK_START) as *const &'static [u8; 4096 * 16]).read_volatile() as *const _
-            as usize
+        ((&BOOT_STACK_START) as *const &'static [u8; 4096 * 16]).read_volatile()
+            as *const _ as usize
     };
     let bootstrap_data = BootStrapData {
-        early_stack: PRange::new(PAddr::from(start), PAddr::from(start + 4096 * 16)),
+        early_stack: PRange::new(
+            PAddr::from(start),
+            PAddr::from(start + 4096 * 16),
+        ),
         allocator: Some(real_allocator),
     };
 
@@ -150,43 +156,40 @@ pub unsafe extern "C" fn riscv64_start(hart_id: usize, dtb_addr: PAddr) -> ! {
     }
 }
 
-unsafe extern "C" {
-    fn BSS_LENGTH();
-}
-
 /// TODO:
 /// 对kernel image添加更细的控制，或者不加也行
-fn setup_kernel_page_table(alloc: impl PageAlloc) {
-    let global_page_table = &GLOBAL_PAGE_TABLE;
+fn setup_kernel_page_table(alloc: BasicPageAllocRef) {
+    let global_page_table = PageTable::<ArchPagingMode, _, _>::new(
+        GLOBAL_PAGE_TABLE.clone(),
+        alloc.clone(),
+        PageAccessImpl,
+    );
 
     let attr = PageAttribute::WRITE
         | PageAttribute::READ
-        | PageAttribute::EXECUTE
         | PageAttribute::GLOBAL
         | PageAttribute::PRESENT;
 
     const KERNEL_BSS_START: VAddr = VAddr::from(0xffffffff40000000);
 
-    // Map kernel BSS
-    for pte in global_page_table.iter_kernel_in(
-        VRange::from(KERNEL_BSS_START).grow(BSS_LENGTH as usize),
-        ArchPagingMode::LEVELS,
-        &alloc,
-    ) {
-        let page = Page::alloc_in(&alloc);
+    let bss_length = extern_symbol_addr!(BSS_LENGTH);
 
-        let attr = {
-            let mut attr = attr.clone();
-            attr.remove(PageAttribute::EXECUTE);
-            attr
-        };
+    // Map kernel BSS
+    let bss_range = VRange::from(KERNEL_BSS_START).grow(bss_length);
+    for pte in global_page_table.iter_kernel(bss_range) {
+        let page = alloc.alloc().unwrap();
+
         pte.set(page.into_raw(), attr.into());
     }
 
     sfence_vma_all();
 
     unsafe {
-        core::ptr::write_bytes(KERNEL_BSS_START.addr() as *mut (), 0, BSS_LENGTH as usize);
+        core::ptr::write_bytes(
+            KERNEL_BSS_START.addr() as *mut u8,
+            0,
+            bss_length,
+        );
     }
 
     unsafe {
@@ -197,17 +200,22 @@ fn setup_kernel_page_table(alloc: impl PageAlloc) {
         );
     }
     sfence_vma_all();
+
+    core::mem::forget(global_page_table);
 }
 
 /// set up tp register to percpu
-fn setup_cpu(alloc: impl PageAlloc, hart_id: usize) {
+fn setup_cpu(alloc: impl FrameAlloc, hart_id: usize) {
     CPU_COUNT.fetch_add(1, Ordering::Relaxed);
 
     let mut percpu_area = PercpuArea::new(|layout| {
         let page_count = layout.size().div_ceil(PAGE_SIZE);
-        let page = Page::alloc_at_least_in(page_count, alloc);
+        let page = alloc.alloc_at_least(page_count).unwrap();
 
-        let ptr = ArchPhysAccess::get_ptr_for_page(&page).cast();
+        let ptr = unsafe {
+            // TODO: safety
+            ArchPhysAccess::as_ptr(page.start())
+        };
         page.into_raw();
 
         ptr
@@ -235,15 +243,6 @@ fn setup_cpu(alloc: impl PageAlloc, hart_id: usize) {
     percpu_area.register(cpu.cpuid());
 }
 
-fn get_ap_start_addr() -> usize {
-    unsafe extern "C" {
-        fn _ap_start();
-    }
-    static AP_START_VALUE: &'static unsafe extern "C" fn() =
-        &(_ap_start as unsafe extern "C" fn());
-    unsafe { (AP_START_VALUE as *const _ as *const usize).read_volatile() }
-}
-
 fn bootstrap_smp(alloc: impl Allocator, page_alloc: &RefCell<BasicPageAlloc>) {
     let local_hart_id = CPU::local().cpuid();
     let mut ap_count = 0;
@@ -251,13 +250,14 @@ fn bootstrap_smp(alloc: impl Allocator, page_alloc: &RefCell<BasicPageAlloc>) {
     for hart_id in FDT.harts().filter(|&id| id != local_hart_id) {
         let stack_range = {
             let page_alloc = BasicPageAllocRef::new(&page_alloc);
-            let ap_stack = Page::alloc_order_in(4, page_alloc);
+            let ap_stack = page_alloc.alloc_order(4).unwrap();
             let stack_range = ap_stack.range();
             ap_stack.into_raw();
             stack_range
         };
 
-        let old = BSP_PAGE_ALLOC.swap((&raw const *page_alloc) as *mut _, Ordering::Release);
+        let old = BSP_PAGE_ALLOC
+            .swap((&raw const *page_alloc) as *mut _, Ordering::Release);
         assert!(old.is_null());
 
         while AP_STACK
@@ -273,7 +273,11 @@ fn bootstrap_smp(alloc: impl Allocator, page_alloc: &RefCell<BasicPageAlloc>) {
         }
 
         unsafe {
-            hart_start(hart_id, PhysicalAddress::new(get_ap_start_addr()), 0);
+            hart_start(
+                hart_id,
+                PhysicalAddress::new(extern_symbol_value!(_ap_start)),
+                0,
+            );
         }
 
         while AP_COUNT.load(Ordering::Acquire) == ap_count {
@@ -289,7 +293,7 @@ fn bootstrap_smp(alloc: impl Allocator, page_alloc: &RefCell<BasicPageAlloc>) {
 #[unsafe(naked)]
 #[unsafe(no_mangle)]
 #[unsafe(link_section = ".bootstrap.apentry")]
-unsafe extern "C" fn _ap_start(hart_id: usize) -> ! {
+unsafe extern "C" fn _ap_start(hart_id: usize) {
     naked_asm!(
         "
             la    sp, 1f        // set temp stack
@@ -326,7 +330,12 @@ unsafe extern "C" fn _ap_start(hart_id: usize) -> ! {
 
 fn get_ap_stack() -> usize {
     while AP_SEM
-        .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
+        .compare_exchange_weak(
+            false,
+            true,
+            Ordering::Acquire,
+            Ordering::Relaxed,
+        )
         .is_err()
     {
         core::hint::spin_loop();
@@ -346,12 +355,14 @@ fn get_ap_stack() -> usize {
 }
 
 fn ap_entry(hart_id: usize, stack_bottom: PAddr) -> ! {
-    let stack_range = PRange::new(stack_bottom - (1 << 3) * PAGE_SIZE, stack_bottom);
+    let stack_range =
+        PRange::new(stack_bottom - (1 << 3) * PAGE_SIZE, stack_bottom);
 
     {
         // SAFETY: Acquire all the work done by the BSP and other APs.
         let alloc = loop {
-            let alloc = BSP_PAGE_ALLOC.swap(core::ptr::null_mut(), Ordering::AcqRel);
+            let alloc =
+                BSP_PAGE_ALLOC.swap(core::ptr::null_mut(), Ordering::AcqRel);
 
             if !alloc.is_null() {
                 break alloc;

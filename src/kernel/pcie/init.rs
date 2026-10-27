@@ -1,14 +1,16 @@
-use super::{
-    device::{PCIDevice, SegmentGroup, PCIE_DEVICES},
-    error::PciError,
-};
-use crate::kernel::{mem::PhysAccess as _, pcie::device::PciMemoryAllocator};
-use acpi::{AcpiHandler, PhysicalMapping};
 use alloc::collections::btree_map::Entry;
 use alloc::vec;
-use eonix_log::println_trace;
-use eonix_mm::address::PAddr;
 
+use acpi::{AcpiHandler, PhysicalMapping};
+use eonix_log::println_trace;
+use eonix_mm::address::{PAddr, PRange};
+
+use super::device::{PCIDevice, SegmentGroup, PCIE_DEVICES};
+use super::error::PciError;
+use crate::kernel::mem::PhysAccess as _;
+use crate::kernel::pcie::device::PciMemoryAllocator;
+
+#[allow(unused)]
 #[derive(Clone)]
 struct AcpiHandlerImpl;
 
@@ -33,7 +35,6 @@ pub fn init_pcie() -> Result<(), PciError> {
     #[cfg(target_arch = "x86_64")]
     {
         use acpi::{AcpiTables, PciConfigRegions};
-        use eonix_mm::address::PAddr;
 
         let acpi_tables = unsafe {
             // SAFETY: Our impl should be correct.
@@ -67,9 +68,9 @@ pub fn init_pcie() -> Result<(), PciError> {
 
     #[cfg(any(target_arch = "riscv64", target_arch = "loongarch64"))]
     {
-        use crate::kernel::constants::{EINVAL, EIO, ENOENT};
         use eonix_hal::arch_exported::fdt::FDT;
-        use eonix_mm::address::PRange;
+
+        use crate::kernel::constants::{EINVAL, EIO, ENOENT};
 
         let pcie_node = FDT
             .find_compatible(&["pci-host-ecam-generic"])
@@ -86,7 +87,7 @@ pub fn init_pcie() -> Result<(), PciError> {
                     let size = u64::from_be_bytes(entry[20..28].try_into().unwrap());
 
                     println_trace!(
-                        "trace_pci",
+                        feat: "trace_pci",
                         "PCIe range: PCI address = {:#x}, CPU address = {:#x}, size = {:#x}",
                         pci_address,
                         cpu_address,

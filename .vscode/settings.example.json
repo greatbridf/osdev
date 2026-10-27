@@ -1,0 +1,10 @@
+{
+    "editor.formatOnSave": true,
+    // Uncomment and set the target you'd like to use for analysis.
+    //
+    // Available targets:
+    // - x86_64-unknown-none.json
+    // - riscv64gc-unknown-none-elf
+    // - loongarch64-unknown-none-softfloat
+    // "rust-analyzer.cargo.target": "x86_64-unknown-none.json",
+}

@@ -1,12 +1,19 @@
-use super::{
-    dentry::{dcache, Dentry, DROOT},
-    inode::Inode,
-    vfs::Vfs,
-};
-use crate::kernel::constants::{EEXIST, ENODEV, ENOTDIR};
-use crate::prelude::*;
-use alloc::{collections::btree_map::BTreeMap, string::ToString as _, sync::Arc};
+use alloc::collections::btree_map::BTreeMap;
+use alloc::string::ToString as _;
+use alloc::sync::Arc;
+
+use async_trait::async_trait;
+use eonix_macros::define_late_init;
 use eonix_sync::LazyLock;
+
+use super::dentry::{dcache, Dentry, DROOT};
+use super::inode::InodeUse;
+use super::{SbUse, SuperBlock};
+use crate::fs::procfs::populate_root;
+use crate::io::buf_writeln;
+use crate::kernel::constants::{EEXIST, ENODEV, ENOTDIR};
+use crate::kernel::task::block_on;
+use crate::prelude::*;
 
 pub const MS_RDONLY: u64 = 1 << 0;
 pub const MS_NOSUID: u64 = 1 << 1;
@@ -26,21 +33,24 @@ const MOUNT_FLAGS: [(u64, &str); 6] = [
     (MS_LAZYTIME, ",lazytime"),
 ];
 
-static MOUNT_CREATORS: Spin<BTreeMap<String, Arc<dyn MountCreator>>> = Spin::new(BTreeMap::new());
+static MOUNT_CREATORS: Spin<BTreeMap<String, Arc<dyn MountCreator>>> =
+    Spin::new(BTreeMap::new());
 static MOUNTS: Spin<Vec<(Arc<Dentry>, MountPointData)>> = Spin::new(vec![]);
 
 pub struct Mount {
-    _vfs: Arc<dyn Vfs>,
+    sb: SbUse<dyn SuperBlock>,
     root: Arc<Dentry>,
 }
 
 impl Mount {
-    pub fn new(mp: &Dentry, vfs: Arc<dyn Vfs>, root_inode: Arc<dyn Inode>) -> KResult<Self> {
+    pub fn new(
+        mp: &Dentry, sb: SbUse<dyn SuperBlock>, root_inode: InodeUse,
+    ) -> KResult<Self> {
         let root_dentry = Dentry::create(mp.parent().clone(), &mp.get_name());
-        root_dentry.save_dir(root_inode)?;
+        root_dentry.fill(root_inode);
 
         Ok(Self {
-            _vfs: vfs,
+            sb,
             root: root_dentry,
         })
     }
@@ -53,12 +63,17 @@ impl Mount {
 unsafe impl Send for Mount {}
 unsafe impl Sync for Mount {}
 
+#[async_trait]
 pub trait MountCreator: Send + Sync {
     fn check_signature(&self, first_block: &[u8]) -> KResult<bool>;
-    fn create_mount(&self, source: &str, flags: u64, mp: &Arc<Dentry>) -> KResult<Mount>;
+    async fn create_mount(
+        &self, source: &str, flags: u64, mp: &Arc<Dentry>,
+    ) -> KResult<Mount>;
 }
 
-pub fn register_filesystem(fstype: &str, creator: Arc<dyn MountCreator>) -> KResult<()> {
+pub fn register_filesystem(
+    fstype: &str, creator: Arc<dyn MountCreator>,
+) -> KResult<()> {
     let mut creators = MOUNT_CREATORS.lock();
     if !creators.contains_key(fstype) {
         creators.insert(fstype.to_string(), creator);
@@ -77,11 +92,8 @@ struct MountPointData {
     flags: u64,
 }
 
-pub fn do_mount(
-    mountpoint: &Arc<Dentry>,
-    source: &str,
-    mountpoint_str: &str,
-    fstype: &str,
+pub async fn do_mount(
+    mountpoint: &Arc<Dentry>, source: &str, mountpoint_str: &str, fstype: &str,
     flags: u64,
 ) -> KResult<()> {
     let mut flags = flags;
@@ -101,7 +113,7 @@ pub fn do_mount(
         let creators = { MOUNT_CREATORS.lock() };
         creators.get(fstype).ok_or(ENODEV)?.clone()
     };
-    let mount = creator.create_mount(source, flags, mountpoint)?;
+    let mount = creator.create_mount(source, flags, mountpoint).await?;
 
     let root_dentry = mount.root().clone();
 
@@ -139,17 +151,23 @@ fn mount_opts(flags: u64) -> String {
     out
 }
 
-pub fn dump_mounts(buffer: &mut dyn core::fmt::Write) {
-    for (_, mpdata) in MOUNTS.lock().iter() {
-        dont_check!(writeln!(
-            buffer,
-            "{} {} {} {} 0 0",
-            mpdata.source,
-            mpdata.mountpoint,
-            mpdata.fstype,
-            mount_opts(mpdata.flags)
-        ))
-    }
+#[define_late_init]
+async fn populate_mounts_file() {
+    populate_root(Arc::from(b"mounts".as_slice()), |buffer| {
+        for (_, mpdata) in MOUNTS.lock().iter() {
+            buf_writeln!(
+                buffer,
+                "{} {} {} {} 0 0",
+                mpdata.source,
+                mpdata.mountpoint,
+                mpdata.fstype,
+                mount_opts(mpdata.flags)
+            )?;
+        }
+
+        Ok(())
+    })
+    .await;
 }
 
 impl Dentry {
@@ -165,24 +183,21 @@ impl Dentry {
                 .cloned()
                 .expect("tmpfs not registered.");
 
-            let mount = creator
-                .create_mount(&source, mount_flags, &DROOT)
-                .expect("Failed to create root mount.");
+            let mount =
+                block_on(creator.create_mount(&source, mount_flags, &DROOT))
+                    .expect("Failed to create root mount.");
 
             let root_dentry = mount.root().clone();
 
             dcache::d_add(root_dentry.clone());
 
-            MOUNTS.lock().push((
-                DROOT.clone(),
-                MountPointData {
-                    mount,
-                    source,
-                    mountpoint: String::from("/"),
-                    fstype,
-                    flags: mount_flags,
-                },
-            ));
+            MOUNTS.lock().push((DROOT.clone(), MountPointData {
+                mount,
+                source,
+                mountpoint: String::from("/"),
+                fstype,
+                flags: mount_flags,
+            }));
 
             root_dentry
         });

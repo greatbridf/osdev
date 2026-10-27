@@ -1,17 +1,18 @@
-use crate::{
-    kernel::{
-        syscall::{procops::parse_user_tls, UserMut},
-        task::{alloc_pid, ProcessBuilder, ProcessList, Thread, ThreadBuilder},
-        user::UserPointerMut,
-    },
-    KResult,
-};
-use bitflags::bitflags;
 use core::num::NonZero;
-use eonix_hal::processor::UserTLS;
+
+use bitflags::bitflags;
 use eonix_runtime::scheduler::RUNTIME;
 use eonix_sync::AsProof;
+use posix_types::ctypes::PtrT;
 use posix_types::signal::Signal;
+
+use super::{UserTLS, UserTLSDescriptor};
+use crate::kernel::syscall::UserMut;
+use crate::kernel::task::{
+    alloc_pid, ProcessBuilder, ProcessList, Thread, ThreadBuilder,
+};
+use crate::kernel::user::UserPointerMut;
+use crate::KResult;
 
 bitflags! {
     #[derive(Debug, Default)]
@@ -46,23 +47,26 @@ bitflags! {
 #[derive(Debug)]
 pub struct CloneArgs {
     pub flags: CloneFlags,
-    pub sp: Option<NonZero<usize>>, // Stack pointer for the new thread.
-    pub exit_signal: Option<Signal>, // Signal to send to the parent on exit.
-    pub set_tid_ptr: Option<UserMut<u32>>, // Pointer to set child TID in user space.
-    pub clear_tid_ptr: Option<UserMut<u32>>, // Pointer to clear child TID in user space.
-    pub parent_tid_ptr: Option<UserMut<u32>>, // Pointer to parent TID in user space.
-    pub tls: Option<UserTLS>,       // Pointer to TLS information.
+    /// Stack pointer for the new thread.
+    pub sp: Option<NonZero<usize>>,
+    /// Signal to send to the parent on exit.
+    pub exit_signal: Option<Signal>,
+    /// Pointer to set child TID in user space.
+    pub set_tid_ptr: Option<UserMut<u32>>,
+    /// Pointer to clear child TID in user space.
+    pub clear_tid_ptr: Option<UserMut<u32>>,
+    /// Pointer to parent TID in user space.
+    pub parent_tid_ptr: Option<UserMut<u32>>,
+    /// Pointer to TLS information.
+    pub tls: Option<UserTLS>,
 }
 
 impl CloneArgs {
     const MASK: usize = 0xff;
 
     pub fn for_clone(
-        flags: usize,
-        sp: usize,
-        child_tid_ptr: UserMut<u32>,
-        parent_tid_ptr: UserMut<u32>,
-        tls: usize,
+        flags: usize, sp: usize, child_tid_ptr: UserMut<u32>,
+        parent_tid_ptr: UserMut<u32>, tls: PtrT,
     ) -> KResult<Self> {
         let clone_flags = CloneFlags::from_bits_truncate(flags & !Self::MASK);
         let exit_signal = flags & Self::MASK;
@@ -87,7 +91,8 @@ impl CloneArgs {
             .then_some(parent_tid_ptr);
 
         let tls = if clone_flags.contains(CloneFlags::CLONE_SETTLS) {
-            Some(parse_user_tls(tls)?)
+            let tls_desc = UserTLSDescriptor::new(tls)?;
+            Some(tls_desc.read()?)
         } else {
             None
         };
@@ -133,7 +138,8 @@ impl CloneArgs {
 pub async fn do_clone(thread: &Thread, clone_args: CloneArgs) -> KResult<u32> {
     let mut procs = ProcessList::get().write().await;
 
-    let thread_builder = ThreadBuilder::new().clone_from(&thread, &clone_args)?;
+    let thread_builder =
+        ThreadBuilder::new().clone_from(&thread, &clone_args)?;
     let current_process = thread.process.clone();
 
     let new_pid = alloc_pid();
@@ -142,7 +148,6 @@ pub async fn do_clone(thread: &Thread, clone_args: CloneArgs) -> KResult<u32> {
         let new_thread = thread_builder
             .process(current_process)
             .tid(new_pid)
-            .tls(clone_args.tls)
             .build(&mut procs);
         new_thread
     } else {

@@ -1,10 +1,12 @@
-use super::{MMList, VAddr};
-use crate::kernel::task::Thread;
+use eonix_hal::extern_symbol_addr;
 use eonix_hal::mm::flush_tlb;
 use eonix_hal::traits::fault::PageFaultErrorCode;
 use eonix_mm::address::{Addr as _, AddrOps as _, VRange};
 use eonix_mm::paging::PAGE_SIZE;
 use posix_types::signal::Signal;
+
+use super::{MMList, VAddr};
+use crate::kernel::task::Thread;
 
 #[repr(C)]
 struct FixEntry {
@@ -23,27 +25,20 @@ impl FixEntry {
         VAddr::from((self.start + self.length) as usize)
     }
 
-    #[allow(dead_code)]
-    fn range(&self) -> VRange {
-        VRange::new(self.start(), self.end())
-    }
-
     fn jump_address(&self) -> VAddr {
         VAddr::from(self.jump_address as usize)
     }
 
     fn entries() -> &'static [FixEntry] {
-        extern "C" {
-            fn FIX_START();
-            fn FIX_END();
-        }
+        let fix_seg_len_bytes =
+            extern_symbol_addr!(FIX_END) - extern_symbol_addr!(FIX_START);
 
         unsafe {
-            // SAFETY: `FIX_START` and `FIX_END` are defined in the
-            //         linker script in `.rodata` section.
+            // SAFETY: `FIX_START` and `FIX_END` are defined in the linker script
+            //         in `.rodata` section.
             core::slice::from_raw_parts(
-                FIX_START as usize as *const FixEntry,
-                (FIX_END as usize - FIX_START as usize) / size_of::<FixEntry>(),
+                extern_symbol_addr!(FIX_START, FixEntry),
+                fix_seg_len_bytes / size_of::<FixEntry>(),
             )
         }
     }
@@ -52,9 +47,7 @@ impl FixEntry {
 impl MMList {
     /// Handle a user page fault.
     pub async fn handle_user_page_fault(
-        &self,
-        addr: VAddr,
-        error: PageFaultErrorCode,
+        &self, addr: VAddr, error: PageFaultErrorCode,
     ) -> Result<(), Signal> {
         debug_assert!(
             error.contains(PageFaultErrorCode::UserAccess),
@@ -64,10 +57,10 @@ impl MMList {
         let inner = self.inner.borrow();
         let inner = inner.lock().await;
 
-        let area = inner.areas.get(&VRange::from(addr)).ok_or(Signal::SIGBUS)?;
+        let area = inner.areas.get(addr).ok_or(Signal::SIGBUS)?;
 
         // Check user access permission.
-        if error.contains(PageFaultErrorCode::Read) && !area.permission.read {
+        if error.contains(PageFaultErrorCode::Read) && !area.can_read() {
             // Under x86_64, we don't have a way to distinguish
             // between a read fault and a non-present fault. But it should be OK
             // since non-readable pages are not allowed under x86 and if we read
@@ -75,11 +68,13 @@ impl MMList {
             Err(Signal::SIGSEGV)?
         }
 
-        if error.contains(PageFaultErrorCode::Write) && !area.permission.write {
+        if error.contains(PageFaultErrorCode::Write) && !area.can_write() {
             Err(Signal::SIGSEGV)?
         }
 
-        if error.contains(PageFaultErrorCode::InstructionFetch) && !area.permission.execute {
+        if error.contains(PageFaultErrorCode::InstructionFetch)
+            && !area.can_execute()
+        {
             Err(Signal::SIGSEGV)?
         }
 
@@ -91,7 +86,7 @@ impl MMList {
 
         area.handle(
             pte,
-            addr.floor() - area.range().start(),
+            addr.floor() - area.range.as_ref(&inner.lock).start(),
             error.contains(PageFaultErrorCode::Write),
         )
         .await
@@ -130,9 +125,7 @@ fn kernel_page_fault_die(vaddr: VAddr, pc: VAddr) -> ! {
 }
 
 pub async fn handle_kernel_page_fault(
-    fault_pc: VAddr,
-    addr: VAddr,
-    error: PageFaultErrorCode,
+    fault_pc: VAddr, addr: VAddr, error: PageFaultErrorCode,
 ) -> Option<VAddr> {
     debug_assert!(
         !error.contains(PageFaultErrorCode::UserAccess),
@@ -151,23 +144,22 @@ pub async fn handle_kernel_page_fault(
     let inner = mms.inner.borrow();
     let inner = inner.lock().await;
 
-    let area = match inner.areas.get(&VRange::from(addr)) {
-        Some(area) => area,
-        None => {
-            return Some(try_page_fault_fix(fault_pc, addr));
-        }
+    let Some(area) = inner.areas.get(addr) else {
+        return Some(try_page_fault_fix(fault_pc, addr));
     };
 
     let pte = inner
         .page_table
         .iter_user(VRange::from(addr.floor()).grow(PAGE_SIZE))
         .next()
-        .expect("If we can find the mapped area, we should be able to find the PTE");
+        .expect(
+            "If we can find the mapped area, we should be able to find the PTE",
+        );
 
     if let Err(_) = area
         .handle(
             pte,
-            addr.floor() - area.range().start(),
+            addr.floor() - area.range.as_ref(&inner.lock).start(),
             error.contains(PageFaultErrorCode::Write),
         )
         .await

@@ -1,9 +1,8 @@
 use alloc::sync::Arc;
-use core::{
-    fmt::{self, Debug, Formatter},
-    ptr::NonNull,
-    sync::atomic::{AtomicPtr, Ordering},
-};
+use core::fmt::{self, Debug, Formatter};
+use core::ptr::NonNull;
+use core::sync::atomic::{AtomicPtr, Ordering};
+
 use pointers::BorrowedArc;
 
 unsafe impl<T> Send for ArcSwap<T> where T: Send + Sync {}
@@ -33,7 +32,7 @@ impl<T> ArcSwap<T> {
         }
     }
 
-    pub fn borrow(&self) -> BorrowedArc<T> {
+    pub fn borrow(&self) -> BorrowedArc<'_, T> {
         unsafe {
             BorrowedArc::from_raw(
                 NonNull::new(self.pointer.load(Ordering::Acquire))

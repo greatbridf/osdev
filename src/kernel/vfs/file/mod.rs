@@ -2,28 +2,23 @@ mod inode_file;
 mod pipe;
 mod terminal_file;
 
-use crate::{
-    io::{Buffer, ByteBuffer, Chunks, IntoStream, Stream},
-    kernel::{
-        constants::{EBADF, EINTR, EINVAL, ENOTTY},
-        mem::{AsMemoryBlock, Page},
-        task::Thread,
-        CharDevice,
-    },
-    prelude::KResult,
-};
 use alloc::sync::Arc;
-use bitflags::bitflags;
-use core::{
-    ops::Deref,
-    sync::atomic::{AtomicI32, AtomicU32, Ordering},
-};
-use pipe::{PipeReadEnd, PipeWriteEnd};
-use posix_types::open::OpenFlags;
+use core::ops::Deref;
+use core::sync::atomic::{AtomicI32, AtomicU32, Ordering};
 
+use bitflags::bitflags;
 pub use inode_file::InodeFile;
 pub use pipe::Pipe;
+use pipe::{PipeReadEnd, PipeWriteEnd};
+use posix_types::open::OpenFlags;
 pub use terminal_file::TerminalFile;
+
+use crate::io::{Buffer, ByteBuffer, Chunks, IntoStream, Stream};
+use crate::kernel::constants::{EBADF, EINTR, EINVAL, ENOTTY};
+use crate::kernel::mem::FolioOwned;
+use crate::kernel::task::Thread;
+use crate::kernel::CharDevice;
+use crate::prelude::KResult;
 
 pub enum FileType {
     Inode(InodeFile),
@@ -56,12 +51,14 @@ bitflags! {
 }
 
 impl FileType {
-    pub async fn read(&self, buffer: &mut dyn Buffer, offset: Option<usize>) -> KResult<usize> {
+    pub async fn read(
+        &self, buffer: &mut dyn Buffer, offset: Option<usize>,
+    ) -> KResult<usize> {
         match self {
             FileType::Inode(inode) => inode.read(buffer, offset).await,
             FileType::PipeRead(pipe) => pipe.read(buffer).await,
             FileType::Terminal(tty) => tty.read(buffer).await,
-            FileType::CharDev(device) => device.read(buffer),
+            FileType::CharDev(device) => device.read(buffer).await,
             _ => Err(EBADF),
         }
     }
@@ -81,7 +78,9 @@ impl FileType {
     //     }
     // }
 
-    pub async fn write(&self, stream: &mut dyn Stream, offset: Option<usize>) -> KResult<usize> {
+    pub async fn write(
+        &self, stream: &mut dyn Stream, offset: Option<usize>,
+    ) -> KResult<usize> {
         match self {
             FileType::Inode(inode) => inode.write(stream, offset).await,
             FileType::PipeWrite(pipe) => pipe.write(stream).await,
@@ -98,10 +97,11 @@ impl FileType {
         }
     }
 
-    pub async fn sendfile(&self, dest_file: &Self, count: usize) -> KResult<usize> {
-        let buffer_page = Page::alloc();
-        // SAFETY: We are the only owner of the page.
-        let buffer = unsafe { buffer_page.as_memblk().as_bytes_mut() };
+    pub async fn sendfile(
+        &self, dest_file: &Self, count: usize,
+    ) -> KResult<usize> {
+        let mut buffer_page = FolioOwned::alloc();
+        let buffer = buffer_page.as_bytes_mut();
 
         self.sendfile_check()?;
 
@@ -132,7 +132,9 @@ impl FileType {
 
     pub async fn ioctl(&self, request: usize, arg3: usize) -> KResult<usize> {
         match self {
-            FileType::Terminal(tty) => tty.ioctl(request, arg3).await.map(|_| 0),
+            FileType::Terminal(tty) => {
+                tty.ioctl(request, arg3).await.map(|_| 0)
+            }
             _ => Err(ENOTTY),
         }
     }

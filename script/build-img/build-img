@@ -1,0 +1,94 @@
+#!/bin/sh
+# shellcheck source=./lib/lib.sh
+
+. "$(dirname "$(realpath "$0")")/lib/lib.sh"
+
+BASE_DIR="$(dirname "$(realpath "$0")")"
+
+KB=1024
+MB=$((1024 * KB))
+
+TARGET=
+IMAGE=
+MOUNTPOINT="$(mktemp -d)"
+
+usage() {
+    cat >&2 <<EOF
+Usage: $0 -t <TARGET> -o <OUTPUT> [-h]
+
+Options
+    -t          The target building image for
+                    [available: riscv64 x86 loongarch64]
+    -o          Output image path
+    -h          Show help message
+EOF
+
+    exit "$1"
+}
+
+ensure_mount_macos() {
+    hdiutil detach "$MOUNTPOINT" > /dev/null 2>&1 || :
+    hdiutil attach "$IMAGE" -mountpoint "$MOUNTPOINT"
+}
+
+ensure_mount_linux() {
+    DEV=$(sudo losetup -f "$IMAGE" --show)
+    sudo mount "$DEV" "$MOUNTPOINT"
+}
+
+ensure_mount() {
+    if [ "$OS" = Darwin ]; then
+        ensure_mount_macos
+        return
+    fi
+
+    ensure_mount_linux
+}
+
+unmount_macos() {
+    hdiutil detach "$MOUNTPOINT"
+}
+
+unmount_linux() {
+    sudo umount "$MOUNTPOINT"
+    sudo losetup -d "$DEV"
+}
+
+cleanup() {
+    case "$OS" in
+        Darwin)
+            unmount_macos
+            ;;
+        *)
+            unmount_linux
+            ;;
+    esac
+}
+
+set -eu
+
+while getopts "t:o:h" opt; do
+    case "$opt" in
+        t) TARGET="$OPTARG";;
+        o) IMAGE="$OPTARG";;
+        h) usage 0;;
+        ?) usage 1;;
+    esac
+done
+
+shift $((OPTIND - 1))
+
+[ -z "$TARGET" ] && die "ARCH is not set"
+[ -z "$IMAGE" ] && die "output image path is not set"
+
+echo "Build image with ARCH=$TARGET OUTPUT=$IMAGE MOUNTPOINT=$MOUNTPOINT"
+
+dd if=/dev/zero of="$IMAGE" bs=$((1 * MB)) count=$((1024 - 4))
+mkfs.fat -n SYSTEM "$IMAGE"
+
+ensure_mount
+trap cleanup EXIT
+
+for name in $(iter_files_sorted "$BASE_DIR/platform/$TARGET"); do
+    ( . "$name" )
+done

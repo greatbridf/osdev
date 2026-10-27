@@ -1,7 +1,8 @@
 pub(crate) mod init;
 
-use super::mm::{E820_MEM_MAP_DATA, PA_G, PA_NXE, PA_P, PA_PS, PA_RW};
 use core::arch::{global_asm, naked_asm};
+
+use super::mm::{E820_MEM_MAP_DATA, PA_G, PA_NXE, PA_P, PA_PS, PA_RW};
 
 const KERNEL_IMAGE_PADDR: usize = 0x200000;
 const KERNEL_PML4: usize = 0x1000;
@@ -171,7 +172,7 @@ global_asm!(
     .Lhalt:
         hlt
         jmp .
-    
+
     # scratch %eax
     # return address should be of 2 bytes, and will be zero extended to 4 bytes
     .Lgo_32bit:
@@ -408,17 +409,38 @@ global_asm!(
         mov ${KERNEL_PD_KIMAGE}, %esi
         call fill_pxe
 
-        # PDE 0xff0
+        # PDE 0xfc0 ~ ?
         mov ${KERNEL_PD_KIMAGE}, %edi
-        lea 0xff0(%edi), %edi
-        mov ${KERNEL_PT_KIMAGE}, %esi # 0x104000
+        mov ${KERNEL_IMAGE_PADDR}, %esi
+        lea 0xfc0(%edi), %edi
+
+        mov ${KIMAGE_PAGES}, %ecx
+        shr $9, %ecx                # 2M blocks
+
+        or ${PA_PS}, %ebx
+
+    2:
+        test %ecx, %ecx
+        jz 2f
+
+        call fill_pxe
+        lea 8(%edi), %edi
+        add $0x200000, %esi
+        dec %ecx
+        jmp 2b
+
+    2:
+        and $(~{PA_PS}), %ebx
+        push %esi
+        mov ${KERNEL_PT_KIMAGE}, %esi
         call fill_pxe
 
         # fill PT (kernel image)
         mov ${KERNEL_PT_KIMAGE}, %edi
-        mov ${KERNEL_IMAGE_PADDR}, %esi
+        pop %esi
 
         mov ${KIMAGE_PAGES}, %ecx
+        and $511, %ecx
 
     2:
         call fill_pxe
@@ -453,16 +475,18 @@ global_asm!(
     # %esi: page physical address
     # %edi: page x entry address
     fill_pxe:
+        push %eax
         lea (%ebx, %esi, 1), %eax
         mov %eax, (%edi)
         mov %edx, 4(%edi)
 
+        pop %eax
         ret
 
     .code64
     2:
         jmp {start_64bit}
-    
+
     .popsection
     "#,
     EARLY_GDT = sym EARLY_GDT,
@@ -513,4 +537,15 @@ pub unsafe extern "C" fn start_64bit() {
         kernel_init = sym init::kernel_init,
         options(att_syntax)
     )
+}
+
+pub fn shutdown() -> ! {
+    unsafe {
+        core::arch::asm!(
+            "mov $0x2000, %ax",
+            "mov $0x604, %dx",
+            "outw %ax, %dx",
+            options(att_syntax, nomem, noreturn)
+        );
+    }
 }

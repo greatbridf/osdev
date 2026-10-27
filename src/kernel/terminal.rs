@@ -1,17 +1,18 @@
-use super::{
-    task::{ProcessList, Session, Thread},
-    user::{UserPointer, UserPointerMut},
-};
-use crate::kernel::constants::{EINTR, ENOTTY, EPERM};
-use crate::{io::Buffer, prelude::*, sync::CondVar};
-use alloc::{
-    collections::vec_deque::VecDeque,
-    sync::{Arc, Weak},
-};
+use alloc::collections::vec_deque::VecDeque;
+use alloc::sync::{Arc, Weak};
+
 use bitflags::bitflags;
 use eonix_log::ConsoleWrite;
-use eonix_sync::{AsProof as _, Mutex};
+use eonix_sync::{Mutex, Proof};
 use posix_types::signal::Signal;
+
+use super::constants::ESRCH;
+use super::task::{ProcessList, Session, Thread};
+use super::user::{UserPointer, UserPointerMut};
+use crate::io::Buffer;
+use crate::kernel::constants::{EINTR, ENOTTY, EPERM};
+use crate::prelude::*;
+use crate::sync::CondVar;
 
 const BUFFER_SIZE: usize = 4096;
 
@@ -351,12 +352,12 @@ pub trait TerminalDevice: Send + Sync {
 
 struct TerminalInner {
     termio: Termios,
-    session: Weak<Session>,
     buffer: VecDeque<u8>,
 }
 
 pub struct Terminal {
     inner: Mutex<TerminalInner>,
+    session: Spin<Weak<Session>>,
     device: Arc<dyn TerminalDevice>,
     cv: CondVar,
 }
@@ -400,9 +401,9 @@ impl Terminal {
         Arc::new(Self {
             inner: Mutex::new(TerminalInner {
                 termio: Termios::new_standard(),
-                session: Weak::new(),
                 buffer: VecDeque::with_capacity(BUFFER_SIZE),
             }),
+            session: Spin::new(Weak::new()),
             cv: CondVar::new(),
             device,
         })
@@ -447,15 +448,21 @@ impl Terminal {
     }
 
     async fn signal(&self, inner: &mut TerminalInner, signal: Signal) {
-        if let Some(session) = inner.session.upgrade() {
+        if let Some(session) = self.session() {
             session.raise_foreground(signal).await;
         }
+
         if !inner.termio.noflsh() {
             self.clear_read_buffer(inner);
         }
     }
 
-    async fn echo_and_signal(&self, inner: &mut TerminalInner, ch: u8, signal: Signal) {
+    async fn echo_and_signal(
+        &self,
+        inner: &mut TerminalInner,
+        ch: u8,
+        signal: Signal,
+    ) {
         self.echo_char(inner, ch);
         self.signal(inner, signal).await;
     }
@@ -481,13 +488,19 @@ impl Terminal {
             match ch {
                 0xff => {}
                 ch if ch == inner.termio.vintr() => {
-                    return self.echo_and_signal(&mut inner, ch, Signal::SIGINT).await
+                    return self
+                        .echo_and_signal(&mut inner, ch, Signal::SIGINT)
+                        .await
                 }
                 ch if ch == inner.termio.vquit() => {
-                    return self.echo_and_signal(&mut inner, ch, Signal::SIGQUIT).await
+                    return self
+                        .echo_and_signal(&mut inner, ch, Signal::SIGQUIT)
+                        .await
                 }
                 ch if ch == inner.termio.vsusp() => {
-                    return self.echo_and_signal(&mut inner, ch, Signal::SIGTSTP).await
+                    return self
+                        .echo_and_signal(&mut inner, ch, Signal::SIGTSTP)
+                        .await
                 }
                 _ => {}
             }
@@ -517,8 +530,12 @@ impl Terminal {
 
         match ch {
             b'\r' if inner.termio.igncr() => {}
-            b'\r' if inner.termio.icrnl() => return self.do_commit_char(&mut inner, b'\n'),
-            b'\n' if inner.termio.inlcr() => return self.do_commit_char(&mut inner, b'\r'),
+            b'\r' if inner.termio.icrnl() => {
+                return self.do_commit_char(&mut inner, b'\n')
+            }
+            b'\n' if inner.termio.inlcr() => {
+                return self.do_commit_char(&mut inner, b'\r')
+            }
             _ => self.do_commit_char(&mut inner, ch),
         }
     }
@@ -589,26 +606,30 @@ impl Terminal {
     pub async fn ioctl(&self, request: TerminalIORequest<'_>) -> KResult<()> {
         match request {
             TerminalIORequest::GetProcessGroup(pgid_pointer) => {
-                if let Some(session) = self.inner.lock().await.session.upgrade() {
-                    if let Some(pgroup) = session.foreground().await {
-                        return pgid_pointer.write(pgroup.pgid);
-                    }
-                }
+                let Some(session) = self.session() else {
+                    return Err(ENOTTY);
+                };
 
-                Err(ENOTTY)
+                let Some(pgroup) = session.foreground_pgroup() else {
+                    return Err(ENOTTY);
+                };
+
+                pgid_pointer.write(pgroup.pgid)
             }
             TerminalIORequest::SetProcessGroup(pgid) => {
                 let pgid = pgid.read()?;
 
                 let procs = ProcessList::get().read().await;
-                let inner = self.inner.lock().await;
-                let session = inner.session.upgrade();
+                let Some(session) = self.session() else {
+                    return Err(ENOTTY);
+                };
 
-                if let Some(session) = session {
-                    session.set_foreground_pgid(pgid, procs.prove()).await
-                } else {
-                    Err(ENOTTY)
-                }
+                let Some(pgroup) = procs.try_find_pgroup(pgid) else {
+                    return Err(ESRCH);
+                };
+
+                session.set_foreground_pgroup(Some(&pgroup))?;
+                Ok(())
             }
             TerminalIORequest::GetWindowSize(ptr) => {
                 // TODO: Get the actual window size
@@ -630,9 +651,12 @@ impl Terminal {
                 let mut inner = self.inner.lock().await;
 
                 // TODO: We ignore unknown bits for now.
-                inner.termio.iflag = TermioIFlags::from_bits_truncate(user_termios.iflag as u16);
-                inner.termio.oflag = TermioOFlags::from_bits_truncate(user_termios.oflag as u16);
-                inner.termio.lflag = TermioLFlags::from_bits_truncate(user_termios.lflag as u16);
+                inner.termio.iflag =
+                    TermioIFlags::from_bits_truncate(user_termios.iflag as u16);
+                inner.termio.oflag =
+                    TermioOFlags::from_bits_truncate(user_termios.oflag as u16);
+                inner.termio.lflag =
+                    TermioLFlags::from_bits_truncate(user_termios.lflag as u16);
                 inner.termio.cflag = user_termios.cflag;
                 inner.termio.line = user_termios.line;
                 inner.termio.cc = user_termios.cc;
@@ -642,30 +666,52 @@ impl Terminal {
         }
     }
 
-    /// Assign the `session` to this terminal. Drop the previous session if `forced` is true.
-    pub async fn set_session(&self, session: &Arc<Session>, forced: bool) -> KResult<()> {
-        let mut inner = self.inner.lock().await;
-        if let Some(session) = inner.session.upgrade() {
-            if !forced {
-                Err(EPERM)
-            } else {
-                session.drop_control_terminal().await;
-                inner.session = Arc::downgrade(&session);
-                Ok(())
+    pub fn session(&self) -> Option<Arc<Session>> {
+        self.session.lock().upgrade()
+    }
+
+    /// Drop our current controlled session. The old session lose its controlling
+    /// terminal and all processes in it will receive a SIGHUP and then SIGCONT.
+    pub fn drop_session(&self, procs: Proof<'_, ProcessList>) {
+        let session =
+            core::mem::replace(&mut *self.session.lock(), Weak::new());
+        let Some(old_session) = session.upgrade() else {
+            return;
+        };
+
+        old_session._drop_control_terminal(procs);
+    }
+
+    /// Assign the `session` to this terminal.
+    /// Drop the previous session if `forced` is true.
+    pub async fn set_session(
+        self: &Arc<Self>,
+        session: &Arc<Session>,
+        forced: bool,
+        procs: Proof<'_, ProcessList>,
+    ) -> KResult<()> {
+        let mut cur_session = self.session.lock();
+
+        // XXX: Holding spinlock for too long?
+        if let Some(old_session) = cur_session.upgrade() {
+            if old_session.sid == session.sid {
+                return Ok(());
             }
-        } else {
-            // Sessions should set their `control_terminal` field.
-            inner.session = Arc::downgrade(&session);
-            Ok(())
+
+            if !forced {
+                return Err(EPERM);
+            }
+
+            // TODO: Check whether the caller has the CAP_SYS_ADMIN capability.
+
+            // We've stolen the terminal from the old session.
+            old_session._drop_control_terminal(procs);
         }
-    }
 
-    pub async fn drop_session(&self) {
-        self.inner.lock().await.session = Weak::new();
-    }
+        *cur_session = Arc::downgrade(session);
+        session._set_control_terminal(self, procs);
 
-    pub async fn session(&self) -> Option<Arc<Session>> {
-        self.inner.lock().await.session.upgrade()
+        Ok(())
     }
 }
 

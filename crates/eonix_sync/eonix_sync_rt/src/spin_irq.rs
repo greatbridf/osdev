@@ -12,7 +12,7 @@ pub trait SpinIrq {
     type Context: SpinContext;
     type Relax;
 
-    fn lock_irq(&self) -> SpinGuard<Self::Value, Self::Context, Self::Relax>;
+    fn lock_irq(&self) -> SpinGuard<'_, Self::Value, Self::Context, Self::Relax>;
 }
 
 impl SpinContext for IrqContext {
@@ -50,7 +50,7 @@ where
     type Context = IrqContext;
     type Relax = R;
 
-    fn lock_irq(&self) -> SpinGuard<Self::Value, Self::Context, Self::Relax> {
+    fn lock_irq(&self) -> SpinGuard<'_, Self::Value, Self::Context, Self::Relax> {
         self.lock_with_context(IrqContext::save())
     }
 }

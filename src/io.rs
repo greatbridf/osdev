@@ -1,6 +1,8 @@
+use core::mem::MaybeUninit;
+use core::ops::{Add, AddAssign, Sub};
+
 use crate::kernel::constants::EFAULT;
 use crate::prelude::*;
-use core::{cmp, mem::MaybeUninit};
 
 #[must_use]
 #[derive(Debug)]
@@ -50,7 +52,9 @@ pub trait Buffer: Send {
 }
 
 pub trait Stream: Send {
-    fn poll_data<'a>(&mut self, buf: &'a mut [u8]) -> KResult<Option<&'a mut [u8]>>;
+    fn poll_data<'a>(
+        &mut self, buf: &'a mut [u8],
+    ) -> KResult<Option<&'a mut [u8]>>;
     fn ignore(&mut self, len: usize) -> KResult<Option<usize>>;
 }
 
@@ -62,9 +66,7 @@ pub trait IntoStream {
 
 pub trait StreamRead {
     fn read_till_end(
-        &mut self,
-        buffer: &mut [u8],
-        func: impl Fn(&mut [u8]) -> KResult<()>,
+        &mut self, buffer: &mut [u8], func: impl Fn(&mut [u8]) -> KResult<()>,
     ) -> KResult<usize>;
 
     fn ignore_all(&mut self) -> KResult<usize>;
@@ -75,9 +77,7 @@ where
     T: Stream + ?Sized,
 {
     fn read_till_end(
-        &mut self,
-        buffer: &mut [u8],
-        func: impl Fn(&mut [u8]) -> KResult<()>,
+        &mut self, buffer: &mut [u8], func: impl Fn(&mut [u8]) -> KResult<()>,
     ) -> KResult<usize> {
         let mut total = 0;
         while let Some(data) = self.poll_data(buffer)? {
@@ -141,7 +141,10 @@ impl<'lt, T: Copy + Sized> UninitBuffer<'lt, T> {
         Self {
             data,
             buffer: ByteBuffer::from(unsafe {
-                core::slice::from_raw_parts_mut(ptr as *mut u8, core::mem::size_of::<T>())
+                core::slice::from_raw_parts_mut(
+                    ptr as *mut u8,
+                    core::mem::size_of::<T>(),
+                )
             }),
         }
     }
@@ -236,18 +239,26 @@ impl Buffer for ByteBuffer<'_> {
     }
 }
 
+pub trait Integer:
+    Add<Output = Self> + Sub<Output = Self> + AddAssign + Copy + PartialOrd + Ord
+{
+}
+
+impl Integer for u64 {}
+impl Integer for usize {}
+
 /// Iterator that generates chunks of a given length from a start index
 /// until the end of the total length.
 ///
 /// The iterator returns a tuple of (start, len) for each chunk.
-pub struct Chunks {
-    end: usize,
-    cur: usize,
-    chunk_len: usize,
+pub struct Chunks<T: Integer> {
+    end: T,
+    cur: T,
+    chunk_len: T,
 }
 
-impl Chunks {
-    pub const fn new(start: usize, total_len: usize, chunk_len: usize) -> Self {
+impl<T: Integer> Chunks<T> {
+    pub fn new(start: T, total_len: T, chunk_len: T) -> Self {
         Self {
             end: start + total_len,
             cur: start,
@@ -256,8 +267,8 @@ impl Chunks {
     }
 }
 
-impl Iterator for Chunks {
-    type Item = (usize, usize);
+impl<T: Integer> Iterator for Chunks<T> {
+    type Item = (T, T);
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.cur >= self.end {
@@ -265,7 +276,7 @@ impl Iterator for Chunks {
         }
 
         let start = self.cur;
-        let len = cmp::min(self.chunk_len, self.end - start);
+        let len = self.chunk_len.min(self.end - start);
 
         self.cur += self.chunk_len;
         Some((start, len))
@@ -284,7 +295,9 @@ impl<'a> ByteStream<'a> {
 }
 
 impl<'a> Stream for ByteStream<'a> {
-    fn poll_data<'b>(&mut self, buf: &'b mut [u8]) -> KResult<Option<&'b mut [u8]>> {
+    fn poll_data<'b>(
+        &mut self, buf: &'b mut [u8],
+    ) -> KResult<Option<&'b mut [u8]>> {
         if self.cur >= self.data.len() {
             return Ok(None);
         }
@@ -320,3 +333,23 @@ impl<'a> IntoStream for &'a [u8] {
         ByteStream::new(self)
     }
 }
+
+macro_rules! buf_write {
+    ($buf:ident, $($args:expr),*) => {{
+        use core::fmt::Write;
+        use $crate::io::Buffer;
+        write!($buf.get_writer(), $($args),*)
+            .map_err(|_| $crate::kernel::constants::ERANGE)
+    }};
+}
+
+macro_rules! buf_writeln {
+    ($buf:ident, $($args:expr),*) => {{
+        use core::fmt::Write;
+        use $crate::io::Buffer;
+        writeln!($buf.get_writer(), $($args),*)
+            .map_err(|_| $crate::kernel::constants::ERANGE)
+    }};
+}
+
+pub(crate) use {buf_write, buf_writeln};

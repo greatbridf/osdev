@@ -1,27 +1,22 @@
-use super::{LoadInfo, ELF_MAGIC};
-use crate::io::UninitBuffer;
-use crate::kernel::task::loader::aux_vec::{AuxKey, AuxVec};
-use crate::path::Path;
-use crate::{
-    io::ByteBuffer,
-    kernel::{
-        constants::ENOEXEC,
-        mem::{FileMapping, MMList, Mapping, Permission},
-        vfs::{dentry::Dentry, FsContext},
-    },
-    prelude::*,
-};
-use align_ext::AlignExt;
+use alloc::ffi::CString;
+use alloc::sync::Arc;
 use alloc::vec::Vec;
-use alloc::{ffi::CString, sync::Arc};
-use eonix_mm::{
-    address::{Addr, AddrOps as _, VAddr},
-    paging::PAGE_SIZE,
-};
-use xmas_elf::{
-    header::{self, Class, HeaderPt1, Machine_},
-    program::{self, ProgramHeader32, ProgramHeader64},
-};
+
+use align_ext::AlignExt;
+use eonix_mm::address::{Addr, AddrOps as _, VAddr};
+use eonix_mm::paging::PAGE_SIZE;
+use xmas_elf::header::{self, Class, HeaderPt1, Machine_};
+use xmas_elf::program::{self, ProgramHeader32, ProgramHeader64};
+
+use super::{LoadInfo, ELF_MAGIC};
+use crate::io::{ByteBuffer, UninitBuffer};
+use crate::kernel::constants::ENOEXEC;
+use crate::kernel::mem::{FileMapping, MMList, Mapping, Permission};
+use crate::kernel::task::loader::aux_vec::{AuxKey, AuxVec};
+use crate::kernel::vfs::dentry::Dentry;
+use crate::kernel::vfs::FsContext;
+use crate::path::Path;
+use crate::prelude::*;
 
 const INIT_STACK_SIZE: usize = 0x80_0000;
 
@@ -193,9 +188,9 @@ impl<E: ElfArch> Elf<E> {
         Err(ENOEXEC)
     }
 
-    fn parse(elf_file: Arc<Dentry>) -> KResult<Self> {
+    async fn parse(elf_file: Arc<Dentry>) -> KResult<Self> {
         let mut elf_header = UninitBuffer::<ElfHeader<E::Ea>>::new();
-        elf_file.read(&mut elf_header, 0)?;
+        elf_file.read(&mut elf_header, 0).await?;
 
         let elf_header = elf_header.assume_init().map_err(|_| ENOEXEC)?;
 
@@ -203,10 +198,12 @@ impl<E: ElfArch> Elf<E> {
         let ph_count = elf_header.pt2.ph_count;
 
         let mut program_headers = vec![E::Ph::default(); ph_count as usize];
-        elf_file.read(
-            &mut ByteBuffer::from(program_headers.as_mut_slice()),
-            ph_offset.into_usize(),
-        )?;
+        elf_file
+            .read(
+                &mut ByteBuffer::from(program_headers.as_mut_slice()),
+                ph_offset.into_usize(),
+            )
+            .await?;
 
         Ok(Self {
             file: elf_file,
@@ -364,7 +361,7 @@ impl<E: ElfArch> Elf<E> {
                     vmap_start,
                     file_len,
                     Mapping::File(FileMapping::new(
-                        self.file.get_inode()?,
+                        self.file.get_inode()?.get_page_cache(),
                         file_offset,
                         real_file_length,
                     )),
@@ -374,28 +371,40 @@ impl<E: ElfArch> Elf<E> {
                 .await?;
         }
 
-        if vmem_len > file_len {
-            mm_list
-                .mmap_fixed(
-                    vmap_start + file_len,
-                    vmem_len - file_len,
-                    Mapping::Anonymous,
-                    permission,
-                    false,
-                )
-                .await?;
+        if vmem_vaddr_end > load_vaddr_end {
+            if load_vaddr_end.page_offset() != 0 {
+                let mut zero_len = PAGE_SIZE - load_vaddr_end.page_offset();
+                zero_len = zero_len.min(vmem_vaddr_end - load_vaddr_end);
+
+                mm_list
+                    .access_mut(load_vaddr_end, zero_len, |_, data| data.fill(0))
+                    .await?;
+            }
+
+            if vmem_len - file_len > 0 {
+                mm_list
+                    .mmap_fixed(
+                        vmap_start + file_len,
+                        vmem_len - file_len,
+                        Mapping::Anonymous,
+                        permission,
+                        false,
+                    )
+                    .await?;
+            }
         }
 
         Ok(vmap_start + vmem_len)
     }
 
     async fn load_ldso(&self, mm_list: &MMList) -> KResult<Option<LdsoLoadInfo>> {
-        let ldso_path = self.ldso_path()?;
+        let ldso_path = self.ldso_path().await?;
 
         if let Some(ldso_path) = ldso_path {
             let fs_context = FsContext::global();
-            let ldso_file = Dentry::open(fs_context, Path::new(ldso_path.as_bytes())?, true)?;
-            let ldso_elf = Elf::<E>::parse(ldso_file)?;
+            let ldso_file =
+                Dentry::open(fs_context, Path::new(ldso_path.as_bytes())?, true).await?;
+            let ldso_elf = Elf::<E>::parse(ldso_file).await?;
 
             let base = VAddr::from(E::LDSO_BASE_ADDR);
 
@@ -420,7 +429,7 @@ impl<E: ElfArch> Elf<E> {
         mm_list.map_vdso().await
     }
 
-    fn ldso_path(&self) -> KResult<Option<String>> {
+    async fn ldso_path(&self) -> KResult<Option<String>> {
         for program_header in &self.program_headers {
             let type_ = program_header.type_().map_err(|_| ENOEXEC)?;
 
@@ -430,7 +439,8 @@ impl<E: ElfArch> Elf<E> {
 
                 let mut ldso_vec = vec![0u8; file_size - 1]; // -1 due to '\0'
                 self.file
-                    .read(&mut ByteBuffer::from(ldso_vec.as_mut_slice()), file_offset)?;
+                    .read(&mut ByteBuffer::from(ldso_vec.as_mut_slice()), file_offset)
+                    .await?;
                 let ldso_path = String::from_utf8(ldso_vec).map_err(|_| ENOEXEC)?;
                 return Ok(Some(ldso_path));
             }
@@ -445,16 +455,16 @@ pub enum ELF {
 }
 
 impl ELF {
-    pub fn parse(elf_file: Arc<Dentry>) -> KResult<Self> {
+    pub async fn parse(elf_file: Arc<Dentry>) -> KResult<Self> {
         let mut header_pt1 = UninitBuffer::<HeaderPt1>::new();
-        elf_file.read(&mut header_pt1, 0)?;
+        elf_file.read(&mut header_pt1, 0).await?;
 
         let header_pt1 = header_pt1.assume_init().map_err(|_| ENOEXEC)?;
         assert_eq!(header_pt1.magic, ELF_MAGIC);
 
         match header_pt1.class() {
-            Class::ThirtyTwo => Ok(ELF::Elf32(Elf::parse(elf_file)?)),
-            Class::SixtyFour => Ok(ELF::Elf64(Elf::parse(elf_file)?)),
+            Class::ThirtyTwo => Ok(ELF::Elf32(Elf::parse(elf_file).await?)),
+            Class::SixtyFour => Ok(ELF::Elf64(Elf::parse(elf_file).await?)),
             _ => Err(ENOEXEC),
         }
     }

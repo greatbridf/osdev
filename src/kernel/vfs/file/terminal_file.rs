@@ -20,9 +20,7 @@ pub struct TerminalFile {
 
 impl TerminalFile {
     pub async fn open(
-        thread: &Thread,
-        terminal: &Arc<Terminal>,
-        flags: OpenFlags,
+        thread: &Thread, terminal: &Arc<Terminal>, flags: OpenFlags,
     ) -> File {
         let set_control_tty = !flags.contains(OpenFlags::O_NOCTTY);
 

@@ -21,7 +21,8 @@ impl VAddrExt for VAddr {
 
 impl VRangeExt for VRange {
     fn is_user(&self) -> bool {
-        !(self.end() > USER_SPACE_MEMORY_TOP || self.start() >= USER_SPACE_MEMORY_TOP)
+        !(self.end() > USER_SPACE_MEMORY_TOP
+            || self.start() >= USER_SPACE_MEMORY_TOP)
     }
 
     fn is_kernel(&self) -> bool {

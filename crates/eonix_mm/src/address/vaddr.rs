@@ -1,8 +1,7 @@
+use core::fmt;
+use core::ops::{Add, Sub};
+
 use super::addr::Addr;
-use core::{
-    fmt,
-    ops::{Add, Sub},
-};
 
 #[repr(transparent)]
 #[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq)]

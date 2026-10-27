@@ -1,15 +1,17 @@
+use core::cell::UnsafeCell;
+use core::marker::PhantomPinned;
+use core::pin::Pin;
+use core::ptr::null_mut;
+use core::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
+use core::task::Waker;
+
+use eonix_spin::Spin;
+use intrusive_collections::{
+    intrusive_adapter, LinkedListAtomicLink, UnsafeRef,
+};
+
 use super::WaitList;
 use crate::SpinIrq as _;
-use core::{
-    cell::UnsafeCell,
-    marker::PhantomPinned,
-    pin::Pin,
-    ptr::null_mut,
-    sync::atomic::{AtomicBool, AtomicPtr, Ordering},
-    task::Waker,
-};
-use eonix_spin::Spin;
-use intrusive_collections::{intrusive_adapter, LinkedListAtomicLink, UnsafeRef};
 
 intrusive_adapter!(
     pub WaitObjectAdapter = Pin<UnsafeRef<WaitObject>>:

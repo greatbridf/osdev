@@ -7,10 +7,14 @@ use eonix_sync::{LazyLock, RwLock};
 
 use super::file::{DeviceInode, FileInode, SymlinkInode};
 use super::TmpFs;
-use crate::kernel::constants::{EEXIST, EINVAL, EISDIR, ENOENT, ENOSYS, ENOTDIR};
+use crate::kernel::constants::{
+    EEXIST, EINVAL, EISDIR, ENOENT, ENOSYS, ENOTDIR,
+};
 use crate::kernel::timer::Instant;
 use crate::kernel::vfs::dentry::{dcache, Dentry};
-use crate::kernel::vfs::inode::{Ino, InodeInfo, InodeOps, InodeUse, RenameData};
+use crate::kernel::vfs::inode::{
+    Ino, InodeInfo, InodeOps, InodeUse, RenameData,
+};
 use crate::kernel::vfs::types::{DeviceId, Format, Mode, Permission};
 use crate::kernel::vfs::{SbRef, SbUse};
 use crate::prelude::KResult;
@@ -19,7 +23,10 @@ pub struct DirectoryInode {
     entries: RwLock<Vec<(Arc<[u8]>, Ino)>>,
 }
 
-fn link(dir: &InodeUse, entries: &mut Vec<(Arc<[u8]>, Ino)>, name: Arc<[u8]>, file: &InodeUse) {
+fn link(
+    dir: &InodeUse, entries: &mut Vec<(Arc<[u8]>, Ino)>, name: Arc<[u8]>,
+    file: &InodeUse,
+) {
     let mut dir_info = dir.info.lock();
     let mut file_info = file.info.lock();
 
@@ -37,7 +44,8 @@ fn link(dir: &InodeUse, entries: &mut Vec<(Arc<[u8]>, Ino)>, name: Arc<[u8]>, fi
 
 impl DirectoryInode {
     pub fn new(ino: Ino, sb: SbRef<TmpFs>, perm: Permission) -> InodeUse {
-        static DOT: LazyLock<Arc<[u8]>> = LazyLock::new(|| Arc::from(b".".as_slice()));
+        static DOT: LazyLock<Arc<[u8]>> =
+            LazyLock::new(|| Arc::from(b".".as_slice()));
 
         let now = Instant::now();
 
@@ -62,14 +70,9 @@ impl DirectoryInode {
     }
 
     fn do_unlink(
-        &self,
-        file: &InodeUse,
-        filename: &[u8],
-        entries: &mut Vec<(Arc<[u8]>, Ino)>,
-        now: Instant,
-        decrease_size: bool,
-        self_info: &mut InodeInfo,
-        file_info: &mut InodeInfo,
+        &self, file: &InodeUse, filename: &[u8],
+        entries: &mut Vec<(Arc<[u8]>, Ino)>, now: Instant, decrease_size: bool,
+        self_info: &mut InodeInfo, file_info: &mut InodeInfo,
     ) -> KResult<()> {
         // SAFETY: `file_lock` has done the synchronization
         if file.format == Format::DIR {
@@ -77,7 +80,9 @@ impl DirectoryInode {
         }
 
         let file_ino = file.ino;
-        entries.retain(|(name, ino)| *ino != file_ino || name.as_ref() != filename);
+        entries.retain(|(name, ino)| {
+            *ino != file_ino || name.as_ref() != filename
+        });
 
         if decrease_size {
             self_info.size -= 1;
@@ -102,10 +107,7 @@ impl InodeOps for DirectoryInode {
     type SuperBlock = TmpFs;
 
     async fn readdir(
-        &self,
-        sb: SbUse<Self::SuperBlock>,
-        _: &InodeUse,
-        offset: usize,
+        &self, sb: SbUse<Self::SuperBlock>, _: &InodeUse, offset: usize,
         for_each_entry: &mut (dyn FnMut(&[u8], Ino) -> KResult<bool> + Send),
     ) -> KResult<KResult<usize>> {
         let _sb = sb;
@@ -124,10 +126,7 @@ impl InodeOps for DirectoryInode {
     }
 
     async fn create(
-        &self,
-        sb: SbUse<Self::SuperBlock>,
-        inode: &InodeUse,
-        at: &Arc<Dentry>,
+        &self, sb: SbUse<Self::SuperBlock>, inode: &InodeUse, at: &Arc<Dentry>,
         perm: Permission,
     ) -> KResult<()> {
         let mut entries = self.entries.write().await;
@@ -142,12 +141,8 @@ impl InodeOps for DirectoryInode {
     }
 
     async fn mknod(
-        &self,
-        sb: SbUse<Self::SuperBlock>,
-        inode: &InodeUse,
-        at: &Dentry,
-        mode: Mode,
-        dev: DeviceId,
+        &self, sb: SbUse<Self::SuperBlock>, inode: &InodeUse, at: &Dentry,
+        mode: Mode, dev: DeviceId,
     ) -> KResult<()> {
         if !mode.is_chr() && !mode.is_blk() {
             return Err(EINVAL);
@@ -165,10 +160,7 @@ impl InodeOps for DirectoryInode {
     }
 
     async fn symlink(
-        &self,
-        sb: SbUse<Self::SuperBlock>,
-        inode: &InodeUse,
-        at: &Arc<Dentry>,
+        &self, sb: SbUse<Self::SuperBlock>, inode: &InodeUse, at: &Arc<Dentry>,
         target: &[u8],
     ) -> KResult<()> {
         let mut entries = self.entries.write().await;
@@ -183,10 +175,7 @@ impl InodeOps for DirectoryInode {
     }
 
     async fn mkdir(
-        &self,
-        sb: SbUse<Self::SuperBlock>,
-        inode: &InodeUse,
-        at: &Dentry,
+        &self, sb: SbUse<Self::SuperBlock>, inode: &InodeUse, at: &Dentry,
         perm: Permission,
     ) -> KResult<()> {
         let mut entries = self.entries.write().await;
@@ -201,10 +190,7 @@ impl InodeOps for DirectoryInode {
     }
 
     async fn unlink(
-        &self,
-        _sb: SbUse<Self::SuperBlock>,
-        inode: &InodeUse,
-        at: &Arc<Dentry>,
+        &self, _sb: SbUse<Self::SuperBlock>, inode: &InodeUse, at: &Arc<Dentry>,
     ) -> KResult<()> {
         let mut entries = self.entries.write().await;
 
@@ -229,9 +215,7 @@ impl InodeOps for DirectoryInode {
     }
 
     async fn rename(
-        &self,
-        sb: SbUse<Self::SuperBlock>,
-        inode: &InodeUse,
+        &self, sb: SbUse<Self::SuperBlock>, inode: &InodeUse,
         rename_data: RenameData<'_, '_>,
     ) -> KResult<()> {
         let _rename_lock = sb.backend.rename_lock.lock().await;
@@ -340,7 +324,9 @@ impl InodeOps for DirectoryInode {
             // Find the new entry in the new directory (if it exists)
             let has_new = new_entries
                 .iter()
-                .position(|(name, ino)| Some(*ino) == new_ino && *name == new_name)
+                .position(|(name, ino)| {
+                    Some(*ino) == new_ino && *name == new_name
+                })
                 .is_some();
 
             let now = Instant::now();
@@ -390,10 +376,7 @@ impl InodeOps for DirectoryInode {
     }
 
     async fn chmod(
-        &self,
-        _sb: SbUse<Self::SuperBlock>,
-        inode: &InodeUse,
-        perm: Permission,
+        &self, _sb: SbUse<Self::SuperBlock>, inode: &InodeUse, perm: Permission,
     ) -> KResult<()> {
         let mut info = inode.info.lock();
         info.perm = perm;

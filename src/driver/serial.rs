@@ -1,18 +1,21 @@
 mod io;
 
-use crate::{
-    kernel::{
-        console::set_console, constants::EIO, interrupt::register_irq_handler,
-        vfs::types::DeviceId, CharDevice, CharDeviceType, Terminal, TerminalDevice,
-    },
-    prelude::*,
-};
-use alloc::{collections::vec_deque::VecDeque, format, sync::Arc};
-use bitflags::bitflags;
+use alloc::collections::vec_deque::VecDeque;
+use alloc::format;
+use alloc::sync::Arc;
 use core::pin::pin;
+
+use bitflags::bitflags;
 use eonix_runtime::scheduler::RUNTIME;
 use eonix_sync::{SpinIrq as _, WaitList};
 use io::SerialIO;
+
+use crate::kernel::console::set_console;
+use crate::kernel::constants::EIO;
+use crate::kernel::interrupt::register_irq_handler;
+use crate::kernel::vfs::types::DeviceId;
+use crate::kernel::{CharDevice, CharDeviceType, Terminal, TerminalDevice};
+use crate::prelude::*;
 
 bitflags! {
     struct LineStatus: u8 {

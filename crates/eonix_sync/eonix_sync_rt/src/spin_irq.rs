@@ -1,6 +1,8 @@
 use eonix_hal::traits::trap::IrqState as _;
 use eonix_hal::trap::{disable_irqs_save, IrqState};
-use eonix_spin::{ContextUnlock, Spin, SpinContext, SpinGuard, UnlockedContext};
+use eonix_spin::{
+    ContextUnlock, Spin, SpinContext, SpinGuard, UnlockedContext,
+};
 use eonix_sync_base::Relax;
 
 pub struct IrqContext(IrqState);
@@ -12,7 +14,9 @@ pub trait SpinIrq {
     type Context: SpinContext;
     type Relax;
 
-    fn lock_irq(&self) -> SpinGuard<'_, Self::Value, Self::Context, Self::Relax>;
+    fn lock_irq(
+        &self,
+    ) -> SpinGuard<'_, Self::Value, Self::Context, Self::Relax>;
 }
 
 impl SpinContext for IrqContext {
@@ -50,7 +54,9 @@ where
     type Context = IrqContext;
     type Relax = R;
 
-    fn lock_irq(&self) -> SpinGuard<'_, Self::Value, Self::Context, Self::Relax> {
+    fn lock_irq(
+        &self,
+    ) -> SpinGuard<'_, Self::Value, Self::Context, Self::Relax> {
         self.lock_with_context(IrqContext::save())
     }
 }

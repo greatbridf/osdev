@@ -32,7 +32,9 @@ impl PageOffset {
         Self((offset + PAGE_SIZE - 1) >> PAGE_SIZE_BITS)
     }
 
-    pub fn iter_till(self, end: PageOffset) -> impl Iterator<Item = PageOffset> {
+    pub fn iter_till(
+        self, end: PageOffset,
+    ) -> impl Iterator<Item = PageOffset> {
         (self.0..end.0).map(PageOffset)
     }
 
@@ -100,10 +102,10 @@ impl PageCache {
     }
 
     pub fn get_page_locked<'a>(
-        &self,
-        pages: &'a mut BTreeMap<PageOffset, CachePage>,
+        &self, pages: &'a mut BTreeMap<PageOffset, CachePage>,
         pgoff: PageOffset,
-    ) -> impl Future<Output = KResult<&'a mut CachePage>> + Send + use<'_, 'a> {
+    ) -> impl Future<Output = KResult<&'a mut CachePage>> + Send + use<'_, 'a>
+    {
         async move {
             match pages.entry(pgoff) {
                 Entry::Occupied(ent) => Ok(ent.into_mut()),
@@ -122,7 +124,9 @@ impl PageCache {
     }
 
     // TODO: Remove this.
-    pub async fn with_page(&self, pgoff: PageOffset, func: impl FnOnce(&CachePage)) -> KResult<()> {
+    pub async fn with_page(
+        &self, pgoff: PageOffset, func: impl FnOnce(&CachePage),
+    ) -> KResult<()> {
         let mut pages = self.pages.lock().await;
         if pgoff > PageOffset::from_byte_ceil(self.len()) {
             return Err(EINVAL);
@@ -135,7 +139,9 @@ impl PageCache {
         Ok(())
     }
 
-    pub async fn read(&self, buffer: &mut dyn Buffer, mut offset: usize) -> KResult<usize> {
+    pub async fn read(
+        &self, buffer: &mut dyn Buffer, mut offset: usize,
+    ) -> KResult<usize> {
         let mut pages = self.pages.lock().await;
         let total_len = self.len();
 
@@ -156,7 +162,10 @@ impl PageCache {
             let data_len = real_end - offset;
 
             if buffer
-                .fill(&page.lock().as_bytes()[inner_offset..inner_offset + data_len])?
+                .fill(
+                    &page.lock().as_bytes()
+                        [inner_offset..inner_offset + data_len],
+                )?
                 .should_stop()
                 || buffer.available() == 0
             {
@@ -169,7 +178,9 @@ impl PageCache {
         Ok(buffer.wrote())
     }
 
-    pub async fn write(&self, stream: &mut dyn Stream, mut offset: usize) -> KResult<usize> {
+    pub async fn write(
+        &self, stream: &mut dyn Stream, mut offset: usize,
+    ) -> KResult<usize> {
         let mut pages = self.pages.lock().await;
         let mut total_written = 0;
 

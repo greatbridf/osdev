@@ -1,9 +1,9 @@
-use super::Mutex;
-use core::{
-    ops::{Deref, DerefMut},
-    sync::atomic::Ordering,
-};
+use core::ops::{Deref, DerefMut};
+use core::sync::atomic::Ordering;
+
 use eonix_sync_base::{UnlockableGuard, UnlockedGuard};
+
+use super::Mutex;
 
 pub struct MutexGuard<'a, T>
 where

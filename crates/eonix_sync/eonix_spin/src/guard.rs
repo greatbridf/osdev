@@ -1,12 +1,13 @@
-use super::{
-    ContextUnlock, DisablePreemption, Relax, Spin, SpinContext, SpinRelax, UnlockedContext,
-};
-use core::{
-    marker::PhantomData,
-    mem::ManuallyDrop,
-    ops::{Deref, DerefMut},
-};
+use core::marker::PhantomData;
+use core::mem::ManuallyDrop;
+use core::ops::{Deref, DerefMut};
+
 use eonix_sync_base::{NotSend, UnlockableGuard, UnlockedGuard};
+
+use super::{
+    ContextUnlock, DisablePreemption, Relax, Spin, SpinContext, SpinRelax,
+    UnlockedContext,
+};
 
 pub struct SpinGuard<'a, T, C = DisablePreemption, R = SpinRelax>
 where
@@ -40,7 +41,9 @@ where
     T: ?Sized,
     C: SpinContext,
 {
-    pub(super) fn new(lock: &'a Spin<T, R>, value: &'a mut T, context: C) -> Self {
+    pub(super) fn new(
+        lock: &'a Spin<T, R>, value: &'a mut T, context: C,
+    ) -> Self {
         Self {
             lock,
             value,

@@ -1,20 +1,19 @@
 mod trap_context;
 
-use super::context::TaskContext;
 use core::arch::{asm, global_asm, naked_asm};
 use core::cell::UnsafeCell;
 use core::mem::{offset_of, size_of};
 use core::num::NonZero;
 use core::ptr::NonNull;
-use eonix_hal_traits::{
-    context::RawTaskContext,
-    trap::{IrqState as IrqStateTrait, TrapReturn},
-};
+
+use eonix_hal_traits::context::RawTaskContext;
+use eonix_hal_traits::trap::{IrqState as IrqStateTrait, TrapReturn};
 use loongArch64::register::crmd::{self, Crmd};
 use loongArch64::register::ecfg;
 use loongArch64::register::eentry::{self, Eentry};
-
 pub use trap_context::*;
+
+use super::context::TaskContext;
 
 pub const CSR_KERNEL_TP: usize = 0x30;
 const CSR_CAPTURED_TRAP_CONTEXT_ADDR: usize = 0x31;

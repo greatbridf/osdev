@@ -1,5 +1,6 @@
-use crate::kernel::constants::{EFAULT, EINVAL, ENOENT};
 use acpi::AcpiError;
+
+use crate::kernel::constants::{EFAULT, EINVAL, ENOENT};
 
 #[derive(Debug)]
 pub struct PciError(u32);

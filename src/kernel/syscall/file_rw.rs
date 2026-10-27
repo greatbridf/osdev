@@ -41,10 +41,7 @@ impl FromSyscallArg for AtFlags {
 }
 
 async fn dentry_from(
-    thread: &Thread,
-    dirfd: FD,
-    pathname: User<u8>,
-    follow_symlink: bool,
+    thread: &Thread, dirfd: FD, pathname: User<u8>, follow_symlink: bool,
 ) -> KResult<Arc<Dentry>> {
     let path = UserString::new(pathname)?;
 
@@ -87,10 +84,7 @@ async fn read(fd: FD, buffer: UserMut<u8>, bufsize: usize) -> KResult<usize> {
 
 #[eonix_macros::define_syscall(SYS_PREAD64)]
 async fn pread64(
-    fd: FD,
-    buffer: UserMut<u8>,
-    bufsize: usize,
-    offset: usize,
+    fd: FD, buffer: UserMut<u8>, bufsize: usize, offset: usize,
 ) -> KResult<usize> {
     let mut buffer = UserBuffer::new(buffer, bufsize)?;
 
@@ -117,10 +111,7 @@ async fn write(fd: FD, buffer: User<u8>, count: usize) -> KResult<usize> {
 
 #[eonix_macros::define_syscall(SYS_PWRITE64)]
 async fn pwrite64(
-    fd: FD,
-    buffer: User<u8>,
-    count: usize,
-    offset: usize,
+    fd: FD, buffer: User<u8>, count: usize, offset: usize,
 ) -> KResult<usize> {
     let buffer = CheckedUserPointer::new(buffer, count)?;
     let mut stream = buffer.into_stream();
@@ -135,10 +126,7 @@ async fn pwrite64(
 
 #[eonix_macros::define_syscall(SYS_OPENAT)]
 async fn openat(
-    dirfd: FD,
-    pathname: User<u8>,
-    flags: OpenFlags,
-    mode: Mode,
+    dirfd: FD, pathname: User<u8>, flags: OpenFlags, mode: Mode,
 ) -> KResult<FD> {
     let dentry =
         dentry_from(thread, dirfd, pathname, flags.follow_symlink()).await?;
@@ -195,9 +183,7 @@ async fn pipe(pipe_fd: UserMut<[FD; 2]>) -> KResult<()> {
 #[cfg(target_arch = "x86_64")]
 #[eonix_macros::define_syscall(SYS_GETDENTS)]
 async fn getdents(
-    fd: FD,
-    buffer: UserMut<u8>,
-    bufsize: usize,
+    fd: FD, buffer: UserMut<u8>, bufsize: usize,
 ) -> KResult<usize> {
     let mut buffer = UserBuffer::new(buffer, bufsize)?;
 
@@ -213,9 +199,7 @@ async fn getdents(
 
 #[eonix_macros::define_syscall(SYS_GETDENTS64)]
 async fn getdents64(
-    fd: FD,
-    buffer: UserMut<u8>,
-    bufsize: usize,
+    fd: FD, buffer: UserMut<u8>, bufsize: usize,
 ) -> KResult<usize> {
     let mut buffer = UserBuffer::new(buffer, bufsize)?;
 
@@ -234,10 +218,7 @@ async fn getdents64(
 )]
 #[cfg_attr(target_arch = "x86_64", eonix_macros::define_syscall(SYS_FSTATAT64))]
 async fn newfstatat(
-    dirfd: FD,
-    pathname: User<u8>,
-    statbuf: UserMut<Stat>,
-    flags: AtFlags,
+    dirfd: FD, pathname: User<u8>, statbuf: UserMut<Stat>, flags: AtFlags,
 ) -> KResult<()> {
     let dentry = if flags.at_empty_path() {
         let file = thread.files.get(dirfd).ok_or(EBADF)?;
@@ -268,10 +249,7 @@ async fn newfstat(fd: FD, statbuf: UserMut<Stat>) -> KResult<()> {
 
 #[eonix_macros::define_syscall(SYS_STATX)]
 async fn statx(
-    dirfd: FD,
-    pathname: User<u8>,
-    flags: AtFlags,
-    mask: u32,
+    dirfd: FD, pathname: User<u8>, flags: AtFlags, mask: u32,
     buffer: UserMut<StatX>,
 ) -> KResult<()> {
     if !flags.statx_default_sync() {
@@ -341,9 +319,7 @@ async fn unlink(pathname: User<u8>) -> KResult<()> {
 
 #[eonix_macros::define_syscall(SYS_SYMLINKAT)]
 async fn symlinkat(
-    target: User<u8>,
-    dirfd: FD,
-    linkpath: User<u8>,
+    target: User<u8>, dirfd: FD, linkpath: User<u8>,
 ) -> KResult<()> {
     let target = UserString::new(target)?;
     let dentry = dentry_from(thread, dirfd, linkpath, false).await?;
@@ -379,10 +355,7 @@ impl UserDeviceId {
 
 #[eonix_macros::define_syscall(SYS_MKNODAT)]
 async fn mknodat(
-    dirfd: FD,
-    pathname: User<u8>,
-    mut mode: Mode,
-    dev: UserDeviceId,
+    dirfd: FD, pathname: User<u8>, mut mode: Mode, dev: UserDeviceId,
 ) -> KResult<()> {
     if !mode.is_blk() && !mode.is_chr() {
         return Err(EINVAL);
@@ -397,19 +370,14 @@ async fn mknodat(
 #[cfg(target_arch = "x86_64")]
 #[eonix_macros::define_syscall(SYS_MKNOD)]
 async fn mknod(
-    pathname: User<u8>,
-    mode: Mode,
-    dev: UserDeviceId,
+    pathname: User<u8>, mode: Mode, dev: UserDeviceId,
 ) -> KResult<()> {
     sys_mknodat(thread, FD::AT_FDCWD, pathname, mode, dev).await
 }
 
 #[eonix_macros::define_syscall(SYS_READLINKAT)]
 async fn readlinkat(
-    dirfd: FD,
-    pathname: User<u8>,
-    buffer: UserMut<u8>,
-    bufsize: usize,
+    dirfd: FD, pathname: User<u8>, buffer: UserMut<u8>, bufsize: usize,
 ) -> KResult<usize> {
     let dentry = dentry_from(thread, dirfd, pathname, false).await?;
     let mut buffer = UserBuffer::new(buffer, bufsize)?;
@@ -420,18 +388,13 @@ async fn readlinkat(
 #[cfg(target_arch = "x86_64")]
 #[eonix_macros::define_syscall(SYS_READLINK)]
 async fn readlink(
-    pathname: User<u8>,
-    buffer: UserMut<u8>,
-    bufsize: usize,
+    pathname: User<u8>, buffer: UserMut<u8>, bufsize: usize,
 ) -> KResult<usize> {
     sys_readlinkat(thread, FD::AT_FDCWD, pathname, buffer, bufsize).await
 }
 
 async fn do_lseek(
-    thread: &Thread,
-    fd: FD,
-    offset: u64,
-    whence: u32,
+    thread: &Thread, fd: FD, offset: u64, whence: u32,
 ) -> KResult<u64> {
     let file = thread.files.get(fd).ok_or(EBADF)?;
 
@@ -452,10 +415,7 @@ async fn lseek(fd: FD, offset: u64, whence: u32) -> KResult<u64> {
 #[cfg(target_arch = "x86_64")]
 #[eonix_macros::define_syscall(SYS_LLSEEK)]
 async fn llseek(
-    fd: FD,
-    offset_high: u32,
-    offset_low: u32,
-    result: UserMut<u64>,
+    fd: FD, offset_high: u32, offset_low: u32, result: UserMut<u64>,
     whence: u32,
 ) -> KResult<()> {
     let mut result =
@@ -552,10 +512,7 @@ async fn writev(fd: FD, iov_user: User<IoVec>, iovcnt: u32) -> KResult<usize> {
 
 #[eonix_macros::define_syscall(SYS_FACCESSAT)]
 async fn faccessat(
-    dirfd: FD,
-    pathname: User<u8>,
-    _mode: u32,
-    flags: AtFlags,
+    dirfd: FD, pathname: User<u8>, _mode: u32, flags: AtFlags,
 ) -> KResult<()> {
     let dentry = if flags.at_empty_path() {
         let file = thread.files.get(dirfd).ok_or(EBADF)?;
@@ -588,10 +545,7 @@ async fn access(pathname: User<u8>, mode: u32) -> KResult<()> {
 
 #[eonix_macros::define_syscall(SYS_SENDFILE64)]
 async fn sendfile64(
-    out_fd: FD,
-    in_fd: FD,
-    offset: UserMut<u8>,
-    count: usize,
+    out_fd: FD, in_fd: FD, offset: UserMut<u8>, count: usize,
 ) -> KResult<usize> {
     let in_file = thread.files.get(in_fd).ok_or(EBADF)?;
     let out_file = thread.files.get(out_fd).ok_or(EBADF)?;
@@ -624,10 +578,7 @@ struct UserPollFd {
 }
 
 async fn do_poll(
-    thread: &Thread,
-    fds: UserMut<UserPollFd>,
-    nfds: u32,
-    _timeout: u32,
+    thread: &Thread, fds: UserMut<UserPollFd>, nfds: u32, _timeout: u32,
 ) -> KResult<u32> {
     match nfds {
         0 => Ok(0),
@@ -654,9 +605,7 @@ async fn do_poll(
 
 #[eonix_macros::define_syscall(SYS_PPOLL)]
 async fn ppoll(
-    fds: UserMut<UserPollFd>,
-    nfds: u32,
-    _timeout_ptr: User<TimeSpec>,
+    fds: UserMut<UserPollFd>, nfds: u32, _timeout_ptr: User<TimeSpec>,
     _sigmask: User<SigSet>,
 ) -> KResult<u32> {
     // TODO: Implement ppoll with signal mask and timeout
@@ -665,12 +614,8 @@ async fn ppoll(
 
 #[eonix_macros::define_syscall(SYS_PSELECT6)]
 async fn pselect6(
-    nfds: u32,
-    _readfds: UserMut<FDSet>,
-    _writefds: UserMut<FDSet>,
-    _exceptfds: UserMut<FDSet>,
-    timeout: UserMut<TimeSpec>,
-    _sigmask: User<()>,
+    nfds: u32, _readfds: UserMut<FDSet>, _writefds: UserMut<FDSet>,
+    _exceptfds: UserMut<FDSet>, timeout: UserMut<TimeSpec>, _sigmask: User<()>,
 ) -> KResult<usize> {
     // According to [pthread6(2)](https://linux.die.net/man/2/pselect6):
     // Some code calls select() with all three sets empty, nfds zero, and
@@ -698,20 +643,14 @@ async fn pselect6(
 #[cfg(target_arch = "x86_64")]
 #[eonix_macros::define_syscall(SYS_POLL)]
 async fn poll(
-    fds: UserMut<UserPollFd>,
-    nfds: u32,
-    timeout: u32,
+    fds: UserMut<UserPollFd>, nfds: u32, timeout: u32,
 ) -> KResult<u32> {
     do_poll(thread, fds, nfds, timeout).await
 }
 
 #[eonix_macros::define_syscall(SYS_FCHOWNAT)]
 async fn fchownat(
-    dirfd: FD,
-    pathname: User<u8>,
-    uid: u32,
-    gid: u32,
-    flags: AtFlags,
+    dirfd: FD, pathname: User<u8>, uid: u32, gid: u32, flags: AtFlags,
 ) -> KResult<()> {
     let dentry =
         dentry_from(thread, dirfd, pathname, !flags.no_follow()).await?;
@@ -724,10 +663,7 @@ async fn fchownat(
 
 #[eonix_macros::define_syscall(SYS_FCHMODAT)]
 async fn fchmodat(
-    dirfd: FD,
-    pathname: User<u8>,
-    mode: Mode,
-    flags: AtFlags,
+    dirfd: FD, pathname: User<u8>, mode: Mode, flags: AtFlags,
 ) -> KResult<()> {
     let dentry = if flags.at_empty_path() {
         let file = thread.files.get(dirfd).ok_or(EBADF)?;
@@ -750,10 +686,7 @@ async fn chmod(pathname: User<u8>, mode: Mode) -> KResult<()> {
 
 #[eonix_macros::define_syscall(SYS_UTIMENSAT)]
 async fn utimensat(
-    dirfd: FD,
-    pathname: User<u8>,
-    times: User<TimeSpec>,
-    flags: AtFlags,
+    dirfd: FD, pathname: User<u8>, times: User<TimeSpec>, flags: AtFlags,
 ) -> KResult<()> {
     let dentry = if flags.at_empty_path() {
         let file = thread.files.get(dirfd).ok_or(EBADF)?;
@@ -780,11 +713,8 @@ async fn utimensat(
 
 #[eonix_macros::define_syscall(SYS_RENAMEAT2)]
 async fn renameat2(
-    old_dirfd: FD,
-    old_pathname: User<u8>,
-    new_dirfd: FD,
-    new_pathname: User<u8>,
-    flags: u32,
+    old_dirfd: FD, old_pathname: User<u8>, new_dirfd: FD,
+    new_pathname: User<u8>, flags: u32,
 ) -> KResult<()> {
     let flags = RenameFlags::from_bits(flags).ok_or(EINVAL)?;
 

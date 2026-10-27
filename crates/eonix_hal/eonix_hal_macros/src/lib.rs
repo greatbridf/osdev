@@ -2,7 +2,8 @@ extern crate proc_macro;
 
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{parse, parse_macro_input, spanned::Spanned as _, FnArg, ItemFn};
+use syn::spanned::Spanned as _;
+use syn::{parse, parse_macro_input, FnArg, ItemFn};
 
 /// Define the default trap handler. The function should take exactly one argument
 /// of type `&mut TrapContext`.
@@ -16,7 +17,9 @@ use syn::{parse, parse_macro_input, spanned::Spanned as _, FnArg, ItemFn};
 /// }
 /// ```
 #[proc_macro_attribute]
-pub fn default_trap_handler(attrs: TokenStream, item: TokenStream) -> TokenStream {
+pub fn default_trap_handler(
+    attrs: TokenStream, item: TokenStream,
+) -> TokenStream {
     let item = parse_macro_input!(item as ItemFn);
 
     if !attrs.is_empty() {
@@ -67,15 +70,21 @@ pub fn main(attrs: TokenStream, item: TokenStream) -> TokenStream {
     let item = parse_macro_input!(item as ItemFn);
 
     if !attrs.is_empty() {
-        return parse::Error::new(item.span(), "`main` attribute does not take any arguments")
-            .into_compile_error()
-            .into();
+        return parse::Error::new(
+            item.span(),
+            "`main` attribute does not take any arguments",
+        )
+        .into_compile_error()
+        .into();
     }
 
     if item.sig.inputs.len() != 1 {
-        return parse::Error::new(item.span(), "`main` should have exactly one argument.")
-            .into_compile_error()
-            .into();
+        return parse::Error::new(
+            item.span(),
+            "`main` should have exactly one argument.",
+        )
+        .into_compile_error()
+        .into();
     }
 
     let arg_ident = match item.sig.inputs.first().unwrap() {
@@ -132,9 +141,12 @@ pub fn ap_main(attrs: TokenStream, item: TokenStream) -> TokenStream {
     }
 
     if item.sig.inputs.len() != 1 {
-        return parse::Error::new(item.span(), "`ap_main` should have exactly one argument.")
-            .into_compile_error()
-            .into();
+        return parse::Error::new(
+            item.span(),
+            "`ap_main` should have exactly one argument.",
+        )
+        .into_compile_error()
+        .into();
     }
 
     let arg_ident = match item.sig.inputs.first().unwrap() {

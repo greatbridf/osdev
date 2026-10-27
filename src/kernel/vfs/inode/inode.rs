@@ -282,10 +282,7 @@ pub struct InodeUse(Arc<Inode>);
 
 impl InodeUse {
     pub fn new(
-        sb: SbRef<dyn SuperBlock>,
-        ino: Ino,
-        format: Format,
-        info: InodeInfo,
+        sb: SbRef<dyn SuperBlock>, ino: Ino, format: Format, info: InodeInfo,
         ops: impl InodeOps,
     ) -> Self {
         let inode = Inode {

@@ -47,7 +47,9 @@ pub struct PciMemoryAllocator {
 }
 
 impl SegmentGroup {
-    pub fn new(id: usize, bus_start: u8, bus_end: u8, base_address: PAddr) -> Self {
+    pub fn new(
+        id: usize, bus_start: u8, bus_end: u8, base_address: PAddr,
+    ) -> Self {
         Self {
             id,
             bus_range: bus_start..=bus_end,
@@ -79,7 +81,9 @@ impl SegmentGroup {
             .flatten()
     }
 
-    pub fn get_conf_space(&self, bus: u8, device: u8, function: u8) -> Option<ConfigSpace> {
+    pub fn get_conf_space(
+        &self, bus: u8, device: u8, function: u8,
+    ) -> Option<ConfigSpace> {
         if self.bus_range.contains(&bus) {
             Some(ConfigSpace {
                 bus,
@@ -129,8 +133,7 @@ impl ConfigSpace {
 
 impl PCIDevice<'static> {
     pub fn new(
-        segment_group: SegmentGroup,
-        config_space: ConfigSpace,
+        segment_group: SegmentGroup, config_space: ConfigSpace,
         header: Header<'static>,
     ) -> Arc<Self> {
         Arc::new(PCIDevice {
@@ -156,31 +159,37 @@ impl PCIDevice<'_> {
         if let Header::Endpoint(header) = self.header {
             for mut bar in header.bars().iter() {
                 match bar.get() {
-                    Bar::MemoryMapped32 { base: None, size } => bar.set(Bar::MemoryMapped32 {
-                        base: Some(
-                            allocator
-                                .allocate(size as usize)
-                                .expect("Failed to allocate BAR memory"),
-                        ),
-                        size,
-                    }),
-                    Bar::MemoryMapped64 { base: None, size } => bar.set(Bar::MemoryMapped64 {
-                        base: Some(
-                            allocator
-                                .allocate(size as usize)
-                                .map(|base| NonZero::new(base.get() as u64))
-                                .flatten()
-                                .expect("Failed to allocate BAR memory"),
-                        ),
-                        size,
-                    }),
+                    Bar::MemoryMapped32 { base: None, size } => {
+                        bar.set(Bar::MemoryMapped32 {
+                            base: Some(
+                                allocator
+                                    .allocate(size as usize)
+                                    .expect("Failed to allocate BAR memory"),
+                            ),
+                            size,
+                        })
+                    }
+                    Bar::MemoryMapped64 { base: None, size } => {
+                        bar.set(Bar::MemoryMapped64 {
+                            base: Some(
+                                allocator
+                                    .allocate(size as usize)
+                                    .map(|base| NonZero::new(base.get() as u64))
+                                    .flatten()
+                                    .expect("Failed to allocate BAR memory"),
+                            ),
+                            size,
+                        })
+                    }
                     _ => {}
                 }
             }
         }
 
         self.header.command().set(
-            Command::IO_ACCESS_ENABLE | Command::MEMORY_ACCESS_ENABLE | Command::BUS_MASTER_ENABLE,
+            Command::IO_ACCESS_ENABLE
+                | Command::MEMORY_ACCESS_ENABLE
+                | Command::BUS_MASTER_ENABLE,
         );
     }
 

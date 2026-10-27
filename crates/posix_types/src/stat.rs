@@ -73,13 +73,15 @@ pub struct Stat {
 impl From<StatX> for Stat {
     fn from(statx: StatX) -> Self {
         Self {
-            st_dev: statx.stx_dev_minor as u64 | ((statx.stx_dev_major as u64) << 8),
+            st_dev: statx.stx_dev_minor as u64
+                | ((statx.stx_dev_major as u64) << 8),
             st_ino: statx.stx_ino,
             st_mode: statx.stx_mode as u32,
             st_nlink: statx.stx_nlink,
             st_uid: statx.stx_uid,
             st_gid: statx.stx_gid,
-            st_rdev: statx.stx_rdev_minor as u64 | ((statx.stx_rdev_major as u64) << 8),
+            st_rdev: statx.stx_rdev_minor as u64
+                | ((statx.stx_rdev_major as u64) << 8),
             __padding: 0,
 
             st_size: statx.stx_size,

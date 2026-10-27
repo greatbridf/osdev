@@ -48,7 +48,8 @@ where
                 //         until `levels_len - 1`.
                 self.tables.get_disjoint_unchecked_mut([idx, idx + 1])
             };
-            let parent_table = parent_table.as_mut().expect("Parent table is None");
+            let parent_table =
+                parent_table.as_mut().expect("Parent table is None");
             let next_pte = parent_table.index_mut(pt_idx);
 
             child_table.replace({
@@ -87,21 +88,22 @@ where
     }
 
     pub fn new(
-        page_table: M::RawTable<'a>,
-        range: VRange,
-        fill_entry_attr: TableAttribute,
-        alloc: A,
-        access: X,
+        page_table: M::RawTable<'a>, range: VRange,
+        fill_entry_attr: TableAttribute, alloc: A, access: X,
     ) -> Self {
-        Self::with_levels(page_table, range, fill_entry_attr, alloc, access, M::LEVELS)
+        Self::with_levels(
+            page_table,
+            range,
+            fill_entry_attr,
+            alloc,
+            access,
+            M::LEVELS,
+        )
     }
 
     pub fn with_levels(
-        page_table: M::RawTable<'a>,
-        range: VRange,
-        fill_entry_attr: TableAttribute,
-        alloc: A,
-        access: X,
+        page_table: M::RawTable<'a>, range: VRange,
+        fill_entry_attr: TableAttribute, alloc: A, access: X,
         levels: &'static [PageTableLevel],
     ) -> Self {
         let start = range.start().floor();

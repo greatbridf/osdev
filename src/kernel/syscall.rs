@@ -37,7 +37,10 @@ pub(self) struct RawSyscallHandler {
         ThreadAlloc<'alloc>,
         [usize; 6],
     ) -> Pin<
-        Box<dyn Future<Output = Option<usize>> + Send + 'thd, ThreadAlloc<'alloc>>,
+        Box<
+            dyn Future<Output = Option<usize>> + Send + 'thd,
+            ThreadAlloc<'alloc>,
+        >,
     >,
     name: &'static str,
 }
@@ -48,7 +51,10 @@ pub struct SyscallHandler {
         ThreadAlloc<'alloc>,
         [usize; 6],
     ) -> Pin<
-        Box<dyn Future<Output = Option<usize>> + Send + 'thd, ThreadAlloc<'alloc>>,
+        Box<
+            dyn Future<Output = Option<usize>> + Send + 'thd,
+            ThreadAlloc<'alloc>,
+        >,
     >,
     pub name: &'static str,
 }
@@ -285,35 +291,38 @@ impl<T> core::fmt::Debug for UserMut<T> {
     }
 }
 
-static SYSCALL_HANDLERS: LazyLock<[Option<SyscallHandler>; MAX_SYSCALL_NO]> = LazyLock::new(|| {
-    // DO NOT TOUCH THESE FUNCTIONS!!!
-    // THEY ARE USED FOR KEEPING THE OBJECTS NOT STRIPPED BY THE LINKER!!!
-    file_rw::keep_alive();
-    mm::keep_alive();
-    net::keep_alive();
-    procops::keep_alive();
-    sysinfo::keep_alive();
+static SYSCALL_HANDLERS: LazyLock<[Option<SyscallHandler>; MAX_SYSCALL_NO]> =
+    LazyLock::new(|| {
+        // DO NOT TOUCH THESE FUNCTIONS!!!
+        // THEY ARE USED FOR KEEPING THE OBJECTS NOT STRIPPED BY THE LINKER!!!
+        file_rw::keep_alive();
+        mm::keep_alive();
+        net::keep_alive();
+        procops::keep_alive();
+        sysinfo::keep_alive();
 
-    let raw_handlers_size_byte = extern_symbol_addr!(RAW_SYSCALL_HANDLERS_SIZE);
-    assert!(raw_handlers_size_byte % size_of::<RawSyscallHandler>() == 0);
+        let raw_handlers_size_byte =
+            extern_symbol_addr!(RAW_SYSCALL_HANDLERS_SIZE);
+        assert!(raw_handlers_size_byte % size_of::<RawSyscallHandler>() == 0);
 
-    let raw_handlers_count = raw_handlers_size_byte / size_of::<RawSyscallHandler>();
+        let raw_handlers_count =
+            raw_handlers_size_byte / size_of::<RawSyscallHandler>();
 
-    let raw_handlers = unsafe {
-        core::slice::from_raw_parts(
-            extern_symbol_addr!(RAW_SYSCALL_HANDLERS, RawSyscallHandler),
-            raw_handlers_count,
-        )
-    };
+        let raw_handlers = unsafe {
+            core::slice::from_raw_parts(
+                extern_symbol_addr!(RAW_SYSCALL_HANDLERS, RawSyscallHandler),
+                raw_handlers_count,
+            )
+        };
 
-    let mut handlers = [const { None }; MAX_SYSCALL_NO];
+        let mut handlers = [const { None }; MAX_SYSCALL_NO];
 
-    for &RawSyscallHandler { no, handler, name } in raw_handlers.iter() {
-        handlers[no] = Some(SyscallHandler { handler, name })
-    }
+        for &RawSyscallHandler { no, handler, name } in raw_handlers.iter() {
+            handlers[no] = Some(SyscallHandler { handler, name })
+        }
 
-    handlers
-});
+        handlers
+    });
 
 pub fn syscall_handlers() -> &'static [Option<SyscallHandler>] {
     SYSCALL_HANDLERS.as_ref()

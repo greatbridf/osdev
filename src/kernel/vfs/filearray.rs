@@ -84,9 +84,7 @@ impl FDAllocator {
     }
 
     fn find_available(
-        &mut self,
-        from: FD,
-        files: &RBTree<OpenFileAdapter>,
+        &mut self, from: FD, files: &RBTree<OpenFileAdapter>,
     ) -> FD {
         files
             .range(Bound::Included(&from), Bound::Unbounded)
@@ -232,10 +230,7 @@ impl FileArray {
     /// Duplicates the file to a new file descriptor, returning the old file
     /// description to be dropped.
     fn dup_to_no_close(
-        &self,
-        old_fd: FD,
-        new_fd: FD,
-        fd_flags: FDFlags,
+        &self, old_fd: FD, new_fd: FD, fd_flags: FDFlags,
     ) -> KResult<Option<File>> {
         let mut inner = self.inner.lock();
         let (files, fd_alloc) = inner.split_borrow();
@@ -264,10 +259,7 @@ impl FileArray {
     }
 
     pub async fn dup_to(
-        &self,
-        old_fd: FD,
-        new_fd: FD,
-        flags: OpenFlags,
+        &self, old_fd: FD, new_fd: FD, flags: OpenFlags,
     ) -> KResult<FD> {
         if let Some(old_file) =
             self.dup_to_no_close(old_fd, new_fd, flags.as_fd_flags())?
@@ -297,10 +289,7 @@ impl FileArray {
     }
 
     pub async fn open(
-        &self,
-        thread: &Thread,
-        dentry: &Arc<Dentry>,
-        flags: OpenFlags,
+        &self, thread: &Thread, dentry: &Arc<Dentry>, flags: OpenFlags,
         perm: Permission,
     ) -> KResult<FD> {
         dentry.open_check(flags, perm).await?;

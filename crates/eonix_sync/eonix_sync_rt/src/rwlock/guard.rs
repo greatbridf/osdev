@@ -1,6 +1,10 @@
-use super::RwLock;
 use core::ops::{Deref, DerefMut};
-use eonix_sync_base::{AsProof, AsProofMut, Proof, ProofMut, UnlockableGuard, UnlockedGuard};
+
+use eonix_sync_base::{
+    AsProof, AsProofMut, Proof, ProofMut, UnlockableGuard, UnlockedGuard,
+};
+
+use super::RwLock;
 
 pub struct RwLockWriteGuard<'a, T>
 where
@@ -114,7 +118,8 @@ where
     }
 }
 
-unsafe impl<'guard, 'pos, T> AsProof<'guard, 'pos, T> for RwLockWriteGuard<'guard, T>
+unsafe impl<'guard, 'pos, T> AsProof<'guard, 'pos, T>
+    for RwLockWriteGuard<'guard, T>
 where
     T: ?Sized,
 {
@@ -123,7 +128,8 @@ where
     }
 }
 
-unsafe impl<'guard, 'pos, T> AsProofMut<'guard, 'pos, T> for RwLockWriteGuard<'guard, T>
+unsafe impl<'guard, 'pos, T> AsProofMut<'guard, 'pos, T>
+    for RwLockWriteGuard<'guard, T>
 where
     T: ?Sized,
 {
@@ -132,7 +138,8 @@ where
     }
 }
 
-unsafe impl<'guard, 'pos, T> AsProof<'guard, 'pos, T> for RwLockReadGuard<'guard, T>
+unsafe impl<'guard, 'pos, T> AsProof<'guard, 'pos, T>
+    for RwLockReadGuard<'guard, T>
 where
     T: ?Sized,
 {

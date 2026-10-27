@@ -1,5 +1,6 @@
-use crate::paging::PAGE_SIZE;
 use core::ops::{Add, Sub};
+
+use crate::paging::PAGE_SIZE;
 
 #[doc(notable_trait)]
 pub trait Addr:

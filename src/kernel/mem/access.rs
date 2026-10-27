@@ -1,4 +1,5 @@
 use core::ptr::NonNull;
+
 use eonix_hal::mm::ArchPhysAccess;
 use eonix_mm::address::{PAddr, PhysAccess as _PhysAccess};
 

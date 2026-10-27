@@ -1,10 +1,16 @@
-use super::{config::platform::virt::*, fdt::FDT, fence::memory_barrier, mm::ArchPhysAccess};
-use crate::arch::time;
-use core::{pin::Pin, ptr::NonNull};
+use core::pin::Pin;
+use core::ptr::NonNull;
+
 use eonix_mm::address::{PAddr, PhysAccess};
 use eonix_sync_base::LazyLock;
 use riscv::register::sie;
 use sbi::SbiError;
+
+use super::config::platform::virt::*;
+use super::fdt::FDT;
+use super::fence::memory_barrier;
+use super::mm::ArchPhysAccess;
+use crate::arch::time;
 
 const PRIORITY_OFFSET: usize = 0x0;
 const PENDING_OFFSET: usize = 0x1000;
@@ -44,10 +50,14 @@ impl PLIC {
     fn new(cpuid: usize) -> Self {
         let base = *PLIC_BASE.get();
 
-        let enable = PAddr::from(base + (cpuid * 2 + 1) * ENABLE_STRIDE + ENABLE_OFFSET);
-        let threshold = PAddr::from(base + (cpuid * 2 + 1) * CONTEXT_STRIDE + THRESHOLD_OFFSET);
-        let claim_complete =
-            PAddr::from(base + (cpuid * 2 + 1) * CONTEXT_STRIDE + CLAIM_COMPLETE_OFFSET);
+        let enable =
+            PAddr::from(base + (cpuid * 2 + 1) * ENABLE_STRIDE + ENABLE_OFFSET);
+        let threshold = PAddr::from(
+            base + (cpuid * 2 + 1) * CONTEXT_STRIDE + THRESHOLD_OFFSET,
+        );
+        let claim_complete = PAddr::from(
+            base + (cpuid * 2 + 1) * CONTEXT_STRIDE + CLAIM_COMPLETE_OFFSET,
+        );
 
         unsafe {
             // SAFETY: The PLIC registers are memory-mapped and placed at specific addresses.
@@ -71,7 +81,9 @@ impl PLIC {
             // SAFETY: The PLIC priority register is memory-mapped and placed at a specific address.
             //         We are pretty sure that the address is valid.
             ArchPhysAccess::as_ptr(
-                *PLIC_BASE.get() + PRIORITY_OFFSET + interrupt * size_of::<u32>(),
+                *PLIC_BASE.get()
+                    + PRIORITY_OFFSET
+                    + interrupt * size_of::<u32>(),
             )
         };
 

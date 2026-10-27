@@ -56,9 +56,7 @@ impl ProcessGroup {
     /// # Panics
     /// Panics if `leader` is already in some pgroup.
     pub fn new(
-        leader: &Arc<Process>,
-        session: &Arc<Session>,
-        procs: &mut ProcessList,
+        leader: &Arc<Process>, session: &Arc<Session>, procs: &mut ProcessList,
     ) -> Arc<Self> {
         let pgid = leader.pid;
         let pgroup_procs = {
@@ -86,18 +84,14 @@ impl ProcessGroup {
     /// # Panics
     /// Panics if `process` is already in some pgroup or the pgroup is dead.
     pub fn add_member(
-        &self,
-        process: &Arc<Process>,
-        procs: ProofMut<'_, ProcessList>,
+        &self, process: &Arc<Process>, procs: ProofMut<'_, ProcessList>,
     ) {
         assert!(self.all_groups_link.is_linked(), "Dead pgroup");
         self.procs.access_mut(procs).insert(process.clone());
     }
 
     pub fn remove_member(
-        self: &Arc<Self>,
-        process: &Arc<Process>,
-        procs: &mut ProcessList,
+        self: &Arc<Self>, process: &Arc<Process>, procs: &mut ProcessList,
     ) {
         let members = self.procs.access_mut(procs.prove_mut());
         assert!(

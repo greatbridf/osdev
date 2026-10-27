@@ -73,7 +73,9 @@ where
         }))
     }
 
-    pub fn new_cyclic(info: SuperBlockInfo, backend_func: impl FnOnce(SbRef<S>) -> S) -> Self {
+    pub fn new_cyclic(
+        info: SuperBlockInfo, backend_func: impl FnOnce(SbRef<S>) -> S,
+    ) -> Self {
         Self(Arc::new_cyclic(|weak| SuperBlockComplex {
             info,
             rwsem: RwLock::new(SuperBlockLock(())),

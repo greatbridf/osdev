@@ -8,7 +8,9 @@ use eonix_mm::paging::{Folio, GlobalFrameAlloc};
 use crate::kernel::mem::{FolioOwned, GlobalPageAlloc, PhysAccess};
 
 #[repr(transparent)]
-pub struct KernelPageTable(PageTable<'static, ArchPagingMode, GlobalPageAlloc, PageAccessImpl>);
+pub struct KernelPageTable(
+    PageTable<'static, ArchPagingMode, GlobalPageAlloc, PageAccessImpl>,
+);
 
 impl KernelPageTable {
     pub fn new() -> Self {
@@ -32,7 +34,8 @@ impl KernelPageTable {
 }
 
 impl Deref for KernelPageTable {
-    type Target = PageTable<'static, ArchPagingMode, GlobalPageAlloc, PageAccessImpl>;
+    type Target =
+        PageTable<'static, ArchPagingMode, GlobalPageAlloc, PageAccessImpl>;
 
     fn deref(&self) -> &Self::Target {
         &self.0

@@ -1,15 +1,13 @@
-use crate::arch::trap::CSR_KERNEL_TP;
-use core::{arch::asm, mem::offset_of};
-use eonix_hal_traits::{
-    fault::{Fault, PageFaultErrorCode},
-    trap::{RawTrapContext, TrapType},
-};
+use core::arch::asm;
+use core::mem::offset_of;
+
+use eonix_hal_traits::fault::{Fault, PageFaultErrorCode};
+use eonix_hal_traits::trap::{RawTrapContext, TrapType};
 use eonix_mm::address::VAddr;
-use loongArch64::register::{
-    badv,
-    estat::{Estat, Exception, Interrupt, Trap},
-    ticlr,
-};
+use loongArch64::register::estat::{Estat, Exception, Interrupt, Trap};
+use loongArch64::register::{badv, ticlr};
+
+use crate::arch::trap::CSR_KERNEL_TP;
 
 #[repr(C)]
 #[derive(Default, Clone, Copy)]
@@ -114,7 +112,9 @@ impl TrapContext {
         ]
     }
 
-    fn gen_page_fault(&self, mut err_code: PageFaultErrorCode) -> TrapType<FIrq, FTimer> {
+    fn gen_page_fault(
+        &self, mut err_code: PageFaultErrorCode,
+    ) -> TrapType<FIrq, FTimer> {
         #[inline(always)]
         fn get_page_fault_address() -> VAddr {
             VAddr::from(badv::read().vaddr())
@@ -152,7 +152,9 @@ impl RawTrapContext for TrapContext {
             },
             Trap::Interrupt(interrupt) => match interrupt as usize {
                 2..=9 => TrapType::Irq {
-                    callback: |handler| crate::arch::interrupt::dispatch_irq(handler),
+                    callback: |handler| {
+                        crate::arch::interrupt::dispatch_irq(handler)
+                    },
                 },
                 interrupt => TrapType::Fault(Fault::Unknown(interrupt)),
             },
@@ -164,21 +166,25 @@ impl RawTrapContext for TrapContext {
                 | Exception::PagePrivilegeIllegal,
             ) => TrapType::Fault(Fault::BadAccess),
             Trap::Exception(Exception::Breakpoint) => TrapType::Breakpoint,
-            Trap::Exception(Exception::InstructionNotExist) => TrapType::Fault(Fault::InvalidOp),
+            Trap::Exception(Exception::InstructionNotExist) => {
+                TrapType::Fault(Fault::InvalidOp)
+            }
             Trap::Exception(Exception::Syscall) => TrapType::Syscall {
                 no: self.syscall_no(),
                 args: self.syscall_args(),
             },
-            Trap::Exception(Exception::LoadPageFault | Exception::PageNonReadableFault) => {
-                self.gen_page_fault(PageFaultErrorCode::Read)
+            Trap::Exception(
+                Exception::LoadPageFault | Exception::PageNonReadableFault,
+            ) => self.gen_page_fault(PageFaultErrorCode::Read),
+            Trap::Exception(
+                Exception::StorePageFault | Exception::PageModifyFault,
+            ) => self.gen_page_fault(PageFaultErrorCode::Write),
+            Trap::Exception(
+                Exception::FetchPageFault | Exception::PageNonExecutableFault,
+            ) => self.gen_page_fault(PageFaultErrorCode::InstructionFetch),
+            Trap::Exception(exception) => {
+                TrapType::Fault(Fault::Unknown(exception as usize))
             }
-            Trap::Exception(Exception::StorePageFault | Exception::PageModifyFault) => {
-                self.gen_page_fault(PageFaultErrorCode::Write)
-            }
-            Trap::Exception(Exception::FetchPageFault | Exception::PageNonExecutableFault) => {
-                self.gen_page_fault(PageFaultErrorCode::InstructionFetch)
-            }
-            Trap::Exception(exception) => TrapType::Fault(Fault::Unknown(exception as usize)),
             Trap::MachineError(_) | Trap::Unknown => todo!(),
         }
     }
@@ -236,12 +242,8 @@ impl RawTrapContext for TrapContext {
     }
 
     fn set_user_call_frame<E>(
-        &mut self,
-        pc: usize,
-        sp: Option<usize>,
-        ra: Option<usize>,
-        args: &[usize],
-        _write_memory: impl Fn(VAddr, &[u8]) -> Result<(), E>,
+        &mut self, pc: usize, sp: Option<usize>, ra: Option<usize>,
+        args: &[usize], _write_memory: impl Fn(VAddr, &[u8]) -> Result<(), E>,
     ) -> Result<(), E> {
         self.set_program_counter(pc);
 
@@ -271,7 +273,9 @@ impl RawTrapContext for TrapContext {
 }
 
 impl TrapContext {
-    fn get_page_fault_error_code(&self, exception: Exception) -> PageFaultErrorCode {
+    fn get_page_fault_error_code(
+        &self, exception: Exception,
+    ) -> PageFaultErrorCode {
         let mut error_code = PageFaultErrorCode::empty();
 
         match exception {

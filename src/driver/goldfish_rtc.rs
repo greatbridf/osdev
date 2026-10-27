@@ -1,11 +1,12 @@
-use crate::kernel::{
-    rtc::{register_rtc, RealTimeClock},
-    timer::Instant,
-};
 use core::ptr::NonNull;
-use eonix_hal::{arch_exported::fdt::FDT, mm::ArchPhysAccess};
+
+use eonix_hal::arch_exported::fdt::FDT;
+use eonix_hal::mm::ArchPhysAccess;
 use eonix_log::println_warn;
 use eonix_mm::address::{PAddr, PhysAccess};
+
+use crate::kernel::rtc::{register_rtc, RealTimeClock};
+use crate::kernel::timer::Instant;
 
 #[cfg(not(target_arch = "riscv64"))]
 compile_error!("Goldfish RTC driver is only supported on RISC-V architecture");

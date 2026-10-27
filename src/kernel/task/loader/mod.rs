@@ -1,14 +1,16 @@
+use alloc::ffi::CString;
+use alloc::sync::Arc;
+
+use eonix_mm::address::VAddr;
+
 use crate::io::ByteBuffer;
 use crate::kernel::constants::ENOEXEC;
+use crate::kernel::mem::MMList;
 use crate::kernel::task::loader::elf::ELF;
+use crate::kernel::vfs::dentry::Dentry;
 use crate::kernel::vfs::FsContext;
 use crate::path::Path;
-use crate::{
-    kernel::{mem::MMList, vfs::dentry::Dentry},
-    prelude::*,
-};
-use alloc::{ffi::CString, sync::Arc};
-use eonix_mm::address::VAddr;
+use crate::prelude::*;
 
 mod aux_vec;
 mod elf;
@@ -34,11 +36,8 @@ pub struct ProgramLoader {
 
 impl ProgramLoader {
     pub async fn parse(
-        fs_context: &FsContext,
-        mut exec_path: CString,
-        mut file: Arc<Dentry>,
-        mut args: Vec<CString>,
-        envs: Vec<CString>,
+        fs_context: &FsContext, mut exec_path: CString, mut file: Arc<Dentry>,
+        mut args: Vec<CString>, envs: Vec<CString>,
     ) -> KResult<Self> {
         const RECURSION_LIMIT: usize = 4;
         let mut nrecur = 0;
@@ -67,14 +66,20 @@ impl ProgramLoader {
                     }
 
                     let line = &interpreter_line[2..nread];
-                    let line = line.split(|&b| b == b'\n' || b == b'\0').next().unwrap();
+                    let line = line
+                        .split(|&b| b == b'\n' || b == b'\0')
+                        .next()
+                        .unwrap();
 
                     let interpreter_name;
                     let mut interpreter_arg = None;
                     match line.iter().position(|&b| b == b' ') {
                         Some(blank_pos) => {
-                            interpreter_name = CString::new(&line[..blank_pos]).unwrap();
-                            interpreter_arg = Some(CString::new(&line[blank_pos + 1..]).unwrap());
+                            interpreter_name =
+                                CString::new(&line[..blank_pos]).unwrap();
+                            interpreter_arg = Some(
+                                CString::new(&line[blank_pos + 1..]).unwrap(),
+                            );
                         }
                         None => interpreter_name = CString::new(line).unwrap(),
                     }

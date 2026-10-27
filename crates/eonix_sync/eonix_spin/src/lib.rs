@@ -108,10 +108,12 @@ where
     }
 
     fn do_lock(&self) {
-        while let Err(_) =
-            self.locked
-                .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
-        {
+        while let Err(_) = self.locked.compare_exchange_weak(
+            false,
+            true,
+            Ordering::Acquire,
+            Ordering::Relaxed,
+        ) {
             R::relax();
         }
     }

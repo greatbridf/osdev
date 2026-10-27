@@ -18,7 +18,9 @@ impl TaskState {
         self.0.swap(state, Ordering::SeqCst)
     }
 
-    pub(crate) fn update(&self, func: impl FnMut(u32) -> Option<u32>) -> Result<u32, u32> {
+    pub(crate) fn update(
+        &self, func: impl FnMut(u32) -> Option<u32>,
+    ) -> Result<u32, u32> {
         self.0
             .fetch_update(Ordering::SeqCst, Ordering::SeqCst, func)
     }

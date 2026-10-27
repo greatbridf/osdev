@@ -1,20 +1,20 @@
-use super::{
-    interrupt::InterruptControl,
-    trap::{setup_trap, TrapContext},
-};
-use crate::arch::fdt::{FdtExt, FDT};
-use core::{
-    arch::asm, cell::UnsafeCell, mem::MaybeUninit, pin::Pin, ptr::NonNull,
-    sync::atomic::AtomicUsize,
-};
+use core::arch::asm;
+use core::cell::UnsafeCell;
+use core::mem::MaybeUninit;
+use core::pin::Pin;
+use core::ptr::NonNull;
+use core::sync::atomic::AtomicUsize;
+
 use eonix_hal_traits::trap::RawTrapContext;
 use eonix_preempt::PreemptGuard;
 use eonix_sync_base::LazyLock;
-use riscv::register::{
-    medeleg::{self, Medeleg},
-    mhartid, sscratch, sstatus,
-};
+use riscv::register::medeleg::{self, Medeleg};
+use riscv::register::{mhartid, sscratch, sstatus};
 use sbi::PhysicalAddress;
+
+use super::interrupt::InterruptControl;
+use super::trap::{setup_trap, TrapContext};
+use crate::arch::fdt::{FdtExt, FDT};
 
 pub static CPU_COUNT: AtomicUsize = AtomicUsize::new(0);
 

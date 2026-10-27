@@ -1,6 +1,7 @@
+use bitflags::bitflags;
+
 use super::Signal;
 use crate::ctypes::PtrT;
-use bitflags::bitflags;
 
 bitflags! {
     #[derive(Debug, Clone, Copy)]

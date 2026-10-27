@@ -1,16 +1,16 @@
-use super::{File, FileType, PollEvent};
-use crate::{
-    io::{Buffer, Stream},
-    kernel::{
-        constants::{EINTR, EPIPE},
-        task::Thread,
-    },
-    prelude::KResult,
-    sync::CondVar,
-};
-use alloc::{collections::vec_deque::VecDeque, sync::Arc};
+use alloc::collections::vec_deque::VecDeque;
+use alloc::sync::Arc;
+
 use eonix_sync::Mutex;
-use posix_types::{open::OpenFlags, signal::Signal};
+use posix_types::open::OpenFlags;
+use posix_types::signal::Signal;
+
+use super::{File, FileType, PollEvent};
+use crate::io::{Buffer, Stream};
+use crate::kernel::constants::{EINTR, EPIPE};
+use crate::kernel::task::Thread;
+use crate::prelude::KResult;
+use crate::sync::CondVar;
 
 struct PipeInner {
     buffer: VecDeque<u8>,
@@ -53,7 +53,8 @@ impl Pipe {
             cv_write: CondVar::new(),
         });
 
-        let read_flags = flags.difference(OpenFlags::O_WRONLY | OpenFlags::O_RDWR);
+        let read_flags =
+            flags.difference(OpenFlags::O_WRONLY | OpenFlags::O_RDWR);
         let mut write_flags = read_flags;
         write_flags.insert(OpenFlags::O_WRONLY);
 
@@ -109,7 +110,8 @@ impl Pipe {
         }
 
         let (data1, data2) = inner.buffer.as_slices();
-        let nread = buffer.fill(data1)?.allow_partial() + buffer.fill(data2)?.allow_partial();
+        let nread = buffer.fill(data1)?.allow_partial()
+            + buffer.fill(data2)?.allow_partial();
         inner.buffer.drain(..nread);
 
         self.cv_write.notify_all();

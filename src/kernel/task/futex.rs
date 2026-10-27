@@ -5,7 +5,9 @@ use core::pin::pin;
 use bitflags::bitflags;
 use eonix_mm::address::Addr;
 use eonix_sync::{LazyLock, Mutex, MutexGuard, WaitList};
-use intrusive_collections::{intrusive_adapter, KeyAdapter, RBTree, RBTreeAtomicLink};
+use intrusive_collections::{
+    intrusive_adapter, KeyAdapter, RBTree, RBTreeAtomicLink,
+};
 
 use super::Thread;
 use crate::kernel::constants::{EAGAIN, EINVAL};
@@ -162,10 +164,7 @@ impl FutexBucket {
 }
 
 pub async fn futex_wait(
-    uaddr: usize,
-    pid: Option<u32>,
-    expected_val: u32,
-    _timeout: Option<u32>,
+    uaddr: usize, pid: Option<u32>, expected_val: u32, _timeout: Option<u32>,
 ) -> KResult<()> {
     let futex_key = FutexKey::new(uaddr, pid);
 
@@ -188,7 +187,9 @@ pub async fn futex_wait(
     Ok(())
 }
 
-pub async fn futex_wake(uaddr: usize, pid: Option<u32>, max_wake_count: u32) -> KResult<usize> {
+pub async fn futex_wake(
+    uaddr: usize, pid: Option<u32>, max_wake_count: u32,
+) -> KResult<usize> {
     let futex_key = FutexKey::new(uaddr, pid);
 
     let (_, futex_bucket_ref) = FUTEX_TABLE.get_bucket(&futex_key);
@@ -212,8 +213,7 @@ pub async fn futex_wake(uaddr: usize, pid: Option<u32>, max_wake_count: u32) -> 
 // should make sure that two keys in different buckets
 // make the lock order to avoid deadlocks
 async fn double_lock_bucket(
-    futex_key0: FutexKey,
-    futex_key1: FutexKey,
+    futex_key0: FutexKey, futex_key1: FutexKey,
 ) -> (
     MutexGuard<'static, FutexBucket>,
     MutexGuard<'static, FutexBucket>,
@@ -233,17 +233,15 @@ async fn double_lock_bucket(
 }
 
 async fn futex_requeue(
-    uaddr: usize,
-    pid: Option<u32>,
-    wake_count: u32,
-    requeue_uaddr: usize,
+    uaddr: usize, pid: Option<u32>, wake_count: u32, requeue_uaddr: usize,
     _requeue_count: u32,
 ) -> KResult<usize> {
     let futex_key = FutexKey::new(uaddr, pid);
     let futex_requeue_key = FutexKey::new(requeue_uaddr, pid);
 
     let (bucket_idx0, _bucket_ref0) = FUTEX_TABLE.get_bucket(&futex_key);
-    let (bucket_idx1, _bucket_ref1) = FUTEX_TABLE.get_bucket(&futex_requeue_key);
+    let (bucket_idx1, _bucket_ref1) =
+        FUTEX_TABLE.get_bucket(&futex_requeue_key);
 
     if bucket_idx0 == bucket_idx1 {
         // If the keys are the same, we can just wake up the waiters.
@@ -298,7 +296,9 @@ impl RobustListHead {
             futex_wake(futex_addr, None, usize::MAX as u32).await?;
 
             // Move to the next entry in the robust list.
-            let robust_list = UserPointer::new(User::<RobustList>::with_addr(entry_ptr))?.read()?;
+            let robust_list =
+                UserPointer::new(User::<RobustList>::with_addr(entry_ptr))?
+                    .read()?;
 
             entry_ptr = robust_list.next;
 

@@ -1,15 +1,14 @@
-use super::Dentry;
-use crate::kernel::constants::ENOENT;
-use crate::rcu::{RCUPointer, RCUReadLock};
-use crate::{
-    prelude::*,
-    rcu::{RCUIterator, RCUList},
-};
 use alloc::sync::Arc;
-use arcref::ArcRef;
 use core::ops::Deref;
 use core::sync::atomic::Ordering;
+
+use arcref::ArcRef;
 use eonix_sync::Mutex;
+
+use super::Dentry;
+use crate::kernel::constants::ENOENT;
+use crate::prelude::*;
+use crate::rcu::{RCUIterator, RCUList, RCUPointer, RCUReadLock};
 
 const DCACHE_HASH_BITS: u32 = 8;
 
@@ -22,12 +21,13 @@ pub trait DCacheItem {
     fn d_hash(&self) -> usize;
     fn d_parent(&self) -> *const Dentry;
     fn d_name<'r, 'a: 'r, 'b: 'a>(
-        &'a self,
-        rcu_read: &'b RCUReadLock,
+        &'a self, rcu_read: &'b RCUReadLock,
     ) -> impl Deref<Target = [u8]> + 'r;
 }
 
-fn d_eq(lhs: &impl DCacheItem, rhs: &impl DCacheItem, rcu_read: &RCUReadLock) -> bool {
+fn d_eq(
+    lhs: &impl DCacheItem, rhs: &impl DCacheItem, rcu_read: &RCUReadLock,
+) -> bool {
     lhs.d_hash() == rhs.d_hash()
         && lhs.d_parent() == rhs.d_parent()
         && *lhs.d_name(rcu_read) == *rhs.d_name(rcu_read)
@@ -39,17 +39,16 @@ fn d_hinted(item: &impl DCacheItem) -> &'static RCUList<Dentry> {
 }
 
 fn d_iter_for<'rcu>(
-    item: &impl DCacheItem,
-    rcu_read: &'rcu RCUReadLock,
+    item: &impl DCacheItem, rcu_read: &'rcu RCUReadLock,
 ) -> RCUIterator<'static, 'rcu, Dentry> {
     d_hinted(item).iter(rcu_read)
 }
 
 pub fn d_find_rcu<'rcu>(
-    item: &impl DCacheItem,
-    rcu_read: &'rcu RCUReadLock,
+    item: &impl DCacheItem, rcu_read: &'rcu RCUReadLock,
 ) -> Option<ArcRef<'rcu, Dentry>> {
-    d_iter_for(item, rcu_read).find(|cur_ref| cur_ref.with_arc(|cur| d_eq(cur, item, rcu_read)))
+    d_iter_for(item, rcu_read)
+        .find(|cur_ref| cur_ref.with_arc(|cur| d_eq(cur, item, rcu_read)))
 }
 
 /// Add the dentry to the dcache
@@ -114,8 +113,7 @@ impl DCacheItem for Arc<Dentry> {
     }
 
     fn d_name<'r, 'a: 'r, 'b: 'a>(
-        &'a self,
-        rcu_read: &'b RCUReadLock,
+        &'a self, rcu_read: &'b RCUReadLock,
     ) -> impl Deref<Target = [u8]> + 'r {
         struct Name<'a>(ArcRef<'a, Arc<[u8]>>);
 

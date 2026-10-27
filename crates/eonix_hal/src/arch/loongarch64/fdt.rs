@@ -1,8 +1,10 @@
-use super::mm::ArchPhysAccess;
 use core::sync::atomic::{AtomicPtr, Ordering};
+
 use eonix_mm::address::{Addr, PAddr, PRange, PhysAccess};
 use eonix_sync_base::LazyLock;
 use fdt::Fdt;
+
+use super::mm::ArchPhysAccess;
 
 const FDT_PADDR: PAddr = PAddr::from_val(0x100000);
 

@@ -66,7 +66,9 @@ impl CommandList {
 
     pub fn recv_fis_base(&self) -> PAddr {
         self._page.start()
-            + (size_of::<UnsafeCell<CommandHeader>>() + size_of::<Spin<SlotControl>>()) * 32
+            + (size_of::<UnsafeCell<CommandHeader>>()
+                + size_of::<Spin<SlotControl>>())
+                * 32
     }
 
     pub fn get(&self, index: usize) -> CommandSlot<'_> {

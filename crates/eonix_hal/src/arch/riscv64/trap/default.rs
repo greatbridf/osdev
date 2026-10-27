@@ -1,6 +1,7 @@
+use core::arch::naked_asm;
+
 use super::Registers;
 use crate::trap::TrapContext;
-use core::arch::naked_asm;
 
 unsafe extern "C" {
     fn _default_trap_handler(trap_context: &mut TrapContext);

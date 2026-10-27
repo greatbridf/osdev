@@ -22,7 +22,9 @@ pub enum Mapping {
 }
 
 impl FileMapping {
-    pub fn new(page_cache: Arc<PageCache>, offset: usize, length: usize) -> Self {
+    pub fn new(
+        page_cache: Arc<PageCache>, offset: usize, length: usize,
+    ) -> Self {
         assert_eq!(offset & (PAGE_SIZE - 1), 0);
         Self {
             page_cache,

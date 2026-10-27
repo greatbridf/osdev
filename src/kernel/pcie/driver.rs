@@ -1,24 +1,26 @@
-use super::{
-    device::{PCIDevice, PCIE_DEVICES},
-    error::PciError,
-};
-use crate::{kernel::constants::EEXIST, KResult};
-use alloc::{
-    boxed::Box,
-    collections::btree_map::{self, BTreeMap},
-    sync::Arc,
-};
+use alloc::boxed::Box;
+use alloc::collections::btree_map::{self, BTreeMap};
+use alloc::sync::Arc;
+
 use async_trait::async_trait;
 use eonix_sync::Spin;
 
-static PCIE_DRIVERS: Spin<BTreeMap<u32, Arc<dyn PCIDriver>>> = Spin::new(BTreeMap::new());
+use super::device::{PCIDevice, PCIE_DEVICES};
+use super::error::PciError;
+use crate::kernel::constants::EEXIST;
+use crate::KResult;
+
+static PCIE_DRIVERS: Spin<BTreeMap<u32, Arc<dyn PCIDriver>>> =
+    Spin::new(BTreeMap::new());
 
 #[async_trait]
 pub trait PCIDriver: Send + Sync {
     fn vendor_id(&self) -> u16;
     fn device_id(&self) -> u16;
 
-    async fn handle_device(&self, device: Arc<PCIDevice<'static>>) -> Result<(), PciError>;
+    async fn handle_device(
+        &self, device: Arc<PCIDevice<'static>>,
+    ) -> Result<(), PciError>;
 }
 
 pub async fn register_driver(driver: impl PCIDriver + 'static) -> KResult<()> {
@@ -27,7 +29,9 @@ pub async fn register_driver(driver: impl PCIDriver + 'static) -> KResult<()> {
     let driver = Arc::new(driver);
 
     match PCIE_DRIVERS.lock().entry(index) {
-        btree_map::Entry::Vacant(vacant_entry) => vacant_entry.insert(driver.clone()),
+        btree_map::Entry::Vacant(vacant_entry) => {
+            vacant_entry.insert(driver.clone())
+        }
         btree_map::Entry::Occupied(_) => Err(EEXIST)?,
     };
 

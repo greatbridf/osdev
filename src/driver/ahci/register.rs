@@ -1,10 +1,11 @@
-use crate::{
-    kernel::{constants::EIO, mem::PhysAccess as _},
-    KResult,
-};
 use core::ptr::NonNull;
+
 use eonix_hal::fence::memory_barrier;
 use eonix_mm::address::PAddr;
+
+use crate::kernel::constants::EIO;
+use crate::kernel::mem::PhysAccess as _;
+use crate::KResult;
 
 pub struct Register<T: Copy> {
     addr: NonNull<T>,

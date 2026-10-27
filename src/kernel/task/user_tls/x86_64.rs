@@ -43,7 +43,9 @@ impl UserTLS {
 impl UserTLSDescriptor<'_> {
     pub fn new(raw_tls: PtrT) -> KResult<Self> {
         Ok(Self {
-            ptr: UserPointerMut::new(UserMut::<UserDescriptor>::with_addr(raw_tls.addr()))?,
+            ptr: UserPointerMut::new(UserMut::<UserDescriptor>::with_addr(
+                raw_tls.addr(),
+            ))?,
         })
     }
 

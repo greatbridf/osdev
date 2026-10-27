@@ -1,10 +1,9 @@
+use core::cell::UnsafeCell;
+use core::marker::PhantomData;
+use core::ops::Deref;
+use core::sync::atomic::{AtomicU8, Ordering};
+
 use crate::{Relax, SpinRelax};
-use core::{
-    cell::UnsafeCell,
-    marker::PhantomData,
-    ops::Deref,
-    sync::atomic::{AtomicU8, Ordering},
-};
 
 enum LazyState<T, F>
 where
@@ -135,7 +134,9 @@ where
                 self.state.store(Self::INITIALIZED, Ordering::Release);
             }
             Self::INITIALIZED => {}
-            Self::INITIALIZING => unreachable!("We should be the only one initializing it."),
+            Self::INITIALIZING => {
+                unreachable!("We should be the only one initializing it.")
+            }
             _ => unreachable!("Invalid LazyLock state."),
         }
 

@@ -59,18 +59,14 @@ impl Session {
     }
 
     pub fn add_member(
-        &self,
-        pgroup: &Arc<ProcessGroup>,
-        procs: ProofMut<'_, ProcessList>,
+        &self, pgroup: &Arc<ProcessGroup>, procs: ProofMut<'_, ProcessList>,
     ) {
         assert!(self.all_sessions_link.is_linked(), "Dead session");
         self.groups.access_mut(procs).insert(pgroup.clone());
     }
 
     pub fn remove_member(
-        self: &Arc<Self>,
-        pgroup: &Arc<ProcessGroup>,
-        procs: &mut ProcessList,
+        self: &Arc<Self>, pgroup: &Arc<ProcessGroup>, procs: &mut ProcessList,
     ) {
         let members = self.groups.access_mut(procs.prove_mut());
         assert!(
@@ -107,8 +103,7 @@ impl Session {
     /// Set the foreground process group identified by `pgid`.
     /// The process group must belong to the session.
     pub fn set_foreground_pgroup(
-        &self,
-        pgroup: Option<&Arc<ProcessGroup>>,
+        &self, pgroup: Option<&Arc<ProcessGroup>>,
     ) -> KResult<()> {
         if let Some(pgroup) = pgroup {
             if pgroup.session.sid != self.sid {
@@ -128,8 +123,7 @@ impl Session {
     /// Panics if we have a controlling terminal already
     /// or the session leader is gone.
     pub fn _set_control_terminal(
-        self: &Arc<Self>,
-        terminal: &Arc<Terminal>,
+        self: &Arc<Self>, terminal: &Arc<Terminal>,
         procs: Proof<'_, ProcessList>,
     ) {
         let mut job_control = self.job_control.lock();

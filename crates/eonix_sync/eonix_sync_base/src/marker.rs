@@ -1,4 +1,5 @@
-use core::{cell::UnsafeCell, marker::PhantomData};
+use core::cell::UnsafeCell;
+use core::marker::PhantomData;
 
 /// A marker type that indicates that the type is not `Send`.
 pub struct NotSend(PhantomData<*const ()>);

@@ -1,7 +1,5 @@
-use core::{
-    fmt::{Debug, Display, Formatter},
-    sync::atomic::AtomicU64,
-};
+use core::fmt::{Debug, Display, Formatter};
+use core::sync::atomic::AtomicU64;
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Ino(u64);

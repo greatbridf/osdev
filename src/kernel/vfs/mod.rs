@@ -6,14 +6,17 @@ pub mod mount;
 mod superblock;
 pub mod types;
 
-use crate::prelude::*;
 use alloc::sync::Arc;
+
 use dentry::Dentry;
 use eonix_sync::LazyLock;
+pub use file::{File, FileType, PollEvent, SeekOption, TerminalFile};
+pub use superblock::{
+    SbRef, SbUse, SuperBlock, SuperBlockInfo, SuperBlockLock,
+};
 use types::Permission;
 
-pub use file::{File, FileType, PollEvent, SeekOption, TerminalFile};
-pub use superblock::{SbRef, SbUse, SuperBlock, SuperBlockInfo, SuperBlockLock};
+use crate::prelude::*;
 
 pub struct FsContext {
     pub fsroot: Arc<Dentry>,

@@ -1,9 +1,7 @@
 #![no_std]
 
-use core::{
-    ops::{Deref, DerefMut},
-    sync::atomic::{compiler_fence, Ordering},
-};
+use core::ops::{Deref, DerefMut};
+use core::sync::atomic::{compiler_fence, Ordering};
 
 pub struct PreemptGuard<T>
 where

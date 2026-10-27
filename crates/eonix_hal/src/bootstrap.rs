@@ -1,6 +1,8 @@
-use crate::mm::{BasicPageAlloc, BasicPageAllocRef};
 use core::cell::RefCell;
+
 use eonix_mm::address::PRange;
+
+use crate::mm::{BasicPageAlloc, BasicPageAllocRef};
 
 pub struct BootStrapData {
     pub(crate) early_stack: PRange,

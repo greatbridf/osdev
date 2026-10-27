@@ -1,13 +1,13 @@
+use alloc::boxed::Box;
+use alloc::string::String;
 use core::pin::Pin;
 
-use alloc::{boxed::Box, string::String};
 use futures::{Stream, StreamExt};
 use posix_types::result::PosixError;
 
+use super::{Cluster, RawCluster};
 use crate::kernel::constants::EINVAL;
 use crate::prelude::*;
-
-use super::{Cluster, RawCluster};
 
 #[repr(C, packed)]
 pub struct RawDirEntry {
@@ -61,7 +61,11 @@ impl RawDirEntry {
     }
 
     fn is_long_filename(&self) -> bool {
-        self.attr == (Self::ATTR_RO | Self::ATTR_HIDDEN | Self::ATTR_SYSTEM | Self::ATTR_VOLUME_ID)
+        self.attr
+            == (Self::ATTR_RO
+                | Self::ATTR_HIDDEN
+                | Self::ATTR_SYSTEM
+                | Self::ATTR_VOLUME_ID)
     }
 
     fn is_volume_id(&self) -> bool {
@@ -162,7 +166,8 @@ where
                 break;
             }
 
-            let Some(raw_long_filename) = cur_entry.as_raw_long_filename() else {
+            let Some(raw_long_filename) = cur_entry.as_raw_long_filename()
+            else {
                 continue;
             };
 
@@ -174,16 +179,20 @@ where
                 .position(|&ch| ch == 0)
                 .unwrap_or(raw_long_filename.len());
 
-            let name_codes_rev = raw_long_filename.into_iter().take(real_len).rev();
-            let name_chars_rev = char::decode_utf16(name_codes_rev).map(|r| r.unwrap_or('?'));
+            let name_codes_rev =
+                raw_long_filename.into_iter().take(real_len).rev();
+            let name_chars_rev =
+                char::decode_utf16(name_codes_rev).map(|r| r.unwrap_or('?'));
 
             filename_rev.extend(name_chars_rev);
         }
 
         // From now on, `entry` represents a valid directory entry.
 
-        let raw_cluster =
-            RawCluster(cur_entry.cluster_low as u32 | ((cur_entry.cluster_high as u32) << 16));
+        let raw_cluster = RawCluster(
+            cur_entry.cluster_low as u32
+                | ((cur_entry.cluster_high as u32) << 16),
+        );
 
         let Some(cluster) = raw_cluster.parse() else {
             return Some(Err(PosixError::EINVAL.into()));

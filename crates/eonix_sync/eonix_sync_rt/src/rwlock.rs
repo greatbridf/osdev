@@ -1,13 +1,12 @@
 mod guard;
 
-use crate::WaitList;
-use core::{
-    cell::UnsafeCell,
-    pin::pin,
-    sync::atomic::{AtomicIsize, Ordering},
-};
+use core::cell::UnsafeCell;
+use core::pin::pin;
+use core::sync::atomic::{AtomicIsize, Ordering};
 
 pub use guard::{RwLockReadGuard, RwLockWriteGuard};
+
+use crate::WaitList;
 
 #[derive(Debug, Default)]
 pub struct RwLock<T>
@@ -83,7 +82,10 @@ where
                     self.read_wait.notify_all();
                 }
             }
-            val => unreachable!("RwLock::read_unlock(): erroneous counter value: {}", val),
+            val => unreachable!(
+                "RwLock::read_unlock(): erroneous counter value: {}",
+                val
+            ),
         }
     }
 
@@ -110,7 +112,12 @@ where
         let counter = self.counter.load(Ordering::Relaxed);
         if counter >= 0 {
             self.counter
-                .compare_exchange(counter, counter + 1, Ordering::Acquire, Ordering::Relaxed)
+                .compare_exchange(
+                    counter,
+                    counter + 1,
+                    Ordering::Acquire,
+                    Ordering::Relaxed,
+                )
                 .ok()
                 .map(|_| unsafe { self.read_lock() })
         } else {
@@ -125,7 +132,12 @@ where
         let counter = self.counter.load(Ordering::Relaxed);
         if counter >= 0 {
             self.counter
-                .compare_exchange_weak(counter, counter + 1, Ordering::Acquire, Ordering::Relaxed)
+                .compare_exchange_weak(
+                    counter,
+                    counter + 1,
+                    Ordering::Acquire,
+                    Ordering::Relaxed,
+                )
                 .ok()
                 .map(|_| unsafe { self.read_lock() })
         } else {

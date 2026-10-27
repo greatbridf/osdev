@@ -1,4 +1,5 @@
-use core::{marker::PhantomData, ptr::NonNull};
+use core::marker::PhantomData;
+use core::ptr::NonNull;
 
 /// A proof of mutable access to a position in memory with lifetime `'pos`.
 ///
@@ -144,7 +145,9 @@ where
     {
         ProofMut {
             // SAFETY: The validity of the reference is guaranteed by the borrow checker.
-            address: unsafe { NonNull::new_unchecked(&raw const **self as *mut _) },
+            address: unsafe {
+                NonNull::new_unchecked(&raw const **self as *mut _)
+            },
             _phantom: PhantomData,
         }
     }
@@ -161,7 +164,9 @@ where
         'guard: 'pos,
     {
         Proof {
-            address: unsafe { NonNull::new_unchecked(&raw const **self as *mut _) },
+            address: unsafe {
+                NonNull::new_unchecked(&raw const **self as *mut _)
+            },
             _phantom: PhantomData,
         }
     }
@@ -178,7 +183,9 @@ where
         'guard: 'pos,
     {
         Proof {
-            address: unsafe { NonNull::new_unchecked(&raw const **self as *mut _) },
+            address: unsafe {
+                NonNull::new_unchecked(&raw const **self as *mut _)
+            },
             _phantom: PhantomData,
         }
     }

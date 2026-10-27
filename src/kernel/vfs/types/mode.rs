@@ -1,7 +1,7 @@
-use crate::kernel::{
-    constants::{S_IFBLK, S_IFCHR, S_IFDIR, S_IFLNK, S_IFMT, S_IFREG},
-    syscall::{FromSyscallArg, SyscallRetVal},
+use crate::kernel::constants::{
+    S_IFBLK, S_IFCHR, S_IFDIR, S_IFLNK, S_IFMT, S_IFREG,
 };
+use crate::kernel::syscall::{FromSyscallArg, SyscallRetVal};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct Mode(u32);
@@ -83,7 +83,8 @@ impl Format {
 }
 
 impl Permission {
-    const RWX: [&str; 8] = ["---", "--x", "-w-", "-wx", "r--", "r-x", "rw-", "rwx"];
+    const RWX: [&str; 8] =
+        ["---", "--x", "-w-", "-wx", "r--", "r-x", "rw-", "rwx"];
 
     pub const fn new(perm_bits: u32) -> Self {
         Self(perm_bits & 0o7777)

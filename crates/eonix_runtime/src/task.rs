@@ -1,23 +1,21 @@
 mod adapter;
 mod task_state;
 
-use crate::{
-    executor::{Executor, OutputHandle},
-    ready_queue::{cpu_rq, ReadyQueue},
-};
-use alloc::{sync::Arc, task::Wake};
+use alloc::sync::Arc;
+use alloc::task::Wake;
+use core::ops::DerefMut;
+use core::sync::atomic::{AtomicU32, Ordering};
+use core::task::{Context, Poll, Waker};
+
+pub use adapter::{TaskAdapter, TaskRqAdapter};
 use atomic_unique_refcell::AtomicUniqueRefCell;
-use core::{
-    ops::DerefMut,
-    sync::atomic::{AtomicU32, Ordering},
-    task::{Context, Poll, Waker},
-};
 use eonix_hal::processor::CPU;
 use eonix_sync::{Spin, SpinIrq};
 use intrusive_collections::{LinkedListAtomicLink, RBTreeAtomicLink};
-
-pub use adapter::{TaskAdapter, TaskRqAdapter};
 pub(crate) use task_state::TaskState;
+
+use crate::executor::{Executor, OutputHandle};
+use crate::ready_queue::{cpu_rq, ReadyQueue};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct TaskId(u32);

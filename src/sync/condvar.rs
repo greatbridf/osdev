@@ -1,7 +1,9 @@
-use crate::kernel::task::Thread;
 use core::pin::pin;
+
 use eonix_sync::{UnlockableGuard, UnlockedGuard as _, WaitList};
 use intrusive_collections::UnsafeRef;
+
+use crate::kernel::task::Thread;
 
 pub struct CondVar<const INTERRUPTIBLE: bool> {
     wait_list: WaitList,

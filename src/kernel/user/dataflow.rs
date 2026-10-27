@@ -44,7 +44,8 @@ pub struct UserStream<'a> {
 
 impl<T: Copy> UserPointer<'_, T> {
     pub fn new(ptr: User<T>) -> KResult<Self> {
-        let pointer = CheckedUserPointer::new(ptr.cast(), core::mem::size_of::<T>())?;
+        let pointer =
+            CheckedUserPointer::new(ptr.cast(), core::mem::size_of::<T>())?;
 
         Ok(Self {
             pointer,
@@ -72,7 +73,10 @@ impl<T: Copy> UserPointer<'_, T> {
 
 impl<'a, T: Copy> UserPointerMut<'a, T> {
     pub fn new(ptr: UserMut<T>) -> KResult<Self> {
-        let pointer = CheckedUserPointer::new(ptr.cast().as_const(), core::mem::size_of::<T>())?;
+        let pointer = CheckedUserPointer::new(
+            ptr.cast().as_const(),
+            core::mem::size_of::<T>(),
+        )?;
 
         Ok(Self {
             pointer,
@@ -522,7 +526,9 @@ impl UserStream<'_> {
 }
 
 impl Stream for UserStream<'_> {
-    fn poll_data<'a>(&mut self, buf: &'a mut [u8]) -> KResult<Option<&'a mut [u8]>> {
+    fn poll_data<'a>(
+        &mut self, buf: &'a mut [u8],
+    ) -> KResult<Option<&'a mut [u8]>> {
         assert_preempt_enabled!("UserStream::poll_data");
 
         if self.cur >= self.pointer.len {

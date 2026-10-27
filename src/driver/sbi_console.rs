@@ -1,6 +1,8 @@
-use crate::kernel::{Terminal, TerminalDevice};
 use alloc::sync::Arc;
+
 use eonix_log::ConsoleWrite;
+
+use crate::kernel::{Terminal, TerminalDevice};
 
 struct SbiConsole;
 
@@ -29,5 +31,6 @@ pub fn init_console() {
 
     let console = Arc::new(SbiConsole);
     let terminal = Terminal::new(console.clone());
-    crate::kernel::console::set_console(terminal).expect("Failed to set console");
+    crate::kernel::console::set_console(terminal)
+        .expect("Failed to set console");
 }

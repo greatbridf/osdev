@@ -1,6 +1,9 @@
-use crate::task::Task;
-use alloc::{collections::VecDeque, sync::Arc};
+use alloc::collections::VecDeque;
+use alloc::sync::Arc;
+
 use eonix_sync::Spin;
+
+use crate::task::Task;
 
 #[eonix_percpu::define_percpu_shared]
 static READYQUEUE: Spin<FifoReadyQueue> = Spin::new(FifoReadyQueue::new());

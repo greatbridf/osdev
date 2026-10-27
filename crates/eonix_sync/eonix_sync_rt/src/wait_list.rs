@@ -1,14 +1,16 @@
 mod wait_handle;
 mod wait_object;
 
-use crate::SpinIrq as _;
 use core::fmt;
+
 use eonix_spin::Spin;
 use eonix_sync_base::LazyLock;
-use intrusive_collections::{linked_list::CursorMut, LinkedList};
+use intrusive_collections::linked_list::CursorMut;
+use intrusive_collections::LinkedList;
+pub use wait_handle::WaitHandle;
 use wait_object::{WaitObject, WaitObjectAdapter};
 
-pub use wait_handle::WaitHandle;
+use crate::SpinIrq as _;
 
 pub struct WaitList {
     /// # Lock
@@ -20,7 +22,9 @@ pub struct WaitList {
 impl WaitList {
     pub const fn new() -> Self {
         Self {
-            waiters: LazyLock::new(|| Spin::new(LinkedList::new(WaitObjectAdapter::new()))),
+            waiters: LazyLock::new(|| {
+                Spin::new(LinkedList::new(WaitObjectAdapter::new()))
+            }),
         }
     }
 
@@ -66,7 +70,9 @@ impl WaitList {
 }
 
 impl WaitList {
-    unsafe fn notify_waiter_unchecked(&self, waiter: &mut CursorMut<'_, WaitObjectAdapter>) {
+    unsafe fn notify_waiter_unchecked(
+        &self, waiter: &mut CursorMut<'_, WaitObjectAdapter>,
+    ) {
         let wait_object = unsafe {
             // SAFETY: The caller guarantees that `waiter` should be `Some`.
             //         `wait_object` is a valid reference to a `WaitObject` because we

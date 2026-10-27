@@ -216,14 +216,18 @@ where
 impl CommonHeader {
     pub fn command(&self) -> Register<'_, Command> {
         Register {
-            register: unsafe { AtomicU16::from_ptr((&raw const self._command) as *mut u16) },
+            register: unsafe {
+                AtomicU16::from_ptr((&raw const self._command) as *mut u16)
+            },
             _phantom: PhantomData,
         }
     }
 
     pub fn status(&self) -> Register<'_, Status> {
         Register {
-            register: unsafe { AtomicU16::from_ptr((&raw const self._status) as *mut u16) },
+            register: unsafe {
+                AtomicU16::from_ptr((&raw const self._status) as *mut u16)
+            },
             _phantom: PhantomData,
         }
     }
@@ -290,7 +294,8 @@ impl BarsEntry<'_> {
         }
 
         if is_64bit {
-            let reg2 = self.reg2.expect("64-bit BARs must have a second register");
+            let reg2 =
+                self.reg2.expect("64-bit BARs must have a second register");
 
             let reg2_value = reg2.load(Ordering::Relaxed);
 
@@ -301,7 +306,9 @@ impl BarsEntry<'_> {
             let size = (self.reg1.load(Ordering::Relaxed) as u64 & !0xf)
                 | ((reg2.load(Ordering::Relaxed) as u64) << 32);
             let bar = NonZero::new(size).map(|size| Bar::MemoryMapped64 {
-                base: NonZero::new((reg1_value as u64 & !0xf) | ((reg2_value as u64) << 32)),
+                base: NonZero::new(
+                    (reg1_value as u64 & !0xf) | ((reg2_value as u64) << 32),
+                ),
                 size: !size.get() + 1,
             });
 
@@ -345,7 +352,8 @@ impl BarsEntry<'_> {
                 memory_barrier();
             }
             Bar::MemoryMapped64 { base, .. } => {
-                let reg2 = self.reg2.expect("64-bit BARs must have a second register");
+                let reg2 =
+                    self.reg2.expect("64-bit BARs must have a second register");
                 let old_value1 = self.reg1.load(Ordering::Relaxed);
                 let old_value2 = reg2.load(Ordering::Relaxed);
                 let base = base.map_or(0, NonZero::get) & !0xf;

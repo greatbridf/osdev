@@ -9,8 +9,7 @@ use quote::{format_ident, quote};
 use syn::{parse2, Ident, ItemStatic, Type};
 
 fn define_percpu_impl(
-    attrs: TokenStream,
-    item: TokenStream,
+    attrs: TokenStream, item: TokenStream,
     get_percpu_pointer: fn(&Ident, &Type) -> TokenStream,
 ) -> TokenStream {
     if !attrs.is_empty() {
@@ -24,10 +23,11 @@ fn define_percpu_impl(
     let expr = &item.expr;
 
     let is_bool = quote!(#ty).to_string().as_str() == "bool";
-    let is_integer =
-        ["u8", "u16", "u32", "u64", "usize"].contains(&quote!(#ty).to_string().as_str());
+    let is_integer = ["u8", "u16", "u32", "u64", "usize"]
+        .contains(&quote!(#ty).to_string().as_str());
 
-    let is_atomic_like = is_bool || is_integer || quote!(#ty).to_string().contains("NonNull");
+    let is_atomic_like =
+        is_bool || is_integer || quote!(#ty).to_string().contains("NonNull");
 
     let inner_ident = format_ident!("_percpu_inner_{}", ident);
     let access_ident = format_ident!("_access_{}", ident);
@@ -122,8 +122,7 @@ fn define_percpu_impl(
 }
 
 fn define_percpu_shared_impl(
-    attrs: TokenStream,
-    item: TokenStream,
+    attrs: TokenStream, item: TokenStream,
     get_percpu_pointer: fn(&Ident, &Type) -> TokenStream,
     get_percpu_offset: fn(&Ident) -> TokenStream,
 ) -> TokenStream {
@@ -191,16 +190,15 @@ fn define_percpu_shared_impl(
 
 #[proc_macro_attribute]
 pub fn define_percpu_x86_64(
-    attrs: proc_macro::TokenStream,
-    item: proc_macro::TokenStream,
+    attrs: proc_macro::TokenStream, item: proc_macro::TokenStream,
 ) -> proc_macro::TokenStream {
-    define_percpu_impl(attrs.into(), item.into(), x86_64::get_percpu_pointer).into()
+    define_percpu_impl(attrs.into(), item.into(), x86_64::get_percpu_pointer)
+        .into()
 }
 
 #[proc_macro_attribute]
 pub fn define_percpu_shared_x86_64(
-    attrs: proc_macro::TokenStream,
-    item: proc_macro::TokenStream,
+    attrs: proc_macro::TokenStream, item: proc_macro::TokenStream,
 ) -> proc_macro::TokenStream {
     define_percpu_shared_impl(
         attrs.into(),
@@ -213,16 +211,15 @@ pub fn define_percpu_shared_x86_64(
 
 #[proc_macro_attribute]
 pub fn define_percpu_riscv64(
-    attrs: proc_macro::TokenStream,
-    item: proc_macro::TokenStream,
+    attrs: proc_macro::TokenStream, item: proc_macro::TokenStream,
 ) -> proc_macro::TokenStream {
-    define_percpu_impl(attrs.into(), item.into(), riscv64::get_percpu_pointer).into()
+    define_percpu_impl(attrs.into(), item.into(), riscv64::get_percpu_pointer)
+        .into()
 }
 
 #[proc_macro_attribute]
 pub fn define_percpu_shared_riscv64(
-    attrs: proc_macro::TokenStream,
-    item: proc_macro::TokenStream,
+    attrs: proc_macro::TokenStream, item: proc_macro::TokenStream,
 ) -> proc_macro::TokenStream {
     define_percpu_shared_impl(
         attrs.into(),
@@ -235,16 +232,19 @@ pub fn define_percpu_shared_riscv64(
 
 #[proc_macro_attribute]
 pub fn define_percpu_loongarch64(
-    attrs: proc_macro::TokenStream,
-    item: proc_macro::TokenStream,
+    attrs: proc_macro::TokenStream, item: proc_macro::TokenStream,
 ) -> proc_macro::TokenStream {
-    define_percpu_impl(attrs.into(), item.into(), loongarch64::get_percpu_pointer).into()
+    define_percpu_impl(
+        attrs.into(),
+        item.into(),
+        loongarch64::get_percpu_pointer,
+    )
+    .into()
 }
 
 #[proc_macro_attribute]
 pub fn define_percpu_shared_loongarch64(
-    attrs: proc_macro::TokenStream,
-    item: proc_macro::TokenStream,
+    attrs: proc_macro::TokenStream, item: proc_macro::TokenStream,
 ) -> proc_macro::TokenStream {
     define_percpu_shared_impl(
         attrs.into(),

@@ -148,8 +148,7 @@ impl<'a> ScopedAllocator<'a> {
     }
 
     pub fn with_alloc<'b, 'r, O>(
-        &'r self,
-        func: impl FnOnce(&'b ScopedAllocator<'a>) -> O,
+        &'r self, func: impl FnOnce(&'b ScopedAllocator<'a>) -> O,
     ) -> O
     where
         'a: 'b,

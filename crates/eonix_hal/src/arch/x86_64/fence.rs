@@ -1,7 +1,5 @@
-use core::{
-    arch::asm,
-    sync::atomic::{compiler_fence, Ordering},
-};
+use core::arch::asm;
+use core::sync::atomic::{compiler_fence, Ordering};
 
 #[doc(hidden)]
 /// Issues a full memory barrier.

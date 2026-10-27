@@ -1,23 +1,28 @@
-use super::virtio_blk::HAL;
-use crate::kernel::{block::BlockDevice, task::block_on, vfs::types::DeviceId};
-use alloc::{sync::Arc, vec::Vec};
+use alloc::sync::Arc;
+use alloc::vec::Vec;
+
 use eonix_hal::arch_exported::fdt::FDT;
 use eonix_hal::mm::ArchPhysAccess;
 use eonix_log::{println_info, println_warn};
 use eonix_mm::address::{PAddr, PhysAccess};
 use eonix_sync::Spin;
-use virtio_drivers::{
-    device::blk::VirtIOBlk,
-    transport::{mmio::MmioTransport, Transport},
-};
+use virtio_drivers::device::blk::VirtIOBlk;
+use virtio_drivers::transport::mmio::MmioTransport;
+use virtio_drivers::transport::Transport;
+
+use super::virtio_blk::HAL;
+use crate::kernel::block::BlockDevice;
+use crate::kernel::task::block_on;
+use crate::kernel::vfs::types::DeviceId;
 
 pub fn init() {
     let mut disk_id = 0;
     let mut virtio_devices: Vec<_> = FDT
         .all_nodes()
         .filter(|node| {
-            node.compatible()
-                .is_some_and(|compatible| compatible.all().any(|s| s == "virtio,mmio"))
+            node.compatible().is_some_and(|compatible| {
+                compatible.all().any(|s| s == "virtio,mmio")
+            })
         })
         .filter_map(|node| node.reg())
         .flatten()
@@ -46,8 +51,9 @@ pub fn init() {
                     )
                     .expect("Failed to register VirtIO Block device");
 
-                    block_on(block_device.partprobe())
-                        .expect("Failed to probe partitions for VirtIO Block device");
+                    block_on(block_device.partprobe()).expect(
+                        "Failed to probe partitions for VirtIO Block device",
+                    );
 
                     disk_id += 1;
                 }

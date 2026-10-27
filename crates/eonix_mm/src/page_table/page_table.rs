@@ -74,7 +74,8 @@ where
     {
         let new_root_table_page = alloc.alloc();
         let new_table_data = self.access.get_ptr_for_page(&new_root_table_page);
-        let kernel_table_data = self.access.get_ptr_for_page(&self.root_table_page);
+        let kernel_table_data =
+            self.access.get_ptr_for_page(&self.root_table_page);
 
         unsafe {
             // SAFETY: `new_table_data` and `kernel_table_data` are both valid pointers
@@ -101,8 +102,11 @@ where
         self.root_table_page.start()
     }
 
-    pub fn iter_user(&self, range: VRange) -> impl Iterator<Item = &mut M::Entry> {
-        let page_table_ptr = self.access.get_ptr_for_page(&self.root_table_page);
+    pub fn iter_user(
+        &self, range: VRange,
+    ) -> impl Iterator<Item = &mut M::Entry> {
+        let page_table_ptr =
+            self.access.get_ptr_for_page(&self.root_table_page);
         let root_page_table = unsafe {
             // SAFETY: `page_table_ptr` is a valid pointer to a page table.
             M::RawTable::from_ptr(page_table_ptr)
@@ -130,8 +134,11 @@ where
     ///     // Process each entry
     /// }
     /// ```
-    pub fn iter_kernel(&self, range: VRange) -> impl Iterator<Item = &mut M::Entry> {
-        let page_table_ptr = self.access.get_ptr_for_page(&self.root_table_page);
+    pub fn iter_kernel(
+        &self, range: VRange,
+    ) -> impl Iterator<Item = &mut M::Entry> {
+        let page_table_ptr =
+            self.access.get_ptr_for_page(&self.root_table_page);
         let root_page_table = unsafe {
             // SAFETY: `page_table_ptr` is a valid pointer to a page table.
             M::RawTable::from_ptr(page_table_ptr)
@@ -147,7 +154,9 @@ where
         )
     }
 
-    fn drop_page_table_recursive(&self, page_table: &A::Folio, levels: &[PageTableLevel]) {
+    fn drop_page_table_recursive(
+        &self, page_table: &A::Folio, levels: &[PageTableLevel],
+    ) {
         let [level, remaining_levels @ ..] = levels else { return };
         if remaining_levels.is_empty() {
             // We reached the last level, no need to go deeper.

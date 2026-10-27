@@ -1,7 +1,10 @@
 #![no_std]
 
 use alloc::sync::Arc;
-use core::{marker::PhantomData, mem::ManuallyDrop, ops::Deref, ptr::NonNull};
+use core::marker::PhantomData;
+use core::mem::ManuallyDrop;
+use core::ops::Deref;
+use core::ptr::NonNull;
 
 extern crate alloc;
 

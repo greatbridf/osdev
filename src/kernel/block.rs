@@ -71,13 +71,12 @@ impl Ord for BlockDevice {
     }
 }
 
-static BLOCK_DEVICE_LIST: Spin<BTreeMap<DeviceId, Arc<BlockDevice>>> = Spin::new(BTreeMap::new());
+static BLOCK_DEVICE_LIST: Spin<BTreeMap<DeviceId, Arc<BlockDevice>>> =
+    Spin::new(BTreeMap::new());
 
 impl BlockDevice {
     pub fn register_disk(
-        devid: DeviceId,
-        size: u64,
-        queue: Arc<dyn BlockRequestQueue>,
+        devid: DeviceId, size: u64, queue: Arc<dyn BlockRequestQueue>,
     ) -> KResult<Arc<Self>> {
         let device = Arc::new(Self {
             devid,
@@ -108,14 +107,19 @@ impl BlockDevice {
         }
     }
 
-    pub fn register_partition(&self, idx: usize, offset: u64, size: u64) -> KResult<Arc<Self>> {
+    pub fn register_partition(
+        &self, idx: usize, offset: u64, size: u64,
+    ) -> KResult<Arc<Self>> {
         let queue = match &self.dev_type {
             BlockDeviceType::Disk { queue } => queue.clone(),
             BlockDeviceType::Partition { .. } => return Err(EINVAL),
         };
 
         let device = Arc::new(BlockDevice {
-            devid: DeviceId::new(self.devid.major, self.devid.minor + idx as u16 + 1),
+            devid: DeviceId::new(
+                self.devid.major,
+                self.devid.minor + idx as u16 + 1,
+            ),
             sector_count: size,
             dev_type: BlockDeviceType::Partition {
                 disk_dev: self.devid,
@@ -136,7 +140,11 @@ impl BlockDevice {
             BlockDeviceType::Disk { .. } => {
                 if let Ok(mbr_table) = MBRPartTable::from_disk(self).await {
                     for (idx, partition) in mbr_table.partitions().enumerate() {
-                        self.register_partition(idx, partition.lba_offset, partition.sector_count)?;
+                        self.register_partition(
+                            idx,
+                            partition.lba_offset,
+                            partition.sector_count,
+                        )?;
                     }
                 }
 
@@ -153,7 +161,9 @@ impl BlockDevice {
     /// - `req.sector` must be within the disk size
     /// - `req.buffer` must be enough to hold the data
     ///
-    pub async fn commit_request(&self, mut req: BlockDeviceRequest<'_>) -> KResult<()> {
+    pub async fn commit_request(
+        &self, mut req: BlockDeviceRequest<'_>,
+    ) -> KResult<()> {
         // Verify the request parameters.
         match &mut req {
             BlockDeviceRequest::Read { sector, count, .. } => {
@@ -161,7 +171,9 @@ impl BlockDevice {
                     return Err(EINVAL);
                 }
 
-                if let BlockDeviceType::Partition { lba_offset, .. } = &self.dev_type {
+                if let BlockDeviceType::Partition { lba_offset, .. } =
+                    &self.dev_type
+                {
                     // Adjust the sector for partition offset.
                     *sector += lba_offset;
                 }
@@ -171,7 +183,9 @@ impl BlockDevice {
                     return Err(EINVAL);
                 }
 
-                if let BlockDeviceType::Partition { lba_offset, .. } = &self.dev_type {
+                if let BlockDeviceType::Partition { lba_offset, .. } =
+                    &self.dev_type
+                {
                     // Adjust the sector for partition offset.
                     *sector += lba_offset;
                 }
@@ -188,7 +202,9 @@ impl BlockDevice {
     /// # Arguments
     /// `offset` - offset in bytes
     ///
-    pub async fn read_some(&self, offset: usize, buffer: &mut dyn Buffer) -> KResult<FillResult> {
+    pub async fn read_some(
+        &self, offset: usize, buffer: &mut dyn Buffer,
+    ) -> KResult<FillResult> {
         let sector_start = offset as u64 / 512;
         let mut first_sector_offset = offset % 512;
         let nr_sectors = (first_sector_offset + buffer.total() + 511) / 512;
@@ -196,7 +212,8 @@ impl BlockDevice {
         let nr_sectors_per_batch = self.queue().max_request_pages() / 2 * 2 * 8;
 
         let mut nr_filled = 0;
-        for (start, nr_batch) in Chunks::new(sector_start, nr_sectors as u64, nr_sectors_per_batch)
+        for (start, nr_batch) in
+            Chunks::new(sector_start, nr_sectors as u64, nr_sectors_per_batch)
         {
             let (page_slice, page, mut page_vec);
             match nr_batch {
@@ -219,7 +236,8 @@ impl BlockDevice {
                     let nr_pages = nr_huge_pages + nr_small_pages;
                     page_vec = Vec::with_capacity(nr_pages);
 
-                    page_vec.resize_with(nr_huge_pages, || Folio::alloc_order(2));
+                    page_vec
+                        .resize_with(nr_huge_pages, || Folio::alloc_order(2));
                     page_vec.resize_with(nr_pages, || Folio::alloc());
                     page_slice = &page_vec;
                 }

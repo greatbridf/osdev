@@ -1,4 +1,4 @@
-use sbi::legacy::{console_putchar, console_getchar};
+use sbi::legacy::{console_getchar, console_putchar};
 
 pub fn getchar() -> Option<u8> {
     let c = console_getchar();

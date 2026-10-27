@@ -1,5 +1,6 @@
-use crate::result::PosixError;
 use core::fmt;
+
+use crate::result::PosixError;
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Signal(u32);
@@ -89,7 +90,9 @@ impl fmt::Debug for Signal {
             &Signal::SIGIO => write!(f, "SIGNOIO/SIGPOLL"),
             &Signal::SIGPWR => write!(f, "SIGHUPWR"),
             &Signal::SIGSYS => write!(f, "SIGSYS"),
-            &Signal(signo @ ..Signal::SIGNUM_MAX) => write!(f, "SIGUSER{}", signo),
+            &Signal(signo @ ..Signal::SIGNUM_MAX) => {
+                write!(f, "SIGUSER{}", signo)
+            }
             &Signal(signo) => write!(f, "Signal::UNKNOWN({})", signo),
         }
     }

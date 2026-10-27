@@ -54,7 +54,9 @@ struct TmpFsMountCreator;
 
 #[async_trait]
 impl MountCreator for TmpFsMountCreator {
-    async fn create_mount(&self, _source: &str, _flags: u64, mp: &Arc<Dentry>) -> KResult<Mount> {
+    async fn create_mount(
+        &self, _source: &str, _flags: u64, mp: &Arc<Dentry>,
+    ) -> KResult<Mount> {
         let (fs, root_inode) = TmpFs::create()?;
 
         Mount::new(mp, fs, root_inode)

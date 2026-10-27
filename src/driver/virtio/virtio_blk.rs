@@ -19,8 +19,7 @@ pub struct HAL;
 
 unsafe impl Hal for HAL {
     fn dma_alloc(
-        pages: usize,
-        _direction: virtio_drivers::BufferDirection,
+        pages: usize, _direction: virtio_drivers::BufferDirection,
     ) -> (virtio_drivers::PhysAddr, core::ptr::NonNull<u8>) {
         let page = Folio::alloc_at_least(pages);
 
@@ -31,8 +30,7 @@ unsafe impl Hal for HAL {
     }
 
     unsafe fn dma_dealloc(
-        paddr: virtio_drivers::PhysAddr,
-        _vaddr: core::ptr::NonNull<u8>,
+        paddr: virtio_drivers::PhysAddr, _vaddr: core::ptr::NonNull<u8>,
         _pages: usize,
     ) -> i32 {
         let pfn = PFN::from(PAddr::from(paddr));
@@ -47,8 +45,7 @@ unsafe impl Hal for HAL {
     }
 
     unsafe fn mmio_phys_to_virt(
-        paddr: virtio_drivers::PhysAddr,
-        _size: usize,
+        paddr: virtio_drivers::PhysAddr, _size: usize,
     ) -> core::ptr::NonNull<u8> {
         unsafe { ArchPhysAccess::as_ptr(PAddr::from(paddr)) }
     }
@@ -66,8 +63,7 @@ unsafe impl Hal for HAL {
     }
 
     unsafe fn unshare(
-        _paddr: virtio_drivers::PhysAddr,
-        _buffer: core::ptr::NonNull<[u8]>,
+        _paddr: virtio_drivers::PhysAddr, _buffer: core::ptr::NonNull<[u8]>,
         _direction: virtio_drivers::BufferDirection,
     ) {
     }
@@ -91,7 +87,8 @@ where
             } => {
                 let mut dev = self.lock();
                 for ((start, sectors), buffer_page) in
-                    Chunks::new(sector as usize, count as usize, 8).zip(buffer.iter())
+                    Chunks::new(sector as usize, count as usize, 8)
+                        .zip(buffer.iter())
                 {
                     let len = sectors * 512;
                     let pg = buffer_page.lock();
@@ -107,7 +104,8 @@ where
             } => {
                 let mut dev = self.lock();
                 for ((start, sectors), buffer_page) in
-                    Chunks::new(sector as usize, count as usize, 8).zip(buffer.iter())
+                    Chunks::new(sector as usize, count as usize, 8)
+                        .zip(buffer.iter())
                 {
                     let len = sectors * 512;
                     let mut pg = buffer_page.lock();

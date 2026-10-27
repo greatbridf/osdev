@@ -1,18 +1,15 @@
-use crate::{
-    io::Buffer as _,
-    kernel::{
-        constants::{CLOCK_MONOTONIC, CLOCK_REALTIME, CLOCK_REALTIME_COARSE, EINTR, EINVAL},
-        syscall::UserMut,
-        task::Thread,
-        timer::{Instant, Ticks},
-        user::{UserBuffer, UserPointerMut},
-    },
-    prelude::*,
+use posix_types::stat::{TimeSpec, TimeVal};
+use posix_types::syscall_no::*;
+
+use crate::io::Buffer as _;
+use crate::kernel::constants::{
+    CLOCK_MONOTONIC, CLOCK_REALTIME, CLOCK_REALTIME_COARSE, EINTR, EINVAL,
 };
-use posix_types::{
-    stat::{TimeSpec, TimeVal},
-    syscall_no::*,
-};
+use crate::kernel::syscall::UserMut;
+use crate::kernel::task::Thread;
+use crate::kernel::timer::{Instant, Ticks};
+use crate::kernel::user::{UserBuffer, UserPointerMut};
+use crate::prelude::*;
 
 #[derive(Clone, Copy)]
 struct NewUTSName {
@@ -63,7 +60,9 @@ async fn newuname(buffer: UserMut<NewUTSName>) -> KResult<()> {
 }
 
 #[eonix_macros::define_syscall(SYS_GETTIMEOFDAY)]
-async fn gettimeofday(timeval: UserMut<TimeVal>, timezone: UserMut<()>) -> KResult<()> {
+async fn gettimeofday(
+    timeval: UserMut<TimeVal>, timezone: UserMut<()>,
+) -> KResult<()> {
     if !timezone.is_null() {
         return Err(EINVAL);
     }
@@ -82,7 +81,9 @@ async fn gettimeofday(timeval: UserMut<TimeVal>, timezone: UserMut<()>) -> KResu
     Ok(())
 }
 
-fn do_clock_gettime64(_thread: &Thread, clock_id: u32, timespec: UserMut<TimeSpec>) -> KResult<()> {
+fn do_clock_gettime64(
+    _thread: &Thread, clock_id: u32, timespec: UserMut<TimeSpec>,
+) -> KResult<()> {
     let timespec = UserPointerMut::new(timespec)?;
 
     match clock_id {
@@ -107,13 +108,17 @@ fn do_clock_gettime64(_thread: &Thread, clock_id: u32, timespec: UserMut<TimeSpe
 
 #[cfg(not(target_arch = "x86_64"))]
 #[eonix_macros::define_syscall(SYS_CLOCK_GETTIME)]
-async fn clock_gettime(clock_id: u32, timespec: UserMut<TimeSpec>) -> KResult<()> {
+async fn clock_gettime(
+    clock_id: u32, timespec: UserMut<TimeSpec>,
+) -> KResult<()> {
     do_clock_gettime64(thread, clock_id, timespec)
 }
 
 #[cfg(target_arch = "x86_64")]
 #[eonix_macros::define_syscall(SYS_CLOCK_GETTIME64)]
-async fn clock_gettime64(clock_id: u32, timespec: UserMut<TimeSpec>) -> KResult<()> {
+async fn clock_gettime64(
+    clock_id: u32, timespec: UserMut<TimeSpec>,
+) -> KResult<()> {
     do_clock_gettime64(thread, clock_id, timespec)
 }
 
@@ -176,7 +181,9 @@ async fn times(tms: UserMut<TMS>) -> KResult<()> {
 }
 
 #[eonix_macros::define_syscall(SYS_GETRANDOM)]
-async fn get_random(buf: UserMut<u8>, len: usize, flags: u32) -> KResult<usize> {
+async fn get_random(
+    buf: UserMut<u8>, len: usize, flags: u32,
+) -> KResult<usize> {
     if flags != 0 {
         return Err(EINVAL);
     }

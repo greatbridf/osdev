@@ -1,11 +1,10 @@
+use alloc::collections::btree_map::{BTreeMap, Entry};
+use alloc::sync::Arc;
 use core::sync::atomic::{AtomicU32, Ordering};
 
-use crate::kernel::constants::EFAULT;
-use alloc::{
-    collections::btree_map::{BTreeMap, Entry},
-    sync::Arc,
-};
 use eonix_sync::Spin;
+
+use crate::kernel::constants::EFAULT;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LinkStatus {
@@ -57,13 +56,16 @@ impl Ord for dyn Netdev {
 }
 
 static NETDEVS_ID: AtomicU32 = AtomicU32::new(0);
-static NETDEVS: Spin<BTreeMap<u32, Arc<Spin<dyn Netdev>>>> = Spin::new(BTreeMap::new());
+static NETDEVS: Spin<BTreeMap<u32, Arc<Spin<dyn Netdev>>>> =
+    Spin::new(BTreeMap::new());
 
 pub fn alloc_id() -> u32 {
     NETDEVS_ID.fetch_add(1, Ordering::SeqCst)
 }
 
-pub fn register_netdev(netdev: impl Netdev + 'static) -> Result<Arc<Spin<dyn Netdev>>, u32> {
+pub fn register_netdev(
+    netdev: impl Netdev + 'static,
+) -> Result<Arc<Spin<dyn Netdev>>, u32> {
     match NETDEVS.lock().entry(netdev.id()) {
         Entry::Vacant(entry) => {
             let netdev = Arc::new(Spin::new(netdev));

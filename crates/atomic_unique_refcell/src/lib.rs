@@ -7,7 +7,6 @@ use core::{
     ops::{Deref, DerefMut},
     sync::atomic::{AtomicBool, Ordering},
 };
-
 #[cfg(not(feature = "no_std"))]
 use std::{
     cell::UnsafeCell,

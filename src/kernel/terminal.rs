@@ -458,10 +458,7 @@ impl Terminal {
     }
 
     async fn echo_and_signal(
-        &self,
-        inner: &mut TerminalInner,
-        ch: u8,
-        signal: Signal,
+        &self, inner: &mut TerminalInner, ch: u8, signal: Signal,
     ) {
         self.echo_char(inner, ch);
         self.signal(inner, signal).await;
@@ -685,9 +682,7 @@ impl Terminal {
     /// Assign the `session` to this terminal.
     /// Drop the previous session if `forced` is true.
     pub async fn set_session(
-        self: &Arc<Self>,
-        session: &Arc<Session>,
-        forced: bool,
+        self: &Arc<Self>, session: &Arc<Session>, forced: bool,
         procs: Proof<'_, ProcessList>,
     ) -> KResult<()> {
         let mut cur_session = self.session.lock();

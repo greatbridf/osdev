@@ -16,16 +16,20 @@ struct AcpiHandlerImpl;
 
 impl AcpiHandler for AcpiHandlerImpl {
     unsafe fn map_physical_region<T>(
-        &self,
-        physical_address: usize,
-        size: usize,
+        &self, physical_address: usize, size: usize,
     ) -> PhysicalMapping<Self, T> {
         let virtual_address = unsafe {
             // SAFETY: `physical_address` is guaranteed to be valid by the caller.
             PAddr::from_val(physical_address).as_ptr()
         };
 
-        PhysicalMapping::new(physical_address, virtual_address, size, size, self.clone())
+        PhysicalMapping::new(
+            physical_address,
+            virtual_address,
+            size,
+            size,
+            self.clone(),
+        )
     }
 
     fn unmap_physical_region<T>(_: &PhysicalMapping<Self, T>) {}
@@ -41,7 +45,8 @@ pub fn init_pcie() -> Result<(), PciError> {
             AcpiTables::search_for_rsdp_bios(AcpiHandlerImpl)?
         };
 
-        let mut allocator = PciMemoryAllocator::new(PRange::from(PAddr::from(0)));
+        let mut allocator =
+            PciMemoryAllocator::new(PRange::from(PAddr::from(0)));
 
         let conf_regions = PciConfigRegions::new(&acpi_tables)?;
         for region in conf_regions.iter() {
@@ -49,11 +54,16 @@ pub fn init_pcie() -> Result<(), PciError> {
 
             for config_space in segment_group.iter() {
                 if let Some(header) = config_space.header() {
-                    let pci_device = PCIDevice::new(segment_group.clone(), config_space, header);
+                    let pci_device = PCIDevice::new(
+                        segment_group.clone(),
+                        config_space,
+                        header,
+                    );
 
                     pci_device.configure_io(&mut allocator);
 
-                    match PCIE_DEVICES.lock().entry(pci_device.vendor_device()) {
+                    match PCIE_DEVICES.lock().entry(pci_device.vendor_device())
+                    {
                         Entry::Vacant(vacant_entry) => {
                             vacant_entry.insert(vec![pci_device]);
                         }
@@ -106,26 +116,34 @@ pub fn init_pcie() -> Result<(), PciError> {
         let reg = pcie_node.reg().ok_or(EINVAL)?.next().ok_or(EINVAL)?;
 
         let mmio_range =
-            PRange::from(PAddr::from(reg.starting_address as usize)).grow(reg.size.ok_or(EINVAL)?);
+            PRange::from(PAddr::from(reg.starting_address as usize))
+                .grow(reg.size.ok_or(EINVAL)?);
 
         if bus_range.value.len() != 8 {
             Err(EINVAL)?;
         }
 
-        let bus_start = u32::from_be_bytes(bus_range.value[..4].try_into().unwrap());
-        let bus_end = u32::from_be_bytes(bus_range.value[4..].try_into().unwrap());
+        let bus_start =
+            u32::from_be_bytes(bus_range.value[..4].try_into().unwrap());
+        let bus_end =
+            u32::from_be_bytes(bus_range.value[4..].try_into().unwrap());
 
-        if bus_start > u8::MAX as u32 || bus_end > u8::MAX as u32 || bus_start > bus_end {
+        if bus_start > u8::MAX as u32
+            || bus_end > u8::MAX as u32
+            || bus_start > bus_end
+        {
             Err(EINVAL)?;
         }
 
         let bus_start = bus_start as u8;
         let bus_end = bus_end as u8;
 
-        let segment_group = SegmentGroup::new(0, bus_start, bus_end, mmio_range.start());
+        let segment_group =
+            SegmentGroup::new(0, bus_start, bus_end, mmio_range.start());
         for config_space in segment_group.iter() {
             if let Some(header) = config_space.header() {
-                let pci_device = PCIDevice::new(segment_group.clone(), config_space, header);
+                let pci_device =
+                    PCIDevice::new(segment_group.clone(), config_space, header);
                 pci_device.configure_io(&mut allocator);
 
                 match PCIE_DEVICES.lock().entry(pci_device.vendor_device()) {

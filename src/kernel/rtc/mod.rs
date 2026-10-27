@@ -1,9 +1,10 @@
+use alloc::sync::Arc;
 use core::time::Duration;
 
-use super::timer::{Instant, Ticks};
-use alloc::sync::Arc;
 use eonix_log::println_warn;
 use eonix_sync::Spin;
+
+use super::timer::{Instant, Ticks};
 
 static RTC: Spin<Option<Arc<dyn RealTimeClock>>> = Spin::new(None);
 
@@ -15,7 +16,8 @@ impl Instant {
     pub fn now() -> Instant {
         RTC.lock().as_ref().map(|rtc| rtc.now()).unwrap_or_else(|| {
             let since_boot = Ticks::since_boot();
-            let pseudo_now = Duration::from_secs((55 * 365 + 30) * 24 * 3600) + since_boot;
+            let pseudo_now =
+                Duration::from_secs((55 * 365 + 30) * 24 * 3600) + since_boot;
 
             Instant::new(pseudo_now.as_secs(), pseudo_now.subsec_nanos())
         })

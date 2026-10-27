@@ -1,8 +1,12 @@
-use super::trap::setup_trap;
+use core::arch::asm;
+use core::pin::Pin;
+use core::ptr::NonNull;
 use core::sync::atomic::AtomicUsize;
-use core::{arch::asm, pin::Pin, ptr::NonNull};
+
 use eonix_preempt::PreemptGuard;
 use eonix_sync_base::LazyLock;
+
+use super::trap::setup_trap;
 
 pub static CPU_COUNT: AtomicUsize = AtomicUsize::new(0);
 

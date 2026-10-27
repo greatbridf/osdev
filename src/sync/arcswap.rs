@@ -24,7 +24,8 @@ impl<T> ArcSwap<T> {
     /// The caller must ensure that the pointer not used elsewhere before ACTUALLLY dropping that.
     pub fn swap(&self, data: Option<Arc<T>>) -> Option<Arc<T>> {
         let new_pointer = data.map(Arc::into_raw).unwrap_or(core::ptr::null());
-        let old_pointer = self.pointer.swap(new_pointer as *mut _, Ordering::AcqRel);
+        let old_pointer =
+            self.pointer.swap(new_pointer as *mut _, Ordering::AcqRel);
         if old_pointer.is_null() {
             None
         } else {

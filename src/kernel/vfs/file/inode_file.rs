@@ -52,7 +52,9 @@ impl InodeFile {
         }
     }
 
-    pub async fn write(&self, stream: &mut dyn Stream, offset: Option<usize>) -> KResult<usize> {
+    pub async fn write(
+        &self, stream: &mut dyn Stream, offset: Option<usize>,
+    ) -> KResult<usize> {
         if !self.w {
             return Err(EBADF);
         }
@@ -62,7 +64,9 @@ impl InodeFile {
         let (offset, update_offset) = match (self.a, offset) {
             (true, _) => (WriteOffset::End(&mut cursor), None),
             (false, Some(offset)) => (WriteOffset::Position(offset), None),
-            (false, None) => (WriteOffset::Position(*cursor), Some(&mut *cursor)),
+            (false, None) => {
+                (WriteOffset::Position(*cursor), Some(&mut *cursor))
+            }
         };
 
         let nr_write = self.dentry.write(stream, offset).await?;
@@ -74,7 +78,9 @@ impl InodeFile {
         Ok(nr_write)
     }
 
-    pub async fn read(&self, buffer: &mut dyn Buffer, offset: Option<usize>) -> KResult<usize> {
+    pub async fn read(
+        &self, buffer: &mut dyn Buffer, offset: Option<usize>,
+    ) -> KResult<usize> {
         if !self.r {
             return Err(EBADF);
         }
@@ -111,7 +117,8 @@ impl File {
             .dentry
             .readdir(*cursor, |filename, ino| {
                 // + 1 for filename length padding '\0', + 1 for d_type.
-                let real_record_len = core::mem::size_of::<UserDirent>() + filename.len() + 2;
+                let real_record_len =
+                    core::mem::size_of::<UserDirent>() + filename.len() + 2;
 
                 if buffer.available() < real_record_len {
                     return Ok(false);
@@ -147,7 +154,8 @@ impl File {
             .dentry
             .readdir(*cursor, |filename, ino| {
                 // Filename length + 1 for padding '\0'
-                let real_record_len = core::mem::size_of::<UserDirent64>() + filename.len() + 1;
+                let real_record_len =
+                    core::mem::size_of::<UserDirent64>() + filename.len() + 1;
 
                 if buffer.available() < real_record_len {
                     return Ok(false);
@@ -181,7 +189,9 @@ impl File {
         let mut cursor = inode_file.cursor.lock().await;
 
         let new_cursor = match option {
-            SeekOption::Current(off) => cursor.checked_add_signed(off).ok_or(EOVERFLOW)?,
+            SeekOption::Current(off) => {
+                cursor.checked_add_signed(off).ok_or(EOVERFLOW)?
+            }
             SeekOption::Set(n) => n,
             SeekOption::End(off) => {
                 let inode = inode_file.dentry.get_inode()?;

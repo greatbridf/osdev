@@ -1,10 +1,8 @@
-use crate::address::{Addr as _, PAddr};
-use core::{
-    fmt,
-    ops::{Add, Sub},
-};
+use core::fmt;
+use core::ops::{Add, Sub};
 
 use super::PAGE_SIZE_BITS;
+use crate::address::{Addr as _, PAddr};
 
 #[repr(transparent)]
 #[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq)]

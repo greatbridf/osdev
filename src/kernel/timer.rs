@@ -1,19 +1,21 @@
-use alloc::{collections::BinaryHeap, vec, vec::Vec};
-use core::{
-    cell::RefCell,
-    cmp::Reverse,
-    ops::Add,
-    sync::atomic::{AtomicUsize, Ordering},
-    task::{Poll, Waker},
-    time::Duration,
-};
+use alloc::collections::BinaryHeap;
+use alloc::vec;
+use alloc::vec::Vec;
+use core::cell::RefCell;
+use core::cmp::Reverse;
+use core::ops::Add;
+use core::sync::atomic::{AtomicUsize, Ordering};
+use core::task::{Poll, Waker};
+use core::time::Duration;
+
 use eonix_hal::processor::CPU;
 use eonix_sync::{Spin, SpinIrq as _};
 use posix_types::stat::{StatXTimestamp, TimeSpec, TimeVal};
 
 static TICKS: AtomicUsize = AtomicUsize::new(0);
 static WAKEUP_TICK: AtomicUsize = AtomicUsize::new(usize::MAX);
-static SLEEPERS_LIST: Spin<BinaryHeap<Reverse<Sleepers>>> = Spin::new(BinaryHeap::new());
+static SLEEPERS_LIST: Spin<BinaryHeap<Reverse<Sleepers>>> =
+    Spin::new(BinaryHeap::new());
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
 pub struct Ticks(usize);
@@ -154,8 +156,9 @@ impl Add<Duration> for Instant {
     fn add(self, duration: Duration) -> Self::Output {
         let nsecs = self.nsecs_within + duration.subsec_nanos();
         let nsecs_within = nsecs % 1_000_000_000;
-        let secs_since_epoch =
-            self.secs_since_epoch + duration.as_secs() + (nsecs / 1_000_000_000) as u64;
+        let secs_since_epoch = self.secs_since_epoch
+            + duration.as_secs()
+            + (nsecs / 1_000_000_000) as u64;
 
         Instant {
             secs_since_epoch,

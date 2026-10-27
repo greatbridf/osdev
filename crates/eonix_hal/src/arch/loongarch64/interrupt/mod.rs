@@ -15,9 +15,10 @@
 //! tree advertises for the interrupt controller (`interrupts = <3>`), and
 //! every vector to CPU 0.
 
-use super::mm::ArchPhysAccess;
 use eonix_mm::address::{PAddr, PhysAccess};
 use loongArch64::iocsr;
+
+use super::mm::ArchPhysAccess;
 
 /// Base address of the PCH-PIC (normal MMIO).
 const PCH_PIC_BASE: usize = 0x1000_0000;
@@ -76,14 +77,16 @@ fn pch_write8(offset: usize, value: u8) {
 }
 
 fn eiointc_enable_vector(vector: usize) {
-    let offset = EIOINTC_ENABLE + (vector / EIOINTC_GROUP_SIZE) * size_of::<u32>();
+    let offset =
+        EIOINTC_ENABLE + (vector / EIOINTC_GROUP_SIZE) * size_of::<u32>();
     let bit = 1u32 << (vector % EIOINTC_GROUP_SIZE);
 
     iocsr::iocsr_write_w(offset, iocsr::iocsr_read_w(offset) | bit);
 }
 
 fn eiointc_clear_vector(vector: usize) {
-    let offset = EIOINTC_COREISR + (vector / EIOINTC_GROUP_SIZE) * size_of::<u32>();
+    let offset =
+        EIOINTC_COREISR + (vector / EIOINTC_GROUP_SIZE) * size_of::<u32>();
     let bit = 1u32 << (vector % EIOINTC_GROUP_SIZE);
 
     // Writing one acknowledges (clears) the pending bit.
@@ -105,7 +108,10 @@ pub fn init() {
     // Route all vectors to CPU 0.  COREMAP stores four bytes (one vector
     // each) per 32-bit register; a byte holds a bitmask of target CPUs.
     for word in 0..(EIOINTC_VECTORS / 4) {
-        iocsr::iocsr_write_w(EIOINTC_COREMAP + word * size_of::<u32>(), 0x0101_0101);
+        iocsr::iocsr_write_w(
+            EIOINTC_COREMAP + word * size_of::<u32>(),
+            0x0101_0101,
+        );
     }
 }
 

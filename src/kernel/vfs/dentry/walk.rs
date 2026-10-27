@@ -57,9 +57,7 @@ impl Dentry {
     /// returning `None` is acceptable if the actual file exists but is not in
     /// the dentry cache. If so, we should check again with `lookup`.
     fn find_rcu<'r, 's: 'r>(
-        self: ArcRef<'s, Self>,
-        name: &[u8],
-        rcu_read: &'r RCUReadLock,
+        self: ArcRef<'s, Self>, name: &[u8], rcu_read: &'r RCUReadLock,
     ) -> Result<Option<ArcRef<'r, Self>>, PosixError> {
         match self.inode.load() {
             Some((DentryKind::Directory, _)) => {}
@@ -81,7 +79,9 @@ impl Dentry {
         }
     }
 
-    async fn find_slow(self: &Arc<Self>, name: &[u8]) -> Result<Arc<Self>, PosixError> {
+    async fn find_slow(
+        self: &Arc<Self>, name: &[u8],
+    ) -> Result<Arc<Self>, PosixError> {
         let dentry = Dentry::create(self.clone(), name);
 
         let _ = dcache::d_try_revalidate(&dentry).await;
@@ -90,7 +90,9 @@ impl Dentry {
         Ok(dentry)
     }
 
-    pub async fn find_full(self: &Arc<Self>, name: &[u8]) -> Result<Arc<Self>, PosixError> {
+    pub async fn find_full(
+        self: &Arc<Self>, name: &[u8],
+    ) -> Result<Arc<Self>, PosixError> {
         if let Some(dentry) = self.aref().find_rcu(name, &rcu_read_lock())? {
             return Ok(dentry.clone_arc());
         }
@@ -103,10 +105,8 @@ impl FsContext {
     /// Walk the pathname and try to find the corresponding dentry FAST without
     /// consulting the VFS for invalid dentries encountered.
     fn walk_rcu<'rcu, 'path>(
-        &self,
-        mut current: ArcRef<'rcu, Dentry>,
-        iter: &mut PathIterator<'path>,
-        rcu_read: &'rcu RCUReadLock,
+        &self, mut current: ArcRef<'rcu, Dentry>,
+        iter: &mut PathIterator<'path>, rcu_read: &'rcu RCUReadLock,
     ) -> WalkResultRcu<'rcu, 'path> {
         use PathComponent::*;
 
@@ -131,7 +131,8 @@ impl FsContext {
 
             match (inode, component) {
                 // Skip trailing empty and dot for normal directories.
-                (Some((DentryKind::Directory, _)), TrailingEmpty | Current) => {}
+                (Some((DentryKind::Directory, _)), TrailingEmpty | Current) => {
+                }
                 // Walk to parent directory unless we are at the filesystem root.
                 (Some((DentryKind::Directory, _)), Parent) => {
                     if current.ptr_eq_arc(&self.fsroot) {
@@ -171,7 +172,9 @@ impl FsContext {
     }
 
     /// Walk the pathname slowly with refcounts held and VFS lookups.
-    async fn walk_slow(&self, mut current: Arc<Dentry>, iter: &mut PathIterator<'_>) -> WalkResult {
+    async fn walk_slow(
+        &self, mut current: Arc<Dentry>, iter: &mut PathIterator<'_>,
+    ) -> WalkResult {
         use PathComponent::*;
 
         loop {
@@ -229,15 +232,15 @@ impl FsContext {
 
     /// Walk the pathname and get an accurate answer. Stop at symlinks.
     async fn walk_full(
-        &self,
-        current: ArcRef<'_, Dentry>,
-        iter: &mut PathIterator<'_>,
+        &self, current: ArcRef<'_, Dentry>, iter: &mut PathIterator<'_>,
     ) -> WalkResult {
         let (parent_slow, name_slow);
 
         match self.walk_rcu(current, iter, &rcu_read_lock()) {
             WalkResultRcu::Err(error) => return WalkResult::Err(error.into()),
-            WalkResultRcu::Ok(dentry) => return WalkResult::Ok(dentry.clone_arc()),
+            WalkResultRcu::Ok(dentry) => {
+                return WalkResult::Ok(dentry.clone_arc())
+            }
             WalkResultRcu::Symlink { symlink, inode } => {
                 return WalkResult::Symlink {
                     symlink: symlink.clone_arc(),
@@ -258,10 +261,7 @@ impl FsContext {
     }
 
     pub async fn follow_symlink(
-        &self,
-        symlink: ArcRef<'_, Dentry>,
-        inode: &InodeUse,
-        nr_follows: u32,
+        &self, symlink: ArcRef<'_, Dentry>, inode: &InodeUse, nr_follows: u32,
     ) -> KResult<Arc<Dentry>> {
         let mut target = [0; 256];
         let mut target = ByteBuffer::new(&mut target);
@@ -276,19 +276,14 @@ impl FsContext {
     }
 
     fn follow_symlink_boxed<'r, 'a: 'r, 'b: 'r, 'c: 'r>(
-        &'a self,
-        symlink: ArcRef<'b, Dentry>,
-        inode: &'c InodeUse,
+        &'a self, symlink: ArcRef<'b, Dentry>, inode: &'c InodeUse,
         nr_follows: u32,
     ) -> Pin<Box<dyn Future<Output = KResult<Arc<Dentry>>> + Send + 'r>> {
         Box::pin(self.follow_symlink(symlink, inode, nr_follows))
     }
 
     async fn walk_recursive(
-        &self,
-        cwd: &Arc<Dentry>,
-        path: &Path,
-        nr_follows: u32,
+        &self, cwd: &Arc<Dentry>, path: &Path, nr_follows: u32,
     ) -> KResult<Arc<Dentry>> {
         const MAX_NR_FOLLOWS: u32 = 16;
 
@@ -312,7 +307,11 @@ impl FsContext {
                     }
 
                     current_owned = self
-                        .follow_symlink_boxed(symlink.aref(), &inode, nr_follows)
+                        .follow_symlink_boxed(
+                            symlink.aref(),
+                            &inode,
+                            nr_follows,
+                        )
                         .await?;
                     current = current_owned.aref();
                 }
@@ -321,9 +320,7 @@ impl FsContext {
     }
 
     pub async fn start_recursive_walk(
-        &self,
-        cwd: &Arc<Dentry>,
-        path: &Path,
+        &self, cwd: &Arc<Dentry>, path: &Path,
     ) -> KResult<Arc<Dentry>> {
         self.walk_recursive(cwd, path, 0).await
     }
@@ -352,8 +349,7 @@ impl DCacheItem for DentryFind<'_, '_> {
     }
 
     fn d_name<'r, 'a: 'r, 'b: 'a>(
-        &'a self,
-        _rcu_read: &'b RCUReadLock,
+        &'a self, _rcu_read: &'b RCUReadLock,
     ) -> impl Deref<Target = [u8]> + 'r {
         self.name
     }

@@ -50,7 +50,8 @@ impl PercpuArea {
     }
 
     fn layout() -> Layout {
-        Layout::from_size_align(Self::len(), align_of::<PercpuData>()).expect("Invalid layout.")
+        Layout::from_size_align(Self::len(), align_of::<PercpuData>())
+            .expect("Invalid layout.")
     }
 
     pub fn new<F>(allocate: F) -> Self
@@ -61,7 +62,8 @@ impl PercpuArea {
 
         unsafe {
             // SAFETY: The `data_pointer` is of valid length and properly aligned.
-            data_pointer.copy_from_nonoverlapping(Self::data_start(), Self::len());
+            data_pointer
+                .copy_from_nonoverlapping(Self::data_start(), Self::len());
         }
 
         Self {

@@ -1,6 +1,8 @@
 mod proof;
 
-use core::{cell::UnsafeCell, fmt, ptr::NonNull};
+use core::cell::UnsafeCell;
+use core::fmt;
+use core::ptr::NonNull;
 
 pub use proof::{AsProof, AsProofMut, Proof, ProofMut};
 

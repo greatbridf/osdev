@@ -2,8 +2,8 @@ use posix_types::stat::StatX;
 
 use super::inode::InodeUse;
 use crate::kernel::constants::{
-    STATX_ATIME, STATX_BLOCKS, STATX_CTIME, STATX_GID, STATX_INO, STATX_MODE, STATX_MTIME,
-    STATX_NLINK, STATX_SIZE, STATX_TYPE, STATX_UID,
+    STATX_ATIME, STATX_BLOCKS, STATX_CTIME, STATX_GID, STATX_INO, STATX_MODE,
+    STATX_MTIME, STATX_NLINK, STATX_SIZE, STATX_TYPE, STATX_UID,
 };
 use crate::kernel::vfs::types::Format;
 use crate::prelude::KResult;

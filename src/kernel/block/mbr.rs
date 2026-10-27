@@ -1,9 +1,7 @@
 use super::{BlockDevice, PartTable, Partition};
-use crate::{
-    io::UninitBuffer,
-    kernel::constants::{EIO, ENODEV},
-    prelude::KResult,
-};
+use crate::io::UninitBuffer;
+use crate::kernel::constants::{EIO, ENODEV};
+use crate::prelude::KResult;
 
 #[repr(C)]
 #[derive(Clone, Copy)]

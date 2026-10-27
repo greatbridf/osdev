@@ -1,29 +1,28 @@
-use super::virtio_blk::HAL;
-use crate::kernel::{
-    block::{make_device, BlockDevice},
-    constants::EIO,
-    pcie::{self, PCIDevice, PCIDriver, PciError, SegmentGroup},
-    task::block_on,
-};
 use alloc::sync::Arc;
 use core::sync::atomic::{AtomicUsize, Ordering};
-use eonix_hal::{fence::memory_barrier, mm::ArchPhysAccess};
+
+use eonix_hal::fence::memory_barrier;
+use eonix_hal::mm::ArchPhysAccess;
 use eonix_log::println_warn;
 use eonix_mm::address::PhysAccess;
 use eonix_sync::Spin;
-use virtio_drivers::{
-    device::blk::VirtIOBlk,
-    transport::{
-        pci::{
-            bus::{ConfigurationAccess, DeviceFunction, PciRoot},
-            PciTransport,
-        },
-        DeviceType, Transport,
-    },
+use virtio_drivers::device::blk::VirtIOBlk;
+use virtio_drivers::transport::pci::bus::{
+    ConfigurationAccess, DeviceFunction, PciRoot,
 };
+use virtio_drivers::transport::pci::PciTransport;
+use virtio_drivers::transport::{DeviceType, Transport};
+
+use super::virtio_blk::HAL;
+use crate::kernel::block::{make_device, BlockDevice};
+use crate::kernel::constants::EIO;
+use crate::kernel::pcie::{self, PCIDevice, PCIDriver, PciError, SegmentGroup};
+use crate::kernel::task::block_on;
 
 impl ConfigurationAccess for &SegmentGroup {
-    fn read_word(&self, device_function: DeviceFunction, register_offset: u8) -> u32 {
+    fn read_word(
+        &self, device_function: DeviceFunction, register_offset: u8,
+    ) -> u32 {
         let conf_space = self
             .get_conf_space(
                 device_function.bus,
@@ -49,7 +48,10 @@ impl ConfigurationAccess for &SegmentGroup {
         value
     }
 
-    fn write_word(&mut self, device_function: DeviceFunction, register_offset: u8, data: u32) {
+    fn write_word(
+        &mut self, device_function: DeviceFunction, register_offset: u8,
+        data: u32,
+    ) {
         let conf_space = self
             .get_conf_space(
                 device_function.bus,
@@ -91,7 +93,9 @@ impl PCIDriver for VirtIODriver {
         0x1001
     }
 
-    fn handle_device(&self, device: Arc<PCIDevice<'static>>) -> Result<(), PciError> {
+    fn handle_device(
+        &self, device: Arc<PCIDevice<'static>>,
+    ) -> Result<(), PciError> {
         let transport = PciTransport::new::<HAL, _>(
             &mut PciRoot::new(device.segment_group()),
             DeviceFunction {
@@ -123,13 +127,20 @@ impl PCIDriver for VirtIODriver {
             Err(EIO)?;
         }
 
-        let virtio_block = VirtIOBlk::<HAL, _>::new(transport).map_err(|err| {
-            println_warn!("Failed to initialize VirtIO Block device: {}", err);
-            EIO
-        })?;
+        let virtio_block =
+            VirtIOBlk::<HAL, _>::new(transport).map_err(|err| {
+                println_warn!(
+                    "Failed to initialize VirtIO Block device: {}",
+                    err
+                );
+                EIO
+            })?;
 
         let block_device = BlockDevice::register_disk(
-            make_device(8, 16 * self.disk_id.fetch_add(1, Ordering::AcqRel) as u32),
+            make_device(
+                8,
+                16 * self.disk_id.fetch_add(1, Ordering::AcqRel) as u32,
+            ),
             2147483647, // TODO: Get size from device
             Arc::new(Spin::new(virtio_block)),
         )?;

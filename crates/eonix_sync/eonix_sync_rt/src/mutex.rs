@@ -1,13 +1,12 @@
 mod guard;
 
-use crate::WaitList;
-use core::{
-    cell::UnsafeCell,
-    pin::pin,
-    sync::atomic::{AtomicBool, Ordering},
-};
+use core::cell::UnsafeCell;
+use core::pin::pin;
+use core::sync::atomic::{AtomicBool, Ordering};
 
 pub use guard::MutexGuard;
+
+use crate::WaitList;
 
 #[derive(Debug, Default)]
 pub struct Mutex<T>
@@ -53,7 +52,12 @@ where
 
     fn try_lock_weak(&self) -> Option<MutexGuard<'_, T>> {
         self.locked
-            .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .compare_exchange_weak(
+                false,
+                true,
+                Ordering::Acquire,
+                Ordering::Relaxed,
+            )
             .ok()
             .map(|_| unsafe { self.get_lock() })
     }

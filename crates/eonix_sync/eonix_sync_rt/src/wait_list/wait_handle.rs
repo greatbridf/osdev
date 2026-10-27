@@ -1,12 +1,13 @@
-use super::{wait_object::WaitObject, WaitList};
-use crate::SpinIrq as _;
-use core::{
-    cell::UnsafeCell,
-    hint::spin_loop,
-    pin::Pin,
-    task::{Context, Poll, Waker},
-};
+use core::cell::UnsafeCell;
+use core::hint::spin_loop;
+use core::pin::Pin;
+use core::task::{Context, Poll, Waker};
+
 use intrusive_collections::UnsafeRef;
+
+use super::wait_object::WaitObject;
+use super::WaitList;
+use crate::SpinIrq as _;
 
 pub struct WaitHandle<'a> {
     wait_list: &'a WaitList,
@@ -78,7 +79,9 @@ impl<'a> WaitHandle<'a> {
 
     /// # Returns
     /// Whether we've been woken up or not.
-    fn do_add_to_wait_list(mut self: Pin<&mut Self>, waker: Option<&Waker>) -> bool {
+    fn do_add_to_wait_list(
+        mut self: Pin<&mut Self>, waker: Option<&Waker>,
+    ) -> bool {
         let PrepareSplit {
             wait_list,
             state,
@@ -119,7 +122,8 @@ impl<'a> WaitHandle<'a> {
 
                 if let Some(waker) = waker {
                     // Lock the waker and check if it is already set.
-                    let waker_set = wait_object.save_waker_if_not_woken_up(&waker);
+                    let waker_set =
+                        wait_object.save_waker_if_not_woken_up(&waker);
 
                     if waker_set {
                         *state = State::WakerSet;
@@ -144,7 +148,9 @@ impl<'a> WaitHandle<'a> {
     /// The caller MUST guarantee that the last use of the returned function
     /// is before `self` is dropped. Otherwise the value referred to in this
     /// function will be dangling and will cause undefined behavior.
-    pub unsafe fn get_waker_function(self: Pin<&Self>) -> impl Fn() + Send + Sync + 'static {
+    pub unsafe fn get_waker_function(
+        self: Pin<&Self>,
+    ) -> impl Fn() + Send + Sync + 'static {
         let wait_list: &WaitList = unsafe {
             // SAFETY: The caller guarantees that the last use of returned function
             //         is before `self` is dropped.
@@ -166,7 +172,9 @@ impl<'a> WaitHandle<'a> {
 impl Future for WaitHandle<'_> {
     type Output = ();
 
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+    fn poll(
+        mut self: Pin<&mut Self>, cx: &mut Context<'_>,
+    ) -> Poll<Self::Output> {
         match self.state {
             State::Init | State::OnList => {
                 if self.as_mut().do_add_to_wait_list(Some(cx.waker())) {

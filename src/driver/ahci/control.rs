@@ -1,8 +1,10 @@
-use super::{BitsIterator, GHC_IE};
-use crate::kernel::mem::PhysAccess as _;
 use core::ptr::NonNull;
+
 use eonix_hal::fence::memory_barrier;
 use eonix_mm::address::PAddr;
+
+use super::{BitsIterator, GHC_IE};
+use crate::kernel::mem::PhysAccess as _;
 
 /// An `AdapterControl` is an HBA device Global Host Control block
 ///

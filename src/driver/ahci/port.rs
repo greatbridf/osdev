@@ -5,10 +5,15 @@ use async_trait::async_trait;
 use eonix_mm::address::{Addr as _, PAddr};
 use eonix_sync::SpinIrq as _;
 
-use super::command::{Command, IdentifyCommand, ReadLBACommand, WriteLBACommand};
+use super::command::{
+    Command, IdentifyCommand, ReadLBACommand, WriteLBACommand,
+};
 use super::slot::CommandList;
 use super::stats::AdapterPortStats;
-use super::{Register, PORT_CMD_CR, PORT_CMD_FR, PORT_CMD_FRE, PORT_CMD_ST, PORT_IE_DEFAULT};
+use super::{
+    Register, PORT_CMD_CR, PORT_CMD_FR, PORT_CMD_FRE, PORT_CMD_ST,
+    PORT_IE_DEFAULT,
+};
 use crate::driver::ahci::command_table::CommandTable;
 use crate::kernel::block::{BlockDeviceRequest, BlockRequestQueue};
 use crate::kernel::constants::{EINVAL, EIO};
@@ -236,9 +241,12 @@ impl AdapterPort {
     }
 
     pub fn print_stats(&self, writer: &mut impl Write) -> KResult<()> {
-        writeln!(writer, "cmd_sent: {}", self.stats.get_cmd_sent()).map_err(|_| EIO)?;
-        writeln!(writer, "cmd_error: {}", self.stats.get_cmd_error()).map_err(|_| EIO)?;
-        writeln!(writer, "int_fired: {}", self.stats.get_int_fired()).map_err(|_| EIO)?;
+        writeln!(writer, "cmd_sent: {}", self.stats.get_cmd_sent())
+            .map_err(|_| EIO)?;
+        writeln!(writer, "cmd_error: {}", self.stats.get_cmd_error())
+            .map_err(|_| EIO)?;
+        writeln!(writer, "int_fired: {}", self.stats.get_int_fired())
+            .map_err(|_| EIO)?;
 
         Ok(())
     }
@@ -261,7 +269,8 @@ impl BlockRequestQueue for AdapterPort {
                     return Err(EINVAL);
                 }
 
-                let command = ReadLBACommand::new(buffer, sector, count as u16)?;
+                let command =
+                    ReadLBACommand::new(buffer, sector, count as u16)?;
 
                 self.send_command(&command).await
             }
@@ -274,7 +283,8 @@ impl BlockRequestQueue for AdapterPort {
                     return Err(EINVAL);
                 }
 
-                let command = WriteLBACommand::new(buffer, sector, count as u16)?;
+                let command =
+                    WriteLBACommand::new(buffer, sector, count as u16)?;
 
                 self.send_command(&command).await
             }

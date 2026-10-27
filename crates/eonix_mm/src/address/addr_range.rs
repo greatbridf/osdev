@@ -1,5 +1,8 @@
+use core::cmp::Ordering;
+use core::fmt;
+use core::ops::RangeBounds;
+
 use super::addr::Addr;
-use core::{cmp::Ordering, fmt, ops::RangeBounds};
 
 #[derive(Clone, Copy)]
 /// A range of addresses.
@@ -153,7 +156,9 @@ impl<A: Addr> AddrRange<A> {
         )
     }
 
-    pub fn mask_with_checked(&self, mask: &Self) -> Option<(Option<Self>, Self, Option<Self>)> {
+    pub fn mask_with_checked(
+        &self, mask: &Self,
+    ) -> Option<(Option<Self>, Self, Option<Self>)> {
         if mask.len() == 0 || !self.overlap_with(mask) {
             return None;
         }

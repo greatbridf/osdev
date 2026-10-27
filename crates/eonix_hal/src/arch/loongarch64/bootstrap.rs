@@ -1,35 +1,25 @@
-use super::cpu::CPUID;
-use super::cpu::CPU_COUNT;
-use crate::{
-    arch::{
-        cpu::CPU,
-        mm::{ArchPhysAccess, PageAttribute64, GLOBAL_PAGE_TABLE},
-        trap::CSR_KERNEL_TP,
-    },
-    bootstrap::BootStrapData,
-    mm::{
-        flush_tlb_all, ArchMemory, ArchPagingMode, BasicPageAlloc, BasicPageAllocRef,
-        ScopedAllocator,
-    },
-};
-use core::arch::naked_asm;
-use core::{
-    alloc::Allocator,
-    arch::asm,
-    cell::RefCell,
-    sync::atomic::{AtomicBool, AtomicUsize, Ordering},
-};
+use core::alloc::Allocator;
+use core::arch::{asm, naked_asm};
+use core::cell::RefCell;
+use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
 use eonix_hal_traits::mm::Memory;
-use eonix_mm::{
-    address::{Addr as _, PAddr, PRange, PhysAccess, VAddr, VRange},
-    page_table::{PageAttribute, PagingMode, PTE as _},
-    paging::{Page, PageAccess, PageAlloc, PAGE_SIZE, PFN},
-};
+use eonix_mm::address::{Addr as _, PAddr, PRange, PhysAccess, VAddr, VRange};
+use eonix_mm::page_table::{PageAttribute, PagingMode, PTE as _};
+use eonix_mm::paging::{Page, PageAccess, PageAlloc, PAGE_SIZE, PFN};
 use eonix_percpu::PercpuArea;
-use loongArch64::register::ecfg;
 use loongArch64::register::ecfg::LineBasedInterrupt;
-use loongArch64::register::tcfg;
-use loongArch64::register::{euen, pgdl};
+use loongArch64::register::{ecfg, euen, pgdl, tcfg};
+
+use super::cpu::{CPUID, CPU_COUNT};
+use crate::arch::cpu::CPU;
+use crate::arch::mm::{ArchPhysAccess, PageAttribute64, GLOBAL_PAGE_TABLE};
+use crate::arch::trap::CSR_KERNEL_TP;
+use crate::bootstrap::BootStrapData;
+use crate::mm::{
+    flush_tlb_all, ArchMemory, ArchPagingMode, BasicPageAlloc,
+    BasicPageAllocRef, ScopedAllocator,
+};
 
 #[unsafe(link_section = ".bootstrap.stack")]
 static BOOT_STACK: [u8; 4096 * 16] = [0; 4096 * 16];
@@ -179,8 +169,8 @@ pub unsafe extern "C" fn riscv64_start(hart_id: usize) -> ! {
     }
 
     let start = unsafe {
-        ((&BOOT_STACK_START) as *const &'static [u8; 4096 * 16]).read_volatile() as *const _
-            as usize
+        ((&BOOT_STACK_START) as *const &'static [u8; 4096 * 16]).read_volatile()
+            as *const _ as usize
     };
     let bootstrap_data = BootStrapData {
         early_stack: PRange::new(
@@ -232,7 +222,11 @@ fn setup_kernel_page_table(alloc: impl PageAlloc) {
     flush_tlb_all();
 
     unsafe {
-        core::ptr::write_bytes(KERNEL_BSS_START.addr() as *mut (), 0, BSS_LENGTH as usize);
+        core::ptr::write_bytes(
+            KERNEL_BSS_START.addr() as *mut (),
+            0,
+            BSS_LENGTH as usize,
+        );
     }
 }
 

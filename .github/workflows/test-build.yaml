@@ -32,6 +32,9 @@ jobs:
       - name: Setup rust nightly
         run: rustup component add rust-src llvm-tools
 
+      - name: Install cargo-binutils
+        run: cargo install cargo-binutils
+
       - name: Setup QEMU
         run: |
           sudo apt-get update

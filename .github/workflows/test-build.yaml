@@ -18,9 +18,11 @@ jobs:
         arch: [riscv64, loongarch64]
         include:
           - arch: riscv64
+            qemu_pkg: qemu-system-riscv64
             target: riscv64gc-unknown-none-elf
             platform: virt
           - arch: x86_64
+            qemu_pkg: qemu-system-x86
             target: x86_64-unknown-none
             platform: acpi_compat
     steps:
@@ -30,10 +32,13 @@ jobs:
       - name: Setup rust nightly
         run: rustup component add rust-src llvm-tools
 
+      - name: Install cargo-binutils
+        run: cargo install cargo-binutils
+
       - name: Setup QEMU
         run: |
           sudo apt-get update
-          sudo apt-get install -y qemu-system-${{ matrix.arch }} qemu-kvm expect
+          sudo apt-get install -y ${{ matrix.qemu_pkg || 'qemu-system-misc' }} expect
 
       - name: Configure
         run: ./configure

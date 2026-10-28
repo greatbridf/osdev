@@ -110,6 +110,8 @@ INSERT AFTER .rodata;
 SECTIONS {
     .vdso ALIGN(0x1000) : ALIGN(0x1000)
     {
+        VDSO_START = ABSOLUTE(.);
+
         KEEP(*(.vdso .vdso.*));
 
         . = ALIGN(0x1000);
@@ -119,3 +121,5 @@ SECTIONS {
     __kernel_end = __edata;
 }
 INSERT BEFORE .data.after;
+
+__kernel_end_phys = LOADADDR(.bss) + SIZEOF(.bss);

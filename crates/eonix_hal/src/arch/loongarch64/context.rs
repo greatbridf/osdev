@@ -1,7 +1,5 @@
 use core::arch::naked_asm;
 
-use eonix_hal_traits::context::RawTaskContext;
-
 #[repr(C)]
 #[derive(Debug)]
 pub struct TaskContext {
@@ -12,16 +10,12 @@ pub struct TaskContext {
     crmd: usize,
 }
 
-impl RawTaskContext for TaskContext {
-    fn new() -> Self {
-        Self::new()
-    }
-
-    fn set_program_counter(&mut self, pc: usize) {
+impl TaskContext {
+    pub(super) fn set_program_counter(&mut self, pc: usize) {
         self.ra = pc as u64;
     }
 
-    fn set_stack_pointer(&mut self, sp: usize) {
+    pub(super) fn set_stack_pointer(&mut self, sp: usize) {
         self.sp = sp as u64;
     }
 
@@ -29,7 +23,7 @@ impl RawTaskContext for TaskContext {
         self.crmd & (1 << 2) != 0
     }
 
-    fn set_interrupt_enabled(&mut self, is_enabled: bool) {
+    pub(super) fn set_interrupt_enabled(&mut self, is_enabled: bool) {
         if is_enabled {
             self.crmd = self.crmd | (1 << 2);
         } else {
@@ -45,7 +39,7 @@ impl RawTaskContext for TaskContext {
     }
 
     #[unsafe(naked)]
-    unsafe extern "C" fn switch(from: &mut Self, to: &mut Self) {
+    pub(super) unsafe extern "C" fn switch(from: &mut Self, to: &mut Self) {
         // Input arguments `from` and `to` will be in `a0` (x10) and `a1` (x11).
         naked_asm!(
             // Save current task's callee-saved registers to `from` context

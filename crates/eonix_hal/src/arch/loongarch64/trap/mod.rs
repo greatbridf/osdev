@@ -6,7 +6,6 @@ use core::mem::{offset_of, size_of};
 use core::num::NonZero;
 use core::ptr::NonNull;
 
-use eonix_hal_traits::context::RawTaskContext;
 use eonix_hal_traits::trap::{IrqState as IrqStateTrait, TrapReturn};
 use loongArch64::register::crmd::{self, Crmd};
 use loongArch64::register::ecfg;
@@ -264,9 +263,18 @@ unsafe extern "C" fn captured_trap_return(trap_context: usize) -> ! {
     );
 }
 
-impl TrapReturn for TrapContext {
-    type TaskContext = TaskContext;
+#[unsafe(naked)]
+unsafe extern "C" fn captured_trap_return_noreturn(
+    trap_context: *mut TrapContext,
+) -> ! {
+    naked_asm!(
+        "move $s8, $a0",
+        "b    {raw_trap_return}",
+        raw_trap_return = sym _raw_trap_return,
+    );
+}
 
+impl TrapReturn for TrapContext {
     unsafe fn trap_return(&mut self) {
         let irq_states = disable_irqs_save();
 
@@ -308,6 +316,14 @@ impl TrapReturn for TrapContext {
         }
 
         irq_states.restore();
+    }
+
+    unsafe fn trap_return_noreturn(&mut self) -> ! {
+        disable_irqs();
+
+        unsafe {
+            captured_trap_return_noreturn(&raw mut *self);
+        }
     }
 }
 

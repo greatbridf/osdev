@@ -1,6 +1,8 @@
+use alloc::boxed::Box;
 use alloc::sync::Arc;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
+use async_trait::async_trait;
 use eonix_hal::fence::memory_barrier;
 use eonix_hal::mm::ArchPhysAccess;
 use eonix_log::println_warn;
@@ -14,10 +16,11 @@ use virtio_drivers::transport::pci::PciTransport;
 use virtio_drivers::transport::{DeviceType, Transport};
 
 use super::virtio_blk::HAL;
-use crate::kernel::block::{make_device, BlockDevice};
+use crate::kernel::block::BlockDevice;
 use crate::kernel::constants::EIO;
 use crate::kernel::pcie::{self, PCIDevice, PCIDriver, PciError, SegmentGroup};
 use crate::kernel::task::block_on;
+use crate::kernel::vfs::types::DeviceId;
 
 impl ConfigurationAccess for &SegmentGroup {
     fn read_word(
@@ -84,6 +87,7 @@ struct VirtIODriver {
     disk_id: AtomicUsize,
 }
 
+#[async_trait]
 impl PCIDriver for VirtIODriver {
     fn vendor_id(&self) -> u16 {
         0x1af4
@@ -93,7 +97,7 @@ impl PCIDriver for VirtIODriver {
         0x1001
     }
 
-    fn handle_device(
+    async fn handle_device(
         &self, device: Arc<PCIDevice<'static>>,
     ) -> Result<(), PciError> {
         let transport = PciTransport::new::<HAL, _>(
@@ -137,15 +141,15 @@ impl PCIDriver for VirtIODriver {
             })?;
 
         let block_device = BlockDevice::register_disk(
-            make_device(
+            DeviceId::new(
                 8,
-                16 * self.disk_id.fetch_add(1, Ordering::AcqRel) as u32,
+                16 * self.disk_id.fetch_add(1, Ordering::AcqRel) as u16,
             ),
             2147483647, // TODO: Get size from device
             Arc::new(Spin::new(virtio_block)),
         )?;
 
-        block_on(block_device.partprobe()).map_err(|err| {
+        block_device.partprobe().await.map_err(|err| {
             println_warn!(
                 "Failed to probe partitions for VirtIO Block device: {}",
                 err
@@ -158,8 +162,8 @@ impl PCIDriver for VirtIODriver {
 }
 
 pub fn init() {
-    pcie::register_driver(VirtIODriver {
+    block_on(pcie::register_driver(VirtIODriver {
         disk_id: AtomicUsize::new(0),
-    })
+    }))
     .expect("Failed to register VirtIO driver");
 }

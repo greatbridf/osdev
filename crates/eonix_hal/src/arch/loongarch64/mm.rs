@@ -5,11 +5,12 @@ use core::sync::atomic::{compiler_fence, Ordering};
 
 use eonix_mm::address::{Addr as _, AddrOps, PAddr, PRange, PhysAccess, VAddr};
 use eonix_mm::page_table::{
-    PageAttribute, PageTable, PageTableLevel, PagingMode, RawAttribute,
-    RawPageTable, TableAttribute, PTE,
+    PageAttribute, PageTableLevel, PagingMode, RawAttribute, RawPageTable,
+    TableAttribute, PTE,
 };
-use eonix_mm::paging::{NoAlloc, Page, PageBlock, PAGE_SIZE, PFN};
-use eonix_sync_base::LazyLock;
+use eonix_mm::paging::{
+    BasicFolio, Folio, PageAccess, PageBlock, PAGE_SIZE, PFN,
+};
 use loongArch64::register::pgdl;
 
 use crate::traits::mm::Memory;
@@ -17,13 +18,7 @@ use crate::traits::mm::Memory;
 pub const KIMAGE_OFFSET: usize = 0xffff_ffff_0000_0000;
 pub const ROOT_PAGE_TABLE_PFN: usize = 0x8000_1000 >> 12;
 pub const PAGE_TABLE_BASE: PFN = PFN::from_val(ROOT_PAGE_TABLE_PFN);
-pub static GLOBAL_PAGE_TABLE: LazyLock<
-    PageTable<ArchPagingMode, NoAlloc, ArchPhysAccess>,
-> = LazyLock::new(|| unsafe {
-    Page::with_raw(PAGE_TABLE_BASE, |root_table_page| {
-        PageTable::with_root_table(root_table_page.clone())
-    })
-});
+pub const GLOBAL_PAGE_TABLE: BasicFolio = BasicFolio::new(PAGE_TABLE_BASE, 0);
 
 pub const PA_VP: u64 = ((1 << 0) | (1 << 7));
 pub const PA_D: u64 = 1 << 1;
@@ -55,6 +50,9 @@ pub struct RawPageTable48<'a>(NonNull<PTE64>, PhantomData<&'a ()>);
 pub struct PagingMode48;
 
 pub struct ArchPhysAccess;
+
+#[derive(Clone)]
+pub struct PageAccessImpl;
 
 pub struct ArchMemory;
 
@@ -215,6 +213,12 @@ impl ArchPhysAccess {
     const PHYS_OFFSET: usize = 0xffff_ff00_0000_0000;
 }
 
+impl PageAccess for PageAccessImpl {
+    unsafe fn get_ptr_for_pfn(&self, pfn: PFN) -> NonNull<PageBlock> {
+        unsafe { ArchPhysAccess::as_ptr(PAddr::from(pfn)) }
+    }
+}
+
 impl PhysAccess for ArchPhysAccess {
     unsafe fn as_ptr<T>(paddr: PAddr) -> NonNull<T> {
         let alignment: usize = align_of::<T>();
@@ -255,11 +259,21 @@ impl Memory for ArchMemory {
     fn free_ram() -> impl Iterator<Item = PRange> {
         unsafe extern "C" {
             fn __kernel_start();
-            fn __kernel_end();
+            fn __kernel_end_phys();
         }
 
-        let kernel_start = PAddr::from(__kernel_start as usize);
-        let kernel_end = PAddr::from(__kernel_end as usize);
+        // Depending on the relocation, these symbols may appear either as
+        // physical addresses or as kernel virtual addresses.
+        let to_paddr = |addr: usize| {
+            PAddr::from_val(if addr >= KIMAGE_OFFSET {
+                addr - KIMAGE_OFFSET
+            } else {
+                addr
+            })
+        };
+
+        let kernel_start = to_paddr(__kernel_start as usize);
+        let kernel_end = to_paddr(__kernel_end_phys as usize);
         let paddr_after_kimage_aligned = kernel_end.ceil_to(PAGE_SIZE);
 
         Self::present_ram()

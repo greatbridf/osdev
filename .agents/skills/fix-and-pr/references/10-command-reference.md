@@ -29,6 +29,9 @@ git diff --check
 git status --short
 git diff --cached --name-only
 git log --oneline "github/${BASE}..HEAD"
+git log --format='%h %G? %s%n  %(trailers:key=Assisted-by,valueonly)' \
+  "github/${BASE}..HEAD"   # every commit must print LLM
+git log -1 --format=%B      # inspect the trailer block before pushing
 
 # Verification
 ARCH=x86_64 sh script/test.sh
@@ -39,6 +42,7 @@ make build MODE=release ARCH=loongarch64
 gh pr create \
   --repo greatbridf/osdev --base "$BASE" --head "$HEAD" \
   --title "$TITLE" --body-file "$ART/pr.md"
+gh pr view "$PR" --json body --jq .body | grep -F 'Assisted-by: LLM'
 ```
 
 ---

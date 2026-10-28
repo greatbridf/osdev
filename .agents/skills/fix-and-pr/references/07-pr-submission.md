@@ -146,6 +146,17 @@ Use a concise, evidence-based body:
 <Any remaining uncertainty, follow-up work, or behavior change.>
 
 Fixes #<issue-id>
+
+Assisted-by: LLM
+```
+
+The closing `Assisted-by: LLM` footer is mandatory on every AI-assisted PR: it
+keeps the disclosure on the PR record even when commits are squashed or
+re-applied. Check both the commits and the body before publishing:
+
+```bash
+git log --format='%h %(trailers:key=Assisted-by,valueonly)' "github/${BASE}..HEAD"
+gh pr view "$PR" --json body --jq .body | grep -F 'Assisted-by: LLM'
 ```
 
 Do not paste full logs into the PR. Link or summarize them, and attach only what

@@ -39,6 +39,12 @@ document for the current phase. Load only the documents needed for that phase.
 If the task is not a GBOS/Eonix kernel issue, keep the same phase gates but
 replace repository-specific paths, build commands, and remotes.
 
+Every commit and PR produced under this skill is AI-assisted and must say so:
+add `Assisted-by: LLM` as the last trailer before `Signed-off-by` in each commit
+message, and as a footer in the PR body. See
+[05 — Commit conventions](references/05-commit-conventions.md) and
+[07 — PR submission](references/07-pr-submission.md).
+
 ## When this skill applies
 
 - A GitHub issue, bug report, stack trace, or failing test must be reproduced
@@ -74,9 +80,9 @@ Then:
 | 0. Intake and environment | `GH_TOKEN` present; clean checkout, configured toolchain, successful build, target QEMU boot, issue details captured. | [01 — Environment and issue intake](references/01-environment-and-intake.md) |
 | 1. Reproduction | Headless script independently verified to distinguish bug from fixed behavior. | [02 — Automated reproduction](references/02-reproduction.md) |
 | 2. Analysis | Root cause stated with evidence; fix boundary and invariants recorded. | [03 — Root-cause analysis](references/03-analysis.md) |
-| 3. Fix and commits | Minimal scoped fix; clean, independently buildable commits with repository-style messages. | [04 — Fix planning and implementation](references/04-fix-and-commits.md), [05 — Commit conventions](references/05-commit-conventions.md) |
+| 3. Fix and commits | Minimal scoped fix; clean, independently buildable commits with repository-style messages and an `Assisted-by: LLM` trailer. | [04 — Fix planning and implementation](references/04-fix-and-commits.md), [05 — Commit conventions](references/05-commit-conventions.md) |
 | 4. Verification and review | Baseline `--expect bug` passes, fixed `--expect fixed` passes, builds/tests pass, independent review has no blockers. | [06 — Verification and review](references/06-verification.md) |
-| 5. PR | Correct base/head, pushed branch, PR body with verification evidence, local and PR diffs match, no secrets. | [07 — PR submission](references/07-pr-submission.md) |
+| 5. PR | Correct base/head, pushed branch, PR body with verification evidence and the `Assisted-by: LLM` footer, local and PR diffs match, no secrets. | [07 — PR submission](references/07-pr-submission.md) |
 
 Do not advance because a plausible fix exists. Advance only when the gate
 evidence exists.
@@ -95,7 +101,10 @@ evidence exists.
    dependency updates.
 7. **Separate authoring from review.** Use a fresh-context `reviewer` for the
    independent diff review.
-8. **Stop on ambiguity.** Ask before changing unspecified behavior or choosing
+8. **Tag AI-assisted work.** Every commit gets `Assisted-by: LLM` in its trailer
+   block immediately before `Signed-off-by`; every PR body gets the same line
+   as a footer. Never push a commit that lacks the tag.
+9. **Stop on ambiguity.** Ask before changing unspecified behavior or choosing
    a PR base branch.
 
 ## Reproduction contract

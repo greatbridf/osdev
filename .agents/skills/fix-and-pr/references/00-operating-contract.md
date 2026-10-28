@@ -68,7 +68,11 @@ test -n "${GH_TOKEN:-}"
    otherwise an untracked secret or log can enter the commit.
 7. **Minimal scope.** No unrelated refactors, formatting sweeps, or speculative
    improvements in a bug-fix PR.
-8. **Stop on ambiguity.** Ask before changing behavior that is not clearly
+8. **Disclose AI assistance.** Every commit produced with agent assistance
+   carries an `Assisted-by: LLM` trailer in its trailer block, immediately
+   before `Signed-off-by`. PR bodies carry the same line as a footer. See
+   [05 — Commit conventions](05-commit-conventions.md).
+9. **Stop on ambiguity.** Ask before changing behavior that is not clearly
    required by the issue, or when the target base branch is unclear.
 
 ### 0.4 Phase gates
@@ -78,9 +82,9 @@ test -n "${GH_TOKEN:-}"
 | 0. Intake and environment | `GH_TOKEN` is present; repository builds, target architecture runs, issue details captured. |
 | 1. Reproduction | A headless script exists and has been independently verified to distinguish bug from fixed behavior. |
 | 2. Analysis | Root cause is stated with evidence; the fix boundary is identified. |
-| 3. Fix and commits | Minimal fix is implemented; commits are clean and build independently. |
+| 3. Fix and commits | Minimal fix is implemented; commits are clean, build independently, and carry the `Assisted-by: LLM` trailer. |
 | 4. Verification and review | Reproduction passes in fixed mode, baseline passes in bug mode, builds/tests pass, independent review has no blocking findings. |
-| 5. PR | Branch is pushed, PR is created with the correct base/head and verification evidence, and the local diff matches the PR diff. |
+| 5. PR | Branch is pushed, PR is created with the correct base/head and verification evidence, the body carries `Assisted-by: LLM`, and the local diff matches the PR diff. |
 
 ### 0.5 Persistent artifacts
 

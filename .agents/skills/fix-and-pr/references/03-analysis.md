@@ -1,149 +1,100 @@
-# 03 — Root-cause analysis and debugging
+# 03 — Analysis
 
-Part of the GBOS/Eonix `fix-and-pr` skill. Read [00-operating-contract.md](00-operating-contract.md) for the phase gates and hard rules before using this document.
+Phase 2, run by `scout`.
 
----
-
-## 3. Phase 2: Root-cause analysis and debugging
-
-The goal is a **causal explanation**, not a patch that happens to make the test
-green.
-
-### 3.1 Freeze the evidence
-
-Before editing anything:
+## Freeze the evidence
 
 ```bash
 git rev-parse HEAD > "$ART/baseline-commit.txt"
 git status --short > "$ART/baseline-status.txt"
 cp "$ART/before.log" "$ART/before.keep.log"
+DEBUG_TRAPS=1 make test-run MODE=release ARCH=x86_64   # build/qemu.log
 ```
 
-Preserve:
+Keep the baseline commit, the exact reproduction command, the panic or backtrace
+text, and any symbols or disassembly used.
 
-- The baseline commit and branch.
-- The exact reproduction command and configuration.
-- The complete panic/backtrace text.
-- The QEMU log, if trap logging was enabled.
-- Any kernel symbols or disassembly used.
-
-For trap logging:
+## Where to look
 
 ```bash
-DEBUG_TRAPS=1 make test-run MODE=release ARCH=x86_64
-# QEMU writes detailed logs to build/qemu.log
-```
-
-### 3.2 Static reconnaissance
-
-Map the code path before changing it:
-
-```bash
-rg -n "<function-or-symbol>" src crates macros
-rg -n "<error string or assertion>" src crates
+rg -n "<symbol or error string>" src crates macros
 git log --oneline --all -- <path>
 git blame -L <start>,<end> -- <path>
 ```
 
-Inspect:
+Check callers and callees, lock order, ownership and refcounts, allocation and
+user-pointer error paths, HAL variants under `crates/eonix_hal`, and related
+MM, VFS, scheduler, and syscall code. For this kernel, always consider:
 
-- Callers and callees of the failing function.
-- Lock ordering, reference counting, and lifetime assumptions.
-- Error paths: allocation failure, invalid user pointers, partial initialization.
-- Architecture-specific implementations under `src/` and `crates/eonix_hal`.
-- Related filesystem, scheduler, VFS, MM, or syscall code.
-- Existing tests and documentation under `doc/` and `script/`.
+- SMP: shared state, single-CPU assumptions, locks held across an await.
+- Interrupts and preemption: check-then-act windows.
+- Refcounts: who owns each reference and which path drops it.
+- Page tables and folios: mapping, CoW, and flag updates.
+- User memory: validation, faulting mid-copy.
+- Architecture: does `riscv64` or `loongarch64` need the same change?
+- ABI: syscall return values, errno, struct layout.
 
-For GBOS/Eonix, explicitly consider:
+## Tools
 
-- **SMP:** Is the code correct with concurrent access? Does it assume a single
-  CPU? Is the lock held across an await point or a blocking operation?
-- **Interrupts/preemption:** Can the state change between check and use?
-- **Refcounts:** Who owns each reference, and which path drops it?
-- **Page tables/folios:** Are mappings, CoW, and page flags updated atomically?
-- **User memory:** Is the access validated, and can it fault mid-copy?
-- **Architecture:** Does the fix need a RISC-V or LoongArch counterpart?
-- **ABI:** Does the change alter syscall return values, errno, or struct layout?
+Smallest tool that answers the next question: `build/qemu.log`, GDB (`make srun`
+then `make debug`), `bt full` / `thread apply all bt` / `info registers`,
+`trace_syscall` / `trace_scheduler` / `log_debug` features, and `SMP=1` vs
+`SMP=4` comparison. Temporary prints are removed or feature-gated before commit.
+Leave no QEMU or GDB running between phases.
 
-### 3.3 Dynamic analysis
+## Hypotheses
 
-Use the smallest tool that answers the next question.
+One block per candidate in `analysis.md`: hypothesis, expected, actual, evidence
+for, evidence against, falsification test. Prefer the explanation of the first
+wrong state over the last visible symptom. Keep disproved hypotheses; they stop
+the next agent repeating the work. Two live hypotheses → one `scout` each, no
+duplicate prompts.
 
-- **QEMU trap log:** `DEBUG_TRAPS=1` and inspect `build/qemu.log`.
-- **GDB:** `make srun` then `make debug`, or `make tmux-debug`.
-- **Backtrace:** `bt full`, `thread apply all bt`, `info registers`.
-- **Memory/state:** `x/`, `p`, `p/x`, `info threads`, `monitor info registers`.
-- **Tracing:** enable `trace_syscall`, `trace_scheduler`, `trace_pci`, or
-  `log_debug` only as needed. Remove or feature-gate temporary prints before
-  committing.
-- **SMP comparison:** run `SMP=1` and `SMP=4`; a difference is strong evidence
-  of a race or missing synchronization.
-- **Architecture comparison:** if x86_64 fails, check whether the shared code
-  or the HAL is responsible; test a second architecture when feasible.
+## Root cause
 
-Do not leave GDB or QEMU running between phases. Record the exact commands and
-observations in `analysis.md`.
-
-### 3.4 Form and disprove hypotheses
-
-Write down candidates before testing:
+Complete with evidence before planning:
 
 ```text
-Hypothesis:
-Expected behavior:
-Actual behavior:
-Evidence for:
-Evidence against:
-Falsification test:
+Root cause: <mechanism> causes <failure> because <invariant violated>, shown by <log, backtrace, code path, or experiment>.
 ```
 
-Rules:
+Then record the smallest code boundary, what must not change, the invariants to
+preserve, and the configs that could regress. Unproven root cause → no phase 3.
 
-- Prefer the hypothesis that explains the **first** wrong state, not the last
-  visible symptom.
-- Distinguish the bug from the mechanism that exposes it.
-- If a hypothesis predicts a log line, register value, or code path, verify it
-  directly.
-- If two independent hypotheses remain, run one read-only `scout` per
-  hypothesis; do not run duplicate scouts with the same prompt.
-- Keep failed hypotheses in `analysis.md`; they prevent the next agent from
-  repeating the work.
+## Reviewer challenge
 
-### 3.5 Write the root-cause statement
+Required, by a `reviewer` that did not do the analysis. Report to
+`$ART/reports/02-analysis-reviewer.md`; verdict `supported`, `uncertain`, or
+`contradicted`, plus contradicting evidence, any simpler explanation, a
+falsification test, and unproven lifecycle or locking assumptions.
 
-Before planning the fix, complete this sentence with evidence:
+## `analysis.md`
 
-```text
-Root cause: <specific mechanism> causes <observed failure> because <invariant
-is violated / state is inconsistent / operation is missing>, as shown by
-<log, backtrace, code path, or experiment>.
-```
+```markdown
+# Issue <id>: <title>
 
-Also record:
+## Reported behavior
+Expected: / Actual:
 
-- The smallest code boundary that must change.
-- What must **not** change.
-- Which invariants the fix must preserve.
-- Which tests or configurations could regress.
+## Environment
+commit, ARCH, MODE, SMP, QEMU/accelerator, extra image or user program
 
-If the root cause is not established, do not proceed to Phase 3.
+## Reproduction
+script, command, baseline result, log path
 
-### 3.6 Challenge the diagnosis
+## Observations
+1. ...
 
-A `reviewer` that did not do the analysis challenges the conclusion before it
-becomes a fix. This is a required subagent run, not an optional second opinion;
-the report goes to `$ART/reports/02-analysis-reviewer.md`:
+## Hypotheses
+| Hypothesis | For | Against | Test | Result |
 
-```text
-Challenge this root-cause claim using the supplied issue, logs, and code paths.
-Do not edit files. Identify:
-1. evidence that contradicts the claim;
-2. a simpler competing explanation;
-3. a falsification test the supervisor can run;
-4. any lifecycle/locking/refcount assumption that is not proven.
-Return a concise verdict: supported, uncertain, or contradicted.
+## Root cause
+## Fix boundary
+must change / must not change / invariants / regression risks
+
+## Open questions
 ```
 
 ---
 
-Next: [04 — Fix planning and implementation](04-fix-and-commits.md)
+Next: [04 — Fix](04-fix-and-commits.md)

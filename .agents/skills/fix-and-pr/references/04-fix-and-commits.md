@@ -46,8 +46,10 @@ Explicitly out of scope:
 - ...
 ```
 
-For a complex or cross-subsystem fix, have a fresh `reviewer` critique the plan
-before any edit:
+A fresh `reviewer` critiques the plan before any edit. This is a required
+subagent run: the plan gate is closed by the reviewer's report, not by the
+supervisor agreeing with its own plan. Record the verdict in
+`$ART/reports/03-plan-reviewer.md`.
 
 ```text
 Review this fix plan against the established root cause and repository
@@ -61,8 +63,9 @@ explicit.
 
 ### 4.2 Write the fix with one worker
 
-Use one writer per worktree. The task must state the exact files or subsystem
-the worker may touch.
+The edit is made by a `worker`, never by the supervisor. Use one writer per
+worktree. The task must state the exact files or subsystem the worker may touch
+and the report path it must write.
 
 ```text
 Objective

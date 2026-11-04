@@ -128,10 +128,11 @@ Also record:
 
 If the root cause is not established, do not proceed to Phase 3.
 
-### 3.6 Optional independent analysis
+### 3.6 Challenge the diagnosis
 
-For a high-risk or surprising diagnosis, spawn a fresh `reviewer` with the
-evidence and ask it to challenge the conclusion:
+A `reviewer` that did not do the analysis challenges the conclusion before it
+becomes a fix. This is a required subagent run, not an optional second opinion;
+the report goes to `$ART/reports/02-analysis-reviewer.md`:
 
 ```text
 Challenge this root-cause claim using the supplied issue, logs, and code paths.

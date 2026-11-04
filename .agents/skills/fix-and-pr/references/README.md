@@ -1,7 +1,9 @@
-# Fix-and-PR reference library
+# Fix-and-Commit reference library
 
-Detailed reference for the GBOS/Eonix `fix-and-pr` skill. The workflow is split
-by phase so an agent can load only what it needs.
+Detailed reference for the GBOS/Eonix `fix-and-pr` skill: intake, reproduction,
+analysis, fix, commits, and verification. The workflow ends with verified commits
+on a local branch, which the separate [create-pr](../../create-pr/SKILL.md) skill
+publishes.
 
 Start with [00 — Operating contract](00-operating-contract.md), then read the
 document for the phase you are entering. Read the next phase's document before
@@ -17,16 +19,16 @@ crossing its gate.
 | 3. Fix | [04 — Fix planning and implementation](04-fix-and-commits.md) | Planning the change, writing it, and refining the diff. |
 | 3. Commits | [05 — Commit conventions](05-commit-conventions.md) | Splitting and writing commits. |
 | 4. Verification | [06 — Verification and review](06-verification.md) | Running the matrix, independent review, and final acceptance. |
-| 5. PR | [07 — PR submission](07-pr-submission.md) | Pushing the branch, creating the PR, and validating it. |
+| 5. Handoff | [create-pr](../../create-pr/SKILL.md) | Pushing the branch, writing the PR body, and publishing. |
 
 ## Supporting documents
 
 | Document | Purpose |
 | --- | --- |
-| [08 — Failure handling](08-failure-handling.md) | Stop conditions, escalation, and recovery choices. |
-| [09 — Issue analysis template](09-analysis-template.md) | Recording observations, hypotheses, and root cause. |
-| [10 — Quick command reference](10-command-reference.md) | Copy-paste commands for build, debug, reproduction, and PR. |
-| [11 — Prompt hygiene](11-prompt-hygiene.md) | Required structure for subagent handoffs. |
+| [07 — Failure handling](07-failure-handling.md) | Stop conditions, escalation, and recovery choices. |
+| [08 — Issue analysis template](08-analysis-template.md) | Recording observations, hypotheses, and root cause. |
+| [09 — Quick command reference](09-command-reference.md) | Copy-paste commands for build, debug, reproduction, and commit hygiene. |
+| [10 — Prompt hygiene](10-prompt-hygiene.md) | Required structure for subagent handoffs. |
 
 ## Reading rules
 
@@ -39,4 +41,8 @@ crossing its gate.
 4. Before leaving a phase, read the next phase document and confirm its gate
    evidence exists.
 5. Do not skip the reproduction or verification documents; they define the
-   evidence that makes the fix and PR trustworthy.
+   evidence that makes the fix trustworthy.
+6. Stop at Phase 5. Pushing and opening the PR is the
+   [create-pr](../../create-pr/SKILL.md) skill's job.
+7. Execute each phase in its subagent and check the report it writes. Do not
+   run a phase inline; a self-certified gate is not evidence.

@@ -1,4 +1,4 @@
-# 11 — Prompt hygiene
+# 10 — Prompt hygiene
 
 Part of the GBOS/Eonix `fix-and-pr` skill. Read [00-operating-contract.md](00-operating-contract.md) for the phase gates and hard rules before using this document.
 
@@ -6,7 +6,8 @@ Part of the GBOS/Eonix `fix-and-pr` skill. Read [00-operating-contract.md](00-op
 
 ## Appendix C: Prompt hygiene
 
-Every subagent prompt should contain:
+Every phase runs as a subagent task, so every phase needs a brief. Prompts should
+contain:
 
 1. **Objective** — one concrete deliverable.
 2. **Repository, cwd, and ref** — exact paths and commit/branch.
@@ -14,7 +15,8 @@ Every subagent prompt should contain:
 4. **Relevant evidence** — issue, logs, root cause, plan, or diff paths.
 5. **Acceptance criteria** — commands and expected exit codes.
 6. **Output contract** — changed files, commands run, exit codes, log paths,
-   verdict, and open questions.
+   verdict, and open questions, written to the report path given in the brief
+   (`$ART/reports/<phase>-<role>.md`).
 7. **Stop conditions** — ambiguity, missing credentials, infrastructure
    failure, or a second independent bug.
 

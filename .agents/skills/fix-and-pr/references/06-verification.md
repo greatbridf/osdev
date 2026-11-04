@@ -10,7 +10,10 @@ Verification is a separate phase. The author's successful run is not enough.
 
 ### 5.1 Verification matrix
 
-Run all applicable rows from `plan.md`. At minimum:
+Run all applicable rows from `plan.md`. The matrix is executed by a verifier
+subagent (`worker` or `reviewer` with a test-only mandate) that writes
+`$ART/reports/04-verify-worker.md`; the supervisor checks the report and the
+logs, and does not run the matrix itself. At minimum:
 
 ```bash
 # Rebuild from the fixed tree.
@@ -54,7 +57,10 @@ Acceptance for this phase:
 
 ### 5.2 Independent fix review
 
-Spawn a fresh `reviewer` that did not write the fix:
+Spawn a fresh `reviewer` that did not write the fix. The review is a required
+subagent run: a passing reproduction does not replace it, and the supervisor
+does not clear this gate on its own reading of the diff. Write the verdict to
+`$ART/reports/04-diff-reviewer.md`.
 
 ```text
 Review the diff for issue #<id> against base <sha>. Do not edit files.
@@ -82,8 +88,8 @@ explicitly. Do not approve merely because the reproducer passes.
 ```
 
 If the reviewer finds a blocking issue, return to Phase 3 to correct it, then
-re-run the full Phase 4 verification matrix. Do not open a PR with an unresolved
-review finding.
+re-run the full Phase 4 verification matrix. Do not hand off to publication with
+an unresolved review finding.
 
 ### 5.3 Definition of done
 
@@ -98,8 +104,8 @@ review finding.
 - [ ] Independent review has no blocking findings.
 - [ ] Commits are clean, build independently, and follow conventions.
 - [ ] No secrets, logs, or build artifacts are staged.
-- [ ] PR base and head branches are correct.
+- [ ] The base branch is confirmed with the user and recorded for the handoff.
 
 ---
 
-Next: [07 — PR submission](07-pr-submission.md)
+Next: [create-pr](../../create-pr/SKILL.md) publishes the verified branch.

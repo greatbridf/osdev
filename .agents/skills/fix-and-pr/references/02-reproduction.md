@@ -12,8 +12,9 @@ its result.
 
 ### 2.1 Spawn a subagent to generate the reproduction script
 
-Spawn a `scout` or `worker` with a bounded, script-only mandate. The subagent
-may inspect the repository, but must not edit kernel source.
+The script is written by a subagent, never by the supervisor. Spawn a `scout` or
+`worker` with a bounded, script-only mandate. The subagent may inspect the
+repository, but must not edit kernel source.
 
 #### Generator task template
 
@@ -100,9 +101,11 @@ reference for prompt matching, timeouts, and `poweroff`, but its global
 
 ### 2.2 Spawn a subagent to verify the reproduction script
 
-Do **not** immediately trust the generator. A broken script can "pass" for the
-wrong reason or fail on infrastructure. The verifier must use a fresh context
-and must not modify kernel code.
+The script is written by a subagent and verified by a different one; the
+supervisor neither writes it nor accepts the author's own result. Do **not**
+immediately trust the generator. A broken script can "pass" for the wrong
+reason or fail on infrastructure. The verifier must use a fresh context and must
+not modify kernel code.
 
 #### Verifier task template
 

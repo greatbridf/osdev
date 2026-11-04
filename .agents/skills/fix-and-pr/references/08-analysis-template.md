@@ -1,4 +1,4 @@
-# 09 — Issue analysis template
+# 08 — Issue analysis template
 
 Part of the GBOS/Eonix `fix-and-pr` skill. Read [00-operating-contract.md](00-operating-contract.md) for the phase gates and hard rules before using this document.
 
@@ -52,4 +52,4 @@ Invariants:
 
 ---
 
-Next: [10 — Quick command reference](10-command-reference.md)
+Next: [09 — Quick command reference](09-command-reference.md)

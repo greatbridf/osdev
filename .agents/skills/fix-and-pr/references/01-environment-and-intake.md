@@ -38,7 +38,8 @@ Requirements:
 - The remote used for the PR is known:
   - `github` often points at the upstream mirror or fork.
   - `origin` may point at a private/self-hosted remote.
-  - Do not assume which remote is the PR target; confirm it in Phase 5.
+  - Do not assume which remote is the PR target; the `create-pr` skill confirms
+    it at publication time, and the base branch is confirmed with the user here.
 
 ### 1.2 Build and runtime environment
 

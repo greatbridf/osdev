@@ -30,14 +30,15 @@ Commit body requirements:
   - `Fixes: <commit-hash> ("<subject>")`
   - `Fixes #<issue-id>`
 - Use `Signed-off-by` if the repository expects it (`git commit -s`).
-- Add the `Assisted-by: LLM` trailer to every AI-generated commit. It is
-  mandatory in this repository: all commits produced with agent assistance
-  must disclose it, and it goes in the trailer block immediately before
-  `Signed-off-by`. The trailer is added by the author, not by a script the CI
-  enforces, so verify it in `git log -1 --format=%B` before pushing.
+- Add the `Assisted-by: LLM` trailer **only** to commits written with agent
+  assistance. It is a disclosure of authorship, not a repository-wide
+  requirement: a commit the maintainer wrote alone carries no such trailer, and
+  one must never be added to it retroactively. For agent-written commits the
+  trailer goes in the trailer block immediately before `Signed-off-by`. No CI
+  enforces this, so verify it in `git log -1 --format=%B` before pushing.
 - Keep lines readable (typically 72 columns).
 
-Example:
+Example of an agent-written commit:
 
 ```text
 fix/futex: wake waiters in futex_exit
@@ -54,10 +55,11 @@ Assisted-by: LLM
 Signed-off-by: <name> <email>
 ```
 
-The trailer block order is fixed: `Fixes:`/`Link:` first, then `Assisted-by:`,
-with `Signed-off-by:` last. Do not append `Assisted-by: LLM` after the
-sign-off, and do not use ad-hoc spellings (`AI-assisted`, `Generated-by`,
-`Co-authored-by: AI`); the tag is exactly `Assisted-by: LLM`.
+The trailer block order is fixed when `Assisted-by:` is present: `Fixes:`/`Link:`
+first, then `Assisted-by:`, with `Signed-off-by:` last. Do not append
+`Assisted-by: LLM` after the sign-off, and do not use ad-hoc spellings
+(`AI-assisted`, `Generated-by`, `Co-authored-by: AI`); the tag is exactly
+`Assisted-by: LLM`. A human-authored commit simply has no `Assisted-by:` line.
 
 Before committing:
 
@@ -70,10 +72,11 @@ Commit explicitly, never with `-A`:
 
 ```bash
 git add path/to/file.rs path/to/other.rs
-git commit -s           # then add `Assisted-by: LLM` to the message
+git commit -s           # agent-written commits also need `Assisted-by: LLM`
 ```
 
-Preferred non-interactive form that cannot silently drop the trailer:
+Preferred non-interactive form for agent-written commits, which cannot silently
+drop the trailer:
 
 ```bash
 git commit -F - <<'EOF'
@@ -90,16 +93,18 @@ EOF
 Use `git commit -s -F <file>` only when the message file omits the
 `Signed-off-by:` line, so the sign-off is not added twice.
 
-After committing, verify the trailer is present and the commit is signed:
+After committing, verify the commit is signed and, when you wrote the commit,
+that the trailer is present:
 
 ```bash
 git log --format='%h %G? %s%n  %(trailers:key=Assisted-by,valueonly)' -1
 ```
 
-If it is missing, fix it with `git commit --amend -F <message-file>` (or
-`git rebase`) before pushing; a pushed commit without the tag must be corrected
-with the same care as any other message fix, including a force-push and re-run
-of the verification.
+If an agent-written commit has no `Assisted-by: LLM`, fix it with
+`git commit --amend -F <message-file>` (or `git rebase`) before pushing; a pushed
+agent-written commit without the tag must be corrected with the same care as any
+other message fix, including a force-push and re-run of the verification. Do not
+"fix" a human-authored commit by adding the tag to it.
 
 If the commit must be amended after review, re-run the build and reproduction
 before force-pushing.

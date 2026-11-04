@@ -790,7 +790,7 @@ async fn clone(
 #[eonix_macros::define_syscall(SYS_CLONE)]
 async fn clone(
     clone_flags: usize, new_sp: usize, parent_tidptr: UserMut<u32>,
-    child_tidptr: UserMut<u32>, tls: usize,
+    child_tidptr: UserMut<u32>, tls: PtrT,
 ) -> KResult<u32> {
     let clone_args = CloneArgs::for_clone(
         clone_flags,

@@ -11,7 +11,7 @@ on:
 
 jobs:
   build-and-run-test:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner || 'ubuntu-latest' }}
     strategy:
       fail-fast: false
       matrix:
@@ -20,6 +20,14 @@ jobs:
           - arch: riscv64
             qemu_pkg: qemu-system-riscv64
             target: riscv64gc-unknown-none-elf
+            platform: virt
+          # The kernel is linked at physical 0x8000_0000, which is high memory
+          # only on QEMU >= 9.0 (8.2 still puts high memory at 0x9000_0000), so
+          # this leg cannot use the qemu 8.2 shipped by ubuntu-24.04.
+          - arch: loongarch64
+            runner: ubuntu-26.04
+            qemu_pkg: qemu-system-misc
+            target: loongarch64-unknown-none-softfloat
             platform: virt
           - arch: x86_64
             qemu_pkg: qemu-system-x86
@@ -38,7 +46,10 @@ jobs:
       - name: Setup QEMU
         run: |
           sudo apt-get update
-          sudo apt-get install -y ${{ matrix.qemu_pkg || 'qemu-system-misc' }} expect
+          sudo apt-get install -y ${{ matrix.qemu_pkg }} expect dosfstools psmisc
+
+      - name: Verify QEMU for ${{ matrix.arch }}
+        run: command -v qemu-system-${{ matrix.arch }}
 
       - name: Configure
         run: ./configure
@@ -59,15 +70,16 @@ jobs:
       - name: Test run for ${{ matrix.arch }}
         run: |
           echo "Fixing permissions for /dev/kvm..."
-          sudo adduser $USER kvm
-          sh script/test.sh
+          sudo adduser $USER kvm || true
+          bash script/test.sh
         env:
           ARCH: ${{ matrix.arch }}
           QEMU_ACCEL: ''
-        timeout-minutes: 2
-        continue-on-error: true
+          TEST_TIMEOUT: 180
+        timeout-minutes: 15
 
       - name: Upload run log
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: test-${{ matrix.arch }}.log

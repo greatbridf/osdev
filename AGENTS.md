@@ -21,13 +21,14 @@ Supported targets:
 ## Toolchain and prerequisites
 
 - `rust-toolchain` pins `nightly-2026-01-09`. Do not bump it casually.
-- Required components: `rust-src`, `llvm-tools`. `cargo-binutils` is needed for
-  `cargo objcopy` (used to build the boot images).
+- Required components: `rust-src`, `llvm-tools`. `cargo-binutils` supplies
+  the objcopy tool that `make build` uses for the boot images.
 - QEMU (`qemu-system-<ARCH>`), plus `expect`, `dosfstools`, and `psmisc`
   (`killall`) for `script/test.sh` and image building.
 - `.cargo/config.toml` sets `target-dir = build`, `force-unwind-tables`, and
   `build-std = core, compiler_builtins, alloc`. Builds therefore never land in
-  `target/`, and `cargo` must be able to build the sysroot from `rust-src`.
+  `target/`, and the pinned toolchain must be able to build the sysroot from
+  `rust-src`.
 
 ## Build, run, test
 
@@ -41,6 +42,8 @@ make build          ARCH=x86_64 MODE=release
 make run            ARCH=x86_64 MODE=release   # QEMU, serial on stdio
 make srun           ARCH=x86_64                # -S -s, waits for gdb
 make debug          ARCH=x86_64                # rust-gdb against build/kernel.sym
+make fmt                                       # rewrite sources
+make fmt-check                                 # non-mutating check
 
 bash script/test.sh                            # headless smoke test (needs ARCH)
 ARCH=riscv64 TEST_TIMEOUT=180 bash script/test.sh
@@ -54,8 +57,8 @@ Useful knobs: `MODE=debug|release`, `SMP=<n>` (defaults 4, adds `--features smp`
 Notes that cost time if rediscovered:
 
 - Every `make build` produces a kernel plus a FAT image; it is not a fast inner
-  loop. Prefer `cargo build --profile dev` for type errors, and reserve full
-  image builds/tests for verification.
+  loop. Use `make build` to catch type errors and reserve full image builds and
+  tests for verification.
 - TCG boots are slow; CI allows `TEST_TIMEOUT=180` and a 15-minute step.
 - `script/test.sh` drives the serial console with `expect` and fails on panic,
   early QEMU exit, or a missing expected string. An `expect` timeout is never a
@@ -97,12 +100,12 @@ shared list.
 
 - Formatting is enforced by `.rustfmt.toml`: `max_width = 80`, 4 spaces,
   `group_imports = "StdExternalCrate"`, `imports_granularity = "Module"`,
-  `imports_layout = "Mixed"`, `hex_literal_case = "Preserve"`. Run
-  `cargo fmt --all` before committing; `cargo fmt --all -- --check` is the
-  non-mutating form (`make fmt` / `make fmt-check`). The check is tracked as
-  `.githooks/pre-commit` and installed by `./configure` (or `make hooks`) via
-  `core.hooksPath = .githooks`, and also runs in CI
-  (`.github/workflows/format.yaml`). `git commit --no-verify` skips it locally.
+  `imports_layout = "Mixed"`, `hex_literal_case = "Preserve"`. Run `make fmt`
+  before committing; `make fmt-check` is the non-mutating form. The check is
+  tracked as `.githooks/pre-commit` and installed by `./configure` (or
+  `make hooks`) via `core.hooksPath = .githooks`, and also runs in CI
+  (`.github/workflows/format.yaml`). The hook needs the generated `Makefile`
+  and refuses to commit without it. `git commit --no-verify` skips it locally.
 - Nightly features are used deliberately (`allocator_api`, `coerce_unsized`,
   `arbitrary_self_types`, `unsize`, ...). `#![feature(...)]` lives in
   `src/lib.rs` and the crate roots.
@@ -117,8 +120,8 @@ shared list.
   or dependency bumps into a functional change.
 - Docs under `doc/` are Chinese; source comments and identifiers are English.
   Match the surrounding file's language and comment style.
-- A `cargo build` for one arch does not prove the others compile; `eonix_hal`
-  and driver changes usually need a build per affected target.
+- A `make build ARCH=<arch>` for one arch does not prove the others compile;
+  `eonix_hal` and driver changes usually need a build per affected target.
 
 ## Commits
 

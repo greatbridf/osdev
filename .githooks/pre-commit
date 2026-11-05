@@ -9,8 +9,9 @@
 #
 # Behaviour:
 #   - exits 0 when no .rs file is staged
-#   - runs `cargo fmt --all -- --check` (never rewrites files)
-#   - on failure prints the diff and a hint to run `cargo fmt --all`
+#   - runs `make fmt-check` (never rewrites files)
+#   - on failure prints the diff and a hint to run `make fmt`
+#   - refuses to run when the configured `Makefile` is missing
 #
 # Locally bypass with: git commit --no-verify
 # CI runs the same check in .github/workflows/format.yaml, so a bypassed
@@ -28,18 +29,25 @@ if [ -z "$staged_rs" ]; then
     exit 0
 fi
 
-if ! command -v cargo >/dev/null 2>&1; then
-    echo "pre-commit: cargo not found in PATH, skipping rustfmt check" >&2
+if ! command -v make >/dev/null 2>&1; then
+    echo "pre-commit: make not found in PATH, skipping rustfmt check" >&2
     exit 0
 fi
 
-# rust-toolchain pins a nightly toolchain; cargo fmt picks it up automatically.
-if ! output="$(cargo fmt --all -- --check 2>&1)"; then
-    echo "pre-commit: rustfmt check failed (cargo fmt --all -- --check)" >&2
+# The generated Makefile is the single entry point for formatting. Refuse to
+# commit rather than guess a fallback when it has not been configured yet.
+if [ ! -f Makefile ]; then
+    echo "pre-commit: no configured Makefile, refusing to commit" >&2
+    echo "Run ./configure and try again (bypass: git commit --no-verify)" >&2
+    exit 1
+fi
+
+if ! output="$(make fmt-check 2>&1)"; then
+    echo "pre-commit: rustfmt check failed (make fmt-check)" >&2
     echo "----------------------------------------------------------------" >&2
     printf '%s\n' "$output" >&2
     echo "----------------------------------------------------------------" >&2
-    echo "Fix with:  cargo fmt --all" >&2
+    echo "Fix with:  make fmt" >&2
     echo "Then stage the result and commit again (bypass: git commit --no-verify)" >&2
     exit 1
 fi

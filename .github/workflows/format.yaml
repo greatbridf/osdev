@@ -2,11 +2,7 @@ name: Format
 
 on:
   push:
-    branches-ignore:
-      - comp-and-judge
   pull_request:
-    branches-ignore:
-      - comp-and-judge
   workflow_dispatch:
 
 concurrency:
@@ -45,8 +41,20 @@ jobs:
           rustup show
           rustup component add rustfmt
 
+      - name: Install configure dependencies
+        # `configure` probes for the full tool set before it writes the
+        # Makefile, so the format job needs the same packages the build job
+        # installs. The rustup cache above still covers the slow part.
+        uses: awalsh128/cache-apt-pkgs-action@v1
+        with:
+          packages: qemu-system-x86 dosfstools
+          version: 1.0
+
+      - name: Configure
+        run: ./configure
+
       - name: Check formatting
-        run: cargo fmt --all -- --check
+        run: make fmt-check
 
       - name: Check hooks are tracked and executable
         run: |

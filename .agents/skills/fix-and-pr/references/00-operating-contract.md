@@ -1,125 +1,74 @@
 # 00 — Operating contract
 
-Part of the GBOS/Eonix `fix-and-pr` skill.
+Roles, briefs, artifacts, and stop conditions for every phase.
 
-A standardized, end-to-end workflow for reproducing kernel issues, finding the
-root cause, implementing and verifying a fix, and opening a pull request with
-subagents.
+## Roles
 
-The workflow is deliberately **evidence-gated**. Do not advance to the next
-phase because a plausible fix exists; advance only when the previous phase has
-produced verifiable evidence.
+| Role | Phases | May | Must not |
+| --- | --- | --- | --- |
+| supervisor | — | run preflight, write briefs, read reports, `git status`/`diff`/`log`/commit, decide gates | read kernel code, write scripts, edit sources, build, review own work, push |
+| `scout` | 0, 2 | read, search, run read-only commands | edit anything, commit |
+| `worker` | 1, 3 | edit only the files its brief names | touch other modules, commit unless told |
+| `reviewer` | 1, 2, 3, 4 | read, run tests, report a verdict | edit code, approve work it wrote |
+| verifier | 4 | build, run the matrix, write logs | edit kernel code |
+| publisher | — | see [create-pr](../../create-pr/SKILL.md) | — |
 
----
+The verifier is a `worker` or `reviewer` with a test-only brief. A reviewer may
+edit a defective reproduction script only if its brief says so, and must report
+every change.
 
-## 0. Operating contract
+## Briefs
 
-### 0.1 Roles
+Keep each brief under a page. Six parts:
 
-| Role | Owner | Responsibility |
-| --- | --- | --- |
-| Supervisor | Parent agent | Owns issue interpretation, phase gates, final diff, commits, and PR. Resolves ambiguity and approves publication. |
-| Scout | `scout` subagent (read-only) | Fetches issue context, maps code paths, collects logs, proposes hypotheses. |
-| Worker | `worker` subagent (writer) | Implements one bounded change in one worktree. |
-| Reviewer | `reviewer` subagent (read-only, fresh context) | Independently challenges the reproduction script, diff, or root cause. |
-| Verifier | `worker` or `reviewer` with a test-only mandate | Runs the reproduction and builds; does not edit kernel code. |
-| Publisher | `worker` subagent | Pushes the branch and creates the PR. Does not change code. |
+1. **Objective** — one deliverable.
+2. **Location** — cwd, ref, branch, base commit.
+3. **Authority** — exact files or dirs writable, commands allowed.
+4. **Inputs** — issue, logs, analysis, plan, or diff paths.
+5. **Deliverable** — files to write plus `$ART/reports/<phase>-<role>.md`.
+6. **Stop conditions** — ambiguity, auth failure, infrastructure failure, or a
+   second independent bug.
 
-The supervisor may perform any step directly when that is cheaper than
-delegation. Subagents are used to obtain isolation, independent verification,
-and parallelism, not as ceremony.
+The report carries the verdict, commands, exit codes, log paths, and open
+questions. It is the gate evidence. Never put `GH_TOKEN` in a brief.
 
-### 0.2 Mandatory credential gate
-
-Before any other workflow action, check `GH_TOKEN` without printing it:
-
-```bash
-test -n "${GH_TOKEN:-}"
-```
-
-- If it is set and non-empty, continue.
-- If it is unset or empty, stop and ask the user for the token. Prefer asking
-  them to export it in their shell:
-
-  ```text
-  GH_TOKEN is not set. Please provide a GitHub token by exporting it:
-    export GH_TOKEN='...'
-  Tell me when it is set; I will not continue until then.
-  ```
-
-- Do not inspect the repository, fetch issues, build, spawn subagents, or begin
-  any phase until the user confirms it is available and the check succeeds.
-- Never echo, log, commit, or put `GH_TOKEN` in a prompt. Do not write it to a
-  file.
-
-### 0.3 Non-negotiable rules
-
-1. **One writer per worktree.** Never let two subagents edit the same checkout
-   concurrently.
-2. **No fix without reproduction.** If the issue cannot be reproduced, record
-   why and stop; do not implement a speculative fix.
-3. **No PR without post-fix verification.** The same reproduction that failed
-   before the fix must pass after it.
-4. **Separate evidence from authority.** A subagent report is evidence. The
-   supervisor decides whether it is sufficient.
-5. **Never leak credentials.** `GH_TOKEN` is read from the environment only.
-   Never print it, put it in a URL, a prompt, a commit, a log, or a file.
-6. **Never use `git add -A` or `git add .`.** Explicitly add intended files;
-   otherwise an untracked secret or log can enter the commit.
-7. **Minimal scope.** No unrelated refactors, formatting sweeps, or speculative
-   improvements in a bug-fix PR.
-8. **Disclose AI assistance.** Every commit produced with agent assistance
-   carries an `Assisted-by: LLM` trailer in its trailer block, immediately
-   before `Signed-off-by`. PR bodies carry the same line as a footer. See
-   [05 — Commit conventions](05-commit-conventions.md).
-9. **Stop on ambiguity.** Ask before changing behavior that is not clearly
-   required by the issue, or when the target base branch is unclear.
-
-### 0.4 Phase gates
-
-| Phase | Gate to leave the phase |
-| --- | --- |
-| 0. Intake and environment | `GH_TOKEN` is present; repository builds, target architecture runs, issue details captured. |
-| 1. Reproduction | A headless script exists and has been independently verified to distinguish bug from fixed behavior. |
-| 2. Analysis | Root cause is stated with evidence; the fix boundary is identified. |
-| 3. Fix and commits | Minimal fix is implemented; commits are clean, build independently, and carry the `Assisted-by: LLM` trailer. |
-| 4. Verification and review | Reproduction passes in fixed mode, baseline passes in bug mode, builds/tests pass, independent review has no blocking findings. |
-| 5. PR | Branch is pushed, PR is created with the correct base/head and verification evidence, the body carries `Assisted-by: LLM`, and the local diff matches the PR diff. |
-
-### 0.5 Persistent artifacts
-
-Use issue-specific paths so later subagents can resume without relying on chat
-history:
-
-```bash
-ISSUE=123
-SLUG=short-issue-slug
-ART="build/work/issue-${ISSUE}"
-mkdir -p "$ART"
-```
+## Artifacts
 
 ```text
 build/work/issue-<id>/
-├── issue.json              # issue metadata and comments, if fetched
+├── issue.json              # issue metadata and comments
 ├── analysis.md             # observations, hypotheses, root cause
-├── plan.md                 # fix plan and test matrix
-├── script-review.md        # independent reproduction-script verdict
-├── before.log              # --expect bug run on the unmodified tree
-├── after.log               # --expect fixed run on the fixed tree
-└── pr.md                   # final PR title/body and URL
+├── plan.md                 # change boundary, verification matrix
+├── script-review.md        # reproducer verdict
+├── before.log              # --expect bug on the unmodified tree
+├── after.log               # --expect fixed on the fixed tree
+└── reports/                # one file per subagent run
+    ├── 00-intake-scout.md
+    ├── 01-repro-worker.md     01-repro-reviewer.md
+    ├── 02-analysis-scout.md   02-analysis-reviewer.md
+    ├── 03-plan-reviewer.md
+    └── 04-verify-verifier.md  04-diff-reviewer.md
 ```
 
-Reproduction scripts belong in `script/repro/`, because they may be reused by
-later subagents and optionally committed as regression tests:
+`build/` is git-ignored but `make clean` deletes it. Copy logs elsewhere before
+a clean rebuild.
 
-```text
-script/repro/issue-<id>-<slug>.exp
-```
+## Stop conditions
 
-`build/` is ignored by Git, but `make clean` deletes it. Copy important logs
-out before a clean rebuild, or keep the canonical logs in a temporary directory
-such as `/tmp/gbos-issue-<id>/`.
+| Situation | Action |
+| --- | --- |
+| `GH_TOKEN` missing | Stop. Ask the user to export it. |
+| No subagent can be launched | Stop and report; an inline phase would self-certify its gate. Preflight is the exception: the supervisor decides it. |
+| Cannot reproduce | Record what was tried, ask for arch/MODE/SMP/image. Do not guess a fix. |
+| Flaky reproduction | Repeat, record pass rate, compare `SMP=1` vs `SMP=4`. |
+| Build fails after the fix | Fix the build; do not run the reproducer on a stale binary. |
+| Test passes but root cause is unclear | Return to phase 2. A passing proxy is not a cause. |
+| Reviewer finds a blocker | Return to phase 3, then re-run the whole phase 4 matrix. |
+| Fix needs a broad refactor | Split it or get scope approval. |
+| A second bug appears | Record it, ask, do not bundle it. |
+| Auth, push, or API failure | Stop and report the error. Never print the token or retry with a tokenized URL. |
+| Base branch ambiguous | Ask. Do not default to `master`. |
 
 ---
 
-Next: [01 — Environment and issue intake](01-environment-and-intake.md)
+Next: [01 — Intake](01-environment-and-intake.md)

@@ -1,6 +1,6 @@
 ---
 name: fix-and-pr
-description: Reproduce, fix, verify, and commit GBOS/Eonix kernel issues, running every phase in a subagent. Publishing is the create-pr skill.
+description: Reproduce, fix, verify, and commit GBOS/Eonix kernel issues in delegated phases. Publishing is the create-pr skill.
 ---
 
 # GBOS / Eonix Fix and Commit
@@ -8,9 +8,11 @@ description: Reproduce, fix, verify, and commit GBOS/Eonix kernel issues, runnin
 Takes a kernel issue to a verified fix committed on a local branch. Publishing
 is [create-pr](../create-pr/SKILL.md)'s job.
 
-Every phase runs in a subagent. The supervisor writes briefs, checks the reports
-they produce, and owns the commits. It does not read kernel code, write scripts,
-edit sources, run builds, or review its own work.
+Preflight, the first step of phase 0, and the phase 5 handoff are the
+supervisor's own work, with no subagent; the rest of intake and phases 1-4 are
+delegated. The supervisor writes briefs, checks the reports they produce, and
+owns the commits. It does not read kernel code, write scripts, edit sources,
+run builds, or review its own work.
 
 ## Credential gate
 
@@ -45,19 +47,20 @@ then the document for the current phase.
 
 | Phase | Executed by | Gate to pass |
 | --- | --- | --- |
-| 0 Intake | `scout` | Clean checkout, build works, target boots, issue captured ([01](references/01-environment-and-intake.md)) |
+| 0 Intake | supervisor (preflight), then `scout` | Clean checkout, build works, target boots, issue captured ([01](references/01-environment-and-intake.md)) |
 | 1 Reproduction | `worker`, verified by `reviewer` | Script distinguishes bug from fixed ([02](references/02-reproduction.md)) |
 | 2 Analysis | `scout`, challenged by `reviewer` | Root cause with evidence, fix boundary ([03](references/03-analysis.md)) |
 | 3 Fix | `worker`, plan checked by `reviewer`, supervisor commits | Minimal fix, every commit builds alone ([04](references/04-fix-and-commits.md), [05](references/05-commit-conventions.md)) |
 | 4 Verification | verifier, then fresh `reviewer` | Bug and fixed runs pass, builds pass, no blocking findings ([06](references/06-verification.md)) |
 | 5 Handoff | supervisor | Clean branch, base agreed, evidence recorded |
 
-A gate passes on the report the named subagent writes. No report, no gate.
+A gate on a delegated phase passes on the report the named subagent writes for
+the part it runs. No report, no gate.
 
 ## Rules
 
-1. Delegate every phase; never run one inline. If no subagent can be launched,
-   stop and report.
+1. Delegate the rest of intake and phases 1-4; preflight and the handoff are
+   the supervisor's own. If no subagent can be launched, stop and report.
 2. One writer per worktree.
 3. No reproduction, no fix. No post-fix verification, no handoff.
 4. `git add` explicit paths only.

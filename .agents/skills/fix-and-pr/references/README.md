@@ -12,10 +12,12 @@ phase.
 | 3 Fix | [04](04-fix-and-commits.md) | Planning and implementing the change |
 | 3 Commits | [05](05-commit-conventions.md) | Message, trailers, staging |
 | 4 Verification | [06](06-verification.md) | Matrix, independent diff review, done checklist |
-| 5 Handoff | [create-pr](../../create-pr/SKILL.md) | Publishing the branch |
+| 5 Handoff | [create-pr](../../create-pr/SKILL.md) | Handing the branch to `create-pr` |
 
-Each phase runs in a subagent named by the gate table in the skill. Its report
-under `$ART/reports/` is the gate evidence; a phase run inline has not happened.
+Each delegated phase runs in a subagent named by the gate table in the skill.
+That subagent's report under `$ART/reports/` is the gate evidence for the part
+it runs; a phase run inline has not happened. Preflight is the exception: the
+supervisor runs it directly and keeps no report.
 
 [00](00-operating-contract.md) also holds the roles, brief format, artifact
 layout, and stop conditions.

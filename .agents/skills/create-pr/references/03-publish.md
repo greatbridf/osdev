@@ -73,13 +73,14 @@ gh pr create --repo "$OWNER/$REPO" --base "$BASE" --head "$HEAD" \
 gh pr view "$PR" --json url,number,baseRefName,headRefName,headRefOid,mergeable,isDraft,title
 gh pr diff "$PR" --patch | diff - <(git diff "github/${BASE}...HEAD")
 gh pr view "$PR" --json body --jq .body | grep -F 'Assisted-by: LLM'
-gh pr view "$PR" --json body --jq .body | grep -E '^(Fixes|Refs) #[0-9]+'
+gh pr view "$PR" --json body --jq .body | grep -nE '^(Fixes|Refs) #[0-9]+' || \
+  echo "no issue link"
 gh pr checks "$PR" || true
 ```
 
 Require: title matches, base and head intended, `headRefOid` equals local `HEAD`,
-PR diff equals local diff, footer and issue link present, no artifacts or secrets,
-CI started.
+PR diff equals local diff, footer present, issue link present when a matching
+issue exists, no artifacts or secrets, CI started.
 
 Fixes: wrong base or head → `gh pr edit --base`, or close and recreate after
 asking. Body → `gh pr edit --body-file`. Unintended files, commits, or failing CI

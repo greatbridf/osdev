@@ -1,13 +1,17 @@
 # 01 — Intake
 
-Phase 0, run by `scout`.
+Phase 0. The preflight checks below are the supervisor's; build, branch, and
+issue capture are `scout`'s.
 
 ## Preflight
+
+Run by the supervisor, with no subagent and no report file: a decision it must
+take itself before spending subagents, and one that produces no work product;
+delegating it would only re-check what the supervisor has to decide anyway.
 
 ```bash
 pwd; git status --short --branch; git remote -v
 git branch --show-current; git log --oneline -10
-./configure && make build MODE=release
 ```
 
 Require: intended branch, no unexpected local changes, `GH_TOKEN` present and

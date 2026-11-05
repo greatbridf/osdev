@@ -9,8 +9,9 @@ Turns a branch that is already written and verified into a validated PR:
 preflight, title and body, credential-safe push, `gh pr create`, read-back
 check. It does not fix anything; not ready → [fix-and-pr](../fix-and-pr/SKILL.md).
 
-Each phase runs in a subagent. The supervisor writes briefs, checks reports, and
-decides base and head; it does not draft the body, push, or call the API.
+Preflight (phase 0) is the supervisor's own work with no subagent: it decides
+whether the branch may be published at all. Phases 1-3 are delegated; the
+supervisor still does not draft the body, push, or call the API.
 
 ## Credential gate
 
@@ -40,7 +41,7 @@ ART="build/work/issue-${ISSUE}"; mkdir -p "$ART/reports"
 
 | Phase | Executed by | Gate to pass |
 | --- | --- | --- |
-| 0 Preflight | supervisor | Clean tree, intended commits, base/head confirmed, trailers correct, evidence on record, no secrets ([01](references/01-preflight.md)) |
+| 0 Preflight | supervisor (no subagent) | Clean tree, intended commits, base/head confirmed, trailers correct, evidence on record, no secrets ([01](references/01-preflight.md)) |
 | 1 Body | `worker` drafts, `reviewer` checks | Title and body written from real evidence, every claim matching the diff ([02](references/02-body.md)) |
 | 2 Publish | publisher `worker` | Branch pushed, PR created against the right base/head ([03](references/03-publish.md)) |
 | 3 Validate | publisher `worker` | PR read back: base, head, SHA, body, diff match local ([03](references/03-publish.md)) |
@@ -48,8 +49,8 @@ ART="build/work/issue-${ISSUE}"; mkdir -p "$ART/reports"
 ## Rules
 
 1. Publication only: no source edits, amends, rebases, or force-pushes here.
-2. Delegate; never draft the body, push, or call the API inline. No subagent →
-   stop and report.
+2. Delegate phases 1-3; never draft the body, push, or call the API inline. No
+   subagent → stop and report. Preflight is the supervisor's own, by design.
 3. No verification evidence, no PR. Never invent a verification bullet.
 4. Never leak `GH_TOKEN`.
 5. `Assisted-by: LLM` goes on agent-written commits (before `Signed-off-by`) and
@@ -57,6 +58,9 @@ ART="build/work/issue-${ISSUE}"; mkdir -p "$ART/reports"
 6. Ask when the base is ambiguous; never assume `master`.
 7. No `build/`, logs, keys, or local paths in the diff.
 8. Never merge, auto-merge, or close without being asked.
+9. Link an existing issue that matches, as `Fixes #<id>` or `Refs #<id>`; never
+   invent a number. No match → no link line, and say so in the body worker's
+   report.
 
 ## Artifacts
 

@@ -6,7 +6,7 @@ Roles, briefs, artifacts, and stop conditions for every phase.
 
 | Role | Phases | May | Must not |
 | --- | --- | --- | --- |
-| supervisor | — | write briefs, read reports, `git status`/`diff`/`log`/commit, decide gates | read kernel code, write scripts, edit sources, build, review own work, push |
+| supervisor | — | run preflight, write briefs, read reports, `git status`/`diff`/`log`/commit, decide gates | read kernel code, write scripts, edit sources, build, review own work, push |
 | `scout` | 0, 2 | read, search, run read-only commands | edit anything, commit |
 | `worker` | 1, 3 | edit only the files its brief names | touch other modules, commit unless told |
 | `reviewer` | 1, 2, 3, 4 | read, run tests, report a verdict | edit code, approve work it wrote |
@@ -58,7 +58,7 @@ a clean rebuild.
 | Situation | Action |
 | --- | --- |
 | `GH_TOKEN` missing | Stop. Ask the user to export it. |
-| No subagent can be launched | Stop and report; an inline phase would self-certify its gate. |
+| No subagent can be launched | Stop and report; an inline phase would self-certify its gate. Preflight is the exception: the supervisor decides it. |
 | Cannot reproduce | Record what was tried, ask for arch/MODE/SMP/image. Do not guess a fix. |
 | Flaky reproduction | Repeat, record pass rate, compare `SMP=1` vs `SMP=4`. |
 | Build fails after the fix | Fix the build; do not run the reproducer on a stale binary. |

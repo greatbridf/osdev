@@ -13,12 +13,17 @@ not write or vouch.
   `$ART/reports/01-body-worker.md`.
 - Every `## Verification` bullet must come from a log or report it was given.
   Never invent a command, exit code, or pass rate.
+- Search for an existing issue this change addresses:
+  `gh issue list --repo <owner>/<repo> --search "<terms>" --state all`. Cite it
+  when one genuinely matches. No match means no link line anywhere in the body.
 - Report anything it could not substantiate.
 
 ## Content
 
 Title: `<subsystem>: <imperative>`, ≤72 characters, no `[WIP]`, no issue number,
 no trailing period.
+
+The `Fixes`/`Refs` line appears only when a matching issue exists.
 
 ```markdown
 ## Summary
@@ -47,7 +52,9 @@ Assisted-by: LLM
 - Delete any bullet that did not run; state what is missing rather than dropping
   the section.
 - Summarize logs, never paste them. No local paths or `build/` contents.
-- `Fixes #<id>` closes the issue; `Refs #<id>` otherwise.
+- `Fixes #<id>` when the PR closes the issue, `Refs #<id>` when it only relates
+  to it, nothing at all when no issue matches. The search result goes in the
+  report. Never invent an issue number.
 - The footer records who wrote the description, so keep it even though commits
   may be human-written.
 
@@ -69,7 +76,7 @@ Verdict to `$ART/reports/01-body-reviewer.md`.
 wc -c < "$ART/pr-title.txt"                      # near ≤72
 grep -c '^## ' "$ART/pr-body.md"                 # 4-5 sections
 grep -qF 'Assisted-by: LLM' "$ART/pr-body.md"
-grep -qE '^(Fixes|Refs) #[0-9]+' "$ART/pr-body.md"
+grep -nE '^(Fixes|Refs) #[0-9]+' "$ART/pr-body.md" || echo "no issue link"
 grep -nE '/Users/|/home/[a-z]' "$ART/pr-body.md" || echo "no local paths"
 ```
 

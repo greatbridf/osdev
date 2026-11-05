@@ -1,6 +1,8 @@
 # 01 — Preflight
 
-Run every check before any push. The supervisor does this; it needs no subagent.
+Run every check before any push. The supervisor does this: the one phase with
+no subagent and no report file under `$ART/reports/`. Preflight is the publish
+decision, and the supervisor takes it.
 
 ## Credential
 

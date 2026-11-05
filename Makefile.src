@@ -140,6 +140,10 @@ srun: build build/kernel.sym
 test-run: build
 	$(QEMU) $(QEMU_ARGS) -display none -serial stdio
 
+.PHONY: hooks
+hooks:
+	sh script/install-hooks.sh
+
 .PHONY: clean
 clean:
 	-rm -rf build
@@ -148,6 +152,14 @@ clean:
 .PHONY: clean-all
 clean-all: clean
 	-rm Makefile
+
+.PHONY: fmt
+fmt:
+	cargo fmt --all
+
+.PHONY: fmt-check
+fmt-check:
+	cargo fmt --all -- --check
 
 .PHONY: debug
 debug: build/kernel.sym

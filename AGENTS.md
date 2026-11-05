@@ -99,8 +99,10 @@ shared list.
   `group_imports = "StdExternalCrate"`, `imports_granularity = "Module"`,
   `imports_layout = "Mixed"`, `hex_literal_case = "Preserve"`. Run
   `cargo fmt --all` before committing; `cargo fmt --all -- --check` is the
-  non-mutating form. (`./pre-commit` in this tree is a staged-file rustfmt check
-  that is *not* installed into git hooks.)
+  non-mutating form (`make fmt` / `make fmt-check`). The check is tracked as
+  `.githooks/pre-commit` and installed by `./configure` (or `make hooks`) via
+  `core.hooksPath = .githooks`, and also runs in CI
+  (`.github/workflows/format.yaml`). `git commit --no-verify` skips it locally.
 - Nightly features are used deliberately (`allocator_api`, `coerce_unsized`,
   `arbitrary_self_types`, `unsize`, ...). `#![feature(...)]` lives in
   `src/lib.rs` and the crate roots.

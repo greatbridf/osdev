@@ -1,0 +1,54 @@
+name: Format
+
+on:
+  push:
+    branches-ignore:
+      - comp-and-judge
+  pull_request:
+    branches-ignore:
+      - comp-and-judge
+  workflow_dispatch:
+
+concurrency:
+  group: format-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rustfmt:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # rust-toolchain pins nightly-2026-01-09; restoring the toolchain keeps
+      # the job from re-downloading it on every push. The key follows the pin,
+      # so a toolchain bump invalidates the cache automatically.
+      - name: Cache pinned rust toolchain
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.rustup/toolchains
+            ~/.rustup/downloads
+            ~/.rustup/update-hashes
+          key: rustup-${{ runner.os }}-${{ hashFiles('rust-toolchain', 'rust-toolchain.toml') }}
+          restore-keys: |
+            rustup-${{ runner.os }}-
+
+      - name: Install pinned toolchain
+        # `rustup show` reads rust-toolchain from the checkout and installs the
+        # pinned channel if the cache missed.
+        run: |
+          rustup show
+          rustup component add rustfmt
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Check hooks are tracked and executable
+        run: |
+          test -x .githooks/pre-commit
+          test -x script/install-hooks.sh

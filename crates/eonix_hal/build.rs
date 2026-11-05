@@ -1,13 +1,17 @@
 use std::path::PathBuf;
 use std::{env, fs};
 
-fn read_dependent_script(script: &str) -> Result<String, Box<dyn std::error::Error>> {
+fn read_dependent_script(
+    script: &str,
+) -> Result<String, Box<dyn std::error::Error>> {
     let content = fs::read_to_string(script)?;
     println!("cargo:rerun-if-changed={}", script);
     Ok(content)
 }
 
-fn process_ldscript_riscv64(script: &mut String) -> Result<(), Box<dyn std::error::Error>> {
+fn process_ldscript_riscv64(
+    script: &mut String,
+) -> Result<(), Box<dyn std::error::Error>> {
     println!("cargo:extra-link-args= --no-check-sections");
 
     let memory = read_dependent_script("src/arch/riscv64/memory.x")?;
@@ -19,7 +23,9 @@ fn process_ldscript_riscv64(script: &mut String) -> Result<(), Box<dyn std::erro
     Ok(())
 }
 
-fn process_ldscript_loongarch64(script: &mut String) -> Result<(), Box<dyn std::error::Error>> {
+fn process_ldscript_loongarch64(
+    script: &mut String,
+) -> Result<(), Box<dyn std::error::Error>> {
     println!("cargo:extra-link-args= --no-check-sections");
 
     let memory = read_dependent_script("src/arch/loongarch64/memory.x")?;
@@ -31,7 +37,9 @@ fn process_ldscript_loongarch64(script: &mut String) -> Result<(), Box<dyn std::
     Ok(())
 }
 
-fn process_ldscript_x86(script: &mut String) -> Result<(), Box<dyn std::error::Error>> {
+fn process_ldscript_x86(
+    script: &mut String,
+) -> Result<(), Box<dyn std::error::Error>> {
     // Otherwise `bootstrap.rs` might be ignored and not linked in.
     println!("cargo:extra-link-args=--undefined=move_mbr --no-check-sections");
 
@@ -45,8 +53,7 @@ fn process_ldscript_x86(script: &mut String) -> Result<(), Box<dyn std::error::E
 }
 
 fn process_ldscript_arch(
-    script: &mut String,
-    arch: &str,
+    script: &mut String, arch: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     match arch {
         "x86_64" => {

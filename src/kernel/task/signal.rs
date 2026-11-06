@@ -229,10 +229,9 @@ impl SignalList {
                         );
                     }
 
-                    eonix_preempt::disable();
-
                     // `SIGSTOP` can only be waken up by `SIGCONT` or `SIGKILL`.
-                    // SAFETY: Preempt disabled above.
+                    // Preemption must stay enabled here: `stackful` rejects
+                    // blocking (returning `Pending`) with preemption disabled.
                     Runtime::block_till_woken(|waker| {
                         let mut inner = self.inner.lock();
                         let old_waker = inner.stop_waker.replace(waker.clone());

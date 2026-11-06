@@ -29,8 +29,7 @@ broader than the cause are blocking.
   reformatting, no dependency changes, no surviving debug prints.
 - No commit unless the supervisor asks.
 - Read the code and `analysis.md` first, change minimally, keep error paths and
-  SMP/preemption safety, run `cargo fmt --all -- --check` if the repo expects
-  rustfmt.
+  SMP/preemption safety, run `make fmt-check` if the repo expects rustfmt.
 - Build release and debug; add a second architecture when the change is shared.
 - Reproduce: `--expect fixed` exits 0, and `--expect bug` still exits 0 on the
   baseline commit.

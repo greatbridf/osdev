@@ -7,6 +7,11 @@ fi
 
 printf "Configuring for %s...\n" "$OUT"
 
+# Point git at the tracked hooks (.githooks/pre-commit). core.hooksPath is
+# repository config, so each clone has to opt in once; doing it here means
+# everyone who configures a build gets the same checks as CI.
+sh script/install-hooks.sh || printf "git hooks: install failed, continuing\n"
+
 event() {
     printf "$1... "
 }

@@ -2,11 +2,7 @@ name: Test Build
 
 on:
   push:
-    branches-ignore:
-      - comp-and-judge
   pull_request:
-    branches-ignore:
-      - comp-and-judge
   workflow_dispatch:
 
 jobs:
@@ -37,19 +33,30 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Cache pinned rust toolchain and cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.rustup/toolchains
+            ~/.rustup/downloads
+            ~/.rustup/update-hashes
+            ~/.cargo
+          key: rustup-${{ matrix.arch }}-${{ hashFiles('rust-toolchain', 'rust-toolchain.toml') }}
+          restore-keys: |
+            rustup-${{ matrix.arch }}-full-
+
       - name: Setup rust nightly
-        run: rustup component add rust-src llvm-tools
+        run: |
+          rustup show
+          rustup component add rust-src llvm-tools
 
       - name: Install cargo-binutils
         run: cargo install cargo-binutils
 
       - name: Setup QEMU
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ${{ matrix.qemu_pkg }} expect dosfstools psmisc
-
-      - name: Verify QEMU for ${{ matrix.arch }}
-        run: command -v qemu-system-${{ matrix.arch }}
+        uses: gerlero/apt-install@v1
+        with:
+          packages: ${{ matrix.qemu_pkg }} expect dosfstools psmisc
 
       - name: Configure
         run: ./configure

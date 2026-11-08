@@ -13,7 +13,7 @@ use eonix_mm::paging::{
 };
 use eonix_preempt::PreemptGuard;
 use eonix_sync::{NoContext, Spin};
-pub use raw_page::{PageFlags, RawPage, RawPageList};
+pub use raw_page::{Page, PageFlags, RawPageList};
 pub use zones::{GlobalZone, ZONE};
 
 use super::folio::Folio;
@@ -50,7 +50,7 @@ impl PerCpuPageAlloc {
         }
     }
 
-    fn alloc_order(&mut self, order: u32) -> Option<&'static mut RawPage> {
+    fn alloc_order(&mut self, order: u32) -> Option<&'static mut Page> {
         assert!(order <= COSTLY_ORDER);
         if let Some(pages) = self.free_areas[order as usize].pop_head() {
             return Some(pages);
@@ -69,7 +69,7 @@ impl PerCpuPageAlloc {
         self.free_areas[order as usize].pop_head()
     }
 
-    fn free_pages(&mut self, page: &'static mut RawPage, order: u32) {
+    fn free_pages(&mut self, page: &'static mut Page, order: u32) {
         self.free_areas[order as usize].push_tail(page);
     }
 }
@@ -89,7 +89,7 @@ impl GlobalPageAlloc {
             .create_folios(range.start(), range.end())
     }
 
-    pub fn alloc_raw_order(&self, order: u32) -> Option<&'static mut RawPage> {
+    pub fn alloc_raw_order(&self, order: u32) -> Option<&'static mut Page> {
         if order > COSTLY_ORDER {
             BUDDY_ALLOC.lock().alloc_order(order)
         } else {
@@ -103,7 +103,7 @@ impl GlobalPageAlloc {
         }
     }
 
-    pub unsafe fn dealloc_raw(&self, raw_page: &'static mut RawPage) {
+    pub unsafe fn dealloc_raw(&self, raw_page: &'static mut Page) {
         assert_eq!(
             raw_page.refcount.load(Ordering::Relaxed),
             0,

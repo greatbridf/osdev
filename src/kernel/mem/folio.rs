@@ -9,10 +9,10 @@ use eonix_mm::paging::{
 };
 
 use super::page_alloc::ZONE;
-use super::{GlobalPageAlloc, PhysAccess as _, RawPage};
+use super::{GlobalPageAlloc, Page, PhysAccess as _};
 
 #[repr(transparent)]
-pub struct Folio(NonNull<RawPage>);
+pub struct Folio(NonNull<Page>);
 
 #[derive(Debug)]
 #[repr(transparent)]
@@ -25,7 +25,7 @@ unsafe impl Send for Folio {}
 unsafe impl Sync for Folio {}
 
 impl Folio {
-    pub(super) const fn from_mut_page(raw_page: &'static mut RawPage) -> Self {
+    pub(super) const fn from_mut_page(raw_page: &'static mut Page) -> Self {
         Self(NonNull::new(raw_page).unwrap())
     }
 
@@ -101,7 +101,7 @@ impl Folio {
 }
 
 impl Deref for Folio {
-    type Target = RawPage;
+    type Target = Page;
 
     fn deref(&self) -> &Self::Target {
         unsafe {

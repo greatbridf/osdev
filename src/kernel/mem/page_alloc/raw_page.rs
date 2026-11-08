@@ -34,7 +34,7 @@ union PageData {
     slab: SlabPageData,
 }
 
-pub struct RawPage {
+pub struct Page {
     /// This can be used for LRU page swap in the future.
     ///
     /// Now only used for free page links in the buddy system.
@@ -75,7 +75,7 @@ impl PageFlags {
     }
 }
 
-impl BuddyFolio for RawPage {
+impl BuddyFolio for Page {
     fn pfn(&self) -> PFN {
         ZONE.get_pfn(self)
     }
@@ -101,7 +101,7 @@ impl BuddyFolio for RawPage {
     }
 }
 
-impl SlabPage for RawPage {
+impl SlabPage for Page {
     fn get_data_ptr(&self) -> NonNull<[u8]> {
         let paddr_start = PAddr::from(ZONE.get_pfn(self));
         let page_data_ptr = unsafe { paddr_start.as_ptr() };
@@ -158,7 +158,7 @@ impl SlabPage for RawPage {
     }
 }
 
-impl PerCpuPage for RawPage {
+impl PerCpuPage for Page {
     fn set_local(&mut self, val: bool) {
         if val {
             self.flags.set(PageFlags::LOCAL)
@@ -173,7 +173,7 @@ pub struct RawPageList(List);
 unsafe impl Send for RawPageList {}
 
 impl FolioList for RawPageList {
-    type Folio = RawPage;
+    type Folio = Page;
 
     fn is_empty(&self) -> bool {
         self.0.is_empty()
@@ -182,7 +182,7 @@ impl FolioList for RawPageList {
     fn peek_head(&mut self) -> Option<&mut Self::Folio> {
         unsafe {
             let link = self.0.head()?;
-            let mut raw_page_ptr = container_of!(link, RawPage, link);
+            let mut raw_page_ptr = container_of!(link, Page, link);
 
             Some(raw_page_ptr.as_mut())
         }
@@ -191,7 +191,7 @@ impl FolioList for RawPageList {
     fn pop_head(&mut self) -> Option<&'static mut Self::Folio> {
         unsafe {
             let link = self.0.pop()?;
-            let mut raw_page_ptr = container_of!(link, RawPage, link);
+            let mut raw_page_ptr = container_of!(link, Page, link);
 
             Some(raw_page_ptr.as_mut())
         }
@@ -211,10 +211,10 @@ impl FolioListSized for RawPageList {
 }
 
 unsafe impl SlabPageAlloc for GlobalPageAlloc {
-    type Page = RawPage;
+    type Page = Page;
     type PageList = RawPageList;
 
-    fn alloc_slab_page(&self) -> &'static mut RawPage {
+    fn alloc_slab_page(&self) -> &'static mut Page {
         let raw_page = self.alloc_raw_order(0).expect("Out of memory");
         raw_page.flags.set(PageFlags::SLAB);
         raw_page.shared_data.slab = SlabPageData::new();

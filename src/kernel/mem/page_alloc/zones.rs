@@ -3,11 +3,11 @@ use core::ptr::NonNull;
 use eonix_mm::address::PRange;
 use eonix_mm::paging::{Zone, PFN};
 
-use super::Page;
+use super::{Page, PageReal};
 
 pub static ZONE: GlobalZone = GlobalZone();
 
-const PAGE_ARRAY: NonNull<Page> =
+const PAGE_ARRAY: NonNull<PageReal> =
     unsafe { NonNull::new_unchecked(0xffffff8040000000 as *mut _) };
 
 pub struct GlobalZone();

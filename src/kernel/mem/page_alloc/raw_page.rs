@@ -34,6 +34,10 @@ union PageData {
     slab: SlabPageData,
 }
 
+/// The real struct Page in memory, big enough to accomodate Page +
+/// 32 bytes of extention data.
+pub type PageReal = Page;
+
 pub struct Page {
     /// This can be used for LRU page swap in the future.
     ///

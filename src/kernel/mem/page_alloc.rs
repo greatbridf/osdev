@@ -13,7 +13,7 @@ use eonix_mm::paging::{
 };
 use eonix_preempt::PreemptGuard;
 use eonix_sync::{NoContext, Spin};
-pub use raw_page::{Page, PageFlags, RawPageList};
+pub use raw_page::{Page, PageFlags, PageReal, RawPageList};
 pub use zones::{GlobalZone, ZONE};
 
 use super::folio::Folio;

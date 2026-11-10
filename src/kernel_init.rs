@@ -6,7 +6,7 @@ use eonix_mm::address::{Addr as _, AddrOps as _, VAddr, VRange};
 use eonix_mm::page_table::{PageAttribute, PageTable, PTE};
 use eonix_mm::paging::{Folio as _, FrameAlloc, PAGE_SIZE, PFN};
 
-use crate::kernel::mem::{GlobalPageAlloc, Page};
+use crate::kernel::mem::{GlobalPageAlloc, PageReal};
 
 fn setup_kernel_page_array(alloc: BasicPageAllocRef, count_pages: usize) {
     // TODO: This should be done by the global Zone
@@ -57,7 +57,7 @@ pub fn setup_memory(data: &mut BootStrapData) {
         .expect("No free memory");
 
     let pfn_max = PFN::from(addr_max.ceil());
-    let len_bytes_page_array = usize::from(pfn_max) * size_of::<Page>();
+    let len_bytes_page_array = usize::from(pfn_max) * size_of::<PageReal>();
     let count_pages = len_bytes_page_array.div_ceil(PAGE_SIZE);
 
     let alloc = data.get_alloc().unwrap();

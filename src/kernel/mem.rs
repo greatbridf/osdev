@@ -13,6 +13,6 @@ pub use folio::{Folio, FolioOwned, LockedFolio};
 pub use mm_list::{
     handle_kernel_page_fault, FileMapping, MMList, Mapping, Permission,
 };
-pub use page_alloc::{GlobalPageAlloc, Page};
+pub use page_alloc::{GlobalPageAlloc, Page, PageReal};
 pub use page_cache::{CachePage, PageCache, PageOffset};
 pub use paging::PageBuffer;

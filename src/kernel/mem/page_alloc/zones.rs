@@ -14,7 +14,10 @@ pub struct GlobalZone();
 
 impl GlobalZone {
     pub fn get_pfn(&self, page_ptr: *const Page) -> PFN {
-        PFN::from(unsafe { page_ptr.offset_from(PAGE_ARRAY.as_ptr()) as usize })
+        PFN::from(unsafe {
+            page_ptr.cast::<PageReal>().offset_from(PAGE_ARRAY.as_ptr())
+                as usize
+        })
     }
 }
 
@@ -26,6 +29,9 @@ impl Zone for GlobalZone {
     }
 
     fn get_page(&self, pfn: PFN) -> Option<NonNull<Page>> {
-        Some(unsafe { PAGE_ARRAY.add(usize::from(pfn)) })
+        Some(unsafe {
+            // SAFETY: We ignore the case pfn is invalid for now.
+            PAGE_ARRAY.add(usize::from(pfn)).cast()
+        })
     }
 }

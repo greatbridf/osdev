@@ -16,7 +16,6 @@ pub const PAGE_SIZE_BITS: u32 = PAGE_SIZE.trailing_zeros();
 pub struct PageBlock([u8; PAGE_SIZE]);
 
 /// A trait that provides the kernel access to the page.
-#[doc(notable_trait)]
 pub trait PageAccess: Clone {
     /// Returns a kernel-accessible pointer to the page referenced by the given
     /// physical frame number.

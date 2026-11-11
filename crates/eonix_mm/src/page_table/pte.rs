@@ -28,7 +28,6 @@ bitflags! {
     }
 }
 
-#[doc(notable_trait)]
 pub trait RawAttribute:
     Copy + From<PageAttribute> + From<TableAttribute>
 {
@@ -50,7 +49,6 @@ pub trait RawAttribute:
     fn as_page_attr(self) -> Option<PageAttribute>;
 }
 
-#[doc(notable_trait)]
 pub trait PTE: Sized {
     type Attr: RawAttribute;
 

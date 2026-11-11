@@ -2,7 +2,6 @@ use core::ops::{Add, Sub};
 
 use crate::paging::PAGE_SIZE;
 
-#[doc(notable_trait)]
 pub trait Addr:
     Sized
     + Copy
@@ -19,7 +18,6 @@ pub trait Addr:
     fn addr(self) -> usize;
 }
 
-#[doc(notable_trait)]
 pub trait AddrOps: Sized {
     fn offset_in(self, size: usize) -> usize;
 

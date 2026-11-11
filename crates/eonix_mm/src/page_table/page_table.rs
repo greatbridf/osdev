@@ -28,10 +28,6 @@ pub trait PageTableAlloc: Clone {
     unsafe fn from_raw(&self, pfn: PFN) -> Self::Folio;
 }
 
-pub trait GlobalPageTableAlloc: PageTableAlloc {
-    const GLOBAL: Self;
-}
-
 pub struct PageTable<'a, M, A, X>
 where
     M: PagingMode,
@@ -59,43 +55,6 @@ where
             access,
             phantom: PhantomData,
         }
-    }
-
-    pub fn clone_global<'b, B>(&self) -> PageTable<'b, M, B, X>
-    where
-        B: GlobalPageTableAlloc,
-    {
-        self.clone_in(B::GLOBAL)
-    }
-
-    pub fn clone_in<'b, B>(&self, alloc: B) -> PageTable<'b, M, B, X>
-    where
-        B: PageTableAlloc,
-    {
-        let new_root_table_page = alloc.alloc();
-        let new_table_data = self.access.get_ptr_for_page(&new_root_table_page);
-        let kernel_table_data =
-            self.access.get_ptr_for_page(&self.root_table_page);
-
-        unsafe {
-            // SAFETY: `new_table_data` and `kernel_table_data` are both valid pointers
-            //         to **different** page tables.
-            new_table_data.copy_from_nonoverlapping(kernel_table_data, 1);
-        }
-
-        let mut root_page_table = unsafe {
-            // SAFETY: `page_table_ptr` is a valid pointer to a page table.
-            M::RawTable::from_ptr(new_table_data)
-        };
-
-        let level0 = M::LEVELS[0];
-        for idx in 0..=level0.max_index() / 2 {
-            // We consider the first half of the page table as user space.
-            // Clear all (potential) user space mappings.
-            root_page_table.index_mut(idx).take();
-        }
-
-        PageTable::new(new_root_table_page, alloc, self.access.clone())
     }
 
     pub fn addr(&self) -> PAddr {

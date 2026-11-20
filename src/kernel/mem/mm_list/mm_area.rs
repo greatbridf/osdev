@@ -4,8 +4,7 @@ use core::mem::ManuallyDrop;
 use core::sync::atomic::{AtomicU32, Ordering};
 
 use eonix_mm::address::{VAddr, VRange};
-use eonix_mm::arch::RawPTE;
-use eonix_mm::page_table::{PageAttribute, PTE as _};
+use eonix_mm::page_table::{PTELeaf, PageAttribute};
 use eonix_mm::paging::{Folio as _, PFN};
 use eonix_sync::Mutex;
 use intrusive_collections::rbtree::Entry;
@@ -546,7 +545,7 @@ impl MemArea {
     }
 
     pub async fn handle(
-        &self, pte: &mut RawPTE, offset: usize, write: bool,
+        &self, pte: &PTELeaf, offset: usize, write: bool,
     ) -> KResult<()> {
         // Exclude concurrent modifications and faults.
         // TODO: concurrent faults should be acceptable...
@@ -556,8 +555,7 @@ impl MemArea {
             "Offset out of range"
         );
 
-        let mut attr = pte.get_leaf().expect("Not a page attribute");
-        let mut pfn = pte.get_pfn();
+        let (mut pfn, mut attr) = pte.get().expect("Not a page attribute");
 
         if attr.contains(PageAttribute::COPY_ON_WRITE) {
             self.handle_cow(&mut pfn, &mut attr);
@@ -573,7 +571,7 @@ impl MemArea {
             attr.insert(PageAttribute::DIRTY);
         }
 
-        pte.set_leaf(pfn, attr);
+        pte.set(pfn, attr);
 
         Ok(())
     }

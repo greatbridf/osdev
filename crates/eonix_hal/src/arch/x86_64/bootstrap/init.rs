@@ -8,7 +8,7 @@ use acpi::platform::ProcessorState;
 use acpi::{AcpiHandler, AcpiTables, PhysicalMapping, PlatformInfo};
 use eonix_hal_traits::mm::Memory;
 use eonix_mm::address::{Addr as _, PAddr, PRange, PhysAccess, VRange};
-use eonix_mm::page_table::{PageAttribute, PagingMode, PTE as _};
+use eonix_mm::page_table::{PageAttribute, PagingMode};
 use eonix_mm::paging::{Folio, FrameAlloc, PageAccess, PAGE_SIZE};
 use eonix_percpu::PercpuArea;
 
@@ -300,7 +300,7 @@ pub extern "C" fn kernel_init() -> ! {
                 | PageAttribute::GLOBAL;
 
             let page = alloc.alloc().unwrap();
-            pte.set_leaf(page.into_raw(), attr);
+            pte.set(page.into_raw(), attr);
         }
     });
 

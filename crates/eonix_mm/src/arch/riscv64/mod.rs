@@ -22,6 +22,18 @@ const PA_SHIFT: u64 = 10;
 pub struct RawPTE(u64);
 
 impl PTE for RawPTE {
+    fn into_raw(self) -> usize {
+        self.0 as usize
+    }
+
+    fn from_raw(val: usize) -> Self {
+        Self(val as u64)
+    }
+
+    fn null() -> Self {
+        Self(0)
+    }
+
     fn get_pfn(&self) -> PFN {
         PFN::from(self.0 as usize >> PA_SHIFT)
     }

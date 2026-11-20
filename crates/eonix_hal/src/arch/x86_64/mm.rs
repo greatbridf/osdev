@@ -7,8 +7,8 @@ use eonix_mm::address::{
 };
 use eonix_mm::arch::RawPTE;
 use eonix_mm::page_table::{
-    PageAttribute, PageTable, PageTableAlloc, PageTableLevel, PagingMode,
-    RawPageTable, TableAttribute, PTE,
+    PTEntry, PageAttribute, PageTable, PageTableAlloc, PageTableLevel,
+    PagingMode, RawPageTable, TableAttribute,
 };
 use eonix_mm::paging::{BasicFolio, PageAccess, PageBlock, PAGE_SIZE, PFN};
 use eonix_sync_base::LazyLock;
@@ -82,12 +82,8 @@ impl PagingMode for PagingMode4Levels {
 }
 
 impl<'a> RawPageTable<'a> for RawPageTable4Levels<'a> {
-    fn index(&self, index: u16) -> &'a RawPTE {
-        unsafe { &self.0.cast::<[RawPTE; 512]>().as_ref()[index as usize] }
-    }
-
-    fn index_mut(&mut self, index: u16) -> &'a mut RawPTE {
-        unsafe { &mut self.0.cast::<[RawPTE; 512]>().as_mut()[index as usize] }
+    fn index(&self, index: u16) -> &'a PTEntry {
+        unsafe { &self.0.cast::<[PTEntry; 512]>().as_ref()[index as usize] }
     }
 
     unsafe fn from_ptr(ptr: NonNull<PageBlock>) -> Self {

@@ -8,7 +8,7 @@ use core::sync::atomic::{AtomicBool, AtomicPtr, AtomicUsize, Ordering};
 use eonix_hal_traits::mm::Memory;
 use eonix_mm::address::{Addr as _, PAddr, PRange, PhysAccess, VAddr, VRange};
 use eonix_mm::page_table::{
-    PageAttribute, PageTable, PagingMode, TableAttribute, PTE as _,
+    PageAttribute, PageTable, PagingMode, TableAttribute,
 };
 use eonix_mm::paging::{
     Folio, FrameAlloc, PageAccess, PageBlock, PAGE_SIZE, PFN,
@@ -178,7 +178,7 @@ fn setup_kernel_page_table(alloc: BasicPageAllocRef) {
     for pte in global_page_table.iter_kernel(bss_range) {
         let page = alloc.alloc().unwrap();
 
-        pte.set_leaf(page.into_raw(), attr);
+        pte.set(page.into_raw(), attr);
     }
 
     sfence_vma_all();

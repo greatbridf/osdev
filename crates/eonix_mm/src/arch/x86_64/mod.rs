@@ -24,6 +24,18 @@ const PA_MASK: u64 = 0xfff0_0000_0000_0fff;
 pub struct RawPTE(u64);
 
 impl PTE for RawPTE {
+    fn into_raw(self) -> usize {
+        self.0 as usize
+    }
+
+    fn from_raw(val: usize) -> Self {
+        Self(val as u64)
+    }
+
+    fn null() -> Self {
+        Self(0)
+    }
+
     fn get_pfn(&self) -> PFN {
         PFN::from(PAddr::from((self.0 & !PA_MASK) as usize))
     }

@@ -5,16 +5,13 @@ use super::paging_mode::PageTableLevel;
 use super::pte::TableAttribute;
 use super::PagingMode;
 use crate::address::{PAddr, VRange};
-use crate::arch::RawPTE;
-use crate::page_table::{PageTableIterator, PTE as _};
+use crate::page_table::pte::Leaf;
+use crate::page_table::{PTEntry, PageTableIterator};
 use crate::paging::{Folio, PageAccess, PageBlock, PFN};
 
 pub trait RawPageTable<'a>: Send + 'a {
     /// Return the entry at the given index.
-    fn index(&self, index: u16) -> &'a RawPTE;
-
-    /// Return a mutable reference to the entry at the given index.
-    fn index_mut(&mut self, index: u16) -> &'a mut RawPTE;
+    fn index(&self, index: u16) -> &'a PTEntry;
 
     /// Get the page table pointed to by raw pointer `ptr`.
     unsafe fn from_ptr(ptr: NonNull<PageBlock>) -> Self;
@@ -60,7 +57,7 @@ where
 
     pub fn iter_user(
         &self, range: VRange,
-    ) -> impl Iterator<Item = &mut RawPTE> {
+    ) -> impl Iterator<Item = &PTEntry<Leaf>> {
         let page_table_ptr =
             self.access.get_ptr_for_page(&self.root_table_page);
         let root_page_table = unsafe {
@@ -75,6 +72,7 @@ where
             self.alloc.clone(),
             self.access.clone(),
         )
+        .map(PTEntry::as_leaf)
     }
 
     /// Iterates over the kernel space entries in the page table.
@@ -92,7 +90,7 @@ where
     /// ```
     pub fn iter_kernel(
         &self, range: VRange,
-    ) -> impl Iterator<Item = &mut RawPTE> {
+    ) -> impl Iterator<Item = &PTEntry<Leaf>> {
         let page_table_ptr =
             self.access.get_ptr_for_page(&self.root_table_page);
         let root_page_table = unsafe {
@@ -108,6 +106,7 @@ where
             self.access.clone(),
             M::LEVELS,
         )
+        .map(PTEntry::as_leaf)
     }
 
     fn drop_page_table_recursive(
@@ -120,17 +119,16 @@ where
         }
 
         let page_table_ptr = self.access.get_ptr_for_page(page_table);
-        let mut page_table = unsafe {
+        let page_table = unsafe {
             // SAFETY: `page_table_ptr` is a valid pointer to a page table.
             M::RawTable::from_ptr(page_table_ptr)
         };
 
-        for pte in (0..=level.max_index()).map(|i| page_table.index_mut(i)) {
-            let pfn = pte.get_pfn();
-            let attr = pte.get_table();
+        for pte in (0..=level.max_index()).map(|i| page_table.index(i)) {
+            let ent = pte.as_table().get();
             pte.clear();
 
-            let Some(attr) = attr else { continue };
+            let Some((pfn, attr)) = ent else { continue };
 
             if !attr.contains(TableAttribute::PRESENT | TableAttribute::USER) {
                 continue;

@@ -5,7 +5,7 @@ use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use eonix_hal_traits::mm::Memory;
 use eonix_mm::address::{Addr as _, PAddr, PRange, PhysAccess, VAddr, VRange};
-use eonix_mm::page_table::{PageAttribute, PageTable, PTE as _};
+use eonix_mm::page_table::{PageAttribute, PageTable};
 use eonix_mm::paging::{Folio, FrameAlloc, PAGE_SIZE, PFN};
 use eonix_percpu::PercpuArea;
 use loongArch64::register::ecfg::LineBasedInterrupt;
@@ -213,7 +213,7 @@ fn setup_kernel_page_table(alloc: BasicPageAllocRef) {
     // Map kernel BSS
     for pte in global_page_table.iter_kernel(bss_range) {
         let page = alloc.alloc().unwrap();
-        pte.set_leaf(page.into_raw(), attr);
+        pte.set(page.into_raw(), attr);
     }
 
     flush_tlb_all();

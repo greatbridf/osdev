@@ -1,8 +1,8 @@
 use super::page_table::PageTableAlloc;
 use super::pte::TableAttribute;
-use super::{PageTableLevel, PagingMode, RawPageTable as _, PTE};
+use super::{PageTableLevel, PagingMode, RawPageTable as _};
 use crate::address::{AddrOps as _, VRange};
-use crate::arch::RawPTE;
+use crate::page_table::PTEntry;
 use crate::paging::{Folio, PageAccess};
 
 pub struct PageTableIterator<'a, M, A, X>
@@ -49,13 +49,12 @@ where
             };
             let parent_table =
                 parent_table.as_mut().expect("Parent table is None");
-            let next_pte = parent_table.index_mut(pt_idx);
+            let next_pte = parent_table.index(pt_idx).as_table();
 
             child_table.replace({
-                let attr = next_pte.get_table().expect("Not a page table");
+                let (pfn, attr) = next_pte.get().expect("Not a page table");
 
                 if attr.contains(TableAttribute::PRESENT) {
-                    let pfn = next_pte.get_pfn();
                     unsafe {
                         // SAFETY: We are creating a pointer to a page referenced to in
                         //         some page table, which should be valid.
@@ -72,7 +71,7 @@ where
                         page_table_ptr.write_bytes(0, 1);
                     }
 
-                    next_pte.set_table(page.into_raw(), self.fill_entry_attr);
+                    next_pte.set(page.into_raw(), self.fill_entry_attr);
 
                     unsafe {
                         // SAFETY: `page_table_ptr` is a valid pointer to a page table.
@@ -134,7 +133,7 @@ where
     A: PageTableAlloc,
     X: PageAccess,
 {
-    type Item = &'a mut RawPTE;
+    type Item = &'a PTEntry;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.remaining == 0 {
@@ -147,7 +146,7 @@ where
         let retval = self.tables[table_level]
             .as_mut()
             .unwrap()
-            .index_mut(self.indicies[table_level]);
+            .index(self.indicies[table_level]);
 
         let idx_level_start_updating = self
             .levels

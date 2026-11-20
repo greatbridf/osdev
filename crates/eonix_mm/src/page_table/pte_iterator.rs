@@ -1,13 +1,13 @@
 use super::page_table::PageTableAlloc;
-use super::pte::{RawAttribute, TableAttribute};
+use super::pte::TableAttribute;
 use super::{PageTableLevel, PagingMode, RawPageTable as _, PTE};
 use crate::address::{AddrOps as _, VRange};
+use crate::arch::RawPTE;
 use crate::paging::{Folio, PageAccess};
 
 pub struct PageTableIterator<'a, M, A, X>
 where
     M: PagingMode,
-    M::Entry: 'a,
     A: PageTableAlloc,
     X: PageAccess,
 {
@@ -30,7 +30,6 @@ where
 impl<'a, M, A, X> PageTableIterator<'a, M, A, X>
 where
     M: PagingMode,
-    M::Entry: 'a,
     A: PageTableAlloc,
     X: PageAccess,
 {
@@ -53,10 +52,7 @@ where
             let next_pte = parent_table.index_mut(pt_idx);
 
             child_table.replace({
-                let attr = next_pte
-                    .get_attr()
-                    .as_table_attr()
-                    .expect("Not a page table");
+                let attr = next_pte.get_table().expect("Not a page table");
 
                 if attr.contains(TableAttribute::PRESENT) {
                     let pfn = next_pte.get_pfn();
@@ -76,7 +72,7 @@ where
                         page_table_ptr.write_bytes(0, 1);
                     }
 
-                    next_pte.set(page.into_raw(), self.fill_entry_attr.into());
+                    next_pte.set_table(page.into_raw(), self.fill_entry_attr);
 
                     unsafe {
                         // SAFETY: `page_table_ptr` is a valid pointer to a page table.
@@ -135,11 +131,10 @@ where
 impl<'a, M, A, X> Iterator for PageTableIterator<'a, M, A, X>
 where
     M: PagingMode,
-    M::Entry: 'a,
     A: PageTableAlloc,
     X: PageAccess,
 {
-    type Item = &'a mut M::Entry;
+    type Item = &'a mut RawPTE;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.remaining == 0 {

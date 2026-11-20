@@ -1,9 +1,8 @@
-use super::{RawPageTable, PTE};
+use super::RawPageTable;
 use crate::address::{Addr as _, VAddr};
 
 pub trait PagingMode {
-    type Entry: PTE;
-    type RawTable<'a>: RawPageTable<'a, Entry = Self::Entry>;
+    type RawTable<'a>: RawPageTable<'a>;
 
     const LEVELS: &'static [PageTableLevel];
 }

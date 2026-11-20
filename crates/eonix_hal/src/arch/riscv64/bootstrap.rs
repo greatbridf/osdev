@@ -29,8 +29,7 @@ use super::time::set_next_timer;
 use crate::arch::cpu::CPU;
 use crate::arch::fdt::{init_dtb_and_fdt, FdtExt, FDT};
 use crate::arch::mm::{
-    ArchPagingMode, ArchPhysAccess, PageAccessImpl, PageAttribute64,
-    RawPageTableSv48, GLOBAL_PAGE_TABLE,
+    ArchPagingMode, ArchPhysAccess, PageAccessImpl, GLOBAL_PAGE_TABLE,
 };
 use crate::bootstrap::BootStrapData;
 use crate::mm::{
@@ -179,7 +178,7 @@ fn setup_kernel_page_table(alloc: BasicPageAllocRef) {
     for pte in global_page_table.iter_kernel(bss_range) {
         let page = alloc.alloc().unwrap();
 
-        pte.set(page.into_raw(), attr.into());
+        pte.set_leaf(page.into_raw(), attr);
     }
 
     sfence_vma_all();

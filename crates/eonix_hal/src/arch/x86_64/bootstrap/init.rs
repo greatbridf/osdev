@@ -300,7 +300,7 @@ pub extern "C" fn kernel_init() -> ! {
                 | PageAttribute::GLOBAL;
 
             let page = alloc.alloc().unwrap();
-            pte.set(page.into_raw(), attr.into());
+            pte.set_leaf(page.into_raw(), attr);
         }
     });
 

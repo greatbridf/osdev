@@ -3,7 +3,7 @@ use eonix_hal::bootstrap::BootStrapData;
 use eonix_hal::mm::{ArchMemory, BasicPageAllocRef, GLOBAL_PAGE_TABLE};
 use eonix_hal::traits::mm::Memory;
 use eonix_mm::address::{Addr as _, AddrOps as _, VAddr, VRange};
-use eonix_mm::page_table::{PageAttribute, PageTable, PTE};
+use eonix_mm::page_table::{PageAttribute, PageTable, PTE as _};
 use eonix_mm::paging::{Folio as _, FrameAlloc, PAGE_SIZE, PFN};
 
 use crate::kernel::mem::{GlobalPageAlloc, PageReal};
@@ -30,7 +30,7 @@ fn setup_kernel_page_array(alloc: BasicPageAllocRef, count_pages: usize) {
             | PageAttribute::DIRTY;
 
         let page = alloc.alloc().unwrap();
-        pte.set(page.into_raw(), attr.into());
+        pte.set_leaf(page.into_raw(), attr);
     }
 
     // TODO!!!: Construct the global zone with all present ram.

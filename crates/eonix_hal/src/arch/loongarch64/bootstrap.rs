@@ -213,7 +213,7 @@ fn setup_kernel_page_table(alloc: BasicPageAllocRef) {
     // Map kernel BSS
     for pte in global_page_table.iter_kernel(bss_range) {
         let page = alloc.alloc().unwrap();
-        pte.set(page.into_raw(), attr.into());
+        pte.set_leaf(page.into_raw(), attr);
     }
 
     flush_tlb_all();

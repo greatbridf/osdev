@@ -2,20 +2,19 @@ use core::marker::PhantomData;
 use core::ptr::NonNull;
 
 use super::paging_mode::PageTableLevel;
-use super::pte::{RawAttribute, TableAttribute};
-use super::{PagingMode, PTE};
+use super::pte::TableAttribute;
+use super::PagingMode;
 use crate::address::{PAddr, VRange};
-use crate::page_table::PageTableIterator;
+use crate::arch::RawPTE;
+use crate::page_table::{PageTableIterator, PTE as _};
 use crate::paging::{Folio, PageAccess, PageBlock, PFN};
 
 pub trait RawPageTable<'a>: Send + 'a {
-    type Entry: PTE + 'a;
-
     /// Return the entry at the given index.
-    fn index(&self, index: u16) -> &'a Self::Entry;
+    fn index(&self, index: u16) -> &'a RawPTE;
 
     /// Return a mutable reference to the entry at the given index.
-    fn index_mut(&mut self, index: u16) -> &'a mut Self::Entry;
+    fn index_mut(&mut self, index: u16) -> &'a mut RawPTE;
 
     /// Get the page table pointed to by raw pointer `ptr`.
     unsafe fn from_ptr(ptr: NonNull<PageBlock>) -> Self;
@@ -31,7 +30,6 @@ pub trait PageTableAlloc: Clone {
 pub struct PageTable<'a, M, A, X>
 where
     M: PagingMode,
-    M::Entry: 'a,
     A: PageTableAlloc,
     X: PageAccess,
 {
@@ -44,7 +42,6 @@ where
 impl<'a, M, A, X> PageTable<'a, M, A, X>
 where
     M: PagingMode,
-    M::Entry: 'a,
     A: PageTableAlloc,
     X: PageAccess,
 {
@@ -63,7 +60,7 @@ where
 
     pub fn iter_user(
         &self, range: VRange,
-    ) -> impl Iterator<Item = &mut M::Entry> {
+    ) -> impl Iterator<Item = &mut RawPTE> {
         let page_table_ptr =
             self.access.get_ptr_for_page(&self.root_table_page);
         let root_page_table = unsafe {
@@ -95,7 +92,7 @@ where
     /// ```
     pub fn iter_kernel(
         &self, range: VRange,
-    ) -> impl Iterator<Item = &mut M::Entry> {
+    ) -> impl Iterator<Item = &mut RawPTE> {
         let page_table_ptr =
             self.access.get_ptr_for_page(&self.root_table_page);
         let root_page_table = unsafe {
@@ -129,10 +126,11 @@ where
         };
 
         for pte in (0..=level.max_index()).map(|i| page_table.index_mut(i)) {
-            let (pfn, attr) = pte.take();
-            let Some(attr) = attr.as_table_attr() else {
-                continue;
-            };
+            let pfn = pte.get_pfn();
+            let attr = pte.get_table();
+            pte.clear();
+
+            let Some(attr) = attr else { continue };
 
             if !attr.contains(TableAttribute::PRESENT | TableAttribute::USER) {
                 continue;
@@ -151,7 +149,6 @@ where
 impl<'a, M, A, X> Drop for PageTable<'a, M, A, X>
 where
     M: PagingMode,
-    M::Entry: 'a,
     A: PageTableAlloc,
     X: PageAccess,
 {

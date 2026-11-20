@@ -4,10 +4,8 @@ use core::ptr::NonNull;
 use core::sync::atomic::{compiler_fence, Ordering};
 
 use eonix_mm::address::{Addr as _, AddrOps, PAddr, PRange, PhysAccess, VAddr};
-use eonix_mm::page_table::{
-    PageAttribute, PageTableLevel, PagingMode, RawAttribute, RawPageTable,
-    TableAttribute, PTE,
-};
+use eonix_mm::arch::RawPTE;
+use eonix_mm::page_table::{PageTableLevel, PagingMode, RawPageTable};
 use eonix_mm::paging::{
     BasicFolio, Folio, PageAccess, PageBlock, PAGE_SIZE, PFN,
 };
@@ -20,32 +18,7 @@ pub const ROOT_PAGE_TABLE_PFN: usize = 0x8000_1000 >> 12;
 pub const PAGE_TABLE_BASE: PFN = PFN::from_val(ROOT_PAGE_TABLE_PFN);
 pub const GLOBAL_PAGE_TABLE: BasicFolio = BasicFolio::new(PAGE_TABLE_BASE, 0);
 
-pub const PA_VP: u64 = ((1 << 0) | (1 << 7));
-pub const PA_D: u64 = 1 << 1;
-pub const PA_U: u64 = 3 << 2;
-pub const PA_CACHED: u64 = 1 << 4;
-pub const PA_G: u64 = 1 << 6;
-pub const PA_W: u64 = 1 << 8;
-pub const PA_NR: u64 = 1 << 61;
-pub const PA_NX: u64 = 1 << 62;
-
-// in RSW
-pub const PA_COW: u64 = 1 << 9;
-pub const PA_MMAP: u64 = 1 << 10;
-
-pub const PA_PT_USER: u64 = 1 << 59;
-pub const PA_PT: u64 = 1 << 60;
-
-pub const PA_FLAGS_MASK: u64 = 0xF800_0000_0000_0FFF;
-
-#[repr(transparent)]
-#[derive(Clone, Copy)]
-pub struct PTE64(u64);
-
-#[derive(Clone, Copy)]
-pub struct PageAttribute64(u64);
-
-pub struct RawPageTable48<'a>(NonNull<PTE64>, PhantomData<&'a ()>);
+pub struct RawPageTable48<'a>(NonNull<RawPTE>, PhantomData<&'a ()>);
 
 pub struct PagingMode48;
 
@@ -56,23 +29,7 @@ pub struct PageAccessImpl;
 
 pub struct ArchMemory;
 
-impl PTE for PTE64 {
-    type Attr = PageAttribute64;
-
-    fn set(&mut self, pfn: PFN, attr: Self::Attr) {
-        let pfn = ((usize::from(pfn) as u64) << 12) & !PA_FLAGS_MASK;
-        self.0 = pfn | attr.0;
-    }
-
-    fn get(&self) -> (PFN, Self::Attr) {
-        let pfn = PFN::from((self.0 & !PA_FLAGS_MASK) as usize >> 12);
-        let attr = PageAttribute64(self.0 & PA_FLAGS_MASK);
-        (pfn, attr)
-    }
-}
-
 impl PagingMode for PagingMode48 {
-    type Entry = PTE64;
     type RawTable<'a> = RawPageTable48<'a>;
     const LEVELS: &'static [PageTableLevel] = &[
         PageTableLevel::new(39, 9),
@@ -87,125 +44,16 @@ pub type ArchPagingMode = PagingMode48;
 unsafe impl Send for RawPageTable48<'_> {}
 
 impl<'a> RawPageTable<'a> for RawPageTable48<'a> {
-    type Entry = PTE64;
-
-    fn index(&self, index: u16) -> &'a Self::Entry {
+    fn index(&self, index: u16) -> &'a RawPTE {
         unsafe { self.0.add(index as usize).as_ref() }
     }
 
-    fn index_mut(&mut self, index: u16) -> &'a mut Self::Entry {
+    fn index_mut(&mut self, index: u16) -> &'a mut RawPTE {
         unsafe { self.0.add(index as usize).as_mut() }
     }
 
     unsafe fn from_ptr(ptr: NonNull<PageBlock>) -> Self {
         Self(ptr.cast(), PhantomData)
-    }
-}
-
-impl RawAttribute for PageAttribute64 {
-    fn null() -> Self {
-        Self(0)
-    }
-
-    fn as_table_attr(self) -> Option<TableAttribute> {
-        let mut table_attr = TableAttribute::empty();
-
-        if self.0 & PA_PT == PA_PT {
-            table_attr |= TableAttribute::PRESENT;
-        }
-
-        if self.0 & PA_PT_USER == PA_PT_USER {
-            table_attr |= TableAttribute::USER;
-        }
-
-        Some(table_attr)
-    }
-
-    fn as_page_attr(self) -> Option<PageAttribute> {
-        let mut page_attr = PageAttribute::empty();
-
-        if self.0 & PA_PT == PA_PT {
-            return None;
-        }
-
-        if self.0 & PA_VP == PA_VP {
-            page_attr |= PageAttribute::PRESENT;
-        }
-
-        if self.0 & PA_NR == 0 {
-            page_attr |= PageAttribute::READ;
-        }
-
-        if self.0 & PA_W != 0 {
-            page_attr |= PageAttribute::WRITE;
-        }
-
-        if self.0 & PA_NX == 0 {
-            page_attr |= PageAttribute::EXECUTE;
-        }
-
-        if self.0 & PA_U == PA_U {
-            page_attr |= PageAttribute::USER;
-        }
-
-        if self.0 & PA_D != 0 {
-            page_attr |= PageAttribute::DIRTY;
-        }
-
-        if self.0 & PA_G != 0 {
-            page_attr |= PageAttribute::GLOBAL;
-        }
-
-        if self.0 & PA_COW != 0 {
-            page_attr |= PageAttribute::COPY_ON_WRITE;
-        }
-
-        if self.0 & PA_MMAP != 0 {
-            page_attr |= PageAttribute::MAPPED;
-        }
-
-        Some(page_attr)
-    }
-}
-
-impl From<PageAttribute> for PageAttribute64 {
-    fn from(page_attr: PageAttribute) -> Self {
-        let mut raw_attr = PA_NR | PA_NX | PA_CACHED;
-
-        for attr in page_attr.iter() {
-            match attr {
-                PageAttribute::PRESENT => raw_attr |= PA_VP,
-                PageAttribute::READ => raw_attr &= !PA_NR,
-                PageAttribute::WRITE => raw_attr |= PA_W,
-                PageAttribute::EXECUTE => raw_attr &= !PA_NX,
-                PageAttribute::USER => raw_attr |= PA_U,
-                PageAttribute::DIRTY => raw_attr |= PA_D,
-                PageAttribute::GLOBAL => raw_attr |= PA_G,
-                PageAttribute::COPY_ON_WRITE => raw_attr |= PA_COW,
-                PageAttribute::MAPPED => raw_attr |= PA_MMAP,
-                PageAttribute::ACCESSED | PageAttribute::ANONYMOUS => {}
-                _ => unreachable!("Invalid page attribute"),
-            }
-        }
-
-        Self(raw_attr)
-    }
-}
-
-impl From<TableAttribute> for PageAttribute64 {
-    fn from(table_attr: TableAttribute) -> Self {
-        let mut raw_attr = 0;
-
-        for attr in table_attr.iter() {
-            match attr {
-                TableAttribute::PRESENT => raw_attr |= PA_PT,
-                TableAttribute::USER => raw_attr |= PA_PT_USER,
-                TableAttribute::GLOBAL | TableAttribute::ACCESSED => {}
-                _ => unreachable!("Invalid table attribute"),
-            }
-        }
-
-        Self(raw_attr)
     }
 }
 

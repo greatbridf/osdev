@@ -28,52 +28,15 @@ bitflags! {
     }
 }
 
-pub trait RawAttribute:
-    Copy + From<PageAttribute> + From<TableAttribute>
-{
-    /// Create a new attribute representing a non-present page.
-    fn null() -> Self;
-
-    /// Interpret the attribute as a page table attribute. Return `None` if it is
-    /// not an attribute for a page table.
-    ///
-    /// # Panic
-    /// The implementor should panic if invalid combinations of flags are present.
-    fn as_table_attr(self) -> Option<TableAttribute>;
-
-    /// Interpret the attribute as a page attribute. Return `None` if it is not
-    /// an attribute for a page.
-    ///
-    /// # Panic
-    /// The implementor should panic if invalid combinations of flags are present.
-    fn as_page_attr(self) -> Option<PageAttribute>;
-}
-
 pub trait PTE: Sized {
-    type Attr: RawAttribute;
+    fn get_pfn(&self) -> PFN;
+    fn get_leaf(&self) -> Option<PageAttribute>;
+    fn get_table(&self) -> Option<TableAttribute>;
 
-    fn set(&mut self, pfn: PFN, attr: Self::Attr);
-    fn get(&self) -> (PFN, Self::Attr);
+    fn set_leaf(&mut self, pfn: PFN, attr: PageAttribute);
+    fn set_table(&mut self, pfn: PFN, attr: TableAttribute);
 
-    fn take(&mut self) -> (PFN, Self::Attr) {
-        let pfn_attr = self.get();
-        self.set(PFN::from_val(0), Self::Attr::null());
-        pfn_attr
-    }
-
-    fn set_pfn(&mut self, pfn: PFN) {
-        self.set(pfn, self.get_attr());
-    }
-
-    fn set_attr(&mut self, attr: Self::Attr) {
-        self.set(self.get_pfn(), attr);
-    }
-
-    fn get_pfn(&self) -> PFN {
-        self.get().0
-    }
-
-    fn get_attr(&self) -> Self::Attr {
-        self.get().1
+    fn clear(&mut self) {
+        self.set_leaf(PFN::from_val(0), PageAttribute::empty());
     }
 }

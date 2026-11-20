@@ -80,21 +80,7 @@ where
         page_table: &'a RawPageTable, range: VRange,
         fill_entry_attr: TableAttribute, alloc: A, access: X,
     ) -> Self {
-        Self::with_levels(
-            page_table,
-            range,
-            fill_entry_attr,
-            alloc,
-            access,
-            M::LEVELS,
-        )
-    }
-
-    pub fn with_levels(
-        page_table: &'a RawPageTable, range: VRange,
-        fill_entry_attr: TableAttribute, alloc: A, access: X,
-        levels: &'static [PageTableLevel],
-    ) -> Self {
+        let levels = M::LEVELS;
         let start = range.start().floor();
         let end = range.end().ceil();
 

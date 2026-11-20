@@ -102,13 +102,12 @@ where
             RawPageTable::from_ptr(page_table_ptr)
         };
 
-        PageTableIterator::<M, _, _>::with_levels(
+        PageTableIterator::<M, _, _>::new(
             root_page_table,
             range,
             TableAttribute::GLOBAL,
             self.alloc.clone(),
             self.access.clone(),
-            M::LEVELS,
         )
         .map(PTEntry::as_leaf)
     }

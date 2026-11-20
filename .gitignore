@@ -21,3 +21,5 @@ cross-compile.cmake
 .Trashes
 
 .gdbinit
+
+COMMIT_MESSAGE

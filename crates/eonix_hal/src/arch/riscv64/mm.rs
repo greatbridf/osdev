@@ -34,7 +34,6 @@ pub struct ArchMemory;
 pub struct PageAccessImpl;
 
 impl PagingMode for PagingModeSv48 {
-    type RawTable<'a> = RawPageTableSv48<'a>;
     const LEVELS: &'static [PageTableLevel] = &[
         PageTableLevel::new(39, 9),
         PageTableLevel::new(30, 9),
@@ -46,16 +45,6 @@ impl PagingMode for PagingModeSv48 {
 pub type ArchPagingMode = PagingModeSv48;
 
 unsafe impl Send for RawPageTableSv48<'_> {}
-
-impl<'a> RawPageTable<'a> for RawPageTableSv48<'a> {
-    fn index(&self, index: u16) -> &'a PTEntry {
-        unsafe { self.0.cast::<PTEntry>().add(index as usize).as_ref() }
-    }
-
-    unsafe fn from_ptr(ptr: NonNull<PageBlock>) -> Self {
-        Self(ptr.cast(), PhantomData)
-    }
-}
 
 impl ArchPhysAccess {
     const PHYS_OFFSET: usize = PHYS_MAP_VIRT;

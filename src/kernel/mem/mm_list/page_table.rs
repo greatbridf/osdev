@@ -9,7 +9,7 @@ use crate::kernel::mem::{FolioOwned, GlobalPageAlloc, PhysAccess};
 
 #[repr(transparent)]
 pub struct KernelPageTable(
-    PageTable<'static, ArchPagingMode, GlobalPageAlloc, PageAccessImpl>,
+    PageTable<ArchPagingMode, GlobalPageAlloc, PageAccessImpl>,
 );
 
 impl KernelPageTable {
@@ -34,8 +34,7 @@ impl KernelPageTable {
 }
 
 impl Deref for KernelPageTable {
-    type Target =
-        PageTable<'static, ArchPagingMode, GlobalPageAlloc, PageAccessImpl>;
+    type Target = PageTable<ArchPagingMode, GlobalPageAlloc, PageAccessImpl>;
 
     fn deref(&self) -> &Self::Target {
         &self.0

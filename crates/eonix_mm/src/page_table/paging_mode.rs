@@ -1,9 +1,6 @@
-use super::RawPageTable;
 use crate::address::{Addr as _, VAddr};
 
 pub trait PagingMode {
-    type RawTable<'a>: RawPageTable<'a>;
-
     const LEVELS: &'static [PageTableLevel];
 }
 

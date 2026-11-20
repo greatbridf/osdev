@@ -71,24 +71,12 @@ pub struct BootLoaderData {
 }
 
 impl PagingMode for PagingMode4Levels {
-    type RawTable<'a> = RawPageTable4Levels<'a>;
-
     const LEVELS: &'static [PageTableLevel] = &[
         PageTableLevel::new(39, 9),
         PageTableLevel::new(30, 9),
         PageTableLevel::new(21, 9),
         PageTableLevel::new(12, 9),
     ];
-}
-
-impl<'a> RawPageTable<'a> for RawPageTable4Levels<'a> {
-    fn index(&self, index: u16) -> &'a PTEntry {
-        unsafe { &self.0.cast::<[PTEntry; 512]>().as_ref()[index as usize] }
-    }
-
-    unsafe fn from_ptr(ptr: NonNull<PageBlock>) -> Self {
-        Self(ptr.cast(), PhantomData)
-    }
 }
 
 unsafe impl Send for RawPageTable4Levels<'_> {}

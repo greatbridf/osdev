@@ -1,8 +1,10 @@
+use core::marker::PhantomData;
+
 use super::page_table::PageTableAlloc;
 use super::pte::TableAttribute;
-use super::{PageTableLevel, PagingMode, RawPageTable as _};
+use super::{PageTableLevel, PagingMode};
 use crate::address::{AddrOps as _, VRange};
-use crate::page_table::PTEntry;
+use crate::page_table::{PTEntry, RawPageTable};
 use crate::paging::{Folio, PageAccess};
 
 pub struct PageTableIterator<'a, M, A, X>
@@ -19,12 +21,13 @@ where
     remaining: usize,
 
     indicies: [u16; 8],
-    tables: [Option<M::RawTable<'a>>; 8],
+    tables: [&'a RawPageTable; 8],
 
     fill_entry_attr: TableAttribute,
 
     alloc: A,
     access: X,
+    _phantom: PhantomData<M>,
 }
 
 impl<'a, M, A, X> PageTableIterator<'a, M, A, X>
@@ -41,49 +44,40 @@ where
             .take(self.levels.len() - 1)
             .skip(idx_level)
         {
-            let [parent_table, child_table] = unsafe {
-                // SAFETY: `idx` and `idx + 1` must not overlap.
-                //         `idx + 1` is always less than `levels_len` since we iterate
-                //         until `levels_len - 1`.
-                self.tables.get_disjoint_unchecked_mut([idx, idx + 1])
-            };
-            let parent_table =
-                parent_table.as_mut().expect("Parent table is None");
-            let next_pte = parent_table.index(pt_idx).as_table();
+            let parent_table = self.tables[idx];
+            let next_pte = parent_table[pt_idx].as_table();
 
-            child_table.replace({
-                let (pfn, attr) = next_pte.get().expect("Not a page table");
+            let (pfn, attr) = next_pte.get().expect("Not a page table");
 
-                if attr.contains(TableAttribute::PRESENT) {
-                    unsafe {
-                        // SAFETY: We are creating a pointer to a page referenced to in
-                        //         some page table, which should be valid.
-                        let page_table_ptr = self.access.get_ptr_for_pfn(pfn);
-                        // SAFETY: `page_table_ptr` is a valid pointer to a page table.
-                        M::RawTable::from_ptr(page_table_ptr)
-                    }
-                } else {
-                    let page = self.alloc.alloc();
-                    let page_table_ptr = self.access.get_ptr_for_page(&page);
-
-                    unsafe {
-                        // SAFETY: `page_table_ptr` is good for writing and properly aligned.
-                        page_table_ptr.write_bytes(0, 1);
-                    }
-
-                    next_pte.set(page.into_raw(), self.fill_entry_attr);
-
-                    unsafe {
-                        // SAFETY: `page_table_ptr` is a valid pointer to a page table.
-                        M::RawTable::from_ptr(page_table_ptr)
-                    }
+            self.tables[idx + 1] = if attr.contains(TableAttribute::PRESENT) {
+                unsafe {
+                    // SAFETY: We are creating a pointer to a page referenced to in
+                    //         some page table, which should be valid.
+                    let page_table_ptr = self.access.get_ptr_for_pfn(pfn);
+                    // SAFETY: `page_table_ptr` is a valid pointer to a page table.
+                    RawPageTable::from_ptr(page_table_ptr)
                 }
-            });
+            } else {
+                let page = self.alloc.alloc();
+                let page_table_ptr = self.access.get_ptr_for_page(&page);
+
+                unsafe {
+                    // SAFETY: `page_table_ptr` is good for writing and properly aligned.
+                    page_table_ptr.write_bytes(0, 1);
+                }
+
+                next_pte.set(page.into_raw(), self.fill_entry_attr);
+
+                unsafe {
+                    // SAFETY: `page_table_ptr` is a valid pointer to a page table.
+                    RawPageTable::from_ptr(page_table_ptr)
+                }
+            };
         }
     }
 
     pub fn new(
-        page_table: M::RawTable<'a>, range: VRange,
+        page_table: &'a RawPageTable, range: VRange,
         fill_entry_attr: TableAttribute, alloc: A, access: X,
     ) -> Self {
         Self::with_levels(
@@ -97,7 +91,7 @@ where
     }
 
     pub fn with_levels(
-        page_table: M::RawTable<'a>, range: VRange,
+        page_table: &'a RawPageTable, range: VRange,
         fill_entry_attr: TableAttribute, alloc: A, access: X,
         levels: &'static [PageTableLevel],
     ) -> Self {
@@ -110,17 +104,18 @@ where
             levels,
             remaining: (end - start) / last_level.page_size(),
             indicies: [0; 8],
-            tables: [const { None }; 8],
+            tables: [const { RawPageTable::null() }; 8],
             fill_entry_attr: fill_entry_attr.union(TableAttribute::PRESENT),
             alloc,
             access,
+            _phantom: PhantomData,
         };
 
         for (i, level) in levels.iter().enumerate() {
             me.indicies[i] = level.index_of(start);
         }
 
-        me.tables[0] = Some(page_table);
+        me.tables[0] = page_table;
         me.parse_tables_starting_from(0);
 
         me
@@ -143,10 +138,8 @@ where
         }
 
         let table_level = self.levels.len() - 1;
-        let retval = self.tables[table_level]
-            .as_mut()
-            .unwrap()
-            .index(self.indicies[table_level]);
+        let table = self.tables[table_level];
+        let retval = &table[self.indicies[table_level]];
 
         let idx_level_start_updating = self
             .levels

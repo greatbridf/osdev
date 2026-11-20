@@ -1,4 +1,5 @@
 use core::marker::PhantomData;
+use core::ops::{Deref, Index};
 use core::ptr::NonNull;
 
 use super::paging_mode::PageTableLevel;
@@ -7,15 +8,9 @@ use super::PagingMode;
 use crate::address::{PAddr, VRange};
 use crate::page_table::pte::Leaf;
 use crate::page_table::{PTEntry, PageTableIterator};
-use crate::paging::{Folio, PageAccess, PageBlock, PFN};
+use crate::paging::{Folio, PageAccess, PageBlock, PAGE_SIZE, PFN};
 
-pub trait RawPageTable<'a>: Send + 'a {
-    /// Return the entry at the given index.
-    fn index(&self, index: u16) -> &'a PTEntry;
-
-    /// Get the page table pointed to by raw pointer `ptr`.
-    unsafe fn from_ptr(ptr: NonNull<PageBlock>) -> Self;
-}
+const PTES_PER_PAGE: usize = PAGE_SIZE / size_of::<PTEntry>();
 
 pub trait PageTableAlloc: Clone {
     type Folio: Folio;
@@ -24,7 +19,16 @@ pub trait PageTableAlloc: Clone {
     unsafe fn from_raw(&self, pfn: PFN) -> Self::Folio;
 }
 
-pub struct PageTable<'a, M, A, X>
+#[repr(transparent)]
+pub struct RawTableBase<T: ?Sized> {
+    entries: T,
+}
+
+pub type RawPageTableSized<const N: usize = PTES_PER_PAGE> =
+    RawTableBase<[PTEntry; N]>;
+pub type RawPageTable = RawTableBase<[PTEntry]>;
+
+pub struct PageTable<M, A, X>
 where
     M: PagingMode,
     A: PageTableAlloc,
@@ -33,10 +37,10 @@ where
     root_table_page: A::Folio,
     alloc: A,
     access: X,
-    phantom: PhantomData<&'a M>,
+    phantom: PhantomData<M>,
 }
 
-impl<'a, M, A, X> PageTable<'a, M, A, X>
+impl<M, A, X> PageTable<M, A, X>
 where
     M: PagingMode,
     A: PageTableAlloc,
@@ -62,7 +66,7 @@ where
             self.access.get_ptr_for_page(&self.root_table_page);
         let root_page_table = unsafe {
             // SAFETY: `page_table_ptr` is a valid pointer to a page table.
-            M::RawTable::from_ptr(page_table_ptr)
+            RawPageTable::from_ptr(page_table_ptr)
         };
 
         PageTableIterator::<M, _, _>::new(
@@ -95,7 +99,7 @@ where
             self.access.get_ptr_for_page(&self.root_table_page);
         let root_page_table = unsafe {
             // SAFETY: `page_table_ptr` is a valid pointer to a page table.
-            M::RawTable::from_ptr(page_table_ptr)
+            RawPageTable::from_ptr(page_table_ptr)
         };
 
         PageTableIterator::<M, _, _>::with_levels(
@@ -121,7 +125,7 @@ where
         let page_table_ptr = self.access.get_ptr_for_page(page_table);
         let page_table = unsafe {
             // SAFETY: `page_table_ptr` is a valid pointer to a page table.
-            M::RawTable::from_ptr(page_table_ptr)
+            RawPageTable::from_ptr(page_table_ptr)
         };
 
         for pte in (0..=level.max_index()).map(|i| page_table.index(i)) {
@@ -144,7 +148,7 @@ where
     }
 }
 
-impl<'a, M, A, X> Drop for PageTable<'a, M, A, X>
+impl<M, A, X> Drop for PageTable<M, A, X>
 where
     M: PagingMode,
     A: PageTableAlloc,
@@ -152,5 +156,44 @@ where
 {
     fn drop(&mut self) {
         self.drop_page_table_recursive(&self.root_table_page, M::LEVELS);
+    }
+}
+
+impl RawPageTable {
+    pub const fn null() -> &'static Self {
+        &RawPageTableSized { entries: [] }
+    }
+
+    pub unsafe fn from_ptr<'a>(ptr: NonNull<PageBlock>) -> &'a Self {
+        // XXX: Consider non-default sized page tables.
+
+        unsafe {
+            // SAFETY: The caller guarantees that deferencing ptr is fine.
+            ptr.cast::<RawPageTableSized>().as_ref() as &Self
+        }
+    }
+}
+
+impl Index<u16> for RawPageTable {
+    type Output = PTEntry;
+
+    fn index(&self, index: u16) -> &Self::Output {
+        &self.entries[index as usize]
+    }
+}
+
+impl<const N: usize> Deref for RawPageTableSized<N> {
+    type Target = RawPageTable;
+
+    fn deref(&self) -> &Self::Target {
+        self as &RawPageTable
+    }
+}
+
+impl Deref for RawPageTable {
+    type Target = [PTEntry];
+
+    fn deref(&self) -> &Self::Target {
+        &self.entries
     }
 }

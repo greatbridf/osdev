@@ -19,6 +19,11 @@ impl VAddr {
     pub const fn from(v: usize) -> Self {
         Self(v)
     }
+
+    pub const fn addr(self) -> usize {
+        let Self(addr) = self;
+        addr
+    }
 }
 
 impl Sub for VAddr {
@@ -53,7 +58,6 @@ impl fmt::Debug for VAddr {
 
 impl Addr for VAddr {
     fn addr(self) -> usize {
-        let Self(addr) = self;
-        addr
+        self.addr()
     }
 }

@@ -1,40 +1,36 @@
-use eonix_hal::arch_exported::mm::{ArchPagingMode, PageAccessImpl};
+use eonix_hal::arch_exported::mm::with_global_page_table;
 use eonix_hal::bootstrap::BootStrapData;
-use eonix_hal::mm::{ArchMemory, BasicPageAllocRef, GLOBAL_PAGE_TABLE};
+use eonix_hal::mm::{ArchMemory, BasicPageAllocRef};
 use eonix_hal::traits::mm::Memory;
 use eonix_mm::address::{AddrOps as _, VAddr, VRange};
-use eonix_mm::page_table::{PageAttribute, PageTable};
+use eonix_mm::page_table::PageAttribute;
 use eonix_mm::paging::{Folio as _, FrameAlloc, PAGE_SIZE, PFN};
 use streaming_iterator::StreamingIterator as _;
 
 use crate::kernel::mem::{GlobalPageAlloc, PageReal};
 
 fn setup_kernel_page_array(alloc: BasicPageAllocRef, count_pages: usize) {
-    // TODO: This should be done by the global Zone
-    let global_page_table = PageTable::<ArchPagingMode, _, _>::new(
-        GLOBAL_PAGE_TABLE.clone(),
-        alloc.clone(),
-        PageAccessImpl,
-    );
-
     // Map kernel page array.
+    // TODO: This should be done by the global Zone
     const V_KERNEL_PAGE_ARRAY_START: VAddr = VAddr::from(0xffffff8040000000);
 
     let range =
         VRange::from(V_KERNEL_PAGE_ARRAY_START).grow(PAGE_SIZE * count_pages);
 
-    let mut ptes = global_page_table.iter_kernel(range);
-    while let Some(pte) = ptes.next() {
-        let attr = PageAttribute::PRESENT
-            | PageAttribute::WRITE
-            | PageAttribute::READ
-            | PageAttribute::GLOBAL
-            | PageAttribute::ACCESSED
-            | PageAttribute::DIRTY;
+    with_global_page_table(alloc.clone(), |table| {
+        let mut ptes = table.iter_kernel(range);
+        while let Some(pte) = ptes.next() {
+            let attr = PageAttribute::PRESENT
+                | PageAttribute::WRITE
+                | PageAttribute::READ
+                | PageAttribute::GLOBAL
+                | PageAttribute::ACCESSED
+                | PageAttribute::DIRTY;
 
-        let page = alloc.alloc().unwrap();
-        pte.set(page.into_raw(), attr);
-    }
+            let page = alloc.alloc().unwrap();
+            pte.set(page.into_raw(), attr);
+        }
+    });
 
     // TODO!!!: Construct the global zone with all present ram.
     // for range in ArchMemory::present_ram() {
@@ -49,8 +45,6 @@ fn setup_kernel_page_array(alloc: BasicPageAllocRef, count_pages: usize) {
             count_pages * PAGE_SIZE,
         );
     }
-
-    core::mem::forget(global_page_table);
 }
 
 pub fn setup_memory(data: &mut BootStrapData) {

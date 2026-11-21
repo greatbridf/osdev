@@ -292,7 +292,7 @@ pub extern "C" fn kernel_init() -> ! {
     }
 
     // Map kernel BSS
-    with_global_page_table(alloc.clone(), PageAccessImpl, |table| {
+    with_global_page_table(alloc.clone(), |table| {
         let mut ptes = table.iter_kernel(bss_range);
         while let Some(pte) = ptes.next() {
             let attr = PageAttribute::PRESENT

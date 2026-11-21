@@ -5,7 +5,10 @@ use core::sync::atomic::{compiler_fence, Ordering};
 
 use eonix_mm::address::{Addr as _, AddrOps, PAddr, PRange, PhysAccess, VAddr};
 use eonix_mm::arch::RawPTE;
-use eonix_mm::page_table::{PTEntry, PageTableLevel, PagingMode, RawPageTable};
+use eonix_mm::page_table::{
+    PTEntry, PageTable, PageTableAlloc, PageTableLevel, PagingMode,
+    RawPageTable, TableManagerComplex,
+};
 use eonix_mm::paging::{
     BasicFolio, Folio, PageAccess, PageBlock, PAGE_SIZE, PFN,
 };
@@ -166,4 +169,24 @@ pub fn set_root_page_table_pfn(pfn: PFN) {
     unsafe {
         asm!("dbar 0x0", "invtlb 0x0, $zero, $zero");
     }
+}
+
+pub fn with_global_page_table<A>(
+    alloc: A,
+    func: impl FnOnce(
+        &mut PageTable<TableManagerComplex<A, PageAccessImpl, ArchPagingMode>>,
+    ),
+) where
+    A: PageTableAlloc<Folio = BasicFolio>,
+{
+    let mut global_page_table =
+        PageTable::new(GLOBAL_PAGE_TABLE.clone(), TableManagerComplex {
+            alloc,
+            mapper: PageAccessImpl,
+            mode: PhantomData,
+        });
+
+    func(&mut global_page_table);
+
+    core::mem::forget(global_page_table);
 }

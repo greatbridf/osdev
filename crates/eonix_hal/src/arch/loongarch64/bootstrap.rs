@@ -5,7 +5,7 @@ use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use eonix_hal_traits::mm::Memory;
 use eonix_mm::address::{Addr as _, PAddr, PRange, PhysAccess, VAddr, VRange};
-use eonix_mm::page_table::{PageAttribute, PageTable};
+use eonix_mm::page_table::PageAttribute;
 use eonix_mm::paging::{Folio, FrameAlloc, PAGE_SIZE, PFN};
 use eonix_percpu::PercpuArea;
 use loongArch64::register::ecfg::LineBasedInterrupt;
@@ -14,9 +14,7 @@ use streaming_iterator::StreamingIterator as _;
 
 use super::cpu::{CPUID, CPU_COUNT};
 use crate::arch::cpu::CPU;
-use crate::arch::mm::{
-    ArchPagingMode, ArchPhysAccess, PageAccessImpl, GLOBAL_PAGE_TABLE,
-};
+use crate::arch::mm::{with_global_page_table, ArchPhysAccess};
 use crate::arch::trap::CSR_KERNEL_TP;
 use crate::bootstrap::BootStrapData;
 use crate::mm::{
@@ -193,12 +191,6 @@ unsafe extern "C" {
 }
 
 fn setup_kernel_page_table(alloc: BasicPageAllocRef) {
-    let global_page_table = PageTable::<ArchPagingMode, _, _>::new(
-        GLOBAL_PAGE_TABLE.clone(),
-        alloc.clone(),
-        PageAccessImpl,
-    );
-
     let attr = PageAttribute::WRITE
         | PageAttribute::READ
         | PageAttribute::GLOBAL
@@ -212,11 +204,13 @@ fn setup_kernel_page_table(alloc: BasicPageAllocRef) {
     let bss_range = VRange::from(KERNEL_BSS_START).grow(bss_length);
 
     // Map kernel BSS
-    let mut ptes = global_page_table.iter_kernel(bss_range);
-    while let Some(pte) = ptes.next() {
-        let page = alloc.alloc().unwrap();
-        pte.set(page.into_raw(), attr);
-    }
+    with_global_page_table(alloc.clone(), |table| {
+        let mut ptes = table.iter_kernel(bss_range);
+        while let Some(pte) = ptes.next() {
+            let page = alloc.alloc().unwrap();
+            pte.set(page.into_raw(), attr);
+        }
+    });
 
     flush_tlb_all();
 
@@ -227,8 +221,6 @@ fn setup_kernel_page_table(alloc: BasicPageAllocRef) {
             bss_length,
         );
     }
-
-    core::mem::forget(global_page_table);
 }
 
 /// set up tp register to percpu

@@ -2,6 +2,8 @@ use core::marker::PhantomData;
 use core::ops::{Deref, Index};
 use core::ptr::NonNull;
 
+use streaming_iterator::StreamingIterator;
+
 use super::paging_mode::PageTableLevel;
 use super::pte::TableAttribute;
 use super::PagingMode;
@@ -61,7 +63,7 @@ where
 
     pub fn iter_user(
         &self, range: VRange,
-    ) -> impl Iterator<Item = &PTEntry<Leaf>> {
+    ) -> impl StreamingIterator<Item = PTEntry<Leaf>> + use<M, A, X> {
         let page_table_ptr =
             self.access.get_ptr_for_page(&self.root_table_page);
         let root_page_table = unsafe {
@@ -76,7 +78,7 @@ where
             self.alloc.clone(),
             self.access.clone(),
         )
-        .map(PTEntry::as_leaf)
+        .map_ref(PTEntry::as_leaf)
     }
 
     /// Iterates over the kernel space entries in the page table.
@@ -94,7 +96,7 @@ where
     /// ```
     pub fn iter_kernel(
         &self, range: VRange,
-    ) -> impl Iterator<Item = &PTEntry<Leaf>> {
+    ) -> impl StreamingIterator<Item = PTEntry<Leaf>> + use<M, A, X> {
         let page_table_ptr =
             self.access.get_ptr_for_page(&self.root_table_page);
         let root_page_table = unsafe {
@@ -109,7 +111,7 @@ where
             self.alloc.clone(),
             self.access.clone(),
         )
-        .map(PTEntry::as_leaf)
+        .map_ref(PTEntry::as_leaf)
     }
 
     fn drop_page_table_recursive(

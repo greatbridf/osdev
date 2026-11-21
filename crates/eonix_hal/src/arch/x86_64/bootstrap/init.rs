@@ -11,6 +11,7 @@ use eonix_mm::address::{Addr as _, PAddr, PRange, PhysAccess, VRange};
 use eonix_mm::page_table::{PageAttribute, PagingMode};
 use eonix_mm::paging::{Folio, FrameAlloc, PageAccess, PAGE_SIZE};
 use eonix_percpu::PercpuArea;
+use streaming_iterator::StreamingIterator as _;
 
 use crate::arch::bootstrap::{EARLY_GDT_DESCRIPTOR, KERNEL_PML4};
 use crate::arch::cpu::{wrmsr, CPU};
@@ -292,7 +293,8 @@ pub extern "C" fn kernel_init() -> ! {
 
     // Map kernel BSS
     with_global_page_table(alloc.clone(), PageAccessImpl, |table| {
-        for pte in table.iter_kernel(bss_range) {
+        let mut ptes = table.iter_kernel(bss_range);
+        while let Some(pte) = ptes.next() {
             let attr = PageAttribute::PRESENT
                 | PageAttribute::WRITE
                 | PageAttribute::READ

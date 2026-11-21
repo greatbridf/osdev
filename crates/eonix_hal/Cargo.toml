@@ -15,6 +15,7 @@ eonix_preempt = { path = "../eonix_preempt" }
 
 acpi = "5.2.0"
 cfg-if = "1.0"
+streaming-iterator = "0.1.9"
 
 [target.'cfg(target_arch = "riscv64")'.dependencies]
 intrusive_list = { path = "../intrusive_list" }

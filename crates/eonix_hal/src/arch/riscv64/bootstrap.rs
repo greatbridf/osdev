@@ -20,6 +20,7 @@ use riscv::register::satp;
 use sbi::hsm::hart_start;
 use sbi::legacy::console_putchar;
 use sbi::PhysicalAddress;
+use streaming_iterator::StreamingIterator as _;
 
 use super::config::mm::*;
 use super::config::{self};
@@ -175,7 +176,8 @@ fn setup_kernel_page_table(alloc: BasicPageAllocRef) {
 
     // Map kernel BSS
     let bss_range = VRange::from(KERNEL_BSS_START).grow(bss_length);
-    for pte in global_page_table.iter_kernel(bss_range) {
+    let mut ptes = global_page_table.iter_kernel(bss_range);
+    while let Some(pte) = ptes.next() {
         let page = alloc.alloc().unwrap();
 
         pte.set(page.into_raw(), attr);

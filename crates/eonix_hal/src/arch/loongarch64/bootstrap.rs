@@ -10,6 +10,7 @@ use eonix_mm::paging::{Folio, FrameAlloc, PAGE_SIZE, PFN};
 use eonix_percpu::PercpuArea;
 use loongArch64::register::ecfg::LineBasedInterrupt;
 use loongArch64::register::{ecfg, euen, tcfg};
+use streaming_iterator::StreamingIterator as _;
 
 use super::cpu::{CPUID, CPU_COUNT};
 use crate::arch::cpu::CPU;
@@ -211,7 +212,8 @@ fn setup_kernel_page_table(alloc: BasicPageAllocRef) {
     let bss_range = VRange::from(KERNEL_BSS_START).grow(bss_length);
 
     // Map kernel BSS
-    for pte in global_page_table.iter_kernel(bss_range) {
+    let mut ptes = global_page_table.iter_kernel(bss_range);
+    while let Some(pte) = ptes.next() {
         let page = alloc.alloc().unwrap();
         pte.set(page.into_raw(), attr);
     }

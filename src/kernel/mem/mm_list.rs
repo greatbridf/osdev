@@ -18,6 +18,7 @@ use eonix_mm::paging::{Folio as _, PAGE_SIZE, PFN};
 use eonix_sync::{LazyLock, Mutex};
 use mm_area::AreaList;
 use page_table::KernelPageTable;
+use streaming_iterator::StreamingIterator as _;
 
 pub use self::mapping::{FileMapping, Mapping};
 pub use self::mm_area::{AreaFlags, MemArea};
@@ -130,7 +131,8 @@ impl MMListInner {
         for area in isolated_areas {
             let range = area.range.as_ref(&self.lock);
 
-            for pte in self.page_table.iter_user(*range) {
+            let mut ptes = self.page_table.iter_user(*range);
+            while let Some(pte) = ptes.next() {
                 let pfn = pte.pfn();
                 pte.clear();
 
@@ -164,7 +166,8 @@ impl MMListInner {
             let range = area.range.as_ref(&self.lock);
             found = true;
 
-            for pte in self.page_table.iter_user(*range) {
+            let mut ptes = self.page_table.iter_user(*range);
+            while let Some(pte) = ptes.next() {
                 let (pfn, mut page_attr) =
                     pte.get().expect("Not a page attribute");
 
@@ -244,7 +247,8 @@ impl Drop for MMListInner {
             let range = area.range.as_ref(&self.lock).clone();
 
             if area.is_shared() {
-                for pte in self.page_table.iter_user(range) {
+                let mut ptes = self.page_table.iter_user(range);
+                while let Some(pte) = ptes.next() {
                     // XXX: Fix me
                     pte.clear();
                     // let raw_page = RawPagePtr::from(pfn);
@@ -253,7 +257,8 @@ impl Drop for MMListInner {
                     // }
                 }
             } else {
-                for pte in self.page_table.iter_user(range) {
+                let mut ptes = self.page_table.iter_user(range);
+                while let Some(pte) = ptes.next() {
                     let pfn = pte.pfn();
                     pte.clear();
                     unsafe { Folio::from_raw(pfn) };
@@ -566,11 +571,11 @@ impl MMList {
             let access_len = remaining.min(area_remaining);
             let access_end = current + access_len;
 
-            for (idx, pte) in inner
-                .page_table
-                .iter_user(VRange::new(current, access_end))
-                .enumerate()
-            {
+            let mut ptes =
+                inner.page_table.iter_user(VRange::new(current, access_end));
+
+            let mut idx = 0;
+            while let Some(pte) = ptes.next() {
                 let page_start = current.floor() + idx * 0x1000;
                 let page_end = page_start + 0x1000;
 
@@ -601,6 +606,8 @@ impl MMList {
                         func(offset + idx * 0x1000, page_data);
                     });
                 }
+
+                idx += 1;
             }
 
             offset += access_len;
@@ -627,31 +634,33 @@ trait PageTableExt {
 
 impl PageTableExt for KernelPageTable {
     fn set_anonymous(&self, range: VRange, permission: Permission) {
-        for pte in self.iter_user(range) {
+        let mut ptes = self.iter_user(range);
+        while let Some(pte) = ptes.next() {
             pte.set_anonymous(permission.execute);
         }
     }
 
     fn set_mmapped(&self, range: VRange, permission: Permission) {
-        for pte in self.iter_user(range) {
+        let mut ptes = self.iter_user(range);
+        while let Some(pte) = ptes.next() {
             pte.set_mapped(permission.execute);
         }
     }
 
     fn set_copy_on_write(&self, from: &Self, range: VRange) {
-        let to_iter = self.iter_user(range);
-        let from_iter = from.iter_user(range);
+        let mut to_iter = self.iter_user(range);
+        let mut from_iter = from.iter_user(range);
 
-        for (to, from) in to_iter.zip(from_iter) {
+        while let (Some(to), Some(from)) = (to_iter.next(), from_iter.next()) {
             to.set_copy_on_write(from);
         }
     }
 
     fn set_copied(&self, from: &Self, range: VRange) {
-        let to_iter = self.iter_user(range);
-        let from_iter = from.iter_user(range);
+        let mut to_iter = self.iter_user(range);
+        let mut from_iter = from.iter_user(range);
 
-        for (to, from) in to_iter.zip(from_iter) {
+        while let (Some(to), Some(from)) = (to_iter.next(), from_iter.next()) {
             to.set_raw(from.get_raw());
         }
     }

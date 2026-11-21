@@ -2,9 +2,10 @@ use eonix_hal::arch_exported::mm::{ArchPagingMode, PageAccessImpl};
 use eonix_hal::bootstrap::BootStrapData;
 use eonix_hal::mm::{ArchMemory, BasicPageAllocRef, GLOBAL_PAGE_TABLE};
 use eonix_hal::traits::mm::Memory;
-use eonix_mm::address::{Addr as _, AddrOps as _, VAddr, VRange};
+use eonix_mm::address::{AddrOps as _, VAddr, VRange};
 use eonix_mm::page_table::{PageAttribute, PageTable};
 use eonix_mm::paging::{Folio as _, FrameAlloc, PAGE_SIZE, PFN};
+use streaming_iterator::StreamingIterator as _;
 
 use crate::kernel::mem::{GlobalPageAlloc, PageReal};
 
@@ -21,7 +22,9 @@ fn setup_kernel_page_array(alloc: BasicPageAllocRef, count_pages: usize) {
 
     let range =
         VRange::from(V_KERNEL_PAGE_ARRAY_START).grow(PAGE_SIZE * count_pages);
-    for pte in global_page_table.iter_kernel(range) {
+
+    let mut ptes = global_page_table.iter_kernel(range);
+    while let Some(pte) = ptes.next() {
         let attr = PageAttribute::PRESENT
             | PageAttribute::WRITE
             | PageAttribute::READ

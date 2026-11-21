@@ -5,7 +5,6 @@ mod pte_iterator;
 
 pub use page_table::{
     PageTable, PageTableAlloc, RawPageTable, RawPageTableSized, TableManage,
-    TableManager,
 };
 pub use paging_mode::{PageTableLevel, PagingMode};
 pub(crate) use pte::PTE;

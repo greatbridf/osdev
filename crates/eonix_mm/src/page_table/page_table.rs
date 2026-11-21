@@ -1,4 +1,3 @@
-use core::marker::PhantomData;
 use core::ops::{Deref, Index};
 use core::ptr::NonNull;
 
@@ -6,11 +5,10 @@ use streaming_iterator::StreamingIterator;
 
 use super::paging_mode::PageTableLevel;
 use super::pte::TableAttribute;
-use super::PagingMode;
 use crate::address::{PAddr, VRange};
 use crate::page_table::pte::Leaf;
 use crate::page_table::{PTEntry, PageTableIterator};
-use crate::paging::{Folio, PageAccess, PageBlock, PAGE_SIZE, PFN};
+use crate::paging::{Folio, PageBlock, PAGE_SIZE, PFN};
 
 const PTES_PER_PAGE: usize = PAGE_SIZE / size_of::<PTEntry>();
 
@@ -30,12 +28,6 @@ pub trait PageTableAlloc: Clone {
 
     fn alloc(&self) -> Self::Folio;
     unsafe fn from_raw(&self, pfn: PFN) -> Self::Folio;
-}
-
-pub struct TableManager<T: PageTableAlloc, U: PageAccess, M: PagingMode> {
-    pub alloc: T,
-    pub mapper: U,
-    pub mode: PhantomData<M>,
 }
 
 #[repr(transparent)]
@@ -180,30 +172,5 @@ impl Deref for RawPageTable {
 
     fn deref(&self) -> &Self::Target {
         &self.entries
-    }
-}
-
-impl<T, U, M> TableManage for TableManager<T, U, M>
-where
-    T: PageTableAlloc,
-    T::Folio: Folio,
-    U: PageAccess,
-    M: PagingMode,
-{
-    type Table = T::Folio;
-    type Mapped = &'static RawPageTable;
-
-    const LEVELS: &'static [PageTableLevel] = M::LEVELS;
-
-    fn alloc(&self) -> Self::Table {
-        self.alloc.alloc()
-    }
-
-    fn map(&self, folio: &Self::Table) -> Self::Mapped {
-        unsafe { RawPageTable::from_ptr(self.mapper.get_ptr_for_page(folio)) }
-    }
-
-    unsafe fn from_raw(&self, pfn: PFN) -> Self::Table {
-        unsafe { self.alloc.from_raw(pfn) }
     }
 }

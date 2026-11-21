@@ -3,13 +3,18 @@ use core::cell::RefCell;
 use core::ptr::NonNull;
 
 use eonix_mm::address::{AddrOps as _, PRange, PhysAccess};
-use eonix_mm::page_table::PageTableAlloc;
-use eonix_mm::paging::{BasicFolio, Folio as _, FrameAlloc, PAGE_SIZE, PFN};
+use eonix_mm::page_table::{
+    PageTableAlloc, PageTableLevel, PagingMode as _, RawPageTable, TableManage,
+};
+use eonix_mm::paging::{
+    BasicFolio, Folio, FrameAlloc, PageAccess as _, PAGE_SIZE, PFN,
+};
 
 pub use crate::arch::mm::{
     flush_tlb, flush_tlb_all, get_root_page_table_pfn, set_root_page_table_pfn,
     ArchMemory, ArchPhysAccess, GLOBAL_PAGE_TABLE,
 };
+use crate::arch::mm::{ArchPagingMode, PageAccessImpl};
 
 pub struct BasicPageAlloc {
     ranges: [Option<PRange>; Self::MAX],
@@ -25,6 +30,11 @@ struct ScopedAllocInner<'a> {
 
 pub struct ScopedAllocator<'a> {
     inner: RefCell<ScopedAllocInner<'a>>,
+}
+
+pub struct TableManager<T: PageTableAlloc> {
+    alloc: T,
+    mapper: PageAccessImpl,
 }
 
 impl BasicPageAlloc {
@@ -208,5 +218,39 @@ impl Drop for ScopedAllocator<'_> {
                 inner.allocated_count
             );
         }
+    }
+}
+
+impl<T: PageTableAlloc> TableManager<T> {
+    pub const fn new(alloc: T) -> Self {
+        Self {
+            alloc,
+            mapper: PageAccessImpl,
+        }
+    }
+}
+
+impl<T> TableManage for TableManager<T>
+where
+    T: PageTableAlloc,
+    T::Folio: Folio,
+{
+    type Table = T::Folio;
+    type Mapped = &'static RawPageTable;
+
+    const LEVELS: &'static [PageTableLevel] = ArchPagingMode::LEVELS;
+
+    fn alloc(&self) -> Self::Table {
+        self.alloc.alloc()
+    }
+
+    fn map(&self, folio: &Self::Table) -> Self::Mapped {
+        unsafe {
+            RawPageTable::from_ptr(self.mapper.get_ptr_for_pfn(folio.pfn()))
+        }
+    }
+
+    unsafe fn from_raw(&self, pfn: PFN) -> Self::Table {
+        unsafe { self.alloc.from_raw(pfn) }
     }
 }

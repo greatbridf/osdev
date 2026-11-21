@@ -6,7 +6,7 @@ use eonix_mm::address::{Addr as _, AddrOps, PAddr, PRange, PhysAccess, VAddr};
 use eonix_mm::arch::RawPTE;
 use eonix_mm::page_table::{
     PTEntry, PageTable, PageTableAlloc, PageTableLevel, PagingMode,
-    RawPageTable, TableManagerComplex,
+    RawPageTable,
 };
 use eonix_mm::paging::{BasicFolio, Folio, PageAccess, PageBlock, PFN};
 use eonix_sync_base::LazyLock;
@@ -18,7 +18,7 @@ use super::config::mm::{PHYS_MAP_VIRT, ROOT_PAGE_TABLE_PFN};
 use super::fdt::{FdtExt, FDT};
 use crate::arch::riscv64::config::mm::KIMAGE_OFFSET;
 use crate::extern_symbol_addr;
-use crate::mm::BasicPageAlloc;
+use crate::mm::{BasicPageAlloc, TableManager};
 
 const PAGE_TABLE_BASE: PFN = PFN::from_val(ROOT_PAGE_TABLE_PFN);
 pub const GLOBAL_PAGE_TABLE: BasicFolio = BasicFolio::new(PAGE_TABLE_BASE, 0);
@@ -118,19 +118,12 @@ pub fn set_root_page_table_pfn(pfn: PFN) {
 }
 
 pub fn with_global_page_table<A>(
-    alloc: A,
-    func: impl FnOnce(
-        &mut PageTable<TableManagerComplex<A, PageAccessImpl, ArchPagingMode>>,
-    ),
+    alloc: A, func: impl FnOnce(&mut PageTable<TableManager<A>>),
 ) where
     A: PageTableAlloc<Folio = BasicFolio>,
 {
     let mut global_page_table =
-        PageTable::new(GLOBAL_PAGE_TABLE.clone(), TableManagerComplex {
-            alloc,
-            mapper: PageAccessImpl,
-            mode: PhantomData,
-        });
+        PageTable::new(GLOBAL_PAGE_TABLE.clone(), TableManager::new(alloc));
 
     func(&mut global_page_table);
 

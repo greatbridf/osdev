@@ -8,11 +8,12 @@ use eonix_mm::address::{
 use eonix_mm::arch::RawPTE;
 use eonix_mm::page_table::{
     PTEntry, PageAttribute, PageTable, PageTableAlloc, PageTableLevel,
-    PagingMode, RawPageTable, TableAttribute, TableManager,
+    PagingMode, RawPageTable, TableAttribute,
 };
 use eonix_mm::paging::{BasicFolio, PageAccess, PageBlock, PAGE_SIZE, PFN};
 use eonix_sync_base::LazyLock;
 
+use crate::mm::TableManager;
 use crate::traits::mm::Memory;
 
 pub const PA_P: u64 = 0x001;
@@ -268,19 +269,12 @@ pub fn set_root_page_table_pfn(pfn: PFN) {
 }
 
 pub fn with_global_page_table<A>(
-    alloc: A,
-    func: impl FnOnce(
-        &mut PageTable<TableManager<A, PageAccessImpl, ArchPagingMode>>,
-    ),
+    alloc: A, func: impl FnOnce(&mut PageTable<TableManager<A>>),
 ) where
     A: PageTableAlloc<Folio = BasicFolio>,
 {
     let mut global_page_table =
-        PageTable::new(GLOBAL_PAGE_TABLE.clone(), TableManager {
-            alloc,
-            mapper: PageAccessImpl,
-            mode: PhantomData,
-        });
+        PageTable::new(GLOBAL_PAGE_TABLE.clone(), TableManager::new(alloc));
 
     func(&mut global_page_table);
 

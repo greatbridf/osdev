@@ -8,7 +8,7 @@ use eonix_mm::page_table::{
     PTEntry, PageTable, PageTableAlloc, PageTableLevel, PagingMode,
     RawPageTable,
 };
-use eonix_mm::paging::{BasicFolio, Folio, PageAccess, PageBlock, PFN};
+use eonix_mm::paging::{BasicFolio, Folio, PFN};
 use eonix_sync_base::LazyLock;
 use fdt::Fdt;
 use riscv::asm::{sfence_vma, sfence_vma_all};
@@ -30,9 +30,6 @@ pub struct PagingModeSv48;
 pub struct ArchPhysAccess;
 
 pub struct ArchMemory;
-
-#[derive(Clone)]
-pub struct PageAccessImpl;
 
 impl PagingMode for PagingModeSv48 {
     const LEVELS: &'static [PageTableLevel] = &[
@@ -73,12 +70,6 @@ impl PhysAccess for ArchPhysAccess {
         );
 
         PAddr::from_val(addr - Self::PHYS_OFFSET)
-    }
-}
-
-impl PageAccess for PageAccessImpl {
-    unsafe fn get_ptr_for_pfn(&self, pfn: PFN) -> NonNull<PageBlock> {
-        unsafe { ArchPhysAccess::as_ptr(PAddr::from(pfn)) }
     }
 }
 

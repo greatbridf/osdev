@@ -10,7 +10,7 @@ use eonix_mm::page_table::{
     PTEntry, PageAttribute, PageTable, PageTableAlloc, PageTableLevel,
     PagingMode, RawPageTable, TableAttribute,
 };
-use eonix_mm::paging::{BasicFolio, PageAccess, PageBlock, PAGE_SIZE, PFN};
+use eonix_mm::paging::{BasicFolio, PageBlock, PAGE_SIZE, PFN};
 use eonix_sync_base::LazyLock;
 
 use crate::mm::TableManager;
@@ -44,9 +44,6 @@ pub struct RawPageTable4Levels<'a>(NonNull<RawPTE>, PhantomData<&'a ()>);
 pub struct PagingMode4Levels;
 
 pub struct ArchPhysAccess;
-
-#[derive(Clone)]
-pub struct PageAccessImpl;
 
 pub struct ArchMemory;
 
@@ -111,12 +108,6 @@ impl PhysAccess for ArchPhysAccess {
         );
 
         PAddr::from_val(addr - Self::PHYS_OFFSET)
-    }
-}
-
-impl PageAccess for PageAccessImpl {
-    unsafe fn get_ptr_for_pfn(&self, pfn: PFN) -> NonNull<PageBlock> {
-        unsafe { ArchPhysAccess::as_ptr(PAddr::from(pfn)) }
     }
 }
 

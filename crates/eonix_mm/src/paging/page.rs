@@ -1,5 +1,4 @@
 use core::mem::ManuallyDrop;
-use core::ptr::NonNull;
 
 use super::PFN;
 use crate::address::{PAddr, PRange};
@@ -14,25 +13,6 @@ pub const PAGE_SIZE_BITS: u32 = PAGE_SIZE.trailing_zeros();
 #[allow(dead_code)]
 #[repr(align(4096))]
 pub struct PageBlock([u8; PAGE_SIZE]);
-
-/// A trait that provides the kernel access to the page.
-pub trait PageAccess: Clone {
-    /// Returns a kernel-accessible pointer to the page referenced by the given
-    /// physical frame number.
-    ///
-    /// # Safety
-    /// This function is unsafe because calling this function on some non-existing
-    /// pfn will cause undefined behavior.
-    unsafe fn get_ptr_for_pfn(&self, pfn: PFN) -> NonNull<PageBlock>;
-
-    /// Returns a kernel-accessible pointer to the given page.
-    fn get_ptr_for_page<F: Folio>(&self, page: &F) -> NonNull<PageBlock> {
-        unsafe {
-            // SAFETY: `page.pfn()` is guaranteed to be valid.
-            self.get_ptr_for_pfn(page.pfn())
-        }
-    }
-}
 
 /// A [`Folio`] represents one page or a bunch of adjacent pages.
 pub trait Folio {

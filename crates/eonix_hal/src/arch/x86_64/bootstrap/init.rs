@@ -9,7 +9,7 @@ use acpi::{AcpiHandler, AcpiTables, PhysicalMapping, PlatformInfo};
 use eonix_hal_traits::mm::Memory;
 use eonix_mm::address::{Addr as _, PAddr, PRange, PhysAccess, VRange};
 use eonix_mm::page_table::{PageAttribute, PagingMode};
-use eonix_mm::paging::{Folio, FrameAlloc, PageAccess, PAGE_SIZE};
+use eonix_mm::paging::{Folio, FrameAlloc, PAGE_SIZE};
 use eonix_percpu::PercpuArea;
 use streaming_iterator::StreamingIterator as _;
 
@@ -17,7 +17,7 @@ use crate::arch::bootstrap::{EARLY_GDT_DESCRIPTOR, KERNEL_PML4};
 use crate::arch::cpu::{wrmsr, CPU};
 use crate::arch::io::Port8;
 use crate::arch::mm::{
-    with_global_page_table, ArchPhysAccess, PageAccessImpl, GLOBAL_PAGE_TABLE,
+    with_global_page_table, ArchPhysAccess, GLOBAL_PAGE_TABLE,
     V_KERNEL_BSS_START,
 };
 use crate::bootstrap::BootStrapData;

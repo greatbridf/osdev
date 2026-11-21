@@ -8,9 +8,7 @@ use core::sync::atomic::{AtomicBool, AtomicPtr, AtomicUsize, Ordering};
 use eonix_hal_traits::mm::Memory;
 use eonix_mm::address::{Addr as _, PAddr, PRange, PhysAccess, VAddr, VRange};
 use eonix_mm::page_table::{PageAttribute, PagingMode, TableAttribute};
-use eonix_mm::paging::{
-    Folio, FrameAlloc, PageAccess, PageBlock, PAGE_SIZE, PFN,
-};
+use eonix_mm::paging::{Folio, FrameAlloc, PageBlock, PAGE_SIZE, PFN};
 use eonix_percpu::PercpuArea;
 use fdt::Fdt;
 use riscv::asm::sfence_vma_all;

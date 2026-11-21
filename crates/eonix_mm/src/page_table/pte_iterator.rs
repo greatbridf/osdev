@@ -5,7 +5,7 @@ use super::pte::TableAttribute;
 use super::{PageTableLevel, PagingMode};
 use crate::address::{AddrOps as _, VRange};
 use crate::page_table::{PTEntry, RawPageTable};
-use crate::paging::{Folio, PageAccess};
+use crate::paging::{Folio, PageAccess, PFN};
 
 pub struct PageTableIterator<'a, M, A, X>
 where
@@ -47,31 +47,20 @@ where
             let parent_table = self.tables[idx];
             let next_pte = parent_table[pt_idx].as_table();
 
-            let (pfn, attr) = next_pte.get().expect("Not a page table");
+            let (mut pfn, attr) = next_pte.get().expect("Not a page table");
 
-            self.tables[idx + 1] = if attr.contains(TableAttribute::PRESENT) {
-                unsafe {
-                    // SAFETY: We are creating a pointer to a page referenced to in
-                    //         some page table, which should be valid.
-                    let page_table_ptr = self.access.get_ptr_for_pfn(pfn);
-                    // SAFETY: `page_table_ptr` is a valid pointer to a page table.
-                    RawPageTable::from_ptr(page_table_ptr)
-                }
-            } else {
-                let page = self.alloc.alloc();
-                let page_table_ptr = self.access.get_ptr_for_page(&page);
+            if !attr.contains(TableAttribute::PRESENT) {
+                debug_assert_eq!(pfn, PFN::NULL, "Non-present table");
+                pfn = self.alloc.alloc().into_raw();
+                next_pte.set(pfn, self.fill_entry_attr);
+            }
 
-                unsafe {
-                    // SAFETY: `page_table_ptr` is good for writing and properly aligned.
-                    page_table_ptr.write_bytes(0, 1);
-                }
-
-                next_pte.set(page.into_raw(), self.fill_entry_attr);
-
-                unsafe {
-                    // SAFETY: `page_table_ptr` is a valid pointer to a page table.
-                    RawPageTable::from_ptr(page_table_ptr)
-                }
+            self.tables[idx + 1] = unsafe {
+                // SAFETY: We are creating a pointer to a page referenced to in
+                //         some page table, which should be valid.
+                let page_table_ptr = self.access.get_ptr_for_pfn(pfn);
+                // SAFETY: `page_table_ptr` is a valid pointer to a page table.
+                RawPageTable::from_ptr(page_table_ptr)
             };
         }
     }

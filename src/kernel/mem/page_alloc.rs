@@ -5,11 +5,13 @@ use alloc::sync::Arc;
 use core::sync::atomic::Ordering;
 
 use buddy_allocator::BuddyAllocator;
+use eonix_hal::mm::ArchPhysAccess;
 use eonix_macros::define_late_init;
-use eonix_mm::address::PRange;
+use eonix_mm::address::{PRange, PhysAccess as _};
 use eonix_mm::page_table::PageTableAlloc;
 use eonix_mm::paging::{
-    FolioList, FolioListSized as _, FrameAlloc, GlobalFrameAlloc, PFN,
+    Folio as _, FolioList, FolioListSized as _, FrameAlloc, GlobalFrameAlloc,
+    PAGE_SIZE, PFN,
 };
 use eonix_preempt::PreemptGuard;
 use eonix_sync::{NoContext, Spin};
@@ -145,7 +147,14 @@ impl PageTableAlloc for GlobalPageAlloc {
     type Folio = Folio;
 
     fn alloc(&self) -> Self::Folio {
-        FrameAlloc::alloc(self).unwrap()
+        let folio = FrameAlloc::alloc(self).unwrap();
+
+        unsafe {
+            ArchPhysAccess::as_ptr::<u8>(folio.start())
+                .write_bytes(0, PAGE_SIZE);
+        }
+
+        folio
     }
 
     unsafe fn from_raw(&self, pfn: PFN) -> Self::Folio {

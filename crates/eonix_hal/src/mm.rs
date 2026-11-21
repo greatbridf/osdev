@@ -2,9 +2,9 @@ use core::alloc::{AllocError, Allocator, Layout};
 use core::cell::RefCell;
 use core::ptr::NonNull;
 
-use eonix_mm::address::{AddrOps as _, PRange};
+use eonix_mm::address::{AddrOps as _, PRange, PhysAccess};
 use eonix_mm::page_table::PageTableAlloc;
-use eonix_mm::paging::{BasicFolio, FrameAlloc, PAGE_SIZE, PFN};
+use eonix_mm::paging::{BasicFolio, Folio as _, FrameAlloc, PAGE_SIZE, PFN};
 
 pub use crate::arch::mm::{
     flush_tlb, flush_tlb_all, get_root_page_table_pfn, set_root_page_table_pfn,
@@ -128,7 +128,14 @@ impl PageTableAlloc for BasicPageAllocRef<'_> {
     type Folio = BasicFolio;
 
     fn alloc(&self) -> Self::Folio {
-        FrameAlloc::alloc(self).unwrap()
+        let folio = FrameAlloc::alloc(self).unwrap();
+
+        unsafe {
+            ArchPhysAccess::as_ptr::<u8>(folio.start())
+                .write_bytes(0, PAGE_SIZE);
+        }
+
+        folio
     }
 
     unsafe fn from_raw(&self, pfn: PFN) -> Self::Folio {

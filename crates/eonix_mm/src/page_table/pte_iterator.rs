@@ -5,18 +5,18 @@ use streaming_iterator::StreamingIterator;
 use super::pte::TableAttribute;
 use super::PageTableLevel;
 use crate::address::{AddrOps as _, VAddr, VRange};
-use crate::page_table::page_table::{TableManage, TableMapped};
+use crate::page_table::page_table::TableManage;
 use crate::page_table::{PTEntry, RawPageTable};
 use crate::paging::{Folio, PFN};
 
 const MAX_LEVELS: usize = 5;
 
-enum TableRef<T: TableMapped> {
+enum TableRef<T> {
     Mapped(T),
     Blank,
 }
 
-impl<T: TableMapped> Deref for TableRef<T> {
+impl<T: Deref<Target = RawPageTable>> Deref for TableRef<T> {
     type Target = RawPageTable;
 
     fn deref(&self) -> &Self::Target {

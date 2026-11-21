@@ -14,11 +14,9 @@ use crate::paging::{Folio, PageAccess, PageBlock, PAGE_SIZE, PFN};
 
 const PTES_PER_PAGE: usize = PAGE_SIZE / size_of::<PTEntry>();
 
-pub trait TableMapped: Deref<Target = RawPageTable> {}
-
 pub trait TableManage {
     type Table: Folio;
-    type Mapped: TableMapped;
+    type Mapped: Deref<Target = RawPageTable>;
 
     const LEVELS: &'static [PageTableLevel];
 
@@ -184,8 +182,6 @@ impl Deref for RawPageTable {
         &self.entries
     }
 }
-
-impl<T> TableMapped for T where T: Deref<Target = RawPageTable> {}
 
 impl<T, U, M> TableManage for TableManager<T, U, M>
 where

@@ -335,10 +335,11 @@ impl DirInode {
             ClusterIterator::new(fat.as_ref(), Cluster::from_ino(inode.ino));
 
         for cluster in clusters {
-            let page = FolioOwned::alloc();
+            let page = FolioOwned::alloc().share();
             fs.read_cluster(cluster, &page).await?;
 
-            dir_pages.push(page);
+            // XXX: This is slow. Use FolioOwned in BlockDeviceRequest.
+            dir_pages.push(page.unshare());
         }
 
         Ok(())

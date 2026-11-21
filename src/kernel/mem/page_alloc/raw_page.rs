@@ -36,7 +36,7 @@ impl SlabPageExt {
 ///
 /// # Safety
 /// Implementors MUST guarantee that the type is less that 32 bytes.
-pub unsafe trait PageExt {}
+pub unsafe trait PageExt: 'static {}
 
 pub struct AnyExt();
 
@@ -105,6 +105,18 @@ where
         unsafe {
             // SAFETY: T is ?Sized for Page<T>, so they have the same layout.
             &*(self as *const _ as *const Page)
+        }
+    }
+}
+
+impl<E> AsMut<Page> for Page<E>
+where
+    E: PageExt,
+{
+    fn as_mut(&mut self) -> &mut Page {
+        unsafe {
+            // SAFETY: T is ?Sized for Page<T>, so they have the same layout.
+            &mut *(self as *const _ as *mut Page)
         }
     }
 }

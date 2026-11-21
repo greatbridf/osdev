@@ -15,12 +15,13 @@ use eonix_mm::paging::{
 };
 use eonix_preempt::PreemptGuard;
 use eonix_sync::{NoContext, Spin};
-pub use raw_page::{Page, PageFlags, PageReal, RawPageList};
+pub use raw_page::{AnyExt, Page, PageExt, PageFlags, PageReal, RawPageList};
 pub use zones::{GlobalZone, ZONE};
 
 use super::folio::Folio;
 use crate::fs::procfs::populate_root;
 use crate::io::buf_write;
+use crate::kernel::mem::FolioOwned;
 
 const COSTLY_ORDER: u32 = 3;
 const AREAS: usize = COSTLY_ORDER as usize + 1;
@@ -126,7 +127,7 @@ impl GlobalPageAlloc {
 }
 
 impl FrameAlloc for GlobalPageAlloc {
-    type Folio = Folio;
+    type Folio = FolioOwned;
 
     fn alloc_order(&self, order: u32) -> Option<Self::Folio> {
         self.alloc_raw_order(order).map(|raw_page| {
@@ -134,7 +135,7 @@ impl FrameAlloc for GlobalPageAlloc {
             //         as that in the copy constructor of `std::shared_ptr`.
 
             raw_page.refcount.fetch_add(1, Ordering::Relaxed);
-            Folio::from_mut_page(raw_page)
+            FolioOwned::from_mut_page(raw_page)
         })
     }
 }
@@ -154,7 +155,7 @@ impl PageTableAlloc for GlobalPageAlloc {
                 .write_bytes(0, PAGE_SIZE);
         }
 
-        folio
+        folio.share()
     }
 
     unsafe fn from_raw(&self, pfn: PFN) -> Self::Folio {

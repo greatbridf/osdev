@@ -12,7 +12,6 @@ pub trait Stack {
 ///
 /// This should be implemented by the architecture-specific trap context
 /// and will be used in the HAL crates.
-#[doc(notable_trait)]
 pub trait RawTrapContext: Copy {
     type FIrq: FnOnce(fn(irqno: usize));
     type FTimer: FnOnce(fn());
@@ -65,7 +64,6 @@ pub trait RawTrapContext: Copy {
     );
 }
 
-#[doc(notable_trait)]
 pub trait TrapReturn {
     /// Return to the context before the trap occurred.
     ///

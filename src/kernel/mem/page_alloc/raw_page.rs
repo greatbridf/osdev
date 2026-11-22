@@ -1,3 +1,6 @@
+use core::marker::PhantomData;
+use core::mem::{offset_of, MaybeUninit};
+use core::ops::{Deref, DerefMut};
 use core::ptr::NonNull;
 use core::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 
@@ -15,12 +18,12 @@ use crate::kernel::mem::PhysAccess;
 pub struct PageFlags(AtomicU32);
 
 #[derive(Clone, Copy)]
-struct SlabPageData {
+pub struct SlabPageExt {
     allocated_count: usize,
     free_next: Option<NonNull<SlabSlot>>,
 }
 
-impl SlabPageData {
+impl SlabPageExt {
     const fn new() -> Self {
         Self {
             allocated_count: 0,
@@ -29,12 +32,31 @@ impl SlabPageData {
     }
 }
 
-#[repr(C)]
-union PageData {
-    slab: SlabPageData,
-}
+/// Extention data of Pages.
+///
+/// # Safety
+/// Implementors MUST guarantee that the type is less that 32 bytes.
+pub unsafe trait PageExt: 'static {}
 
-pub struct RawPage {
+pub struct AnyExt();
+
+#[allow(unused)]
+pub struct RealExt([u8; 32]);
+
+unsafe impl PageExt for AnyExt {}
+unsafe impl PageExt for RealExt {}
+unsafe impl PageExt for SlabPageExt {}
+
+/// The real struct Page in memory, big enough to accomodate Page +
+/// 32 bytes of extention data.
+pub type PageReal = Page<RealExt>;
+
+pub type PageSlab = Page<SlabPageExt>;
+
+pub struct Page<E = AnyExt>
+where
+    E: PageExt + ?Sized,
+{
     /// This can be used for LRU page swap in the future.
     ///
     /// Now only used for free page links in the buddy system.
@@ -45,7 +67,7 @@ pub struct RawPage {
     pub flags: PageFlags,
     pub refcount: AtomicUsize,
 
-    shared_data: PageData,
+    data: E,
 }
 
 impl PageFlags {
@@ -75,7 +97,95 @@ impl PageFlags {
     }
 }
 
-impl BuddyFolio for RawPage {
+impl<E> AsRef<Page> for Page<E>
+where
+    E: PageExt,
+{
+    fn as_ref(&self) -> &Page {
+        unsafe {
+            // SAFETY: T is ?Sized for Page<T>, so they have the same layout.
+            &*(self as *const _ as *const Page)
+        }
+    }
+}
+
+impl<E> AsMut<Page> for Page<E>
+where
+    E: PageExt,
+{
+    fn as_mut(&mut self) -> &mut Page {
+        unsafe {
+            // SAFETY: T is ?Sized for Page<T>, so they have the same layout.
+            &mut *(self as *const _ as *mut Page)
+        }
+    }
+}
+
+impl Page {
+    /// Cast the Page into specific type.
+    ///
+    /// # Safety
+    /// The caller MUST guarantee that the page has the extension of type `E`.
+    pub unsafe fn cast_unchecked<E>(&self) -> &Page<E>
+    where
+        E: PageExt,
+    {
+        // SAFETY: The caller guarantees that the page is a `Page<E>`.
+        &*(self as *const _ as *const Page<E>)
+    }
+
+    /// Cast the Page into specific type.
+    ///
+    /// # Safety
+    /// The caller MUST guarantee that the page has the extension of type `E`.
+    pub unsafe fn cast_mut_unchecked<E>(&mut self) -> &mut Page<E>
+    where
+        E: PageExt,
+    {
+        // SAFETY: The caller guarantees that the page is a `Page<E>`.
+        &mut *(self as *const _ as *mut Page<E>)
+    }
+
+    /// Cast the Page into specific type.
+    ///
+    /// # Safety
+    /// The caller MUST guarantee that the page was not initialized.
+    pub unsafe fn init_unchecked<E>(&mut self, ext: E) -> &mut Page<E>
+    where
+        E: PageExt,
+    {
+        let mut typed_ptr = NonNull::from_mut(self)
+            .byte_add(offset_of!(Page<E>, data))
+            .cast::<MaybeUninit<E>>();
+
+        // SAFETY: The caller ensures that the page was not initialized.
+        typed_ptr.as_mut().write(ext);
+
+        self.cast_mut_unchecked()
+    }
+}
+
+impl<E> Deref for Page<E>
+where
+    E: PageExt + ?Sized,
+{
+    type Target = E;
+
+    fn deref(&self) -> &Self::Target {
+        &self.data
+    }
+}
+
+impl<E> DerefMut for Page<E>
+where
+    E: PageExt + ?Sized,
+{
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.data
+    }
+}
+
+impl BuddyFolio for Page {
     fn pfn(&self) -> PFN {
         ZONE.get_pfn(self)
     }
@@ -101,48 +211,34 @@ impl BuddyFolio for RawPage {
     }
 }
 
-impl SlabPage for RawPage {
+impl SlabPage for PageSlab {
     fn get_data_ptr(&self) -> NonNull<[u8]> {
-        let paddr_start = PAddr::from(ZONE.get_pfn(self));
+        let paddr_start = PAddr::from(ZONE.get_pfn(self.as_ref()));
         let page_data_ptr = unsafe { paddr_start.as_ptr() };
 
         NonNull::slice_from_raw_parts(page_data_ptr, 1 << (self.order + 12))
     }
 
     fn get_free_slot(&self) -> Option<NonNull<SlabSlot>> {
-        unsafe {
-            // SAFETY: TODO
-            self.shared_data.slab.free_next
-        }
+        self.free_next
     }
 
     fn set_free_slot(&mut self, next: Option<NonNull<SlabSlot>>) {
-        self.shared_data.slab.free_next = next;
+        self.free_next = next;
     }
 
     fn get_alloc_count(&self) -> usize {
-        unsafe {
-            // SAFETY: TODO
-            self.shared_data.slab.allocated_count
-        }
+        self.allocated_count
     }
 
     fn inc_alloc_count(&mut self) -> usize {
-        unsafe {
-            // SAFETY: TODO
-            self.shared_data.slab.allocated_count += 1;
-
-            self.shared_data.slab.allocated_count
-        }
+        self.allocated_count += 1;
+        self.allocated_count
     }
 
     fn dec_alloc_count(&mut self) -> usize {
-        unsafe {
-            // SAFETY: TODO
-            self.shared_data.slab.allocated_count -= 1;
-
-            self.shared_data.slab.allocated_count
-        }
+        self.allocated_count -= 1;
+        self.allocated_count
     }
 
     unsafe fn from_allocated(ptr: NonNull<u8>) -> &'static mut Self {
@@ -154,11 +250,12 @@ impl SlabPage for RawPage {
             ZONE.get_page(pfn)
                 .expect("Page outside of the global zone")
                 .as_mut()
+                .cast_mut_unchecked()
         }
     }
 }
 
-impl PerCpuPage for RawPage {
+impl PerCpuPage for Page {
     fn set_local(&mut self, val: bool) {
         if val {
             self.flags.set(PageFlags::LOCAL)
@@ -168,12 +265,15 @@ impl PerCpuPage for RawPage {
     }
 }
 
-pub struct RawPageList(List);
+pub struct RawPageList<E = AnyExt>(List, PhantomData<E>);
 
-unsafe impl Send for RawPageList {}
+unsafe impl<F> Send for RawPageList<F> {}
 
-impl FolioList for RawPageList {
-    type Folio = RawPage;
+impl<E> FolioList for RawPageList<E>
+where
+    E: PageExt,
+{
+    type Folio = Page<E>;
 
     fn is_empty(&self) -> bool {
         self.0.is_empty()
@@ -182,7 +282,7 @@ impl FolioList for RawPageList {
     fn peek_head(&mut self) -> Option<&mut Self::Folio> {
         unsafe {
             let link = self.0.head()?;
-            let mut raw_page_ptr = container_of!(link, RawPage, link);
+            let mut raw_page_ptr = container_of!(link, Page<E>, link);
 
             Some(raw_page_ptr.as_mut())
         }
@@ -191,7 +291,7 @@ impl FolioList for RawPageList {
     fn pop_head(&mut self) -> Option<&'static mut Self::Folio> {
         unsafe {
             let link = self.0.pop()?;
-            let mut raw_page_ptr = container_of!(link, RawPage, link);
+            let mut raw_page_ptr = container_of!(link, Page<E>, link);
 
             Some(raw_page_ptr.as_mut())
         }
@@ -206,19 +306,25 @@ impl FolioList for RawPageList {
     }
 }
 
-impl FolioListSized for RawPageList {
-    const NEW: Self = RawPageList(List::new());
+impl<E> FolioListSized for RawPageList<E>
+where
+    E: PageExt,
+{
+    const NEW: Self = RawPageList(List::new(), PhantomData);
 }
 
 unsafe impl SlabPageAlloc for GlobalPageAlloc {
-    type Page = RawPage;
-    type PageList = RawPageList;
+    type Page = PageSlab;
+    type PageList = RawPageList<SlabPageExt>;
 
-    fn alloc_slab_page(&self) -> &'static mut RawPage {
+    fn alloc_slab_page(&self) -> &'static mut Self::Page {
         let raw_page = self.alloc_raw_order(0).expect("Out of memory");
-        raw_page.flags.set(PageFlags::SLAB);
-        raw_page.shared_data.slab = SlabPageData::new();
 
-        raw_page
+        let page = unsafe { raw_page.init_unchecked(SlabPageExt::new()) };
+
+        // XXX: Use Ordering::Release
+        page.flags.set(PageFlags::SLAB);
+
+        page
     }
 }

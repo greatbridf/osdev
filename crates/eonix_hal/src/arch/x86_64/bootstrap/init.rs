@@ -8,15 +8,16 @@ use acpi::platform::ProcessorState;
 use acpi::{AcpiHandler, AcpiTables, PhysicalMapping, PlatformInfo};
 use eonix_hal_traits::mm::Memory;
 use eonix_mm::address::{Addr as _, PAddr, PRange, PhysAccess, VRange};
-use eonix_mm::page_table::{PageAttribute, PagingMode, PTE as _};
-use eonix_mm::paging::{Folio, FrameAlloc, PageAccess, PAGE_SIZE};
+use eonix_mm::page_table::{PageAttribute, PagingMode};
+use eonix_mm::paging::{Folio, FrameAlloc, PAGE_SIZE};
 use eonix_percpu::PercpuArea;
+use streaming_iterator::StreamingIterator as _;
 
 use crate::arch::bootstrap::{EARLY_GDT_DESCRIPTOR, KERNEL_PML4};
 use crate::arch::cpu::{wrmsr, CPU};
 use crate::arch::io::Port8;
 use crate::arch::mm::{
-    with_global_page_table, ArchPhysAccess, PageAccessImpl, GLOBAL_PAGE_TABLE,
+    with_global_page_table, ArchPhysAccess, GLOBAL_PAGE_TABLE,
     V_KERNEL_BSS_START,
 };
 use crate::bootstrap::BootStrapData;
@@ -291,8 +292,9 @@ pub extern "C" fn kernel_init() -> ! {
     }
 
     // Map kernel BSS
-    with_global_page_table(alloc.clone(), PageAccessImpl, |table| {
-        for pte in table.iter_kernel(bss_range) {
+    with_global_page_table(alloc.clone(), |table| {
+        let mut ptes = table.iter_kernel(bss_range);
+        while let Some(pte) = ptes.next() {
             let attr = PageAttribute::PRESENT
                 | PageAttribute::WRITE
                 | PageAttribute::READ
@@ -300,7 +302,7 @@ pub extern "C" fn kernel_init() -> ! {
                 | PageAttribute::GLOBAL;
 
             let page = alloc.alloc().unwrap();
-            pte.set(page.into_raw(), attr.into());
+            pte.set(page.into_raw(), attr);
         }
     });
 

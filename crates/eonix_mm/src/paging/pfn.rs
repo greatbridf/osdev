@@ -57,6 +57,8 @@ impl From<PAddr> for PFN {
 }
 
 impl PFN {
+    pub const NULL: Self = Self::from_val(0);
+
     pub const fn from_val(pfn: usize) -> Self {
         Self(pfn)
     }

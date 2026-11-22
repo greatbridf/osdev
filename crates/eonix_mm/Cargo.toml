@@ -5,3 +5,4 @@ edition = "2024"
 
 [dependencies]
 bitflags = "2.6.0"
+streaming-iterator = "0.1.9"

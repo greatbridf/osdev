@@ -1,174 +1,170 @@
-use super::page_table::PageTableAlloc;
-use super::pte::{RawAttribute, TableAttribute};
-use super::{PageTableLevel, PagingMode, RawPageTable as _, PTE};
-use crate::address::{AddrOps as _, VRange};
-use crate::paging::{Folio, PageAccess};
+use core::ops::Deref;
 
-pub struct PageTableIterator<'a, M, A, X>
+use streaming_iterator::StreamingIterator;
+
+use super::pte::TableAttribute;
+use super::PageTableLevel;
+use crate::address::{AddrOps as _, VAddr, VRange};
+use crate::page_table::page_table::TableManage;
+use crate::page_table::{PTEntry, RawPageTable};
+use crate::paging::{Folio, PFN};
+
+const MAX_LEVELS: usize = 5;
+
+enum TableRef<T> {
+    Mapped(T),
+    Blank,
+}
+
+impl<T: Deref<Target = RawPageTable>> Deref for TableRef<T> {
+    type Target = RawPageTable;
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            TableRef::Mapped(mapped) => mapped,
+            TableRef::Blank => RawPageTable::null(),
+        }
+    }
+}
+
+pub struct PageTableIterator<'a, T>
 where
-    M: PagingMode,
-    M::Entry: 'a,
-    A: PageTableAlloc,
-    X: PageAccess,
+    T: TableManage,
 {
     /// Specifies the hierarchy of page table levels to iterate over.
     /// This field determines the sequence of levels in the page table
     /// hierarchy that the iterator will traverse, starting from the
     /// highest level and moving down to the lowest.
     levels: &'static [PageTableLevel],
-    remaining: usize,
+    next_addr: VAddr,
+    end_addr: VAddr,
 
-    indicies: [u16; 8],
-    tables: [Option<M::RawTable<'a>>; 8],
+    tables: [TableRef<T::Mapped>; MAX_LEVELS],
+    indicies: [u16; MAX_LEVELS],
+    done: bool,
 
     fill_entry_attr: TableAttribute,
-
-    alloc: A,
-    access: X,
+    manager: &'a T,
 }
 
-impl<'a, M, A, X> PageTableIterator<'a, M, A, X>
-where
-    M: PagingMode,
-    M::Entry: 'a,
-    A: PageTableAlloc,
-    X: PageAccess,
-{
-    fn parse_tables_starting_from(&mut self, idx_level: usize) {
-        for (idx, &pt_idx) in self
-            .indicies
-            .iter()
-            .enumerate()
-            .take(self.levels.len() - 1)
-            .skip(idx_level)
-        {
-            let [parent_table, child_table] = unsafe {
-                // SAFETY: `idx` and `idx + 1` must not overlap.
-                //         `idx + 1` is always less than `levels_len` since we iterate
-                //         until `levels_len - 1`.
-                self.tables.get_disjoint_unchecked_mut([idx, idx + 1])
-            };
-            let parent_table =
-                parent_table.as_mut().expect("Parent table is None");
-            let next_pte = parent_table.index_mut(pt_idx);
-
-            child_table.replace({
-                let attr = next_pte
-                    .get_attr()
-                    .as_table_attr()
-                    .expect("Not a page table");
-
-                if attr.contains(TableAttribute::PRESENT) {
-                    let pfn = next_pte.get_pfn();
-                    unsafe {
-                        // SAFETY: We are creating a pointer to a page referenced to in
-                        //         some page table, which should be valid.
-                        let page_table_ptr = self.access.get_ptr_for_pfn(pfn);
-                        // SAFETY: `page_table_ptr` is a valid pointer to a page table.
-                        M::RawTable::from_ptr(page_table_ptr)
-                    }
-                } else {
-                    let page = self.alloc.alloc();
-                    let page_table_ptr = self.access.get_ptr_for_page(&page);
-
-                    unsafe {
-                        // SAFETY: `page_table_ptr` is good for writing and properly aligned.
-                        page_table_ptr.write_bytes(0, 1);
-                    }
-
-                    next_pte.set(page.into_raw(), self.fill_entry_attr.into());
-
-                    unsafe {
-                        // SAFETY: `page_table_ptr` is a valid pointer to a page table.
-                        M::RawTable::from_ptr(page_table_ptr)
-                    }
-                }
-            });
-        }
-    }
-
+impl<'a, T: TableManage> PageTableIterator<'a, T> {
     pub fn new(
-        page_table: M::RawTable<'a>, range: VRange,
-        fill_entry_attr: TableAttribute, alloc: A, access: X,
+        page_table: T::Mapped, range: VRange, fill_entry_attr: TableAttribute,
+        manager: &'a T,
     ) -> Self {
-        Self::with_levels(
-            page_table,
-            range,
-            fill_entry_attr,
-            alloc,
-            access,
-            M::LEVELS,
-        )
+        const { assert!(T::LEVELS.len() <= MAX_LEVELS) }
+
+        Self {
+            levels: T::LEVELS,
+            next_addr: range.start().floor(),
+            end_addr: range.end().ceil(),
+            tables: {
+                let mut tables = [const { TableRef::Blank }; MAX_LEVELS];
+                tables[0] = TableRef::Mapped(page_table);
+                tables
+            },
+            indicies: [0; MAX_LEVELS],
+            done: false,
+            fill_entry_attr: fill_entry_attr.union(TableAttribute::PRESENT),
+            manager,
+        }
     }
 
-    pub fn with_levels(
-        page_table: M::RawTable<'a>, range: VRange,
-        fill_entry_attr: TableAttribute, alloc: A, access: X,
-        levels: &'static [PageTableLevel],
-    ) -> Self {
-        let start = range.start().floor();
-        let end = range.end().ceil();
+    fn get_entry(&self, level_idx: usize) -> &PTEntry {
+        let table = &self.tables[level_idx];
+        &table[self.indicies[level_idx]]
+    }
 
-        let [.., last_level] = levels else { unreachable!() };
+    fn parse_indicies(&mut self) {
+        for (level, idx) in self.levels.iter().zip(self.indicies.iter_mut()) {
+            *idx = level.index_of(self.next_addr);
+        }
+    }
 
-        let mut me = Self {
-            levels,
-            remaining: (end - start) / last_level.page_size(),
-            indicies: [0; 8],
-            tables: [const { None }; 8],
-            fill_entry_attr: fill_entry_attr.union(TableAttribute::PRESENT),
-            alloc,
-            access,
-        };
+    fn map_to_ref(&self, pfn: PFN) -> TableRef<T::Mapped> {
+        TableRef::Mapped({
+            let table = unsafe { self.manager.from_raw(pfn) };
+            let mapped = self.manager.map(&table);
+            table.into_raw();
 
-        for (i, level) in levels.iter().enumerate() {
-            me.indicies[i] = level.index_of(start);
+            mapped
+        })
+    }
+
+    fn parse_table(&mut self, level_idx: usize) {
+        assert!(level_idx > 0);
+
+        let next_pte = self.get_entry(level_idx - 1).as_table();
+        let (mut pfn, attr) = next_pte.get().expect("Not a page table");
+
+        if !attr.contains(TableAttribute::PRESENT) {
+            debug_assert_eq!(pfn, PFN::NULL, "Non-present table");
+            pfn = self.manager.alloc().into_raw();
+            next_pte.set(pfn, self.fill_entry_attr);
         }
 
-        me.tables[0] = Some(page_table);
-        me.parse_tables_starting_from(0);
+        self.tables[level_idx] = self.map_to_ref(pfn);
 
-        me
+        debug_assert!(!self.tables[level_idx].is_empty());
+    }
+
+    fn parse_tables(&mut self, prev_indicies: &[u16; MAX_LEVELS]) {
+        let levels_len = self.levels.len();
+        let mut idx_update = levels_len;
+
+        for i in 1..levels_len {
+            let curr_idx = self.indicies[i - 1];
+            let prev_idx = prev_indicies[i - 1];
+
+            if self.tables[i].is_empty() || curr_idx != prev_idx {
+                idx_update = i;
+                break;
+            }
+        }
+
+        for i in idx_update..levels_len {
+            self.parse_table(i);
+        }
+    }
+
+    fn test_mark_done(&mut self) -> bool {
+        if self.next_addr >= self.end_addr {
+            self.done = true;
+        }
+
+        self.done
+    }
+
+    fn pte_size(&self) -> usize {
+        self.levels.last().unwrap().page_size()
+    }
+
+    fn step_pte(&mut self) {
+        if self.test_mark_done() {
+            return;
+        }
+
+        let prev_indicies = self.indicies;
+
+        self.parse_indicies();
+        self.parse_tables(&prev_indicies);
+
+        self.next_addr = self.next_addr + self.pte_size();
     }
 }
 
-impl<'a, M, A, X> Iterator for PageTableIterator<'a, M, A, X>
-where
-    M: PagingMode,
-    M::Entry: 'a,
-    A: PageTableAlloc,
-    X: PageAccess,
-{
-    type Item = &'a mut M::Entry;
+impl<T: TableManage> StreamingIterator for PageTableIterator<'_, T> {
+    type Item = PTEntry;
 
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.remaining == 0 {
+    fn advance(&mut self) {
+        self.step_pte();
+    }
+
+    fn get(&self) -> Option<&Self::Item> {
+        if self.done {
             return None;
-        } else {
-            self.remaining -= 1;
         }
 
-        let table_level = self.levels.len() - 1;
-        let retval = self.tables[table_level]
-            .as_mut()
-            .unwrap()
-            .index_mut(self.indicies[table_level]);
-
-        let idx_level_start_updating = self
-            .levels
-            .iter()
-            .zip(self.indicies.iter_mut())
-            .enumerate()
-            .rev()
-            .skip_while(|(_, (level, idx))| **idx == level.max_index())
-            .map(|(i, _)| i)
-            .next()
-            .expect("Index out of bounds");
-
-        self.indicies[idx_level_start_updating] += 1;
-        self.indicies[idx_level_start_updating + 1..=table_level].fill(0);
-        self.parse_tables_starting_from(idx_level_start_updating);
-
-        Some(retval)
+        Some(self.get_entry(self.levels.len() - 1))
     }
 }

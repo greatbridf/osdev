@@ -1,6 +1,24 @@
+use core::marker::PhantomData;
+use core::ops::Deref;
+use core::sync::atomic::{AtomicUsize, Ordering};
+
 use bitflags::bitflags;
 
+use crate::arch::RawPTE;
 use crate::paging::PFN;
+
+pub struct Any;
+pub struct Table;
+pub struct Leaf;
+
+#[repr(transparent)]
+pub struct PTEntry<K: ?Sized = Any> {
+    value: AtomicUsize,
+    _kind: PhantomData<K>,
+}
+
+pub type PTELeaf = PTEntry<Leaf>;
+pub type PTETable = PTEntry<Table>;
 
 bitflags! {
     #[derive(Clone, Copy, PartialEq)]
@@ -28,54 +46,115 @@ bitflags! {
     }
 }
 
-#[doc(notable_trait)]
-pub trait RawAttribute:
-    Copy + From<PageAttribute> + From<TableAttribute>
-{
-    /// Create a new attribute representing a non-present page.
-    fn null() -> Self;
+impl PTEntry {
+    #[inline(always)]
+    pub fn _conv<K>(&self) -> &PTEntry<K> {
+        unsafe {
+            // SAFETY: All PTEntry<K> have the same layout and alignment.
+            &*(self as *const _ as *const PTEntry<K>)
+        }
+    }
 
-    /// Interpret the attribute as a page table attribute. Return `None` if it is
-    /// not an attribute for a page table.
-    ///
-    /// # Panic
-    /// The implementor should panic if invalid combinations of flags are present.
-    fn as_table_attr(self) -> Option<TableAttribute>;
+    #[inline(always)]
+    pub fn as_table(&self) -> &PTEntry<Table> {
+        self._conv()
+    }
 
-    /// Interpret the attribute as a page attribute. Return `None` if it is not
-    /// an attribute for a page.
-    ///
-    /// # Panic
-    /// The implementor should panic if invalid combinations of flags are present.
-    fn as_page_attr(self) -> Option<PageAttribute>;
+    #[inline(always)]
+    pub fn as_leaf(&self) -> &PTEntry<Leaf> {
+        self._conv()
+    }
+
+    #[inline(always)]
+    pub fn set_raw(&self, pte: RawPTE) {
+        self.value.store(pte.into_raw(), Ordering::Relaxed);
+    }
+
+    #[inline(always)]
+    pub fn get_raw(&self) -> RawPTE {
+        RawPTE::from_raw(self.value.load(Ordering::Relaxed))
+    }
+
+    #[inline(always)]
+    pub fn pfn(&self) -> PFN {
+        let pte = self.get_raw();
+        pte.get_pfn()
+    }
+
+    #[inline(always)]
+    pub fn clear(&self) {
+        self.set_raw(RawPTE::null());
+    }
 }
 
-#[doc(notable_trait)]
+impl PTEntry<Table> {
+    #[inline(always)]
+    pub fn get(&self) -> Option<(PFN, TableAttribute)> {
+        let pte = self.get_raw();
+        let attr = pte.get_table()?;
+        Some((pte.get_pfn(), attr))
+    }
+
+    #[inline(always)]
+    pub fn set(&self, pfn: PFN, attr: TableAttribute) {
+        let mut pte = RawPTE::null();
+        pte.set_table(pfn, attr);
+        self.set_raw(pte)
+    }
+
+    #[inline(always)]
+    pub fn attr(&self) -> Option<TableAttribute> {
+        self.get().map(|(_, attr)| attr)
+    }
+}
+
+impl PTEntry<Leaf> {
+    #[inline(always)]
+    pub fn get(&self) -> Option<(PFN, PageAttribute)> {
+        let pte = self.get_raw();
+        let attr = pte.get_leaf()?;
+        Some((pte.get_pfn(), attr))
+    }
+
+    #[inline(always)]
+    pub fn set(&self, pfn: PFN, attr: PageAttribute) {
+        let mut pte = RawPTE::null();
+        pte.set_leaf(pfn, attr);
+        self.set_raw(pte)
+    }
+
+    #[inline(always)]
+    pub fn attr(&self) -> Option<PageAttribute> {
+        self.get().map(|(_, attr)| attr)
+    }
+}
+
+trait Type {}
+
+impl Type for Table {}
+impl Type for Leaf {}
+
+impl<K: Type> Deref for PTEntry<K> {
+    type Target = PTEntry;
+
+    #[inline(always)]
+    fn deref(&self) -> &Self::Target {
+        unsafe {
+            // SAFETY: K is zero sized so they have the same alignment.
+            &*(self as *const _ as *const Self::Target)
+        }
+    }
+}
+
 pub trait PTE: Sized {
-    type Attr: RawAttribute;
+    fn into_raw(self) -> usize;
+    fn from_raw(val: usize) -> Self;
+    fn null() -> Self;
 
-    fn set(&mut self, pfn: PFN, attr: Self::Attr);
-    fn get(&self) -> (PFN, Self::Attr);
+    fn get_pfn(&self) -> PFN;
+    fn get_leaf(&self) -> Option<PageAttribute>;
+    fn get_table(&self) -> Option<TableAttribute>;
 
-    fn take(&mut self) -> (PFN, Self::Attr) {
-        let pfn_attr = self.get();
-        self.set(PFN::from_val(0), Self::Attr::null());
-        pfn_attr
-    }
-
-    fn set_pfn(&mut self, pfn: PFN) {
-        self.set(pfn, self.get_attr());
-    }
-
-    fn set_attr(&mut self, attr: Self::Attr) {
-        self.set(self.get_pfn(), attr);
-    }
-
-    fn get_pfn(&self) -> PFN {
-        self.get().0
-    }
-
-    fn get_attr(&self) -> Self::Attr {
-        self.get().1
-    }
+    fn set_leaf(&mut self, pfn: PFN, attr: PageAttribute);
+    fn set_table(&mut self, pfn: PFN, attr: TableAttribute);
 }

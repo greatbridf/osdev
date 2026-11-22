@@ -1,10 +1,6 @@
-use super::{RawPageTable, PTE};
-use crate::address::{Addr as _, VAddr};
+use crate::address::VAddr;
 
 pub trait PagingMode {
-    type Entry: PTE;
-    type RawTable<'a>: RawPageTable<'a, Entry = Self::Entry>;
-
     const LEVELS: &'static [PageTableLevel];
 }
 
@@ -32,7 +28,7 @@ impl PageTableLevel {
         (1 << self.len()) - 1
     }
 
-    pub fn index_of(self, vaddr: VAddr) -> u16 {
+    pub const fn index_of(self, vaddr: VAddr) -> u16 {
         ((vaddr.addr() >> self.nth_bit()) & ((1 << self.len()) - 1)) as u16
     }
 }

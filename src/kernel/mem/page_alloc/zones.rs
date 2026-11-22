@@ -3,29 +3,35 @@ use core::ptr::NonNull;
 use eonix_mm::address::PRange;
 use eonix_mm::paging::{Zone, PFN};
 
-use super::RawPage;
+use super::{Page, PageReal};
 
 pub static ZONE: GlobalZone = GlobalZone();
 
-const PAGE_ARRAY: NonNull<RawPage> =
+const PAGE_ARRAY: NonNull<PageReal> =
     unsafe { NonNull::new_unchecked(0xffffff8040000000 as *mut _) };
 
 pub struct GlobalZone();
 
 impl GlobalZone {
-    pub fn get_pfn(&self, page_ptr: *const RawPage) -> PFN {
-        PFN::from(unsafe { page_ptr.offset_from(PAGE_ARRAY.as_ptr()) as usize })
+    pub fn get_pfn(&self, page_ptr: *const Page) -> PFN {
+        PFN::from(unsafe {
+            page_ptr.cast::<PageReal>().offset_from(PAGE_ARRAY.as_ptr())
+                as usize
+        })
     }
 }
 
 impl Zone for GlobalZone {
-    type Page = RawPage;
+    type Page = Page;
 
     fn contains_prange(&self, _: PRange) -> bool {
         true
     }
 
-    fn get_page(&self, pfn: PFN) -> Option<NonNull<RawPage>> {
-        Some(unsafe { PAGE_ARRAY.add(usize::from(pfn)) })
+    fn get_page(&self, pfn: PFN) -> Option<NonNull<Page>> {
+        Some(unsafe {
+            // SAFETY: We ignore the case pfn is invalid for now.
+            PAGE_ARRAY.add(usize::from(pfn)).cast()
+        })
     }
 }

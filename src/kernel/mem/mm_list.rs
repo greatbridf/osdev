@@ -13,11 +13,12 @@ use eonix_hal::mm::{
     GLOBAL_PAGE_TABLE,
 };
 use eonix_mm::address::{Addr as _, AddrOps as _, PAddr, VAddr, VRange};
-use eonix_mm::page_table::{PageAttribute, RawAttribute, PTE};
+use eonix_mm::page_table::{PTELeaf, PageAttribute};
 use eonix_mm::paging::{Folio as _, PAGE_SIZE, PFN};
 use eonix_sync::{LazyLock, Mutex};
 use mm_area::AreaList;
 use page_table::KernelPageTable;
+use streaming_iterator::StreamingIterator as _;
 
 pub use self::mapping::{FileMapping, Mapping};
 pub use self::mm_area::{AreaFlags, MemArea};
@@ -130,8 +131,11 @@ impl MMListInner {
         for area in isolated_areas {
             let range = area.range.as_ref(&self.lock);
 
-            for pte in self.page_table.iter_user(*range) {
-                let (pfn, _) = pte.take();
+            let mut ptes = self.page_table.iter_user(*range);
+            while let Some(pte) = ptes.next() {
+                let pfn = pte.pfn();
+                pte.clear();
+
                 pages_to_free.push(unsafe {
                     // SAFETY: We got the pfn from a valid page table entry, so it should be valid.
                     Folio::from_raw(pfn)
@@ -162,11 +166,10 @@ impl MMListInner {
             let range = area.range.as_ref(&self.lock);
             found = true;
 
-            for pte in self.page_table.iter_user(*range) {
-                let mut page_attr = pte
-                    .get_attr()
-                    .as_page_attr()
-                    .expect("Not a page attribute");
+            let mut ptes = self.page_table.iter_user(*range);
+            while let Some(pte) = ptes.next() {
+                let (pfn, mut page_attr) =
+                    pte.get().expect("Not a page attribute");
 
                 if !permission.read && !permission.write && !permission.execute
                 {
@@ -178,7 +181,7 @@ impl MMListInner {
                             | PageAttribute::EXECUTE,
                     );
 
-                    pte.set_attr(page_attr.into());
+                    pte.set(pfn, page_attr);
                     continue;
                 }
 
@@ -189,8 +192,7 @@ impl MMListInner {
                 }
 
                 page_attr.set(PageAttribute::EXECUTE, permission.execute);
-
-                pte.set_attr(page_attr.into());
+                pte.set(pfn, page_attr);
             }
 
             area.set_permission(permission);
@@ -245,17 +247,20 @@ impl Drop for MMListInner {
             let range = area.range.as_ref(&self.lock).clone();
 
             if area.is_shared() {
-                for pte in self.page_table.iter_user(range) {
+                let mut ptes = self.page_table.iter_user(range);
+                while let Some(pte) = ptes.next() {
                     // XXX: Fix me
-                    let _ = pte.take();
+                    pte.clear();
                     // let raw_page = RawPagePtr::from(pfn);
                     // if raw_page.refcount().fetch_sub(1, Ordering::Relaxed) == 1 {
                     //     unsafe { Page::from_raw(pfn) };
                     // }
                 }
             } else {
-                for pte in self.page_table.iter_user(range) {
-                    let (pfn, _) = pte.take();
+                let mut ptes = self.page_table.iter_user(range);
+                while let Some(pte) = ptes.next() {
+                    let pfn = pte.pfn();
+                    pte.clear();
                     unsafe { Folio::from_raw(pfn) };
                 }
             }
@@ -486,12 +491,11 @@ impl MMList {
         let pte = pte_iter.next().expect("There should be at least one PTE");
         pte.set(
             vdso_pfn,
-            (PageAttribute::PRESENT
+            PageAttribute::PRESENT
                 | PageAttribute::READ
                 | PageAttribute::EXECUTE
                 | PageAttribute::USER
-                | PageAttribute::ACCESSED)
-                .into(),
+                | PageAttribute::ACCESSED,
         );
 
         assert!(pte_iter.next().is_none(), "There should be only one PTE");
@@ -567,11 +571,11 @@ impl MMList {
             let access_len = remaining.min(area_remaining);
             let access_end = current + access_len;
 
-            for (idx, pte) in inner
-                .page_table
-                .iter_user(VRange::new(current, access_end))
-                .enumerate()
-            {
+            let mut ptes =
+                inner.page_table.iter_user(VRange::new(current, access_end));
+
+            let mut idx = 0;
+            while let Some(pte) = ptes.next() {
                 let page_start = current.floor() + idx * 0x1000;
                 let page_end = page_start + 0x1000;
 
@@ -594,7 +598,7 @@ impl MMList {
 
                 unsafe {
                     // SAFETY: We are sure that the page is valid and we have the right to access it.
-                    Folio::with_raw(pte.get_pfn(), |page| {
+                    Folio::with_raw(pte.pfn(), |page| {
                         let mut pg = page.lock();
                         let page_data =
                             &mut pg.as_bytes_mut()[start_offset..end_offset];
@@ -602,6 +606,8 @@ impl MMList {
                         func(offset + idx * 0x1000, page_data);
                     });
                 }
+
+                idx += 1;
             }
 
             offset += access_len;
@@ -628,50 +634,48 @@ trait PageTableExt {
 
 impl PageTableExt for KernelPageTable {
     fn set_anonymous(&self, range: VRange, permission: Permission) {
-        for pte in self.iter_user(range) {
+        let mut ptes = self.iter_user(range);
+        while let Some(pte) = ptes.next() {
             pte.set_anonymous(permission.execute);
         }
     }
 
     fn set_mmapped(&self, range: VRange, permission: Permission) {
-        for pte in self.iter_user(range) {
+        let mut ptes = self.iter_user(range);
+        while let Some(pte) = ptes.next() {
             pte.set_mapped(permission.execute);
         }
     }
 
     fn set_copy_on_write(&self, from: &Self, range: VRange) {
-        let to_iter = self.iter_user(range);
-        let from_iter = from.iter_user(range);
+        let mut to_iter = self.iter_user(range);
+        let mut from_iter = from.iter_user(range);
 
-        for (to, from) in to_iter.zip(from_iter) {
+        while let (Some(to), Some(from)) = (to_iter.next(), from_iter.next()) {
             to.set_copy_on_write(from);
         }
     }
 
     fn set_copied(&self, from: &Self, range: VRange) {
-        let to_iter = self.iter_user(range);
-        let from_iter = from.iter_user(range);
+        let mut to_iter = self.iter_user(range);
+        let mut from_iter = from.iter_user(range);
 
-        for (to, from) in to_iter.zip(from_iter) {
-            let (pfn, attr) = from.get();
-            to.set(pfn, attr);
+        while let (Some(to), Some(from)) = (to_iter.next(), from_iter.next()) {
+            to.set_raw(from.get_raw());
         }
     }
 }
 
 trait PTEExt {
     // private anonymous
-    fn set_anonymous(&mut self, execute: bool);
+    fn set_anonymous(&self, execute: bool);
     // file mapped or shared anonymous
-    fn set_mapped(&mut self, execute: bool);
-    fn set_copy_on_write(&mut self, from: &mut Self);
+    fn set_mapped(&self, execute: bool);
+    fn set_copy_on_write(&self, from: &Self);
 }
 
-impl<T> PTEExt for T
-where
-    T: PTE,
-{
-    fn set_anonymous(&mut self, execute: bool) {
+impl PTEExt for PTELeaf {
+    fn set_anonymous(&self, execute: bool) {
         // Writable flag is set during page fault handling while executable flag is
         // preserved across page faults, so we set executable flag now.
         let mut attr = PageAttribute::PRESENT
@@ -680,24 +684,21 @@ where
             | PageAttribute::COPY_ON_WRITE;
         attr.set(PageAttribute::EXECUTE, execute);
 
-        self.set(EMPTY_PAGE.clone().into_raw(), T::Attr::from(attr));
+        self.set(EMPTY_PAGE.clone().into_raw(), attr);
     }
 
-    fn set_mapped(&mut self, execute: bool) {
+    fn set_mapped(&self, execute: bool) {
         // Writable flag is set during page fault handling while executable flag is
         // preserved across page faults, so we set executable flag now.
         let mut attr =
             PageAttribute::READ | PageAttribute::USER | PageAttribute::MAPPED;
         attr.set(PageAttribute::EXECUTE, execute);
 
-        self.set(EMPTY_PAGE.clone().into_raw(), T::Attr::from(attr));
+        self.set(EMPTY_PAGE.clone().into_raw(), attr);
     }
 
-    fn set_copy_on_write(&mut self, from: &mut Self) {
-        let mut from_attr = from
-            .get_attr()
-            .as_page_attr()
-            .expect("Not a page attribute");
+    fn set_copy_on_write(&self, from: &Self) {
+        let (pfn, mut from_attr) = from.get().expect("Not a page attribute");
 
         if !from_attr.intersects(PageAttribute::PRESENT | PageAttribute::MAPPED)
         {
@@ -709,11 +710,10 @@ where
 
         let pfn = unsafe {
             // SAFETY: We get the pfn from a valid page table entry, so it should be valid as well.
-            Folio::with_raw(from.get_pfn(), |page| page.clone().into_raw())
+            Folio::with_raw(pfn, |page| page.clone().into_raw())
         };
 
-        self.set(pfn, T::Attr::from(from_attr & !PageAttribute::ACCESSED));
-
-        from.set_attr(T::Attr::from(from_attr));
+        self.set(pfn, from_attr & !PageAttribute::ACCESSED);
+        from.set(pfn, from_attr);
     }
 }

@@ -2,10 +2,13 @@ use core::alloc::{AllocError, Allocator, Layout};
 use core::cell::RefCell;
 use core::ptr::NonNull;
 
-use eonix_mm::address::{AddrOps as _, PRange};
-use eonix_mm::page_table::PageTableAlloc;
-use eonix_mm::paging::{BasicFolio, FrameAlloc, PAGE_SIZE, PFN};
+use eonix_mm::address::{AddrOps as _, PAddr, PRange, PhysAccess};
+use eonix_mm::page_table::{
+    PageTableAlloc, PageTableLevel, PagingMode as _, RawPageTable, TableManage,
+};
+use eonix_mm::paging::{BasicFolio, Folio, FrameAlloc, PAGE_SIZE, PFN};
 
+use crate::arch::mm::ArchPagingMode;
 pub use crate::arch::mm::{
     flush_tlb, flush_tlb_all, get_root_page_table_pfn, set_root_page_table_pfn,
     ArchMemory, ArchPhysAccess, GLOBAL_PAGE_TABLE,
@@ -25,6 +28,10 @@ struct ScopedAllocInner<'a> {
 
 pub struct ScopedAllocator<'a> {
     inner: RefCell<ScopedAllocInner<'a>>,
+}
+
+pub struct TableManager<T: PageTableAlloc> {
+    alloc: T,
 }
 
 impl BasicPageAlloc {
@@ -128,7 +135,14 @@ impl PageTableAlloc for BasicPageAllocRef<'_> {
     type Folio = BasicFolio;
 
     fn alloc(&self) -> Self::Folio {
-        FrameAlloc::alloc(self).unwrap()
+        let folio = FrameAlloc::alloc(self).unwrap();
+
+        unsafe {
+            ArchPhysAccess::as_ptr::<u8>(folio.start())
+                .write_bytes(0, PAGE_SIZE);
+        }
+
+        folio
     }
 
     unsafe fn from_raw(&self, pfn: PFN) -> Self::Folio {
@@ -201,5 +215,38 @@ impl Drop for ScopedAllocator<'_> {
                 inner.allocated_count
             );
         }
+    }
+}
+
+impl<T: PageTableAlloc> TableManager<T> {
+    pub const fn new(alloc: T) -> Self {
+        Self { alloc }
+    }
+}
+
+impl<T> TableManage for TableManager<T>
+where
+    T: PageTableAlloc,
+    T::Folio: Folio,
+{
+    type Table = T::Folio;
+    type Mapped = &'static RawPageTable;
+
+    const LEVELS: &'static [PageTableLevel] = ArchPagingMode::LEVELS;
+
+    fn alloc(&self) -> Self::Table {
+        self.alloc.alloc()
+    }
+
+    fn map(&self, folio: &Self::Table) -> Self::Mapped {
+        unsafe {
+            RawPageTable::from_ptr(ArchPhysAccess::as_ptr(PAddr::from(
+                folio.pfn(),
+            )))
+        }
+    }
+
+    unsafe fn from_raw(&self, pfn: PFN) -> Self::Table {
+        unsafe { self.alloc.from_raw(pfn) }
     }
 }

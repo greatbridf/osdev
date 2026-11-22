@@ -7,12 +7,8 @@ use core::sync::atomic::{AtomicBool, AtomicPtr, AtomicUsize, Ordering};
 
 use eonix_hal_traits::mm::Memory;
 use eonix_mm::address::{Addr as _, PAddr, PRange, PhysAccess, VAddr, VRange};
-use eonix_mm::page_table::{
-    PageAttribute, PageTable, PagingMode, TableAttribute, PTE as _,
-};
-use eonix_mm::paging::{
-    Folio, FrameAlloc, PageAccess, PageBlock, PAGE_SIZE, PFN,
-};
+use eonix_mm::page_table::{PageAttribute, PagingMode, TableAttribute};
+use eonix_mm::paging::{Folio, FrameAlloc, PageBlock, PAGE_SIZE, PFN};
 use eonix_percpu::PercpuArea;
 use fdt::Fdt;
 use riscv::asm::sfence_vma_all;
@@ -20,6 +16,7 @@ use riscv::register::satp;
 use sbi::hsm::hart_start;
 use sbi::legacy::console_putchar;
 use sbi::PhysicalAddress;
+use streaming_iterator::StreamingIterator as _;
 
 use super::config::mm::*;
 use super::config::{self};
@@ -29,8 +26,7 @@ use super::time::set_next_timer;
 use crate::arch::cpu::CPU;
 use crate::arch::fdt::{init_dtb_and_fdt, FdtExt, FDT};
 use crate::arch::mm::{
-    ArchPagingMode, ArchPhysAccess, PageAccessImpl, PageAttribute64,
-    RawPageTableSv48, GLOBAL_PAGE_TABLE,
+    with_global_page_table, ArchPhysAccess, GLOBAL_PAGE_TABLE,
 };
 use crate::bootstrap::BootStrapData;
 use crate::mm::{
@@ -159,12 +155,6 @@ pub unsafe extern "C" fn riscv64_start(hart_id: usize, dtb_addr: PAddr) -> ! {
 /// TODO:
 /// 对kernel image添加更细的控制，或者不加也行
 fn setup_kernel_page_table(alloc: BasicPageAllocRef) {
-    let global_page_table = PageTable::<ArchPagingMode, _, _>::new(
-        GLOBAL_PAGE_TABLE.clone(),
-        alloc.clone(),
-        PageAccessImpl,
-    );
-
     let attr = PageAttribute::WRITE
         | PageAttribute::READ
         | PageAttribute::GLOBAL
@@ -176,11 +166,14 @@ fn setup_kernel_page_table(alloc: BasicPageAllocRef) {
 
     // Map kernel BSS
     let bss_range = VRange::from(KERNEL_BSS_START).grow(bss_length);
-    for pte in global_page_table.iter_kernel(bss_range) {
-        let page = alloc.alloc().unwrap();
+    with_global_page_table(alloc.clone(), |table| {
+        let mut ptes = table.iter_kernel(bss_range);
+        while let Some(pte) = ptes.next() {
+            let page = alloc.alloc().unwrap();
 
-        pte.set(page.into_raw(), attr.into());
-    }
+            pte.set(page.into_raw(), attr);
+        }
+    });
 
     sfence_vma_all();
 
@@ -196,12 +189,10 @@ fn setup_kernel_page_table(alloc: BasicPageAllocRef) {
         satp::set(
             satp::Mode::Sv48,
             0,
-            usize::from(PFN::from(global_page_table.addr())),
+            usize::from(PFN::from(GLOBAL_PAGE_TABLE.start())),
         );
     }
     sfence_vma_all();
-
-    core::mem::forget(global_page_table);
 }
 
 /// set up tp register to percpu

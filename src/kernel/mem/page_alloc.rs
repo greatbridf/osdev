@@ -5,20 +5,23 @@ use alloc::sync::Arc;
 use core::sync::atomic::Ordering;
 
 use buddy_allocator::BuddyAllocator;
+use eonix_hal::mm::ArchPhysAccess;
 use eonix_macros::define_late_init;
-use eonix_mm::address::PRange;
+use eonix_mm::address::{PRange, PhysAccess as _};
 use eonix_mm::page_table::PageTableAlloc;
 use eonix_mm::paging::{
-    FolioList, FolioListSized as _, FrameAlloc, GlobalFrameAlloc, PFN,
+    Folio as _, FolioList, FolioListSized as _, FrameAlloc, GlobalFrameAlloc,
+    PAGE_SIZE, PFN,
 };
 use eonix_preempt::PreemptGuard;
 use eonix_sync::{NoContext, Spin};
-pub use raw_page::{PageFlags, RawPage, RawPageList};
+pub use raw_page::{AnyExt, Page, PageExt, PageFlags, PageReal, RawPageList};
 pub use zones::{GlobalZone, ZONE};
 
 use super::folio::Folio;
 use crate::fs::procfs::populate_root;
 use crate::io::buf_write;
+use crate::kernel::mem::FolioOwned;
 
 const COSTLY_ORDER: u32 = 3;
 const AREAS: usize = COSTLY_ORDER as usize + 1;
@@ -50,7 +53,7 @@ impl PerCpuPageAlloc {
         }
     }
 
-    fn alloc_order(&mut self, order: u32) -> Option<&'static mut RawPage> {
+    fn alloc_order(&mut self, order: u32) -> Option<&'static mut Page> {
         assert!(order <= COSTLY_ORDER);
         if let Some(pages) = self.free_areas[order as usize].pop_head() {
             return Some(pages);
@@ -69,7 +72,7 @@ impl PerCpuPageAlloc {
         self.free_areas[order as usize].pop_head()
     }
 
-    fn free_pages(&mut self, page: &'static mut RawPage, order: u32) {
+    fn free_pages(&mut self, page: &'static mut Page, order: u32) {
         self.free_areas[order as usize].push_tail(page);
     }
 }
@@ -89,7 +92,7 @@ impl GlobalPageAlloc {
             .create_folios(range.start(), range.end())
     }
 
-    pub fn alloc_raw_order(&self, order: u32) -> Option<&'static mut RawPage> {
+    pub fn alloc_raw_order(&self, order: u32) -> Option<&'static mut Page> {
         if order > COSTLY_ORDER {
             BUDDY_ALLOC.lock().alloc_order(order)
         } else {
@@ -103,7 +106,7 @@ impl GlobalPageAlloc {
         }
     }
 
-    pub unsafe fn dealloc_raw(&self, raw_page: &'static mut RawPage) {
+    pub unsafe fn dealloc_raw(&self, raw_page: &'static mut Page) {
         assert_eq!(
             raw_page.refcount.load(Ordering::Relaxed),
             0,
@@ -124,7 +127,7 @@ impl GlobalPageAlloc {
 }
 
 impl FrameAlloc for GlobalPageAlloc {
-    type Folio = Folio;
+    type Folio = FolioOwned;
 
     fn alloc_order(&self, order: u32) -> Option<Self::Folio> {
         self.alloc_raw_order(order).map(|raw_page| {
@@ -132,7 +135,7 @@ impl FrameAlloc for GlobalPageAlloc {
             //         as that in the copy constructor of `std::shared_ptr`.
 
             raw_page.refcount.fetch_add(1, Ordering::Relaxed);
-            Folio::from_mut_page(raw_page)
+            FolioOwned::from_mut_page(raw_page)
         })
     }
 }
@@ -145,7 +148,14 @@ impl PageTableAlloc for GlobalPageAlloc {
     type Folio = Folio;
 
     fn alloc(&self) -> Self::Folio {
-        FrameAlloc::alloc(self).unwrap()
+        let folio = FrameAlloc::alloc(self).unwrap();
+
+        unsafe {
+            ArchPhysAccess::as_ptr::<u8>(folio.start())
+                .write_bytes(0, PAGE_SIZE);
+        }
+
+        folio.share()
     }
 
     unsafe fn from_raw(&self, pfn: PFN) -> Self::Folio {

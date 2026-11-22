@@ -4,6 +4,7 @@ use eonix_hal::traits::fault::PageFaultErrorCode;
 use eonix_mm::address::{Addr as _, AddrOps as _, VRange};
 use eonix_mm::paging::PAGE_SIZE;
 use posix_types::signal::Signal;
+use streaming_iterator::StreamingIterator as _;
 
 use super::{MMList, VAddr};
 use crate::kernel::task::Thread;
@@ -78,11 +79,13 @@ impl MMList {
             Err(Signal::SIGSEGV)?
         }
 
-        let pte = inner
+        let mut ptes = inner
             .page_table
-            .iter_user(VRange::from(addr.floor()).grow(PAGE_SIZE))
-            .next()
-            .expect("If we can find the mapped area, we should be able to find the PTE");
+            .iter_user(VRange::from(addr.floor()).grow(PAGE_SIZE));
+
+        let pte = ptes.next().expect(
+            "If we can find the mapped area, we should be able to find the PTE",
+        );
 
         area.handle(
             pte,
@@ -148,13 +151,13 @@ pub async fn handle_kernel_page_fault(
         return Some(try_page_fault_fix(fault_pc, addr));
     };
 
-    let pte = inner
+    let mut ptes = inner
         .page_table
-        .iter_user(VRange::from(addr.floor()).grow(PAGE_SIZE))
-        .next()
-        .expect(
-            "If we can find the mapped area, we should be able to find the PTE",
-        );
+        .iter_user(VRange::from(addr.floor()).grow(PAGE_SIZE));
+
+    let pte = ptes.next().expect(
+        "If we can find the mapped area, we should be able to find the PTE",
+    );
 
     if let Err(_) = area
         .handle(

@@ -132,6 +132,7 @@ dependencies = [
  "loongArch64",
  "riscv",
  "sbi",
+ "streaming-iterator",
 ]
 
 [[package]]
@@ -181,6 +182,7 @@ dependencies = [
  "slab_allocator",
  "stalloc",
  "static_assertions",
+ "streaming-iterator",
  "unwinding",
  "virtio-drivers",
  "xmas-elf",
@@ -207,6 +209,7 @@ name = "eonix_mm"
 version = "0.1.0"
 dependencies = [
  "bitflags",
+ "streaming-iterator",
 ]
 
 [[package]]
@@ -530,6 +533,12 @@ name = "static_assertions"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
+
+[[package]]
+name = "streaming-iterator"
+version = "0.1.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2b2231b7c3057d5e4ad0156fb3dc807d900806020c5ffa3ee6ff2c8c76fb8520"
 
 [[package]]
 name = "syn"

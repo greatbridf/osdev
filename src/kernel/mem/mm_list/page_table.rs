@@ -1,16 +1,13 @@
 use core::ops::Deref;
 
-use eonix_hal::arch_exported::mm::{ArchPagingMode, PageAccessImpl};
-use eonix_hal::mm::GLOBAL_PAGE_TABLE;
+use eonix_hal::mm::{TableManager, GLOBAL_PAGE_TABLE};
 use eonix_mm::page_table::PageTable;
 use eonix_mm::paging::{Folio, GlobalFrameAlloc};
 
 use crate::kernel::mem::{FolioOwned, GlobalPageAlloc, PhysAccess};
 
 #[repr(transparent)]
-pub struct KernelPageTable(
-    PageTable<'static, ArchPagingMode, GlobalPageAlloc, PageAccessImpl>,
-);
+pub struct KernelPageTable(PageTable<TableManager<GlobalPageAlloc>>);
 
 impl KernelPageTable {
     pub fn new() -> Self {
@@ -27,15 +24,13 @@ impl KernelPageTable {
 
         Self(PageTable::new(
             table_page.share(),
-            GlobalPageAlloc::GLOBAL,
-            PageAccessImpl,
+            TableManager::new(GlobalPageAlloc::GLOBAL),
         ))
     }
 }
 
 impl Deref for KernelPageTable {
-    type Target =
-        PageTable<'static, ArchPagingMode, GlobalPageAlloc, PageAccessImpl>;
+    type Target = PageTable<TableManager<GlobalPageAlloc>>;
 
     fn deref(&self) -> &Self::Target {
         &self.0

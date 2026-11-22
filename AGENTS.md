@@ -49,6 +49,10 @@ bash script/test.sh                            # headless smoke test (needs ARCH
 ARCH=riscv64 TEST_TIMEOUT=180 bash script/test.sh
 ```
 
+After finishing a change, run `ARCH=<arch> bash script/test.sh` sequentially
+on all three architectures (`x86_64`, `riscv64`, `loongarch64`) for a quick
+verification.
+
 Useful knobs: `MODE=debug|release`, `SMP=<n>` (defaults 4, adds `--features smp`),
 `FEATURES=a,b`, `IMG=<path>` (extra disk), `QEMU=`, `DEBUG_TRAPS=1`
 (writes `build/qemu.log`), `QEMU_ACCEL` (defaults to `kvm` on Linux with
